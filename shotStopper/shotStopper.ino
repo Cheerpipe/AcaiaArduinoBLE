@@ -116,8 +116,8 @@ constexpr uint8_t STOPPER_STATUS_LED_GPIO =
     SHOT_STOPPER_STOPPER_LED_GPIO;
 
 constexpr uint8_t PADDLE_ACTIVE_LEVEL = LOW;
-constexpr uint8_t RELAY_CLOSED_LEVEL = HIGH;
-constexpr uint8_t RELAY_OPEN_LEVEL = LOW;
+constexpr uint8_t RELAY_CLOSED_LEVEL = LOW;
+constexpr uint8_t RELAY_OPEN_LEVEL = HIGH;
 
 #if defined(SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO) != \
     defined(SHOT_STOPPER_CN9_FEEDBACK_GPIO)
@@ -151,8 +151,9 @@ static_assert(PADDLE_ACTIVE_LEVEL == LOW,
               "Micra paddle wiring requires INPUT_PULLUP and active LOW");
 static_assert(RELAY_CLOSED_LEVEL != RELAY_OPEN_LEVEL,
               "Relay open and closed levels must differ");
-static_assert(RELAY_OPEN_LEVEL == LOW,
-              "The IRAM emergency path requires active-HIGH relay wiring");
+static_assert((RELAY_OPEN_LEVEL == LOW || RELAY_OPEN_LEVEL == HIGH) &&
+                  (RELAY_CLOSED_LEVEL == LOW || RELAY_CLOSED_LEVEL == HIGH),
+              "Relay levels must be LOW or HIGH");
 static_assert(SHOT_STOPPER_LED_BRIGHTNESS > 0 &&
                   SHOT_STOPPER_LED_BRIGHTNESS <= 255,
               "WS2812B brightness must be between 1 and 255");
@@ -727,22 +728,37 @@ void operationalLimitTimerCallback(void *) {
 }
 
 #ifndef SHOT_STOPPER_HOST_TEST
-void IRAM_ATTR clearGpioFromIsr(uint8_t pin) {
-  if (pin < 32) {
-    REG_WRITE(GPIO_OUT_W1TC_REG, uint32_t{1} << pin);
-  }
+void IRAM_ATTR writeGpioFromIsr(uint8_t pin, uint8_t level) {
+  const uint32_t mask = (pin < 32) ? (uint32_t{1} << pin)
+                                   : (uint32_t{1} << (pin - 32));
+  if (level == LOW) {
+    if (pin < 32) {
+      REG_WRITE(GPIO_OUT_W1TC_REG, mask);
+    }
 #ifdef GPIO_OUT1_W1TC_REG
-  else {
-    REG_WRITE(GPIO_OUT1_W1TC_REG, uint32_t{1} << (pin - 32));
-  }
+    else {
+      REG_WRITE(GPIO_OUT1_W1TC_REG, mask);
+    }
 #endif
+  } else {
+    if (pin < 32) {
+      REG_WRITE(GPIO_OUT_W1TS_REG, mask);
+    }
+#ifdef GPIO_OUT1_W1TS_REG
+    else {
+      REG_WRITE(GPIO_OUT1_W1TS_REG, mask);
+    }
+#endif
+  }
 }
 
 void IRAM_ATTR openRelayElectricalFromIsr() {
   // Arduino-ESP32 does not place digitalWrite()/gpio_set_level() in IRAM in
-  // the standard board configurations. Write the W1TC register directly so
+  // the standard board configurations. Write the GPIO register directly so
   // the GPTimer deadline can de-energize K1 while flash cache is disabled.
-  clearGpioFromIsr(RELAY_GPIO);
+  // Supports both active-HIGH and active-LOW relay modules: the correct
+  // register (W1TS or W1TC) is selected at compile time via RELAY_OPEN_LEVEL.
+  writeGpioFromIsr(RELAY_GPIO, RELAY_OPEN_LEVEL);
 }
 #else
 void openRelayElectricalFromIsr() {
