@@ -21,12 +21,40 @@ if (Buffer.byteLength(html, 'utf8') > 32768) {
   throw new Error('Web UI exceeds the 32 KiB asset budget');
 }
 if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
-    !html.includes('brewConfirmationBeep')) {
-  throw new Error('Web UI must use English, expose a paddle switch, and expose the brew beep option');
+    !html.includes('Paddle State') || !html.includes('brewConfirmationBeep') ||
+    !html.includes('paddleReturnReminderBeep')) {
+  throw new Error('Web UI must show the physical paddle state and expose both scale beep options');
 }
 if (!network.includes('"brewConfirmationBeep"') ||
-    !firmware.includes('session.config.brewConfirmationBeep')) {
-  throw new Error('Brew-confirmation beep must be configurable end-to-end');
+    !network.includes('"paddleReturnReminderBeep"') ||
+    !firmware.includes('session.config.brewConfirmationBeep') ||
+    !firmware.includes('servicePaddleReturnReminder')) {
+  throw new Error('Scale beep settings must be configurable end-to-end');
+}
+if (!html.includes('authenticatedOnly') || !html.includes('Read-only view') ||
+    !html.includes('sessionStorage.setItem') || !html.includes('window.location.reload()') ||
+    !network.includes('Status intentionally has no authentication requirement')) {
+  throw new Error('Web UI must expose a public read-only mode and reload after authenticated sign-in');
+}
+const statusSection = html.match(/<fieldset><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
+if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
+    statusSection[1].includes('class="row"') ||
+    (statusSection[1].match(/class="metric"/g) || []).length !== 7 ||
+    !html.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'")) {
+  throw new Error('Status must use one metric per row and homologate Paddle/CN9 OPEN/OFF and CLOSED/ON labels');
+}
+if (!/<fieldset><legend>Log<\/legend>/.test(html) ||
+    /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
+    !html.includes('refreshLog();') ||
+    !html.includes('setInterval(()=>refreshLog(),3000)')) {
+  throw new Error('Diagnostic log must remain visible and refresh in public read-only mode');
+}
+if (!html.includes('id="factoryResetButton"') ||
+    !html.includes("confirm('Restore every stopper setting") ||
+    !html.includes("confirm:'ERASE_ALL_SETTINGS'") ||
+    !network.includes('FACTORY_RESET_NOT_CONFIRMED') ||
+    !network.includes('resetPersistedSettingsToFactory(next)')) {
+  throw new Error('Factory reset must require UI and server-side confirmation');
 }
 if (/<script\s+src=|<link\s+[^>]*href=/i.test(html)) {
   throw new Error('Web UI must not depend on external assets');
@@ -45,6 +73,7 @@ const expected = new Map([
   ['POST /api/v1/control/rinse', 'rinseHandler'],
   ['POST /api/v1/control/stop', 'stopHandler'],
   ['POST /api/v1/control/restart', 'restartHandler'],
+  ['POST /api/v1/factory-reset', 'factoryResetHandler'],
   ['POST /api/v1/network', 'networkHandler'],
   ['POST /api/v1/network/scan', 'wifiScanStartHandler'],
   ['GET /api/v1/network/scan', 'wifiScanStatusHandler'],
@@ -75,6 +104,20 @@ const statusFormat = network.slice(statusFormatStart, statusFormatEnd);
 for (const field of forbiddenResponseFields) {
   if (statusFormat.includes(field)) {
     throw new Error(`Secret field exposed by status JSON: ${field}`);
+  }
+}
+const logHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::logHandler');
+const logHandlerEnd = network.indexOf('esp_err_t ShotStopperNetwork::configHandler', logHandlerStart);
+if (logHandlerStart < 0 || logHandlerEnd < 0) {
+  throw new Error('Log handler not found');
+}
+const logHandler = network.slice(logHandlerStart, logHandlerEnd);
+if (logHandler.includes('authenticate(request')) {
+  throw new Error('Read-only diagnostic log must not require authentication');
+}
+for (const field of forbiddenResponseFields) {
+  if (logHandler.includes(field)) {
+    throw new Error(`Secret field exposed by diagnostic log: ${field}`);
   }
 }
 
@@ -108,6 +151,7 @@ if (!safeBeep.includes('BEEP_LEVEL_1_BOOKOO') ||
 }
 if (!firmware.includes('requestScaleBrewBeep(session.id)') ||
     !firmware.includes('cancelScaleBrewBeep(session.id)') ||
+    !firmware.includes('scale.supportsTareStartTimer()') ||
     /enum class ScaleCommandType[\s\S]*BEEP/.test(
       firmware.slice(firmware.indexOf('enum class ScaleCommandType'),
                      firmware.indexOf('enum class ScaleEventType')))) {

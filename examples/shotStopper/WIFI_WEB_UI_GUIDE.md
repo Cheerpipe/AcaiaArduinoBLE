@@ -12,7 +12,9 @@ The device never enables AP and STA simultaneously. The UI is served only over H
 
 ## Using the UI
 
-Sign in with the AP/UI password. The Status section displays the controller state, CN9 state, active or previous extraction time, scale availability and current or final weight.
+The landing page is public and read-only: it displays Status, the current Workflow values with all controls disabled, and the bounded diagnostic Log. Actions, Wi-Fi, access-point settings, saving and restart controls are not shown until sign-in. After a successful sign-in the browser reloads into the full authenticated UI; signing out returns to the public read-only view.
+
+The Status section uses a single column with one metric per row so long state names cannot distort the layout. Both the live physical paddle GPIO and CN9 use the same labels: `CLOSED (ON)` or `OPEN (OFF)`. It also displays active or previous extraction time, scale availability and current or final weight.
 
 The Virtual paddle is a two-position ON/OFF switch. It follows the same state machine as the physical paddle, while a physical paddle change always wins. A Web paddle has a heartbeat safety stop if its browser disappears. **Stop shot** opens CN9 immediately; it does not change workflow settings.
 
@@ -29,14 +31,18 @@ Workflow settings can be saved only in `READY`. They are locked in qualifying, b
 
 The required relationship is `rinse gesture < brew confirmation < minimum auto-stop < CN9 limit`; rinse duration must not exceed the CN9 limit. The 50-second limit is hard-coded and cannot be increased.
 
-**Beep when brew is confirmed** controls the optional Bookoo beep issued after a confirmed automatic brew. It has no effect in timer-only mode, and it never changes the scale connection state or performs a tare.
+New settings default to a 1,500 ms rinse gesture and enable the Bookoo combined command and **Beep when brew is confirmed**. The latter controls the optional Bookoo beep issued after a confirmed automatic brew. It has no effect in timer-only mode, and it never changes the scale connection state or performs a tare.
+
+**Scale reminder beep until the physical paddle is switched OFF** is on by default. While the physical paddle circuit is closed, CN9 is open, and the scale is connected, it requests a state-safe scale beep every 15 seconds. It never uses a tare command; scales without an independent beep command remain silent.
 
 **Reset learned stop offset (1.5 g)** asks for confirmation, cancels any pending post-shot calibration analysis, restores the default stop offset, and persists it. It is available only while Ready.
 
 Use **Scan networks** while Ready to list nearby networks, select one, enter its password, then choose **Save and restart**. Hidden networks can be entered manually. Passwords are never returned by the API or written to the log.
 
+**Restore all factory settings** is visible only after administrator sign-in and only enabled while the controller is safely `READY` with the physical paddle OFF and CN9 open. It asks for confirmation, erases the complete stopper NVS namespace, writes factory defaults to both redundant settings slots, invalidates every Web session, and restarts. This removes the saved STA network, workflow changes, learned stop calibration, and custom AP/UI password. After the restart, connect to `MicraShotStopperAP` with the factory password `Micra1234`.
+
 ## Safety and diagnostics
 
-The Web UI only reads bounded snapshots and queues fixed-size commands. It never accesses GPIO, the relay, BLE, or the control state machine directly. HTTP, Wi-Fi scans, DHCP and NVS writes run outside the control loop. The log contains state transitions, relay actions, scale connection events and accepted/rejected commands; weight samples are omitted deliberately.
+The Web UI only reads bounded snapshots and queues fixed-size commands. It never accesses GPIO, the relay, BLE, or the control state machine directly. HTTP, Wi-Fi scans, DHCP and NVS writes run outside the control loop. The public read-only log contains only fixed diagnostic messages and numeric arguments for state transitions, relay actions, scale connection events and accepted/rejected command types. It never contains credentials, session material or request payloads; weight samples are omitted deliberately.
 
 The UI is a convenience control surface, not a replacement for the physical safety checks. Verify CN9 continuity and relay-open behavior before connecting a machine.

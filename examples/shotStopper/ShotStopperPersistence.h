@@ -20,6 +20,9 @@ constexpr const char *SETTINGS_SLOT_B = "settingsB";
 constexpr const char *DEFAULT_AP_PASSWORD = "Micra1234";
 constexpr size_t AUTH_SALT_LENGTH = 16;
 constexpr size_t AUTH_HASH_LENGTH = 32;
+constexpr size_t LEGACY_WEIGHT_EEPROM_ADDRESS = 0;
+constexpr size_t LEGACY_OFFSET_EEPROM_ADDRESS = 1;
+constexpr uint8_t ERASED_EEPROM_VALUE = 0xFF;
 
 struct PersistedSettings {
   uint32_t magic = PERSISTED_SETTINGS_MAGIC;
@@ -36,6 +39,49 @@ struct PersistedSettings {
   uint8_t authHash[AUTH_HASH_LENGTH] = {};
   uint32_t checksum = 0;
 };
+
+// Exact on-flash layout used by schemas 2 and 3. Keep byte-sized flags here:
+// schema 2 used the schema-3 brew beep byte as padding, which is not a valid
+// C++ bool representation in every possible legacy record.
+struct PersistedRuntimeConfigV3 {
+  uint32_t revision;
+  uint8_t goalWeightG;
+  uint8_t alignmentBeforeWeight[3];
+  float weightOffsetG;
+  uint8_t autoTare;
+  uint8_t timerOnly;
+  uint8_t canTareStartTimer;
+  uint8_t brewConfirmationBeep;
+  uint32_t rinseGestureMs;
+  uint32_t rinseDurationMs;
+  uint32_t brewConfirmMs;
+  uint32_t minAutoStopMs;
+  uint32_t operationalWallMs;
+};
+
+struct PersistedSettingsV3 {
+  uint32_t magic;
+  uint32_t schemaVersion;
+  uint32_t structureSize;
+  uint32_t storageRevision;
+  PersistedRuntimeConfigV3 runtime;
+  uint8_t staConfigured;
+  uint8_t staOpen;
+  char staSsid[WIFI_SSID_CAPACITY];
+  char staPassword[WIFI_PASSWORD_CAPACITY];
+  char apPassword[WIFI_PASSWORD_CAPACITY];
+  uint8_t authSalt[AUTH_SALT_LENGTH];
+  uint8_t authHash[AUTH_HASH_LENGTH];
+  uint8_t alignmentBeforeChecksum[1];
+  uint32_t checksum;
+};
+
+static_assert(sizeof(PersistedRuntimeConfigV3) == 36,
+              "Unexpected schema-3 runtime layout");
+static_assert(sizeof(PersistedSettingsV3) == 268,
+              "Unexpected schema-3 settings layout");
+static_assert(sizeof(PersistedSettingsV3) < sizeof(PersistedSettings),
+              "Schema-4 migration requires a larger current record");
 
 inline bool calculatePasswordHash(const uint8_t salt[AUTH_SALT_LENGTH],
                                   const char *password,
@@ -91,9 +137,16 @@ inline uint32_t persistedSettingsChecksum(const PersistedSettings &settings) {
                offsetof(PersistedSettings, checksum));
 }
 
+inline uint32_t persistedSettingsV3Checksum(
+    const PersistedSettingsV3 &settings) {
+  return crc32(reinterpret_cast<const uint8_t *>(&settings),
+               offsetof(PersistedSettingsV3, checksum));
+}
+
 inline bool validPersistedSettings(const PersistedSettings &settings) {
   if (settings.magic != PERSISTED_SETTINGS_MAGIC ||
       (settings.schemaVersion != CONFIG_SCHEMA_VERSION &&
+       settings.schemaVersion != PREVIOUS_CONFIG_SCHEMA_VERSION &&
        settings.schemaVersion != LEGACY_CONFIG_SCHEMA_VERSION) ||
       settings.structureSize != sizeof(PersistedSettings) ||
       settings.checksum != persistedSettingsChecksum(settings) ||
@@ -138,6 +191,86 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
   return true;
 }
 
+inline bool readLegacySettingsSlot(Preferences &preferences, const char *key,
+                                   PersistedSettings &settings) {
+  if (preferences.getBytesLength(key) != sizeof(PersistedSettingsV3)) {
+    return false;
+  }
+  PersistedSettingsV3 legacy = {};
+  if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
+      legacy.magic != PERSISTED_SETTINGS_MAGIC ||
+      (legacy.schemaVersion != PREVIOUS_CONFIG_SCHEMA_VERSION &&
+       legacy.schemaVersion != LEGACY_CONFIG_SCHEMA_VERSION) ||
+      legacy.structureSize != sizeof(PersistedSettingsV3) ||
+      legacy.checksum != persistedSettingsV3Checksum(legacy) ||
+      !validAccessPointPassword(legacy.apPassword) ||
+      (legacy.staConfigured != 0 &&
+       (!validWifiSsid(legacy.staSsid) ||
+        !validWifiPassword(legacy.staPassword, legacy.staOpen != 0)))) {
+    return false;
+  }
+
+  uint8_t expectedHash[AUTH_HASH_LENGTH] = {};
+  if (!calculatePasswordHash(legacy.authSalt, legacy.apPassword,
+                             expectedHash) ||
+      !constantTimeEqual(legacy.authHash, expectedHash,
+                         sizeof(expectedHash))) {
+    return false;
+  }
+
+  PersistedSettings migrated = {};
+  migrated.storageRevision = legacy.storageRevision;
+  migrated.runtime.revision = legacy.runtime.revision;
+  migrated.runtime.goalWeightG = legacy.runtime.goalWeightG;
+  migrated.runtime.weightOffsetG = legacy.runtime.weightOffsetG;
+  migrated.runtime.autoTare = legacy.runtime.autoTare != 0;
+  migrated.runtime.timerOnly = legacy.runtime.timerOnly != 0;
+  migrated.runtime.canTareStartTimer =
+      legacy.runtime.canTareStartTimer != 0;
+  migrated.runtime.brewConfirmationBeep =
+      legacy.schemaVersion == LEGACY_CONFIG_SCHEMA_VERSION
+          ? true
+          : legacy.runtime.brewConfirmationBeep != 0;
+  migrated.runtime.paddleReturnReminderBeep = true;
+  migrated.runtime.rinseGestureMs = legacy.runtime.rinseGestureMs;
+  migrated.runtime.rinseDurationMs = legacy.runtime.rinseDurationMs;
+  migrated.runtime.brewConfirmMs = legacy.runtime.brewConfirmMs;
+  migrated.runtime.minAutoStopMs = legacy.runtime.minAutoStopMs;
+  migrated.runtime.operationalWallMs = legacy.runtime.operationalWallMs;
+  migrated.staConfigured = legacy.staConfigured != 0;
+  migrated.staOpen = legacy.staOpen != 0;
+  memcpy(migrated.staSsid, legacy.staSsid, sizeof(migrated.staSsid));
+  memcpy(migrated.staPassword, legacy.staPassword,
+         sizeof(migrated.staPassword));
+  memcpy(migrated.apPassword, legacy.apPassword,
+         sizeof(migrated.apPassword));
+  memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
+  memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
+  if (validateRuntimeConfig(migrated.runtime) !=
+      ConfigValidationError::NONE) {
+    return false;
+  }
+  finalizePersistedSettings(migrated);
+  settings = migrated;
+  return true;
+}
+
+inline bool readAnySettingsSlot(Preferences &preferences, const char *key,
+                                PersistedSettings &settings,
+                                bool *legacyFormat = nullptr) {
+  const size_t length = preferences.getBytesLength(key);
+  const bool isLegacy = length == sizeof(PersistedSettingsV3);
+  const bool valid = length == sizeof(PersistedSettings)
+                         ? readSettingsSlot(preferences, key, settings)
+                         : isLegacy &&
+                               readLegacySettingsSlot(preferences, key,
+                                                      settings);
+  if (legacyFormat != nullptr) {
+    *legacyFormat = valid && isLegacy;
+  }
+  return valid;
+}
+
 inline bool loadPersistedSettings(PersistedSettings &settings) {
   Preferences preferences;
   if (!preferences.begin(SETTINGS_NAMESPACE, true)) {
@@ -145,9 +278,12 @@ inline bool loadPersistedSettings(PersistedSettings &settings) {
   }
   PersistedSettings first = {};
   PersistedSettings second = {};
-  const bool firstValid = readSettingsSlot(preferences, SETTINGS_SLOT_A, first);
-  const bool secondValid =
-      readSettingsSlot(preferences, SETTINGS_SLOT_B, second);
+  bool firstLegacy = false;
+  bool secondLegacy = false;
+  const bool firstValid = readAnySettingsSlot(
+      preferences, SETTINGS_SLOT_A, first, &firstLegacy);
+  const bool secondValid = readAnySettingsSlot(
+      preferences, SETTINGS_SLOT_B, second, &secondLegacy);
   preferences.end();
 
   if (!firstValid && !secondValid) {
@@ -158,16 +294,24 @@ inline bool loadPersistedSettings(PersistedSettings &settings) {
   } else if (!secondValid) {
     settings = first;
   } else {
-    settings = static_cast<int32_t>(second.storageRevision -
-                                    first.storageRevision) > 0
-                   ? second
-                   : first;
+    const int32_t revisionDelta =
+        static_cast<int32_t>(second.storageRevision - first.storageRevision);
+    if (revisionDelta > 0 ||
+        (revisionDelta == 0 && secondLegacy && !firstLegacy)) {
+      settings = second;
+    } else {
+      settings = first;
+    }
   }
   // Version 2 used the byte now occupied by brewConfirmationBeep as padding.
-  // Preserve the previous always-beep behaviour while keeping old credentials
-  // and workflow values readable.
+  // Version 3 used the byte now occupied by paddleReturnReminderBeep as
+  // padding. Preserve the former always-on defaults while keeping old
+  // credentials and workflow values readable.
   if (settings.schemaVersion == LEGACY_CONFIG_SCHEMA_VERSION) {
     settings.runtime.brewConfirmationBeep = true;
+  }
+  if (settings.schemaVersion <= PREVIOUS_CONFIG_SCHEMA_VERSION) {
+    settings.runtime.paddleReturnReminderBeep = true;
   }
   return true;
 }
@@ -225,6 +369,61 @@ inline bool initializeDefaultSettings(PersistedSettings &settings,
   if (legacyMigrated != nullptr) {
     *legacyMigrated = migrated;
   }
+  return true;
+}
+
+// A factory reset deliberately clears the whole namespace so records from an
+// older schema or an abandoned alternate slot cannot be selected on a later
+// boot. Recreate both redundant slots before reporting success; accepting one
+// valid copy still makes the operation recoverable if the second NVS write
+// fails.
+inline bool resetPersistedSettingsToFactory(PersistedSettings &settings) {
+  PersistedSettings first = {};
+  if (!initializeDefaultSettings(first, 255, 255)) {
+    return false;
+  }
+  first.storageRevision = 1;
+  finalizePersistedSettings(first);
+  PersistedSettings second = first;
+  second.storageRevision = 2;
+  finalizePersistedSettings(second);
+
+  // Invalidate the pre-NVS values as well. Otherwise they could be migrated
+  // back after a later loss of both NVS slots, partially undoing the reset.
+  EEPROM.write(LEGACY_WEIGHT_EEPROM_ADDRESS, ERASED_EEPROM_VALUE);
+  EEPROM.write(LEGACY_OFFSET_EEPROM_ADDRESS, ERASED_EEPROM_VALUE);
+  if (!EEPROM.commit()) {
+    return false;
+  }
+
+  Preferences preferences;
+  if (!preferences.begin(SETTINGS_NAMESPACE, false)) {
+    return false;
+  }
+  if (!preferences.clear()) {
+    preferences.end();
+    return false;
+  }
+  const bool firstSaved =
+      preferences.putBytes(SETTINGS_SLOT_A, &first, sizeof(first)) ==
+      sizeof(first);
+  const bool secondSaved =
+      preferences.putBytes(SETTINGS_SLOT_B, &second, sizeof(second)) ==
+      sizeof(second);
+  PersistedSettings verifiedFirst = {};
+  PersistedSettings verifiedSecond = {};
+  const bool firstVerified =
+      firstSaved && readSettingsSlot(preferences, SETTINGS_SLOT_A,
+                                     verifiedFirst);
+  const bool secondVerified =
+      secondSaved && readSettingsSlot(preferences, SETTINGS_SLOT_B,
+                                      verifiedSecond);
+  preferences.end();
+
+  if (!firstVerified && !secondVerified) {
+    return false;
+  }
+  settings = secondVerified ? verifiedSecond : verifiedFirst;
   return true;
 }
 

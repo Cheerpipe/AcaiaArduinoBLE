@@ -37,11 +37,13 @@ stateDiagram-v2
 
 The firmware uses the existing Acaia BLE central connection. It does not expose a BLE configuration peripheral. For an automatic brew, the scale session begins with the cycle and the predictor uses a regression of the latest valid samples to estimate when `target - learned offset` will be reached. It does not simply stop at the first target-weight sample. Post-shot drip analysis updates the offset only when the required valid, new scale readings are available.
 
-The optional **Beep when brew is confirmed** workflow setting sends a Bookoo-compatible independent beep after a confirmed automatic brew. It is enabled by default for new settings and preserved as enabled for migrated settings. It is ignored in timer-only mode, never tares the scale, and cannot change the BLE connection state.
+New settings use a 1,500 ms rinse gesture and enable both the Bookoo combined tare/start command and **Beep when brew is confirmed**. The latter sends a Bookoo-compatible independent beep after a confirmed automatic brew; it is ignored in timer-only mode, never tares the scale, and cannot change the BLE connection state.
+
+The default-on **Scale reminder beep until the physical paddle is switched OFF** emits a state-safe scale beep every 15 seconds while the physical paddle GPIO is ON (circuit closed), CN9 is open, and the scale is connected. This helps the operator notice a paddle left ON after a completed shot. It is configurable in the Web UI and only emits on scales that support the independent, non-taring beep command.
 
 ## Web UI and Wi-Fi
 
-See [Wi-Fi and Web UI Guide](WIFI_WEB_UI_GUIDE.md). The embedded Web UI uses English only and provides an ON/OFF virtual-paddle switch, rinse, stop, restart, workflow configuration, Wi-Fi setup, asynchronous scanning and a bounded diagnostic log.
+See [Wi-Fi and Web UI Guide](WIFI_WEB_UI_GUIDE.md). The embedded Web UI uses English only and provides an ON/OFF virtual-paddle switch, rinse, stop, restart, workflow configuration, Wi-Fi setup, asynchronous scanning, a confirmed factory reset and a bounded diagnostic log.
 
 The UI cannot alter workflow settings during an active cycle. It never owns GPIO, relay or BLE access; it sends bounded commands to the control loop. Thus a slow HTTP client, scan, DHCP operation or NVS write cannot intentionally block control processing.
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -43,6 +44,17 @@ inline void putRaw(const char *nameSpace, const char *key, const void *data,
 
 }  // namespace persistence_host
 
+class PersistenceHostEEPROM {
+ public:
+  uint8_t read(size_t address) const { return bytes.at(address); }
+  void write(size_t address, uint8_t value) { bytes.at(address) = value; }
+  bool commit() { return true; }
+
+  std::array<uint8_t, 2> bytes = {0xFF, 0xFF};
+};
+
+inline PersistenceHostEEPROM EEPROM;
+
 class Preferences {
  public:
   bool begin(const char *nameSpace, bool readOnly = false) {
@@ -81,6 +93,20 @@ class Preferences {
     }
     persistence_host::putRaw(nameSpace_.c_str(), key, input, length);
     return length;
+  }
+
+  bool clear() {
+    if (!active_ || readOnly_) return false;
+    const std::string prefix = nameSpace_ + "/";
+    for (auto record = persistence_host::records.begin();
+         record != persistence_host::records.end();) {
+      if (record->first.compare(0, prefix.size(), prefix) == 0) {
+        record = persistence_host::records.erase(record);
+      } else {
+        ++record;
+      }
+    }
+    return true;
   }
 
  private:

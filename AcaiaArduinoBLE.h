@@ -44,6 +44,7 @@ class AcaiaArduinoBLE{
         bool stopTimer();
         bool resetTimer();
         bool tareStartTimer();
+        bool supportsTareStartTimer() const;
         bool beep();
         bool supportsIndependentBeep() const;
         bool beepWithoutStateChange();

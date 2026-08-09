@@ -36,6 +36,7 @@ constexpr uint32_t DRIP_DELAY_MS = 3000;
 constexpr uint32_t SCALE_CONNECT_RETRY_MS = 1000;
 constexpr uint32_t SCALE_CONNECT_LOG_MS = 10000;
 constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;
+constexpr uint32_t PADDLE_RETURN_REMINDER_BEEP_INTERVAL_MS = 15000;
 constexpr size_t SCALE_COMMAND_QUEUE_LENGTH = 12;
 constexpr size_t SCALE_EVENT_QUEUE_LENGTH = 64;
 
@@ -212,6 +213,9 @@ uint32_t scaleDisconnectSequence = 0;
 uint32_t scaleWorkerProgressAtMs = 0;
 bool scaleBeepPending = false;
 uint32_t scaleBeepCycleId = 0;
+bool scalePaddleReturnReminderBeepPending = false;
+bool paddleReturnReminderActive = false;
+uint32_t paddleReturnReminderLastAtMs = 0;
 
 bool rawPaddleOn = false;
 bool paddleOn = false;
@@ -847,7 +851,8 @@ void executeScaleStartCommand(const ScaleCommand &command) {
   event.cycleId = command.cycleId;
 
   if (scale.isConnected()) {
-    if (command.canTareStartTimer && command.autoTare) {
+    if (command.canTareStartTimer && command.autoTare &&
+        scale.supportsTareStartTimer()) {
       event.commandAttempted = true;
       event.writeSucceeded = scale.tareStartTimer();
     } else {
@@ -882,19 +887,18 @@ void executeScaleStopCommand(const ScaleCommand &command) {
   publishScaleEvent(event, true);
 }
 
-void executeScaleBeepCommand() {
+void executeScaleBeepCommand(DebugCode successCode, DebugCode failureCode,
+                             DebugCode unsupportedCode) {
   if (!scale.isConnected()) {
-    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_BEEP_FAILED);
+    addDebugEvent(DebugCategory::SCALE, failureCode);
     return;
   }
   if (!scale.supportsIndependentBeep()) {
-    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_BEEP_UNSUPPORTED);
+    addDebugEvent(DebugCategory::SCALE, unsupportedCode);
     return;
   }
   const bool succeeded = scale.beepWithoutStateChange();
-  addDebugEvent(DebugCategory::SCALE,
-                succeeded ? DebugCode::SCALE_BEEP_OK
-                          : DebugCode::SCALE_BEEP_FAILED);
+  addDebugEvent(DebugCategory::SCALE, succeeded ? successCode : failureCode);
   updateWorkerLinkState();
 }
 
@@ -925,6 +929,56 @@ void cancelScaleBrewBeep(uint32_t cycleId) {
     scaleBeepCycleId = 0;
   }
   portEXIT_CRITICAL(&scaleBeepMux);
+}
+
+void requestScalePaddleReturnReminderBeep() {
+  portENTER_CRITICAL(&scaleBeepMux);
+  scalePaddleReturnReminderBeepPending = true;
+  portEXIT_CRITICAL(&scaleBeepMux);
+}
+
+bool takeScalePaddleReturnReminderBeep() {
+  bool pending = false;
+  portENTER_CRITICAL(&scaleBeepMux);
+  if (scalePaddleReturnReminderBeepPending) {
+    pending = true;
+    scalePaddleReturnReminderBeepPending = false;
+  }
+  portEXIT_CRITICAL(&scaleBeepMux);
+  return pending;
+}
+
+void cancelScalePaddleReturnReminderBeep() {
+  portENTER_CRITICAL(&scaleBeepMux);
+  scalePaddleReturnReminderBeepPending = false;
+  portEXIT_CRITICAL(&scaleBeepMux);
+}
+
+void servicePaddleReturnReminder() {
+  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
+  // Read the GPIO here rather than a debounced state: this reminder describes
+  // the physical paddle circuit as it is wired at this instant.
+  const bool shouldRemind = runtimeConfig.paddleReturnReminderBeep &&
+                            readRawPaddleOn() && !relay.closed &&
+                            scaleAvailable();
+  if (!shouldRemind) {
+    paddleReturnReminderActive = false;
+    paddleReturnReminderLastAtMs = 0;
+    cancelScalePaddleReturnReminderBeep();
+    return;
+  }
+
+  const uint32_t now = millis();
+  if (!paddleReturnReminderActive) {
+    paddleReturnReminderActive = true;
+    paddleReturnReminderLastAtMs = now;
+    return;
+  }
+  if (elapsedMs(paddleReturnReminderLastAtMs) >=
+      PADDLE_RETURN_REMINDER_BEEP_INTERVAL_MS) {
+    paddleReturnReminderLastAtMs = now;
+    requestScalePaddleReturnReminderBeep();
+  }
 }
 
 void executeScaleCommand(const ScaleCommand &command) {
@@ -984,7 +1038,13 @@ void scaleWorkerTask(void *) {
       uint32_t beepCycleId = 0;
       if (takeScaleBrewBeep(beepCycleId)) {
         (void)beepCycleId;
-        executeScaleBeepCommand();
+        executeScaleBeepCommand(DebugCode::SCALE_BEEP_OK,
+                                DebugCode::SCALE_BEEP_FAILED,
+                                DebugCode::SCALE_BEEP_UNSUPPORTED);
+      } else if (takeScalePaddleReturnReminderBeep()) {
+        executeScaleBeepCommand(DebugCode::SCALE_PADDLE_REMINDER_BEEP_OK,
+                                DebugCode::SCALE_PADDLE_REMINDER_BEEP_FAILED,
+                                DebugCode::SCALE_PADDLE_REMINDER_BEEP_UNSUPPORTED);
       } else if (scale.isConnected()) {
         connectAttemptSeriesActive = false;
         serviceScaleWorkerLink();
@@ -1527,6 +1587,7 @@ void processWebCommand(const WebCommand &command) {
     case WebCommandType::CHANGE_AP_PASSWORD:
     case WebCommandType::RESTART:
     case WebCommandType::RESET_NETWORK_UI:
+    case WebCommandType::FACTORY_RESET:
       if (!controlAllowsConfigurationNow()) {
         rejectWebCommand(command);
         return;
@@ -1564,7 +1625,9 @@ void publishControlStatus() {
   next.state = stopperState;
   next.activeCycle = session.active;
   next.relayClosed = relay.closed;
-  next.physicalPaddleOn = paddleOn || rawPaddleOn;
+  // Status intentionally reports the actual GPIO level, not the debounced
+  // state used by the control state machine.
+  next.physicalPaddleOn = readRawPaddleOn();
   next.virtualPaddleOn = virtualPaddleOn;
   next.source = session.active ? session.source : ControlSource::NONE;
   next.cycleId = session.active ? session.id : 0;
@@ -1735,6 +1798,7 @@ void loop() {
   // heartbeat, packet, timer and connection operation.
   updatePaddleInput();
   stateMachineTask();
+  servicePaddleReturnReminder();
   processScaleWorkerEvents();
   shotAnalysisTask();
 #ifndef SHOT_STOPPER_HOST_TEST

@@ -155,6 +155,9 @@ class AcaiaArduinoBLE {
     ++tareStartTimerCalls;
     return runCommand(tareStartTimerSucceeds);
   }
+  bool supportsTareStartTimer() const {
+    return connected && tareStartTimerSupported;
+  }
   bool supportsIndependentBeep() const {
     return connected && independentBeepSupported;
   }
@@ -187,6 +190,7 @@ class AcaiaArduinoBLE {
   bool stopTimerSucceeds = true;
   bool resetTimerSucceeds = true;
   bool tareStartTimerSucceeds = true;
+  bool tareStartTimerSupported = true;
   bool independentBeepSupported = true;
   bool beepSucceeds = true;
   bool heartbeatSucceeds = true;

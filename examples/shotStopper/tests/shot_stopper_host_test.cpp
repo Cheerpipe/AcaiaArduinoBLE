@@ -81,6 +81,9 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scaleWorkerProgressAtMs = hostMillis;
   scaleBeepPending = false;
   scaleBeepCycleId = 0;
+  scalePaddleReturnReminderBeepPending = false;
+  paddleReturnReminderActive = false;
+  paddleReturnReminderLastAtMs = 0;
   hostAutoScaleWorkerProgress = true;
   setScaleLinkState(scaleConnected ? ScaleLinkState::CONNECTED
                                    : ScaleLinkState::DISCONNECTED);
@@ -233,7 +236,20 @@ bool executePendingScaleBrewBeep() {
   }
   CHECK_VALUE(cycleId == session.id, false);
   markScaleWorkerProgress();
-  executeScaleBeepCommand();
+  executeScaleBeepCommand(DebugCode::SCALE_BEEP_OK,
+                          DebugCode::SCALE_BEEP_FAILED,
+                          DebugCode::SCALE_BEEP_UNSUPPORTED);
+  return true;
+}
+
+bool executePendingScalePaddleReturnReminderBeep() {
+  if (!takeScalePaddleReturnReminderBeep()) {
+    return false;
+  }
+  markScaleWorkerProgress();
+  executeScaleBeepCommand(DebugCode::SCALE_PADDLE_REMINDER_BEEP_OK,
+                          DebugCode::SCALE_PADDLE_REMINDER_BEEP_FAILED,
+                          DebugCode::SCALE_PADDLE_REMINDER_BEEP_UNSUPPORTED);
   return true;
 }
 
@@ -260,13 +276,12 @@ void t03_sustained_on_confirms_brew_once() {
   startCycle();
   CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
   CHECK(executeNextScaleCommand());
-  CHECK(scale.resetTimerCalls == 1);
-  CHECK(scale.startTimerCalls == 1);
-  CHECK(scale.tareCalls == 1);
-  CHECK(scale.commandLog.size() == 3);
-  CHECK(scale.commandLog[0] == "resetTimer");
-  CHECK(scale.commandLog[1] == "startTimer");
-  CHECK(scale.commandLog[2] == "tare");
+  CHECK(scale.tareStartTimerCalls == 1);
+  CHECK(scale.resetTimerCalls == 0);
+  CHECK(scale.startTimerCalls == 0);
+  CHECK(scale.tareCalls == 0);
+  CHECK(scale.commandLog.size() == 1);
+  CHECK(scale.commandLog[0] == "tareStartTimer");
   CHECK(session.remoteTimerStarted);
   reachSessionElapsed(runtimeConfig.brewConfirmMs);
   CHECK(stopperState == StopperState::BREW);
@@ -275,12 +290,12 @@ void t03_sustained_on_confirms_brew_once() {
   CHECK(scaleBeepPending);
   CHECK(executePendingScaleBrewBeep());
   CHECK(scale.beepCalls == 1);
-  CHECK(scale.commandLog.size() == 4);
-  CHECK(scale.commandLog[3] == "beepWithoutStateChange");
+  CHECK(scale.commandLog.size() == 2);
+  CHECK(scale.commandLog[1] == "beepWithoutStateChange");
   runLoopAfter(100);
   CHECK(!scaleBeepPending);
   CHECK(scale.beepCalls == 1);
-  CHECK(scale.startTimerCalls == 1);
+  CHECK(scale.startTimerCalls == 0);
 }
 
 void t04_exact_rinse_boundary_and_duration() {
@@ -743,9 +758,10 @@ void r04_scale_commands_execute_once_and_report_results() {
   reachReadyFromBoot();
   startCycle();
   CHECK(executeNextScaleCommand());
-  CHECK(scale.resetTimerCalls == 1);
-  CHECK(scale.startTimerCalls == 1);
-  CHECK(scale.tareCalls == 1);
+  CHECK(scale.tareStartTimerCalls == 1);
+  CHECK(scale.resetTimerCalls == 0);
+  CHECK(scale.startTimerCalls == 0);
+  CHECK(scale.tareCalls == 0);
   reachSessionElapsed(runtimeConfig.brewConfirmMs);
   setRawPaddle(false);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
@@ -757,10 +773,11 @@ void r04_scale_commands_execute_once_and_report_results() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  scale.startTimerSucceeds = false;
+  scale.tareStartTimerSucceeds = false;
   CHECK(executeNextScaleCommand());
-  CHECK(scale.resetTimerCalls == 1);
-  CHECK(scale.startTimerCalls == 1);
+  CHECK(scale.tareStartTimerCalls == 1);
+  CHECK(scale.resetTimerCalls == 0);
+  CHECK(scale.startTimerCalls == 0);
   CHECK(scale.tareCalls == 0);
   CHECK(!session.remoteTimerStarted);
   loop();
@@ -993,6 +1010,10 @@ void w01_default_runtime_configuration_is_valid() {
   const RuntimeConfig config;
   CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
   CHECK(config.operationalWallMs == HARD_MAX_CN9_CLOSED_MS);
+  CHECK(config.rinseGestureMs == 1500);
+  CHECK(config.canTareStartTimer);
+  CHECK(config.brewConfirmationBeep);
+  CHECK(config.paddleReturnReminderBeep);
 }
 
 void w02_each_runtime_field_is_validated() {
@@ -1398,7 +1419,8 @@ void w31_unsupported_scale_never_uses_tare_as_a_beep() {
   CHECK(scaleBeepPending);
   CHECK(executePendingScaleBrewBeep());
   CHECK(scale.beepCalls == 0);
-  CHECK(scale.tareCalls == 1);
+  CHECK(scale.tareStartTimerCalls == 1);
+  CHECK(scale.tareCalls == 0);
   CHECK(scale.connected);
   CHECK(session.automaticEnabled);
 }
@@ -1446,6 +1468,63 @@ void w34_calibration_reset_restores_default_and_cancels_analysis() {
         0.001f);
   CHECK(runtimeConfig.revision == previousRevision + 1);
   CHECK(!pendingAnalysis.pending);
+}
+
+void w35_status_reports_the_live_physical_paddle_gpio() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  hostPinLevel[PADDLE_GPIO] = PADDLE_ACTIVE_LEVEL;
+  CHECK(!rawPaddleOn);
+  publishControlStatus();
+  ControlStatusSnapshot status;
+  copyControlStatus(status);
+  CHECK(status.physicalPaddleOn);
+}
+
+void w36_paddle_return_reminder_beeps_every_fifteen_seconds_only_while_open() {
+  resetHarness(true, true);
+  runLoopAfter(0);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(!scalePaddleReturnReminderBeepPending);
+  runLoopAfter(PADDLE_RETURN_REMINDER_BEEP_INTERVAL_MS - 1);
+  CHECK(!scalePaddleReturnReminderBeepPending);
+  runLoopAfter(1);
+  CHECK(scalePaddleReturnReminderBeepPending);
+  CHECK(executePendingScalePaddleReturnReminderBeep());
+  CHECK(scale.beepCalls == 1);
+
+  setRawPaddle(false);
+  CHECK(!scalePaddleReturnReminderBeepPending);
+  runLoopAfter(PADDLE_RETURN_REMINDER_BEEP_INTERVAL_MS);
+  CHECK(!scalePaddleReturnReminderBeepPending);
+}
+
+void w37_factory_reset_is_rejected_while_control_is_active() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  startCycle();
+  DebugEvent before[DEBUG_EVENT_CAPACITY] = {};
+  const size_t beforeCount =
+      copyDebugEvents(0, before, DEBUG_EVENT_CAPACITY);
+  const uint32_t afterSequence =
+      beforeCount == 0 ? 0 : before[beforeCount - 1].sequence;
+
+  WebCommand reset;
+  reset.type = WebCommandType::FACTORY_RESET;
+  processWebCommand(reset);
+
+  CHECK(session.active);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(stopperState == StopperState::QUALIFYING_ON);
+  DebugEvent events[4] = {};
+  const size_t count = copyDebugEvents(afterSequence, events, 4);
+  bool rejected = false;
+  for (size_t index = 0; index < count; ++index) {
+    rejected |= events[index].code == DebugCode::WEB_COMMAND_REJECTED &&
+                events[index].argument1 ==
+                    static_cast<int32_t>(WebCommandType::FACTORY_RESET);
+  }
+  CHECK(rejected);
 }
 
 using TestFunction = void (*)();
@@ -1532,6 +1611,9 @@ const TestCase testCases[] = {
     {"W32", w32_full_scale_queue_cannot_block_brew_confirmation},
     {"W33", w33_brew_confirmation_beep_can_be_disabled},
     {"W34", w34_calibration_reset_restores_default_and_cancels_analysis},
+    {"W35", w35_status_reports_the_live_physical_paddle_gpio},
+    {"W36", w36_paddle_return_reminder_beeps_every_fifteen_seconds_only_while_open},
+    {"W37", w37_factory_reset_is_rejected_while_control_is_active},
 };
 
 }  // namespace

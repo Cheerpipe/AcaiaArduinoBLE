@@ -725,6 +725,7 @@ void ShotStopperNetwork::processAcceptedCommands() {
 void ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
   PersistedSettings next = settingsCopy();
   bool persist = false;
+  bool factoryReset = false;
   bool authenticationChanged = false;
   switch (command.type) {
     case WebCommandType::PERSIST_RUNTIME:
@@ -785,6 +786,19 @@ void ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
       log(DebugCategory::SECURITY, DebugCode::NETWORK_RESET);
       break;
 
+    case WebCommandType::FACTORY_RESET:
+      if (!resetPersistedSettingsToFactory(next)) {
+        restartPending_ = false;
+        apRestartPending_ = false;
+        log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
+        return;
+      }
+      factoryReset = true;
+      authenticationChanged = true;
+      restartPending_ = true;
+      log(DebugCategory::SECURITY, DebugCode::FACTORY_RESET);
+      break;
+
     case WebCommandType::RESTART:
       restartPending_ = true;
       log(DebugCategory::SECURITY, DebugCode::RESTART_REQUESTED);
@@ -804,6 +818,13 @@ void ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
     portENTER_CRITICAL(&dataMux_);
     settings_ = next;
     status_.wifiConfigured = next.staConfigured;
+    portEXIT_CRITICAL(&dataMux_);
+    log(DebugCategory::CONFIG, DebugCode::CONFIG_PERSISTED,
+        static_cast<int32_t>(next.runtime.revision));
+  } else if (factoryReset) {
+    portENTER_CRITICAL(&dataMux_);
+    settings_ = next;
+    status_.wifiConfigured = false;
     portEXIT_CRITICAL(&dataMux_);
     log(DebugCategory::CONFIG, DebugCode::CONFIG_PERSISTED,
         static_cast<int32_t>(next.runtime.revision));
@@ -830,7 +851,7 @@ bool ShotStopperNetwork::startHttpServer() {
   config.task_priority = tskIDLE_PRIORITY + 1;
   config.stack_size = 8192;
   config.max_open_sockets = 2;
-  config.max_uri_handlers = 16;
+  config.max_uri_handlers = 17;
   config.max_resp_headers = 8;
   config.backlog_conn = 2;
   config.lru_purge_enable = true;
@@ -860,6 +881,8 @@ bool ShotStopperNetwork::startHttpServer() {
                       stopHandler) &&
       registerHandler(server_, "/api/v1/control/restart", HTTP_POST,
                       restartHandler) &&
+      registerHandler(server_, "/api/v1/factory-reset", HTTP_POST,
+                      factoryResetHandler) &&
       registerHandler(server_, "/api/v1/network", HTTP_POST, networkHandler) &&
       registerHandler(server_, "/api/v1/network/scan", HTTP_POST,
                       wifiScanStartHandler) &&
@@ -1214,10 +1237,9 @@ const char *ShotStopperNetwork::wifiScanStateName(WifiScanState state) {
 
 esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, false)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session.");
-  }
+  // Status intentionally has no authentication requirement. It is the
+  // read-only landing view and contains no credentials, session material, or
+  // actionable state. Every mutating route remains authenticated.
   ControlStatusSnapshot control;
   self.callbacks_.copyControlStatus(control);
   const NetworkStatusSnapshot network = self.snapshot();
@@ -1240,7 +1262,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"controlSource\":\"%s\",\"cn9ElapsedMs\":%lu,"
       "\"configMutable\":%s,\"config\":{\"revision\":%lu,"
       "\"goalWeightG\":%u,\"autoTare\":%s,\"timerOnly\":%s,"
-      "\"canTareStartTimer\":%s,\"brewConfirmationBeep\":%s,\"rinseGestureMs\":%lu,"
+      "\"canTareStartTimer\":%s,\"brewConfirmationBeep\":%s,"
+      "\"paddleReturnReminderBeep\":%s,\"rinseGestureMs\":%lu,"
       "\"rinseDurationMs\":%lu,\"brewConfirmMs\":%lu,"
       "\"minAutoStopMs\":%lu,\"operationalWallMs\":%lu},"
       "\"scale\":{\"available\":%s,\"currentWeightG\":%s,"
@@ -1265,6 +1288,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.config.timerOnly ? "true" : "false",
       control.config.canTareStartTimer ? "true" : "false",
       control.config.brewConfirmationBeep ? "true" : "false",
+      control.config.paddleReturnReminderBeep ? "true" : "false",
       static_cast<unsigned long>(control.config.rinseGestureMs),
       static_cast<unsigned long>(control.config.rinseDurationMs),
       static_cast<unsigned long>(control.config.brewConfirmMs),
@@ -1293,10 +1317,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, false)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session.");
-  }
+  // The bounded diagnostic log is intentionally public like Status. It emits
+  // only fixed enum-derived messages and numeric arguments; credentials,
+  // session material and request payloads are never included.
   uint32_t after = 0;
   const size_t queryLength = httpd_req_get_url_query_len(request);
   if (queryLength > 0 && queryLength < 64) {
@@ -1391,9 +1414,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   static const char *const fields[] = {
       "goalWeightG", "rinseGestureMs", "rinseDurationMs", "brewConfirmMs",
       "minAutoStopMs", "operationalWallMs", "autoTare", "timerOnly",
-      "canTareStartTimer", "brewConfirmationBeep"};
+      "canTareStartTimer", "brewConfirmationBeep", "paddleReturnReminderBeep"};
   const bool parsed =
-      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 10) &&
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 11) &&
       jsonUint8(root, "goalWeightG", candidate.goalWeightG) &&
       jsonUint32(root, "rinseGestureMs", candidate.rinseGestureMs) &&
       jsonUint32(root, "rinseDurationMs", candidate.rinseDurationMs) &&
@@ -1404,7 +1427,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       jsonBoolean(root, "timerOnly", candidate.timerOnly) &&
       jsonBoolean(root, "canTareStartTimer", candidate.canTareStartTimer) &&
       jsonBoolean(root, "brewConfirmationBeep",
-                  candidate.brewConfirmationBeep);
+                  candidate.brewConfirmationBeep) &&
+      jsonBoolean(root, "paddleReturnReminderBeep",
+                  candidate.paddleReturnReminderBeep);
   if (root != nullptr) {
     cJSON_Delete(root);
   }
@@ -1577,6 +1602,54 @@ esp_err_t ShotStopperNetwork::restartHandler(httpd_req_t *request) {
                      "Control queue is full.");
   }
   return sendJson(request, STATUS_ACCEPTED, "{\"accepted\":true}");
+}
+
+esp_err_t ShotStopperNetwork::factoryResetHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authenticate(request, true)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
+                     "Invalid session or CSRF token.");
+  }
+  ControlStatusSnapshot status;
+  self.callbacks_.copyControlStatus(status);
+  if (!controlAllowsConfiguration(status)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "Stop the cycle, switch the physical paddle OFF, and wait for Ready before restoring factory settings.");
+  }
+
+  char body[REQUEST_BODY_CAPACITY] = {};
+  char confirmation[32] = {};
+  if (!readJsonBody(request, body)) {
+    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
+                     "An explicit factory-reset confirmation is required.");
+  }
+  cJSON *root = cJSON_Parse(body);
+  static const char *const fields[] = {"confirm"};
+  const bool parsed =
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
+      jsonString(root, "confirm", confirmation, sizeof(confirmation), false) &&
+      strcmp(confirmation, "ERASE_ALL_SETTINGS") == 0;
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  memset(body, 0, sizeof(body));
+  memset(confirmation, 0, sizeof(confirmation));
+  if (!parsed) {
+    return sendError(request, STATUS_UNPROCESSABLE,
+                     "FACTORY_RESET_NOT_CONFIRMED",
+                     "The factory reset was not explicitly confirmed.");
+  }
+
+  WebCommand command;
+  command.type = WebCommandType::FACTORY_RESET;
+  command.requestId = millis();
+  if (!self.callbacks_.enqueueWebCommand(command)) {
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
+                     "Control is busy; no settings were erased.");
+  }
+  return sendJson(request, STATUS_ACCEPTED,
+                  "{\"accepted\":true,\"restarting\":true}");
 }
 
 esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {

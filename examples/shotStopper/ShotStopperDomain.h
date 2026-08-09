@@ -7,11 +7,12 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 3;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 4;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 3;
 constexpr uint32_t LEGACY_CONFIG_SCHEMA_VERSION = 2;
 constexpr uint32_t HARD_MAX_CN9_CLOSED_MS = 50000;
 constexpr uint32_t DEFAULT_OPERATIONAL_WALL_MS = 50000;
-constexpr uint32_t DEFAULT_RINSE_GESTURE_MS = 1000;
+constexpr uint32_t DEFAULT_RINSE_GESTURE_MS = 1500;
 constexpr uint32_t DEFAULT_RINSE_DURATION_MS = 3000;
 constexpr uint32_t DEFAULT_BREW_CONFIRM_MS = 3000;
 constexpr uint32_t DEFAULT_MIN_AUTO_STOP_MS = 5000;
@@ -72,9 +73,11 @@ struct RuntimeConfig {
   float weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
   bool autoTare = true;
   bool timerOnly = false;
-  bool canTareStartTimer = false;
+  bool canTareStartTimer = true;
   // An independent Bookoo beep after Brew confirmation is optional.
   bool brewConfirmationBeep = true;
+  // Remind the user to release the physical paddle after CN9 has opened.
+  bool paddleReturnReminderBeep = true;
   uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
   uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
   uint32_t brewConfirmMs = DEFAULT_BREW_CONFIRM_MS;
@@ -88,8 +91,9 @@ struct CycleConfigSnapshot {
   float weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
   bool autoTare = true;
   bool timerOnly = false;
-  bool canTareStartTimer = false;
+  bool canTareStartTimer = true;
   bool brewConfirmationBeep = true;
+  bool paddleReturnReminderBeep = true;
   uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
   uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
   uint32_t brewConfirmMs = DEFAULT_BREW_CONFIRM_MS;
@@ -106,6 +110,7 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.timerOnly = config.timerOnly;
   snapshot.canTareStartTimer = config.canTareStartTimer;
   snapshot.brewConfirmationBeep = config.brewConfirmationBeep;
+  snapshot.paddleReturnReminderBeep = config.paddleReturnReminderBeep;
   snapshot.rinseGestureMs = config.rinseGestureMs;
   snapshot.rinseDurationMs = config.rinseDurationMs;
   snapshot.brewConfirmMs = config.brewConfirmMs;
@@ -232,6 +237,7 @@ enum class WebCommandType : uint8_t {
   CHANGE_AP_PASSWORD,
   RESTART,
   RESET_NETWORK_UI,
+  FACTORY_RESET,
   PERSIST_RUNTIME
 };
 
@@ -251,6 +257,7 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::CHANGE_AP_PASSWORD: return "change AP password";
     case WebCommandType::RESTART: return "restart";
     case WebCommandType::RESET_NETWORK_UI: return "recover network/UI";
+    case WebCommandType::FACTORY_RESET: return "restore factory settings";
     case WebCommandType::PERSIST_RUNTIME: return "persist workflow";
   }
   return "unknown web command";
@@ -329,6 +336,9 @@ enum class DebugCode : uint8_t {
   SCALE_BEEP_OK,
   SCALE_BEEP_FAILED,
   SCALE_BEEP_UNSUPPORTED,
+  SCALE_PADDLE_REMINDER_BEEP_OK,
+  SCALE_PADDLE_REMINDER_BEEP_FAILED,
+  SCALE_PADDLE_REMINDER_BEEP_UNSUPPORTED,
   CONFIG_ACCEPTED,
   CONFIG_REJECTED,
   WEIGHT_OFFSET_RESET,
@@ -354,7 +364,8 @@ enum class DebugCode : uint8_t {
   WEB_COMMAND_REJECTED,
   WEB_STOP,
   RESTART_REQUESTED,
-  NETWORK_RESET
+  NETWORK_RESET,
+  FACTORY_RESET
 };
 
 struct DebugEvent {
@@ -464,6 +475,12 @@ inline const char *debugCodeName(DebugCode code) {
       return "scale brew-confirmation beep failed";
     case DebugCode::SCALE_BEEP_UNSUPPORTED:
       return "scale has no state-safe beep command";
+    case DebugCode::SCALE_PADDLE_REMINDER_BEEP_OK:
+      return "scale paddle-return reminder beep sent";
+    case DebugCode::SCALE_PADDLE_REMINDER_BEEP_FAILED:
+      return "scale paddle-return reminder beep failed";
+    case DebugCode::SCALE_PADDLE_REMINDER_BEEP_UNSUPPORTED:
+      return "scale has no state-safe paddle-return reminder beep command";
     case DebugCode::CONFIG_ACCEPTED: return "configuration accepted";
     case DebugCode::CONFIG_REJECTED: return "configuration rejected";
     case DebugCode::WEIGHT_OFFSET_RESET:
@@ -492,6 +509,7 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::WEB_STOP: return "web safe stop";
     case DebugCode::RESTART_REQUESTED: return "restart requested";
     case DebugCode::NETWORK_RESET: return "network settings reset";
+    case DebugCode::FACTORY_RESET: return "factory settings restored";
   }
   return "unknown";
 }

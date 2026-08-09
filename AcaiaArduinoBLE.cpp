@@ -264,6 +264,10 @@ bool AcaiaArduinoBLE::tareStartTimer(){
     }
 }
 
+bool AcaiaArduinoBLE::supportsTareStartTimer() const {
+    return _connected && _type == GENERIC;
+}
+
 bool AcaiaArduinoBLE::beep(){
 
     // for acaia's, use the tare command to generate the beep
