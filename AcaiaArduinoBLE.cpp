@@ -39,6 +39,7 @@ AcaiaArduinoBLE::AcaiaArduinoBLE(bool debug){
     _debug = debug;
     _currentWeight = 0;
     _connected = false;
+    _type = OLD;
     _packetPeriod = 0;
 }
 
@@ -274,6 +275,27 @@ bool AcaiaArduinoBLE::beep(){
         Serial.println("beep level write failed");
         return false;
     }
+}
+
+bool AcaiaArduinoBLE::supportsIndependentBeep() const {
+    return _connected && _type == GENERIC;
+}
+
+bool AcaiaArduinoBLE::beepWithoutStateChange(){
+    if(!supportsIndependentBeep()){
+        Serial.println("independent beep unsupported for this scale");
+        return false;
+    }
+
+    // Bookoo/generic protocol command 0x02 only changes the buzzer level. A
+    // failed optional beep is deliberately not allowed to change the library
+    // connection state; normal packet/heartbeat handling remains responsible
+    // for detecting an actual lost link.
+    const bool ok = _write.writeValue(BEEP_LEVEL_1_BOOKOO,
+                                      sizeof(BEEP_LEVEL_1_BOOKOO));
+    Serial.println(ok ? "independent beep write successful"
+                      : "independent beep write failed");
+    return ok;
 }
 
 bool AcaiaArduinoBLE::heartbeat(){

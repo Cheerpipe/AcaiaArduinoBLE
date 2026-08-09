@@ -45,6 +45,8 @@ class AcaiaArduinoBLE{
         bool resetTimer();
         bool tareStartTimer();
         bool beep();
+        bool supportsIndependentBeep() const;
+        bool beepWithoutStateChange();
         bool heartbeat();
         float getWeight();
         bool heartbeatRequired();
