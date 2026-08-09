@@ -1,0 +1,65 @@
+# Operating-system metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+secrets.h
+credentials.h
+WiFiSecrets.h
+*.local.h
+
+# Arduino IDE and Arduino CLI generated state
+.arduinoIDE/
+.arduino/
+.compile_stubs/
+build/
+build-*/
+**/build/
+**/build.*/
+*.autosave
+
+# ESP32, compiler and linker outputs
+artifacts/
+*.bin
+*.elf
+*.map
+*.hex
+*.eep
+*.uf2
+*.lst
+*.sym
+*.o
+*.obj
+*.d
+*.a
+*.core
+compile_commands.json
+sdkconfig
+sdkconfig.old
+
+# PlatformIO outputs (if used locally)
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Host-test and coverage outputs
+coverage/
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata

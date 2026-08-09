@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Acaia lifecycle and parser tests
+        run: libraries/AcaiaArduinoBLE/tests/run_host_tests.sh
+      - name: ShotStopper host tests
+        run: shotStopper/tests/run_host_tests.sh
+      - name: Embedded web assets
+        run: node shotStopper/tests/check_web_assets.js
+
+  firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - fqbn: esp32:esp32:esp32
+            target: esp32
+            heartbeat_gpio: 16
+            feedback_gpio: 17
+            flash_budget: 1300000
+          - fqbn: esp32:esp32:esp32c3
+            target: esp32c3
+            heartbeat_gpio: 4
+            feedback_gpio: 5
+            flash_budget: 1300000
+          - fqbn: esp32:esp32:esp32s3
+            target: esp32s3
+            heartbeat_gpio: 4
+            feedback_gpio: 5
+            flash_budget: 1300000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install pinned toolchain
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.3
+          arduino-cli lib install ArduinoBLE@2.1.0
+      - name: Compile ShotStopper
+        run: |
+          arduino-cli compile \
+            --fqbn "${{ matrix.fqbn }}" \
+            --warnings all \
+            --build-path "/tmp/shot-${{ matrix.target }}-base" \
+            --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy' \
+            --library libraries/AcaiaArduinoBLE \
+            shotStopper
+          app_size=$(stat -c%s "/tmp/shot-${{ matrix.target }}-base/shotStopper.ino.bin")
+          test "$app_size" -le "${{ matrix.flash_budget }}"
+          echo "Base firmware: $app_size / ${{ matrix.flash_budget }} bytes"
+      - name: Compile external CN9 safety interface
+        run: |
+          arduino-cli compile \
+            --fqbn "${{ matrix.fqbn }}" \
+            --warnings all \
+            --build-path "/tmp/shot-${{ matrix.target }}-external" \
+            --build-property "compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_SAFETY_HEARTBEAT_GPIO=${{ matrix.heartbeat_gpio }} -DSHOT_STOPPER_CN9_FEEDBACK_GPIO=${{ matrix.feedback_gpio }} -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1" \
+            --library libraries/AcaiaArduinoBLE \
+            shotStopper
+          app_size=$(stat -c%s "/tmp/shot-${{ matrix.target }}-external/shotStopper.ino.bin")
+          test "$app_size" -le "${{ matrix.flash_budget }}"
+          echo "External-safety firmware: $app_size / ${{ matrix.flash_budget }} bytes"
