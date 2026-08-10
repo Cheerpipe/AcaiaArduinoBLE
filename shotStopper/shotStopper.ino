@@ -46,6 +46,7 @@ constexpr uint32_t DRIP_DELAY_MS = 3000;
 constexpr uint32_t SCALE_CONNECT_RETRY_MS = 1000;
 constexpr uint32_t SCALE_CONNECT_LOG_MS = 10000;
 constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;
+constexpr uint32_t SCALE_ATT_TIMEOUT_MS = 1000;
 constexpr uint32_t PADDLE_RETURN_REMINDER_BEEP_INTERVAL_MS = 15000;
 constexpr size_t SCALE_COMMAND_QUEUE_LENGTH = 12;
 constexpr size_t SCALE_EVENT_QUEUE_LENGTH = 64;
@@ -254,19 +255,35 @@ struct CycleSession {
   bool stopTimerRequested = false;
   bool stopTimerCommandQueued = false;
   bool receivedFreshWeightInCycle = false;
+  bool calibrationEligible = false;
+  bool hasWeightAnchor = false;
+  bool directStopPending = false;
   TimerStopResult timerStopResult = TimerStopResult::NOT_REQUIRED;
+  WeightControlState weightControlState = WeightControlState::INACTIVE;
+  EndReason directStopReason = EndReason::NONE;
   uint8_t stopTimerAttempts = 0;
+  uint8_t thresholdConfirmations = 0;
+  uint8_t recoveryConfirmations = 0;
   uint32_t id = 0;
   uint32_t webSessionId = 0;
   uint32_t controlLeaseId = 0;
   uint32_t scaleDisconnectSequenceAtStart = 0;
   uint32_t weightSequenceAtStart = 0;
+  uint32_t connectionGenerationAtStart = 0;
+  uint32_t ownedConnectionGeneration = 0;
   uint32_t startedAtMs = 0;
   uint32_t rinseStartedAtMs = 0;
   uint32_t stopTimerRetryDeadlineMs = 0;
   uint32_t stopTimerLastAttemptMs = 0;
   uint32_t lastAcceptedWeightAtMs = 0;
+  uint32_t lastAcceptedPacketSequence = 0;
+  uint32_t lastThresholdAtMs = 0;
+  uint32_t lastThresholdPacketSequence = 0;
+  uint32_t lastThresholdConnectionGeneration = 0;
+  uint32_t recoveryLastAtMs = 0;
+  uint32_t recoveryLastPacketSequence = 0;
   float lastAcceptedWeightG = 0.0f;
+  float recoveryLastWeightG = 0.0f;
   ControlSource source = ControlSource::NONE;
   CycleConfigSnapshot config = {};
   EndReason endReason = EndReason::NONE;
@@ -291,6 +308,8 @@ struct ScaleEvent {
   ScaleEventType type = ScaleEventType::WEIGHT;
   uint32_t cycleId = 0;
   uint32_t receivedAtMs = 0;
+  uint32_t connectionGeneration = 0;
+  uint32_t packetSequence = 0;
   float weightG = 0.0f;
   bool commandAttempted = false;
   bool writeSucceeded = false;
@@ -322,6 +341,12 @@ DebugRingBuffer debugLog;
 float currentWeight = 0.0f;
 uint32_t currentWeightReceivedAtMs = 0;
 uint32_t currentWeightSequence = 0;
+uint32_t currentWeightConnectionGeneration = 0;
+float observedWeight = 0.0f;
+uint32_t observedWeightReceivedAtMs = 0;
+uint32_t observedWeightSequence = 0;
+uint32_t observedWeightConnectionGeneration = 0;
+WeightStreamState weightStreamState = WeightStreamState::NO_SAMPLE;
 uint32_t nextCycleId = 1;
 TaskHandle_t scaleWorkerTaskHandle = nullptr;
 QueueHandle_t scaleCommandQueue = nullptr;
@@ -330,15 +355,26 @@ QueueHandle_t webCommandQueue = nullptr;
 portMUX_TYPE scaleLinkMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE scaleBeepMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE scaleCriticalEventMux = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE scaleWeightEventMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE webStatusMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE debugLogMux = portMUX_INITIALIZER_UNLOCKED;
 ScaleLinkState scaleLinkState = ScaleLinkState::DISCONNECTED;
 uint32_t scaleDisconnectSequence = 0;
+uint32_t scaleConnectionGeneration = 0;
+uint32_t scalePacketSequence = 0;
+uint32_t scalePacketGaps = 0;
+uint32_t scaleRejectedPackets = 0;
+uint32_t scaleReconnects = 0;
+uint8_t scaleLastDisconnectReason = 0;
 uint32_t scaleWorkerProgressAtMs = 0;
 uint32_t scaleEventsDropped = 0;
 uint32_t scaleWorkerStackMinWords = 0;
 ScaleEvent scaleCriticalEvent;
 bool scaleCriticalEventPending = false;
+ScaleEvent scaleTimerStartEvent;
+bool scaleTimerStartEventPending = false;
+ScaleEvent scaleWeightEvent;
+bool scaleWeightEventPending = false;
 bool scaleBeepPending = false;
 uint32_t scaleBeepCycleId = 0;
 bool scalePaddleReturnReminderBeepPending = false;
@@ -418,6 +454,12 @@ uint32_t resetRecoveryOffStartedAtMs = 0;
 struct ScaleLinkSnapshot {
   ScaleLinkState state;
   uint32_t disconnectSequence;
+  uint32_t connectionGeneration;
+  uint32_t packetSequence;
+  uint32_t packetGaps;
+  uint32_t rejectedPackets;
+  uint32_t reconnects;
+  uint8_t lastDisconnectReason;
   uint32_t workerProgressAtMs;
 };
 
@@ -480,6 +522,12 @@ ScaleLinkSnapshot getScaleLinkSnapshot() {
   portENTER_CRITICAL(&scaleLinkMux);
   snapshot.state = scaleLinkState;
   snapshot.disconnectSequence = scaleDisconnectSequence;
+  snapshot.connectionGeneration = scaleConnectionGeneration;
+  snapshot.packetSequence = scalePacketSequence;
+  snapshot.packetGaps = scalePacketGaps;
+  snapshot.rejectedPackets = scaleRejectedPackets;
+  snapshot.reconnects = scaleReconnects;
+  snapshot.lastDisconnectReason = scaleLastDisconnectReason;
   snapshot.workerProgressAtMs = scaleWorkerProgressAtMs;
   portEXIT_CRITICAL(&scaleLinkMux);
   return snapshot;
@@ -493,6 +541,13 @@ void setScaleLinkState(ScaleLinkState state) {
   if (scaleLinkState == ScaleLinkState::CONNECTED &&
       state == ScaleLinkState::DISCONNECTED) {
     ++scaleDisconnectSequence;
+  }
+  if (scaleLinkState != ScaleLinkState::CONNECTED &&
+      state == ScaleLinkState::CONNECTED) {
+    ++scaleConnectionGeneration;
+    if (scaleConnectionGeneration == 0) {
+      scaleConnectionGeneration = 1;
+    }
   }
   scaleLinkState = state;
   scaleWorkerProgressAtMs = progressAtMs;
@@ -522,12 +577,62 @@ bool scaleAvailable() {
 }
 
 bool currentWeightIsFresh(uint32_t now = millis()) {
+  const uint32_t linkGeneration = getScaleLinkSnapshot().connectionGeneration;
   return currentWeightSequence > 0 && isfinite(currentWeight) &&
          currentWeight >= MIN_AUTOMATION_WEIGHT_G &&
          currentWeight <= MAX_AUTOMATION_WEIGHT_G &&
+         (currentWeightConnectionGeneration == 0 ||
+          currentWeightConnectionGeneration == linkGeneration) &&
          static_cast<int32_t>(now - currentWeightReceivedAtMs) >= 0 &&
          static_cast<uint32_t>(now - currentWeightReceivedAtMs) <=
              MAX_AUTOMATION_WEIGHT_AGE_MS;
+}
+
+bool observedWeightIsFresh(uint32_t now = millis()) {
+  const uint32_t linkGeneration = getScaleLinkSnapshot().connectionGeneration;
+  return observedWeightSequence > 0 && isfinite(observedWeight) &&
+         fabsf(observedWeight) <= MAX_PARSED_WEIGHT_G &&
+         observedWeightConnectionGeneration != 0 &&
+         observedWeightConnectionGeneration == linkGeneration &&
+         static_cast<int32_t>(now - observedWeightReceivedAtMs) >= 0 &&
+         static_cast<uint32_t>(now - observedWeightReceivedAtMs) <=
+             MAX_AUTOMATION_WEIGHT_AGE_MS;
+}
+
+void setWeightControlState(WeightControlState state) {
+  if (session.weightControlState == state) {
+    session.automaticEnabled = state == WeightControlState::ACTIVE;
+    return;
+  }
+  const WeightControlState previous = session.weightControlState;
+  session.weightControlState = state;
+  session.automaticEnabled = state == WeightControlState::ACTIVE;
+  if (state == WeightControlState::SUSPENDED) {
+    session.scaleWasLost = true;
+    addDebugEvent(DebugCategory::SCALE,
+                  DebugCode::SCALE_CONTROL_SUSPENDED,
+                  static_cast<int32_t>(previous));
+  } else if (state == WeightControlState::ACTIVE &&
+             (previous == WeightControlState::SUSPENDED ||
+              previous == WeightControlState::VALIDATING)) {
+    addDebugEvent(DebugCategory::SCALE,
+                  DebugCode::SCALE_CONTROL_RECOVERED);
+  }
+}
+
+void resetWeightTrend() {
+  shot.expectedEndS = session.config.operationalWallMs / 1000.0f;
+  shot.datapoints = 0;
+}
+
+void suspendWeightControl() {
+  if (session.weightControlState == WeightControlState::ACTIVE ||
+      session.weightControlState == WeightControlState::VALIDATING) {
+    setWeightControlState(WeightControlState::SUSPENDED);
+    session.recoveryConfirmations = 0;
+    session.calibrationEligible = false;
+    resetWeightTrend();
+  }
 }
 
 bool scaleAutomationUnavailableForSession() {
@@ -563,6 +668,8 @@ const char *endReasonName(EndReason reason) {
     case EndReason::NONE: return "none";
     case EndReason::PADDLE: return "paddle";
     case EndReason::SCALE_PREDICTION: return "scale prediction";
+    case EndReason::SCALE_THRESHOLD: return "scale threshold";
+    case EndReason::WEIGHT_ANOMALY: return "weight anomaly";
     case EndReason::GLOBAL_LIMIT: return "global CN9 limit";
     case EndReason::CONFIGURED_WALL_LIMIT:
       return "configured wall limit";
@@ -1261,67 +1368,90 @@ void calculateExpectedEndTime() {
 }
 
 bool shouldTrackWeight() {
-  return session.active && session.automaticEnabled &&
+  return session.active && !session.config.timerOnly &&
+         session.weightControlState != WeightControlState::INACTIVE &&
+         session.weightControlState != WeightControlState::FAULT_STOPPED &&
          (stopperState == StopperState::QUALIFYING_ON ||
           stopperState == StopperState::BREW);
 }
 
-bool recordWeightSample(float weight, uint32_t receivedAtMs) {
-  if (!shouldTrackWeight()) {
-    return true;
+float effectiveStopThreshold() {
+  return static_cast<float>(session.config.goalWeightG) -
+         session.config.weightOffsetG;
+}
+
+void resetDirectStopConfirmation() {
+  session.thresholdConfirmations = 0;
+  session.lastThresholdAtMs = 0;
+  session.lastThresholdPacketSequence = 0;
+  session.lastThresholdConnectionGeneration = 0;
+}
+
+void considerDirectStopSample(float weight, uint32_t receivedAtMs,
+                              uint32_t packetSequence,
+                              uint32_t connectionGeneration) {
+  if (!shouldTrackWeight() || packetSequence == 0 || !isfinite(weight)) {
+    return;
   }
 
-  if (!isfinite(weight) || weight < MIN_AUTOMATION_WEIGHT_G ||
-      weight > MAX_AUTOMATION_WEIGHT_G) {
-    Serial.println("Invalid or out-of-range weight ignored");
-    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_SAMPLE_REJECTED);
-    return false;
+  const bool overload = fabsf(weight) > MAX_AUTOMATION_WEIGHT_G;
+  const bool overThreshold = weight >= effectiveStopThreshold();
+  if (!overThreshold && !overload) {
+    resetDirectStopConfirmation();
+    return;
   }
 
-  if (static_cast<int32_t>(receivedAtMs - shot.startMs) < 0) {
-    return false;
+  const bool consecutive = session.thresholdConfirmations > 0 &&
+      connectionGeneration == session.lastThresholdConnectionGeneration &&
+      packetSequence == session.lastThresholdPacketSequence + 1U &&
+      static_cast<int32_t>(receivedAtMs - session.lastThresholdAtMs) >= 0 &&
+      static_cast<uint32_t>(receivedAtMs - session.lastThresholdAtMs) <=
+          DIRECT_STOP_CONFIRMATION_WINDOW_MS;
+  session.thresholdConfirmations = consecutive
+      ? static_cast<uint8_t>(session.thresholdConfirmations + 1U)
+      : 1U;
+  session.lastThresholdAtMs = receivedAtMs;
+  session.lastThresholdPacketSequence = packetSequence;
+  session.lastThresholdConnectionGeneration = connectionGeneration;
+
+  if (session.thresholdConfirmations < DIRECT_STOP_CONFIRMATION_SAMPLES) {
+    return;
   }
 
+  session.directStopPending = true;
+  session.directStopReason = overload ? EndReason::WEIGHT_ANOMALY
+                                      : EndReason::SCALE_THRESHOLD;
+  if (overload) {
+    weightStreamState = WeightStreamState::OVERLOAD;
+    session.calibrationEligible = false;
+    setWeightControlState(WeightControlState::FAULT_STOPPED);
+    addDebugEvent(DebugCategory::SCALE,
+                  DebugCode::SCALE_OVERLOAD_CONFIRMED,
+                  static_cast<int32_t>(weight));
+  } else {
+    addDebugEvent(DebugCategory::SCALE,
+                  DebugCode::SCALE_THRESHOLD_CONFIRMED,
+                  static_cast<int32_t>(weight * 100.0f));
+  }
+}
+
+bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
+                                uint32_t packetSequence) {
   if (shot.datapoints >= MAX_SHOT_DATAPOINTS) {
     Serial.println("Shot trajectory full; ignoring additional samples");
     return true;
   }
-
-  if (shot.datapoints > 0) {
-    if (static_cast<int32_t>(receivedAtMs -
-                             session.lastAcceptedWeightAtMs) <= 0) {
-      Serial.println("Non-monotonic scale sample ignored; cycle degraded");
-      session.automaticEnabled = false;
-      session.scaleWasLost = true;
-      addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_SAMPLE_REJECTED);
-      return false;
-    }
-    const uint32_t deltaMs =
-        receivedAtMs - session.lastAcceptedWeightAtMs;
-    const float allowedDelta = AUTOMATION_WEIGHT_SLEW_ALLOWANCE_G +
-        MAX_AUTOMATION_WEIGHT_SLEW_G_PER_S * deltaMs / 1000.0f;
-    if (fabsf(weight - session.lastAcceptedWeightG) > allowedDelta) {
-      Serial.println("Implausible scale slew ignored; cycle degraded");
-      session.automaticEnabled = false;
-      session.scaleWasLost = true;
-      addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_SAMPLE_REJECTED,
-                    static_cast<int32_t>(deltaMs));
-      return false;
-    }
-  }
-
   const size_t index = shot.datapoints++;
   shot.timeS[index] =
       static_cast<uint32_t>(receivedAtMs - shot.startMs) / 1000.0f;
   shot.weight[index] = weight;
   session.receivedFreshWeightInCycle = true;
+  session.hasWeightAnchor = true;
   session.lastAcceptedWeightAtMs = receivedAtMs;
   session.lastAcceptedWeightG = weight;
+  session.lastAcceptedPacketSequence = packetSequence;
   calculateExpectedEndTime();
 
-  // Per-sample serial output can fill the UART buffer and delay the next
-  // control iteration. Keep it behind the compile-time diagnostic flag; the
-  // Web ring deliberately never records individual weights.
   if (DEBUG) {
     Serial.print(weight);
     Serial.print("g, t=");
@@ -1331,6 +1461,152 @@ bool recordWeightSample(float weight, uint32_t receivedAtMs) {
     Serial.println("s");
   }
   return true;
+}
+
+bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
+                                      uint32_t packetSequence,
+                                      uint32_t connectionGeneration) {
+  if (!isfinite(weight) || fabsf(weight) > MAX_PARSED_WEIGHT_G) {
+    Serial.println("Invalid or out-of-range weight ignored");
+    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_SAMPLE_REJECTED);
+    return false;
+  }
+
+  if (!shouldTrackWeight()) {
+    return weight >= MIN_AUTOMATION_WEIGHT_G &&
+           weight <= MAX_AUTOMATION_WEIGHT_G;
+  }
+
+  if (connectionGeneration == 0) {
+    connectionGeneration = session.ownedConnectionGeneration;
+  }
+  if (packetSequence == 0) {
+    packetSequence = session.lastAcceptedPacketSequence + 1U;
+    if (packetSequence == 0) {
+      packetSequence = 1;
+    }
+  }
+
+  if ((session.weightControlState == WeightControlState::ACTIVE ||
+       session.weightControlState == WeightControlState::VALIDATING) &&
+      session.ownedConnectionGeneration != 0 &&
+      connectionGeneration != session.ownedConnectionGeneration) {
+    suspendWeightControl();
+  }
+
+  considerDirectStopSample(weight, receivedAtMs, packetSequence,
+                           connectionGeneration);
+
+  if (weight < MIN_AUTOMATION_WEIGHT_G ||
+      weight > MAX_AUTOMATION_WEIGHT_G) {
+    weightStreamState = WeightStreamState::OVERLOAD;
+    session.calibrationEligible = false;
+    if (session.weightControlState == WeightControlState::ACTIVE) {
+      setWeightControlState(WeightControlState::VALIDATING);
+    }
+    session.recoveryConfirmations = 0;
+    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_SAMPLE_REJECTED,
+                  static_cast<int32_t>(weight));
+    return false;
+  }
+
+  if (static_cast<int32_t>(receivedAtMs - shot.startMs) < 0) {
+    return false;
+  }
+
+  bool plausible = true;
+  if (session.hasWeightAnchor) {
+    if (static_cast<int32_t>(receivedAtMs -
+                             session.lastAcceptedWeightAtMs) < 0) {
+      plausible = false;
+    } else {
+      uint32_t deltaMs = receivedAtMs - session.lastAcceptedWeightAtMs;
+      if (deltaMs == 0) {
+        deltaMs = 1;
+      }
+      const float allowedDelta = AUTOMATION_WEIGHT_SLEW_ALLOWANCE_G +
+          MAX_AUTOMATION_WEIGHT_SLEW_G_PER_S * deltaMs / 1000.0f;
+      plausible = fabsf(weight - session.lastAcceptedWeightG) <= allowedDelta;
+    }
+  }
+
+  if (session.weightControlState == WeightControlState::ACTIVE && !plausible) {
+    Serial.println("Implausible scale slew ignored; validating stream");
+    weightStreamState = WeightStreamState::ANOMALOUS;
+    session.calibrationEligible = false;
+    setWeightControlState(WeightControlState::VALIDATING);
+    session.recoveryConfirmations = 0;
+    session.recoveryLastAtMs = 0;
+    session.recoveryLastPacketSequence = 0;
+    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_SAMPLE_REJECTED);
+    return false;
+  }
+
+  if (session.weightControlState == WeightControlState::VALIDATING ||
+      session.weightControlState == WeightControlState::SUSPENDED) {
+    bool recoveryPlausible = plausible;
+    if (session.recoveryConfirmations > 0) {
+      const bool consecutive =
+          packetSequence == session.recoveryLastPacketSequence + 1U;
+      const int32_t signedDelta =
+          static_cast<int32_t>(receivedAtMs - session.recoveryLastAtMs);
+      if (!consecutive || signedDelta <= 0 ||
+          static_cast<uint32_t>(signedDelta) > MAX_AUTOMATION_WEIGHT_AGE_MS) {
+        recoveryPlausible = false;
+      } else {
+        const float allowedIncrease = AUTOMATION_WEIGHT_SLEW_ALLOWANCE_G +
+            MAX_AUTOMATION_WEIGHT_SLEW_G_PER_S *
+                static_cast<uint32_t>(signedDelta) / 1000.0f;
+        const float change = weight - session.recoveryLastWeightG;
+        recoveryPlausible = change >= -MAX_RECOVERY_WEIGHT_DROP_G &&
+                            change <= allowedIncrease;
+      }
+    } else if (session.hasWeightAnchor) {
+      recoveryPlausible = recoveryPlausible &&
+          weight >= session.lastAcceptedWeightG - MAX_RECOVERY_WEIGHT_DROP_G;
+    }
+
+    if (!recoveryPlausible) {
+      session.recoveryConfirmations = 0;
+      session.recoveryLastAtMs = 0;
+      session.recoveryLastPacketSequence = 0;
+      addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_SAMPLE_REJECTED);
+      return false;
+    }
+
+    ++session.recoveryConfirmations;
+    session.recoveryLastAtMs = receivedAtMs;
+    session.recoveryLastPacketSequence = packetSequence;
+    session.recoveryLastWeightG = weight;
+    if (session.recoveryConfirmations <
+        WEIGHT_RECOVERY_CONFIRMATION_SAMPLES) {
+      return false;
+    }
+
+    session.ownedConnectionGeneration = connectionGeneration;
+    session.scaleDisconnectSequenceAtStart =
+        getScaleLinkSnapshot().disconnectSequence;
+    session.recoveryConfirmations = 0;
+    resetWeightTrend();
+    setWeightControlState(WeightControlState::ACTIVE);
+  }
+
+  weightStreamState = WeightStreamState::FRESH;
+  return acceptWeightIntoTrajectory(weight, receivedAtMs, packetSequence);
+}
+
+bool recordWeightSample(float weight, uint32_t receivedAtMs) {
+  uint32_t packetSequence = 0;
+  portENTER_CRITICAL(&scaleLinkMux);
+  ++scalePacketSequence;
+  if (scalePacketSequence == 0) {
+    scalePacketSequence = 1;
+  }
+  packetSequence = scalePacketSequence;
+  portEXIT_CRITICAL(&scaleLinkMux);
+  return recordWeightSampleWithProvenance(
+      weight, receivedAtMs, packetSequence,
+      session.ownedConnectionGeneration);
 }
 
 void scheduleShotAnalysis() {
@@ -1402,13 +1678,57 @@ void shotAnalysisTask() {
 // ---------------------------------------------------------------------------
 
 bool publishScaleEvent(const ScaleEvent &event, bool critical) {
+  if (event.type == ScaleEventType::WEIGHT) {
+    ScaleEvent stamped = event;
+    portENTER_CRITICAL(&scaleLinkMux);
+    if (stamped.connectionGeneration == 0) {
+      stamped.connectionGeneration = scaleConnectionGeneration;
+    }
+    if (stamped.packetSequence == 0) {
+      ++scalePacketSequence;
+      if (scalePacketSequence == 0) {
+        scalePacketSequence = 1;
+      }
+      stamped.packetSequence = scalePacketSequence;
+    }
+    portEXIT_CRITICAL(&scaleLinkMux);
+
+    bool overwrotePendingWeight = false;
+    portENTER_CRITICAL(&scaleWeightEventMux);
+    overwrotePendingWeight = scaleWeightEventPending;
+    scaleWeightEvent = stamped;
+    scaleWeightEventPending = true;
+    portEXIT_CRITICAL(&scaleWeightEventMux);
+    if (overwrotePendingWeight) {
+      portENTER_CRITICAL(&scaleLinkMux);
+      ++scalePacketGaps;
+      portEXIT_CRITICAL(&scaleLinkMux);
+      addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_PACKET_GAP,
+                    static_cast<int32_t>(stamped.packetSequence));
+    }
+    return true;
+  }
+
   if (critical) {
+    // Weight events use their own overwrite mailbox. Command results normally
+    // use this FIFO; distinct START and STOP fallback slots ensure those two
+    // acknowledgements cannot overwrite each other when the FIFO is full.
+    if (scaleEventQueue != nullptr &&
+        xQueueSend(scaleEventQueue, &event, 0) == pdTRUE) {
+      return true;
+    }
     portENTER_CRITICAL(&scaleCriticalEventMux);
-    if (scaleCriticalEventPending) {
+    ScaleEvent *fallback = &scaleCriticalEvent;
+    bool *fallbackPending = &scaleCriticalEventPending;
+    if (event.type == ScaleEventType::TIMER_START_RESULT) {
+      fallback = &scaleTimerStartEvent;
+      fallbackPending = &scaleTimerStartEventPending;
+    }
+    if (*fallbackPending) {
       ++scaleEventsDropped;
     }
-    scaleCriticalEvent = event;
-    scaleCriticalEventPending = true;
+    *fallback = event;
+    *fallbackPending = true;
     portEXIT_CRITICAL(&scaleCriticalEventMux);
     return true;
   }
@@ -1428,6 +1748,12 @@ bool publishScaleEvent(const ScaleEvent &event, bool critical) {
 }
 
 void updateWorkerLinkState() {
+  portENTER_CRITICAL(&scaleLinkMux);
+  scaleRejectedPackets = scale.rejectedPacketCount();
+  scaleReconnects = scale.reconnectCount();
+  scaleLastDisconnectReason =
+      static_cast<uint8_t>(scale.lastDisconnectReason());
+  portEXIT_CRITICAL(&scaleLinkMux);
   setScaleLinkState(scale.isConnected() ? ScaleLinkState::CONNECTED
                                         : ScaleLinkState::DISCONNECTED);
 }
@@ -1581,12 +1907,14 @@ void executeScaleCommand(const ScaleCommand &command) {
 
 void serviceScaleWorkerLink() {
   if (!scale.isConnected()) {
+    updateWorkerLinkState();
     setScaleLinkState(ScaleLinkState::DISCONNECTED);
     return;
   }
 
   if (scale.heartbeatRequired()) {
     if (!scale.heartbeat()) {
+      updateWorkerLinkState();
       setScaleLinkState(ScaleLinkState::DISCONNECTED);
       return;
     }
@@ -1594,6 +1922,7 @@ void serviceScaleWorkerLink() {
 
   const bool weightAvailable = scale.newWeightAvailable();
   if (!scale.isConnected()) {
+    updateWorkerLinkState();
     setScaleLinkState(ScaleLinkState::DISCONNECTED);
     return;
   }
@@ -1605,6 +1934,7 @@ void serviceScaleWorkerLink() {
     event.weightG = scale.getWeight();
     publishScaleEvent(event, false);
   }
+  updateWorkerLinkState();
 }
 
 void scaleWorkerTask(void *) {
@@ -1656,6 +1986,7 @@ void scaleWorkerTask(void *) {
           Serial.println(connected ? "Scale connected"
                                    : "Scale connection failed");
         }
+        updateWorkerLinkState();
         setScaleLinkState(connected ? ScaleLinkState::CONNECTED
                                     : ScaleLinkState::DISCONNECTED);
       }
@@ -1703,7 +2034,8 @@ bool initializeScaleWorker() {
 }
 
 void processScaleWorkerEvents() {
-  if (scaleEventQueue == nullptr && !scaleCriticalEventPending) {
+  if (scaleEventQueue == nullptr && !scaleCriticalEventPending &&
+      !scaleTimerStartEventPending && !scaleWeightEventPending) {
     return;
   }
 
@@ -1711,6 +2043,7 @@ void processScaleWorkerEvents() {
   size_t processed = 0;
   while (processed < SCALE_EVENT_QUEUE_LENGTH + 1) {
     bool receivedCritical = false;
+    bool receivedWeight = false;
     portENTER_CRITICAL(&scaleCriticalEventMux);
     if (scaleCriticalEventPending) {
       event = scaleCriticalEvent;
@@ -1718,7 +2051,25 @@ void processScaleWorkerEvents() {
       receivedCritical = true;
     }
     portEXIT_CRITICAL(&scaleCriticalEventMux);
-    if (!receivedCritical &&
+    if (!receivedCritical) {
+      portENTER_CRITICAL(&scaleCriticalEventMux);
+      if (scaleTimerStartEventPending) {
+        event = scaleTimerStartEvent;
+        scaleTimerStartEventPending = false;
+        receivedCritical = true;
+      }
+      portEXIT_CRITICAL(&scaleCriticalEventMux);
+    }
+    if (!receivedCritical) {
+      portENTER_CRITICAL(&scaleWeightEventMux);
+      if (scaleWeightEventPending) {
+        event = scaleWeightEvent;
+        scaleWeightEventPending = false;
+        receivedWeight = true;
+      }
+      portEXIT_CRITICAL(&scaleWeightEventMux);
+    }
+    if (!receivedCritical && !receivedWeight &&
         (scaleEventQueue == nullptr ||
          xQueueReceive(scaleEventQueue, &event, 0) != pdTRUE)) {
       break;
@@ -1727,17 +2078,42 @@ void processScaleWorkerEvents() {
     switch (event.type) {
       case ScaleEventType::WEIGHT:
         if (!isfinite(event.weightG) ||
-            event.weightG < MIN_AUTOMATION_WEIGHT_G ||
-            event.weightG > MAX_AUTOMATION_WEIGHT_G) {
+            fabsf(event.weightG) > MAX_PARSED_WEIGHT_G) {
           Serial.println("Invalid scale weight event ignored");
           addDebugEvent(DebugCategory::SCALE,
                         DebugCode::SCALE_SAMPLE_REJECTED);
           break;
         }
-        if (recordWeightSample(event.weightG, event.receivedAtMs)) {
+        {
+          const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+          if (event.connectionGeneration == 0) {
+            event.connectionGeneration = link.connectionGeneration;
+          }
+          if (event.connectionGeneration != link.connectionGeneration ||
+              (session.active &&
+               static_cast<int32_t>(event.receivedAtMs -
+                                    session.startedAtMs) < 0)) {
+            addDebugEvent(DebugCategory::SCALE,
+                          DebugCode::SCALE_STALE_EVENT_REJECTED,
+                          static_cast<int32_t>(event.connectionGeneration),
+                          static_cast<int32_t>(link.connectionGeneration));
+            break;
+          }
+        }
+        observedWeight = event.weightG;
+        observedWeightReceivedAtMs = event.receivedAtMs;
+        observedWeightSequence = event.packetSequence;
+        observedWeightConnectionGeneration = event.connectionGeneration;
+        weightStreamState = fabsf(event.weightG) > MAX_AUTOMATION_WEIGHT_G
+                                ? WeightStreamState::OVERLOAD
+                                : WeightStreamState::FRESH;
+        if (recordWeightSampleWithProvenance(
+                event.weightG, event.receivedAtMs, event.packetSequence,
+                event.connectionGeneration)) {
           currentWeight = event.weightG;
           currentWeightReceivedAtMs = event.receivedAtMs;
-          ++currentWeightSequence;
+          currentWeightSequence = event.packetSequence;
+          currentWeightConnectionGeneration = event.connectionGeneration;
         }
         break;
 
@@ -1813,7 +2189,23 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
       scaleLinkAvailable(scaleLinkAtStart) && currentWeightIsFresh();
   session.scaleDisconnectSequenceAtStart =
       scaleLinkAtStart.disconnectSequence;
-  session.automaticEnabled = session.startedWithScale;
+  session.connectionGenerationAtStart =
+      scaleLinkAtStart.connectionGeneration;
+  session.ownedConnectionGeneration =
+      scaleLinkAtStart.connectionGeneration;
+  session.weightControlState =
+      session.startedWithScale && !session.config.timerOnly
+          ? WeightControlState::ACTIVE
+          : WeightControlState::INACTIVE;
+  session.automaticEnabled =
+      session.weightControlState == WeightControlState::ACTIVE;
+  session.calibrationEligible = session.automaticEnabled;
+  if (session.startedWithScale) {
+    session.hasWeightAnchor = true;
+    session.lastAcceptedWeightG = currentWeight;
+    session.lastAcceptedWeightAtMs = currentWeightReceivedAtMs;
+    session.lastAcceptedPacketSequence = currentWeightSequence;
+  }
   resetShotTrajectory(session.startedAtMs);
   transitionTo(StopperState::QUALIFYING_ON);
 
@@ -1841,7 +2233,8 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
 
 void finalizeCycle(EndReason reason, StopperState nextState) {
   const RelaySafetySnapshot relayBeforeOpen = getRelaySafetySnapshot();
-  const bool analyze = shot.confirmedBrew && !session.config.timerOnly;
+  const bool analyze = shot.confirmedBrew && !session.config.timerOnly &&
+                       session.calibrationEligible;
 
   // Physical flow always stops before the non-blocking BLE command is queued.
   setCn9Closed(false);
@@ -1867,6 +2260,8 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   lastCycle.lastWeightG = lastCycle.weightValid ? currentWeight : 0.0f;
   lastCycle.weightAgeAtEndMs =
       lastCycle.weightValid ? elapsedMs(currentWeightReceivedAtMs) : 0;
+  lastCycle.weightControlState = session.weightControlState;
+  lastCycle.calibrationEligible = session.calibrationEligible;
   session.active = false;
   virtualPaddleOn = false;
   Serial.print("Cycle ended by ");
@@ -1885,9 +2280,18 @@ void enterRinse() {
 }
 
 void confirmBrewOrManual() {
-  if (session.automaticEnabled &&
-      session.receivedFreshWeightInCycle &&
-      !scaleAutomationUnavailableForSession()) {
+  if (session.config.timerOnly && session.startedWithScale) {
+    Serial.println("Timer-only brew confirmed");
+    transitionTo(StopperState::BREW);
+    return;
+  }
+  if (session.startedWithScale && !session.config.timerOnly &&
+      (session.receivedFreshWeightInCycle ||
+       session.thresholdConfirmations > 0) &&
+      session.weightControlState != WeightControlState::INACTIVE) {
+    if (scaleAutomationUnavailableForSession()) {
+      suspendWeightControl();
+    }
     shot.confirmedBrew = true;
     Serial.println("Brew confirmed");
     transitionTo(StopperState::BREW);
@@ -1921,13 +2325,25 @@ void handleQualifyingPaddleOff(uint32_t onDurationMs) {
 }
 
 bool automaticScaleStopDue() {
-  if (session.config.timerOnly || stopperState != StopperState::BREW ||
-      !session.automaticEnabled || !session.receivedFreshWeightInCycle ||
+  if (session.config.timerOnly || stopperState != StopperState::BREW) {
+    return false;
+  }
+
+  const bool directStopFresh = session.directStopPending &&
+      session.thresholdConfirmations >= DIRECT_STOP_CONFIRMATION_SAMPLES &&
+      static_cast<int32_t>(millis() - session.lastThresholdAtMs) >= 0 &&
+      elapsedMs(session.lastThresholdAtMs) <= MAX_AUTOMATION_WEIGHT_AGE_MS;
+  if (elapsedMs(session.startedAtMs) >= session.config.minAutoStopMs &&
+      directStopFresh) {
+    return true;
+  }
+
+  if (!session.receivedFreshWeightInCycle ||
+      session.weightControlState != WeightControlState::ACTIVE ||
       currentWeightSequence == session.weightSequenceAtStart ||
       scaleAutomationUnavailableForSession()) {
     return false;
   }
-
   const float elapsedS = cycleElapsedSeconds();
   return elapsedMs(session.startedAtMs) >= session.config.minAutoStopMs &&
          elapsedS >= shot.expectedEndS;
@@ -2035,13 +2451,12 @@ void stateMachineTask() {
         return;
       }
 
-      // A BLE loss marks the cycle manual but does not skip gesture
+      // A BLE loss suspends by-weight authority but does not skip gesture
       // classification; a quick release must still become a rinse.
-      if (session.automaticEnabled &&
+      if (session.weightControlState == WeightControlState::ACTIVE &&
           scaleAutomationUnavailableForSession()) {
-        session.automaticEnabled = false;
-        session.scaleWasLost = true;
-        Serial.println("Scale lost while qualifying; cycle marked manual");
+        suspendWeightControl();
+        Serial.println("Scale stream suspended while qualifying");
       }
 
       if (elapsedMs(session.startedAtMs) >= session.config.brewConfirmMs) {
@@ -2067,16 +2482,20 @@ void stateMachineTask() {
         return;
       }
 
-      if (scaleAutomationUnavailableForSession()) {
-        session.automaticEnabled = false;
-        session.scaleWasLost = true;
-        Serial.println("Scale lost during brew; continuing as manual cycle");
-        transitionTo(StopperState::MANUAL_NO_SCALE);
-        return;
+      if ((session.weightControlState == WeightControlState::ACTIVE ||
+           session.weightControlState == WeightControlState::VALIDATING) &&
+          scaleAutomationUnavailableForSession()) {
+        suspendWeightControl();
+        weightStreamState = WeightStreamState::STALE;
+        addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_STREAM_STALE);
+        Serial.println("Scale stream suspended during brew");
       }
 
       if (automaticScaleStopDue()) {
-        finalizeCycle(EndReason::SCALE_PREDICTION,
+        const EndReason reason = session.directStopPending
+                                     ? session.directStopReason
+                                     : EndReason::SCALE_PREDICTION;
+        finalizeCycle(reason,
                       StopperState::REQUIRES_OFF);
       }
       return;
@@ -2467,16 +2886,35 @@ void publishControlStatus() {
   next.resetRecoveryRequired = relay.resetRecoveryRequired;
   next.bootLoopDetected = relay.bootLoopDetected;
   next.scaleAvailable = scaleLinkAvailable(scaleLink);
-  next.currentWeightValid = next.scaleAvailable && currentWeightSequence > 0 &&
-                            isfinite(currentWeight) &&
-                            static_cast<uint32_t>(now -
-                                                  currentWeightReceivedAtMs) <=
-                                SCALE_WORKER_STALE_MS;
+  next.weightControlState = session.active
+                                ? session.weightControlState
+                                : WeightControlState::INACTIVE;
+  if (observedWeightSequence == 0) {
+    next.weightStreamState = WeightStreamState::NO_SAMPLE;
+  } else if (!observedWeightIsFresh(now)) {
+    next.weightStreamState = WeightStreamState::STALE;
+  } else {
+    next.weightStreamState = weightStreamState;
+  }
+  next.currentWeightValid = next.scaleAvailable && currentWeightIsFresh(now);
   next.currentWeightG = next.currentWeightValid ? currentWeight : 0.0f;
   next.currentWeightAgeMs =
       next.currentWeightValid
           ? static_cast<uint32_t>(now - currentWeightReceivedAtMs)
           : 0;
+  next.observedWeightValid = observedWeightSequence > 0 &&
+                             isfinite(observedWeight) &&
+                             fabsf(observedWeight) <= MAX_PARSED_WEIGHT_G;
+  next.observedWeightG = next.observedWeightValid ? observedWeight : 0.0f;
+  next.observedWeightAgeMs = next.observedWeightValid
+                                 ? elapsedMs(observedWeightReceivedAtMs)
+                                 : 0;
+  next.scaleConnectionGeneration = scaleLink.connectionGeneration;
+  next.scalePacketSequence = scaleLink.packetSequence;
+  next.scalePacketGaps = scaleLink.packetGaps;
+  next.scaleRejectedPackets = scaleLink.rejectedPackets;
+  next.scaleReconnects = scaleLink.reconnects;
+  next.scaleLastDisconnectReason = scaleLink.lastDisconnectReason;
   next.loopMaxGapMs = loopMaxGapMs;
   next.loopStackMinWords = loopStackMinWords;
   next.scaleStackMinWords = scaleWorkerStackMinWords;
@@ -2535,8 +2973,9 @@ ScaleIndicatorCondition currentScaleIndicatorCondition() {
   if (scaleLink.state == ScaleLinkState::DISCONNECTED) {
     return ScaleIndicatorCondition::DISCONNECTED;
   }
-  return scaleLinkAvailable(scaleLink) ? ScaleIndicatorCondition::AVAILABLE
-                                       : ScaleIndicatorCondition::STALE;
+  return scaleLinkAvailable(scaleLink) && observedWeightIsFresh()
+             ? ScaleIndicatorCondition::AVAILABLE
+             : ScaleIndicatorCondition::STALE;
 }
 
 bool stopperUsesManualIndicatorPalette() {
@@ -2545,9 +2984,10 @@ bool stopperUsesManualIndicatorPalette() {
   }
   if (session.active) {
     return session.config.timerOnly || !session.startedWithScale ||
-           session.scaleWasLost;
+           session.weightControlState != WeightControlState::ACTIVE;
   }
-  return runtimeConfig.timerOnly || !scaleAvailable();
+  return runtimeConfig.timerOnly || !scaleAvailable() ||
+         !currentWeightIsFresh();
 }
 
 void updateStatusIndicators() {
@@ -2688,6 +3128,12 @@ void setup() {
   Serial.println(runtimeConfig.weightOffsetG);
 
   bleStackReady = BLE.begin();
+  if (bleStackReady) {
+    // ArduinoBLE defaults ATT operations to five seconds. Keep the BLE owner
+    // isolated, but also bound connect/discovery/subscribe/write waits so its
+    // watchdog and stream-staleness telemetry react promptly.
+    BLE.setTimeout(SCALE_ATT_TIMEOUT_MS);
+  }
   Serial.println(bleStackReady
                      ? "BLE scale central active; local configuration removed"
                      : "BLE unavailable; stopper restricted to manual mode");
@@ -2762,9 +3208,12 @@ void loop() {
     return;
   }
   updatePaddleInput();
+  // Consume only the latest attributed weight before making automatic
+  // decisions. Paddle and relay safety were already sampled first, so their
+  // priority is preserved without adding a full event backlog to this loop.
+  processScaleWorkerEvents();
   stateMachineTask();
   servicePaddleReturnReminder();
-  processScaleWorkerEvents();
   serviceRemoteTimerStopRetry();
   shotAnalysisTask();
 #ifndef SHOT_STOPPER_HOST_TEST

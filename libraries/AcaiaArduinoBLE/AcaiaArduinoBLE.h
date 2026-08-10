@@ -11,7 +11,7 @@
 #ifndef AcaiaArduinoBLE_h
 #define AcaiaArduinoBLE_h
 
-#define LIBRARY_VERSION                 "3.4.0"
+#define LIBRARY_VERSION                 "3.5.0"
 #define WRITE_CHAR_OLD_VERSION          "2a80"
 #define READ_CHAR_OLD_VERSION           "2a80"
 #define WRITE_CHAR_NEW_VERSION          "49535343-8841-43f4-a8d4-ecbe34729bb3"
@@ -24,7 +24,9 @@
 #define FIRST_PACKET_TIMEOUT_MS          5000UL
 #define MAX_PACKET_PERIOD_MS             5000UL
 #define SCALE_SCAN_TIMEOUT_MS            3000UL
+#define BLE_OPERATION_TIMEOUT_MS          1000UL
 #define MAX_SUPPORTED_WEIGHT_GRAMS      10000.0f
+#define MAX_CONSECUTIVE_REJECTED_PACKETS 8U
 
 #include "Arduino.h"
 #include <ArduinoBLE.h>
@@ -49,6 +51,7 @@ enum class AcaiaDisconnectReason : uint8_t {
     REMOTE_DISCONNECTED,
     FIRST_PACKET_TIMEOUT,
     PACKET_TIMEOUT,
+    INVALID_PACKET_STREAM,
     COMMAND_WRITE_FAILED
 };
 
@@ -139,6 +142,7 @@ class AcaiaArduinoBLE {
         uint32_t            _lastPacket;
         uint32_t            _packetPeriod;
         uint32_t            _rejectedPackets;
+        uint8_t             _consecutiveRejectedPackets;
         uint32_t            _reconnects;
         uint32_t            _successfulConnections;
         bool                _hasPeripheral;

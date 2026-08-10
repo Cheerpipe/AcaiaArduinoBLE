@@ -26,6 +26,28 @@ constexpr const char *STATUS_CONFLICT = "409 Conflict";
 constexpr const char *STATUS_UNPROCESSABLE = "422 Unprocessable Entity";
 constexpr const char *STATUS_UNAVAILABLE = "503 Service Unavailable";
 
+const char *scaleDisconnectReasonName(uint8_t reason) {
+  // Mirrors AcaiaDisconnectReason without coupling the network task to the
+  // single-owner BLE implementation.
+  switch (reason) {
+    case 0: return "NONE";
+    case 1: return "USER_REQUEST";
+    case 2: return "SCAN_START_FAILED";
+    case 3: return "SCAN_TIMEOUT";
+    case 4: return "CONNECT_FAILED";
+    case 5: return "DISCOVERY_FAILED";
+    case 6: return "UNSUPPORTED_SCALE";
+    case 7: return "SUBSCRIBE_FAILED";
+    case 8: return "INITIALIZATION_WRITE_FAILED";
+    case 9: return "REMOTE_DISCONNECTED";
+    case 10: return "FIRST_PACKET_TIMEOUT";
+    case 11: return "PACKET_TIMEOUT";
+    case 12: return "INVALID_PACKET_STREAM";
+    case 13: return "COMMAND_WRITE_FAILED";
+  }
+  return "UNKNOWN";
+}
+
 bool jsonBoolean(cJSON *object, const char *name, bool &output) {
   cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
   if (!cJSON_IsBool(item)) {
@@ -1527,6 +1549,8 @@ const char *ShotStopperNetwork::endReasonName(EndReason reason) {
     case EndReason::NONE: return "NONE";
     case EndReason::PADDLE: return "PADDLE";
     case EndReason::SCALE_PREDICTION: return "SCALE_PREDICTION";
+    case EndReason::SCALE_THRESHOLD: return "SCALE_THRESHOLD";
+    case EndReason::WEIGHT_ANOMALY: return "WEIGHT_ANOMALY";
     case EndReason::GLOBAL_LIMIT: return "GLOBAL_LIMIT";
     case EndReason::CONFIGURED_WALL_LIMIT:
       return "CONFIGURED_WALL_LIMIT";
@@ -1573,10 +1597,15 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   self.callbacks_.copyControlStatus(control);
   const NetworkStatusSnapshot network = self.snapshot();
   char currentWeight[32] = "null";
+  char observedWeight[32] = "null";
   char lastWeight[32] = "null";
   if (control.currentWeightValid) {
     snprintf(currentWeight, sizeof(currentWeight), "%.2f",
              static_cast<double>(control.currentWeightG));
+  }
+  if (control.observedWeightValid) {
+    snprintf(observedWeight, sizeof(observedWeight), "%.2f",
+             static_cast<double>(control.observedWeightG));
   }
   if (control.lastCycle.weightValid) {
     snprintf(lastWeight, sizeof(lastWeight), "%.2f",
@@ -1604,8 +1633,15 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"paddleReturnReminderBeep\":%s,\"rinseGestureMs\":%lu,"
       "\"rinseDurationMs\":%lu,\"brewConfirmMs\":%lu,"
       "\"minAutoStopMs\":%lu,\"operationalWallMs\":%lu},"
-      "\"scale\":{\"available\":%s,\"currentWeightG\":%s,"
-      "\"weightAgeMs\":%lu,\"eventsDropped\":%lu},"
+      "\"scale\":{\"available\":%s,\"streamState\":\"%s\","
+      "\"controlState\":\"%s\",\"controlAccepted\":%s,"
+      "\"currentWeightG\":%s,"
+      "\"weightAgeMs\":%lu,\"observedWeightG\":%s,"
+      "\"observedWeightAgeMs\":%lu,\"connectionGeneration\":%lu,"
+      "\"packetSequence\":%lu,\"packetGaps\":%lu,"
+      "\"rejectedPackets\":%lu,\"reconnects\":%lu,"
+      "\"lastDisconnectReason\":%u,"
+      "\"lastDisconnectReasonName\":\"%s\",\"eventsDropped\":%lu},"
       "\"lastCycle\":{\"valid\":%s,"
       "\"durationMs\":%lu,\"endReason\":\"%s\","
       "\"lastWeightG\":%s,\"weightAgeMs\":%lu},"
@@ -1655,8 +1691,20 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(control.config.brewConfirmMs),
       static_cast<unsigned long>(control.config.minAutoStopMs),
       static_cast<unsigned long>(control.config.operationalWallMs),
-      control.scaleAvailable ? "true" : "false", currentWeight,
+      control.scaleAvailable ? "true" : "false",
+      weightStreamStateName(control.weightStreamState),
+      weightControlStateName(control.weightControlState),
+      control.currentWeightValid ? "true" : "false", currentWeight,
       static_cast<unsigned long>(control.currentWeightAgeMs),
+      observedWeight,
+      static_cast<unsigned long>(control.observedWeightAgeMs),
+      static_cast<unsigned long>(control.scaleConnectionGeneration),
+      static_cast<unsigned long>(control.scalePacketSequence),
+      static_cast<unsigned long>(control.scalePacketGaps),
+      static_cast<unsigned long>(control.scaleRejectedPackets),
+      static_cast<unsigned long>(control.scaleReconnects),
+      static_cast<unsigned>(control.scaleLastDisconnectReason),
+      scaleDisconnectReasonName(control.scaleLastDisconnectReason),
       static_cast<unsigned long>(control.scaleEventsDropped),
       control.lastCycle.valid ? "true" : "false",
       static_cast<unsigned long>(control.lastCycle.durationMs),

@@ -198,6 +198,7 @@ public:
         return BLEDevice(availableState);
     }
     void poll() {}
+    void setTimeout(unsigned long timeout) { timeoutMs = timeout; }
     bool disconnect() {
         if (!availableState) {
             return false;
@@ -214,11 +215,13 @@ public:
         scanning_ = false;
         delivered_ = false;
         stopScanCalls = 0;
+        timeoutMs = 0;
         availableState.reset();
     }
 
     bool scanResult = true;
     int stopScanCalls = 0;
+    unsigned long timeoutMs = 0;
     std::shared_ptr<FakeBLE::PeripheralState> availableState;
 
 private:

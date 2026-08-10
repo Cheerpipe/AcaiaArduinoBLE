@@ -32,6 +32,11 @@ constexpr float MIN_AUTOMATION_WEIGHT_G = -100.0f;
 constexpr float MAX_AUTOMATION_WEIGHT_G = 1000.0f;
 constexpr float MAX_AUTOMATION_WEIGHT_SLEW_G_PER_S = 100.0f;
 constexpr float AUTOMATION_WEIGHT_SLEW_ALLOWANCE_G = 20.0f;
+constexpr float MAX_PARSED_WEIGHT_G = 10000.0f;
+constexpr uint8_t DIRECT_STOP_CONFIRMATION_SAMPLES = 2;
+constexpr uint8_t WEIGHT_RECOVERY_CONFIRMATION_SAMPLES = 3;
+constexpr uint32_t DIRECT_STOP_CONFIRMATION_WINDOW_MS = 1000;
+constexpr float MAX_RECOVERY_WEIGHT_DROP_G = 2.0f;
 
 #ifndef SHOT_STOPPER_ENABLE_REMOTE_CN9
 #define SHOT_STOPPER_ENABLE_REMOTE_CN9 0
@@ -58,6 +63,44 @@ enum class ControlSource : uint8_t {
   WEB
 };
 
+enum class WeightStreamState : uint8_t {
+  NO_SAMPLE,
+  FRESH,
+  STALE,
+  ANOMALOUS,
+  OVERLOAD
+};
+
+enum class WeightControlState : uint8_t {
+  INACTIVE,
+  VALIDATING,
+  ACTIVE,
+  SUSPENDED,
+  FAULT_STOPPED
+};
+
+inline const char *weightStreamStateName(WeightStreamState state) {
+  switch (state) {
+    case WeightStreamState::NO_SAMPLE: return "NO_SAMPLE";
+    case WeightStreamState::FRESH: return "FRESH";
+    case WeightStreamState::STALE: return "STALE";
+    case WeightStreamState::ANOMALOUS: return "ANOMALOUS";
+    case WeightStreamState::OVERLOAD: return "OVERLOAD";
+  }
+  return "UNKNOWN";
+}
+
+inline const char *weightControlStateName(WeightControlState state) {
+  switch (state) {
+    case WeightControlState::INACTIVE: return "INACTIVE";
+    case WeightControlState::VALIDATING: return "VALIDATING";
+    case WeightControlState::ACTIVE: return "ACTIVE";
+    case WeightControlState::SUSPENDED: return "SUSPENDED";
+    case WeightControlState::FAULT_STOPPED: return "FAULT_STOPPED";
+  }
+  return "UNKNOWN";
+}
+
 inline const char *stopperStateName(StopperState state) {
   switch (state) {
     case StopperState::REQUIRES_OFF: return "REQUIRES_OFF";
@@ -74,6 +117,8 @@ enum class EndReason : uint8_t {
   NONE,
   PADDLE,
   SCALE_PREDICTION,
+  SCALE_THRESHOLD,
+  WEIGHT_ANOMALY,
   GLOBAL_LIMIT,
   CONFIGURED_WALL_LIMIT,
   SHORT_SHOT,
@@ -332,6 +377,8 @@ struct LastCycleSummary {
   bool weightValid = false;
   float lastWeightG = 0.0f;
   uint32_t weightAgeAtEndMs = 0;
+  WeightControlState weightControlState = WeightControlState::INACTIVE;
+  bool calibrationEligible = false;
 };
 
 struct ControlStatusSnapshot {
@@ -361,9 +408,20 @@ struct ControlStatusSnapshot {
   bool resetRecoveryRequired = false;
   bool bootLoopDetected = false;
   bool scaleAvailable = false;
+  WeightStreamState weightStreamState = WeightStreamState::NO_SAMPLE;
+  WeightControlState weightControlState = WeightControlState::INACTIVE;
   bool currentWeightValid = false;
   float currentWeightG = 0.0f;
   uint32_t currentWeightAgeMs = 0;
+  bool observedWeightValid = false;
+  float observedWeightG = 0.0f;
+  uint32_t observedWeightAgeMs = 0;
+  uint32_t scaleConnectionGeneration = 0;
+  uint32_t scalePacketSequence = 0;
+  uint32_t scalePacketGaps = 0;
+  uint32_t scaleRejectedPackets = 0;
+  uint32_t scaleReconnects = 0;
+  uint8_t scaleLastDisconnectReason = 0;
   uint32_t loopMaxGapMs = 0;
   uint32_t loopStackMinWords = 0;
   uint32_t scaleStackMinWords = 0;
@@ -448,6 +506,13 @@ enum class DebugCode : uint8_t {
   COMMAND_FAILED,
   SCALE_EVENT_DROPPED,
   SCALE_SAMPLE_REJECTED,
+  SCALE_STREAM_STALE,
+  SCALE_CONTROL_SUSPENDED,
+  SCALE_CONTROL_RECOVERED,
+  SCALE_THRESHOLD_CONFIRMED,
+  SCALE_OVERLOAD_CONFIRMED,
+  SCALE_STALE_EVENT_REJECTED,
+  SCALE_PACKET_GAP,
   NETWORK_RETRY,
   INITIALIZATION_FAILED
 };
@@ -604,6 +669,18 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::COMMAND_FAILED: return "durable command failed";
     case DebugCode::SCALE_EVENT_DROPPED: return "scale event dropped";
     case DebugCode::SCALE_SAMPLE_REJECTED: return "scale sample rejected";
+    case DebugCode::SCALE_STREAM_STALE: return "scale weight stream stale";
+    case DebugCode::SCALE_CONTROL_SUSPENDED:
+      return "weight control suspended";
+    case DebugCode::SCALE_CONTROL_RECOVERED:
+      return "weight control recovered";
+    case DebugCode::SCALE_THRESHOLD_CONFIRMED:
+      return "scale stop threshold confirmed";
+    case DebugCode::SCALE_OVERLOAD_CONFIRMED:
+      return "scale overload confirmed";
+    case DebugCode::SCALE_STALE_EVENT_REJECTED:
+      return "stale scale event rejected";
+    case DebugCode::SCALE_PACKET_GAP: return "scale packet gap";
     case DebugCode::NETWORK_RETRY: return "network startup retry";
     case DebugCode::INITIALIZATION_FAILED:
       return "subsystem initialization failed";

@@ -133,6 +133,7 @@ void testScanDiagnostics() {
     BLE.scanResult = false;
     AcaiaArduinoBLE scale(false);
     CHECK(!scale.init());
+    CHECK(BLE.timeoutMs == BLE_OPERATION_TIMEOUT_MS);
     CHECK(scale.lastDisconnectReason() ==
           AcaiaDisconnectReason::SCAN_START_FAILED);
 
@@ -384,11 +385,18 @@ void testPacketLengthCorpusAndReconnectSoak() {
     AcaiaArduinoBLE scale(false);
     CHECK(scale.init());
     for (int length = 0; length <= 64; ++length) {
+        if (!scale.isConnected()) {
+            fixture = makeScale(NEW);
+            CHECK(scale.init());
+        }
         notify(fixture,
                std::vector<byte>(static_cast<size_t>(length), 0xa5));
         CHECK(!scale.newWeightAvailable());
     }
     CHECK(scale.rejectedPacketCount() == 65);
+    CHECK(scale.reconnectCount() > 0);
+    CHECK(scale.lastDisconnectReason() ==
+          AcaiaDisconnectReason::INVALID_PACKET_STREAM);
 
     resetFake();
     AcaiaArduinoBLE reconnecting(false);

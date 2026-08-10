@@ -101,17 +101,33 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   currentWeight = 0.0f;
   currentWeightReceivedAtMs = 0;
   currentWeightSequence = 0;
+  currentWeightConnectionGeneration = 0;
+  observedWeight = 0.0f;
+  observedWeightReceivedAtMs = 0;
+  observedWeightSequence = 0;
+  observedWeightConnectionGeneration = 0;
+  weightStreamState = WeightStreamState::NO_SAMPLE;
   nextCycleId = 1;
   scaleWorkerTaskHandle = nullptr;
   scale = AcaiaArduinoBLE(DEBUG);
   scale.connected = scaleConnected;
   scaleLinkState = ScaleLinkState::DISCONNECTED;
   scaleDisconnectSequence = 0;
+  scaleConnectionGeneration = 0;
+  scalePacketSequence = 0;
+  scalePacketGaps = 0;
+  scaleRejectedPackets = 0;
+  scaleReconnects = 0;
+  scaleLastDisconnectReason = 0;
   scaleWorkerProgressAtMs = hostMillis;
   scaleEventsDropped = 0;
   scaleWorkerStackMinWords = 0;
   scaleCriticalEvent = ScaleEvent{};
   scaleCriticalEventPending = false;
+  scaleTimerStartEvent = ScaleEvent{};
+  scaleTimerStartEventPending = false;
+  scaleWeightEvent = ScaleEvent{};
+  scaleWeightEventPending = false;
   scaleBeepPending = false;
   scaleBeepCycleId = 0;
   scalePaddleReturnReminderBeepPending = false;
@@ -233,6 +249,18 @@ void setScaleConnected(bool connected) {
   scale.connected = connected;
   setScaleLinkState(connected ? ScaleLinkState::CONNECTED
                               : ScaleLinkState::DISCONNECTED);
+}
+
+void publishWeight(float weight, uint32_t receivedAtMs = UINT32_MAX,
+                   uint32_t generation = 0, uint32_t sequence = 0) {
+  ScaleEvent event;
+  event.type = ScaleEventType::WEIGHT;
+  event.receivedAtMs = receivedAtMs == UINT32_MAX ? hostMillis : receivedAtMs;
+  event.connectionGeneration = generation;
+  event.packetSequence = sequence;
+  event.weightG = weight;
+  CHECK(publishScaleEvent(event, false));
+  processScaleWorkerEvents();
 }
 
 void reachReadyFromBoot() {
@@ -479,14 +507,15 @@ void t10_paddle_bounce_does_not_start_cycle() {
   CHECK(hostRelayClosedWrites == 0);
 }
 
-void t11_ble_loss_degrades_brew_without_late_stop() {
+void t11_ble_loss_suspends_brew_without_late_stop() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
   reachSessionElapsed(runtimeConfig.brewConfirmMs);
   setScaleConnected(false);
   loop();
-  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.weightControlState == WeightControlState::SUSPENDED);
   CHECK(getRelaySafetySnapshot().closed);
   setRawPaddle(false);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
@@ -701,20 +730,23 @@ void t25_ble_loss_while_qualifying_preserves_classification() {
   setScaleConnected(false);
   loop();
   reachSessionElapsed(runtimeConfig.brewConfirmMs);
-  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.weightControlState == WeightControlState::SUSPENDED);
 }
 
-void t26_reconnected_degraded_cycle_sends_one_stop_on_release() {
+void t26_reconnected_suspended_cycle_sends_one_stop_on_release() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
   reachSessionElapsed(runtimeConfig.brewConfirmMs);
   setScaleConnected(false);
   loop();
-  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.weightControlState == WeightControlState::SUSPENDED);
   setScaleConnected(true);
   loop();
-  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.weightControlState == WeightControlState::SUSPENDED);
   setRawPaddle(false);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
@@ -769,7 +801,7 @@ void t28_paddle_motion_cannot_cancel_or_extend_rinse() {
   CHECK(!getRelaySafetySnapshot().closed);
 }
 
-void r01_transient_disconnect_is_latched_for_cycle() {
+void r01_transient_disconnect_suspends_weight_control() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
@@ -781,17 +813,17 @@ void r01_transient_disconnect_is_latched_for_cycle() {
   setScaleConnected(false);
   setScaleConnected(true);
   loop();
-  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(stopperState == StopperState::BREW);
   CHECK(session.scaleWasLost);
-  CHECK(!session.automaticEnabled);
+  CHECK(session.weightControlState == WeightControlState::SUSPENDED);
 
   shot.expectedEndS = 0.0f;
   reachSessionElapsed(runtimeConfig.minAutoStopMs);
-  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(stopperState == StopperState::BREW);
   CHECK(getRelaySafetySnapshot().closed);
 }
 
-void r02_stalled_scale_worker_degrades_cycle_permanently() {
+void r02_stalled_scale_worker_suspends_until_validated() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
@@ -801,13 +833,14 @@ void r02_stalled_scale_worker_degrades_cycle_permanently() {
 
   hostAutoScaleWorkerProgress = false;
   runLoopAfter(SCALE_WORKER_STALE_MS + 1);
-  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.weightControlState == WeightControlState::SUSPENDED);
   CHECK(getRelaySafetySnapshot().closed);
 
   hostAutoScaleWorkerProgress = true;
   markScaleWorkerProgress();
   loop();
-  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(stopperState == StopperState::BREW);
   CHECK(!session.automaticEnabled);
 }
 
@@ -1591,6 +1624,7 @@ void w30_last_cycle_weight_must_belong_to_that_cycle() {
   ScaleEvent event;
   event.type = ScaleEventType::WEIGHT;
   event.receivedAtMs = hostMillis + 1;
+  event.packetSequence = 2;
   event.weightG = 7.5f;
   publishScaleEvent(event, true);
   processScaleWorkerEvents();
@@ -1748,15 +1782,24 @@ void r21_automatic_control_requires_fresh_weight() {
   CHECK(getRelaySafetySnapshot().closed);
 }
 
-void r22_implausible_weight_slew_degrades_to_manual() {
+void r22_confirmed_implausible_weight_stops_fail_safe() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
   CHECK(session.automaticEnabled);
-  recordWeightSample(500.0f, session.lastAcceptedWeightAtMs + 1);
-  CHECK(!session.automaticEnabled);
-  CHECK(session.scaleWasLost);
+  reachSessionElapsed(runtimeConfig.brewConfirmMs);
+  CHECK(stopperState == StopperState::BREW);
+  reachSessionElapsed(runtimeConfig.minAutoStopMs - 2);
+  const uint32_t firstAt = hostMillis;
+  recordWeightSample(900.0f, firstAt);
+  CHECK(session.weightControlState == WeightControlState::VALIDATING);
   CHECK(getRelaySafetySnapshot().closed);
+  recordWeightSample(900.0f, firstAt + 1);
+  CHECK(session.directStopPending);
+  reachSessionElapsed(runtimeConfig.minAutoStopMs);
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
+  CHECK(!getRelaySafetySnapshot().closed);
 }
 
 void r23_maintenance_is_canceled_fail_open_by_physical_paddle() {
@@ -1810,13 +1853,25 @@ void r25_critical_scale_mailbox_never_blocks_and_keeps_latest() {
   first.commandAttempted = true;
   ScaleEvent latest = first;
   latest.cycleId = 2;
+  ScaleEvent filler = first;
+  filler.cycleId = UINT32_MAX;
+  for (size_t index = 0; index < SCALE_EVENT_QUEUE_LENGTH; ++index) {
+    CHECK(xQueueSend(scaleEventQueue, &filler, 0) == pdTRUE);
+  }
   CHECK(publishScaleEvent(first, true));
   CHECK(publishScaleEvent(latest, true));
   CHECK(scaleCriticalEventPending);
   CHECK(scaleEventsDropped == 1);
   CHECK(scaleCriticalEvent.cycleId == 2);
+  ScaleEvent startResult = first;
+  startResult.type = ScaleEventType::TIMER_START_RESULT;
+  startResult.cycleId = 3;
+  CHECK(publishScaleEvent(startResult, true));
+  CHECK(scaleTimerStartEventPending);
+  CHECK(scaleCriticalEventPending);
   processScaleWorkerEvents();
   CHECK(!scaleCriticalEventPending);
+  CHECK(!scaleTimerStartEventPending);
 }
 
 void r26_remote_timer_stop_retries_after_full_queue() {
@@ -1881,6 +1936,143 @@ void r28_terminal_control_result_is_retained_until_forwarded() {
   CHECK(hostLastForwardedNetworkCommand.requestId == 91);
   CHECK(hostLastForwardedNetworkCommand.resultState ==
         CommandResultState::APPLIED);
+}
+
+void r29_direct_threshold_stops_before_regression_is_ready() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  startCycle();
+  reachSessionElapsed(runtimeConfig.minAutoStopMs);
+  CHECK(shot.datapoints < TREND_POINT_COUNT);
+  const float threshold = effectiveStopThreshold();
+  publishWeight(threshold + 0.1f);
+  CHECK(getRelaySafetySnapshot().closed);
+  publishWeight(threshold + 0.2f);
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void r30_first_abrupt_sample_uses_pre_shot_baseline() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  resetWeightTrend();
+  CHECK(session.hasWeightAnchor);
+  CHECK(session.lastAcceptedWeightG == 0.0f);
+  publishWeight(900.0f, hostMillis + 1);
+  CHECK(shot.datapoints == 0);
+  CHECK(session.weightControlState == WeightControlState::VALIDATING);
+}
+
+void r31_confirmed_overload_opens_without_learning() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  startCycle();
+  reachSessionElapsed(runtimeConfig.minAutoStopMs);
+  publishWeight(1500.0f);
+  publishWeight(1501.0f, hostMillis + 1);
+  runLoopAfter(1);
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::WEIGHT_ANOMALY);
+  CHECK(!session.calibrationEligible);
+  CHECK(!pendingAnalysis.pending);
+}
+
+void r32_old_connection_generation_cannot_update_weight() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  const uint32_t generation = getScaleLinkSnapshot().connectionGeneration;
+  CHECK(generation > 0);
+  const uint32_t observedBefore = observedWeightSequence;
+  publishWeight(12.0f, hostMillis, generation + 1, 77);
+  CHECK(observedWeightSequence == observedBefore);
+  CHECK(currentWeight != 12.0f);
+}
+
+void r33_weight_mailbox_keeps_latest_and_reports_gap() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  ScaleEvent first;
+  first.type = ScaleEventType::WEIGHT;
+  first.receivedAtMs = hostMillis;
+  first.weightG = 1.0f;
+  ScaleEvent latest = first;
+  latest.weightG = 2.0f;
+  CHECK(publishScaleEvent(first, false));
+  CHECK(publishScaleEvent(latest, false));
+  CHECK(scalePacketGaps == 1);
+  processScaleWorkerEvents();
+  CHECK(observedWeight == 2.0f);
+}
+
+void r34_suspended_control_recovers_after_three_attributed_samples() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  startCycle();
+  reachSessionElapsed(runtimeConfig.brewConfirmMs);
+  setScaleConnected(false);
+  loop();
+  CHECK(session.weightControlState == WeightControlState::SUSPENDED);
+  setScaleConnected(true);
+  publishWeight(1.0f);
+  CHECK(session.weightControlState == WeightControlState::SUSPENDED);
+  publishWeight(2.0f, hostMillis + 1);
+  CHECK(session.weightControlState == WeightControlState::SUSPENDED);
+  publishWeight(3.0f, hostMillis + 2);
+  CHECK(session.weightControlState == WeightControlState::ACTIVE);
+  CHECK(session.automaticEnabled);
+  loop();
+  CHECK(stopperState == StopperState::BREW);
+
+  // Also cover a disconnect/reconnect that occurs wholly between control-loop
+  // iterations: the connection generation must suspend authority before the
+  // new sample can enter the old trajectory.
+  setScaleConnected(false);
+  setScaleConnected(true);
+  publishWeight(4.0f, hostMillis + 3);
+  CHECK(session.weightControlState == WeightControlState::SUSPENDED);
+  CHECK(shot.datapoints == 0);
+  publishWeight(5.0f, hostMillis + 4);
+  publishWeight(6.0f, hostMillis + 5);
+  CHECK(session.weightControlState == WeightControlState::ACTIVE);
+}
+
+void r35_connected_without_weight_stream_is_not_available_indicator() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  observedWeightSequence = 0;
+  scaleWorkerTaskHandle = reinterpret_cast<TaskHandle_t>(1);
+  CHECK(getScaleLinkSnapshot().state == ScaleLinkState::CONNECTED);
+  CHECK(currentScaleIndicatorCondition() == ScaleIndicatorCondition::STALE);
+  publishControlStatus();
+  ControlStatusSnapshot status;
+  copyControlStatus(status);
+  CHECK(status.scaleAvailable);
+  CHECK(status.weightStreamState == WeightStreamState::NO_SAMPLE);
+  CHECK(!status.observedWeightValid);
+
+  publishWeight(1500.0f);
+  publishControlStatus();
+  copyControlStatus(status);
+  CHECK(status.observedWeightValid);
+  CHECK(status.observedWeightG == 1500.0f);
+  CHECK(status.weightStreamState == WeightStreamState::OVERLOAD);
+  CHECK(!status.currentWeightValid);
+
+  publishWeight(10.0f);
+  CHECK(currentScaleIndicatorCondition() ==
+        ScaleIndicatorCondition::AVAILABLE);
+  setScaleConnected(false);
+  setScaleConnected(true);
+  CHECK(currentScaleIndicatorCondition() == ScaleIndicatorCondition::STALE);
+  publishControlStatus();
+  copyControlStatus(status);
+  CHECK(!status.currentWeightValid);
 }
 
 void w38_scale_indicator_states_are_unambiguous() {
@@ -2009,6 +2201,8 @@ void w43_manual_palette_tracks_timer_only_and_scale_loss() {
   resetHarness(false, true);
   stopperState = StopperState::READY;
   runtimeConfig.timerOnly = false;
+  currentWeightSequence = 1;
+  currentWeightReceivedAtMs = hostMillis;
   CHECK(!stopperUsesManualIndicatorPalette());
 
   runtimeConfig.timerOnly = true;
@@ -2022,8 +2216,9 @@ void w43_manual_palette_tracks_timer_only_and_scale_loss() {
   session.config.timerOnly = false;
   session.startedWithScale = true;
   session.scaleWasLost = false;
+  session.weightControlState = WeightControlState::ACTIVE;
   CHECK(!stopperUsesManualIndicatorPalette());
-  session.scaleWasLost = true;
+  session.weightControlState = WeightControlState::SUSPENDED;
   CHECK(stopperUsesManualIndicatorPalette());
 }
 
@@ -2045,7 +2240,7 @@ const TestCase testCases[] = {
     {"T08", t08_on_during_rinse_is_ignored},
     {"T09", t09_rinse_ending_on_requires_off},
     {"T10", t10_paddle_bounce_does_not_start_cycle},
-    {"T11", t11_ble_loss_degrades_brew_without_late_stop},
+    {"T11", t11_ble_loss_suspends_brew_without_late_stop},
     {"T12", t12_global_limit_opens_manual_and_brew_cycles},
     {"T13", t13_reset_path_starts_with_relay_open},
     {"T14", t14_automatic_stop_stays_open_while_paddle_on},
@@ -2060,11 +2255,11 @@ const TestCase testCases[] = {
     {"T23", t23_prediction_before_minimum_is_reevaluated_at_minimum},
     {"T24", t24_paddle_off_before_minimum_is_immediate},
     {"T25", t25_ble_loss_while_qualifying_preserves_classification},
-    {"T26", t26_reconnected_degraded_cycle_sends_one_stop_on_release},
+    {"T26", t26_reconnected_suspended_cycle_sends_one_stop_on_release},
     {"T27", t27_configuration_is_rejected_while_cycle_is_active},
     {"T28", t28_paddle_motion_cannot_cancel_or_extend_rinse},
-    {"R01", r01_transient_disconnect_is_latched_for_cycle},
-    {"R02", r02_stalled_scale_worker_degrades_cycle_permanently},
+    {"R01", r01_transient_disconnect_suspends_weight_control},
+    {"R02", r02_stalled_scale_worker_suspends_until_validated},
     {"R03", r03_non_finite_weights_cannot_corrupt_state_or_offset},
     {"R04", r04_scale_commands_execute_once_and_report_results},
     {"R05", r05_regression_uses_last_ten_valid_samples},
@@ -2084,13 +2279,20 @@ const TestCase testCases[] = {
     {"R19", r19_reset_during_close_requires_local_on_off_recovery},
     {"R20", r20_three_unsafe_resets_are_latched_as_a_boot_loop},
     {"R21", r21_automatic_control_requires_fresh_weight},
-    {"R22", r22_implausible_weight_slew_degrades_to_manual},
+    {"R22", r22_confirmed_implausible_weight_stops_fail_safe},
     {"R23", r23_maintenance_is_canceled_fail_open_by_physical_paddle},
     {"R24", r24_web_control_lease_owner_is_enforced},
     {"R25", r25_critical_scale_mailbox_never_blocks_and_keeps_latest},
     {"R26", r26_remote_timer_stop_retries_after_full_queue},
     {"R27", r27_platform_clock_failure_prevents_cn9_close},
     {"R28", r28_terminal_control_result_is_retained_until_forwarded},
+    {"R29", r29_direct_threshold_stops_before_regression_is_ready},
+    {"R30", r30_first_abrupt_sample_uses_pre_shot_baseline},
+    {"R31", r31_confirmed_overload_opens_without_learning},
+    {"R32", r32_old_connection_generation_cannot_update_weight},
+    {"R33", r33_weight_mailbox_keeps_latest_and_reports_gap},
+    {"R34", r34_suspended_control_recovers_after_three_attributed_samples},
+    {"R35", r35_connected_without_weight_stream_is_not_available_indicator},
     {"W01", w01_default_runtime_configuration_is_valid},
     {"W02", w02_each_runtime_field_is_validated},
     {"W03", w03_runtime_timing_relations_are_transactional},

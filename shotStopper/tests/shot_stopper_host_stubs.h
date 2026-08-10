@@ -144,11 +144,30 @@ class HostBLE {
  public:
   bool begin() { return beginSucceeds; }
   void poll() {}
+  void setTimeout(unsigned long timeout) { configuredTimeoutMs = timeout; }
 
   bool beginSucceeds = true;
+  unsigned long configuredTimeoutMs = 0;
 };
 
 inline HostBLE BLE;
+
+enum class AcaiaDisconnectReason : uint8_t {
+  NONE,
+  USER_REQUEST,
+  SCAN_START_FAILED,
+  SCAN_TIMEOUT,
+  CONNECT_FAILED,
+  DISCOVERY_FAILED,
+  UNSUPPORTED_SCALE,
+  SUBSCRIBE_FAILED,
+  INITIALIZATION_WRITE_FAILED,
+  REMOTE_DISCONNECTED,
+  FIRST_PACKET_TIMEOUT,
+  PACKET_TIMEOUT,
+  INVALID_PACKET_STREAM,
+  COMMAND_WRITE_FAILED
+};
 
 class AcaiaArduinoBLE {
  public:
@@ -211,6 +230,11 @@ class AcaiaArduinoBLE {
     }
     return available;
   }
+  AcaiaDisconnectReason lastDisconnectReason() const {
+    return disconnectReason;
+  }
+  uint32_t rejectedPacketCount() const { return rejectedPackets; }
+  uint32_t reconnectCount() const { return reconnects; }
 
   bool connected = false;
   bool tareSucceeds = true;
@@ -226,6 +250,9 @@ class AcaiaArduinoBLE {
   bool newWeightAvailableValue = false;
   bool disconnectWhenCheckingWeight = false;
   float weight = 0.0f;
+  AcaiaDisconnectReason disconnectReason = AcaiaDisconnectReason::NONE;
+  uint32_t rejectedPackets = 0;
+  uint32_t reconnects = 0;
   size_t tareCalls = 0;
   size_t startTimerCalls = 0;
   size_t stopTimerCalls = 0;

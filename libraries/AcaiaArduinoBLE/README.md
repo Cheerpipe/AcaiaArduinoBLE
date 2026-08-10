@@ -20,7 +20,7 @@ This is an Arduino Library which can be found in the Arduino IDE Library Manager
 
 This library is intended for Arduino devices compatible with
 [ArduinoBLE](https://www.arduino.cc/reference/en/libraries/arduinoble/).
-Release 3.4.0 is compiled and tested against ArduinoBLE 2.1.0, which is pinned
+Release 3.5.0 is compiled and tested against ArduinoBLE 2.1.0, which is pinned
 in `library.properties` so upgrades cannot silently change the audited BLE
 lifecycle behavior.
 
@@ -33,10 +33,13 @@ residual risk and the required hardware/soak validation.
 
 ## Robust connection behavior
 
-Version 3.4.0 adds explicit ownership and cleanup for remote characteristics,
-a five-second first-valid-packet deadline, validation before a packet refreshes
+Version 3.5.0 adds a one-second ArduinoBLE operation timeout and forces a
+recoverable disconnect after eight consecutive invalid notifications. It also
+retains the explicit ownership and cleanup for remote characteristics, the
+five-second first-valid-packet deadline, validation before a packet refreshes
 availability, a three-second scan window with distinct failure reasons, and
-connection telemetry.
+connection telemetry. The operation timeout bounds ATT waits supported by the
+public ArduinoBLE API; it cannot bound every internal ESP32 HCI wait.
 
 `AcaiaArduinoBLE` is a single-owner object: create it, call it, and destroy it
 from one task only. It is intentionally non-copyable and is not thread-safe.

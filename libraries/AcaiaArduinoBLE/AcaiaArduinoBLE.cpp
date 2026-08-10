@@ -69,6 +69,7 @@ AcaiaArduinoBLE::AcaiaArduinoBLE(bool debug) :
     _lastPacket(0),
     _packetPeriod(0),
     _rejectedPackets(0),
+    _consecutiveRejectedPackets(0),
     _reconnects(0),
     _successfulConnections(0),
     _hasPeripheral(false),
@@ -86,6 +87,7 @@ AcaiaArduinoBLE::~AcaiaArduinoBLE() {
 
 bool AcaiaArduinoBLE::init(String mac) {
     resetConnection(true, AcaiaDisconnectReason::NONE);
+    BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
 
     Serial.print("AcaiaArduinoBLE Library v");
     Serial.print(LIBRARY_VERSION);
@@ -468,6 +470,7 @@ bool AcaiaArduinoBLE::newWeightAvailable() {
     _currentWeight = parsedWeight;
     _lastPacket = receivedAt;
     _hasValidPacket = true;
+    _consecutiveRejectedPackets = 0;
     return true;
 }
 
@@ -665,14 +668,22 @@ void AcaiaArduinoBLE::resetConnection(bool disconnectPeer,
     _lastHeartBeat = 0;
     _packetPeriod = 0;
     _hasValidPacket = false;
+    _consecutiveRejectedPackets = 0;
     _type = OLD;
 }
 
 void AcaiaArduinoBLE::rejectPacket(const char* reason) {
     ++_rejectedPackets;
+    ++_consecutiveRejectedPackets;
     if (_debug) {
         Serial.print("Rejected scale packet: ");
         Serial.println(reason);
+    }
+    if (_connected &&
+        _consecutiveRejectedPackets >= MAX_CONSECUTIVE_REJECTED_PACKETS) {
+        Serial.println("Invalid scale packet stream; reconnecting");
+        resetConnection(true,
+                        AcaiaDisconnectReason::INVALID_PACKET_STREAM);
     }
 }
 
@@ -697,6 +708,8 @@ const char* AcaiaArduinoBLE::lastDisconnectReasonName() const {
         case AcaiaDisconnectReason::FIRST_PACKET_TIMEOUT:
             return "first packet timeout";
         case AcaiaDisconnectReason::PACKET_TIMEOUT: return "packet timeout";
+        case AcaiaDisconnectReason::INVALID_PACKET_STREAM:
+            return "invalid packet stream";
         case AcaiaDisconnectReason::COMMAND_WRITE_FAILED:
             return "command write failed";
     }

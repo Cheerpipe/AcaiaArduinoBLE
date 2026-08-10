@@ -57,8 +57,9 @@ The project was created to achieve these goals:
   detection and `LOCKOUT`, for integration with a second physical K2 barrier.
 - Redundant RTC record of relay commands and unsafe resets; a reset during
   CLOSE or three consecutive unsafe resets requires local recovery.
-- Safe degradation to manual mode if the scale is lost during an automatic
-  extraction.
+- Explicit weight-stream and control-authority states. A transient scale loss
+  suspends by-weight control and can recover only after three coherent samples;
+  it does not silently convert an automatic extraction into manual mode.
 - Local Web UI with status, configuration, emergency stop, restart, Wi-Fi,
   factory reset, and a bounded diagnostic log. Virtual paddle and remote rinse
   are opt-in and disabled by default.
@@ -103,11 +104,14 @@ closes CN9 and begins gesture qualification.
 - Releasing it after the rinse window but before confirmation produces a short
   manual extraction and opens CN9.
 - Releasing it during an automatic or manual extraction opens CN9 immediately.
-- If the scale disconnects during an automatic extraction, the rest of the
-  cycle becomes manual. An active manual cycle never becomes automatic.
-- Weight prediction can stop only a confirmed extraction after the configured
-  minimum time. Timer-only mode retains timing and tare but disables prediction
-  and learning.
+- If the scale disconnects or its samples become stale during an automatic
+  extraction, weight control is suspended. It recovers only on the current BLE
+  generation after three coherent samples. Paddle OFF and timing limits remain
+  authoritative throughout.
+- After the configured minimum time, two fresh samples at or above
+  `goal - offset` stop the extraction directly, independently of regression.
+  Prediction remains an earlier stop mechanism. Timer-only mode retains timing
+  and tare but disables both mechanisms and learning.
 - Every path that closes CN9 is constrained by the configurable operational
   time and an absolute maximum of 60 seconds.
 
@@ -123,20 +127,24 @@ stateDiagram-v2
   RINSE --> READY: complete, paddle OFF
   RINSE --> REQUIRES_OFF: complete, paddle ON
   BREW --> READY: paddle/Web stop
-  BREW --> MANUAL_NO_SCALE: scale lost
   MANUAL_NO_SCALE --> READY: paddle/Web stop
-  BREW --> REQUIRES_OFF: predicted or safety stop
+  BREW --> REQUIRES_OFF: threshold, predicted, or safety stop
 ```
 
 ## Scale and prediction
 
 The firmware uses the existing AcaiaArduinoBLE central BLE connection; it does
 not expose a BLE configuration peripheral. During an automatic extraction, the
-scale session starts with the cycle, and the predictor uses regression over the
-latest valid samples to estimate when `target - learned offset` will be
-reached. It does not simply stop at the first sample that reaches the target
-weight. Post-drip analysis updates the offset only when the required new and
-valid readings are available.
+scale session starts with the cycle. A confirmed direct threshold of two fresh
+samples at `target - learned offset` is authoritative after the minimum stop
+time, while the predictor uses regression over the latest accepted samples to
+stop earlier. Abrupt samples are still visible as observed weight but cannot
+enter regression or learning. Post-drip analysis updates the offset only after
+a continuous, anomaly-free control trajectory.
+
+The status API distinguishes BLE connection, stream freshness and control
+authority, and exposes observed versus accepted weight, connection generation,
+packet sequence/gaps, rejected packets, reconnects and disconnect reason.
 
 New configurations use a 1,500 ms rinse gesture and enable both the Bookoo
 combined tare/start command and **Beep when brew is confirmed**. The latter
@@ -283,9 +291,9 @@ diagnostic only and are never part of the CN9 safety decision.
 | Scale LED | Meaning |
 | --- | --- |
 | Slow blue blink | Firmware is starting |
-| Solid green | Scale connected and worker responsive |
+| Solid green | Scale connected, worker responsive, and weight stream fresh |
 | Solid red | Scale disconnected |
-| Slow yellow blink | BLE link reports connected but the scale worker is stale |
+| Slow yellow blink | BLE link is connected but worker or weight stream is stale |
 | Fast red blink | BLE subsystem or scale worker unavailable |
 
 | Stopper workflow | Automatic palette | Manual/timer-only palette |
