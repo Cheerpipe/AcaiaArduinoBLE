@@ -25,7 +25,7 @@ PersistedSettingsV3 makeSchemaThreeRecord(const PersistedSettings &source,
                                            uint32_t storageRevision) {
   PersistedSettingsV3 legacy = {};
   legacy.magic = PERSISTED_SETTINGS_MAGIC;
-  legacy.schemaVersion = PREVIOUS_CONFIG_SCHEMA_VERSION;
+  legacy.schemaVersion = LEGACY_PRE_SCHEMA_FOUR_VERSION;
   legacy.structureSize = sizeof(PersistedSettingsV3);
   legacy.storageRevision = storageRevision;
   legacy.runtime.revision = source.runtime.revision;
@@ -214,7 +214,7 @@ void p11_schema_three_defaults_to_paddle_return_reminder_beep() {
   persistence_host::reset();
   PersistedSettings legacy;
   CHECK(initializeDefaultSettings(legacy, 255, 255));
-  legacy.schemaVersion = PREVIOUS_CONFIG_SCHEMA_VERSION;
+  legacy.schemaVersion = LEGACY_PRE_SCHEMA_FOUR_VERSION;
   legacy.runtime.paddleReturnReminderBeep = false;
   legacy.checksum = 0;
   legacy.checksum = persistedSettingsChecksum(legacy);
@@ -225,7 +225,7 @@ void p11_schema_three_defaults_to_paddle_return_reminder_beep() {
   PersistedSettings loaded;
   CHECK(loadPersistedSettings(loaded));
   CHECK(loaded.runtime.paddleReturnReminderBeep);
-  CHECK(loaded.schemaVersion == PREVIOUS_CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.schemaVersion == LEGACY_PRE_SCHEMA_FOUR_VERSION);
 }
 
 void p12_real_schema_three_layout_recovers_network_after_bad_upgrade() {
@@ -379,17 +379,12 @@ void p15_normal_save_requires_verified_readback() {
   CHECK(validPersistedSettings(loaded));
 }
 
-void p16_provisioning_credentials_are_unique_per_generation() {
+void p16_default_ap_password_is_micra1234() {
   persistence_host::reset();
-  PersistedSettings first;
-  PersistedSettings second;
-  CHECK(initializeDefaultSettings(first, 255, 255));
-  CHECK(initializeDefaultSettings(second, 255, 255));
-  CHECK(validAccessPointPassword(first.apPassword));
-  CHECK(validAccessPointPassword(second.apPassword));
-  CHECK(strcmp(first.apPassword, second.apPassword) != 0);
-  CHECK(verifyAdminPassword(first, first.apPassword));
-  CHECK(verifyAdminPassword(second, second.apPassword));
+  PersistedSettings settings;
+  CHECK(initializeDefaultSettings(settings, 255, 255));
+  CHECK(strcmp(settings.apPassword, DEFAULT_AP_PASSWORD) == 0);
+  CHECK(verifyAdminPassword(settings, DEFAULT_AP_PASSWORD));
 }
 
 struct TestCase {
@@ -413,7 +408,7 @@ const TestCase tests[] = {
     {"P13", p13_factory_reset_erases_every_record_and_rebuilds_redundancy},
     {"P14", p14_factory_reset_survives_one_failed_redundant_write},
     {"P15", p15_normal_save_requires_verified_readback},
-    {"P16", p16_provisioning_credentials_are_unique_per_generation},
+    {"P16", p16_default_ap_password_is_micra1234},
 };
 
 }  // namespace

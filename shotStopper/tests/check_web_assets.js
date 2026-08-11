@@ -35,6 +35,8 @@ if (!html.includes('id="operationalWallMs" type="number" min="5000" max="60000"'
 }
 if (!network.includes('"brewConfirmationBeep"') ||
     !network.includes('"paddleReturnReminderBeep"') ||
+    !network.includes('"paddleReturnReminderIntervalMs"') ||
+    !network.includes('"paddleReturnReminderMaxDurationMs"') ||
     !firmware.includes('session.config.brewConfirmationBeep') ||
     !firmware.includes('servicePaddleReturnReminder')) {
   throw new Error('Scale beep settings must be configurable end-to-end');

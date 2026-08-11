@@ -132,6 +132,11 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "Minimum auto-stop must be from 1,000 to 30,000 ms.";
     case ConfigValidationError::OPERATIONAL_WALL:
       return "CN9 limit must be from 5,000 to 60,000 ms.";
+    case ConfigValidationError::PADDLE_REMINDER_INTERVAL:
+      return "Paddle reminder interval must be from 5,000 to 60,000 ms.";
+    case ConfigValidationError::PADDLE_REMINDER_MAX_DURATION:
+      return "Paddle reminder limit must be from 60,000 to 3,600,000 ms and "
+             "at least the reminder interval.";
     case ConfigValidationError::TIMING_RELATION:
       return "Required: gesture < brew < auto-stop < limit, and rinse duration <= limit.";
     case ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE:
@@ -1081,11 +1086,9 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
       next.staOpen = false;
       memset(next.staSsid, 0, sizeof(next.staSsid));
       memset(next.staPassword, 0, sizeof(next.staPassword));
-      if (!generateDeviceAuthentication(next)) {
+      if (!initializeDefaultAuthentication(next)) {
         return false;
       }
-      Serial.print("Generated recovery AP/UI password: ");
-      Serial.println(next.apPassword);
       persist = true;
       restartPending_ = true;
       log(DebugCategory::SECURITY, DebugCode::NETWORK_RESET);
@@ -1101,8 +1104,6 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
       factoryReset = true;
       authenticationChanged = true;
       restartPending_ = true;
-      Serial.print("Generated factory AP/UI password: ");
-      Serial.println(next.apPassword);
       log(DebugCategory::SECURITY, DebugCode::FACTORY_RESET);
       break;
 
@@ -1630,7 +1631,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"configMutable\":%s,\"config\":{\"revision\":%lu,"
       "\"goalWeightG\":%u,\"autoTare\":%s,\"timerOnly\":%s,"
       "\"canTareStartTimer\":%s,\"brewConfirmationBeep\":%s,"
-      "\"paddleReturnReminderBeep\":%s,\"rinseGestureMs\":%lu,"
+      "\"paddleReturnReminderBeep\":%s,"
+      "\"paddleReturnReminderIntervalMs\":%lu,"
+      "\"paddleReturnReminderMaxDurationMs\":%lu,\"rinseGestureMs\":%lu,"
       "\"rinseDurationMs\":%lu,\"brewConfirmMs\":%lu,"
       "\"minAutoStopMs\":%lu,\"operationalWallMs\":%lu},"
       "\"scale\":{\"available\":%s,\"streamState\":\"%s\","
@@ -1686,6 +1689,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.config.canTareStartTimer ? "true" : "false",
       control.config.brewConfirmationBeep ? "true" : "false",
       control.config.paddleReturnReminderBeep ? "true" : "false",
+      static_cast<unsigned long>(
+          control.config.paddleReturnReminderIntervalMs),
+      static_cast<unsigned long>(
+          control.config.paddleReturnReminderMaxDurationMs),
       static_cast<unsigned long>(control.config.rinseGestureMs),
       static_cast<unsigned long>(control.config.rinseDurationMs),
       static_cast<unsigned long>(control.config.brewConfirmMs),
@@ -1838,9 +1845,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   static const char *const fields[] = {
       "goalWeightG", "rinseGestureMs", "rinseDurationMs", "brewConfirmMs",
       "minAutoStopMs", "operationalWallMs", "autoTare", "timerOnly",
-      "canTareStartTimer", "brewConfirmationBeep", "paddleReturnReminderBeep"};
+      "canTareStartTimer", "brewConfirmationBeep", "paddleReturnReminderBeep",
+      "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs"};
   const bool parsed =
-      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 11) &&
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 13) &&
       jsonUint8(root, "goalWeightG", candidate.goalWeightG) &&
       jsonUint32(root, "rinseGestureMs", candidate.rinseGestureMs) &&
       jsonUint32(root, "rinseDurationMs", candidate.rinseDurationMs) &&
@@ -1853,7 +1861,11 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       jsonBoolean(root, "brewConfirmationBeep",
                   candidate.brewConfirmationBeep) &&
       jsonBoolean(root, "paddleReturnReminderBeep",
-                  candidate.paddleReturnReminderBeep);
+                  candidate.paddleReturnReminderBeep) &&
+      jsonUint32(root, "paddleReturnReminderIntervalMs",
+                 candidate.paddleReturnReminderIntervalMs) &&
+      jsonUint32(root, "paddleReturnReminderMaxDurationMs",
+                 candidate.paddleReturnReminderMaxDurationMs);
   if (root != nullptr) {
     cJSON_Delete(root);
   }

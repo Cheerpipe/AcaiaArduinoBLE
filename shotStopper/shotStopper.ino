@@ -47,7 +47,7 @@ constexpr uint32_t SCALE_CONNECT_RETRY_MS = 1000;
 constexpr uint32_t SCALE_CONNECT_LOG_MS = 10000;
 constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;
 constexpr uint32_t SCALE_ATT_TIMEOUT_MS = 1000;
-constexpr uint32_t PADDLE_RETURN_REMINDER_BEEP_INTERVAL_MS = 15000;
+constexpr uint32_t SCALE_COMPLETION_BEEP_DELAY_MS = 200;
 constexpr size_t SCALE_COMMAND_QUEUE_LENGTH = 12;
 constexpr size_t SCALE_EVENT_QUEUE_LENGTH = 64;
 constexpr uint32_t SCALE_STOP_RETRY_INTERVAL_MS = 250;
@@ -373,6 +373,10 @@ uint32_t scaleBeepCycleId = 0;
 bool scalePaddleReturnReminderBeepPending = false;
 bool paddleReturnReminderActive = false;
 uint32_t paddleReturnReminderLastAtMs = 0;
+uint32_t paddleReturnReminderStartedAtMs = 0;
+bool scaleCompletionBeepPending = false;
+bool scaleCompletionBeepScheduled = false;
+uint32_t scaleCompletionBeepDueAtMs = 0;
 
 bool rawPaddleOn = false;
 bool paddleOn = false;
@@ -1910,6 +1914,63 @@ void cancelScalePaddleReturnReminderBeep() {
   portEXIT_CRITICAL(&scaleBeepMux);
 }
 
+bool shotCompletionGetsDoubleBeep(EndReason reason) {
+  switch (reason) {
+    case EndReason::PADDLE:
+    case EndReason::SCALE_PREDICTION:
+    case EndReason::SCALE_THRESHOLD:
+    case EndReason::WEIGHT_ANOMALY:
+    case EndReason::GLOBAL_LIMIT:
+    case EndReason::CONFIGURED_WALL_LIMIT:
+    case EndReason::WEB_STOP:
+    case EndReason::PHYSICAL_OVERRIDE:
+    case EndReason::WEB_HEARTBEAT_TIMEOUT:
+      return true;
+    default:
+      return false;
+  }
+}
+
+void requestScaleCompletionBeep() {
+  portENTER_CRITICAL(&scaleBeepMux);
+  scaleCompletionBeepPending = true;
+  portEXIT_CRITICAL(&scaleBeepMux);
+}
+
+bool takeScaleCompletionBeep() {
+  bool pending = false;
+  portENTER_CRITICAL(&scaleBeepMux);
+  if (scaleCompletionBeepPending) {
+    pending = true;
+    scaleCompletionBeepPending = false;
+  }
+  portEXIT_CRITICAL(&scaleBeepMux);
+  return pending;
+}
+
+void scheduleScaleCompletionBeep() {
+  scaleCompletionBeepScheduled = true;
+  scaleCompletionBeepDueAtMs = millis() + SCALE_COMPLETION_BEEP_DELAY_MS;
+}
+
+void cancelScaleCompletionBeep() {
+  scaleCompletionBeepScheduled = false;
+  portENTER_CRITICAL(&scaleBeepMux);
+  scaleCompletionBeepPending = false;
+  portEXIT_CRITICAL(&scaleBeepMux);
+}
+
+void serviceScaleCompletionBeep() {
+  if (!scaleCompletionBeepScheduled) {
+    return;
+  }
+  if (static_cast<int32_t>(millis() - scaleCompletionBeepDueAtMs) < 0) {
+    return;
+  }
+  scaleCompletionBeepScheduled = false;
+  requestScaleCompletionBeep();
+}
+
 void servicePaddleReturnReminder() {
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   // Read the GPIO here rather than a debounced state: this reminder describes
@@ -1920,6 +1981,7 @@ void servicePaddleReturnReminder() {
   if (!shouldRemind) {
     paddleReturnReminderActive = false;
     paddleReturnReminderLastAtMs = 0;
+    paddleReturnReminderStartedAtMs = 0;
     cancelScalePaddleReturnReminderBeep();
     return;
   }
@@ -1928,10 +1990,19 @@ void servicePaddleReturnReminder() {
   if (!paddleReturnReminderActive) {
     paddleReturnReminderActive = true;
     paddleReturnReminderLastAtMs = now;
+    paddleReturnReminderStartedAtMs = now;
+    return;
+  }
+  if (elapsedMs(paddleReturnReminderStartedAtMs) >=
+      runtimeConfig.paddleReturnReminderMaxDurationMs) {
+    paddleReturnReminderActive = false;
+    paddleReturnReminderLastAtMs = 0;
+    paddleReturnReminderStartedAtMs = 0;
+    cancelScalePaddleReturnReminderBeep();
     return;
   }
   if (elapsedMs(paddleReturnReminderLastAtMs) >=
-      PADDLE_RETURN_REMINDER_BEEP_INTERVAL_MS) {
+      runtimeConfig.paddleReturnReminderIntervalMs) {
     paddleReturnReminderLastAtMs = now;
     requestScalePaddleReturnReminderBeep();
   }
@@ -2010,6 +2081,10 @@ void scaleWorkerTask(void *) {
         executeScaleBeepCommand(DebugCode::SCALE_PADDLE_REMINDER_BEEP_OK,
                                 DebugCode::SCALE_PADDLE_REMINDER_BEEP_FAILED,
                                 DebugCode::SCALE_PADDLE_REMINDER_BEEP_UNSUPPORTED);
+      } else if (takeScaleCompletionBeep()) {
+        executeScaleBeepCommand(DebugCode::SCALE_BEEP_OK,
+                                DebugCode::SCALE_BEEP_FAILED,
+                                DebugCode::SCALE_BEEP_UNSUPPORTED);
       } else if (scale.isConnected()) {
         connectAttemptSeriesActive = false;
         serviceScaleWorkerLink();
@@ -2290,8 +2365,12 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   // Physical flow always stops before the non-blocking BLE command is queued.
   setCn9Closed(false);
   cancelScaleBrewBeep(session.id);
+  cancelScaleCompletionBeep();
   session.endReason = reason;
   requestRemoteTimerStop();
+  if (shotCompletionGetsDoubleBeep(reason)) {
+    scheduleScaleCompletionBeep();
+  }
 
   if (analyze) {
     scheduleShotAnalysis();
@@ -2325,7 +2404,6 @@ void enterRinse() {
   // from 30 ms later when debounce accepts the transition.
   session.rinseStartedAtMs = rawPaddleChangedAtMs;
   session.automaticEnabled = false;
-  requestRemoteTimerStop();
   Serial.println("Rinse classified; paddle changes ignored until completion");
   transitionTo(StopperState::RINSE);
 }
@@ -2521,7 +2599,6 @@ void stateMachineTask() {
       // All paddle transitions are intentionally consumed while rinsing.
       if (elapsedMs(session.rinseStartedAtMs) >=
           session.config.rinseDurationMs) {
-        requestRemoteTimerStop();
         const bool mustReleasePaddle = paddleOn || rawPaddleOn;
         finalizeCycle(EndReason::RINSE_COMPLETE,
                       mustReleasePaddle ? StopperState::REQUIRES_OFF
@@ -2579,8 +2656,8 @@ void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
   resetSessionForNewCycle(ControlSource::WEB, webSessionId, controlLeaseId);
   session.startedAtMs = millis();
   session.weightSequenceAtStart = currentWeightSequence;
+  session.startedWithScale = scaleAvailable();
   session.rinseStartedAtMs = session.startedAtMs;
-  session.startedWithScale = false;
   session.automaticEnabled = false;
   virtualPaddleOn = false;
   resetShotTrajectory(session.startedAtMs);
@@ -2589,6 +2666,13 @@ void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
     session.endReason = EndReason::RELAY_SAFETY_FAILURE;
     transitionTo(StopperState::REQUIRES_OFF);
     return;
+  }
+  if (session.startedWithScale &&
+      !requestRemoteTimerStart()) {
+    session.startedWithScale = false;
+    session.automaticEnabled = false;
+    session.scaleWasLost = true;
+    Serial.println("Scale start command unavailable; web rinse marked manual");
   }
   transitionTo(StopperState::RINSE);
 }
@@ -3144,13 +3228,11 @@ void setup() {
   persistenceReady = EEPROM.begin(EEPROM_SIZE);
 #ifndef SHOT_STOPPER_HOST_TEST
   bool settingsReady = persistenceReady;
-  bool generatedDevicePassword = false;
   if (settingsReady && !loadPersistedSettings(persistedSettings)) {
     bool legacyMigrated = false;
     settingsReady = initializeDefaultSettings(
         persistedSettings, EEPROM.read(WEIGHT_ADDR), EEPROM.read(OFFSET_ADDR),
         &legacyMigrated);
-    generatedDevicePassword = settingsReady;
     if (settingsReady) {
       settingsReady = savePersistedSettings(persistedSettings);
     }
@@ -3160,11 +3242,6 @@ void setup() {
   }
   if (settingsReady) {
     runtimeConfig = persistedSettings.runtime;
-  }
-  if (generatedDevicePassword) {
-    Serial.print("Generated device-unique AP/UI password: ");
-    Serial.println(persistedSettings.apPassword);
-    Serial.println("Store it securely; it is not exposed by the Web API");
   }
 #else
   runtimeConfig = RuntimeConfig{};
@@ -3267,6 +3344,7 @@ void loop() {
   processScaleWorkerEvents();
   stateMachineTask();
   servicePaddleReturnReminder();
+  serviceScaleCompletionBeep();
   serviceRemoteTimerStopRetry();
   shotAnalysisTask();
 #ifndef SHOT_STOPPER_HOST_TEST

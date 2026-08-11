@@ -10,9 +10,19 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 4;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 3;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 6;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 5;
+constexpr uint32_t LEGACY_PRE_SCHEMA_FOUR_VERSION = 3;
+constexpr uint32_t LEGACY_SCHEMA_FOUR_VERSION = 4;
 constexpr uint32_t LEGACY_CONFIG_SCHEMA_VERSION = 2;
+constexpr uint32_t DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS = 10000;
+constexpr uint32_t MIN_PADDLE_RETURN_REMINDER_INTERVAL_MS = 5000;
+constexpr uint32_t MAX_PADDLE_RETURN_REMINDER_INTERVAL_MS = 60000;
+constexpr uint32_t DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS =
+    15UL * 60UL * 1000UL;
+constexpr uint32_t MIN_PADDLE_RETURN_REMINDER_MAX_DURATION_MS = 60000UL;
+constexpr uint32_t MAX_PADDLE_RETURN_REMINDER_MAX_DURATION_MS =
+    60UL * 60UL * 1000UL;
 constexpr uint32_t HARD_MAX_CN9_CLOSED_MS = 60000;
 constexpr uint32_t DEFAULT_OPERATIONAL_WALL_MS = 60000;
 constexpr uint32_t DEFAULT_RINSE_GESTURE_MS = 1500;
@@ -143,6 +153,10 @@ struct RuntimeConfig {
   bool brewConfirmationBeep = true;
   // Remind the user to release the physical paddle after CN9 has opened.
   bool paddleReturnReminderBeep = true;
+  uint32_t paddleReturnReminderIntervalMs =
+      DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
+  uint32_t paddleReturnReminderMaxDurationMs =
+      DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
   uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
   uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
   uint32_t brewConfirmMs = DEFAULT_BREW_CONFIRM_MS;
@@ -159,6 +173,10 @@ struct CycleConfigSnapshot {
   bool canTareStartTimer = true;
   bool brewConfirmationBeep = true;
   bool paddleReturnReminderBeep = true;
+  uint32_t paddleReturnReminderIntervalMs =
+      DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
+  uint32_t paddleReturnReminderMaxDurationMs =
+      DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
   uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
   uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
   uint32_t brewConfirmMs = DEFAULT_BREW_CONFIRM_MS;
@@ -176,6 +194,10 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.canTareStartTimer = config.canTareStartTimer;
   snapshot.brewConfirmationBeep = config.brewConfirmationBeep;
   snapshot.paddleReturnReminderBeep = config.paddleReturnReminderBeep;
+  snapshot.paddleReturnReminderIntervalMs =
+      config.paddleReturnReminderIntervalMs;
+  snapshot.paddleReturnReminderMaxDurationMs =
+      config.paddleReturnReminderMaxDurationMs;
   snapshot.rinseGestureMs = config.rinseGestureMs;
   snapshot.rinseDurationMs = config.rinseDurationMs;
   snapshot.brewConfirmMs = config.brewConfirmMs;
@@ -193,6 +215,8 @@ enum class ConfigValidationError : uint8_t {
   BREW_CONFIRM,
   MIN_AUTO_STOP,
   OPERATIONAL_WALL,
+  PADDLE_REMINDER_INTERVAL,
+  PADDLE_REMINDER_MAX_DURATION,
   TIMING_RELATION,
   COMBINED_TARE_REQUIRES_AUTOTARE
 };
@@ -223,6 +247,20 @@ inline ConfigValidationError validateRuntimeConfig(
       config.operationalWallMs > HARD_MAX_CN9_CLOSED_MS) {
     return ConfigValidationError::OPERATIONAL_WALL;
   }
+  if (config.paddleReturnReminderIntervalMs <
+          MIN_PADDLE_RETURN_REMINDER_INTERVAL_MS ||
+      config.paddleReturnReminderIntervalMs >
+          MAX_PADDLE_RETURN_REMINDER_INTERVAL_MS) {
+    return ConfigValidationError::PADDLE_REMINDER_INTERVAL;
+  }
+  if (config.paddleReturnReminderMaxDurationMs <
+          MIN_PADDLE_RETURN_REMINDER_MAX_DURATION_MS ||
+      config.paddleReturnReminderMaxDurationMs >
+          MAX_PADDLE_RETURN_REMINDER_MAX_DURATION_MS ||
+      config.paddleReturnReminderMaxDurationMs <
+          config.paddleReturnReminderIntervalMs) {
+    return ConfigValidationError::PADDLE_REMINDER_MAX_DURATION;
+  }
   if (!(config.rinseGestureMs < config.brewConfirmMs &&
         config.brewConfirmMs < config.minAutoStopMs &&
         config.minAutoStopMs < config.operationalWallMs) ||
@@ -246,6 +284,10 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
     case ConfigValidationError::MIN_AUTO_STOP: return "minAutoStopMs";
     case ConfigValidationError::OPERATIONAL_WALL:
       return "operationalWallMs";
+    case ConfigValidationError::PADDLE_REMINDER_INTERVAL:
+      return "paddleReturnReminderIntervalMs";
+    case ConfigValidationError::PADDLE_REMINDER_MAX_DURATION:
+      return "paddleReturnReminderMaxDurationMs";
     case ConfigValidationError::TIMING_RELATION: return "timingRelation";
     case ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE:
       return "canTareStartTimer";

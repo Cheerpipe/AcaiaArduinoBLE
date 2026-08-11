@@ -133,6 +133,10 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scalePaddleReturnReminderBeepPending = false;
   paddleReturnReminderActive = false;
   paddleReturnReminderLastAtMs = 0;
+  paddleReturnReminderStartedAtMs = 0;
+  scaleCompletionBeepPending = false;
+  scaleCompletionBeepScheduled = false;
+  scaleCompletionBeepDueAtMs = 0;
   hostAutoScaleWorkerProgress = true;
   setScaleLinkState(scaleConnected ? ScaleLinkState::CONNECTED
                                    : ScaleLinkState::DISCONNECTED);
@@ -419,13 +423,14 @@ void t04_exact_rinse_boundary_and_duration() {
   releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
   CHECK(stopperState == StopperState::RINSE);
   CHECK(getRelaySafetySnapshot().closed);
-  CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
+  CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
 
   const uint32_t remaining =
       runtimeConfig.rinseDurationMs - elapsedMs(session.rinseStartedAtMs);
   runLoopAfter(remaining - 1);
   CHECK(stopperState == StopperState::RINSE);
   CHECK(getRelaySafetySnapshot().closed);
+  CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
   runLoopAfter(1);
   CHECK(stopperState == StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -632,6 +637,8 @@ void t18_rinse_and_short_shot_each_request_one_stop() {
   reachReadyFromBoot();
   uint32_t rawOnAt = startCycle();
   releaseAtPhysicalDuration(rawOnAt, 500);
+  CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
+  runLoopAfter(runtimeConfig.rinseDurationMs);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
 
   resetHarness(false, true);
@@ -1417,16 +1424,17 @@ void w14_physical_motion_overrides_web_control() {
   CHECK(!getRelaySafetySnapshot().closed);
 }
 
-void w15_web_rinse_skips_scale_timer() {
+void w15_web_rinse_starts_scale_timer() {
   resetHarness(false, true);
   reachReadyFromBoot();
   WebCommand rinse = webControlCommand(WebCommandType::RINSE);
   processWebCommand(rinse);
   CHECK(stopperState == StopperState::RINSE);
   CHECK(session.source == ControlSource::WEB);
-  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 0);
+  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
   runLoopAfter(runtimeConfig.rinseDurationMs);
   CHECK(stopperState == StopperState::READY);
+  CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
 
   processWebCommand(rinse);
   setRawPaddle(true);
@@ -1434,7 +1442,7 @@ void w15_web_rinse_skips_scale_timer() {
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(session.endReason == EndReason::PHYSICAL_OVERRIDE);
   CHECK(!getRelaySafetySnapshot().closed);
-  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 0);
+  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 2);
 }
 
 void w16_web_stop_during_rinse_preserves_rearm() {
@@ -1708,12 +1716,13 @@ void w35_status_reports_the_live_physical_paddle_gpio() {
   CHECK(status.physicalPaddleOn);
 }
 
-void w36_paddle_return_reminder_beeps_every_fifteen_seconds_only_while_open() {
+void w36_paddle_return_reminder_beeps_at_configured_interval_only_while_open() {
   resetHarness(true, true);
   runLoopAfter(0);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(!scalePaddleReturnReminderBeepPending);
-  runLoopAfter(PADDLE_RETURN_REMINDER_BEEP_INTERVAL_MS - 1);
+  const uint32_t interval = runtimeConfig.paddleReturnReminderIntervalMs;
+  runLoopAfter(interval - 1);
   CHECK(!scalePaddleReturnReminderBeepPending);
   runLoopAfter(1);
   CHECK(scalePaddleReturnReminderBeepPending);
@@ -1722,7 +1731,19 @@ void w36_paddle_return_reminder_beeps_every_fifteen_seconds_only_while_open() {
 
   setRawPaddle(false);
   CHECK(!scalePaddleReturnReminderBeepPending);
-  runLoopAfter(PADDLE_RETURN_REMINDER_BEEP_INTERVAL_MS);
+  runLoopAfter(interval);
+  CHECK(!scalePaddleReturnReminderBeepPending);
+}
+
+void w44_paddle_return_reminder_stops_after_fifteen_minutes() {
+  resetHarness(true, true);
+  runLoopAfter(0);
+  runLoopAfter(runtimeConfig.paddleReturnReminderIntervalMs);
+  CHECK(executePendingScalePaddleReturnReminderBeep());
+  runLoopAfter(runtimeConfig.paddleReturnReminderMaxDurationMs -
+               runtimeConfig.paddleReturnReminderIntervalMs);
+  CHECK(!scalePaddleReturnReminderBeepPending);
+  runLoopAfter(runtimeConfig.paddleReturnReminderIntervalMs);
   CHECK(!scalePaddleReturnReminderBeepPending);
 }
 
@@ -2421,7 +2442,7 @@ const TestCase testCases[] = {
     {"W12", w12_hard_limit_cannot_be_configured_above_sixty_seconds},
     {"W13", w13_virtual_paddle_uses_normal_state_machine},
     {"W14", w14_physical_motion_overrides_web_control},
-    {"W15", w15_web_rinse_skips_scale_timer},
+    {"W15", w15_web_rinse_starts_scale_timer},
     {"W16", w16_web_stop_during_rinse_preserves_rearm},
     {"W17", w17_web_heartbeat_timeout_is_a_safe_stop},
     {"W18", w18_web_stop_can_end_a_physical_brew_only_by_opening},
@@ -2442,7 +2463,7 @@ const TestCase testCases[] = {
     {"W33", w33_brew_confirmation_beep_can_be_disabled},
     {"W34", w34_calibration_reset_restores_default_and_cancels_analysis},
     {"W35", w35_status_reports_the_live_physical_paddle_gpio},
-    {"W36", w36_paddle_return_reminder_beeps_every_fifteen_seconds_only_while_open},
+    {"W36", w36_paddle_return_reminder_beeps_at_configured_interval_only_while_open},
     {"W37", w37_factory_reset_is_rejected_while_control_is_active},
     {"W38", w38_scale_indicator_states_are_unambiguous},
     {"W39", w39_automatic_stopper_palette_encodes_workflow},
@@ -2450,6 +2471,7 @@ const TestCase testCases[] = {
     {"W41", w41_safety_and_action_states_override_operating_palette},
     {"W42", w42_indicator_blink_periods_are_deterministic},
     {"W43", w43_manual_palette_tracks_timer_only_and_scale_loss},
+    {"W44", w44_paddle_return_reminder_stops_after_fifteen_minutes},
 };
 
 }  // namespace
