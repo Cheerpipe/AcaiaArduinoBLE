@@ -77,7 +77,11 @@ if (!html.includes('id="shotTable"') ||
     !html.includes('id="clearShotsButton"') ||
     !html.includes("confirm:'CLEAR_SHOT_LOG'") ||
     !html.includes('refreshShots()') ||
+    !html.includes('formatShotTime(r)') ||
+    !html.includes('sin hora') ||
     !html.includes('id="timezoneOffsetMinutes"') ||
+    !network.includes('hasWallTime') ||
+    !network.includes('endedAtLocalSec') ||
     !network.includes('SHOT_LOG_CLEAR_NOT_CONFIRMED')) {
   throw new Error('Shot history UI/API must expose table, CSV export, clear confirmation, and timezone setting');
 }

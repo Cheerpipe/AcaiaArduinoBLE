@@ -86,8 +86,9 @@ class ShotStopperNetwork {
              const NetworkBridgeCallbacks &callbacks);
   bool enqueueAcceptedCommand(const WebCommand &command);
   NetworkStatusSnapshot snapshot();
+  void requestNtpSyncIfNeeded();
 
- private:
+  private:
   static constexpr uint32_t AP_WINDOW_MS = 180000;
   static constexpr uint32_t UI_GRACE_MS = 180000;
   static constexpr uint32_t WEB_PADDLE_HEARTBEAT_TIMEOUT_MS = 15000;
@@ -161,8 +162,10 @@ class ShotStopperNetwork {
   bool ntpStarted_ = false;
   bool ntpRearmPending_ = false;
   bool ntpManualSyncPending_ = false;
+  bool ntpActivitySyncPending_ = false;
   uint8_t ntpFailoverIndex_ = 0;
   uint32_t ntpSyncStartedAtMs_ = 0;
+  uint32_t staNtpEligibleAtMs_ = 0;
   uint32_t ntpConfigRevision_ = 0;
   char ntpServerBuffer_[NTP_SERVER_HOST_CAPACITY] = {};
 
@@ -170,6 +173,7 @@ class ShotStopperNetwork {
   void taskLoop();
   void service();
   void serviceNtp(uint32_t now, bool staConnected);
+  bool ntpMayArm(uint32_t now, bool staConnected) const;
   void stopNtp();
   void armNtp(uint32_t now);
   void handleNtpFailure(uint32_t now);

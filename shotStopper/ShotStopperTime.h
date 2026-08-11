@@ -244,6 +244,13 @@ class WallClock {
   uint32_t pendingUtcSec_ = 0;
 };
 
+inline bool wallClockNeedsActivityNtpSync(const WallClock &clock,
+                                          uint32_t monotonicMs) {
+  const TimeStatusSnapshot snap = clock.snapshot(monotonicMs);
+  return snap.state == TimeSyncState::OFF ||
+         snap.state == TimeSyncState::FAILED;
+}
+
 #if defined(SHOT_STOPPER_HOST_TEST) || \
     defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
 inline WallClock g_wallClock;

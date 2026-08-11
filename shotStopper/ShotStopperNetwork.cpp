@@ -308,7 +308,7 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
   instance_ = this;
   ntpConfigRevision_ = settings_.runtime.revision;
   g_wallClock.reset();
-  if (xTaskCreate(taskEntry, "network_manager", 8192, this,
+  if (xTaskCreate(taskEntry, "network_manager", 10240, this,
                   tskIDLE_PRIORITY + 1, &taskHandle_) != pdPASS) {
     instance_ = nullptr;
     vQueueDelete(acceptedCommandQueue_);
@@ -322,6 +322,15 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
 bool ShotStopperNetwork::enqueueAcceptedCommand(const WebCommand &command) {
   return acceptedCommandQueue_ != nullptr &&
          xQueueSend(acceptedCommandQueue_, &command, 0) == pdTRUE;
+}
+
+void ShotStopperNetwork::requestNtpSyncIfNeeded() {
+  if (!wallClockNeedsActivityNtpSync(g_wallClock, millis())) {
+    return;
+  }
+  portENTER_CRITICAL(&dataMux_);
+  ntpActivitySyncPending_ = true;
+  portEXIT_CRITICAL(&dataMux_);
 }
 
 NetworkStatusSnapshot ShotStopperNetwork::snapshot() {
@@ -648,6 +657,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       log(DebugCategory::NETWORK, DebugCode::STA_FAILED,
           static_cast<int32_t>(WiFi.status()));
       stopNtp();
+      staNtpEligibleAtMs_ = 0;
       g_wallClock.markDisabled();
       staReconnectAttemptAtMs_ = now;
       Serial.println("WiFi STA disconnected; Web server waiting for reconnect");
@@ -685,6 +695,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
     log(DebugCategory::NETWORK, DebugCode::STA_CONNECTED);
     Serial.print("WiFi STA connected; IP: ");
     Serial.println(address);
+    staNtpEligibleAtMs_ = now + NTP_STA_SETTLE_MS;
     ntpRearmPending_ = true;
     return;
   }
@@ -1253,23 +1264,44 @@ void ShotStopperNetwork::ntpSyncNotificationCallback(struct timeval *tv) {
 }
 
 void ShotStopperNetwork::stopNtp() {
-  if (ntpStarted_) {
+  if (ntpStarted_ || esp_sntp_enabled()) {
     esp_sntp_stop();
     ntpStarted_ = false;
   }
 }
 
+bool ShotStopperNetwork::ntpMayArm(uint32_t now, bool staConnected) const {
+  if (!staConnected || server_ == nullptr) {
+    return false;
+  }
+  if (staNtpEligibleAtMs_ != 0 &&
+      static_cast<int32_t>(now - staNtpEligibleAtMs_) < 0) {
+    return false;
+  }
+  return true;
+}
+
 void ShotStopperNetwork::armNtp(uint32_t now) {
-  stopNtp();
   resolveNtpServerHost(settings_.runtime, ntpFailoverIndex_, ntpServerBuffer_);
   g_wallClock.setSyncing(ntpServerBuffer_, now);
+  ntpSyncStartedAtMs_ = now;
+  esp_sntp_set_time_sync_notification_cb(ntpSyncNotificationCallback);
+
+  if (esp_sntp_enabled()) {
+    esp_sntp_setservername(0, ntpServerBuffer_);
+    esp_sntp_set_sync_interval(NTP_RESYNC_INTERVAL_MS);
+    if (sntp_restart()) {
+      ntpStarted_ = true;
+      return;
+    }
+    stopNtp();
+  }
+
   esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
   esp_sntp_setservername(0, ntpServerBuffer_);
-  esp_sntp_set_time_sync_notification_cb(ntpSyncNotificationCallback);
   esp_sntp_set_sync_interval(NTP_RESYNC_INTERVAL_MS);
   esp_sntp_init();
   ntpStarted_ = true;
-  ntpSyncStartedAtMs_ = now;
 }
 
 void ShotStopperNetwork::handleNtpFailure(uint32_t now) {
@@ -1295,15 +1327,42 @@ void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
 
   if (!staConnected) {
     stopNtp();
+    staNtpEligibleAtMs_ = 0;
     g_wallClock.markDisabled();
     return;
   }
 
   const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(now);
 
-  if (ntpRearmPending_ || ntpManualSyncPending_) {
+  if (timeStatus.state == TimeSyncState::SYNCING) {
+    if (esp_sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED &&
+        !g_wallClock.synced()) {
+      time_t nowSec = 0;
+      time(&nowSec);
+      if (nowSec >= 1000000000) {
+        g_wallClock.queueSyncFromCallback(static_cast<uint32_t>(nowSec));
+        if (g_wallClock.applyPendingSync(now)) {
+          ntpFailoverIndex_ = 0;
+          stopNtp();
+          log(DebugCategory::NETWORK, DebugCode::TIME_SYNC_OK);
+        }
+      }
+    }
+    if (static_cast<uint32_t>(now - ntpSyncStartedAtMs_) >=
+        NTP_FIRST_SYNC_TIMEOUT_MS) {
+      handleNtpFailure(now);
+    }
+    return;
+  }
+
+  if (!ntpMayArm(now, staConnected)) {
+    return;
+  }
+
+  if (ntpRearmPending_ || ntpManualSyncPending_ || ntpActivitySyncPending_) {
     ntpRearmPending_ = false;
     ntpManualSyncPending_ = false;
+    ntpActivitySyncPending_ = false;
     ntpFailoverIndex_ = 0;
     armNtp(now);
     return;
@@ -1317,31 +1376,14 @@ void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
       }
       armNtp(now);
       return;
-    case TimeSyncState::SYNCING:
-      if (esp_sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED &&
-          !g_wallClock.synced()) {
-        time_t nowSec = 0;
-        time(&nowSec);
-        if (nowSec >= 1000000000) {
-          g_wallClock.queueSyncFromCallback(static_cast<uint32_t>(nowSec));
-          if (g_wallClock.applyPendingSync(now)) {
-            ntpFailoverIndex_ = 0;
-            stopNtp();
-            log(DebugCategory::NETWORK, DebugCode::TIME_SYNC_OK);
-          }
-        }
-      }
-      if (static_cast<uint32_t>(now - ntpSyncStartedAtMs_) >=
-          NTP_FIRST_SYNC_TIMEOUT_MS) {
-        handleNtpFailure(now);
-      }
-      return;
     case TimeSyncState::SYNCED:
     case TimeSyncState::STALE:
       if (!ntpStarted_ &&
           timeStatus.lastSyncAgeMs >= NTP_RESYNC_INTERVAL_MS) {
         armNtp(now);
       }
+      return;
+    case TimeSyncState::SYNCING:
       return;
   }
 }
@@ -1804,7 +1846,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   }
 
   const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(millis());
-  char response[4352] = {};
+  char response[5120] = {};
   const int written = snprintf(
       response, sizeof(response),
       "{\"state\":\"%s\",\"stateLabel\":\"%s\",\"relayClosed\":%s,"
@@ -2039,11 +2081,10 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
 
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
   httpd_resp_set_hdr(request, "Cache-Control", "no-store");
-  char header[160] = {};
+  char header[96] = {};
   snprintf(header, sizeof(header),
-           "{\"bootId\":%lu,\"timezoneOffsetMinutes\":%d,\"shots\":[",
-           static_cast<unsigned long>(control.bootId),
-           static_cast<int>(control.config.timezoneOffsetMinutes));
+           "{\"bootId\":%lu,\"shots\":[",
+           static_cast<unsigned long>(control.bootId));
   if (httpd_resp_send_chunk(request, header, HTTPD_RESP_USE_STRLEN) != ESP_OK) {
     return ESP_FAIL;
   }
@@ -2074,10 +2115,12 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
       snprintf(firstDrop, sizeof(firstDrop), "%.1f",
                static_cast<double>(record.firstDropDs) / 10.0);
     }
-    char item[460] = {};
+    char item[560] = {};
     snprintf(item, sizeof(item),
              "%s{\"id\":%lu,\"bootId\":%lu,\"endedAtMs\":%lu,"
-             "\"endedAtUnixSec\":%lu,\"durationS\":%.1f,"
+             "\"hasWallTime\":%s,\"endedAtLocalSec\":%lu,"
+             "\"endedAtUnixSec\":%lu,\"timezoneOffsetMinutesAtCommit\":%d,"
+             "\"durationS\":%.1f,"
              "\"goalG\":%u,\"actualG\":%s,\"errorG\":%s,\"errorPct\":%s,"
              "\"offsetG\":%.2f,\"avgFlowGS\":%s,\"firstDropS\":%s,"
              "\"shotType\":\"%s\",\"cutType\":\"%s\"}",
@@ -2085,7 +2128,10 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
              static_cast<unsigned long>(record.id),
              static_cast<unsigned long>(record.bootId),
              static_cast<unsigned long>(record.endedAtMs),
+             record.hasWallTime ? "true" : "false",
+             static_cast<unsigned long>(record.endedAtLocalSec),
              static_cast<unsigned long>(record.endedAtUnixSec),
+             static_cast<int>(record.timezoneOffsetMinutesAtCommit),
              static_cast<double>(record.durationDs) / 10.0,
              static_cast<unsigned>(record.goalWeightG), actual, errorG,
              errorPct,

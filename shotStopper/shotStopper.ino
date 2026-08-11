@@ -412,6 +412,7 @@ bool controlResultPending = false;
 bool hostForwardAcceptedNetworkCommandSucceeds = true;
 uint32_t hostForwardAcceptedNetworkCommandCalls = 0;
 WebCommand hostLastForwardedNetworkCommand;
+uint32_t hostNtpSyncRequestCount = 0;
 #endif
 bool runtimePersistPending = false;
 RuntimeConfig runtimePersistCandidate;
@@ -1757,8 +1758,19 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
   record.avgFlowCgS = SHOT_LOG_METRIC_MISSING;
   record.bootId = snapshot.bootId;
   record.endedAtMs = snapshot.endedAtMs;
-  record.endedAtUnixSec =
-      g_wallClock.synced() ? g_wallClock.nowUtcSec(millis()) : 0U;
+  if (g_wallClock.synced()) {
+    const uint32_t utcSec = g_wallClock.nowUtcSec(millis());
+    const int16_t offset = runtimeConfig.timezoneOffsetMinutes;
+    record.endedAtUnixSec = utcSec;
+    record.endedAtLocalSec = shotLogLocalSecFromUtc(utcSec, offset);
+    record.timezoneOffsetMinutesAtCommit = offset;
+    record.hasWallTime = 1;
+  } else {
+    record.endedAtUnixSec = 0;
+    record.endedAtLocalSec = 0;
+    record.timezoneOffsetMinutesAtCommit = 0;
+    record.hasWallTime = 0;
+  }
   record.durationDs = snapshot.durationDs;
   record.goalWeightG = snapshot.goalWeightG;
   record.offsetUsedCg = shotLogWeightToCentigrams(snapshot.weightOffsetG);
@@ -2444,6 +2456,8 @@ void resetSessionForNewCycle(ControlSource source, uint32_t webSessionId = 0,
   session.endReason = EndReason::NONE;
 }
 
+void maybeRequestNtpSyncOnActivity();
+
 void beginCycle(ControlSource source = ControlSource::PHYSICAL,
                 uint32_t webSessionId = 0,
                 uint32_t controlLeaseId = 0) {
@@ -2509,6 +2523,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
   Serial.print("g, offset snapshot=");
   Serial.print(session.config.weightOffsetG);
   Serial.println("g");
+  maybeRequestNtpSyncOnActivity();
 }
 
 void finalizeCycle(EndReason reason, StopperState nextState) {
@@ -2557,6 +2572,7 @@ void enterRinse() {
   session.automaticEnabled = false;
   Serial.println("Rinse classified; paddle changes ignored until completion");
   transitionTo(StopperState::RINSE);
+  maybeRequestNtpSyncOnActivity();
 }
 
 void confirmBrewOrManual() {
@@ -2793,6 +2809,16 @@ void stateMachineTask() {
 // Web/control bridge
 // ---------------------------------------------------------------------------
 
+void maybeRequestNtpSyncOnActivity() {
+#ifndef SHOT_STOPPER_HOST_TEST
+  networkManager.requestNtpSyncIfNeeded();
+#else
+  if (wallClockNeedsActivityNtpSync(g_wallClock, hostMillis)) {
+    ++hostNtpSyncRequestCount;
+  }
+#endif
+}
+
 bool controlAllowsConfigurationNow() {
   return stopperState == StopperState::READY && !session.active &&
          !getRelaySafetySnapshot().closed && !paddleOn && !rawPaddleOn &&
@@ -2829,6 +2855,7 @@ void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
     Serial.println("Scale start command unavailable; web rinse marked manual");
   }
   transitionTo(StopperState::RINSE);
+  maybeRequestNtpSyncOnActivity();
 }
 
 bool forwardAcceptedNetworkCommand(const WebCommand &command) {

@@ -11,7 +11,7 @@
 namespace shotstopper {
 
 constexpr uint32_t SHOT_LOG_MAGIC = 0x534C4F47U;  // "SLOG"
-constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 3;
+constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 4;
 constexpr size_t SHOT_LOG_CAPACITY = 120;
 constexpr uint32_t MIN_SHOT_LOG_DURATION_MS = 10000;
 constexpr float FIRST_DROP_THRESHOLD_G = 0.3f;
@@ -91,6 +91,25 @@ struct ShotLogRecord {
   uint32_t bootId;
   uint32_t endedAtMs;
   uint32_t endedAtUnixSec;
+  uint32_t endedAtLocalSec;
+  int16_t timezoneOffsetMinutesAtCommit;
+  uint16_t durationDs;
+  uint8_t goalWeightG;
+  uint8_t hasWallTime;
+  int16_t actualWeightCg;
+  int16_t errorCg;
+  int16_t offsetUsedCg;
+  uint16_t firstDropDs;
+  uint16_t avgFlowCgS;
+  uint8_t shotType;
+  uint8_t cutType;
+};
+
+struct ShotLogRecordV3 {
+  uint32_t id;
+  uint32_t bootId;
+  uint32_t endedAtMs;
+  uint32_t endedAtUnixSec;
   uint16_t durationDs;
   uint8_t goalWeightG;
   int16_t actualWeightCg;
@@ -133,13 +152,19 @@ struct ShotLogStore {
   ShotLogRecord records[SHOT_LOG_CAPACITY];
 };
 
+struct ShotLogStoreV3 {
+  ShotLogHeader header;
+  ShotLogRecordV3 records[SHOT_LOG_CAPACITY];
+};
+
 struct ShotLogStoreV2 {
   ShotLogHeader header;
   ShotLogRecordV2 records[SHOT_LOG_CAPACITY];
 };
 
-static_assert(sizeof(ShotLogRecordV2) + sizeof(uint32_t) == sizeof(ShotLogRecord),
-              "v3 shot log records extend v2 with endedAtUnixSec");
+inline uint32_t shotLogLocalSecFromUtc(uint32_t utcSec, int16_t offsetMinutes) {
+  return utcSec + static_cast<int32_t>(offsetMinutes) * 60;
+}
 
 inline uint32_t shotLogChecksumBytes(const ShotLogHeader &header) {
   return crc32(reinterpret_cast<const uint8_t *>(&header),
@@ -154,6 +179,22 @@ inline uint32_t shotLogChecksumV2(const ShotLogStoreV2 &store) {
   return shotLogChecksumBytes(store.header);
 }
 
+inline uint32_t shotLogChecksumV3(const ShotLogStoreV3 &store) {
+  return shotLogChecksumBytes(store.header);
+}
+
+inline bool validShotLogStoreV3(const ShotLogStoreV3 &store) {
+  if (store.header.magic != SHOT_LOG_MAGIC ||
+      store.header.schemaVersion != 3 ||
+      store.header.recordSize != sizeof(ShotLogRecordV3) ||
+      store.header.count > SHOT_LOG_CAPACITY ||
+      store.header.writeIndex >= SHOT_LOG_CAPACITY ||
+      store.header.checksum != shotLogChecksumV3(store)) {
+    return false;
+  }
+  return true;
+}
+
 inline bool validShotLogStoreV2(const ShotLogStoreV2 &store) {
   if (store.header.magic != SHOT_LOG_MAGIC ||
       store.header.schemaVersion != 2 ||
@@ -164,6 +205,14 @@ inline bool validShotLogStoreV2(const ShotLogStoreV2 &store) {
     return false;
   }
   return true;
+}
+
+inline void finalizeShotLogStoreV3(ShotLogStoreV3 &store) {
+  store.header.magic = SHOT_LOG_MAGIC;
+  store.header.schemaVersion = 3;
+  store.header.recordSize = sizeof(ShotLogRecordV3);
+  store.header.checksum = 0;
+  store.header.checksum = shotLogChecksumV3(store);
 }
 
 inline void finalizeShotLogStoreV2(ShotLogStoreV2 &store) {
@@ -194,7 +243,32 @@ inline void migrateShotLogStoreV2(const ShotLogStoreV2 &legacy, ShotLogStore &st
     dest.id = source.id;
     dest.bootId = source.bootId;
     dest.endedAtMs = source.endedAtMs;
-    dest.endedAtUnixSec = 0;
+    dest.durationDs = source.durationDs;
+    dest.goalWeightG = source.goalWeightG;
+    dest.actualWeightCg = source.actualWeightCg;
+    dest.errorCg = source.errorCg;
+    dest.offsetUsedCg = source.offsetUsedCg;
+    dest.firstDropDs = source.firstDropDs;
+    dest.avgFlowCgS = source.avgFlowCgS;
+    dest.shotType = source.shotType;
+    dest.cutType = source.cutType;
+  }
+  finalizeShotLogStore(store);
+}
+
+inline void migrateShotLogStoreV3(const ShotLogStoreV3 &legacy, ShotLogStore &store) {
+  memset(&store, 0, sizeof(store));
+  store.header.bootId = legacy.header.bootId;
+  store.header.nextRecordId = legacy.header.nextRecordId;
+  store.header.count = legacy.header.count;
+  store.header.writeIndex = legacy.header.writeIndex;
+  for (size_t index = 0; index < SHOT_LOG_CAPACITY; ++index) {
+    const ShotLogRecordV3 &source = legacy.records[index];
+    ShotLogRecord &dest = store.records[index];
+    dest.id = source.id;
+    dest.bootId = source.bootId;
+    dest.endedAtMs = source.endedAtMs;
+    dest.endedAtUnixSec = source.endedAtUnixSec;
     dest.durationDs = source.durationDs;
     dest.goalWeightG = source.goalWeightG;
     dest.actualWeightCg = source.actualWeightCg;
@@ -253,6 +327,14 @@ class ShotLog {
           validShotLogStore(store_)) {
         loaded = true;
       }
+    } else if (length == sizeof(ShotLogStoreV3)) {
+      ShotLogStoreV3 legacy = {};
+      if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
+              sizeof(legacy) &&
+          validShotLogStoreV3(legacy)) {
+        migrateShotLogStoreV3(legacy, store_);
+        loaded = true;
+      }
     } else if (length == sizeof(ShotLogStoreV2)) {
       ShotLogStoreV2 legacy = {};
       if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
@@ -265,7 +347,8 @@ class ShotLog {
     preferences.end();
     if (!loaded) {
       resetShotLogStore(store_, 1);
-    } else if (length == sizeof(ShotLogStoreV2)) {
+    } else if (length == sizeof(ShotLogStoreV3) ||
+               length == sizeof(ShotLogStoreV2)) {
       save();
     }
     return true;

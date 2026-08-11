@@ -93,6 +93,8 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   hostForwardAcceptedNetworkCommandSucceeds = true;
   hostForwardAcceptedNetworkCommandCalls = 0;
   hostLastForwardedNetworkCommand = WebCommand{};
+  hostNtpSyncRequestCount = 0;
+  g_wallClock.reset();
   runtimePersistPending = false;
   runtimePersistCandidate = RuntimeConfig{};
   runtimePersistRequestId = 0;
@@ -2419,6 +2421,62 @@ void n03_unsynced_retry_is_one_minute() {
   CHECK(ntpRetryDelayMs(5) == NTP_UNSYNCED_RETRY_MS);
 }
 
+void n04_brew_start_requests_ntp_when_unsynced() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  CHECK(hostNtpSyncRequestCount == 0);
+  startCycle();
+  CHECK(hostNtpSyncRequestCount == 1);
+}
+
+void n05_rinse_start_requests_ntp_when_unsynced() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  const uint32_t rawOnAt = startCycle();
+  CHECK(hostNtpSyncRequestCount == 1);
+  hostNtpSyncRequestCount = 0;
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(hostNtpSyncRequestCount == 1);
+}
+
+void n06_synced_clock_skips_activity_ntp_request() {
+  resetHarness(false, true);
+  g_wallClock.setSyncing("pool.ntp.org", hostMillis);
+  g_wallClock.queueSyncFromCallback(1'700'000'000U);
+  CHECK(g_wallClock.applyPendingSync(hostMillis));
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(hostNtpSyncRequestCount == 0);
+
+  resetHarness(false, true);
+  g_wallClock.setSyncing("pool.ntp.org", hostMillis);
+  g_wallClock.queueSyncFromCallback(1'700'000'000U);
+  CHECK(g_wallClock.applyPendingSync(hostMillis));
+  reachReadyFromBoot();
+  WebCommand rinse = webControlCommand(WebCommandType::RINSE);
+  processWebCommand(rinse);
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(hostNtpSyncRequestCount == 0);
+}
+
+void n07_syncing_clock_skips_activity_ntp_request() {
+  resetHarness(false, true);
+  g_wallClock.setSyncing("pool.ntp.org", hostMillis);
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(hostNtpSyncRequestCount == 0);
+}
+
+void n08_web_rinse_requests_ntp_when_unsynced() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  WebCommand rinse = webControlCommand(WebCommandType::RINSE);
+  processWebCommand(rinse);
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(hostNtpSyncRequestCount == 1);
+}
+
 void s04_shot_log_remove_by_id() {
   resetHarness(false, true);
   shotLog.clear();
@@ -2464,7 +2522,70 @@ void s05_shot_log_migrates_schema_v2() {
   CHECK(migrated.header.bootId == 3);
   CHECK(migrated.records[0].id == 1);
   CHECK(migrated.records[0].durationDs == 285);
-  CHECK(migrated.records[0].endedAtUnixSec == 0);
+  CHECK(migrated.records[0].hasWallTime == 0);
+  CHECK(migrated.records[0].endedAtLocalSec == 0);
+}
+
+void s06_shot_log_local_sec_from_utc() {
+  CHECK(shotLogLocalSecFromUtc(1'700'000'000U, -240) ==
+        1'700'000'000U - 14400U);
+  CHECK(shotLogLocalSecFromUtc(1'700'000'000U, 60) == 1'700'000'000U + 3600U);
+}
+
+void s07_shot_log_stores_fixed_wall_time() {
+  resetHarness(false, true);
+  shotLog.clear();
+  ShotLogRecord record = {};
+  record.durationDs = 120;
+  record.hasWallTime = 1;
+  record.endedAtUnixSec = 1'700'000'000U;
+  record.endedAtLocalSec = shotLogLocalSecFromUtc(1'700'000'000U, -240);
+  record.timezoneOffsetMinutesAtCommit = -240;
+  CHECK(shotLog.append(record));
+  ShotLogRecord stored[1] = {};
+  CHECK(shotLog.copyNewestFirst(stored, 1) == 1);
+  CHECK(stored[0].hasWallTime == 1);
+  CHECK(stored[0].endedAtLocalSec ==
+        shotLogLocalSecFromUtc(1'700'000'000U, -240));
+  CHECK(stored[0].timezoneOffsetMinutesAtCommit == -240);
+}
+
+void s08_shot_log_without_sync_has_no_wall_time() {
+  resetHarness(false, true);
+  shotLog.clear();
+  ShotLogRecord record = {};
+  record.durationDs = 120;
+  record.bootId = shotLog.bootId();
+  record.endedAtMs = 45000;
+  record.hasWallTime = 0;
+  CHECK(shotLog.append(record));
+  ShotLogRecord stored[1] = {};
+  CHECK(shotLog.copyNewestFirst(stored, 1) == 1);
+  CHECK(stored[0].hasWallTime == 0);
+  CHECK(stored[0].endedAtLocalSec == 0);
+  CHECK(stored[0].endedAtUnixSec == 0);
+}
+
+void s09_shot_log_migrates_schema_v3() {
+  ShotLogStoreV3 legacy = {};
+  legacy.header.bootId = 2;
+  legacy.header.nextRecordId = 2;
+  legacy.header.count = 1;
+  legacy.header.writeIndex = 1;
+  legacy.records[0].id = 1;
+  legacy.records[0].bootId = 2;
+  legacy.records[0].endedAtMs = 90000;
+  legacy.records[0].endedAtUnixSec = 1'700'000'000U;
+  legacy.records[0].durationDs = 150;
+  finalizeShotLogStoreV3(legacy);
+  CHECK(validShotLogStoreV3(legacy));
+
+  ShotLogStore migrated = {};
+  migrateShotLogStoreV3(legacy, migrated);
+  CHECK(validShotLogStore(migrated));
+  CHECK(migrated.records[0].endedAtUnixSec == 1'700'000'000U);
+  CHECK(migrated.records[0].hasWallTime == 0);
+  CHECK(migrated.records[0].endedAtLocalSec == 0);
 }
 
 using TestFunction = void (*)();
@@ -2593,9 +2714,18 @@ const TestCase testCases[] = {
     {"S03", s03_shot_log_clear_empties_records},
     {"S04", s04_shot_log_remove_by_id},
     {"S05", s05_shot_log_migrates_schema_v2},
+    {"S06", s06_shot_log_local_sec_from_utc},
+    {"S07", s07_shot_log_stores_fixed_wall_time},
+    {"S08", s08_shot_log_without_sync_has_no_wall_time},
+    {"S09", s09_shot_log_migrates_schema_v3},
     {"N01", n01_wall_clock_tracks_utc_from_anchor},
     {"N02", n02_ntp_hostname_validation},
     {"N03", n03_unsynced_retry_is_one_minute},
+    {"N04", n04_brew_start_requests_ntp_when_unsynced},
+    {"N05", n05_rinse_start_requests_ntp_when_unsynced},
+    {"N06", n06_synced_clock_skips_activity_ntp_request},
+    {"N07", n07_syncing_clock_skips_activity_ntp_request},
+    {"N08", n08_web_rinse_requests_ntp_when_unsynced},
 };
 
 }  // namespace
