@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "ShotStopperSafety.h"
@@ -28,10 +29,12 @@ constexpr size_t WIFI_PASSWORD_CAPACITY = 64;
 constexpr size_t WEB_COMMAND_QUEUE_LENGTH = 8;
 constexpr size_t DEBUG_EVENT_CAPACITY = 128;
 constexpr uint32_t MAX_AUTOMATION_WEIGHT_AGE_MS = 1000;
-constexpr float MIN_AUTOMATION_WEIGHT_G = -100.0f;
+constexpr float MIN_AUTOMATION_WEIGHT_G = -500.0f;
 constexpr float MAX_AUTOMATION_WEIGHT_G = 1000.0f;
 constexpr float MAX_AUTOMATION_WEIGHT_SLEW_G_PER_S = 100.0f;
 constexpr float AUTOMATION_WEIGHT_SLEW_ALLOWANCE_G = 20.0f;
+constexpr float POST_TARE_BASELINE_MAX_ABS_G = 50.0f;
+constexpr uint32_t POST_TARE_BASELINE_GRACE_MS = 2000;
 constexpr float MAX_PARSED_WEIGHT_G = 10000.0f;
 constexpr uint8_t DIRECT_STOP_CONFIRMATION_SAMPLES = 2;
 constexpr uint8_t WEIGHT_RECOVERY_CONFIRMATION_SAMPLES = 3;
@@ -505,7 +508,12 @@ enum class DebugCode : uint8_t {
   COMMAND_RETRY,
   COMMAND_FAILED,
   SCALE_EVENT_DROPPED,
-  SCALE_SAMPLE_REJECTED,
+  SCALE_SAMPLE_REJECTED_INVALID,
+  SCALE_SAMPLE_REJECTED_RANGE,
+  SCALE_SAMPLE_REJECTED_SLEW,
+  SCALE_SAMPLE_REJECTED_RECOVERY,
+  SCALE_SAMPLE_REJECTED_PRE_CYCLE,
+  SCALE_POST_TARE_BASELINE_TIMEOUT,
   SCALE_STREAM_STALE,
   SCALE_CONTROL_SUSPENDED,
   SCALE_CONTROL_RECOVERED,
@@ -668,7 +676,18 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::COMMAND_RETRY: return "durable command retry";
     case DebugCode::COMMAND_FAILED: return "durable command failed";
     case DebugCode::SCALE_EVENT_DROPPED: return "scale event dropped";
-    case DebugCode::SCALE_SAMPLE_REJECTED: return "scale sample rejected";
+    case DebugCode::SCALE_SAMPLE_REJECTED_INVALID:
+      return "scale sample rejected: invalid weight";
+    case DebugCode::SCALE_SAMPLE_REJECTED_RANGE:
+      return "scale sample rejected: out of automation range";
+    case DebugCode::SCALE_SAMPLE_REJECTED_SLEW:
+      return "scale sample rejected: implausible slew";
+    case DebugCode::SCALE_SAMPLE_REJECTED_RECOVERY:
+      return "scale sample rejected: recovery failed";
+    case DebugCode::SCALE_SAMPLE_REJECTED_PRE_CYCLE:
+      return "scale sample rejected: pre-cycle event";
+    case DebugCode::SCALE_POST_TARE_BASELINE_TIMEOUT:
+      return "scale post-tare baseline timeout";
     case DebugCode::SCALE_STREAM_STALE: return "scale weight stream stale";
     case DebugCode::SCALE_CONTROL_SUSPENDED:
       return "weight control suspended";
@@ -686,6 +705,65 @@ inline const char *debugCodeName(DebugCode code) {
       return "subsystem initialization failed";
   }
   return "unknown";
+}
+
+inline int32_t weightToCentigrams(float weightG) {
+  if (!isfinite(weightG)) {
+    return 0;
+  }
+  return static_cast<int32_t>(weightG * 100.0f);
+}
+
+inline void formatWeightCentigrams(int32_t centigrams, char *buffer,
+                                   size_t capacity) {
+  if (buffer == nullptr || capacity == 0) {
+    return;
+  }
+  const int32_t whole = centigrams / 100;
+  const int32_t fraction =
+      centigrams >= 0 ? centigrams % 100 : -((-centigrams) % 100);
+  snprintf(buffer, capacity, "%ld.%02ldg", static_cast<long>(whole),
+           static_cast<long>(fraction));
+}
+
+inline bool formatScaleSampleDebugMessage(const DebugEvent &event, char *message,
+                                          size_t capacity) {
+  if (message == nullptr || capacity == 0) {
+    return false;
+  }
+  char weightText[24] = {};
+  char referenceText[24] = {};
+  switch (event.code) {
+    case DebugCode::SCALE_SAMPLE_REJECTED_INVALID:
+    case DebugCode::SCALE_SAMPLE_REJECTED_PRE_CYCLE:
+      formatWeightCentigrams(event.argument1, weightText, sizeof(weightText));
+      snprintf(message, capacity, "%s (%s)", debugCodeName(event.code),
+               weightText);
+      return true;
+    case DebugCode::SCALE_SAMPLE_REJECTED_RANGE:
+      formatWeightCentigrams(event.argument1, weightText, sizeof(weightText));
+      formatWeightCentigrams(event.argument2, referenceText,
+                             sizeof(referenceText));
+      snprintf(message, capacity, "%s (%s, limit=%s)",
+               debugCodeName(event.code), weightText, referenceText);
+      return true;
+    case DebugCode::SCALE_SAMPLE_REJECTED_SLEW:
+    case DebugCode::SCALE_SAMPLE_REJECTED_RECOVERY:
+      formatWeightCentigrams(event.argument1, weightText, sizeof(weightText));
+      formatWeightCentigrams(event.argument2, referenceText,
+                             sizeof(referenceText));
+      snprintf(message, capacity, "%s (weight=%s, reference=%s)",
+               debugCodeName(event.code), weightText, referenceText);
+      return true;
+    case DebugCode::SCALE_POST_TARE_BASELINE_TIMEOUT:
+      snprintf(message, capacity, "%s (cycle=%ld, graceMs=%ld)",
+               debugCodeName(event.code),
+               static_cast<long>(event.argument1),
+               static_cast<long>(event.argument2));
+      return true;
+    default:
+      return false;
+  }
 }
 
 inline uint32_t crc32(const uint8_t *data, size_t length) {

@@ -1789,6 +1789,8 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
                debugCodeName(events[index].code),
                webCommandTypeName(
                    static_cast<WebCommandType>(events[index].argument1)));
+    } else if (formatScaleSampleDebugMessage(events[index], message,
+                                             sizeof(message))) {
     } else {
       strncpy(message, debugCodeName(events[index].code),
               sizeof(message) - 1);

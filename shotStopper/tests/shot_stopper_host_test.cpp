@@ -1960,6 +1960,7 @@ void r30_first_abrupt_sample_uses_pre_shot_baseline() {
   currentWeight = 0.0f;
   currentWeightReceivedAtMs = hostMillis;
   currentWeightSequence = 1;
+  runtimeConfig.autoTare = false;
   startCycle();
   resetWeightTrend();
   CHECK(session.hasWeightAnchor);
@@ -2073,6 +2074,113 @@ void r35_connected_without_weight_stream_is_not_available_indicator() {
   publishControlStatus();
   copyControlStatus(status);
   CHECK(!status.currentWeightValid);
+}
+
+bool debugEventExists(DebugCode code, int32_t argument1 = INT32_MIN,
+                      int32_t argument2 = INT32_MIN) {
+  DebugEvent events[DEBUG_EVENT_CAPACITY] = {};
+  const size_t count = copyDebugEvents(0, events, DEBUG_EVENT_CAPACITY);
+  for (size_t index = 0; index < count; ++index) {
+    const DebugEvent &event = events[index];
+    if (event.code != code) {
+      continue;
+    }
+    if (argument1 != INT32_MIN && event.argument1 != argument1) {
+      continue;
+    }
+    if (argument2 != INT32_MIN && event.argument2 != argument2) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+void r41_negative_weight_in_range_starts_automatic_cycle() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  currentWeight = -236.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  CHECK(session.startedWithScale);
+  CHECK(session.awaitingPostTareBaseline);
+  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
+}
+
+void r42_weight_below_automation_min_stays_manual() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  currentWeight = -520.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  CHECK(!session.startedWithScale);
+  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 0);
+  reachSessionElapsed(runtimeConfig.brewConfirmMs);
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+}
+
+void r43_post_tare_baseline_accepts_zero_after_pre_tare_weight() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  currentWeight = 236.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  CHECK(session.awaitingPostTareBaseline);
+  CHECK(executeNextScaleCommand());
+  publishWeight(236.0f, hostMillis + 1);
+  CHECK(session.awaitingPostTareBaseline);
+  publishWeight(0.0f, hostMillis + 2);
+  CHECK(session.receivedFreshWeightInCycle);
+  CHECK(!session.awaitingPostTareBaseline);
+  CHECK(session.hasWeightAnchor);
+  reachSessionElapsed(runtimeConfig.brewConfirmMs);
+  CHECK(stopperState == StopperState::BREW);
+}
+
+void r44_first_shot_after_reconnect_confirms_brew() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  setScaleConnected(false);
+  setScaleConnected(true);
+  const uint32_t generation = getScaleLinkSnapshot().connectionGeneration;
+  CHECK(generation > 0);
+  currentWeight = 236.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  currentWeightConnectionGeneration = generation;
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  publishWeight(0.0f, hostMillis + 1, generation, 10);
+  reachSessionElapsed(runtimeConfig.brewConfirmMs);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.receivedFreshWeightInCycle);
+}
+
+void r45_slew_rejection_emits_specific_debug_code() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  runtimeConfig.autoTare = false;
+  startCycle();
+  publishWeight(900.0f, hostMillis + 1);
+  CHECK(debugEventExists(DebugCode::SCALE_SAMPLE_REJECTED_SLEW, 90000, 0));
+}
+
+void r46_range_rejection_emits_specific_debug_code() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  publishWeight(-520.0f, hostMillis + 1);
+  CHECK(debugEventExists(DebugCode::SCALE_SAMPLE_REJECTED_RANGE, -52000,
+                        weightToCentigrams(MIN_AUTOMATION_WEIGHT_G)));
 }
 
 void w38_scale_indicator_states_are_unambiguous() {
@@ -2293,6 +2401,12 @@ const TestCase testCases[] = {
     {"R33", r33_weight_mailbox_keeps_latest_and_reports_gap},
     {"R34", r34_suspended_control_recovers_after_three_attributed_samples},
     {"R35", r35_connected_without_weight_stream_is_not_available_indicator},
+    {"R41", r41_negative_weight_in_range_starts_automatic_cycle},
+    {"R42", r42_weight_below_automation_min_stays_manual},
+    {"R43", r43_post_tare_baseline_accepts_zero_after_pre_tare_weight},
+    {"R44", r44_first_shot_after_reconnect_confirms_brew},
+    {"R45", r45_slew_rejection_emits_specific_debug_code},
+    {"R46", r46_range_rejection_emits_specific_debug_code},
     {"W01", w01_default_runtime_configuration_is_valid},
     {"W02", w02_each_runtime_field_is_validated},
     {"W03", w03_runtime_timing_relations_are_transactional},

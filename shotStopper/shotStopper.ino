@@ -258,6 +258,7 @@ struct CycleSession {
   bool calibrationEligible = false;
   bool hasWeightAnchor = false;
   bool directStopPending = false;
+  bool awaitingPostTareBaseline = false;
   TimerStopResult timerStopResult = TimerStopResult::NOT_REQUIRED;
   WeightControlState weightControlState = WeightControlState::INACTIVE;
   EndReason directStopReason = EndReason::NONE;
@@ -273,6 +274,7 @@ struct CycleSession {
   uint32_t ownedConnectionGeneration = 0;
   uint32_t startedAtMs = 0;
   uint32_t rinseStartedAtMs = 0;
+  uint32_t postTareBaselineDeadlineMs = 0;
   uint32_t stopTimerRetryDeadlineMs = 0;
   uint32_t stopTimerLastAttemptMs = 0;
   uint32_t lastAcceptedWeightAtMs = 0;
@@ -1387,6 +1389,36 @@ void resetDirectStopConfirmation() {
   session.lastThresholdConnectionGeneration = 0;
 }
 
+void rejectScaleSample(DebugCode code, float weightG, float referenceG = 0.0f) {
+  addDebugEvent(DebugCategory::SCALE, code, weightToCentigrams(weightG),
+                weightToCentigrams(referenceG));
+}
+
+void armPostTareBaselineWindow() {
+  session.awaitingPostTareBaseline = true;
+  session.postTareBaselineDeadlineMs =
+      session.startedAtMs + POST_TARE_BASELINE_GRACE_MS;
+  session.hasWeightAnchor = false;
+  session.recoveryConfirmations = 0;
+  session.recoveryLastAtMs = 0;
+  session.recoveryLastPacketSequence = 0;
+}
+
+void expirePostTareBaselineIfNeeded() {
+  if (!session.awaitingPostTareBaseline) {
+    return;
+  }
+  if (static_cast<int32_t>(millis() - session.postTareBaselineDeadlineMs) <
+      0) {
+    return;
+  }
+  session.awaitingPostTareBaseline = false;
+  addDebugEvent(DebugCategory::SCALE,
+                DebugCode::SCALE_POST_TARE_BASELINE_TIMEOUT,
+                static_cast<int32_t>(session.id),
+                static_cast<int32_t>(POST_TARE_BASELINE_GRACE_MS));
+}
+
 void considerDirectStopSample(float weight, uint32_t receivedAtMs,
                               uint32_t packetSequence,
                               uint32_t connectionGeneration) {
@@ -1468,7 +1500,7 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
                                       uint32_t connectionGeneration) {
   if (!isfinite(weight) || fabsf(weight) > MAX_PARSED_WEIGHT_G) {
     Serial.println("Invalid or out-of-range weight ignored");
-    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_SAMPLE_REJECTED);
+    rejectScaleSample(DebugCode::SCALE_SAMPLE_REJECTED_INVALID, weight);
     return false;
   }
 
@@ -1505,12 +1537,27 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
       setWeightControlState(WeightControlState::VALIDATING);
     }
     session.recoveryConfirmations = 0;
-    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_SAMPLE_REJECTED,
-                  static_cast<int32_t>(weight));
+    const float violatedLimit = weight < MIN_AUTOMATION_WEIGHT_G
+                                    ? MIN_AUTOMATION_WEIGHT_G
+                                    : MAX_AUTOMATION_WEIGHT_G;
+    rejectScaleSample(DebugCode::SCALE_SAMPLE_REJECTED_RANGE, weight,
+                      violatedLimit);
     return false;
   }
 
   if (static_cast<int32_t>(receivedAtMs - shot.startMs) < 0) {
+    rejectScaleSample(DebugCode::SCALE_SAMPLE_REJECTED_PRE_CYCLE, weight);
+    return false;
+  }
+
+  if (session.awaitingPostTareBaseline) {
+    if (fabsf(weight) <= POST_TARE_BASELINE_MAX_ABS_G) {
+      session.awaitingPostTareBaseline = false;
+      weightStreamState = WeightStreamState::FRESH;
+      return acceptWeightIntoTrajectory(weight, receivedAtMs, packetSequence);
+    }
+    rejectScaleSample(DebugCode::SCALE_SAMPLE_REJECTED_SLEW, weight,
+                      POST_TARE_BASELINE_MAX_ABS_G);
     return false;
   }
 
@@ -1538,7 +1585,8 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
     session.recoveryConfirmations = 0;
     session.recoveryLastAtMs = 0;
     session.recoveryLastPacketSequence = 0;
-    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_SAMPLE_REJECTED);
+    rejectScaleSample(DebugCode::SCALE_SAMPLE_REJECTED_SLEW, weight,
+                      session.lastAcceptedWeightG);
     return false;
   }
 
@@ -1567,10 +1615,14 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
     }
 
     if (!recoveryPlausible) {
+      const float referenceG = session.recoveryConfirmations > 0
+                                   ? session.recoveryLastWeightG
+                                   : session.lastAcceptedWeightG;
       session.recoveryConfirmations = 0;
       session.recoveryLastAtMs = 0;
       session.recoveryLastPacketSequence = 0;
-      addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_SAMPLE_REJECTED);
+      rejectScaleSample(DebugCode::SCALE_SAMPLE_REJECTED_RECOVERY, weight,
+                        referenceG);
       return false;
     }
 
@@ -2080,8 +2132,8 @@ void processScaleWorkerEvents() {
         if (!isfinite(event.weightG) ||
             fabsf(event.weightG) > MAX_PARSED_WEIGHT_G) {
           Serial.println("Invalid scale weight event ignored");
-          addDebugEvent(DebugCategory::SCALE,
-                        DebugCode::SCALE_SAMPLE_REJECTED);
+          rejectScaleSample(DebugCode::SCALE_SAMPLE_REJECTED_INVALID,
+                            event.weightG);
           break;
         }
         {
@@ -2121,6 +2173,10 @@ void processScaleWorkerEvents() {
         if (event.cycleId == session.id) {
           session.remoteTimerMayBeRunning = event.commandAttempted;
           session.remoteTimerStarted = event.writeSucceeded;
+          if (event.writeSucceeded && session.config.autoTare &&
+              session.startedWithScale) {
+            armPostTareBaselineWindow();
+          }
         }
         Serial.print("Remote timer start write: ");
         Serial.println(event.writeSucceeded ? "successful" : "failed/skipped");
@@ -2201,10 +2257,14 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
       session.weightControlState == WeightControlState::ACTIVE;
   session.calibrationEligible = session.automaticEnabled;
   if (session.startedWithScale) {
-    session.hasWeightAnchor = true;
-    session.lastAcceptedWeightG = currentWeight;
-    session.lastAcceptedWeightAtMs = currentWeightReceivedAtMs;
-    session.lastAcceptedPacketSequence = currentWeightSequence;
+    if (session.config.autoTare) {
+      armPostTareBaselineWindow();
+    } else {
+      session.hasWeightAnchor = true;
+      session.lastAcceptedWeightG = currentWeight;
+      session.lastAcceptedWeightAtMs = currentWeightReceivedAtMs;
+      session.lastAcceptedPacketSequence = currentWeightSequence;
+    }
   }
   resetShotTrajectory(session.startedAtMs);
   transitionTo(StopperState::QUALIFYING_ON);
@@ -2458,6 +2518,8 @@ void stateMachineTask() {
         suspendWeightControl();
         Serial.println("Scale stream suspended while qualifying");
       }
+
+      expirePostTareBaselineIfNeeded();
 
       if (elapsedMs(session.startedAtMs) >= session.config.brewConfirmMs) {
         confirmBrewOrManual();
