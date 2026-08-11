@@ -3,6 +3,7 @@
 
 #include "ShotStopperWebAssets.h"
 
+#include <Arduino.h>
 #include <cJSON.h>
 #include <esp_sntp.h>
 #include <esp_wifi.h>
@@ -283,6 +284,35 @@ esp_err_t sendJsonStringChunk(httpd_req_t *request, const char *value) {
     return ESP_FAIL;
   }
   return httpd_resp_send_chunk(request, "\"", 1);
+}
+
+char g_statusResponseBuffer[6144];
+
+void sanitizeJsonEmbed(const char *input, char *output, size_t capacity) {
+  if (capacity == 0) {
+    return;
+  }
+  size_t written = 0;
+  for (size_t index = 0; input != nullptr && input[index] != '\0' &&
+                          written + 1 < capacity;
+       ++index) {
+    const unsigned char byte = static_cast<unsigned char>(input[index]);
+    if (byte == '\"' || byte == '\\' || byte < 0x20) {
+      continue;
+    }
+    output[written++] = static_cast<char>(byte);
+  }
+  output[written] = '\0';
+}
+
+bool applySystemTimeToWallClock(uint32_t now) {
+  time_t nowSec = 0;
+  time(&nowSec);
+  if (nowSec < 1000000000) {
+    return false;
+  }
+  g_wallClock.queueSyncFromCallback(static_cast<uint32_t>(nowSec));
+  return g_wallClock.applyPendingSync(now);
 }
 
 }  // namespace
@@ -1285,22 +1315,16 @@ void ShotStopperNetwork::armNtp(uint32_t now) {
   resolveNtpServerHost(settings_.runtime, ntpFailoverIndex_, ntpServerBuffer_);
   g_wallClock.setSyncing(ntpServerBuffer_, now);
   ntpSyncStartedAtMs_ = now;
-  esp_sntp_set_time_sync_notification_cb(ntpSyncNotificationCallback);
 
   if (esp_sntp_enabled()) {
     esp_sntp_setservername(0, ntpServerBuffer_);
-    esp_sntp_set_sync_interval(NTP_RESYNC_INTERVAL_MS);
-    if (sntp_restart()) {
-      ntpStarted_ = true;
-      return;
-    }
-    stopNtp();
+    sntp_restart();
+    ntpStarted_ = true;
+    return;
   }
 
-  esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
-  esp_sntp_setservername(0, ntpServerBuffer_);
-  esp_sntp_set_sync_interval(NTP_RESYNC_INTERVAL_MS);
-  esp_sntp_init();
+  esp_sntp_set_time_sync_notification_cb(ntpSyncNotificationCallback);
+  configTime(0, 0, ntpServerBuffer_);
   ntpStarted_ = true;
 }
 
@@ -1316,7 +1340,6 @@ void ShotStopperNetwork::handleNtpFailure(uint32_t now) {
 void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
   if (g_wallClock.applyPendingSync(now)) {
     ntpFailoverIndex_ = 0;
-    stopNtp();
     log(DebugCategory::NETWORK, DebugCode::TIME_SYNC_OK);
   }
 
@@ -1335,21 +1358,11 @@ void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
   const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(now);
 
   if (timeStatus.state == TimeSyncState::SYNCING) {
-    if (esp_sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED &&
-        !g_wallClock.synced()) {
-      time_t nowSec = 0;
-      time(&nowSec);
-      if (nowSec >= 1000000000) {
-        g_wallClock.queueSyncFromCallback(static_cast<uint32_t>(nowSec));
-        if (g_wallClock.applyPendingSync(now)) {
-          ntpFailoverIndex_ = 0;
-          stopNtp();
-          log(DebugCategory::NETWORK, DebugCode::TIME_SYNC_OK);
-        }
-      }
-    }
-    if (static_cast<uint32_t>(now - ntpSyncStartedAtMs_) >=
-        NTP_FIRST_SYNC_TIMEOUT_MS) {
+    if (applySystemTimeToWallClock(now)) {
+      ntpFailoverIndex_ = 0;
+      log(DebugCategory::NETWORK, DebugCode::TIME_SYNC_OK);
+    } else if (static_cast<uint32_t>(now - ntpSyncStartedAtMs_) >=
+               NTP_FIRST_SYNC_TIMEOUT_MS) {
       handleNtpFailure(now);
     }
     return;
@@ -1371,16 +1384,17 @@ void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
   switch (timeStatus.state) {
     case TimeSyncState::OFF:
     case TimeSyncState::FAILED:
-      if (timeStatus.nextRetryInMs > 0 || ntpStarted_) {
+      if (timeStatus.nextRetryInMs > 0) {
         return;
       }
       armNtp(now);
       return;
     case TimeSyncState::SYNCED:
     case TimeSyncState::STALE:
-      if (!ntpStarted_ &&
-          timeStatus.lastSyncAgeMs >= NTP_RESYNC_INTERVAL_MS) {
-        armNtp(now);
+      if (timeStatus.lastSyncAgeMs >= NTP_RESYNC_INTERVAL_MS &&
+          applySystemTimeToWallClock(now)) {
+        ntpFailoverIndex_ = 0;
+        log(DebugCategory::NETWORK, DebugCode::TIME_SYNC_OK);
       }
       return;
     case TimeSyncState::SYNCING:
@@ -1394,7 +1408,7 @@ bool ShotStopperNetwork::startHttpServer() {
   }
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.task_priority = tskIDLE_PRIORITY + 1;
-  config.stack_size = 8192;
+  config.stack_size = 12288;
   config.max_open_sockets = 2;
   config.max_uri_handlers = 23;
   config.max_resp_headers = 8;
@@ -1846,9 +1860,14 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   }
 
   const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(millis());
-  char response[5120] = {};
+  char safeNtpCustom[NTP_SERVER_HOST_CAPACITY] = {};
+  char safeActiveServer[NTP_SERVER_HOST_CAPACITY] = {};
+  sanitizeJsonEmbed(control.config.ntpServerCustom, safeNtpCustom,
+                    sizeof(safeNtpCustom));
+  sanitizeJsonEmbed(timeStatus.activeServer, safeActiveServer,
+                    sizeof(safeActiveServer));
   const int written = snprintf(
-      response, sizeof(response),
+      g_statusResponseBuffer, sizeof(g_statusResponseBuffer),
       "{\"state\":\"%s\",\"stateLabel\":\"%s\",\"relayClosed\":%s,"
       "\"physicalPaddleOn\":%s,\"virtualPaddleOn\":%s,"
       "\"remoteControlEnabled\":%s,"
@@ -1938,13 +1957,13 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(control.config.operationalWallMs),
       static_cast<int>(control.config.timezoneOffsetMinutes),
       ntpPresetId(control.config.ntpServerPreset),
-      control.config.ntpServerCustom,
+      safeNtpCustom,
       timeSyncStateName(timeStatus.state),
       static_cast<unsigned long>(timeStatus.utcSec),
       static_cast<unsigned long>(timeStatus.lastSyncAgeMs),
       static_cast<unsigned long>(timeStatus.nextRetryInMs),
       static_cast<unsigned>(timeStatus.consecutiveFailures),
-      timeStatus.activeServer,
+      safeActiveServer,
       control.scaleAvailable ? "true" : "false",
       weightStreamStateName(control.weightStreamState),
       weightControlStateName(control.weightControlState),
@@ -1983,11 +2002,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(network.lastCommandRequestId),
       commandResultStateName(network.lastCommandState),
       static_cast<unsigned long>(control.debugEventsDropped));
-  if (written < 0 || static_cast<size_t>(written) >= sizeof(response)) {
+  if (written < 0 ||
+      static_cast<size_t>(written) >= sizeof(g_statusResponseBuffer)) {
     return sendError(request, "500 Internal Server Error", "STATUS_TOO_LARGE",
                      "Status snapshot exceeds its size limit.");
   }
-  return sendJson(request, STATUS_OK, response);
+  return sendJson(request, STATUS_OK, g_statusResponseBuffer);
 }
 
 esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
