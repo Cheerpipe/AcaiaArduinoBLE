@@ -1,5 +1,5 @@
 #define SHOT_STOPPER_HOST_TEST
-#define ARDUINO_ESP32C3_DEV
+#define ARDUINO_ESP32_DEV
 #define SHOT_STOPPER_ENABLE_REMOTE_CN9 1
 
 #include <cstdlib>

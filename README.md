@@ -66,7 +66,7 @@ The project was created to achieve these goals:
 - Local BLE library for Acaia, Bookoo, and Felicita scales.
 - Two independent WS2812B status indicators: one for scale health and one for
   stopper workflow and safety state.
-- Host tests, coverage, and CI builds for ESP32, ESP32-C3, and ESP32-S3.
+- Host tests, coverage, and CI builds for ESP32 and ESP32-S3.
 
 ## Repository structure
 
@@ -267,7 +267,6 @@ devices, each with its own data GPIO:
 | Board | FQBN | Paddle | Relay | Scale LED | Stopper LED |
 | --- | --- | ---: | ---: | ---: | ---: |
 | ESP32 Dev Module / DevKit V4 | `esp32:esp32:esp32` | GPIO 27 | GPIO 26 | GPIO 25 | GPIO 33 |
-| ESP32-C3 Dev Module | `esp32:esp32:esp32c3` | GPIO 8 | GPIO 6 | GPIO 20 | GPIO 21 |
 | ESP32-S3 Dev Module | `esp32:esp32:esp32s3` | GPIO 21 | GPIO 38 | GPIO 48 | GPIO 47 |
 
 The code also maps Arduino Nano ESP32 D10/D11 to paddle/relay and D2/D3 to
@@ -356,16 +355,16 @@ error:
 - `SHOT_STOPPER_CN9_FEEDBACK_GPIO`: isolated feedback input.
 - `SHOT_STOPPER_CN9_FEEDBACK_CLOSED_LEVEL`: optional; defaults to `LOW`.
 
-Example build for an ESP32-C3 where GPIO 4 and GPIO 5 were verified as free and
-appropriate on the specific hardware:
+Example build for an ESP32 Dev Module where GPIO 16 and GPIO 17 were verified as
+free and appropriate on the specific hardware:
 
 ```sh
-mkdir -p build/esp32-c3-safety
-arduino-cli compile --fqbn esp32:esp32:esp32c3 --warnings all \
+mkdir -p build/esp32-safety
+arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all \
   --build-property \
-  'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_SAFETY_HEARTBEAT_GPIO=4 -DSHOT_STOPPER_CN9_FEEDBACK_GPIO=5' \
+  'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_SAFETY_HEARTBEAT_GPIO=16 -DSHOT_STOPPER_CN9_FEEDBACK_GPIO=17' \
   --library libraries/AcaiaArduinoBLE \
-  --build-path build/esp32-c3-safety \
+  --build-path build/esp32-safety \
   shotStopper
 ```
 
@@ -424,14 +423,10 @@ arduino-cli compile \
   shotStopper
 ```
 
-For C3 and S3 variants, use their FQBNs and output directories:
+For the ESP32-S3 variant, use its FQBN and output directory:
 
 ```sh
-mkdir -p build/esp32-c3 build/esp32-s3
-
-arduino-cli compile --fqbn esp32:esp32:esp32c3 --warnings all \
-  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy' \
-  --library libraries/AcaiaArduinoBLE --build-path build/esp32-c3 shotStopper
+mkdir -p build/esp32-s3
 
 arduino-cli compile --fqbn esp32:esp32:esp32s3 --warnings all \
   --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy' \
@@ -457,7 +452,7 @@ arduino-cli upload \
   shotStopper
 ```
 
-For C3 or S3, change both `--fqbn` and `--input-dir` to match the compiled
+For ESP32-S3, change both `--fqbn` and `--input-dir` to match the compiled
 variant. The generated application image is named `shotStopper.ino.bin`.
 `arduino-cli upload --input-dir` is recommended because it uploads the
 bootloader, partition table, and application at their correct offsets.
@@ -484,7 +479,7 @@ Automated tests do not replace electrical, RF, power-loss, or
 The stopper suite includes host fault injection for a timeout during `ARMING`,
 GPTimer failure, task watchdog failure, stuck/disconnected feedback, and
 heartbeat faults. CI builds both the base variant and the external safety
-interface for ESP32, ESP32-C3, and ESP32-S3. Bench and HIL testing of the
+interface for ESP32 and ESP32-S3. Bench and HIL testing of the
 specific circuit remains mandatory before real use.
 
 ## Additional documentation

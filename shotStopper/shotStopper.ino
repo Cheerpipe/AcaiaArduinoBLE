@@ -80,15 +80,6 @@ constexpr uint8_t RELAY_GPIO = 38;
 #ifndef SHOT_STOPPER_STOPPER_LED_GPIO
 #define SHOT_STOPPER_STOPPER_LED_GPIO 47
 #endif
-#elif defined(ARDUINO_ESP32C3_DEV)
-constexpr uint8_t PADDLE_GPIO = 8;
-constexpr uint8_t RELAY_GPIO = 6;
-#ifndef SHOT_STOPPER_SCALE_LED_GPIO
-#define SHOT_STOPPER_SCALE_LED_GPIO 20
-#endif
-#ifndef SHOT_STOPPER_STOPPER_LED_GPIO
-#define SHOT_STOPPER_STOPPER_LED_GPIO 21
-#endif
 #elif defined(ARDUINO_NANO_ESP32)
 constexpr uint8_t PADDLE_GPIO = 10;
 constexpr uint8_t RELAY_GPIO = 11;
