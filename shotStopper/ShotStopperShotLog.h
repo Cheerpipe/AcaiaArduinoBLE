@@ -11,7 +11,7 @@
 namespace shotstopper {
 
 constexpr uint32_t SHOT_LOG_MAGIC = 0x534C4F47U;  // "SLOG"
-constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 2;
+constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 3;
 constexpr size_t SHOT_LOG_CAPACITY = 120;
 constexpr uint32_t MIN_SHOT_LOG_DURATION_MS = 10000;
 constexpr float FIRST_DROP_THRESHOLD_G = 0.3f;
@@ -90,6 +90,22 @@ struct ShotLogRecord {
   uint32_t id;
   uint32_t bootId;
   uint32_t endedAtMs;
+  uint32_t endedAtUnixSec;
+  uint16_t durationDs;
+  uint8_t goalWeightG;
+  int16_t actualWeightCg;
+  int16_t errorCg;
+  int16_t offsetUsedCg;
+  uint16_t firstDropDs;
+  uint16_t avgFlowCgS;
+  uint8_t shotType;
+  uint8_t cutType;
+};
+
+struct ShotLogRecordV2 {
+  uint32_t id;
+  uint32_t bootId;
+  uint32_t endedAtMs;
   uint16_t durationDs;
   uint8_t goalWeightG;
   int16_t actualWeightCg;
@@ -117,9 +133,79 @@ struct ShotLogStore {
   ShotLogRecord records[SHOT_LOG_CAPACITY];
 };
 
-inline uint32_t shotLogChecksum(const ShotLogStore &store) {
-  return crc32(reinterpret_cast<const uint8_t *>(&store.header),
+struct ShotLogStoreV2 {
+  ShotLogHeader header;
+  ShotLogRecordV2 records[SHOT_LOG_CAPACITY];
+};
+
+static_assert(sizeof(ShotLogRecordV2) + sizeof(uint32_t) == sizeof(ShotLogRecord),
+              "v3 shot log records extend v2 with endedAtUnixSec");
+
+inline uint32_t shotLogChecksumBytes(const ShotLogHeader &header) {
+  return crc32(reinterpret_cast<const uint8_t *>(&header),
                offsetof(ShotLogHeader, checksum));
+}
+
+inline uint32_t shotLogChecksum(const ShotLogStore &store) {
+  return shotLogChecksumBytes(store.header);
+}
+
+inline uint32_t shotLogChecksumV2(const ShotLogStoreV2 &store) {
+  return shotLogChecksumBytes(store.header);
+}
+
+inline bool validShotLogStoreV2(const ShotLogStoreV2 &store) {
+  if (store.header.magic != SHOT_LOG_MAGIC ||
+      store.header.schemaVersion != 2 ||
+      store.header.recordSize != sizeof(ShotLogRecordV2) ||
+      store.header.count > SHOT_LOG_CAPACITY ||
+      store.header.writeIndex >= SHOT_LOG_CAPACITY ||
+      store.header.checksum != shotLogChecksumV2(store)) {
+    return false;
+  }
+  return true;
+}
+
+inline void finalizeShotLogStoreV2(ShotLogStoreV2 &store) {
+  store.header.magic = SHOT_LOG_MAGIC;
+  store.header.schemaVersion = 2;
+  store.header.recordSize = sizeof(ShotLogRecordV2);
+  store.header.checksum = 0;
+  store.header.checksum = shotLogChecksumV2(store);
+}
+
+inline void finalizeShotLogStore(ShotLogStore &store) {
+  store.header.magic = SHOT_LOG_MAGIC;
+  store.header.schemaVersion = SHOT_LOG_SCHEMA_VERSION;
+  store.header.recordSize = sizeof(ShotLogRecord);
+  store.header.checksum = 0;
+  store.header.checksum = shotLogChecksum(store);
+}
+
+inline void migrateShotLogStoreV2(const ShotLogStoreV2 &legacy, ShotLogStore &store) {
+  memset(&store, 0, sizeof(store));
+  store.header.bootId = legacy.header.bootId;
+  store.header.nextRecordId = legacy.header.nextRecordId;
+  store.header.count = legacy.header.count;
+  store.header.writeIndex = legacy.header.writeIndex;
+  for (size_t index = 0; index < SHOT_LOG_CAPACITY; ++index) {
+    const ShotLogRecordV2 &source = legacy.records[index];
+    ShotLogRecord &dest = store.records[index];
+    dest.id = source.id;
+    dest.bootId = source.bootId;
+    dest.endedAtMs = source.endedAtMs;
+    dest.endedAtUnixSec = 0;
+    dest.durationDs = source.durationDs;
+    dest.goalWeightG = source.goalWeightG;
+    dest.actualWeightCg = source.actualWeightCg;
+    dest.errorCg = source.errorCg;
+    dest.offsetUsedCg = source.offsetUsedCg;
+    dest.firstDropDs = source.firstDropDs;
+    dest.avgFlowCgS = source.avgFlowCgS;
+    dest.shotType = source.shotType;
+    dest.cutType = source.cutType;
+  }
+  finalizeShotLogStore(store);
 }
 
 inline bool validShotLogStore(const ShotLogStore &store) {
@@ -134,14 +220,6 @@ inline bool validShotLogStore(const ShotLogStore &store) {
   return true;
 }
 
-inline void finalizeShotLogStore(ShotLogStore &store) {
-  store.header.magic = SHOT_LOG_MAGIC;
-  store.header.schemaVersion = SHOT_LOG_SCHEMA_VERSION;
-  store.header.recordSize = sizeof(ShotLogRecord);
-  store.header.checksum = 0;
-  store.header.checksum = shotLogChecksum(store);
-}
-
 inline void resetShotLogStore(ShotLogStore &store, uint32_t bootId) {
   memset(&store, 0, sizeof(store));
   store.header.bootId = bootId == 0 ? 1U : bootId;
@@ -152,8 +230,8 @@ inline void resetShotLogStore(ShotLogStore &store, uint32_t bootId) {
 class ShotLog {
  public:
   bool load() {
-    resetShotLogStore(store_, 1);
 #if defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST) || defined(SHOT_STOPPER_HOST_TEST)
+    resetShotLogStore(store_, 1);
     if (hostStorageValid_) {
       memcpy(&store_, &hostStorage_, sizeof(store_));
     }
@@ -164,18 +242,32 @@ class ShotLog {
 #else
     Preferences preferences;
     if (!preferences.begin(SHOT_LOG_NAMESPACE, true)) {
+      resetShotLogStore(store_, 1);
       return false;
     }
-    if (preferences.getBytesLength(SHOT_LOG_KEY) != sizeof(store_)) {
-      preferences.end();
-      return true;
-    }
-    if (preferences.getBytes(SHOT_LOG_KEY, &store_, sizeof(store_)) !=
-            sizeof(store_) ||
-        !validShotLogStore(store_)) {
-      resetShotLogStore(store_, 1);
+    const size_t length = preferences.getBytesLength(SHOT_LOG_KEY);
+    bool loaded = false;
+    if (length == sizeof(store_)) {
+      if (preferences.getBytes(SHOT_LOG_KEY, &store_, sizeof(store_)) ==
+              sizeof(store_) &&
+          validShotLogStore(store_)) {
+        loaded = true;
+      }
+    } else if (length == sizeof(ShotLogStoreV2)) {
+      ShotLogStoreV2 legacy = {};
+      if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
+              sizeof(legacy) &&
+          validShotLogStoreV2(legacy)) {
+        migrateShotLogStoreV2(legacy, store_);
+        loaded = true;
+      }
     }
     preferences.end();
+    if (!loaded) {
+      resetShotLogStore(store_, 1);
+    } else if (length == sizeof(ShotLogStoreV2)) {
+      save();
+    }
     return true;
 #endif
   }

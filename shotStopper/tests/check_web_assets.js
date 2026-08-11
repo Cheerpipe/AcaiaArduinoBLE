@@ -40,6 +40,15 @@ if (!network.includes('"brewConfirmationBeep"') ||
     !network.includes('"paddleReturnReminderIntervalMs"') ||
     !network.includes('"paddleReturnReminderMaxDurationMs"') ||
     !network.includes('"timezoneOffsetMinutes"') ||
+    !network.includes('"ntpServerPreset"') ||
+    !network.includes('"ntpServerCustom"') ||
+    !network.includes('\\"time\\":{') ||
+    !html.includes('id="currentTime"') ||
+    !html.includes('id="ntpStatus"') ||
+    !html.includes('id="ntpServerPreset"') ||
+    !html.includes('id="ntpServerCustom"') ||
+    !html.includes('id="syncTimeButton"') ||
+    !html.includes('/api/v1/time/sync') ||
     !firmware.includes('session.config.brewConfirmationBeep') ||
     !firmware.includes('servicePaddleReturnReminder')) {
   throw new Error('Scale beep settings must be configurable end-to-end');
@@ -52,7 +61,7 @@ if (!html.includes('authenticatedOnly') || !html.includes('Read-only view') ||
 const statusSection = html.match(/<fieldset><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     statusSection[1].includes('class="row"') ||
-    (statusSection[1].match(/class="metric"/g) || []).length !== 11 ||
+    (statusSection[1].match(/class="metric"/g) || []).length !== 13 ||
     !html.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'")) {
   throw new Error('Status must use one metric per row and homologate Paddle/CN9 OPEN/OFF and CLOSED/ON labels');
 }
@@ -106,6 +115,7 @@ const expected = new Map([
   ['GET /api/v1/shots', 'shotsHandler'],
   ['POST /api/v1/shots/clear', 'shotsClearHandler'],
   ['POST /api/v1/shots/delete', 'shotsDeleteHandler'],
+  ['POST /api/v1/time/sync', 'timeSyncHandler'],
   ['POST /api/v1/network', 'networkHandler'],
   ['POST /api/v1/network/scan', 'wifiScanStartHandler'],
   ['GET /api/v1/network/scan', 'wifiScanStatusHandler'],

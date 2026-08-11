@@ -34,6 +34,7 @@
 #include "ShotStopperResetGuard.h"
 #include "ShotStopperSafety.h"
 #include "ShotStopperShotLog.h"
+#include "ShotStopperTime.h"
 #include "ShotStopperWatchdog.h"
 
 using namespace shotstopper;
@@ -1756,6 +1757,8 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
   record.avgFlowCgS = SHOT_LOG_METRIC_MISSING;
   record.bootId = snapshot.bootId;
   record.endedAtMs = snapshot.endedAtMs;
+  record.endedAtUnixSec =
+      g_wallClock.synced() ? g_wallClock.nowUtcSec(millis()) : 0U;
   record.durationDs = snapshot.durationDs;
   record.goalWeightG = snapshot.goalWeightG;
   record.offsetUsedCg = shotLogWeightToCentigrams(snapshot.weightOffsetG);

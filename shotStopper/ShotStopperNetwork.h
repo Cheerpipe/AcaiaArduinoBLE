@@ -3,9 +3,12 @@
 #include "ShotStopperDomain.h"
 #include "ShotStopperPersistence.h"
 #include "ShotStopperShotLog.h"
+#include "ShotStopperTime.h"
 
 #include <WiFi.h>
 #include <esp_http_server.h>
+
+struct timeval;
 
 namespace shotstopper {
 
@@ -155,10 +158,22 @@ class ShotStopperNetwork {
   uint32_t restartRequestedAtMs_ = 0;
   uint32_t loginWindowStartedAtMs_ = 0;
   uint8_t loginAttemptsInWindow_ = 0;
+  bool ntpStarted_ = false;
+  bool ntpRearmPending_ = false;
+  bool ntpManualSyncPending_ = false;
+  uint8_t ntpFailoverIndex_ = 0;
+  uint32_t ntpSyncStartedAtMs_ = 0;
+  uint32_t ntpConfigRevision_ = 0;
+  char ntpServerBuffer_[NTP_SERVER_HOST_CAPACITY] = {};
 
   static void taskEntry(void *parameter);
   void taskLoop();
   void service();
+  void serviceNtp(uint32_t now, bool staConnected);
+  void stopNtp();
+  void armNtp(uint32_t now);
+  void handleNtpFailure(uint32_t now);
+  static void ntpSyncNotificationCallback(struct timeval *tv);
   bool startNetwork();
   void startStation(const PersistedSettings &settings, uint32_t now);
   bool startFallbackAccessPoint(uint32_t now);
@@ -205,6 +220,7 @@ class ShotStopperNetwork {
   static esp_err_t shotsHandler(httpd_req_t *request);
   static esp_err_t shotsClearHandler(httpd_req_t *request);
   static esp_err_t shotsDeleteHandler(httpd_req_t *request);
+  static esp_err_t timeSyncHandler(httpd_req_t *request);
   static esp_err_t configHandler(httpd_req_t *request);
   static esp_err_t resetCalibrationHandler(httpd_req_t *request);
   static esp_err_t paddleHandler(httpd_req_t *request);

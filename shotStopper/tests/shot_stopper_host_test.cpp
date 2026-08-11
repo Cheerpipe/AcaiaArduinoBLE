@@ -2397,6 +2397,28 @@ void s03_shot_log_clear_empties_records() {
   CHECK(shotLog.count() == 0);
 }
 
+void n01_wall_clock_tracks_utc_from_anchor() {
+  g_wallClock.reset();
+  g_wallClock.setSyncing("pool.ntp.org", 1000);
+  g_wallClock.queueSyncFromCallback(1'700'000'000U);
+  CHECK(g_wallClock.applyPendingSync(1000));
+  CHECK(g_wallClock.nowUtcSec(1000) == 1'700'000'000U);
+  CHECK(g_wallClock.nowUtcSec(6000) == 1'700'000'005U);
+}
+
+void n02_ntp_hostname_validation() {
+  CHECK(validNtpHostname("pool.ntp.org"));
+  CHECK(validNtpHostname("time.google.com"));
+  CHECK(!validNtpHostname(""));
+  CHECK(!validNtpHostname("-bad.example"));
+  CHECK(!validNtpHostname("bad space"));
+}
+
+void n03_unsynced_retry_is_one_minute() {
+  CHECK(ntpRetryDelayMs(0) == NTP_UNSYNCED_RETRY_MS);
+  CHECK(ntpRetryDelayMs(5) == NTP_UNSYNCED_RETRY_MS);
+}
+
 void s04_shot_log_remove_by_id() {
   resetHarness(false, true);
   shotLog.clear();
@@ -2419,6 +2441,30 @@ void s04_shot_log_remove_by_id() {
   CHECK(records[0].durationDs == 100);
   CHECK(!shotLog.removeById(deleteId));
   CHECK(!shotLog.removeById(99999U));
+}
+
+void s05_shot_log_migrates_schema_v2() {
+  ShotLogStoreV2 legacy = {};
+  legacy.header.bootId = 3;
+  legacy.header.nextRecordId = 2;
+  legacy.header.count = 1;
+  legacy.header.writeIndex = 1;
+  legacy.records[0].id = 1;
+  legacy.records[0].bootId = 3;
+  legacy.records[0].endedAtMs = 45000;
+  legacy.records[0].durationDs = 285;
+  legacy.records[0].goalWeightG = 18;
+  finalizeShotLogStoreV2(legacy);
+  CHECK(validShotLogStoreV2(legacy));
+
+  ShotLogStore migrated = {};
+  migrateShotLogStoreV2(legacy, migrated);
+  CHECK(validShotLogStore(migrated));
+  CHECK(migrated.header.count == 1);
+  CHECK(migrated.header.bootId == 3);
+  CHECK(migrated.records[0].id == 1);
+  CHECK(migrated.records[0].durationDs == 285);
+  CHECK(migrated.records[0].endedAtUnixSec == 0);
 }
 
 using TestFunction = void (*)();
@@ -2546,6 +2592,10 @@ const TestCase testCases[] = {
     {"S02", s02_shot_log_appends_after_drip_delay},
     {"S03", s03_shot_log_clear_empties_records},
     {"S04", s04_shot_log_remove_by_id},
+    {"S05", s05_shot_log_migrates_schema_v2},
+    {"N01", n01_wall_clock_tracks_utc_from_anchor},
+    {"N02", n02_ntp_hostname_validation},
+    {"N03", n03_unsynced_retry_is_one_minute},
 };
 
 }  // namespace

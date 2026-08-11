@@ -10,8 +10,61 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 7;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 6;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 8;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 7;
+constexpr size_t NTP_SERVER_HOST_CAPACITY = 64;
+constexpr uint32_t NTP_RESYNC_INTERVAL_MS = 3600UL * 1000UL;
+constexpr uint32_t NTP_UNSYNCED_RETRY_MS = 60UL * 1000UL;
+constexpr uint32_t NTP_FIRST_SYNC_TIMEOUT_MS = 30000;
+constexpr uint32_t NTP_SYNC_TIMEOUT_MS = 60000;
+constexpr uint32_t NTP_STALE_AFTER_MS = 24UL * 3600UL * 1000UL;
+constexpr uint8_t NTP_MAX_CONSECUTIVE_FAILURES = 255;
+
+enum class NtpServerPreset : uint8_t {
+  POOL = 0,
+  GOOGLE = 1,
+  CLOUDFLARE = 2,
+  NIST = 3
+};
+
+inline bool validNtpHostnameChar(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+         (c >= '0' && c <= '9') || c == '-' || c == '.';
+}
+
+inline bool validNtpHostname(const char *host) {
+  if (host == nullptr) {
+    return false;
+  }
+  const size_t length = strnlen(host, NTP_SERVER_HOST_CAPACITY);
+  if (length == 0 || length >= NTP_SERVER_HOST_CAPACITY) {
+    return false;
+  }
+  if (host[0] == '-' || host[0] == '.' || host[length - 1] == '-' ||
+      host[length - 1] == '.') {
+    return false;
+  }
+  for (size_t index = 0; index < length; ++index) {
+    if (!validNtpHostnameChar(host[index])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline const char *ntpPresetHostname(uint8_t preset) {
+  switch (preset) {
+    case static_cast<uint8_t>(NtpServerPreset::GOOGLE):
+      return "time.google.com";
+    case static_cast<uint8_t>(NtpServerPreset::CLOUDFLARE):
+      return "time.cloudflare.com";
+    case static_cast<uint8_t>(NtpServerPreset::NIST):
+      return "time.nist.gov";
+    case static_cast<uint8_t>(NtpServerPreset::POOL):
+    default:
+      return "pool.ntp.org";
+  }
+}
 constexpr int16_t MIN_TIMEZONE_OFFSET_MINUTES = -720;
 constexpr int16_t MAX_TIMEZONE_OFFSET_MINUTES = 840;
 constexpr int16_t DEFAULT_TIMEZONE_OFFSET_MINUTES = 0;
@@ -167,6 +220,8 @@ struct RuntimeConfig {
   uint32_t minAutoStopMs = DEFAULT_MIN_AUTO_STOP_MS;
   uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
   int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
+  uint8_t ntpServerPreset = static_cast<uint8_t>(NtpServerPreset::POOL);
+  char ntpServerCustom[NTP_SERVER_HOST_CAPACITY] = {};
 };
 
 struct CycleConfigSnapshot {
@@ -224,7 +279,9 @@ enum class ConfigValidationError : uint8_t {
   PADDLE_REMINDER_MAX_DURATION,
   TIMING_RELATION,
   COMBINED_TARE_REQUIRES_AUTOTARE,
-  TIMEZONE_OFFSET
+  TIMEZONE_OFFSET,
+  NTP_SERVER_PRESET,
+  NTP_SERVER_CUSTOM
 };
 
 inline ConfigValidationError validateRuntimeConfig(
@@ -280,6 +337,14 @@ inline ConfigValidationError validateRuntimeConfig(
       config.timezoneOffsetMinutes > MAX_TIMEZONE_OFFSET_MINUTES) {
     return ConfigValidationError::TIMEZONE_OFFSET;
   }
+  if (config.ntpServerPreset >
+      static_cast<uint8_t>(NtpServerPreset::NIST)) {
+    return ConfigValidationError::NTP_SERVER_PRESET;
+  }
+  if (config.ntpServerCustom[0] != '\0' &&
+      !validNtpHostname(config.ntpServerCustom)) {
+    return ConfigValidationError::NTP_SERVER_CUSTOM;
+  }
   return ConfigValidationError::NONE;
 }
 
@@ -303,6 +368,10 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "canTareStartTimer";
     case ConfigValidationError::TIMEZONE_OFFSET:
       return "timezoneOffsetMinutes";
+    case ConfigValidationError::NTP_SERVER_PRESET:
+      return "ntpServerPreset";
+    case ConfigValidationError::NTP_SERVER_CUSTOM:
+      return "ntpServerCustom";
   }
   return "unknown";
 }
@@ -579,7 +648,9 @@ enum class DebugCode : uint8_t {
   SCALE_STALE_EVENT_REJECTED,
   SCALE_PACKET_GAP,
   NETWORK_RETRY,
-  INITIALIZATION_FAILED
+  INITIALIZATION_FAILED,
+  TIME_SYNC_OK,
+  TIME_SYNC_FAIL
 };
 
 struct DebugEvent {
@@ -760,6 +831,8 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::NETWORK_RETRY: return "network startup retry";
     case DebugCode::INITIALIZATION_FAILED:
       return "subsystem initialization failed";
+    case DebugCode::TIME_SYNC_OK: return "clock synchronized";
+    case DebugCode::TIME_SYNC_FAIL: return "clock sync failed";
   }
   return "unknown";
 }

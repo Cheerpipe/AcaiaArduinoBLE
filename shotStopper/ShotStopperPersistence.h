@@ -188,8 +188,47 @@ struct PersistedSettingsV6 {
   uint32_t checksum;
 };
 
-static_assert(sizeof(PersistedSettingsV6) < sizeof(PersistedSettings),
-              "Schema-7 migration requires a larger current record");
+struct RuntimeConfigV7 {
+  uint32_t revision = 1;
+  uint8_t goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  float weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
+  bool autoTare = true;
+  bool timerOnly = false;
+  bool canTareStartTimer = true;
+  bool brewConfirmationBeep = true;
+  bool paddleReturnReminderBeep = true;
+  uint32_t paddleReturnReminderIntervalMs =
+      DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
+  uint32_t paddleReturnReminderMaxDurationMs =
+      DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
+  uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
+  uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
+  uint32_t brewConfirmMs = DEFAULT_BREW_CONFIRM_MS;
+  uint32_t minAutoStopMs = DEFAULT_MIN_AUTO_STOP_MS;
+  uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
+  int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
+};
+
+struct PersistedSettingsV7 {
+  uint32_t magic;
+  uint32_t schemaVersion;
+  uint32_t structureSize;
+  uint32_t storageRevision;
+  RuntimeConfigV7 runtime;
+  bool staConfigured;
+  bool staOpen;
+  char staSsid[WIFI_SSID_CAPACITY];
+  char staPassword[WIFI_PASSWORD_CAPACITY];
+  char apPassword[WIFI_PASSWORD_CAPACITY];
+  uint8_t authSalt[AUTH_SALT_LENGTH];
+  uint8_t authHash[AUTH_HASH_LENGTH];
+  uint32_t checksum;
+};
+
+static_assert(sizeof(PersistedSettingsV6) < sizeof(PersistedSettingsV7),
+              "Schema-7 migration requires a larger v7 record");
+static_assert(sizeof(PersistedSettingsV7) < sizeof(PersistedSettings),
+              "Schema-8 migration requires a larger current record");
 
 inline bool calculatePasswordHash(const uint8_t salt[AUTH_SALT_LENGTH],
                                   const char *password,
@@ -255,6 +294,18 @@ inline uint32_t persistedSettingsV3Checksum(
                offsetof(PersistedSettingsV3, checksum));
 }
 
+inline uint32_t persistedSettingsV6Checksum(
+    const PersistedSettingsV6 &settings) {
+  return crc32(reinterpret_cast<const uint8_t *>(&settings),
+               offsetof(PersistedSettingsV6, checksum));
+}
+
+inline uint32_t persistedSettingsV7Checksum(
+    const PersistedSettingsV7 &settings) {
+  return crc32(reinterpret_cast<const uint8_t *>(&settings),
+               offsetof(PersistedSettingsV7, checksum));
+}
+
 inline bool validPersistedSettings(const PersistedSettings &settings) {
   if (settings.magic != PERSISTED_SETTINGS_MAGIC ||
       (settings.schemaVersion != CONFIG_SCHEMA_VERSION &&
@@ -286,6 +337,74 @@ inline void finalizePersistedSettings(PersistedSettings &settings) {
   settings.structureSize = sizeof(PersistedSettings);
   settings.checksum = 0;
   settings.checksum = persistedSettingsChecksum(settings);
+}
+
+inline bool readV7SettingsSlot(Preferences &preferences, const char *key,
+                               PersistedSettings &settings) {
+  if (preferences.getBytesLength(key) != sizeof(PersistedSettingsV7)) {
+    return false;
+  }
+  PersistedSettingsV7 legacy = {};
+  if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
+      legacy.magic != PERSISTED_SETTINGS_MAGIC ||
+      legacy.schemaVersion != PREVIOUS_CONFIG_SCHEMA_VERSION ||
+      legacy.structureSize != sizeof(PersistedSettingsV7) ||
+      legacy.checksum != persistedSettingsV7Checksum(legacy) ||
+      !validAccessPointPassword(legacy.apPassword) ||
+      (legacy.staConfigured != 0 &&
+       (!validWifiSsid(legacy.staSsid) ||
+        !validWifiPassword(legacy.staPassword, legacy.staOpen != 0)))) {
+    return false;
+  }
+
+  uint8_t expectedHash[AUTH_HASH_LENGTH] = {};
+  if (!calculatePasswordHash(legacy.authSalt, legacy.apPassword,
+                             expectedHash) ||
+      !constantTimeEqual(legacy.authHash, expectedHash,
+                         sizeof(expectedHash))) {
+    return false;
+  }
+
+  PersistedSettings migrated = {};
+  migrated.storageRevision = legacy.storageRevision;
+  migrated.runtime.revision = legacy.runtime.revision;
+  migrated.runtime.goalWeightG = legacy.runtime.goalWeightG;
+  migrated.runtime.weightOffsetG = legacy.runtime.weightOffsetG;
+  migrated.runtime.autoTare = legacy.runtime.autoTare;
+  migrated.runtime.timerOnly = legacy.runtime.timerOnly;
+  migrated.runtime.canTareStartTimer = legacy.runtime.canTareStartTimer;
+  migrated.runtime.brewConfirmationBeep = legacy.runtime.brewConfirmationBeep;
+  migrated.runtime.paddleReturnReminderBeep =
+      legacy.runtime.paddleReturnReminderBeep;
+  migrated.runtime.paddleReturnReminderIntervalMs =
+      legacy.runtime.paddleReturnReminderIntervalMs;
+  migrated.runtime.paddleReturnReminderMaxDurationMs =
+      legacy.runtime.paddleReturnReminderMaxDurationMs;
+  migrated.runtime.rinseGestureMs = legacy.runtime.rinseGestureMs;
+  migrated.runtime.rinseDurationMs = legacy.runtime.rinseDurationMs;
+  migrated.runtime.brewConfirmMs = legacy.runtime.brewConfirmMs;
+  migrated.runtime.minAutoStopMs = legacy.runtime.minAutoStopMs;
+  migrated.runtime.operationalWallMs = legacy.runtime.operationalWallMs;
+  migrated.runtime.timezoneOffsetMinutes =
+      legacy.runtime.timezoneOffsetMinutes;
+  migrated.runtime.ntpServerPreset =
+      static_cast<uint8_t>(NtpServerPreset::POOL);
+  migrated.staConfigured = legacy.staConfigured;
+  migrated.staOpen = legacy.staOpen;
+  memcpy(migrated.staSsid, legacy.staSsid, sizeof(migrated.staSsid));
+  memcpy(migrated.staPassword, legacy.staPassword,
+         sizeof(migrated.staPassword));
+  memcpy(migrated.apPassword, legacy.apPassword,
+         sizeof(migrated.apPassword));
+  memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
+  memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
+  if (validateRuntimeConfig(migrated.runtime) !=
+      ConfigValidationError::NONE) {
+    return false;
+  }
+  finalizePersistedSettings(migrated);
+  settings = migrated;
+  return true;
 }
 
 inline bool readSettingsSlot(Preferences &preferences, const char *key,
@@ -451,12 +570,6 @@ inline uint32_t persistedSettingsV5Checksum(
                offsetof(PersistedSettingsV5, checksum));
 }
 
-inline uint32_t persistedSettingsV6Checksum(
-    const PersistedSettingsV6 &settings) {
-  return crc32(reinterpret_cast<const uint8_t *>(&settings),
-               offsetof(PersistedSettingsV6, checksum));
-}
-
 inline bool readV5SettingsSlot(Preferences &preferences, const char *key,
                                PersistedSettings &settings) {
   if (preferences.getBytesLength(key) != sizeof(PersistedSettingsV5)) {
@@ -531,7 +644,7 @@ inline bool readV6SettingsSlot(Preferences &preferences, const char *key,
   PersistedSettingsV6 legacy = {};
   if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
       legacy.magic != PERSISTED_SETTINGS_MAGIC ||
-      legacy.schemaVersion != PREVIOUS_CONFIG_SCHEMA_VERSION ||
+      legacy.schemaVersion != 6U ||
       legacy.structureSize != sizeof(PersistedSettingsV6) ||
       legacy.checksum != persistedSettingsV6Checksum(legacy) ||
       !validAccessPointPassword(legacy.apPassword) ||
@@ -572,6 +685,8 @@ inline bool readV6SettingsSlot(Preferences &preferences, const char *key,
   migrated.runtime.minAutoStopMs = legacy.runtime.minAutoStopMs;
   migrated.runtime.operationalWallMs = legacy.runtime.operationalWallMs;
   migrated.runtime.timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
+  migrated.runtime.ntpServerPreset =
+      static_cast<uint8_t>(NtpServerPreset::POOL);
   migrated.staConfigured = legacy.staConfigured != 0;
   migrated.staOpen = legacy.staOpen != 0;
   memcpy(migrated.staSsid, legacy.staSsid, sizeof(migrated.staSsid));
@@ -597,19 +712,23 @@ inline bool readAnySettingsSlot(Preferences &preferences, const char *key,
   const bool isLegacy = length == sizeof(PersistedSettingsV3) ||
                         length == sizeof(PersistedSettingsV4) ||
                         length == sizeof(PersistedSettingsV5) ||
-                        length == sizeof(PersistedSettingsV6);
+                        length == sizeof(PersistedSettingsV6) ||
+                        length == sizeof(PersistedSettingsV7);
   const bool valid =
       length == sizeof(PersistedSettings)
           ? readSettingsSlot(preferences, key, settings)
-          : length == sizeof(PersistedSettingsV6)
-                ? readV6SettingsSlot(preferences, key, settings)
-                : length == sizeof(PersistedSettingsV5)
-                      ? readV5SettingsSlot(preferences, key, settings)
-                      : length == sizeof(PersistedSettingsV4)
-                            ? readV4SettingsSlot(preferences, key, settings)
-                            : length == sizeof(PersistedSettingsV3) &&
-                                  readLegacySettingsSlot(preferences, key,
-                                                         settings);
+          : length == sizeof(PersistedSettingsV7)
+                ? readV7SettingsSlot(preferences, key, settings)
+                : length == sizeof(PersistedSettingsV6)
+                      ? readV6SettingsSlot(preferences, key, settings)
+                      : length == sizeof(PersistedSettingsV5)
+                            ? readV5SettingsSlot(preferences, key, settings)
+                            : length == sizeof(PersistedSettingsV4)
+                                  ? readV4SettingsSlot(preferences, key,
+                                                       settings)
+                                  : length == sizeof(PersistedSettingsV3) &&
+                                        readLegacySettingsSlot(preferences, key,
+                                                               settings);
   if (legacyFormat != nullptr) {
     *legacyFormat = valid && isLegacy;
   }
@@ -666,6 +785,9 @@ inline bool loadPersistedSettings(PersistedSettings &settings) {
     settings.runtime.paddleReturnReminderMaxDurationMs =
         DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
     settings.runtime.timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
+    settings.runtime.ntpServerPreset =
+        static_cast<uint8_t>(NtpServerPreset::POOL);
+    settings.runtime.ntpServerCustom[0] = '\0';
   }
   return true;
 }

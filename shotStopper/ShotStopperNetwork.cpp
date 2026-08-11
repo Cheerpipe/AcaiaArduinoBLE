@@ -4,14 +4,20 @@
 #include "ShotStopperWebAssets.h"
 
 #include <cJSON.h>
+#include <esp_sntp.h>
 #include <esp_wifi.h>
 #include <esp_system.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
+#include <time.h>
 
 namespace shotstopper {
+
+WallClock g_wallClock;
+
 namespace {
 
 constexpr const char *AP_SSID = "MicraShotStopperAP";
@@ -160,8 +166,50 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "The Bookoo combined command requires automatic tare.";
     case ConfigValidationError::TIMEZONE_OFFSET:
       return "Timezone offset must be from -720 to +840 minutes.";
+    case ConfigValidationError::NTP_SERVER_PRESET:
+      return "NTP server preset must be pool, google, cloudflare, or nist.";
+    case ConfigValidationError::NTP_SERVER_CUSTOM:
+      return "Custom NTP hostname is invalid.";
   }
   return "Invalid configuration.";
+}
+
+bool jsonNtpPreset(cJSON *object, const char *name, uint8_t &output) {
+  cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+  if (!cJSON_IsString(item) || item->valuestring == nullptr) {
+    return false;
+  }
+  if (strcmp(item->valuestring, "pool") == 0) {
+    output = static_cast<uint8_t>(NtpServerPreset::POOL);
+    return true;
+  }
+  if (strcmp(item->valuestring, "google") == 0) {
+    output = static_cast<uint8_t>(NtpServerPreset::GOOGLE);
+    return true;
+  }
+  if (strcmp(item->valuestring, "cloudflare") == 0) {
+    output = static_cast<uint8_t>(NtpServerPreset::CLOUDFLARE);
+    return true;
+  }
+  if (strcmp(item->valuestring, "nist") == 0) {
+    output = static_cast<uint8_t>(NtpServerPreset::NIST);
+    return true;
+  }
+  return false;
+}
+
+const char *ntpPresetId(uint8_t preset) {
+  switch (preset) {
+    case static_cast<uint8_t>(NtpServerPreset::GOOGLE):
+      return "google";
+    case static_cast<uint8_t>(NtpServerPreset::CLOUDFLARE):
+      return "cloudflare";
+    case static_cast<uint8_t>(NtpServerPreset::NIST):
+      return "nist";
+    case static_cast<uint8_t>(NtpServerPreset::POOL):
+    default:
+      return "pool";
+  }
 }
 
 bool constantTimeTokenEqual(const char *left, const char *right,
@@ -258,6 +306,8 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
     return false;
   }
   instance_ = this;
+  ntpConfigRevision_ = settings_.runtime.revision;
+  g_wallClock.reset();
   if (xTaskCreate(taskEntry, "network_manager", 8192, this,
                   tskIDLE_PRIORITY + 1, &taskHandle_) != pdPASS) {
     instance_ = nullptr;
@@ -418,7 +468,14 @@ void ShotStopperNetwork::service() {
   serviceWifiScan(now);
   serviceSessions(now);
 
-  const NetworkStatusSnapshot network = snapshot();
+  const NetworkStatusSnapshot networkSnapshot = snapshot();
+  const bool staConnected =
+      networkSnapshot.staState == StaState::CONNECTED &&
+      networkSnapshot.wifiConfigured && WiFi.status() == WL_CONNECTED &&
+      networkSnapshot.staIp[0] != '\0';
+  serviceNtp(now, staConnected);
+
+  const NetworkStatusSnapshot network = networkSnapshot;
   const uint8_t apClients = network.apActive
                                 ? static_cast<uint8_t>(
                                       WiFi.softAPgetStationNum())
@@ -590,6 +647,8 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       portEXIT_CRITICAL(&dataMux_);
       log(DebugCategory::NETWORK, DebugCode::STA_FAILED,
           static_cast<int32_t>(WiFi.status()));
+      stopNtp();
+      g_wallClock.markDisabled();
       staReconnectAttemptAtMs_ = now;
       Serial.println("WiFi STA disconnected; Web server waiting for reconnect");
       return;
@@ -626,6 +685,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
     log(DebugCategory::NETWORK, DebugCode::STA_CONNECTED);
     Serial.print("WiFi STA connected; IP: ");
     Serial.println(address);
+    ntpRearmPending_ = true;
     return;
   }
 
@@ -1185,6 +1245,107 @@ void ShotStopperNetwork::log(DebugCategory category, DebugCode code,
   }
 }
 
+void ShotStopperNetwork::ntpSyncNotificationCallback(struct timeval *tv) {
+  if (tv == nullptr) {
+    return;
+  }
+  g_wallClock.queueSyncFromCallback(static_cast<uint32_t>(tv->tv_sec));
+}
+
+void ShotStopperNetwork::stopNtp() {
+  if (ntpStarted_) {
+    esp_sntp_stop();
+    ntpStarted_ = false;
+  }
+}
+
+void ShotStopperNetwork::armNtp(uint32_t now) {
+  stopNtp();
+  resolveNtpServerHost(settings_.runtime, ntpFailoverIndex_, ntpServerBuffer_);
+  g_wallClock.setSyncing(ntpServerBuffer_, now);
+  esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
+  esp_sntp_setservername(0, ntpServerBuffer_);
+  esp_sntp_set_time_sync_notification_cb(ntpSyncNotificationCallback);
+  esp_sntp_set_sync_interval(NTP_RESYNC_INTERVAL_MS);
+  esp_sntp_init();
+  ntpStarted_ = true;
+  ntpSyncStartedAtMs_ = now;
+}
+
+void ShotStopperNetwork::handleNtpFailure(uint32_t now) {
+  stopNtp();
+  if (ntpFailoverIndex_ < 3) {
+    ++ntpFailoverIndex_;
+  }
+  g_wallClock.markFailed(now, NTP_MAX_CONSECUTIVE_FAILURES);
+  log(DebugCategory::NETWORK, DebugCode::TIME_SYNC_FAIL, ntpFailoverIndex_, 0);
+}
+
+void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
+  if (g_wallClock.applyPendingSync(now)) {
+    ntpFailoverIndex_ = 0;
+    stopNtp();
+    log(DebugCategory::NETWORK, DebugCode::TIME_SYNC_OK);
+  }
+
+  if (settings_.runtime.revision != ntpConfigRevision_) {
+    ntpConfigRevision_ = settings_.runtime.revision;
+    ntpRearmPending_ = true;
+  }
+
+  if (!staConnected) {
+    stopNtp();
+    g_wallClock.markDisabled();
+    return;
+  }
+
+  const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(now);
+
+  if (ntpRearmPending_ || ntpManualSyncPending_) {
+    ntpRearmPending_ = false;
+    ntpManualSyncPending_ = false;
+    ntpFailoverIndex_ = 0;
+    armNtp(now);
+    return;
+  }
+
+  switch (timeStatus.state) {
+    case TimeSyncState::OFF:
+    case TimeSyncState::FAILED:
+      if (timeStatus.nextRetryInMs > 0 || ntpStarted_) {
+        return;
+      }
+      armNtp(now);
+      return;
+    case TimeSyncState::SYNCING:
+      if (esp_sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED &&
+          !g_wallClock.synced()) {
+        time_t nowSec = 0;
+        time(&nowSec);
+        if (nowSec >= 1000000000) {
+          g_wallClock.queueSyncFromCallback(static_cast<uint32_t>(nowSec));
+          if (g_wallClock.applyPendingSync(now)) {
+            ntpFailoverIndex_ = 0;
+            stopNtp();
+            log(DebugCategory::NETWORK, DebugCode::TIME_SYNC_OK);
+          }
+        }
+      }
+      if (static_cast<uint32_t>(now - ntpSyncStartedAtMs_) >=
+          NTP_FIRST_SYNC_TIMEOUT_MS) {
+        handleNtpFailure(now);
+      }
+      return;
+    case TimeSyncState::SYNCED:
+    case TimeSyncState::STALE:
+      if (!ntpStarted_ &&
+          timeStatus.lastSyncAgeMs >= NTP_RESYNC_INTERVAL_MS) {
+        armNtp(now);
+      }
+      return;
+  }
+}
+
 bool ShotStopperNetwork::startHttpServer() {
   if (server_ != nullptr) {
     return true;
@@ -1193,7 +1354,7 @@ bool ShotStopperNetwork::startHttpServer() {
   config.task_priority = tskIDLE_PRIORITY + 1;
   config.stack_size = 8192;
   config.max_open_sockets = 2;
-  config.max_uri_handlers = 22;
+  config.max_uri_handlers = 23;
   config.max_resp_headers = 8;
   config.backlog_conn = 2;
   config.lru_purge_enable = true;
@@ -1217,6 +1378,8 @@ bool ShotStopperNetwork::startHttpServer() {
                       shotsClearHandler) &&
       registerHandler(server_, "/api/v1/shots/delete", HTTP_POST,
                       shotsDeleteHandler) &&
+      registerHandler(server_, "/api/v1/time/sync", HTTP_POST,
+                      timeSyncHandler) &&
       registerHandler(server_, "/api/v1/config", HTTP_POST, configHandler) &&
       registerHandler(server_, "/api/v1/calibration/reset", HTTP_POST,
                       resetCalibrationHandler) &&
@@ -1640,7 +1803,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
              static_cast<double>(control.lastCycle.lastWeightG));
   }
 
-  char response[4096] = {};
+  const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(millis());
+  char response[4352] = {};
   const int written = snprintf(
       response, sizeof(response),
       "{\"state\":\"%s\",\"stateLabel\":\"%s\",\"relayClosed\":%s,"
@@ -1663,7 +1827,11 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"paddleReturnReminderMaxDurationMs\":%lu,\"rinseGestureMs\":%lu,"
       "\"rinseDurationMs\":%lu,\"brewConfirmMs\":%lu,"
       "\"minAutoStopMs\":%lu,\"operationalWallMs\":%lu,"
-      "\"timezoneOffsetMinutes\":%d},"
+      "\"timezoneOffsetMinutes\":%d,"
+      "\"ntpServerPreset\":\"%s\",\"ntpServerCustom\":\"%s\"},"
+      "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
+      "\"nextRetryInMs\":%lu,\"consecutiveFailures\":%u,"
+      "\"activeServer\":\"%s\"},"
       "\"scale\":{\"available\":%s,\"streamState\":\"%s\","
       "\"controlState\":\"%s\",\"controlAccepted\":%s,"
       "\"currentWeightG\":%s,"
@@ -1727,6 +1895,14 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(control.config.minAutoStopMs),
       static_cast<unsigned long>(control.config.operationalWallMs),
       static_cast<int>(control.config.timezoneOffsetMinutes),
+      ntpPresetId(control.config.ntpServerPreset),
+      control.config.ntpServerCustom,
+      timeSyncStateName(timeStatus.state),
+      static_cast<unsigned long>(timeStatus.utcSec),
+      static_cast<unsigned long>(timeStatus.lastSyncAgeMs),
+      static_cast<unsigned long>(timeStatus.nextRetryInMs),
+      static_cast<unsigned>(timeStatus.consecutiveFailures),
+      timeStatus.activeServer,
       control.scaleAvailable ? "true" : "false",
       weightStreamStateName(control.weightStreamState),
       weightControlStateName(control.weightControlState),
@@ -1898,9 +2074,10 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
       snprintf(firstDrop, sizeof(firstDrop), "%.1f",
                static_cast<double>(record.firstDropDs) / 10.0);
     }
-    char item[420] = {};
+    char item[460] = {};
     snprintf(item, sizeof(item),
-             "%s{\"id\":%lu,\"bootId\":%lu,\"endedAtMs\":%lu,\"durationS\":%.1f,"
+             "%s{\"id\":%lu,\"bootId\":%lu,\"endedAtMs\":%lu,"
+             "\"endedAtUnixSec\":%lu,\"durationS\":%.1f,"
              "\"goalG\":%u,\"actualG\":%s,\"errorG\":%s,\"errorPct\":%s,"
              "\"offsetG\":%.2f,\"avgFlowGS\":%s,\"firstDropS\":%s,"
              "\"shotType\":\"%s\",\"cutType\":\"%s\"}",
@@ -1908,6 +2085,7 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
              static_cast<unsigned long>(record.id),
              static_cast<unsigned long>(record.bootId),
              static_cast<unsigned long>(record.endedAtMs),
+             static_cast<unsigned long>(record.endedAtUnixSec),
              static_cast<double>(record.durationDs) / 10.0,
              static_cast<unsigned>(record.goalWeightG), actual, errorG,
              errorPct,
@@ -2010,6 +2188,23 @@ esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
   return sendJson(request, STATUS_OK, "{\"deleted\":true}");
 }
 
+esp_err_t ShotStopperNetwork::timeSyncHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authenticate(request, true)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
+                     "Invalid session or CSRF token.");
+  }
+  ControlStatusSnapshot status;
+  self.callbacks_.copyControlStatus(status);
+  if (!controlAllowsConfiguration(status)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "Stop the cycle, switch the physical paddle OFF, and wait for Ready before syncing the clock.");
+  }
+  self.ntpManualSyncPending_ = true;
+  return self.sendAccepted(request, self.allocateRequestId());
+}
+
 esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   if (!self.authenticate(request, true)) {
@@ -2030,14 +2225,16 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   }
   cJSON *root = cJSON_Parse(body);
   RuntimeConfig candidate = status.config;
+  char customNtp[NTP_SERVER_HOST_CAPACITY] = {};
+  memcpy(customNtp, candidate.ntpServerCustom, sizeof(customNtp));
   static const char *const fields[] = {
       "goalWeightG", "rinseGestureMs", "rinseDurationMs", "brewConfirmMs",
       "minAutoStopMs", "operationalWallMs", "autoTare", "timerOnly",
       "canTareStartTimer", "brewConfirmationBeep", "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
-      "timezoneOffsetMinutes"};
+      "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom"};
   const bool parsed =
-      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 14) &&
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 16) &&
       jsonUint8(root, "goalWeightG", candidate.goalWeightG) &&
       jsonUint32(root, "rinseGestureMs", candidate.rinseGestureMs) &&
       jsonUint32(root, "rinseDurationMs", candidate.rinseDurationMs) &&
@@ -2056,14 +2253,19 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       jsonUint32(root, "paddleReturnReminderMaxDurationMs",
                  candidate.paddleReturnReminderMaxDurationMs) &&
       jsonInt16(root, "timezoneOffsetMinutes",
-                candidate.timezoneOffsetMinutes);
+                candidate.timezoneOffsetMinutes) &&
+      jsonNtpPreset(root, "ntpServerPreset", candidate.ntpServerPreset) &&
+      jsonString(root, "ntpServerCustom", customNtp, sizeof(customNtp), true);
   if (root != nullptr) {
     cJSON_Delete(root);
   }
   if (!parsed) {
+    memset(customNtp, 0, sizeof(customNtp));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
                      "A field is missing or has an invalid type.");
   }
+  memcpy(candidate.ntpServerCustom, customNtp, sizeof(candidate.ntpServerCustom));
+  memset(customNtp, 0, sizeof(customNtp));
   const ConfigValidationError error = validateRuntimeConfig(candidate);
   if (error != ConfigValidationError::NONE) {
     self.log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED,
