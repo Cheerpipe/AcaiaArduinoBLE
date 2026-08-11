@@ -28,15 +28,18 @@ if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
     !html.includes('paddleReturnReminderBeep')) {
   throw new Error('Web UI must show the physical paddle state and expose both scale beep options');
 }
-if (!html.includes('id="operationalWallMs" type="number" min="5000" max="60000"') ||
-    !html.includes('CN9 limit ≤ 60,000 ms') ||
+if (!html.includes('id="operationalWallS" type="number" min="5" max="60"') ||
+    !html.includes('CN9 limit ≤ 60 s') ||
+    !html.includes('sToMs(') ||
+    !html.includes('rinseGestureMs:sToMs') ||
     !network.includes('CN9 limit must be from 5,000 to 60,000 ms.')) {
-  throw new Error('CN9 operational limit must be capped at 60,000 ms in the UI and API');
+  throw new Error('CN9 operational limit must be capped at 60 s in the UI and 60,000 ms in the API');
 }
 if (!network.includes('"brewConfirmationBeep"') ||
     !network.includes('"paddleReturnReminderBeep"') ||
     !network.includes('"paddleReturnReminderIntervalMs"') ||
     !network.includes('"paddleReturnReminderMaxDurationMs"') ||
+    !network.includes('"timezoneOffsetMinutes"') ||
     !firmware.includes('session.config.brewConfirmationBeep') ||
     !firmware.includes('servicePaddleReturnReminder')) {
   throw new Error('Scale beep settings must be configurable end-to-end');
@@ -59,6 +62,15 @@ if (!html.includes('remoteReady&&authenticated()') ||
     !network.includes('\\"lastCommand\\"') ||
     !network.includes('\\"maintenance\\"')) {
   throw new Error('Web UI must enforce and display remote policy, maintenance, and durable command state');
+}
+if (!html.includes('id="shotTable"') ||
+    !html.includes('id="exportShotsButton"') ||
+    !html.includes('id="clearShotsButton"') ||
+    !html.includes("confirm:'CLEAR_SHOT_LOG'") ||
+    !html.includes('refreshShots()') ||
+    !html.includes('id="timezoneOffsetMinutes"') ||
+    !network.includes('SHOT_LOG_CLEAR_NOT_CONFIRMED')) {
+  throw new Error('Shot history UI/API must expose table, CSV export, clear confirmation, and timezone setting');
 }
 if (!/<fieldset><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
@@ -91,11 +103,25 @@ const expected = new Map([
   ['POST /api/v1/control/stop', 'stopHandler'],
   ['POST /api/v1/control/restart', 'restartHandler'],
   ['POST /api/v1/factory-reset', 'factoryResetHandler'],
+  ['GET /api/v1/shots', 'shotsHandler'],
+  ['POST /api/v1/shots/clear', 'shotsClearHandler'],
+  ['POST /api/v1/shots/delete', 'shotsDeleteHandler'],
   ['POST /api/v1/network', 'networkHandler'],
   ['POST /api/v1/network/scan', 'wifiScanStartHandler'],
   ['GET /api/v1/network/scan', 'wifiScanStatusHandler'],
   ['POST /api/v1/access-point/password', 'apPasswordHandler'],
 ]);
+
+const maxHandlersMatch = network.match(/max_uri_handlers\s*=\s*(\d+)/);
+if (!maxHandlersMatch) {
+  throw new Error('HTTP server max_uri_handlers not found');
+}
+const maxUriHandlers = Number(maxHandlersMatch[1]);
+if (maxUriHandlers < expected.size) {
+  throw new Error(
+    `HTTP server max_uri_handlers (${maxUriHandlers}) is below registered route count (${expected.size})`
+  );
+}
 
 for (const [route, handler] of expected) {
   const [method, uri] = route.split(' ');
@@ -124,7 +150,7 @@ for (const field of forbiddenResponseFields) {
   }
 }
 const logHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::logHandler');
-const logHandlerEnd = network.indexOf('esp_err_t ShotStopperNetwork::configHandler', logHandlerStart);
+const logHandlerEnd = network.indexOf('esp_err_t ShotStopperNetwork::shotsHandler', logHandlerStart);
 if (logHandlerStart < 0 || logHandlerEnd < 0) {
   throw new Error('Log handler not found');
 }

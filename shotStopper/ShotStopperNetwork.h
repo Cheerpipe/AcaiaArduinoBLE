@@ -2,6 +2,7 @@
 
 #include "ShotStopperDomain.h"
 #include "ShotStopperPersistence.h"
+#include "ShotStopperShotLog.h"
 
 #include <WiFi.h>
 #include <esp_http_server.h>
@@ -67,6 +68,9 @@ struct NetworkBridgeCallbacks {
                         int32_t argument1, int32_t argument2) = nullptr;
   void (*reportTaskWatchdogFault)() = nullptr;
   void (*requestSafeRestart)() = nullptr;
+  size_t (*copyShotRecords)(ShotLogRecord *output, size_t capacity) = nullptr;
+  bool (*deleteShotRecord)(uint32_t id) = nullptr;
+  bool (*clearShotLog)() = nullptr;
 };
 
 class ShotStopperNetwork {
@@ -198,6 +202,9 @@ class ShotStopperNetwork {
   static esp_err_t heartbeatHandler(httpd_req_t *request);
   static esp_err_t statusHandler(httpd_req_t *request);
   static esp_err_t logHandler(httpd_req_t *request);
+  static esp_err_t shotsHandler(httpd_req_t *request);
+  static esp_err_t shotsClearHandler(httpd_req_t *request);
+  static esp_err_t shotsDeleteHandler(httpd_req_t *request);
   static esp_err_t configHandler(httpd_req_t *request);
   static esp_err_t resetCalibrationHandler(httpd_req_t *request);
   static esp_err_t paddleHandler(httpd_req_t *request);

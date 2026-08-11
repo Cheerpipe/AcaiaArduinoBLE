@@ -33,6 +33,7 @@
 #include "ShotStopperIndicators.h"
 #include "ShotStopperResetGuard.h"
 #include "ShotStopperSafety.h"
+#include "ShotStopperShotLog.h"
 #include "ShotStopperWatchdog.h"
 
 using namespace shotstopper;
@@ -275,6 +276,9 @@ struct CycleSession {
   uint32_t lastThresholdConnectionGeneration = 0;
   uint32_t recoveryLastAtMs = 0;
   uint32_t recoveryLastPacketSequence = 0;
+  uint32_t firstDropMs = 0;
+  float scaleBaselineG = 0.0f;
+  bool scaleBaselineReady = false;
   float lastAcceptedWeightG = 0.0f;
   float recoveryLastWeightG = 0.0f;
   ControlSource source = ControlSource::NONE;
@@ -282,12 +286,24 @@ struct CycleSession {
   EndReason endReason = EndReason::NONE;
 };
 
-struct PendingShotAnalysis {
+struct PendingShotFinalize {
   bool pending = false;
+  bool offsetAnalysis = false;
+  bool logEligible = false;
   uint32_t endedAtMs = 0;
   uint32_t endedWeightSequence = 0;
+  uint32_t cycleStartedAtMs = 0;
+  uint32_t bootId = 0;
+  uint16_t durationDs = 0;
+  uint16_t firstDropDs = SHOT_LOG_METRIC_MISSING;
   uint8_t goalWeightG = DEFAULT_GOAL_WEIGHT_G;
   float weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
+  float scaleBaselineG = 0.0f;
+  bool startedWithScale = false;
+  bool timerOnly = false;
+  bool confirmedBrew = false;
+  StopperState finalState = StopperState::READY;
+  EndReason endReason = EndReason::NONE;
 };
 
 struct ScaleCommand {
@@ -326,10 +342,11 @@ AcaiaArduinoBLE scale(DEBUG);
 StopperState stopperState = StopperState::REQUIRES_OFF;
 ShotTrajectory shot;
 CycleSession session;
-PendingShotAnalysis pendingAnalysis;
+PendingShotFinalize pendingFinalize;
 RuntimeConfig runtimeConfig;
 LastCycleSummary lastCycle;
 DebugRingBuffer debugLog;
+ShotLog shotLog;
 
 float currentWeight = 0.0f;
 uint32_t currentWeightReceivedAtMs = 0;
@@ -507,6 +524,18 @@ void reportTaskWatchdogFault() {
 
 void requestSafeRestart() {
   safeRestartRequested = true;
+}
+
+size_t copyShotRecords(ShotLogRecord *output, size_t capacity) {
+  return shotLog.copyNewestFirst(output, capacity);
+}
+
+bool deleteShotRecord(uint32_t id) {
+  return shotLog.removeById(id);
+}
+
+bool clearShotLog() {
+  return shotLog.clear();
 }
 
 bool enqueueWebCommand(const WebCommand &command) {
@@ -1490,6 +1519,8 @@ bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
   return true;
 }
 
+void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs);
+
 bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
                                       uint32_t packetSequence,
                                       uint32_t connectionGeneration) {
@@ -1497,6 +1528,10 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
     Serial.println("Invalid or out-of-range weight ignored");
     rejectScaleSample(DebugCode::SCALE_SAMPLE_REJECTED_INVALID, weight);
     return false;
+  }
+
+  if (session.active && session.startedWithScale) {
+    considerScaleFlowMarkers(weight, receivedAtMs);
   }
 
   if (!shouldTrackWeight()) {
@@ -1656,51 +1691,162 @@ bool recordWeightSample(float weight, uint32_t receivedAtMs) {
       session.ownedConnectionGeneration);
 }
 
-void scheduleShotAnalysis() {
-  pendingAnalysis.pending = true;
-  pendingAnalysis.endedAtMs = millis();
-  pendingAnalysis.endedWeightSequence = currentWeightSequence;
-  pendingAnalysis.goalWeightG = session.config.goalWeightG;
-  pendingAnalysis.weightOffsetG = session.config.weightOffsetG;
+void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs) {
+  if (!session.active || !session.startedWithScale || session.firstDropMs != 0) {
+    return;
+  }
+  if (session.awaitingPostTareBaseline) {
+    if (fabsf(weight) <= POST_TARE_BASELINE_MAX_ABS_G) {
+      session.scaleBaselineG = weight;
+      session.scaleBaselineReady = true;
+    }
+    return;
+  }
+  if (!session.scaleBaselineReady) {
+    session.scaleBaselineG = weight;
+    session.scaleBaselineReady = true;
+    return;
+  }
+  if (weight - session.scaleBaselineG >= FIRST_DROP_THRESHOLD_G) {
+    session.firstDropMs = receivedAtMs;
+  }
 }
 
-void shotAnalysisTask() {
-  if (!pendingAnalysis.pending ||
-      elapsedMs(pendingAnalysis.endedAtMs) < DRIP_DELAY_MS) {
+void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
+  const bool logEligible = shotLogEligible(reason, durationMs);
+  const bool offsetAnalysis = shot.confirmedBrew && !session.config.timerOnly &&
+                              session.calibrationEligible;
+  if (!logEligible && !offsetAnalysis) {
     return;
   }
 
-  pendingAnalysis.pending = false;
+  pendingFinalize = PendingShotFinalize{};
+  pendingFinalize.pending = true;
+  pendingFinalize.offsetAnalysis = offsetAnalysis;
+  pendingFinalize.logEligible = logEligible;
+  pendingFinalize.endedAtMs = millis();
+  pendingFinalize.endedWeightSequence = currentWeightSequence;
+  pendingFinalize.cycleStartedAtMs = session.startedAtMs;
+  pendingFinalize.bootId = shotLog.bootId();
+  pendingFinalize.durationDs =
+      static_cast<uint16_t>(durationMs / 100U);
+  if (session.firstDropMs != 0 &&
+      static_cast<int32_t>(session.firstDropMs - session.startedAtMs) >= 0) {
+    pendingFinalize.firstDropDs = static_cast<uint16_t>(
+        (session.firstDropMs - session.startedAtMs) / 100U);
+  }
+  pendingFinalize.goalWeightG = session.config.goalWeightG;
+  pendingFinalize.weightOffsetG = session.config.weightOffsetG;
+  pendingFinalize.scaleBaselineG =
+      session.scaleBaselineReady ? session.scaleBaselineG : 0.0f;
+  pendingFinalize.startedWithScale = session.startedWithScale;
+  pendingFinalize.timerOnly = session.config.timerOnly;
+  pendingFinalize.confirmedBrew = shot.confirmedBrew;
+  pendingFinalize.finalState = stopperState;
+  pendingFinalize.endReason = reason;
+}
+
+void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeightG,
+                          bool finalWeightValid) {
+  ShotLogRecord record;
+  memset(&record, 0, sizeof(record));
+  record.actualWeightCg = SHOT_LOG_WEIGHT_MISSING;
+  record.errorCg = SHOT_LOG_WEIGHT_MISSING;
+  record.firstDropDs = snapshot.firstDropDs;
+  record.avgFlowCgS = SHOT_LOG_METRIC_MISSING;
+  record.bootId = snapshot.bootId;
+  record.endedAtMs = snapshot.endedAtMs;
+  record.durationDs = snapshot.durationDs;
+  record.goalWeightG = snapshot.goalWeightG;
+  record.offsetUsedCg = shotLogWeightToCentigrams(snapshot.weightOffsetG);
+  record.shotType = static_cast<uint8_t>(shotLogTypeFromCycle(
+      snapshot.finalState, snapshot.startedWithScale, snapshot.timerOnly,
+      snapshot.confirmedBrew));
+  record.cutType = static_cast<uint8_t>(
+      shotLogCutFromEndReason(snapshot.endReason));
+
+  if (finalWeightValid) {
+    record.actualWeightCg = shotLogWeightToCentigrams(finalWeightG);
+    record.errorCg =
+        shotLogWeightToCentigrams(finalWeightG -
+                           static_cast<float>(snapshot.goalWeightG));
+    if (snapshot.firstDropDs != SHOT_LOG_METRIC_MISSING) {
+      const float durationS = snapshot.durationDs / 10.0f;
+      const float firstDropS = snapshot.firstDropDs / 10.0f;
+      const float brewS = durationS - firstDropS;
+      const float deltaG = finalWeightG - snapshot.scaleBaselineG;
+      if (brewS > 0.5f && deltaG > 0.0f) {
+        const float flowGs = deltaG / brewS;
+        if (isfinite(flowGs) && flowGs >= 0.0f && flowGs <= 655.35f) {
+          record.avgFlowCgS =
+              static_cast<uint16_t>(flowGs * 100.0f + 0.5f);
+        }
+      }
+    }
+  }
+
+  if (!shotLog.append(record)) {
+    Serial.println("Shot log persist failed");
+  }
+}
+
+void pendingShotFinalizeTask() {
+  if (!pendingFinalize.pending ||
+      elapsedMs(pendingFinalize.endedAtMs) < DRIP_DELAY_MS) {
+    return;
+  }
+
+  const PendingShotFinalize snapshot = pendingFinalize;
+  pendingFinalize.pending = false;
+
+  float finalWeightG = 0.0f;
+  bool finalWeightValid = false;
+  if (scaleAvailable() && isfinite(currentWeight) &&
+      currentWeightSequence != snapshot.endedWeightSequence &&
+      static_cast<int32_t>(currentWeightReceivedAtMs - snapshot.endedAtMs) >
+          0) {
+    finalWeightG = currentWeight;
+    finalWeightValid = snapshot.startedWithScale;
+  }
+
+  if (snapshot.logEligible) {
+    commitPendingShotLog(snapshot, finalWeightG, finalWeightValid);
+  }
+
+  if (!snapshot.offsetAnalysis) {
+    return;
+  }
+
   if (!scaleAvailable() || !isfinite(currentWeight) ||
-      !isfinite(pendingAnalysis.weightOffsetG) ||
-      currentWeightSequence == pendingAnalysis.endedWeightSequence ||
-      static_cast<int32_t>(currentWeightReceivedAtMs -
-                           pendingAnalysis.endedAtMs) <= 0 ||
+      !isfinite(snapshot.weightOffsetG) ||
+      currentWeightSequence == snapshot.endedWeightSequence ||
+      static_cast<int32_t>(currentWeightReceivedAtMs - snapshot.endedAtMs) <=
+          0 ||
       currentWeight <
-          (pendingAnalysis.goalWeightG - pendingAnalysis.weightOffsetG)) {
+          (snapshot.goalWeightG - snapshot.weightOffsetG)) {
     Serial.println("Final weight unavailable or too low; offset unchanged");
     return;
   }
 
+  finalWeightG = currentWeight;
+
   Serial.print("Final weight: ");
-  Serial.print(currentWeight);
+  Serial.print(finalWeightG);
   Serial.print("g; cycle goal: ");
-  Serial.print(pendingAnalysis.goalWeightG);
+  Serial.print(snapshot.goalWeightG);
   Serial.print("g; cycle offset: ");
-  Serial.print(pendingAnalysis.weightOffsetG);
+  Serial.print(snapshot.weightOffsetG);
   Serial.println("g");
 
   const float observedError =
-      currentWeight - pendingAnalysis.goalWeightG +
-      pendingAnalysis.weightOffsetG;
+      finalWeightG - snapshot.goalWeightG + snapshot.weightOffsetG;
   if (fabsf(observedError) > MAX_OFFSET_G) {
     Serial.println("Shot error too large; offset unchanged");
     return;
   }
 
   const float updatedOffset =
-      pendingAnalysis.weightOffsetG + currentWeight -
-      pendingAnalysis.goalWeightG;
+      snapshot.weightOffsetG + finalWeightG - snapshot.goalWeightG;
   if (!isfinite(updatedOffset) || updatedOffset < 0.0f ||
       updatedOffset > MAX_OFFSET_G) {
     Serial.println("Calculated offset outside safe range; offset unchanged");
@@ -2298,13 +2444,16 @@ void resetSessionForNewCycle(ControlSource source, uint32_t webSessionId = 0,
 void beginCycle(ControlSource source = ControlSource::PHYSICAL,
                 uint32_t webSessionId = 0,
                 uint32_t controlLeaseId = 0) {
-  if (pendingAnalysis.pending) {
-    pendingAnalysis.pending = false;
+  if (pendingFinalize.pending) {
+    pendingFinalize.pending = false;
     Serial.println("Previous drip analysis cancelled by a new cycle");
   }
 
   resetSessionForNewCycle(source, webSessionId, controlLeaseId);
   session.startedAtMs = millis();
+  session.firstDropMs = 0;
+  session.scaleBaselineReady = false;
+  session.scaleBaselineG = 0.0f;
   session.weightSequenceAtStart = currentWeightSequence;
   const ScaleLinkSnapshot scaleLinkAtStart = getScaleLinkSnapshot();
   session.startedWithScale =
@@ -2330,6 +2479,8 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
       session.lastAcceptedWeightG = currentWeight;
       session.lastAcceptedWeightAtMs = currentWeightReceivedAtMs;
       session.lastAcceptedPacketSequence = currentWeightSequence;
+      session.scaleBaselineG = currentWeight;
+      session.scaleBaselineReady = true;
     }
   }
   resetShotTrajectory(session.startedAtMs);
@@ -2359,8 +2510,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
 
 void finalizeCycle(EndReason reason, StopperState nextState) {
   const RelaySafetySnapshot relayBeforeOpen = getRelaySafetySnapshot();
-  const bool analyze = shot.confirmedBrew && !session.config.timerOnly &&
-                       session.calibrationEligible;
+  const uint32_t durationMs = elapsedMs(relayBeforeOpen.closedAtMs);
 
   // Physical flow always stops before the non-blocking BLE command is queued.
   setCn9Closed(false);
@@ -2372,13 +2522,11 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
     scheduleScaleCompletionBeep();
   }
 
-  if (analyze) {
-    scheduleShotAnalysis();
-  }
+  schedulePendingShotFinalize(reason, durationMs);
 
   lastCycle.valid = true;
   lastCycle.cycleId = session.id;
-  lastCycle.durationMs = elapsedMs(relayBeforeOpen.closedAtMs);
+  lastCycle.durationMs = durationMs;
   lastCycle.endedAtMs = millis();
   lastCycle.endReason = reason;
   lastCycle.source = session.source;
@@ -2649,12 +2797,15 @@ bool controlAllowsConfigurationNow() {
 }
 
 void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
-  if (pendingAnalysis.pending) {
-    pendingAnalysis.pending = false;
+  if (pendingFinalize.pending) {
+    pendingFinalize.pending = false;
     Serial.println("Previous drip analysis cancelled by a web rinse");
   }
   resetSessionForNewCycle(ControlSource::WEB, webSessionId, controlLeaseId);
   session.startedAtMs = millis();
+  session.firstDropMs = 0;
+  session.scaleBaselineReady = false;
+  session.scaleBaselineG = 0.0f;
   session.weightSequenceAtStart = currentWeightSequence;
   session.startedWithScale = scaleAvailable();
   session.rinseStartedAtMs = session.startedAtMs;
@@ -2930,7 +3081,7 @@ void processWebCommand(const WebCommand &command) {
       }
       // Prevent a completed shot's delayed drip analysis from immediately
       // replacing the user-requested default calibration.
-      pendingAnalysis.pending = false;
+      pendingFinalize.pending = false;
       RuntimeConfig candidate = runtimeConfig;
       candidate.weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
       ++candidate.revision;
@@ -2963,6 +3114,10 @@ void processWebCommand(const WebCommand &command) {
       return;
 
     case WebCommandType::PERSIST_RUNTIME:
+      rejectWebCommand(command);
+      return;
+
+    case WebCommandType::CLEAR_SHOT_LOG:
       rejectWebCommand(command);
       return;
 
@@ -3004,6 +3159,7 @@ void publishControlStatus() {
   next.remoteControlEnabled = REMOTE_CN9_CONTROL_ENABLED;
   next.source = session.active ? session.source : ControlSource::NONE;
   next.cycleId = session.active ? session.id : 0;
+  next.bootId = shotLog.bootId();
   next.webSessionId = session.active ? session.webSessionId : 0;
   next.controlLeaseId = session.active ? session.controlLeaseId : 0;
   next.maintenanceLeaseActive = maintenanceLease.active;
@@ -3247,6 +3403,15 @@ void setup() {
   runtimeConfig = RuntimeConfig{};
 #endif
 
+#ifndef SHOT_STOPPER_HOST_TEST
+  shotLog.load();
+  shotLog.onBoot();
+  shotLog.save();
+#else
+  shotLog.load();
+  shotLog.onBoot();
+#endif
+
   if (!persistenceReady) {
     Serial.println("Persistence unavailable; using volatile defaults");
     addDebugEvent(DebugCategory::CONFIG, DebugCode::INITIALIZATION_FAILED, 2);
@@ -3292,6 +3457,9 @@ void setup() {
     callbacks.addDebugEvent = addDebugEvent;
     callbacks.reportTaskWatchdogFault = reportTaskWatchdogFault;
     callbacks.requestSafeRestart = requestSafeRestart;
+    callbacks.copyShotRecords = copyShotRecords;
+    callbacks.deleteShotRecord = deleteShotRecord;
+    callbacks.clearShotLog = clearShotLog;
     if (!networkManager.begin(persistedSettings, callbacks)) {
       Serial.println("Network manager unavailable; stopper remains local");
     }
@@ -3346,7 +3514,7 @@ void loop() {
   servicePaddleReturnReminder();
   serviceScaleCompletionBeep();
   serviceRemoteTimerStopRetry();
-  shotAnalysisTask();
+  pendingShotFinalizeTask();
 #ifndef SHOT_STOPPER_HOST_TEST
   serviceSerialRecovery();
 #endif

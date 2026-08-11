@@ -154,6 +154,43 @@ struct PersistedSettingsV5 {
 static_assert(sizeof(PersistedSettingsV5) < sizeof(PersistedSettings),
               "Schema-6 migration requires a larger current record");
 
+struct PersistedRuntimeConfigV6 {
+  uint32_t revision;
+  uint8_t goalWeightG;
+  float weightOffsetG;
+  uint8_t autoTare;
+  uint8_t timerOnly;
+  uint8_t canTareStartTimer;
+  uint8_t brewConfirmationBeep;
+  uint8_t paddleReturnReminderBeep;
+  uint32_t paddleReturnReminderIntervalMs;
+  uint32_t paddleReturnReminderMaxDurationMs;
+  uint32_t rinseGestureMs;
+  uint32_t rinseDurationMs;
+  uint32_t brewConfirmMs;
+  uint32_t minAutoStopMs;
+  uint32_t operationalWallMs;
+};
+
+struct PersistedSettingsV6 {
+  uint32_t magic;
+  uint32_t schemaVersion;
+  uint32_t structureSize;
+  uint32_t storageRevision;
+  PersistedRuntimeConfigV6 runtime;
+  uint8_t staConfigured;
+  uint8_t staOpen;
+  char staSsid[WIFI_SSID_CAPACITY];
+  char staPassword[WIFI_PASSWORD_CAPACITY];
+  char apPassword[WIFI_PASSWORD_CAPACITY];
+  uint8_t authSalt[AUTH_SALT_LENGTH];
+  uint8_t authHash[AUTH_HASH_LENGTH];
+  uint32_t checksum;
+};
+
+static_assert(sizeof(PersistedSettingsV6) < sizeof(PersistedSettings),
+              "Schema-7 migration requires a larger current record");
+
 inline bool calculatePasswordHash(const uint8_t salt[AUTH_SALT_LENGTH],
                                   const char *password,
                                   uint8_t output[AUTH_HASH_LENGTH]) {
@@ -414,6 +451,12 @@ inline uint32_t persistedSettingsV5Checksum(
                offsetof(PersistedSettingsV5, checksum));
 }
 
+inline uint32_t persistedSettingsV6Checksum(
+    const PersistedSettingsV6 &settings) {
+  return crc32(reinterpret_cast<const uint8_t *>(&settings),
+               offsetof(PersistedSettingsV6, checksum));
+}
+
 inline bool readV5SettingsSlot(Preferences &preferences, const char *key,
                                PersistedSettings &settings) {
   if (preferences.getBytesLength(key) != sizeof(PersistedSettingsV5)) {
@@ -422,7 +465,7 @@ inline bool readV5SettingsSlot(Preferences &preferences, const char *key,
   PersistedSettingsV5 legacy = {};
   if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
       legacy.magic != PERSISTED_SETTINGS_MAGIC ||
-      legacy.schemaVersion != PREVIOUS_CONFIG_SCHEMA_VERSION ||
+      legacy.schemaVersion != LEGACY_SCHEMA_FIVE_VERSION ||
       legacy.structureSize != sizeof(PersistedSettingsV5) ||
       legacy.checksum != persistedSettingsV5Checksum(legacy) ||
       !validAccessPointPassword(legacy.apPassword) ||
@@ -480,22 +523,93 @@ inline bool readV5SettingsSlot(Preferences &preferences, const char *key,
   return true;
 }
 
+inline bool readV6SettingsSlot(Preferences &preferences, const char *key,
+                               PersistedSettings &settings) {
+  if (preferences.getBytesLength(key) != sizeof(PersistedSettingsV6)) {
+    return false;
+  }
+  PersistedSettingsV6 legacy = {};
+  if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
+      legacy.magic != PERSISTED_SETTINGS_MAGIC ||
+      legacy.schemaVersion != PREVIOUS_CONFIG_SCHEMA_VERSION ||
+      legacy.structureSize != sizeof(PersistedSettingsV6) ||
+      legacy.checksum != persistedSettingsV6Checksum(legacy) ||
+      !validAccessPointPassword(legacy.apPassword) ||
+      (legacy.staConfigured != 0 &&
+       (!validWifiSsid(legacy.staSsid) ||
+        !validWifiPassword(legacy.staPassword, legacy.staOpen != 0)))) {
+    return false;
+  }
+
+  uint8_t expectedHash[AUTH_HASH_LENGTH] = {};
+  if (!calculatePasswordHash(legacy.authSalt, legacy.apPassword,
+                             expectedHash) ||
+      !constantTimeEqual(legacy.authHash, expectedHash,
+                         sizeof(expectedHash))) {
+    return false;
+  }
+
+  PersistedSettings migrated = {};
+  migrated.storageRevision = legacy.storageRevision;
+  migrated.runtime.revision = legacy.runtime.revision;
+  migrated.runtime.goalWeightG = legacy.runtime.goalWeightG;
+  migrated.runtime.weightOffsetG = legacy.runtime.weightOffsetG;
+  migrated.runtime.autoTare = legacy.runtime.autoTare != 0;
+  migrated.runtime.timerOnly = legacy.runtime.timerOnly != 0;
+  migrated.runtime.canTareStartTimer =
+      legacy.runtime.canTareStartTimer != 0;
+  migrated.runtime.brewConfirmationBeep =
+      legacy.runtime.brewConfirmationBeep != 0;
+  migrated.runtime.paddleReturnReminderBeep =
+      legacy.runtime.paddleReturnReminderBeep != 0;
+  migrated.runtime.paddleReturnReminderIntervalMs =
+      legacy.runtime.paddleReturnReminderIntervalMs;
+  migrated.runtime.paddleReturnReminderMaxDurationMs =
+      legacy.runtime.paddleReturnReminderMaxDurationMs;
+  migrated.runtime.rinseGestureMs = legacy.runtime.rinseGestureMs;
+  migrated.runtime.rinseDurationMs = legacy.runtime.rinseDurationMs;
+  migrated.runtime.brewConfirmMs = legacy.runtime.brewConfirmMs;
+  migrated.runtime.minAutoStopMs = legacy.runtime.minAutoStopMs;
+  migrated.runtime.operationalWallMs = legacy.runtime.operationalWallMs;
+  migrated.runtime.timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
+  migrated.staConfigured = legacy.staConfigured != 0;
+  migrated.staOpen = legacy.staOpen != 0;
+  memcpy(migrated.staSsid, legacy.staSsid, sizeof(migrated.staSsid));
+  memcpy(migrated.staPassword, legacy.staPassword,
+         sizeof(migrated.staPassword));
+  memcpy(migrated.apPassword, legacy.apPassword,
+         sizeof(migrated.apPassword));
+  memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
+  memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
+  if (validateRuntimeConfig(migrated.runtime) !=
+      ConfigValidationError::NONE) {
+    return false;
+  }
+  finalizePersistedSettings(migrated);
+  settings = migrated;
+  return true;
+}
+
 inline bool readAnySettingsSlot(Preferences &preferences, const char *key,
                                 PersistedSettings &settings,
                                 bool *legacyFormat = nullptr) {
   const size_t length = preferences.getBytesLength(key);
   const bool isLegacy = length == sizeof(PersistedSettingsV3) ||
                         length == sizeof(PersistedSettingsV4) ||
-                        length == sizeof(PersistedSettingsV5);
+                        length == sizeof(PersistedSettingsV5) ||
+                        length == sizeof(PersistedSettingsV6);
   const bool valid =
       length == sizeof(PersistedSettings)
           ? readSettingsSlot(preferences, key, settings)
-          : length == sizeof(PersistedSettingsV5)
-                ? readV5SettingsSlot(preferences, key, settings)
-                : length == sizeof(PersistedSettingsV4)
-                      ? readV4SettingsSlot(preferences, key, settings)
-                      : length == sizeof(PersistedSettingsV3) &&
-                            readLegacySettingsSlot(preferences, key, settings);
+          : length == sizeof(PersistedSettingsV6)
+                ? readV6SettingsSlot(preferences, key, settings)
+                : length == sizeof(PersistedSettingsV5)
+                      ? readV5SettingsSlot(preferences, key, settings)
+                      : length == sizeof(PersistedSettingsV4)
+                            ? readV4SettingsSlot(preferences, key, settings)
+                            : length == sizeof(PersistedSettingsV3) &&
+                                  readLegacySettingsSlot(preferences, key,
+                                                         settings);
   if (legacyFormat != nullptr) {
     *legacyFormat = valid && isLegacy;
   }
@@ -551,6 +665,7 @@ inline bool loadPersistedSettings(PersistedSettings &settings) {
   if (settings.schemaVersion == PREVIOUS_CONFIG_SCHEMA_VERSION) {
     settings.runtime.paddleReturnReminderMaxDurationMs =
         DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
+    settings.runtime.timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
   }
   return true;
 }

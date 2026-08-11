@@ -10,10 +10,14 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 6;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 5;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 7;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 6;
+constexpr int16_t MIN_TIMEZONE_OFFSET_MINUTES = -720;
+constexpr int16_t MAX_TIMEZONE_OFFSET_MINUTES = 840;
+constexpr int16_t DEFAULT_TIMEZONE_OFFSET_MINUTES = 0;
 constexpr uint32_t LEGACY_PRE_SCHEMA_FOUR_VERSION = 3;
 constexpr uint32_t LEGACY_SCHEMA_FOUR_VERSION = 4;
+constexpr uint32_t LEGACY_SCHEMA_FIVE_VERSION = 5;
 constexpr uint32_t LEGACY_CONFIG_SCHEMA_VERSION = 2;
 constexpr uint32_t DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS = 10000;
 constexpr uint32_t MIN_PADDLE_RETURN_REMINDER_INTERVAL_MS = 5000;
@@ -162,6 +166,7 @@ struct RuntimeConfig {
   uint32_t brewConfirmMs = DEFAULT_BREW_CONFIRM_MS;
   uint32_t minAutoStopMs = DEFAULT_MIN_AUTO_STOP_MS;
   uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
+  int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
 };
 
 struct CycleConfigSnapshot {
@@ -218,7 +223,8 @@ enum class ConfigValidationError : uint8_t {
   PADDLE_REMINDER_INTERVAL,
   PADDLE_REMINDER_MAX_DURATION,
   TIMING_RELATION,
-  COMBINED_TARE_REQUIRES_AUTOTARE
+  COMBINED_TARE_REQUIRES_AUTOTARE,
+  TIMEZONE_OFFSET
 };
 
 inline ConfigValidationError validateRuntimeConfig(
@@ -270,6 +276,10 @@ inline ConfigValidationError validateRuntimeConfig(
   if (config.canTareStartTimer && !config.autoTare) {
     return ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE;
   }
+  if (config.timezoneOffsetMinutes < MIN_TIMEZONE_OFFSET_MINUTES ||
+      config.timezoneOffsetMinutes > MAX_TIMEZONE_OFFSET_MINUTES) {
+    return ConfigValidationError::TIMEZONE_OFFSET;
+  }
   return ConfigValidationError::NONE;
 }
 
@@ -291,6 +301,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
     case ConfigValidationError::TIMING_RELATION: return "timingRelation";
     case ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE:
       return "canTareStartTimer";
+    case ConfigValidationError::TIMEZONE_OFFSET:
+      return "timezoneOffsetMinutes";
   }
   return "unknown";
 }
@@ -345,6 +357,7 @@ enum class WebCommandType : uint8_t {
   RESTART,
   RESET_NETWORK_UI,
   FACTORY_RESET,
+  CLEAR_SHOT_LOG,
   PERSIST_RUNTIME,
   START_WIFI_SCAN,
   MAINTENANCE_COMPLETE
@@ -367,6 +380,7 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::RESTART: return "restart";
     case WebCommandType::RESET_NETWORK_UI: return "recover network/UI";
     case WebCommandType::FACTORY_RESET: return "restore factory settings";
+    case WebCommandType::CLEAR_SHOT_LOG: return "clear shot history";
     case WebCommandType::PERSIST_RUNTIME: return "persist workflow";
     case WebCommandType::START_WIFI_SCAN: return "scan Wi-Fi networks";
     case WebCommandType::MAINTENANCE_COMPLETE:
@@ -435,6 +449,7 @@ struct ControlStatusSnapshot {
   bool remoteControlEnabled = REMOTE_CN9_CONTROL_ENABLED;
   ControlSource source = ControlSource::NONE;
   uint32_t cycleId = 0;
+  uint32_t bootId = 0;
   uint32_t webSessionId = 0;
   uint32_t controlLeaseId = 0;
   bool maintenanceLeaseActive = false;

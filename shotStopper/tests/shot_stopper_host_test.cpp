@@ -80,7 +80,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   stopperState = StopperState::REQUIRES_OFF;
   shot = ShotTrajectory{};
   session = CycleSession{};
-  pendingAnalysis = PendingShotAnalysis{};
+  pendingFinalize = PendingShotFinalize{};
   runtimeConfig = RuntimeConfig{};
   lastCycle = LastCycleSummary{};
   debugLog.clear();
@@ -875,16 +875,17 @@ void r03_non_finite_weights_cannot_corrupt_state_or_offset() {
   recordWeightSample(std::numeric_limits<float>::infinity(), hostMillis);
   CHECK(shot.datapoints == 0);
 
-  pendingAnalysis.pending = true;
-  pendingAnalysis.endedAtMs = hostMillis;
-  pendingAnalysis.endedWeightSequence = 0;
-  pendingAnalysis.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
-  pendingAnalysis.weightOffsetG = originalOffset;
+  pendingFinalize.pending = true;
+  pendingFinalize.offsetAnalysis = true;
+  pendingFinalize.endedAtMs = hostMillis;
+  pendingFinalize.endedWeightSequence = 0;
+  pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  pendingFinalize.weightOffsetG = originalOffset;
   currentWeight = std::numeric_limits<float>::quiet_NaN();
   currentWeightSequence = 1;
   currentWeightReceivedAtMs = hostMillis + 1;
   runLoopAfter(DRIP_DELAY_MS);
-  CHECK(!pendingAnalysis.pending);
+  CHECK(!pendingFinalize.pending);
   CHECK(isfinite(runtimeConfig.weightOffsetG));
   CHECK(runtimeConfig.weightOffsetG == originalOffset);
 }
@@ -1057,11 +1058,12 @@ void r11_final_shot_analysis_updates_only_valid_offset() {
   resetHarness(false, true);
   reachReadyFromBoot();
   const float originalOffset = runtimeConfig.weightOffsetG;
-  pendingAnalysis.pending = true;
-  pendingAnalysis.endedAtMs = hostMillis;
-  pendingAnalysis.endedWeightSequence = 0;
-  pendingAnalysis.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
-  pendingAnalysis.weightOffsetG = originalOffset;
+  pendingFinalize.pending = true;
+  pendingFinalize.offsetAnalysis = true;
+  pendingFinalize.endedAtMs = hostMillis;
+  pendingFinalize.endedWeightSequence = 0;
+  pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  pendingFinalize.weightOffsetG = originalOffset;
   currentWeight = DEFAULT_GOAL_WEIGHT_G + 1.0f;
   currentWeightSequence = 1;
   currentWeightReceivedAtMs = hostMillis + 1;
@@ -1070,11 +1072,12 @@ void r11_final_shot_analysis_updates_only_valid_offset() {
   CHECK(fabsf(runtimeConfig.weightOffsetG - 2.5f) < 0.001f);
 
   const float validOffset = runtimeConfig.weightOffsetG;
-  pendingAnalysis.pending = true;
-  pendingAnalysis.endedAtMs = hostMillis;
-  pendingAnalysis.endedWeightSequence = currentWeightSequence;
-  pendingAnalysis.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
-  pendingAnalysis.weightOffsetG = validOffset;
+  pendingFinalize.pending = true;
+  pendingFinalize.offsetAnalysis = true;
+  pendingFinalize.endedAtMs = hostMillis;
+  pendingFinalize.endedWeightSequence = currentWeightSequence;
+  pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  pendingFinalize.weightOffsetG = validOffset;
   currentWeight = DEFAULT_GOAL_WEIGHT_G + MAX_OFFSET_G + 1.0f;
   ++currentWeightSequence;
   currentWeightReceivedAtMs = hostMillis + 1;
@@ -1694,7 +1697,7 @@ void w34_calibration_reset_restores_default_and_cancels_analysis() {
   reachReadyFromBoot();
   runtimeConfig.weightOffsetG = 3.2f;
   const uint32_t previousRevision = runtimeConfig.revision;
-  pendingAnalysis.pending = true;
+  pendingFinalize.pending = true;
   WebCommand reset;
   reset.type = WebCommandType::RESET_WEIGHT_OFFSET;
   processWebCommand(reset);
@@ -1702,7 +1705,7 @@ void w34_calibration_reset_restores_default_and_cancels_analysis() {
   CHECK(fabsf(runtimeConfig.weightOffsetG - DEFAULT_WEIGHT_OFFSET_G) <
         0.001f);
   CHECK(runtimeConfig.revision == previousRevision + 1);
-  CHECK(!pendingAnalysis.pending);
+  CHECK(!pendingFinalize.pending);
 }
 
 void w35_status_reports_the_live_physical_paddle_gpio() {
@@ -2002,7 +2005,7 @@ void r31_confirmed_overload_opens_without_learning() {
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(session.endReason == EndReason::WEIGHT_ANOMALY);
   CHECK(!session.calibrationEligible);
-  CHECK(!pendingAnalysis.pending);
+  CHECK(!pendingFinalize.pending);
 }
 
 void r32_old_connection_generation_cannot_update_weight() {
@@ -2351,6 +2354,73 @@ void w43_manual_palette_tracks_timer_only_and_scale_loss() {
   CHECK(stopperUsesManualIndicatorPalette());
 }
 
+void s01_shot_log_filters_short_and_rinse() {
+  CHECK(!shotLogEligible(EndReason::SHORT_SHOT, 15000));
+  CHECK(!shotLogEligible(EndReason::RINSE_COMPLETE, 15000));
+  CHECK(!shotLogEligible(EndReason::PADDLE, 9000));
+  CHECK(shotLogEligible(EndReason::PADDLE, 10000));
+}
+
+void s02_shot_log_appends_after_drip_delay() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  shotLog.clear();
+  pendingFinalize = PendingShotFinalize{};
+  pendingFinalize.pending = true;
+  pendingFinalize.logEligible = true;
+  pendingFinalize.startedWithScale = false;
+  pendingFinalize.finalState = StopperState::MANUAL_NO_SCALE;
+  pendingFinalize.endReason = EndReason::PADDLE;
+  pendingFinalize.bootId = shotLog.bootId();
+  pendingFinalize.durationDs = 120;
+  pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  pendingFinalize.weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
+  pendingFinalize.endedAtMs = hostMillis;
+  runLoopAfter(DRIP_DELAY_MS);
+  CHECK(!pendingFinalize.pending);
+  CHECK(shotLog.count() == 1);
+  ShotLogRecord records[1] = {};
+  CHECK(shotLog.copyNewestFirst(records, 1) == 1);
+  CHECK(records[0].durationDs == 120);
+  CHECK(records[0].shotType ==
+        static_cast<uint8_t>(ShotLogType::MANUAL));
+}
+
+void s03_shot_log_clear_empties_records() {
+  resetHarness(false, true);
+  shotLog.clear();
+  ShotLogRecord record = {};
+  record.durationDs = 100;
+  CHECK(shotLog.append(record));
+  CHECK(shotLog.count() == 1);
+  CHECK(shotLog.clear());
+  CHECK(shotLog.count() == 0);
+}
+
+void s04_shot_log_remove_by_id() {
+  resetHarness(false, true);
+  shotLog.clear();
+  ShotLogRecord first = {};
+  first.durationDs = 100;
+  CHECK(shotLog.append(first));
+  ShotLogRecord second = {};
+  second.durationDs = 200;
+  CHECK(shotLog.append(second));
+  CHECK(shotLog.count() == 2);
+  ShotLogRecord records[2] = {};
+  CHECK(shotLog.copyNewestFirst(records, 2) == 2);
+  CHECK(records[0].durationDs == 200);
+  CHECK(records[1].durationDs == 100);
+  const uint32_t deleteId = records[0].id;
+  CHECK(deleteId != 0);
+  CHECK(shotLog.removeById(deleteId));
+  CHECK(shotLog.count() == 1);
+  CHECK(shotLog.copyNewestFirst(records, 2) == 1);
+  CHECK(records[0].durationDs == 100);
+  CHECK(!shotLog.removeById(deleteId));
+  CHECK(!shotLog.removeById(99999U));
+}
+
 using TestFunction = void (*)();
 
 struct TestCase {
@@ -2472,6 +2542,10 @@ const TestCase testCases[] = {
     {"W42", w42_indicator_blink_periods_are_deterministic},
     {"W43", w43_manual_palette_tracks_timer_only_and_scale_loss},
     {"W44", w44_paddle_return_reminder_stops_after_fifteen_minutes},
+    {"S01", s01_shot_log_filters_short_and_rinse},
+    {"S02", s02_shot_log_appends_after_drip_delay},
+    {"S03", s03_shot_log_clear_empties_records},
+    {"S04", s04_shot_log_remove_by_id},
 };
 
 }  // namespace

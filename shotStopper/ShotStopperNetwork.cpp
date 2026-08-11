@@ -23,6 +23,7 @@ constexpr const char *STATUS_BAD_REQUEST = "400 Bad Request";
 constexpr const char *STATUS_UNAUTHORIZED = "401 Unauthorized";
 constexpr const char *STATUS_TOO_MANY = "429 Too Many Requests";
 constexpr const char *STATUS_CONFLICT = "409 Conflict";
+constexpr const char *STATUS_NOT_FOUND = "404 Not Found";
 constexpr const char *STATUS_UNPROCESSABLE = "422 Unprocessable Entity";
 constexpr const char *STATUS_UNAVAILABLE = "503 Service Unavailable";
 
@@ -74,6 +75,22 @@ bool jsonUint8(cJSON *object, const char *name, uint8_t &output) {
     return false;
   }
   output = static_cast<uint8_t>(value);
+  return true;
+}
+
+bool jsonInt16(cJSON *object, const char *name, int16_t &output) {
+  if (object == nullptr || name == nullptr) {
+    return false;
+  }
+  const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+  if (!cJSON_IsNumber(item) || item->valuedouble != item->valueint) {
+    return false;
+  }
+  const long value = item->valueint;
+  if (value < INT16_MIN || value > INT16_MAX) {
+    return false;
+  }
+  output = static_cast<int16_t>(value);
   return true;
 }
 
@@ -141,6 +158,8 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "Required: gesture < brew < auto-stop < limit, and rinse duration <= limit.";
     case ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE:
       return "The Bookoo combined command requires automatic tare.";
+    case ConfigValidationError::TIMEZONE_OFFSET:
+      return "Timezone offset must be from -720 to +840 minutes.";
   }
   return "Invalid configuration.";
 }
@@ -1101,6 +1120,9 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
         log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
         return false;
       }
+      if (callbacks_.clearShotLog != nullptr) {
+        callbacks_.clearShotLog();
+      }
       factoryReset = true;
       authenticationChanged = true;
       restartPending_ = true;
@@ -1171,7 +1193,7 @@ bool ShotStopperNetwork::startHttpServer() {
   config.task_priority = tskIDLE_PRIORITY + 1;
   config.stack_size = 8192;
   config.max_open_sockets = 2;
-  config.max_uri_handlers = 17;
+  config.max_uri_handlers = 22;
   config.max_resp_headers = 8;
   config.backlog_conn = 2;
   config.lru_purge_enable = true;
@@ -1190,6 +1212,11 @@ bool ShotStopperNetwork::startHttpServer() {
                       heartbeatHandler) &&
       registerHandler(server_, "/api/v1/status", HTTP_GET, statusHandler) &&
       registerHandler(server_, "/api/v1/log", HTTP_GET, logHandler) &&
+      registerHandler(server_, "/api/v1/shots", HTTP_GET, shotsHandler) &&
+      registerHandler(server_, "/api/v1/shots/clear", HTTP_POST,
+                      shotsClearHandler) &&
+      registerHandler(server_, "/api/v1/shots/delete", HTTP_POST,
+                      shotsDeleteHandler) &&
       registerHandler(server_, "/api/v1/config", HTTP_POST, configHandler) &&
       registerHandler(server_, "/api/v1/calibration/reset", HTTP_POST,
                       resetCalibrationHandler) &&
@@ -1635,7 +1662,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"paddleReturnReminderIntervalMs\":%lu,"
       "\"paddleReturnReminderMaxDurationMs\":%lu,\"rinseGestureMs\":%lu,"
       "\"rinseDurationMs\":%lu,\"brewConfirmMs\":%lu,"
-      "\"minAutoStopMs\":%lu,\"operationalWallMs\":%lu},"
+      "\"minAutoStopMs\":%lu,\"operationalWallMs\":%lu,"
+      "\"timezoneOffsetMinutes\":%d},"
       "\"scale\":{\"available\":%s,\"streamState\":\"%s\","
       "\"controlState\":\"%s\",\"controlAccepted\":%s,"
       "\"currentWeightG\":%s,"
@@ -1698,6 +1726,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(control.config.brewConfirmMs),
       static_cast<unsigned long>(control.config.minAutoStopMs),
       static_cast<unsigned long>(control.config.operationalWallMs),
+      static_cast<int>(control.config.timezoneOffsetMinutes),
       control.scaleAvailable ? "true" : "false",
       weightStreamStateName(control.weightStreamState),
       weightControlStateName(control.weightControlState),
@@ -1822,6 +1851,165 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
              : ESP_FAIL;
 }
 
+esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  ControlStatusSnapshot control;
+  self.callbacks_.copyControlStatus(control);
+  static ShotLogRecord records[SHOT_LOG_CAPACITY];
+  const size_t count =
+      self.callbacks_.copyShotRecords != nullptr
+          ? self.callbacks_.copyShotRecords(records, SHOT_LOG_CAPACITY)
+          : 0;
+
+  httpd_resp_set_type(request, JSON_CONTENT_TYPE);
+  httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+  char header[160] = {};
+  snprintf(header, sizeof(header),
+           "{\"bootId\":%lu,\"timezoneOffsetMinutes\":%d,\"shots\":[",
+           static_cast<unsigned long>(control.bootId),
+           static_cast<int>(control.config.timezoneOffsetMinutes));
+  if (httpd_resp_send_chunk(request, header, HTTPD_RESP_USE_STRLEN) != ESP_OK) {
+    return ESP_FAIL;
+  }
+
+  for (size_t index = 0; index < count; ++index) {
+    const ShotLogRecord &record = records[index];
+    char actual[16] = "null";
+    char errorG[16] = "null";
+    char errorPct[16] = "null";
+    char flow[16] = "null";
+    char firstDrop[16] = "null";
+    if (record.actualWeightCg != SHOT_LOG_WEIGHT_MISSING) {
+      snprintf(actual, sizeof(actual), "%.2f",
+               static_cast<double>(record.actualWeightCg) / 100.0);
+      snprintf(errorG, sizeof(errorG), "%.2f",
+               static_cast<double>(record.errorCg) / 100.0);
+      if (record.goalWeightG > 0) {
+        snprintf(errorPct, sizeof(errorPct), "%.1f",
+                 static_cast<double>(record.errorCg) * 100.0 /
+                     (static_cast<double>(record.goalWeightG) * 100.0));
+      }
+    }
+    if (record.avgFlowCgS != SHOT_LOG_METRIC_MISSING) {
+      snprintf(flow, sizeof(flow), "%.2f",
+               static_cast<double>(record.avgFlowCgS) / 100.0);
+    }
+    if (record.firstDropDs != SHOT_LOG_METRIC_MISSING) {
+      snprintf(firstDrop, sizeof(firstDrop), "%.1f",
+               static_cast<double>(record.firstDropDs) / 10.0);
+    }
+    char item[420] = {};
+    snprintf(item, sizeof(item),
+             "%s{\"id\":%lu,\"bootId\":%lu,\"endedAtMs\":%lu,\"durationS\":%.1f,"
+             "\"goalG\":%u,\"actualG\":%s,\"errorG\":%s,\"errorPct\":%s,"
+             "\"offsetG\":%.2f,\"avgFlowGS\":%s,\"firstDropS\":%s,"
+             "\"shotType\":\"%s\",\"cutType\":\"%s\"}",
+             index == 0 ? "" : ",",
+             static_cast<unsigned long>(record.id),
+             static_cast<unsigned long>(record.bootId),
+             static_cast<unsigned long>(record.endedAtMs),
+             static_cast<double>(record.durationDs) / 10.0,
+             static_cast<unsigned>(record.goalWeightG), actual, errorG,
+             errorPct,
+             static_cast<double>(record.offsetUsedCg) / 100.0, flow,
+             firstDrop,
+             shotLogTypeName(static_cast<ShotLogType>(record.shotType)),
+             shotLogCutName(static_cast<ShotLogCut>(record.cutType)));
+    if (httpd_resp_send_chunk(request, item, HTTPD_RESP_USE_STRLEN) != ESP_OK) {
+      return ESP_FAIL;
+    }
+  }
+  return httpd_resp_send_chunk(request, "]}", HTTPD_RESP_USE_STRLEN) == ESP_OK
+             ? httpd_resp_send_chunk(request, nullptr, 0)
+             : ESP_FAIL;
+}
+
+esp_err_t ShotStopperNetwork::shotsClearHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authenticate(request, true)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
+                     "Invalid session or CSRF token.");
+  }
+  ControlStatusSnapshot status;
+  self.callbacks_.copyControlStatus(status);
+  if (!controlAllowsConfiguration(status)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "Stop the cycle, switch the physical paddle OFF, and wait for Ready before clearing shot history.");
+  }
+
+  char body[REQUEST_BODY_CAPACITY] = {};
+  char confirmation[32] = {};
+  if (!readJsonBody(request, body)) {
+    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
+                     "An explicit confirmation is required.");
+  }
+  cJSON *root = cJSON_Parse(body);
+  static const char *const fields[] = {"confirm"};
+  const bool parsed =
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
+      jsonString(root, "confirm", confirmation, sizeof(confirmation), false) &&
+      strcmp(confirmation, "CLEAR_SHOT_LOG") == 0;
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  memset(body, 0, sizeof(body));
+  memset(confirmation, 0, sizeof(confirmation));
+  if (!parsed) {
+    return sendError(request, STATUS_UNPROCESSABLE,
+                     "SHOT_LOG_CLEAR_NOT_CONFIRMED",
+                     "The shot-history clear was not explicitly confirmed.");
+  }
+
+  if (self.callbacks_.clearShotLog == nullptr ||
+      !self.callbacks_.clearShotLog()) {
+    return sendError(request, STATUS_UNAVAILABLE, "SHOT_LOG_CLEAR_FAILED",
+                     "Shot history could not be cleared.");
+  }
+  return sendJson(request, STATUS_OK, "{\"cleared\":true}");
+}
+
+esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authenticate(request, true)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
+                     "Invalid session or CSRF token.");
+  }
+  ControlStatusSnapshot status;
+  self.callbacks_.copyControlStatus(status);
+  if (!controlAllowsConfiguration(status)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "Stop the cycle, switch the physical paddle OFF, and wait for Ready before deleting shot records.");
+  }
+
+  char body[REQUEST_BODY_CAPACITY] = {};
+  if (!readJsonBody(request, body)) {
+    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
+                     "A bounded JSON request is required.");
+  }
+  cJSON *root = cJSON_Parse(body);
+  uint32_t shotId = 0;
+  static const char *const fields[] = {"id"};
+  const bool parsed = root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
+                      jsonUint32(root, "id", shotId) && shotId != 0;
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  memset(body, 0, sizeof(body));
+  if (!parsed) {
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
+                     "A non-zero shot id is required.");
+  }
+
+  if (self.callbacks_.deleteShotRecord == nullptr ||
+      !self.callbacks_.deleteShotRecord(shotId)) {
+    return sendError(request, STATUS_NOT_FOUND, "SHOT_NOT_FOUND",
+                     "The requested shot record was not found.");
+  }
+  return sendJson(request, STATUS_OK, "{\"deleted\":true}");
+}
+
 esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   if (!self.authenticate(request, true)) {
@@ -1846,9 +2034,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "goalWeightG", "rinseGestureMs", "rinseDurationMs", "brewConfirmMs",
       "minAutoStopMs", "operationalWallMs", "autoTare", "timerOnly",
       "canTareStartTimer", "brewConfirmationBeep", "paddleReturnReminderBeep",
-      "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs"};
+      "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
+      "timezoneOffsetMinutes"};
   const bool parsed =
-      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 13) &&
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 14) &&
       jsonUint8(root, "goalWeightG", candidate.goalWeightG) &&
       jsonUint32(root, "rinseGestureMs", candidate.rinseGestureMs) &&
       jsonUint32(root, "rinseDurationMs", candidate.rinseDurationMs) &&
@@ -1865,7 +2054,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       jsonUint32(root, "paddleReturnReminderIntervalMs",
                  candidate.paddleReturnReminderIntervalMs) &&
       jsonUint32(root, "paddleReturnReminderMaxDurationMs",
-                 candidate.paddleReturnReminderMaxDurationMs);
+                 candidate.paddleReturnReminderMaxDurationMs) &&
+      jsonInt16(root, "timezoneOffsetMinutes",
+                candidate.timezoneOffsetMinutes);
   if (root != nullptr) {
     cJSON_Delete(root);
   }
