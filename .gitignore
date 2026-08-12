@@ -63,3 +63,6 @@ coverage/
 *.gcov
 *.profraw
 *.profdata
+
+# Internal development plans (not for version control)
+docs/plans/
