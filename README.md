@@ -200,6 +200,12 @@ Additional fixed protections (not separately configurable):
 
 ### Scale support
 
+Scale compatibility depends on the
+[AcaiaArduinoBLE](https://github.com/tatemazer/AcaiaArduinoBLE) library by
+**[tatemazer](https://github.com/tatemazer)**. This project vendors a local
+copy under `libraries/AcaiaArduinoBLE/` and aims to stay aligned with upstream
+releases, new scale types, and protocol fixes as they land in that repository.
+
 - Local **AcaiaArduinoBLE** library (vendored in-repo) for **Acaia** (legacy and
   current), **Bookoo/generic**, and **Felicita** scales over BLE central.
 - Dedicated **`scale_worker`** FreeRTOS task isolates BLE polling, connection
@@ -785,3 +791,11 @@ This repository acknowledges that project and the contributors listed in the
 [local library documentation](libraries/AcaiaArduinoBLE/README.md#acknowledgement).
 The application firmware, safety model, Web UI, and Micra-specific workflow are
 substantial new work on top of that foundation.
+
+## Disclaimer
+
+This project was developed with substantial assistance from artificial
+intelligence tools. AI helped with design, implementation, documentation, and
+testing workflows; human review, hardware validation, and safety judgment remain
+the author’s responsibility. Use on real espresso equipment only after you have
+verified wiring, isolation, and behavior on your own setup.
