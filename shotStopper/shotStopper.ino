@@ -313,6 +313,9 @@ struct CycleSession {
   ControlSource source = ControlSource::NONE;
   CycleConfigSnapshot config = {};
   EndReason endReason = EndReason::NONE;
+  bool extractionExtended = false;
+  bool targetReachedEarly = false;
+  uint32_t targetReachedAtMs = 0;
 };
 
 struct PendingShotFinalize {
@@ -333,6 +336,12 @@ struct PendingShotFinalize {
   bool confirmedBrew = false;
   StopperState finalState = StopperState::READY;
   EndReason endReason = EndReason::NONE;
+  bool extractionGuardEnabled = false;
+  bool extractionExtended = false;
+  bool targetReachedEarly = false;
+  uint16_t targetReachedEarlyDs = SHOT_LOG_METRIC_MISSING;
+  float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
+  uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
 };
 
 struct ScaleCommand {
@@ -741,6 +750,10 @@ const char *endReasonName(EndReason reason) {
     case EndReason::PHYSICAL_OVERRIDE: return "physical override";
     case EndReason::WEB_HEARTBEAT_TIMEOUT: return "web heartbeat timeout";
     case EndReason::RELAY_SAFETY_FAILURE: return "relay safety failure";
+    case EndReason::FAST_EXTRACTION_MAX_WEIGHT:
+      return "fast extraction max weight";
+    case EndReason::FAST_EXTRACTION_MIN_TIME:
+      return "fast extraction min time";
   }
   return "unknown";
 }
@@ -1394,6 +1407,10 @@ void resetShotTrajectory(uint32_t startedAtMs) {
 }
 
 void calculateExpectedEndTime() {
+  if (session.extractionExtended) {
+    shot.expectedEndS = session.config.operationalWallMs / 1000.0f;
+    return;
+  }
   if (shot.datapoints < TREND_POINT_COUNT ||
       shot.weight[shot.datapoints - 1] < 10.0f) {
     shot.expectedEndS = session.config.operationalWallMs / 1000.0f;
@@ -1451,6 +1468,23 @@ bool shouldTrackWeight() {
 float effectiveStopThreshold() {
   return static_cast<float>(session.config.goalWeightG) -
          session.config.weightOffsetG;
+}
+
+float effectiveMaxStopThreshold() {
+  return session.config.maxRecoveryWeightG - session.config.weightOffsetG;
+}
+
+bool fastExtractionGuardSession() {
+  return session.active && session.config.fastExtractionGuardEnabled &&
+         !session.config.timerOnly && session.startedWithScale;
+}
+
+bool minBrewTimeReached() {
+  return elapsedMs(session.startedAtMs) >= session.config.minBrewTimeMs;
+}
+
+bool targetWeightReached(float weight) {
+  return weight >= effectiveStopThreshold();
 }
 
 void requestScaleBrewBeep(uint32_t cycleId);
@@ -1724,8 +1758,11 @@ void considerDirectStopSample(float weight, uint32_t receivedAtMs,
   }
 
   const bool overload = fabsf(weight) > MAX_AUTOMATION_WEIGHT_G;
+  const bool overMax =
+      fastExtractionGuardSession() && session.extractionExtended &&
+      weight >= effectiveMaxStopThreshold();
   const bool overThreshold = weight >= effectiveStopThreshold();
-  if (!overThreshold && !overload) {
+  if (!overThreshold && !overload && !overMax) {
     resetDirectStopConfirmation();
     return;
   }
@@ -1747,21 +1784,43 @@ void considerDirectStopSample(float weight, uint32_t receivedAtMs,
     return;
   }
 
-  session.directStopPending = true;
-  session.directStopReason = overload ? EndReason::WEIGHT_ANOMALY
-                                      : EndReason::SCALE_THRESHOLD;
   if (overload) {
+    session.directStopPending = true;
+    session.directStopReason = EndReason::WEIGHT_ANOMALY;
     weightStreamState = WeightStreamState::OVERLOAD;
     session.calibrationEligible = false;
     setWeightControlState(WeightControlState::FAULT_STOPPED);
     addDebugEvent(DebugCategory::SCALE,
                   DebugCode::SCALE_OVERLOAD_CONFIRMED,
                   static_cast<int32_t>(weight));
-  } else {
-    addDebugEvent(DebugCategory::SCALE,
-                  DebugCode::SCALE_THRESHOLD_CONFIRMED,
-                  static_cast<int32_t>(weight * 100.0f));
+    return;
   }
+
+  if (overMax) {
+    session.directStopPending = true;
+    session.directStopReason = EndReason::FAST_EXTRACTION_MAX_WEIGHT;
+    addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_STOP_MAX,
+                  static_cast<int32_t>(weight * 100.0f));
+    return;
+  }
+
+  if (overThreshold && fastExtractionGuardSession() && !minBrewTimeReached()) {
+    if (!session.extractionExtended) {
+      session.extractionExtended = true;
+      session.targetReachedEarly = true;
+      session.targetReachedAtMs = receivedAtMs;
+      addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_ENTERED,
+                    static_cast<int32_t>(weight * 100.0f),
+                    static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+    }
+    resetDirectStopConfirmation();
+    return;
+  }
+
+  session.directStopPending = true;
+  session.directStopReason = EndReason::SCALE_THRESHOLD;
+  addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_THRESHOLD_CONFIRMED,
+                static_cast<int32_t>(weight * 100.0f));
 }
 
 bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
@@ -2077,6 +2136,18 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   pendingFinalize.confirmedBrew = shot.confirmedBrew;
   pendingFinalize.finalState = stopperState;
   pendingFinalize.endReason = reason;
+  pendingFinalize.extractionGuardEnabled =
+      session.config.fastExtractionGuardEnabled;
+  pendingFinalize.extractionExtended = session.extractionExtended;
+  pendingFinalize.targetReachedEarly = session.targetReachedEarly;
+  pendingFinalize.maxRecoveryWeightG = session.config.maxRecoveryWeightG;
+  pendingFinalize.minBrewTimeMs = session.config.minBrewTimeMs;
+  if (session.targetReachedAtMs != 0 &&
+      static_cast<int32_t>(session.targetReachedAtMs - session.startedAtMs) >=
+          0) {
+    pendingFinalize.targetReachedEarlyDs = static_cast<uint16_t>(
+        (session.targetReachedAtMs - session.startedAtMs) / 100U);
+  }
 }
 
 void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeightG,
@@ -2110,6 +2181,21 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
       snapshot.confirmedBrew));
   record.cutType = static_cast<uint8_t>(
       shotLogCutFromEndReason(snapshot.endReason));
+  record.extractionGuardEnabled = snapshot.extractionGuardEnabled ? 1U : 0U;
+  record.extractionExtended = snapshot.extractionExtended ? 1U : 0U;
+  record.stopDetail = static_cast<uint8_t>(shotLogStopDetailFromEndReason(
+      snapshot.endReason, snapshot.extractionGuardEnabled,
+      snapshot.extractionExtended));
+  if (snapshot.extractionGuardEnabled) {
+    record.maxRecoveryWeightCg =
+        shotLogWeightToCentigrams(snapshot.maxRecoveryWeightG);
+    record.minBrewTimeDs =
+        static_cast<uint16_t>(snapshot.minBrewTimeMs / 100U);
+  } else {
+    record.maxRecoveryWeightCg = SHOT_LOG_WEIGHT_MISSING;
+    record.minBrewTimeDs = SHOT_LOG_METRIC_MISSING;
+  }
+  record.targetReachedEarlyDs = snapshot.targetReachedEarlyDs;
 
   if (finalWeightValid) {
     record.actualWeightCg = shotLogWeightToCentigrams(finalWeightG);
@@ -2434,6 +2520,8 @@ bool shotCompletionGetsDoubleBeep(EndReason reason) {
     case EndReason::WEB_STOP:
     case EndReason::PHYSICAL_OVERRIDE:
     case EndReason::WEB_HEARTBEAT_TIMEOUT:
+    case EndReason::FAST_EXTRACTION_MAX_WEIGHT:
+    case EndReason::FAST_EXTRACTION_MIN_TIME:
       return true;
     default:
       return false;
@@ -2990,6 +3078,20 @@ bool automaticScaleStopDue() {
       elapsedMs(session.lastThresholdAtMs) <= MAX_AUTOMATION_WEIGHT_AGE_MS;
   if (directStopFresh) {
     return true;
+  }
+
+  if (session.extractionExtended && fastExtractionGuardSession()) {
+    if (minBrewTimeReached() &&
+        targetWeightReached(session.lastAcceptedWeightG)) {
+      session.directStopPending = true;
+      session.directStopReason = EndReason::FAST_EXTRACTION_MIN_TIME;
+      addDebugEvent(DebugCategory::SCALE,
+                    DebugCode::FAST_EXTRACTION_STOP_MIN_TIME,
+                    static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f),
+                    static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+      return true;
+    }
+    return false;
   }
 
   if (!session.receivedFreshWeightInCycle ||
@@ -3624,6 +3726,21 @@ void publishControlStatus() {
         session.retareFlowFirstDetectedAtMs;
     next.cycleStartedAtMs = session.startedAtMs;
     next.cycleElapsedMs = elapsedMs(session.startedAtMs);
+    next.cycleExtractionExtended =
+        session.extractionExtended && fastExtractionGuardSession();
+    next.cycleTargetReachedEarly = session.targetReachedEarly;
+    if (next.cycleExtractionExtended) {
+      next.cycleActiveStopWeightG = session.config.maxRecoveryWeightG;
+      const uint32_t elapsed = next.cycleElapsedMs;
+      next.cycleMinBrewTimeRemainingMs =
+          elapsed >= session.config.minBrewTimeMs
+              ? 0U
+              : session.config.minBrewTimeMs - elapsed;
+    } else {
+      next.cycleActiveStopWeightG =
+          static_cast<float>(session.config.goalWeightG);
+      next.cycleMinBrewTimeRemainingMs = 0;
+    }
   }
   portENTER_CRITICAL(&debugLogMux);
   next.debugEventsDropped = debugLog.overwritten();
@@ -3793,20 +3910,29 @@ void setup() {
 
   persistenceReady = EEPROM.begin(EEPROM_SIZE);
 #ifndef SHOT_STOPPER_HOST_TEST
-  bool settingsReady = persistenceReady;
-  if (settingsReady && !loadPersistedSettings(persistedSettings)) {
-    bool legacyMigrated = false;
-    settingsReady = initializeDefaultSettings(
-        persistedSettings, EEPROM.read(WEIGHT_ADDR), EEPROM.read(OFFSET_ADDR),
-        &legacyMigrated);
-    if (settingsReady) {
-      settingsReady = savePersistedSettings(persistedSettings);
+  bool settingsLoaded = false;
+  bool configMigrated = false;
+  if (persistenceReady &&
+      loadPersistedSettings(persistedSettings, &configMigrated)) {
+    settingsLoaded = true;
+    if (configMigrated) {
+      if (savePersistedSettings(persistedSettings)) {
+        addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_MIGRATED);
+      } else {
+        Serial.println("WARN: settings save failed");
+        addDebugEvent(DebugCategory::CONFIG, DebugCode::INITIALIZATION_FAILED,
+                      4);
+      }
     }
-    if (legacyMigrated) {
-      addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_MIGRATED);
+  } else if (persistenceReady) {
+    if (initializeDefaultSettings(persistedSettings)) {
+      settingsLoaded = true;
+      if (!savePersistedSettings(persistedSettings)) {
+        Serial.println("WARN: settings save failed");
+      }
     }
   }
-  if (settingsReady) {
+  if (settingsLoaded) {
     runtimeConfig = persistedSettings.runtime;
   }
 #else
@@ -3860,7 +3986,7 @@ void setup() {
   hwmonSnapshot = hwmon.sample(1);
   publishControlStatus();
 #ifndef SHOT_STOPPER_HOST_TEST
-  if (settingsReady && webCommandQueue != nullptr) {
+  if (settingsLoaded && webCommandQueue != nullptr) {
     NetworkBridgeCallbacks callbacks;
     callbacks.copyControlStatus = copyControlStatus;
     callbacks.enqueueWebCommand = enqueueWebCommand;
@@ -3874,7 +4000,7 @@ void setup() {
     if (!networkManager.begin(persistedSettings, callbacks)) {
       Serial.println("Network manager unavailable; stopper remains local");
     }
-  } else if (!settingsReady) {
+  } else if (!settingsLoaded) {
     Serial.println("Network settings unavailable; stopper remains local");
   }
 #endif

@@ -1364,6 +1364,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.canTareStartTimer);
   CHECK(config.brewConfirmationBeep);
   CHECK(config.paddleReturnReminderBeep);
+  CHECK(!config.fastExtractionGuardEnabled);
 }
 
 void w02_each_runtime_field_is_validated() {
@@ -1387,6 +1388,11 @@ void w02_each_runtime_field_is_validated() {
   config.confirmationTimeoutMs = MAX_CONFIRMATION_TIMEOUT_MS + 1;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::CONFIRMATION_TIMEOUT);
+  config = RuntimeConfig{};
+  config.fastExtractionGuardEnabled = true;
+  config.maxRecoveryWeightG = 36.0f;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION);
 }
 
 void w03_runtime_timing_relations_are_transactional() {
@@ -2904,6 +2910,16 @@ void n08_web_rinse_requests_ntp_when_unsynced() {
   CHECK(hostNtpSyncRequestCount == 1);
 }
 
+void n09_network_bringup_ignores_paddle() {
+  ControlStatusSnapshot status = {};
+  status.state = StopperState::BREW;
+  status.activeCycle = true;
+  status.relayClosed = true;
+  status.physicalPaddleOn = true;
+  CHECK(!controlAllowsConfiguration(status));
+  CHECK(controlAllowsNetworkBringup(status));
+}
+
 void s04_shot_log_remove_by_id() {
   resetHarness(false, true);
   shotLog.clear();
@@ -3015,6 +3031,90 @@ void s09_shot_log_migrates_schema_v3() {
   CHECK(migrated.records[0].endedAtLocalSec == 0);
 }
 
+void s10_shot_log_migrates_schema_v4() {
+  ShotLogStoreV4 legacy = {};
+  legacy.header.bootId = 4;
+  legacy.header.nextRecordId = 2;
+  legacy.header.count = 1;
+  legacy.header.writeIndex = 1;
+  legacy.records[0].id = 1;
+  legacy.records[0].bootId = 4;
+  legacy.records[0].durationDs = 260;
+  legacy.records[0].goalWeightG = 36;
+  legacy.header.magic = SHOT_LOG_MAGIC;
+  legacy.header.schemaVersion = 4;
+  legacy.header.recordSize = sizeof(ShotLogRecordV4);
+  legacy.header.checksum = shotLogChecksumBytes(legacy.header);
+
+  ShotLogStore migrated = {};
+  migrateShotLogStoreV4(legacy, migrated);
+  CHECK(validShotLogStore(migrated));
+  CHECK(migrated.records[0].extractionGuardEnabled == 0);
+  CHECK(migrated.records[0].stopDetail ==
+        static_cast<uint8_t>(ShotLogStopDetail::NORMAL_TARGET));
+}
+
+void r48_guard_disabled_stops_at_target_normally() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.fastExtractionGuardEnabled = false;
+  startCycle();
+  advanceToBrewFromQualifying();
+  endBrewStartConfirmationForTests();
+  const float threshold = effectiveStopThreshold();
+  publishWeight(threshold + 0.1f);
+  publishWeight(threshold + 0.2f);
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
+}
+
+void r49_guard_extends_and_stops_at_max_weight() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.fastExtractionGuardEnabled = true;
+  runtimeConfig.maxRecoveryWeightG = 42.5f;
+  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrewFromQualifying();
+  endBrewStartConfirmationForTests();
+  runLoopAfter(22000);
+  const float threshold = effectiveStopThreshold();
+  publishWeight(threshold + 0.1f);
+  publishWeight(threshold + 0.2f);
+  CHECK(session.extractionExtended);
+  CHECK(getRelaySafetySnapshot().closed);
+  const float maxThreshold = effectiveMaxStopThreshold();
+  publishWeight(maxThreshold + 0.1f);
+  publishWeight(maxThreshold + 0.2f);
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::FAST_EXTRACTION_MAX_WEIGHT);
+}
+
+void r50_guard_extends_and_stops_at_min_time() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.fastExtractionGuardEnabled = true;
+  runtimeConfig.maxRecoveryWeightG = 42.5f;
+  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrewFromQualifying();
+  endBrewStartConfirmationForTests();
+  runLoopAfter(22000);
+  const float threshold = effectiveStopThreshold();
+  publishWeight(threshold + 0.1f);
+  publishWeight(threshold + 0.2f);
+  CHECK(session.extractionExtended);
+  runLoopAfter(4000);
+  session.lastAcceptedWeightG = threshold + 1.0f;
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::FAST_EXTRACTION_MIN_TIME);
+}
+
 using TestFunction = void (*)();
 
 struct TestCase {
@@ -3082,6 +3182,9 @@ const TestCase testCases[] = {
     {"R29", r29_direct_threshold_stops_before_regression_is_ready},
     {"R30", r30_first_abrupt_sample_uses_pre_shot_baseline},
     {"R31", r31_confirmed_overload_opens_without_learning},
+    {"R48", r48_guard_disabled_stops_at_target_normally},
+    {"R49", r49_guard_extends_and_stops_at_max_weight},
+    {"R50", r50_guard_extends_and_stops_at_min_time},
     {"R32", r32_old_connection_generation_cannot_update_weight},
     {"R33", r33_weight_mailbox_keeps_latest_and_reports_gap},
     {"R34", r34_suspended_control_recovers_after_three_attributed_samples},
@@ -3162,6 +3265,7 @@ const TestCase testCases[] = {
     {"S07", s07_shot_log_stores_fixed_wall_time},
     {"S08", s08_shot_log_without_sync_has_no_wall_time},
     {"S09", s09_shot_log_migrates_schema_v3},
+    {"S10", s10_shot_log_migrates_schema_v4},
     {"N01", n01_wall_clock_tracks_utc_from_anchor},
     {"N02", n02_ntp_hostname_validation},
     {"N03", n03_unsynced_retry_is_one_minute},
@@ -3170,6 +3274,7 @@ const TestCase testCases[] = {
     {"N06", n06_synced_clock_skips_activity_ntp_request},
     {"N07", n07_syncing_clock_skips_activity_ntp_request},
     {"N08", n08_web_rinse_requests_ntp_when_unsynced},
+    {"N09", n09_network_bringup_ignores_paddle},
 };
 
 }  // namespace

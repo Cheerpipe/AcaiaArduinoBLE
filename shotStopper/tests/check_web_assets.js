@@ -20,8 +20,8 @@ if (!scriptMatch) throw new Error('Embedded script not found');
 // Parse the exact JavaScript delivered by the controller.
 new Function(scriptMatch[1]);
 
-if (Buffer.byteLength(html, 'utf8') > 40960) {
-  throw new Error('Web UI exceeds the 40 KiB asset budget');
+if (Buffer.byteLength(html, 'utf8') > 45056) {
+  throw new Error('Web UI exceeds the 44 KiB asset budget');
 }
 if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
     !html.includes('Paddle State') || !html.includes('brewConfirmationBeep') ||
@@ -46,6 +46,11 @@ if (!network.includes('"brewConfirmationBeep"') ||
     !network.includes('"retareStabilityMaxGapMs"') ||
     !network.includes('"retareStabilityMinDurationMs"') ||
     !network.includes('"confirmationTimeoutMs"') ||
+    !network.includes('"fastExtractionGuardEnabled"') ||
+    !network.includes('"maxRecoveryWeightG"') ||
+    !network.includes('"minBrewTimeMs"') ||
+    !network.includes('\\"extractionExtended\\"') ||
+    !network.includes('\\"stopDetail\\"') ||
     !network.includes('"paddleReturnReminderIntervalMs"') ||
     !network.includes('"paddleReturnReminderMaxDurationMs"') ||
     !network.includes('"timezoneOffsetMinutes"') ||
@@ -58,6 +63,10 @@ if (!network.includes('"brewConfirmationBeep"') ||
     !html.includes('id="ntpServerCustom"') ||
     !html.includes('id="syncTimeButton"') ||
     !html.includes('id="autoRetare"') ||
+    !html.includes('id="fastExtractionGuardEnabled"') ||
+    !html.includes('id="maxRecoveryWeightG"') ||
+    !html.includes('id="minBrewTimeS"') ||
+    !html.includes('Fast extraction guard') ||
     !html.includes('id="retareWindowS"') ||
     !html.includes('id="minimumCupWeightG"') ||
     !html.includes('id="retareStabilitySamples"') ||

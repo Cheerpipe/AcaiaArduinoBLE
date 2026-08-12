@@ -197,6 +197,10 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "NTP server preset must be pool, google, cloudflare, or nist.";
     case ConfigValidationError::NTP_SERVER_CUSTOM:
       return "Custom NTP hostname is invalid.";
+    case ConfigValidationError::MAX_RECOVERY_WEIGHT:
+    case ConfigValidationError::MIN_BREW_TIME:
+    case ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION:
+      break;
   }
   return "Invalid configuration.";
 }
@@ -499,7 +503,7 @@ void ShotStopperNetwork::service() {
   ControlStatusSnapshot control;
   callbacks_.copyControlStatus(control);
 
-  if (!startupComplete_ && controlAllowsConfiguration(control) &&
+  if (!startupComplete_ && controlAllowsNetworkBringup(control) &&
       static_cast<int32_t>(now - networkRetryAtMs_) >= 0) {
     if (startNetwork()) {
       startupFailures_ = 0;
@@ -719,8 +723,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       Serial.println("WiFi STA disconnected; Web server waiting for reconnect");
       return;
     }
-    if (server_ == nullptr && controlAllowsNetworkMutation() &&
-        static_cast<int32_t>(now - httpRetryAtMs_) >= 0) {
+    if (server_ == nullptr && static_cast<int32_t>(now - httpRetryAtMs_) >= 0) {
       const bool httpReady = startHttpServer();
       httpRetryAtMs_ = httpReady ? 0 : now + HTTP_RETRY_MS;
       portENTER_CRITICAL(&dataMux_);
@@ -735,9 +738,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       WiFi.status() == WL_CONNECTED) {
     char address[16] = {};
     formatIp(WiFi.localIP(), address);
-    const bool mayStartHttp =
-        controlAllowsNetworkMutation() &&
-        static_cast<int32_t>(now - httpRetryAtMs_) >= 0;
+    const bool mayStartHttp = static_cast<int32_t>(now - httpRetryAtMs_) >= 0;
     const bool httpReady = mayStartHttp && startHttpServer();
     httpRetryAtMs_ = httpReady ? 0 : now + HTTP_RETRY_MS;
     staEverConnected_ = true;
@@ -758,7 +759,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
 
   if (status.staState == StaState::CONNECTING && !staEverConnected_ &&
       static_cast<uint32_t>(now - staConnectStartedAtMs_) >=
-          STA_CONNECT_TIMEOUT_MS && controlAllowsNetworkMutation()) {
+          STA_CONNECT_TIMEOUT_MS) {
     WiFi.disconnect(false, false);
     portENTER_CRITICAL(&dataMux_);
     status_.staState = StaState::FAILED;
@@ -787,7 +788,6 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
   }
 
   if (status.staState == StaState::DISCONNECTED && staEverConnected_ &&
-      controlAllowsNetworkMutation() &&
       static_cast<uint32_t>(now - staReconnectAttemptAtMs_) >=
           STA_RECONNECT_INTERVAL_MS) {
     staReconnectAttemptAtMs_ = now;
@@ -1846,6 +1846,10 @@ const char *ShotStopperNetwork::endReasonName(EndReason reason) {
     case EndReason::WEB_HEARTBEAT_TIMEOUT:
       return "WEB_HEARTBEAT_TIMEOUT";
     case EndReason::RELAY_SAFETY_FAILURE: return "RELAY_SAFETY_FAILURE";
+    case EndReason::FAST_EXTRACTION_MAX_WEIGHT:
+      return "FAST_EXTRACTION_MAX_WEIGHT";
+    case EndReason::FAST_EXTRACTION_MIN_TIME:
+      return "FAST_EXTRACTION_MIN_TIME";
   }
   return "UNKNOWN";
 }
@@ -1940,6 +1944,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"retareStabilityMinDurationMs\":%lu,"
       "\"confirmationTimeoutMs\":%lu,"
       "\"operationalWallMs\":%lu,"
+      "\"fastExtractionGuardEnabled\":%s,"
+      "\"maxRecoveryWeightG\":%.1f,"
+      "\"minBrewTimeMs\":%lu,"
       "\"timezoneOffsetMinutes\":%d,"
       "\"ntpServerPreset\":\"%s\",\"ntpServerCustom\":\"%s\"},"
       "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
@@ -1975,7 +1982,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"cycle\":{\"active\":%s,\"id\":%lu,\"elapsedMs\":%lu,"
       "\"retarePerformed\":%s,\"shotType\":\"%s\",\"flowDuringRetare\":%s,"
       "\"firstDropMs\":%lu,\"retareFlowFirstDetectedAtMs\":%lu,"
-      "\"firstDropElapsedMs\":%lu},"
+      "\"firstDropElapsedMs\":%lu,"
+      "\"extractionExtended\":%s,\"targetReachedEarly\":%s,"
+      "\"activeStopWeightG\":%.1f,\"minBrewTimeRemainingMs\":%lu},"
       "\"debugEventsDropped\":%lu}",
       safeFirmwareVersion, stopperStateName(control.state),
       stateLabel(control.state),
@@ -2023,6 +2032,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(control.config.retareStabilityMinDurationMs),
       static_cast<unsigned long>(control.config.confirmationTimeoutMs),
       static_cast<unsigned long>(control.config.operationalWallMs),
+      control.config.fastExtractionGuardEnabled ? "true" : "false",
+      static_cast<double>(control.config.maxRecoveryWeightG),
+      static_cast<unsigned long>(control.config.minBrewTimeMs),
       static_cast<int>(control.config.timezoneOffsetMinutes),
       ntpPresetId(control.config.ntpServerPreset),
       safeNtpCustom,
@@ -2093,6 +2105,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
                                        control.cycleStartedAtMs) >= 0
               ? control.cycleFirstDropMs - control.cycleStartedAtMs
               : 0U),
+      control.cycleExtractionExtended ? "true" : "false",
+      control.cycleTargetReachedEarly ? "true" : "false",
+      static_cast<double>(control.cycleActiveStopWeightG),
+      static_cast<unsigned long>(control.cycleMinBrewTimeRemainingMs),
       static_cast<unsigned long>(control.debugEventsDropped));
   if (written < 0 ||
       static_cast<size_t>(written) >= sizeof(g_statusResponseBuffer)) {
@@ -2208,6 +2224,9 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
     char errorPct[16] = "null";
     char flow[16] = "null";
     char firstDrop[16] = "null";
+    char maxRecovery[16] = "null";
+    char minBrewTime[16] = "null";
+    char targetEarly[16] = "null";
     if (record.actualWeightCg != SHOT_LOG_WEIGHT_MISSING) {
       snprintf(actual, sizeof(actual), "%.2f",
                static_cast<double>(record.actualWeightCg) / 100.0);
@@ -2227,7 +2246,19 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
       snprintf(firstDrop, sizeof(firstDrop), "%.1f",
                static_cast<double>(record.firstDropDs) / 10.0);
     }
-    char item[560] = {};
+    if (record.maxRecoveryWeightCg != SHOT_LOG_WEIGHT_MISSING) {
+      snprintf(maxRecovery, sizeof(maxRecovery), "%.2f",
+               static_cast<double>(record.maxRecoveryWeightCg) / 100.0);
+    }
+    if (record.minBrewTimeDs != SHOT_LOG_METRIC_MISSING) {
+      snprintf(minBrewTime, sizeof(minBrewTime), "%.1f",
+               static_cast<double>(record.minBrewTimeDs) / 10.0);
+    }
+    if (record.targetReachedEarlyDs != SHOT_LOG_METRIC_MISSING) {
+      snprintf(targetEarly, sizeof(targetEarly), "%.1f",
+               static_cast<double>(record.targetReachedEarlyDs) / 10.0);
+    }
+    char item[760] = {};
     snprintf(item, sizeof(item),
              "%s{\"id\":%lu,\"bootId\":%lu,\"endedAtMs\":%lu,"
              "\"hasWallTime\":%s,\"endedAtLocalSec\":%lu,"
@@ -2235,7 +2266,10 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
              "\"durationS\":%.1f,"
              "\"goalG\":%u,\"actualG\":%s,\"errorG\":%s,\"errorPct\":%s,"
              "\"offsetG\":%.2f,\"avgFlowGS\":%s,\"firstDropS\":%s,"
-             "\"shotType\":\"%s\",\"cutType\":\"%s\"}",
+             "\"shotType\":\"%s\",\"cutType\":\"%s\","
+             "\"extractionGuardEnabled\":%s,\"extractionExtended\":%s,"
+             "\"stopDetail\":\"%s\",\"maxRecoveryWeightG\":%s,"
+             "\"minBrewTimeS\":%s,\"targetReachedEarlyS\":%s}",
              index == 0 ? "" : ",",
              static_cast<unsigned long>(record.id),
              static_cast<unsigned long>(record.bootId),
@@ -2250,7 +2284,12 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
              static_cast<double>(record.offsetUsedCg) / 100.0, flow,
              firstDrop,
              shotLogTypeName(static_cast<ShotLogType>(record.shotType)),
-             shotLogCutName(static_cast<ShotLogCut>(record.cutType)));
+             shotLogCutName(static_cast<ShotLogCut>(record.cutType)),
+             record.extractionGuardEnabled ? "true" : "false",
+             record.extractionExtended ? "true" : "false",
+             shotLogStopDetailName(
+                 static_cast<ShotLogStopDetail>(record.stopDetail)),
+             maxRecovery, minBrewTime, targetEarly);
     if (httpd_resp_send_chunk(request, item, HTTPD_RESP_USE_STRLEN) != ESP_OK) {
       return ESP_FAIL;
     }
@@ -2393,10 +2432,11 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "autoRetare", "retareWindowMs", "minimumCupWeightG",
       "retareStabilitySamples", "retareStabilityToleranceG",
       "retareStabilityMaxGapMs", "retareStabilityMinDurationMs",
-      "confirmationTimeoutMs",
+      "confirmationTimeoutMs", "fastExtractionGuardEnabled",
+      "maxRecoveryWeightG", "minBrewTimeMs",
       "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom"};
   const bool parsed =
-      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 22) &&
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 25) &&
       jsonUint8(root, "goalWeightG", candidate.goalWeightG) &&
       jsonUint32(root, "rinseGestureMs", candidate.rinseGestureMs) &&
       jsonUint32(root, "rinseDurationMs", candidate.rinseDurationMs) &&
@@ -2425,6 +2465,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
                  candidate.retareStabilityMinDurationMs) &&
       jsonUint32(root, "confirmationTimeoutMs",
                  candidate.confirmationTimeoutMs) &&
+      jsonBoolean(root, "fastExtractionGuardEnabled",
+                  candidate.fastExtractionGuardEnabled) &&
+      jsonFloat(root, "maxRecoveryWeightG", candidate.maxRecoveryWeightG) &&
+      jsonUint32(root, "minBrewTimeMs", candidate.minBrewTimeMs) &&
       jsonInt16(root, "timezoneOffsetMinutes",
                 candidate.timezoneOffsetMinutes) &&
       jsonNtpPreset(root, "ntpServerPreset", candidate.ntpServerPreset) &&

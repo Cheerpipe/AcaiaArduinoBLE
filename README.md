@@ -47,7 +47,10 @@ Examples that did not exist (or barely existed) in the original stopper sketch:
   not break the shot.
 - **Embedded Web UI** with Wi-Fi, diagnostics, configuration, and optional
   remote control — no extra display or buttons on the machine.
-- **Shot history** (duration, weight, flow, first drop, cut type) with export.
+- **Shot history** (duration, weight, flow, first drop, cut type, extraction guard
+  telemetry) with export.
+- **Fast extraction guard** — optional extension when target weight is reached
+  too quickly (minimum brew time + max recovery weight); off by default.
 - **Advanced workflow settings** (rinse, CN9 limits, reminders, scale options).
 - **Safety and observability** — supervisor, task watchdog, optional external
   K2/feedback, structured debug log, hardware monitor.
@@ -101,6 +104,7 @@ panel and persisted in EEPROM. Defaults are shown in parentheses.
 | --- | --- |
 | **Target (g)** | Goal weight for brew by weight (10–200 g; default 36 g). |
 | **CN9 limit (s)** | Maximum CN9 closed time per cycle (5–60 s; default 60 s). |
+| **Fast extraction guard** | Optional; **off by default**. See [Fast extraction guard](#fast-extraction-guard). |
 | **Automatic tare** | Send an initial tare when an automatic shot starts (default ON). |
 | **Timer only** | Keep tare/timer but disable weight stop and offset learning. |
 | **Bookoo combined command** | Use the scale’s combined tare + start-timer command (requires auto tare; default ON). |
@@ -139,8 +143,11 @@ Additional fixed protections (not separately configurable):
   rinses and very short gestures are excluded).
 - Each record includes: local time (when NTP synced), duration, goal weight,
   actual weight, error and error %, learned offset used, average flow (g/s),
-  first-drop time, shot type (`auto`, `timer_only`, `manual`), and cut type
-  (`weight`, `prediction`, `manual`, `limit`, etc.).
+  first-drop time, shot type (`auto`, `timer_only`, `manual`), cut type
+  (`weight`, `prediction`, `manual`, `limit`, etc.), and when the fast
+  extraction guard was active: whether the shot was extended, how it stopped
+  (`normal_target`, `extended_max_weight`, `extended_min_time`, …), and the
+  max recovery weight / minimum brew time that applied.
 - Web UI table with **CSV export**, authenticated **clear all**, and
   **per-shot delete**.
 - Timezone offset and NTP server (preset or custom) configure wall-clock labels;
@@ -159,8 +166,9 @@ Additional fixed protections (not separately configurable):
 - **Live shot panel:** current/goal weight, progress bar, elapsed time, first
   drop, retare state, shot type, and scale protocol.
 - **REST API** (`/api/v1/…`) for status, config, shots, log, network, and
-  control. Configuration changes use a maintenance lease that requires stable
-  paddle OFF and open CN9.
+  control. Wi-Fi (STA/AP) and the HTTP server start regardless of paddle
+  position; **configuration changes** still use a maintenance lease that
+  requires stable paddle OFF and open CN9.
 - **Factory reset** erases Wi-Fi, settings, calibration, shot history, and the
   AP/UI password, then restarts.
 
@@ -320,6 +328,49 @@ The status API distinguishes BLE connection, stream freshness, control
 authority, observed versus accepted weight, connection generation, packet
 gaps, rejected packets, reconnects, and disconnect reason.
 
+## Fast extraction guard
+
+Optional brew-by-weight enhancement, **disabled by default**. It addresses
+shots that reach the target weight too quickly — often a sign of channeling or
+a grind that is too coarse — where stopping immediately would yield a thin,
+under-extracted cup.
+
+When enabled, you still set a mandatory **target weight** (same as today). You
+also configure:
+
+| Setting | Default | Role |
+| --- | --- | --- |
+| **Max recovery weight (g)** | 42.5 | Hard ceiling if the shot must be extended |
+| **Minimum brew time (s)** | 26 | Minimum extraction time for a normal target stop |
+
+### How it works
+
+1. **Normal stop** — the scale reaches the target at or after the minimum brew
+   time → CN9 opens at the target (unchanged behavior).
+2. **Too fast** — the target is reached *before* the minimum brew time → the
+   shot enters **extended** mode and keeps running until either:
+   - **Max recovery weight** is reached (always stops), or
+   - **Minimum brew time** is reached *and* the scale still shows at least the
+     target weight (stops even if below max recovery).
+
+Elapsed time is measured from cycle start (CN9 close), consistent with other
+timing in the firmware. The learned stop offset applies to both target and max
+recovery thresholds.
+
+### Why it is useful
+
+If coffee hits 36 g in ~22 s but you know a good shot needs ~26 s, the guard
+lets the extraction continue toward 42.5 g or until the minimum time passes —
+similar to manually allowing the shot to reach your next weight checkpoint
+without watching the scale.
+
+### Telemetry
+
+The live shot panel shows when the guard is off, on, or **extended** (with the
+active stop weight and time remaining). Shot history and CSV export record
+`extraction_guard_enabled`, `extraction_extended`, `stop_detail`, and the
+max/min settings used for that shot.
+
 ## Web UI and Wi-Fi (details)
 
 See **Web UI, Wi-Fi, and API** under [Main features](#main-features) for
@@ -330,9 +381,10 @@ notes:
 - Web actions that can close CN9 are **disabled by default**; enable only with
   `SHOT_STOPPER_ENABLE_REMOTE_CN9=1` on a trusted network.
 - Each remote cycle is bound to its session and a non-reusable lease.
-- Configuration, NVS, Wi-Fi, and scan operations use a **maintenance
+- Configuration, NVS, Wi-Fi save, and scan operations use a **maintenance
   reservation** that requires stable paddle OFF and open CN9; physical movement
-  cancels it.
+  cancels it. Read-only status and the web UI remain available while the paddle
+  is ON.
 - `202` responses include a `requestId`; `GET /api/v1/status` publishes the
   terminal command state (`APPLIED`, `PERSISTED`, `FAILED`, `CANCELED`).
 - There is no shared factory password: a unique random password is generated at
@@ -497,9 +549,8 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all \
   shotStopper
 ```
 
-To also validate opt-in remote actuation, add
-`-DSHOT_STOPPER_ENABLE_REMOTE_CN9=1` to `compiler.cpp.extra_flags`. It is not
-included in normal builds.
+The README [compile examples](#compile) enable remote CN9 actuation with
+`-DSHOT_STOPPER_ENABLE_REMOTE_CN9=1`. Omit that flag for local-only builds.
 
 The firmware checks at compile time that both pins differ from paddle, relay,
 and LED pins, and that the heartbeat uses an output-capable GPIO. This does not
@@ -569,12 +620,27 @@ DevKit V4 with:
 ./scripts/gen_version.sh
 mkdir -p build/esp32
 arduino-cli compile \
-  --fqbn esp32:esp32:esp32 \
+  --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs \
   --warnings all \
-  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy' \
+  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1' \
   --library libraries/AcaiaArduinoBLE \
   --build-path build/esp32 \
   shotStopper
+```
+
+`-DSHOT_STOPPER_ENABLE_REMOTE_CN9=1` exposes virtual paddle, rinse, and stop
+over the Web UI and API. Use only on a trusted network.
+
+The `min_spiffs` partition scheme gives a **1.9 MB** application slot. The
+default scheme only allows **1.25 MB** (`1310720` bytes); this firmware is
+larger than that limit and will not boot if compiled with the default
+partition table.
+
+After compiling, verify the on-disk image fits when using the default OTA
+slot (optional sanity check):
+
+```sh
+wc -c < build/esp32/shotStopper.ino.bin
 ```
 
 For the ESP32-S3 variant, generate the version header and use its FQBN and
@@ -585,7 +651,7 @@ output directory:
 mkdir -p build/esp32-s3
 
 arduino-cli compile --fqbn esp32:esp32:esp32s3 --warnings all \
-  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy' \
+  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1' \
   --library libraries/AcaiaArduinoBLE --build-path build/esp32-s3 shotStopper
 ```
 
@@ -603,7 +669,7 @@ the port used by your system:
 ```sh
 arduino-cli upload \
   --port /dev/cu.usbserial-0001 \
-  --fqbn esp32:esp32:esp32 \
+  --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs \
   --input-dir build/esp32 \
   shotStopper
 ```
@@ -612,6 +678,72 @@ For ESP32-S3, change both `--fqbn` and `--input-dir` to match the compiled
 variant. The generated application image is named `shotStopper.ino.bin`.
 `arduino-cli upload --input-dir` is recommended because it uploads the
 bootloader, partition table, and application at their correct offsets.
+
+## Serial monitor
+
+Connect the board over USB and list available ports:
+
+```sh
+arduino-cli board list
+```
+
+On macOS the port is usually `/dev/cu.usbserial-XXXX` (use the `cu.*` device,
+not `tty.*`, for monitoring). On Linux it is often `/dev/ttyUSB0` or
+`/dev/ttyACM0`.
+
+Open the monitor with `arduino-cli`, replacing the port with yours:
+
+```sh
+arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200
+```
+
+Use **115200** right after reset to read ESP32 boot messages (including image
+size or partition errors). After the app starts, switch to **9600** for Shot
+Stopper logs:
+
+```sh
+arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=9600
+```
+
+You should see lines such as `Shot Stopper Micra …` and `Goal weight: …`.
+Press **RST** on the board if the monitor was already open. Exit with
+`Ctrl+C`.
+
+### Troubleshooting serial output
+
+Not every baud rate works on every board. The correct speed depends on the
+USB‑serial chip (CP2102, CH340, FTDI, native USB CDC), the ESP32 variant, and
+whether you are reading the **bootloader** or the **running firmware**. If the
+monitor shows garbage (random symbols and repeated characters), try another rate and press **RST** after
+each change.
+
+| Baud rate | Typical use |
+| --- | --- |
+| **9600** | Shot Stopper application logs (this firmware) |
+| **115200** | ESP32 Arduino boot / early startup messages |
+| **74880** | ESP32 ROM bootloader right after reset |
+| **57600** | Some CH340 / clone adapters and older sketches |
+| **38400** | Fallback on misconfigured or bridged setups |
+| **19200** | Rare; worth trying if nothing else is readable |
+| **230400** | High-speed debug builds (not used by this project) |
+
+Example — try another rate:
+
+```sh
+arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=74880
+```
+
+If output is still unreadable at every rate:
+
+- Confirm the port with `arduino-cli board list` and use the `cu.*` device on
+  macOS.
+- Close other programs that may hold the port (Arduino IDE, another monitor).
+- Try a different USB cable or port (must be data, not charge-only).
+- Re-flash the firmware and watch **115200** or **74880** during reset for
+  partition or boot errors.
+
+If you see `Image length … doesn't fit in partition length …`, recompile with
+`PartitionScheme=min_spiffs` (see [Compile](#compile)) and upload again.
 
 ## Automated tests
 

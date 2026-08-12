@@ -11,7 +11,7 @@
 namespace shotstopper {
 
 constexpr uint32_t SHOT_LOG_MAGIC = 0x534C4F47U;  // "SLOG"
-constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 4;
+constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 5;
 constexpr size_t SHOT_LOG_CAPACITY = 120;
 constexpr uint32_t MIN_SHOT_LOG_DURATION_MS = 10000;
 constexpr float FIRST_DROP_THRESHOLD_G = 0.3f;
@@ -29,6 +29,44 @@ enum class ShotLogCut : uint8_t {
   MANUAL = 1,
   LIMIT = 2
 };
+
+enum class ShotLogStopDetail : uint8_t {
+  NORMAL_TARGET = 0,
+  PREDICTION = 1,
+  EXTENDED_MAX_WEIGHT = 2,
+  EXTENDED_MIN_TIME = 3,
+  OTHER = 255
+};
+
+inline const char *shotLogStopDetailName(ShotLogStopDetail detail) {
+  switch (detail) {
+    case ShotLogStopDetail::NORMAL_TARGET: return "normal_target";
+    case ShotLogStopDetail::PREDICTION: return "prediction";
+    case ShotLogStopDetail::EXTENDED_MAX_WEIGHT: return "extended_max_weight";
+    case ShotLogStopDetail::EXTENDED_MIN_TIME: return "extended_min_time";
+    case ShotLogStopDetail::OTHER: return "other";
+  }
+  return "unknown";
+}
+
+inline ShotLogStopDetail shotLogStopDetailFromEndReason(
+    EndReason reason, bool extractionGuardEnabled, bool extractionExtended) {
+  switch (reason) {
+    case EndReason::FAST_EXTRACTION_MAX_WEIGHT:
+      return ShotLogStopDetail::EXTENDED_MAX_WEIGHT;
+    case EndReason::FAST_EXTRACTION_MIN_TIME:
+      return ShotLogStopDetail::EXTENDED_MIN_TIME;
+    case EndReason::SCALE_PREDICTION:
+      return ShotLogStopDetail::PREDICTION;
+    case EndReason::SCALE_THRESHOLD:
+    case EndReason::WEIGHT_ANOMALY:
+      return extractionExtended && extractionGuardEnabled
+                 ? ShotLogStopDetail::OTHER
+                 : ShotLogStopDetail::NORMAL_TARGET;
+    default:
+      return ShotLogStopDetail::OTHER;
+  }
+}
 
 inline const char *shotLogTypeName(ShotLogType type) {
   switch (type) {
@@ -53,6 +91,8 @@ inline ShotLogCut shotLogCutFromEndReason(EndReason reason) {
     case EndReason::SCALE_THRESHOLD:
     case EndReason::SCALE_PREDICTION:
     case EndReason::WEIGHT_ANOMALY:
+    case EndReason::FAST_EXTRACTION_MAX_WEIGHT:
+    case EndReason::FAST_EXTRACTION_MIN_TIME:
       return ShotLogCut::AUTO;
     case EndReason::PADDLE:
     case EndReason::WEB_STOP:
@@ -87,6 +127,31 @@ inline ShotLogType shotLogTypeFromCycle(StopperState finalState, bool startedWit
 }
 
 struct ShotLogRecord {
+  uint32_t id;
+  uint32_t bootId;
+  uint32_t endedAtMs;
+  uint32_t endedAtUnixSec;
+  uint32_t endedAtLocalSec;
+  int16_t timezoneOffsetMinutesAtCommit;
+  uint16_t durationDs;
+  uint8_t goalWeightG;
+  uint8_t hasWallTime;
+  int16_t actualWeightCg;
+  int16_t errorCg;
+  int16_t offsetUsedCg;
+  uint16_t firstDropDs;
+  uint16_t avgFlowCgS;
+  uint8_t shotType;
+  uint8_t cutType;
+  uint8_t extractionGuardEnabled;
+  uint8_t extractionExtended;
+  uint8_t stopDetail;
+  int16_t maxRecoveryWeightCg;
+  uint16_t minBrewTimeDs;
+  uint16_t targetReachedEarlyDs;
+};
+
+struct ShotLogRecordV4 {
   uint32_t id;
   uint32_t bootId;
   uint32_t endedAtMs;
@@ -150,6 +215,11 @@ struct ShotLogHeader {
 struct ShotLogStore {
   ShotLogHeader header;
   ShotLogRecord records[SHOT_LOG_CAPACITY];
+};
+
+struct ShotLogStoreV4 {
+  ShotLogHeader header;
+  ShotLogRecordV4 records[SHOT_LOG_CAPACITY];
 };
 
 struct ShotLogStoreV3 {
@@ -231,6 +301,57 @@ inline void finalizeShotLogStore(ShotLogStore &store) {
   store.header.checksum = shotLogChecksum(store);
 }
 
+inline void migrateShotLogRecordV4ToV5(const ShotLogRecordV4 &source,
+                                       ShotLogRecord &dest) {
+  dest.id = source.id;
+  dest.bootId = source.bootId;
+  dest.endedAtMs = source.endedAtMs;
+  dest.endedAtUnixSec = source.endedAtUnixSec;
+  dest.endedAtLocalSec = source.endedAtLocalSec;
+  dest.timezoneOffsetMinutesAtCommit = source.timezoneOffsetMinutesAtCommit;
+  dest.durationDs = source.durationDs;
+  dest.goalWeightG = source.goalWeightG;
+  dest.hasWallTime = source.hasWallTime;
+  dest.actualWeightCg = source.actualWeightCg;
+  dest.errorCg = source.errorCg;
+  dest.offsetUsedCg = source.offsetUsedCg;
+  dest.firstDropDs = source.firstDropDs;
+  dest.avgFlowCgS = source.avgFlowCgS;
+  dest.shotType = source.shotType;
+  dest.cutType = source.cutType;
+  dest.extractionGuardEnabled = 0;
+  dest.extractionExtended = 0;
+  dest.stopDetail = static_cast<uint8_t>(ShotLogStopDetail::NORMAL_TARGET);
+  dest.maxRecoveryWeightCg = SHOT_LOG_WEIGHT_MISSING;
+  dest.minBrewTimeDs = SHOT_LOG_METRIC_MISSING;
+  dest.targetReachedEarlyDs = SHOT_LOG_METRIC_MISSING;
+}
+
+inline void migrateShotLogStoreV4(const ShotLogStoreV4 &legacy,
+                                  ShotLogStore &store) {
+  memset(&store, 0, sizeof(store));
+  store.header.bootId = legacy.header.bootId;
+  store.header.nextRecordId = legacy.header.nextRecordId;
+  store.header.count = legacy.header.count;
+  store.header.writeIndex = legacy.header.writeIndex;
+  for (size_t index = 0; index < SHOT_LOG_CAPACITY; ++index) {
+    migrateShotLogRecordV4ToV5(legacy.records[index], store.records[index]);
+  }
+  finalizeShotLogStore(store);
+}
+
+inline bool validShotLogStoreV4(const ShotLogStoreV4 &store) {
+  if (store.header.magic != SHOT_LOG_MAGIC ||
+      store.header.schemaVersion != 4 ||
+      store.header.recordSize != sizeof(ShotLogRecordV4) ||
+      store.header.count > SHOT_LOG_CAPACITY ||
+      store.header.writeIndex >= SHOT_LOG_CAPACITY ||
+      store.header.checksum != shotLogChecksumBytes(store.header)) {
+    return false;
+  }
+  return true;
+}
+
 inline void migrateShotLogStoreV2(const ShotLogStoreV2 &legacy, ShotLogStore &store) {
   memset(&store, 0, sizeof(store));
   store.header.bootId = legacy.header.bootId;
@@ -252,6 +373,12 @@ inline void migrateShotLogStoreV2(const ShotLogStoreV2 &legacy, ShotLogStore &st
     dest.avgFlowCgS = source.avgFlowCgS;
     dest.shotType = source.shotType;
     dest.cutType = source.cutType;
+    dest.extractionGuardEnabled = 0;
+    dest.extractionExtended = 0;
+    dest.stopDetail = static_cast<uint8_t>(ShotLogStopDetail::NORMAL_TARGET);
+    dest.maxRecoveryWeightCg = SHOT_LOG_WEIGHT_MISSING;
+    dest.minBrewTimeDs = SHOT_LOG_METRIC_MISSING;
+    dest.targetReachedEarlyDs = SHOT_LOG_METRIC_MISSING;
   }
   finalizeShotLogStore(store);
 }
@@ -278,6 +405,12 @@ inline void migrateShotLogStoreV3(const ShotLogStoreV3 &legacy, ShotLogStore &st
     dest.avgFlowCgS = source.avgFlowCgS;
     dest.shotType = source.shotType;
     dest.cutType = source.cutType;
+    dest.extractionGuardEnabled = 0;
+    dest.extractionExtended = 0;
+    dest.stopDetail = static_cast<uint8_t>(ShotLogStopDetail::NORMAL_TARGET);
+    dest.maxRecoveryWeightCg = SHOT_LOG_WEIGHT_MISSING;
+    dest.minBrewTimeDs = SHOT_LOG_METRIC_MISSING;
+    dest.targetReachedEarlyDs = SHOT_LOG_METRIC_MISSING;
   }
   finalizeShotLogStore(store);
 }
@@ -327,6 +460,14 @@ class ShotLog {
           validShotLogStore(store_)) {
         loaded = true;
       }
+    } else if (length == sizeof(ShotLogStoreV4)) {
+      ShotLogStoreV4 legacy = {};
+      if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
+              sizeof(legacy) &&
+          validShotLogStoreV4(legacy)) {
+        migrateShotLogStoreV4(legacy, store_);
+        loaded = true;
+      }
     } else if (length == sizeof(ShotLogStoreV3)) {
       ShotLogStoreV3 legacy = {};
       if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
@@ -347,7 +488,8 @@ class ShotLog {
     preferences.end();
     if (!loaded) {
       resetShotLogStore(store_, 1);
-    } else if (length == sizeof(ShotLogStoreV3) ||
+    } else if (length == sizeof(ShotLogStoreV4) ||
+               length == sizeof(ShotLogStoreV3) ||
                length == sizeof(ShotLogStoreV2)) {
       save();
     }

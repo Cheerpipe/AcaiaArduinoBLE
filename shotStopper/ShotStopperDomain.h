@@ -11,8 +11,8 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 12;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 11;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 13;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 12;
 constexpr size_t NTP_SERVER_HOST_CAPACITY = 64;
 constexpr uint32_t NTP_RESYNC_INTERVAL_MS = 3600UL * 1000UL;
 constexpr uint32_t NTP_UNSYNCED_RETRY_MS = 60UL * 1000UL;
@@ -70,10 +70,6 @@ inline const char *ntpPresetHostname(uint8_t preset) {
 constexpr int16_t MIN_TIMEZONE_OFFSET_MINUTES = -720;
 constexpr int16_t MAX_TIMEZONE_OFFSET_MINUTES = 840;
 constexpr int16_t DEFAULT_TIMEZONE_OFFSET_MINUTES = 0;
-constexpr uint32_t LEGACY_PRE_SCHEMA_FOUR_VERSION = 3;
-constexpr uint32_t LEGACY_SCHEMA_FOUR_VERSION = 4;
-constexpr uint32_t LEGACY_SCHEMA_FIVE_VERSION = 5;
-constexpr uint32_t LEGACY_CONFIG_SCHEMA_VERSION = 2;
 constexpr uint32_t DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS = 10000;
 constexpr uint32_t MIN_PADDLE_RETURN_REMINDER_INTERVAL_MS = 5000;
 constexpr uint32_t MAX_PADDLE_RETURN_REMINDER_INTERVAL_MS = 60000;
@@ -112,6 +108,12 @@ constexpr uint8_t FIRST_DROP_CONFIRMATION_SAMPLES = 2;
 constexpr uint8_t MIN_GOAL_WEIGHT_G = 10;
 constexpr uint8_t MAX_GOAL_WEIGHT_G = 200;
 constexpr uint8_t DEFAULT_GOAL_WEIGHT_G = 36;
+constexpr float DEFAULT_MAX_RECOVERY_WEIGHT_G = 42.5f;
+constexpr float MIN_MAX_RECOVERY_WEIGHT_G = 10.0f;
+constexpr float MAX_MAX_RECOVERY_WEIGHT_G = 200.0f;
+constexpr uint32_t DEFAULT_MIN_BREW_TIME_MS = 26000;
+constexpr uint32_t MIN_MIN_BREW_TIME_MS = 5000;
+constexpr uint32_t MAX_MIN_BREW_TIME_MS = 55000;
 constexpr float MAX_OFFSET_G = 5.0f;
 constexpr float DEFAULT_WEIGHT_OFFSET_G = 1.5f;
 constexpr size_t WIFI_SSID_CAPACITY = 33;
@@ -219,7 +221,9 @@ enum class EndReason : uint8_t {
   WEB_STOP,
   PHYSICAL_OVERRIDE,
   WEB_HEARTBEAT_TIMEOUT,
-  RELAY_SAFETY_FAILURE
+  RELAY_SAFETY_FAILURE,
+  FAST_EXTRACTION_MAX_WEIGHT,
+  FAST_EXTRACTION_MIN_TIME
 };
 
 struct RuntimeConfig {
@@ -251,6 +255,9 @@ struct RuntimeConfig {
   int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
   uint8_t ntpServerPreset = static_cast<uint8_t>(NtpServerPreset::POOL);
   char ntpServerCustom[NTP_SERVER_HOST_CAPACITY] = {};
+  bool fastExtractionGuardEnabled = false;
+  float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
+  uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
 };
 
 struct CycleConfigSnapshot {
@@ -277,6 +284,9 @@ struct CycleConfigSnapshot {
   uint32_t retareStabilityMinDurationMs = DEFAULT_RETARE_STABILITY_MIN_DURATION_MS;
   uint32_t confirmationTimeoutMs = DEFAULT_CONFIRMATION_TIMEOUT_MS;
   uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
+  bool fastExtractionGuardEnabled = false;
+  float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
+  uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
 };
 
 inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
@@ -304,6 +314,9 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.retareStabilityMinDurationMs = config.retareStabilityMinDurationMs;
   snapshot.confirmationTimeoutMs = config.confirmationTimeoutMs;
   snapshot.operationalWallMs = config.operationalWallMs;
+  snapshot.fastExtractionGuardEnabled = config.fastExtractionGuardEnabled;
+  snapshot.maxRecoveryWeightG = config.maxRecoveryWeightG;
+  snapshot.minBrewTimeMs = config.minBrewTimeMs;
   return snapshot;
 }
 
@@ -329,7 +342,10 @@ enum class ConfigValidationError : uint8_t {
   COMBINED_TARE_REQUIRES_AUTOTARE,
   TIMEZONE_OFFSET,
   NTP_SERVER_PRESET,
-  NTP_SERVER_CUSTOM
+  NTP_SERVER_CUSTOM,
+  MAX_RECOVERY_WEIGHT,
+  MIN_BREW_TIME,
+  FAST_EXTRACTION_GUARD_RELATION
 };
 
 inline uint32_t effectiveRetareWindowMs(const RuntimeConfig &config) {
@@ -451,6 +467,23 @@ inline ConfigValidationError validateRuntimeConfig(
       !validNtpHostname(config.ntpServerCustom)) {
     return ConfigValidationError::NTP_SERVER_CUSTOM;
   }
+  if (!config.fastExtractionGuardEnabled) {
+    return ConfigValidationError::NONE;
+  }
+  if (!isfinite(config.maxRecoveryWeightG) ||
+      config.maxRecoveryWeightG < MIN_MAX_RECOVERY_WEIGHT_G ||
+      config.maxRecoveryWeightG > MAX_MAX_RECOVERY_WEIGHT_G) {
+    return ConfigValidationError::MAX_RECOVERY_WEIGHT;
+  }
+  if (config.minBrewTimeMs < MIN_MIN_BREW_TIME_MS ||
+      config.minBrewTimeMs > MAX_MIN_BREW_TIME_MS) {
+    return ConfigValidationError::MIN_BREW_TIME;
+  }
+  if (config.maxRecoveryWeightG <= static_cast<float>(config.goalWeightG) ||
+      config.minBrewTimeMs >= config.operationalWallMs ||
+      config.minBrewTimeMs < config.confirmationTimeoutMs) {
+    return ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION;
+  }
   return ConfigValidationError::NONE;
 }
 
@@ -492,6 +525,12 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "ntpServerPreset";
     case ConfigValidationError::NTP_SERVER_CUSTOM:
       return "ntpServerCustom";
+    case ConfigValidationError::MAX_RECOVERY_WEIGHT:
+      return "maxRecoveryWeightG";
+    case ConfigValidationError::MIN_BREW_TIME:
+      return "minBrewTimeMs";
+    case ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION:
+      return "fastExtractionGuardRelation";
   }
   return "unknown";
 }
@@ -692,6 +731,10 @@ struct ControlStatusSnapshot {
   uint32_t cycleRetareFlowFirstDetectedAtMs = 0;
   uint32_t cycleStartedAtMs = 0;
   uint32_t cycleElapsedMs = 0;
+  bool cycleExtractionExtended = false;
+  bool cycleTargetReachedEarly = false;
+  float cycleActiveStopWeightG = 0.0f;
+  uint32_t cycleMinBrewTimeRemainingMs = 0;
   char scaleProtocol[20] = "none";
 };
 
@@ -699,6 +742,10 @@ inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {
   return status.state == StopperState::READY && !status.activeCycle &&
          !status.relayClosed && !status.physicalPaddleOn &&
          !status.maintenanceLeaseActive;
+}
+
+inline bool controlAllowsNetworkBringup(const ControlStatusSnapshot &) {
+  return true;
 }
 
 enum class DebugCategory : uint8_t {
@@ -783,7 +830,10 @@ enum class DebugCode : uint8_t {
   INITIALIZATION_FAILED,
   TIME_SYNC_OK,
   TIME_SYNC_FAIL,
-  FIRST_DROP_DURING_RETARE
+  FIRST_DROP_DURING_RETARE,
+  FAST_EXTRACTION_ENTERED,
+  FAST_EXTRACTION_STOP_MAX,
+  FAST_EXTRACTION_STOP_MIN_TIME
 };
 
 struct DebugEvent {
@@ -968,6 +1018,12 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::TIME_SYNC_FAIL: return "clock sync failed";
     case DebugCode::FIRST_DROP_DURING_RETARE:
       return "first coffee drop detected during retare";
+    case DebugCode::FAST_EXTRACTION_ENTERED:
+      return "fast extraction guard extended shot";
+    case DebugCode::FAST_EXTRACTION_STOP_MAX:
+      return "fast extraction guard stopped at max weight";
+    case DebugCode::FAST_EXTRACTION_STOP_MIN_TIME:
+      return "fast extraction guard stopped at min brew time";
   }
   return "unknown";
 }
