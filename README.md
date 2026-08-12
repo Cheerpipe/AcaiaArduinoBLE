@@ -14,30 +14,66 @@ independently.
 > [manual test plan](docs/MANUAL_TEST_PLAN.md) before connecting the machine.
 > This project cannot make an unsuitable relay module or unsafe wiring safe.
 
-## Origin and goals
+## Origin and evolution
 
-This project explicitly derives from
-[tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/AcaiaArduinoBLE). The
-derived library is kept in this repository as a local dependency, while Micra
-Shot Stopper is now the main application.
+This project began from
+[tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/AcaiaArduinoBLE) — the
+original ESP32 firmware and library for stopping an extraction by weight over
+BLE. What started as small Micra-specific changes grew into a **new product
+concept and an almost complete rewrite**. Micra Shot Stopper is now the main
+application; the derived library remains in this repository as a local
+dependency.
 
-The project was created to achieve these goals:
+### Compared to the original firmware
 
-- Adapt the hardware specifically to the Micra by connecting the paddle to a
-  GPIO and reading and actuating it independently from CN9, enabling full
-  software control.
-- Add features and parameterization, including reminder beeps to return the
-  paddle to OFF.
-- Remove workarounds such as manual double tare; automatic retare handles late cup
-  placement during Brew by Weight.
-- Add a Web UI that displays status, diagnostics, and remote control.
-- Remove the need to move the paddle to OFF for the stopper to work: software
-  has full control of the hardware.
-- Support lower-cost hardware, such as ESP32 boards with integrated magnetic
-  relays.
-- Provide a solution dedicated to the Micra and its paddle.
-- Use more robust, resilient, and fault-tolerant workflows and state machines.
-- Improve handling of exceptions and misuse scenarios.
+| | Original AcaiaArduinoBLE stopper | Micra Shot Stopper |
+| --- | --- | --- |
+| **Scope** | Generic, intended to work on several machines | Dedicated to the Micra and its independent paddle |
+| **Architecture** | Simple, mostly single-threaded | FreeRTOS tasks, queues, and isolation between control, BLE, and network |
+| **Features** | Minimal brew-by-weight stop | Rich workflow: retare, confirmation windows, rinse, shot history, Web UI, diagnostics, safety layers |
+| **Paddle machines** | Assumes you can work within the original machine constraints | Reads the physical paddle on GPIO and controls CN9 independently — no need to “fight” the paddle wiring |
+| **Resilience** | Straightforward happy path | Explicit state machines, watchdogs, transactional CN9 close, stream validation, recovery paths |
+
+The original firmware proved that BLE scale stop was possible; this project
+**removed the original’s limitations on paddle-equipped machines** and invested
+heavily in robustness: real thread boundaries, CN9 safety defenses, fault
+handling, and persistence that survives resets and misconfiguration.
+
+### What was added along the way
+
+Examples that did not exist (or barely existed) in the original stopper sketch:
+
+- **Intelligent retare** and brew-start confirmation so late cup placement does
+  not break the shot.
+- **Embedded Web UI** with Wi-Fi, diagnostics, configuration, and optional
+  remote control — no extra display or buttons on the machine.
+- **Shot history** (duration, weight, flow, first drop, cut type) with export.
+- **Advanced workflow settings** (rinse, CN9 limits, reminders, scale options).
+- **Safety and observability** — supervisor, task watchdog, optional external
+  K2/feedback, structured debug log, hardware monitor.
+- **OTA over Wi-Fi** — planned; see [Not yet implemented](#not-yet-implemented).
+
+The codebase is intentionally **more complex to implement and configure** so
+that day-to-day use can stay **simple**.
+
+## Design philosophy
+
+The real goal is to use **brew by weight without noticing the DIY controller is
+there**:
+
+- Put the cup **before** the shot or **right when** the shot starts.
+- Flip the paddle, brew, walk away.
+- No extra screen on the espresso bar, no accessory buttons, no ritual double
+  tare, no “did the stopper accept my cup?” — the firmware handles timing,
+  retare, confirmation, stop, and reminders in the background.
+
+Complexity lives in firmware parameters, state machines, and safety — not in
+the barista workflow. Defaults and automatic behaviors (retare, confirmation,
+offset learning, paddle-return beeps) exist so most users never touch the Web
+UI after initial setup. The UI and API are there for tuning and diagnosis, not
+for operating every shot.
+
+In short: **hard to build, easy to live with.**
 
 ## Main features
 
@@ -608,8 +644,12 @@ mandatory before real use.
 
 ## License and acknowledgements
 
-The project retains the MIT license in [LICENSE](LICENSE) and acknowledges the
-work of the original
-[tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/AcaiaArduinoBLE)
-project, as well as the sources and contributors listed in the
+The project retains the MIT license in [LICENSE](LICENSE).
+
+Micra Shot Stopper is a derivative work that **would not exist without**
+[tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/AcaiaArduinoBLE): the
+original proved BLE brew-by-weight stop and shared the core scale protocol work.
+This repository acknowledges that project and the contributors listed in the
 [local library documentation](libraries/AcaiaArduinoBLE/README.md#acknowledgement).
+The application firmware, safety model, Web UI, and Micra-specific workflow are
+substantial new work on top of that foundation.
