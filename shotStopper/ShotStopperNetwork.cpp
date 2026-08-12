@@ -85,6 +85,15 @@ bool jsonUint8(cJSON *object, const char *name, uint8_t &output) {
   return true;
 }
 
+bool jsonFloat(cJSON *object, const char *name, float &output) {
+  cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+  if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble)) {
+    return false;
+  }
+  output = static_cast<float>(item->valuedouble);
+  return true;
+}
+
 bool jsonInt16(cJSON *object, const char *name, int16_t &output) {
   if (object == nullptr || name == nullptr) {
     return false;
@@ -150,10 +159,25 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "Rinse gesture must be from 100 to 5,000 ms.";
     case ConfigValidationError::RINSE_DURATION:
       return "Rinse duration must be from 500 to 10,000 ms.";
-    case ConfigValidationError::BREW_CONFIRM:
-      return "Brew confirmation must be from 500 to 10,000 ms.";
-    case ConfigValidationError::MIN_AUTO_STOP:
-      return "Minimum auto-stop must be from 1,000 to 30,000 ms.";
+    case ConfigValidationError::RETARE_WINDOW:
+      return "Retare window must be from 500 to 10,000 ms.";
+    case ConfigValidationError::MINIMUM_CUP_WEIGHT:
+      return "Minimum cup weight must be from 1 to 500 g.";
+    case ConfigValidationError::RETARE_STABILITY_SAMPLES:
+      return "Retare stable samples must be from 2 to 10.";
+    case ConfigValidationError::RETARE_STABILITY_TOLERANCE:
+      return "Retare stability tolerance must be from 0.1 to 20.0 g.";
+    case ConfigValidationError::RETARE_STABILITY_MAX_GAP:
+      return "Retare sample gap must be from 100 to 5,000 ms.";
+    case ConfigValidationError::RETARE_STABILITY_MIN_DURATION:
+      return "Retare min stable time must be from 0 to 2,000 ms.";
+    case ConfigValidationError::RETARE_STABILITY_RELATION:
+      return "Retare min stable time must fit within the retare window and "
+             "sample count times the sample gap.";
+    case ConfigValidationError::CONFIRMATION_TIMEOUT:
+      return "Brew start confirmation must be from 500 to 30,000 ms.";
+    case ConfigValidationError::CONFIRMATION_RETARE_RELATION:
+      return "Brew start confirmation must be at least retare window + 3 s.";
     case ConfigValidationError::OPERATIONAL_WALL:
       return "CN9 limit must be from 5,000 to 60,000 ms.";
     case ConfigValidationError::PADDLE_REMINDER_INTERVAL:
@@ -162,7 +186,8 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "Paddle reminder limit must be from 60,000 to 3,600,000 ms and "
              "at least the reminder interval.";
     case ConfigValidationError::TIMING_RELATION:
-      return "Required: gesture < brew < auto-stop < limit, and rinse duration <= limit.";
+      return "Required: rinse gesture < CN9 limit, rinse duration <= limit, "
+             "retare window + brew start confirmation <= limit.";
     case ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE:
       return "The Bookoo combined command requires automatic tare.";
     case ConfigValidationError::TIMEZONE_OFFSET:
@@ -1886,8 +1911,15 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"paddleReturnReminderBeep\":%s,"
       "\"paddleReturnReminderIntervalMs\":%lu,"
       "\"paddleReturnReminderMaxDurationMs\":%lu,\"rinseGestureMs\":%lu,"
-      "\"rinseDurationMs\":%lu,\"brewConfirmMs\":%lu,"
-      "\"minAutoStopMs\":%lu,\"operationalWallMs\":%lu,"
+      "\"rinseDurationMs\":%lu,"
+      "\"autoRetare\":%s,\"retareWindowMs\":%lu,"
+      "\"minimumCupWeightG\":%.1f,"
+      "\"retareStabilitySamples\":%u,"
+      "\"retareStabilityToleranceG\":%.1f,"
+      "\"retareStabilityMaxGapMs\":%lu,"
+      "\"retareStabilityMinDurationMs\":%lu,"
+      "\"confirmationTimeoutMs\":%lu,"
+      "\"operationalWallMs\":%lu,"
       "\"timezoneOffsetMinutes\":%d,"
       "\"ntpServerPreset\":\"%s\",\"ntpServerCustom\":\"%s\"},"
       "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
@@ -1952,8 +1984,14 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
           control.config.paddleReturnReminderMaxDurationMs),
       static_cast<unsigned long>(control.config.rinseGestureMs),
       static_cast<unsigned long>(control.config.rinseDurationMs),
-      static_cast<unsigned long>(control.config.brewConfirmMs),
-      static_cast<unsigned long>(control.config.minAutoStopMs),
+      control.config.autoRetare ? "true" : "false",
+      static_cast<unsigned long>(control.config.retareWindowMs),
+      static_cast<double>(control.config.minimumCupWeightG),
+      static_cast<unsigned>(control.config.retareStabilitySamples),
+      static_cast<double>(control.config.retareStabilityToleranceG),
+      static_cast<unsigned long>(control.config.retareStabilityMaxGapMs),
+      static_cast<unsigned long>(control.config.retareStabilityMinDurationMs),
+      static_cast<unsigned long>(control.config.confirmationTimeoutMs),
       static_cast<unsigned long>(control.config.operationalWallMs),
       static_cast<int>(control.config.timezoneOffsetMinutes),
       ntpPresetId(control.config.ntpServerPreset),
@@ -2294,18 +2332,20 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   char customNtp[NTP_SERVER_HOST_CAPACITY] = {};
   memcpy(customNtp, candidate.ntpServerCustom, sizeof(customNtp));
   static const char *const fields[] = {
-      "goalWeightG", "rinseGestureMs", "rinseDurationMs", "brewConfirmMs",
-      "minAutoStopMs", "operationalWallMs", "autoTare", "timerOnly",
+      "goalWeightG", "rinseGestureMs", "rinseDurationMs", "operationalWallMs",
+      "autoTare", "timerOnly",
       "canTareStartTimer", "brewConfirmationBeep", "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
+      "autoRetare", "retareWindowMs", "minimumCupWeightG",
+      "retareStabilitySamples", "retareStabilityToleranceG",
+      "retareStabilityMaxGapMs", "retareStabilityMinDurationMs",
+      "confirmationTimeoutMs",
       "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom"};
   const bool parsed =
-      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 16) &&
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 22) &&
       jsonUint8(root, "goalWeightG", candidate.goalWeightG) &&
       jsonUint32(root, "rinseGestureMs", candidate.rinseGestureMs) &&
       jsonUint32(root, "rinseDurationMs", candidate.rinseDurationMs) &&
-      jsonUint32(root, "brewConfirmMs", candidate.brewConfirmMs) &&
-      jsonUint32(root, "minAutoStopMs", candidate.minAutoStopMs) &&
       jsonUint32(root, "operationalWallMs", candidate.operationalWallMs) &&
       jsonBoolean(root, "autoTare", candidate.autoTare) &&
       jsonBoolean(root, "timerOnly", candidate.timerOnly) &&
@@ -2318,6 +2358,19 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
                  candidate.paddleReturnReminderIntervalMs) &&
       jsonUint32(root, "paddleReturnReminderMaxDurationMs",
                  candidate.paddleReturnReminderMaxDurationMs) &&
+      jsonBoolean(root, "autoRetare", candidate.autoRetare) &&
+      jsonUint32(root, "retareWindowMs", candidate.retareWindowMs) &&
+      jsonFloat(root, "minimumCupWeightG", candidate.minimumCupWeightG) &&
+      jsonUint8(root, "retareStabilitySamples",
+                candidate.retareStabilitySamples) &&
+      jsonFloat(root, "retareStabilityToleranceG",
+                candidate.retareStabilityToleranceG) &&
+      jsonUint32(root, "retareStabilityMaxGapMs",
+                 candidate.retareStabilityMaxGapMs) &&
+      jsonUint32(root, "retareStabilityMinDurationMs",
+                 candidate.retareStabilityMinDurationMs) &&
+      jsonUint32(root, "confirmationTimeoutMs",
+                 candidate.confirmationTimeoutMs) &&
       jsonInt16(root, "timezoneOffsetMinutes",
                 candidate.timezoneOffsetMinutes) &&
       jsonNtpPreset(root, "ntpServerPreset", candidate.ntpServerPreset) &&

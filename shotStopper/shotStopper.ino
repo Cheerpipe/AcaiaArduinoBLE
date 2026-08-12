@@ -211,13 +211,22 @@ enum class ScaleLinkState : uint8_t {
 
 enum class ScaleCommandType : uint8_t {
   START_TIMER_AND_TARE,
+  TARE_ONLY,
   STOP_TIMER
 };
 
 enum class ScaleEventType : uint8_t {
   WEIGHT,
   TIMER_START_RESULT,
+  TARE_RESULT,
   TIMER_STOP_RESULT
+};
+
+enum class BbwProtectionPhase : uint8_t {
+  NONE,
+  RETARE,
+  CONFIRMATION,
+  NORMAL
 };
 
 enum class TimerStopResult : uint8_t {
@@ -240,6 +249,7 @@ struct ShotTrajectory {
 struct CycleSession {
   bool active = false;
   bool automaticEnabled = false;
+  bool bbwProtectionEnabled = false;
   bool startedWithScale = false;
   bool scaleWasLost = false;
   bool timerStartCommandQueued = false;
@@ -282,6 +292,21 @@ struct CycleSession {
   bool scaleBaselineReady = false;
   float lastAcceptedWeightG = 0.0f;
   float recoveryLastWeightG = 0.0f;
+  bool retareEnded = false;
+  bool brewStartConfirmEnded = false;
+  bool flowDuringRetare = false;
+  bool retarePerformed = false;
+  bool retareDisabled = false;
+  bool firstDropsBeepSent = false;
+  float retareCandidateWeightG = 0.0f;
+  uint8_t retareStabilitySamples = 0;
+  uint32_t retareStabilityStartedAtMs = 0;
+  uint32_t retareLastSampleAtMs = 0;
+  float retareFlowLastWeightG = 0.0f;
+  bool retareFlowSampleValid = false;
+  uint8_t firstDropConfirmations = 0;
+  uint32_t firstDropLastAtMs = 0;
+  uint32_t firstDropLastPacketSequence = 0;
   ControlSource source = ControlSource::NONE;
   CycleConfigSnapshot config = {};
   EndReason endReason = EndReason::NONE;
@@ -1283,6 +1308,17 @@ bool requestRemoteTimerStart() {
   return session.timerStartCommandQueued;
 }
 
+bool requestRemoteRetare() {
+  if (!session.config.autoTare) {
+    return false;
+  }
+  ScaleCommand command;
+  command.type = ScaleCommandType::TARE_ONLY;
+  command.cycleId = session.id;
+  command.autoTare = true;
+  return enqueueScaleCommand(command);
+}
+
 bool tryQueueRemoteTimerStop() {
   if (!session.stopTimerRequested || session.stopTimerCommandQueued ||
       session.timerStopResult == TimerStopResult::WRITE_SUCCEEDED ||
@@ -1408,11 +1444,213 @@ float effectiveStopThreshold() {
          session.config.weightOffsetG;
 }
 
+void requestScaleBrewBeep(uint32_t cycleId);
+
 void resetDirectStopConfirmation() {
   session.thresholdConfirmations = 0;
   session.lastThresholdAtMs = 0;
   session.lastThresholdPacketSequence = 0;
   session.lastThresholdConnectionGeneration = 0;
+  session.directStopPending = false;
+}
+
+bool bbwAutomaticScaleSession() {
+  return session.active && session.bbwProtectionEnabled;
+}
+
+bool retareWindowOpen() {
+  if (!bbwAutomaticScaleSession() || !session.config.autoRetare) {
+    return false;
+  }
+  if (session.retareEnded || session.retarePerformed) {
+    return false;
+  }
+  return elapsedMs(session.startedAtMs) < session.config.retareWindowMs;
+}
+
+bool retareHasEnded() {
+  if (!bbwAutomaticScaleSession() || !session.config.autoRetare) {
+    return true;
+  }
+  return session.retareEnded;
+}
+
+bool brewStartConfirmationOpen() {
+  if (!bbwAutomaticScaleSession()) {
+    return false;
+  }
+  return !session.brewStartConfirmEnded;
+}
+
+void skipBrewStartConfirmationDueToRetareFlow(uint32_t receivedAtMs) {
+  session.brewStartConfirmEnded = true;
+  resetDirectStopConfirmation();
+  if (session.firstDropMs == 0) {
+    session.firstDropMs = receivedAtMs;
+  }
+  if (!session.firstDropsBeepSent && session.config.brewConfirmationBeep) {
+    requestScaleBrewBeep(session.id);
+    session.firstDropsBeepSent = true;
+  }
+}
+
+void resetRetareStabilityStreak();
+
+void markRetareEnded(uint32_t endedAtMs) {
+  if (session.retareEnded) {
+    return;
+  }
+  session.retareEnded = true;
+  session.retareDisabled = true;
+  resetRetareStabilityStreak();
+  if (session.flowDuringRetare && !session.retarePerformed) {
+    skipBrewStartConfirmationDueToRetareFlow(endedAtMs);
+  }
+}
+
+void endBrewStartConfirmation(uint32_t receivedAtMs, bool allowBeep) {
+  (void)receivedAtMs;
+  session.brewStartConfirmEnded = true;
+  resetDirectStopConfirmation();
+  if (allowBeep && !session.firstDropsBeepSent &&
+      session.config.brewConfirmationBeep && retareHasEnded()) {
+    requestScaleBrewBeep(session.id);
+    session.firstDropsBeepSent = true;
+  }
+}
+
+bool bbwWeightStopInhibited() {
+  if (!bbwAutomaticScaleSession()) {
+    return false;
+  }
+  if (retareWindowOpen()) {
+    return true;
+  }
+  if (brewStartConfirmationOpen()) {
+    return true;
+  }
+  return false;
+}
+
+bool readyToConfirmBrew() {
+  return elapsedMs(session.startedAtMs) > session.config.rinseGestureMs;
+}
+
+void resetRetareStabilityStreak() {
+  session.retareStabilitySamples = 0;
+  session.retareStabilityStartedAtMs = 0;
+  session.retareLastSampleAtMs = 0;
+}
+
+void onFirstDropsDetected(uint32_t receivedAtMs) {
+  if (retareWindowOpen()) {
+    return;
+  }
+  if (session.firstDropMs == 0) {
+    session.firstDropMs = receivedAtMs;
+  }
+  endBrewStartConfirmation(receivedAtMs, true);
+}
+
+void performAutomaticRetare() {
+  if (session.retarePerformed || session.retareDisabled || !retareWindowOpen()) {
+    return;
+  }
+  session.retarePerformed = true;
+  resetRetareStabilityStreak();
+  (void)requestRemoteRetare();
+  markRetareEnded(millis());
+}
+
+void considerRetareCupCandidate(float weight, uint32_t receivedAtMs) {
+  if (!retareWindowOpen() || session.retareDisabled || session.retarePerformed) {
+    return;
+  }
+  if (weight < session.config.minimumCupWeightG) {
+    resetRetareStabilityStreak();
+    return;
+  }
+
+  if (session.retareStabilitySamples == 0) {
+    session.retareCandidateWeightG = weight;
+    session.retareStabilitySamples = 1;
+    session.retareStabilityStartedAtMs = receivedAtMs;
+    session.retareLastSampleAtMs = receivedAtMs;
+    return;
+  }
+
+  if (static_cast<uint32_t>(receivedAtMs - session.retareLastSampleAtMs) >
+          session.config.retareStabilityMaxGapMs ||
+      fabsf(weight - session.retareCandidateWeightG) >
+          session.config.retareStabilityToleranceG) {
+    session.retareCandidateWeightG = weight;
+    session.retareStabilitySamples = 1;
+    session.retareStabilityStartedAtMs = receivedAtMs;
+    session.retareLastSampleAtMs = receivedAtMs;
+    return;
+  }
+
+  session.retareCandidateWeightG = weight;
+  session.retareLastSampleAtMs = receivedAtMs;
+  if (session.retareStabilitySamples < UINT8_MAX) {
+    ++session.retareStabilitySamples;
+  }
+  const uint32_t stableDurationMs =
+      static_cast<uint32_t>(receivedAtMs - session.retareStabilityStartedAtMs);
+  const bool samplesMet =
+      session.retareStabilitySamples >= session.config.retareStabilitySamples;
+  const bool durationMet =
+      session.config.retareStabilityMinDurationMs == 0U ||
+      stableDurationMs >= session.config.retareStabilityMinDurationMs;
+  if (samplesMet && durationMet &&
+      session.retareCandidateWeightG >= session.config.minimumCupWeightG) {
+    performAutomaticRetare();
+  }
+}
+
+void initializeBbwProtection() {
+  session.bbwProtectionEnabled = false;
+  session.retareEnded = false;
+  session.brewStartConfirmEnded = false;
+  session.flowDuringRetare = false;
+  session.retarePerformed = false;
+  session.retareDisabled = false;
+  session.firstDropsBeepSent = false;
+  session.retareCandidateWeightG = 0.0f;
+  resetRetareStabilityStreak();
+  session.retareFlowLastWeightG = 0.0f;
+  session.retareFlowSampleValid = false;
+  session.firstDropConfirmations = 0;
+  session.firstDropLastAtMs = 0;
+  session.firstDropLastPacketSequence = 0;
+
+  if (!session.startedWithScale || session.config.timerOnly ||
+      !session.automaticEnabled) {
+    session.retareEnded = true;
+    session.brewStartConfirmEnded = true;
+    return;
+  }
+  session.bbwProtectionEnabled = true;
+  if (!session.config.autoRetare) {
+    session.retareEnded = true;
+  }
+}
+
+void serviceBbwProtectionPhases() {
+  if (!session.active || !session.bbwProtectionEnabled) {
+    return;
+  }
+  const uint32_t nowMs = millis();
+  if (!session.retareEnded && session.config.autoRetare &&
+      !session.retarePerformed &&
+      elapsedMs(session.startedAtMs) >= session.config.retareWindowMs) {
+    markRetareEnded(nowMs);
+  }
+  if (!session.brewStartConfirmEnded &&
+      elapsedMs(session.startedAtMs) >= session.config.confirmationTimeoutMs) {
+    session.brewStartConfirmEnded = true;
+    resetDirectStopConfirmation();
+  }
 }
 
 void rejectScaleSample(DebugCode code, float weightG, float referenceG = 0.0f) {
@@ -1448,7 +1686,8 @@ void expirePostTareBaselineIfNeeded() {
 void considerDirectStopSample(float weight, uint32_t receivedAtMs,
                               uint32_t packetSequence,
                               uint32_t connectionGeneration) {
-  if (!shouldTrackWeight() || packetSequence == 0 || !isfinite(weight)) {
+  if (!shouldTrackWeight() || packetSequence == 0 || !isfinite(weight) ||
+      bbwWeightStopInhibited()) {
     return;
   }
 
@@ -1521,7 +1760,8 @@ bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
   return true;
 }
 
-void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs);
+void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
+                              uint32_t packetSequence);
 
 bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
                                       uint32_t packetSequence,
@@ -1532,15 +1772,6 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
     return false;
   }
 
-  if (session.active && session.startedWithScale) {
-    considerScaleFlowMarkers(weight, receivedAtMs);
-  }
-
-  if (!shouldTrackWeight()) {
-    return weight >= MIN_AUTOMATION_WEIGHT_G &&
-           weight <= MAX_AUTOMATION_WEIGHT_G;
-  }
-
   if (connectionGeneration == 0) {
     connectionGeneration = session.ownedConnectionGeneration;
   }
@@ -1549,6 +1780,22 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
     if (packetSequence == 0) {
       packetSequence = 1;
     }
+  }
+
+  if (session.active && session.startedWithScale) {
+    if (retareWindowOpen() &&
+        (!session.awaitingPostTareBaseline ||
+         weight >= session.config.minimumCupWeightG) &&
+        weight >= MIN_AUTOMATION_WEIGHT_G &&
+        weight <= MAX_AUTOMATION_WEIGHT_G) {
+      considerRetareCupCandidate(weight, receivedAtMs);
+    }
+    considerScaleFlowMarkers(weight, receivedAtMs, packetSequence);
+  }
+
+  if (!shouldTrackWeight()) {
+    return weight >= MIN_AUTOMATION_WEIGHT_G &&
+           weight <= MAX_AUTOMATION_WEIGHT_G;
   }
 
   if ((session.weightControlState == WeightControlState::ACTIVE ||
@@ -1693,7 +1940,8 @@ bool recordWeightSample(float weight, uint32_t receivedAtMs) {
       session.ownedConnectionGeneration);
 }
 
-void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs) {
+void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
+                              uint32_t packetSequence) {
   if (!session.active || !session.startedWithScale || session.firstDropMs != 0) {
     return;
   }
@@ -1709,8 +1957,59 @@ void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs) {
     session.scaleBaselineReady = true;
     return;
   }
-  if (weight - session.scaleBaselineG >= FIRST_DROP_THRESHOLD_G) {
-    session.firstDropMs = receivedAtMs;
+  const float deltaFromBaseline = weight - session.scaleBaselineG;
+  if (deltaFromBaseline < FIRST_DROP_THRESHOLD_G) {
+    session.firstDropConfirmations = 0;
+    return;
+  }
+  const float firstDropMaxWeightG =
+      static_cast<float>(session.config.goalWeightG) * 0.5f;
+  if (weight >= firstDropMaxWeightG) {
+    session.firstDropConfirmations = 0;
+    return;
+  }
+  if (retareWindowOpen() &&
+      deltaFromBaseline >= session.config.minimumCupWeightG) {
+    session.firstDropConfirmations = 0;
+    return;
+  }
+  if (retareWindowOpen() &&
+      deltaFromBaseline >= session.config.minimumCupWeightG * 0.5f) {
+    session.firstDropConfirmations = 0;
+    return;
+  }
+  if (retareWindowOpen()) {
+    if (!session.retareFlowSampleValid) {
+      session.retareFlowLastWeightG = weight;
+      session.retareFlowSampleValid = true;
+      session.firstDropConfirmations = 0;
+      return;
+    }
+    const float step = weight - session.retareFlowLastWeightG;
+    session.retareFlowLastWeightG = weight;
+    if (step > session.config.retareStabilityToleranceG * 2.0f || step < 0.0f) {
+      session.firstDropConfirmations = 0;
+      return;
+    }
+    session.flowDuringRetare = true;
+    session.firstDropConfirmations = 0;
+    return;
+  }
+
+  const bool consecutive =
+      session.firstDropConfirmations > 0 &&
+      packetSequence == session.firstDropLastPacketSequence + 1U &&
+      static_cast<int32_t>(receivedAtMs - session.firstDropLastAtMs) >= 0 &&
+      static_cast<uint32_t>(receivedAtMs - session.firstDropLastAtMs) <=
+          DIRECT_STOP_CONFIRMATION_WINDOW_MS;
+  session.firstDropConfirmations =
+      consecutive ? static_cast<uint8_t>(session.firstDropConfirmations + 1U)
+                  : 1U;
+  session.firstDropLastAtMs = receivedAtMs;
+  session.firstDropLastPacketSequence = packetSequence;
+
+  if (session.firstDropConfirmations >= FIRST_DROP_CONFIRMATION_SAMPLES) {
+    onFirstDropsDetected(receivedAtMs);
   }
 }
 
@@ -2008,6 +2307,20 @@ void executeScaleStopCommand(const ScaleCommand &command) {
   publishScaleEvent(event, true);
 }
 
+void executeScaleTareCommand(const ScaleCommand &command) {
+  ScaleEvent event;
+  event.type = ScaleEventType::TARE_RESULT;
+  event.cycleId = command.cycleId;
+
+  if (scale.isConnected()) {
+    event.commandAttempted = true;
+    event.writeSucceeded = scale.tare();
+  }
+
+  updateWorkerLinkState();
+  publishScaleEvent(event, true);
+}
+
 void executeScaleBeepCommand(DebugCode successCode, DebugCode failureCode,
                              DebugCode unsupportedCode) {
   if (!scale.isConnected()) {
@@ -2173,6 +2486,9 @@ void executeScaleCommand(const ScaleCommand &command) {
   switch (command.type) {
     case ScaleCommandType::START_TIMER_AND_TARE:
       executeScaleStartCommand(command);
+      break;
+    case ScaleCommandType::TARE_ONLY:
+      executeScaleTareCommand(command);
       break;
     case ScaleCommandType::STOP_TIMER:
       executeScaleStopCommand(command);
@@ -2413,6 +2729,19 @@ void processScaleWorkerEvents() {
                       static_cast<int32_t>(event.cycleId));
         break;
 
+      case ScaleEventType::TARE_RESULT:
+        if (event.cycleId == session.id && event.writeSucceeded &&
+            session.startedWithScale) {
+          armPostTareBaselineWindow();
+          session.scaleBaselineReady = false;
+          session.scaleBaselineG = 0.0f;
+          session.firstDropConfirmations = 0;
+          session.firstDropLastAtMs = 0;
+          session.firstDropLastPacketSequence = 0;
+          resetDirectStopConfirmation();
+        }
+        break;
+
       case ScaleEventType::TIMER_STOP_RESULT:
         if (event.cycleId == session.id) {
           session.stopTimerCommandQueued = false;
@@ -2501,6 +2830,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
     }
   }
   resetShotTrajectory(session.startedAtMs);
+  initializeBbwProtection();
   transitionTo(StopperState::QUALIFYING_ON);
 
   if (!setCn9Closed(true, session.config.operationalWallMs)) {
@@ -2591,11 +2921,10 @@ void confirmBrewOrManual() {
     shot.confirmedBrew = true;
     Serial.println("Brew confirmed");
     transitionTo(StopperState::BREW);
-    if (!session.config.timerOnly && session.config.brewConfirmationBeep) {
-      requestScaleBrewBeep(session.id);
-    }
   } else {
     session.automaticEnabled = false;
+    session.retareEnded = true;
+    session.brewStartConfirmEnded = true;
     Serial.println("Manual cycle confirmed (no scale automation)");
     transitionTo(StopperState::MANUAL_NO_SCALE);
   }
@@ -2607,21 +2936,15 @@ void handleQualifyingPaddleOff(uint32_t onDurationMs) {
     return;
   }
 
-  // Exactly at or after the confirmation boundary, the cycle is considered a
-  // confirmed brew/manual shot and is then immediately stopped by paddle OFF.
-  if (onDurationMs >= session.config.brewConfirmMs) {
-    if (session.automaticEnabled) {
-      shot.confirmedBrew = true;
-    }
-    finalizeCycle(EndReason::PADDLE, StopperState::READY);
-    return;
+  if (session.automaticEnabled) {
+    shot.confirmedBrew = true;
   }
-
-  finalizeCycle(EndReason::SHORT_SHOT, StopperState::READY);
+  finalizeCycle(EndReason::PADDLE, StopperState::READY);
 }
 
 bool automaticScaleStopDue() {
-  if (session.config.timerOnly || stopperState != StopperState::BREW) {
+  if (session.config.timerOnly || stopperState != StopperState::BREW ||
+      bbwWeightStopInhibited()) {
     return false;
   }
 
@@ -2629,8 +2952,7 @@ bool automaticScaleStopDue() {
       session.thresholdConfirmations >= DIRECT_STOP_CONFIRMATION_SAMPLES &&
       static_cast<int32_t>(millis() - session.lastThresholdAtMs) >= 0 &&
       elapsedMs(session.lastThresholdAtMs) <= MAX_AUTOMATION_WEIGHT_AGE_MS;
-  if (elapsedMs(session.startedAtMs) >= session.config.minAutoStopMs &&
-      directStopFresh) {
+  if (directStopFresh) {
     return true;
   }
 
@@ -2641,8 +2963,7 @@ bool automaticScaleStopDue() {
     return false;
   }
   const float elapsedS = cycleElapsedSeconds();
-  return elapsedMs(session.startedAtMs) >= session.config.minAutoStopMs &&
-         elapsedS >= shot.expectedEndS;
+  return elapsedS >= shot.expectedEndS;
 }
 
 void handleGlobalLimitTrip() {
@@ -2756,8 +3077,9 @@ void stateMachineTask() {
       }
 
       expirePostTareBaselineIfNeeded();
+      serviceBbwProtectionPhases();
 
-      if (elapsedMs(session.startedAtMs) >= session.config.brewConfirmMs) {
+      if (readyToConfirmBrew()) {
         confirmBrewOrManual();
       }
       return;
@@ -2778,6 +3100,8 @@ void stateMachineTask() {
         finalizeCycle(EndReason::PADDLE, StopperState::READY);
         return;
       }
+
+      serviceBbwProtectionPhases();
 
       if ((session.weightControlState == WeightControlState::ACTIVE ||
            session.weightControlState == WeightControlState::VALIDATING) &&

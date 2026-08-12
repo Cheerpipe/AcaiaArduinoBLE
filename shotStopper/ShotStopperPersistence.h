@@ -203,8 +203,8 @@ struct RuntimeConfigV7 {
       DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
   uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
   uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
-  uint32_t brewConfirmMs = DEFAULT_BREW_CONFIRM_MS;
-  uint32_t minAutoStopMs = DEFAULT_MIN_AUTO_STOP_MS;
+  uint32_t brewConfirmMs = 3000;
+  uint32_t minAutoStopMs = 5000;
   uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
   int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
 };
@@ -225,10 +225,196 @@ struct PersistedSettingsV7 {
   uint32_t checksum;
 };
 
+struct RuntimeConfigV8 {
+  uint32_t revision = 1;
+  uint8_t goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  float weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
+  bool autoTare = true;
+  bool timerOnly = false;
+  bool canTareStartTimer = true;
+  bool brewConfirmationBeep = true;
+  bool paddleReturnReminderBeep = true;
+  uint32_t paddleReturnReminderIntervalMs =
+      DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
+  uint32_t paddleReturnReminderMaxDurationMs =
+      DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
+  uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
+  uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
+  uint32_t brewConfirmMs = 3000;
+  uint32_t minAutoStopMs = 5000;
+  uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
+  int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
+  uint8_t ntpServerPreset = static_cast<uint8_t>(NtpServerPreset::POOL);
+  char ntpServerCustom[NTP_SERVER_HOST_CAPACITY] = {};
+};
+
+struct PersistedSettingsV8 {
+  uint32_t magic;
+  uint32_t schemaVersion;
+  uint32_t structureSize;
+  uint32_t storageRevision;
+  RuntimeConfigV8 runtime;
+  bool staConfigured;
+  bool staOpen;
+  char staSsid[WIFI_SSID_CAPACITY];
+  char staPassword[WIFI_PASSWORD_CAPACITY];
+  char apPassword[WIFI_PASSWORD_CAPACITY];
+  uint8_t authSalt[AUTH_SALT_LENGTH];
+  uint8_t authHash[AUTH_HASH_LENGTH];
+  uint32_t checksum;
+};
+
+struct RuntimeConfigV9 {
+  uint32_t revision = 1;
+  uint8_t goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  float weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
+  bool autoTare = true;
+  bool timerOnly = false;
+  bool canTareStartTimer = true;
+  bool brewConfirmationBeep = true;
+  bool paddleReturnReminderBeep = true;
+  uint32_t paddleReturnReminderIntervalMs =
+      DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
+  uint32_t paddleReturnReminderMaxDurationMs =
+      DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
+  uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
+  uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
+  uint32_t brewConfirmMs = 3000;
+  bool autoRetare = true;
+  uint32_t retareWindowMs = DEFAULT_RETARE_WINDOW_MS;
+  float minimumCupWeightG = DEFAULT_MINIMUM_CUP_WEIGHT_G;
+  bool shotConfirmationEnabled = true;
+  uint32_t confirmationTimeoutMs = 7000;
+  uint32_t minAutoStopMs = 5000;
+  uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
+  int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
+  uint8_t ntpServerPreset = static_cast<uint8_t>(NtpServerPreset::POOL);
+  char ntpServerCustom[NTP_SERVER_HOST_CAPACITY] = {};
+};
+
+struct PersistedSettingsV9 {
+  uint32_t magic;
+  uint32_t schemaVersion;
+  uint32_t structureSize;
+  uint32_t storageRevision;
+  RuntimeConfigV9 runtime;
+  bool staConfigured;
+  bool staOpen;
+  char staSsid[WIFI_SSID_CAPACITY];
+  char staPassword[WIFI_PASSWORD_CAPACITY];
+  char apPassword[WIFI_PASSWORD_CAPACITY];
+  uint8_t authSalt[AUTH_SALT_LENGTH];
+  uint8_t authHash[AUTH_HASH_LENGTH];
+  uint32_t checksum;
+};
+
+struct RuntimeConfigV10 {
+  uint32_t revision = 1;
+  uint8_t goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  float weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
+  bool autoTare = true;
+  bool timerOnly = false;
+  bool canTareStartTimer = true;
+  bool brewConfirmationBeep = true;
+  bool paddleReturnReminderBeep = true;
+  uint32_t paddleReturnReminderIntervalMs =
+      DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
+  uint32_t paddleReturnReminderMaxDurationMs =
+      DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
+  uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
+  uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
+  uint32_t brewConfirmMs = 3000;
+  bool autoRetare = true;
+  uint32_t retareWindowMs = DEFAULT_RETARE_WINDOW_MS;
+  float minimumCupWeightG = DEFAULT_MINIMUM_CUP_WEIGHT_G;
+  uint8_t retareStabilitySamples = DEFAULT_RETARE_STABILITY_SAMPLES;
+  float retareStabilityToleranceG = DEFAULT_RETARE_STABILITY_TOLERANCE_G;
+  uint32_t retareStabilityMaxGapMs = DEFAULT_RETARE_STABILITY_MAX_GAP_MS;
+  bool shotConfirmationEnabled = true;
+  uint32_t confirmationTimeoutMs = 7000;
+  uint32_t minAutoStopMs = 5000;
+  uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
+  int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
+  uint8_t ntpServerPreset = static_cast<uint8_t>(NtpServerPreset::POOL);
+  char ntpServerCustom[NTP_SERVER_HOST_CAPACITY] = {};
+};
+
+struct PersistedSettingsV10 {
+  uint32_t magic;
+  uint32_t schemaVersion;
+  uint32_t structureSize;
+  uint32_t storageRevision;
+  RuntimeConfigV10 runtime;
+  bool staConfigured;
+  bool staOpen;
+  char staSsid[WIFI_SSID_CAPACITY];
+  char staPassword[WIFI_PASSWORD_CAPACITY];
+  char apPassword[WIFI_PASSWORD_CAPACITY];
+  uint8_t authSalt[AUTH_SALT_LENGTH];
+  uint8_t authHash[AUTH_HASH_LENGTH];
+  uint32_t checksum;
+};
+
+struct RuntimeConfigV11 {
+  uint32_t revision = 1;
+  uint8_t goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  float weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
+  bool autoTare = true;
+  bool timerOnly = false;
+  bool canTareStartTimer = true;
+  bool brewConfirmationBeep = true;
+  bool paddleReturnReminderBeep = true;
+  uint32_t paddleReturnReminderIntervalMs =
+      DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
+  uint32_t paddleReturnReminderMaxDurationMs =
+      DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
+  uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
+  uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
+  uint32_t brewConfirmMs = 3000;
+  bool autoRetare = true;
+  uint32_t retareWindowMs = DEFAULT_RETARE_WINDOW_MS;
+  float minimumCupWeightG = DEFAULT_MINIMUM_CUP_WEIGHT_G;
+  uint8_t retareStabilitySamples = DEFAULT_RETARE_STABILITY_SAMPLES;
+  float retareStabilityToleranceG = DEFAULT_RETARE_STABILITY_TOLERANCE_G;
+  uint32_t retareStabilityMaxGapMs = DEFAULT_RETARE_STABILITY_MAX_GAP_MS;
+  uint32_t retareStabilityMinDurationMs = DEFAULT_RETARE_STABILITY_MIN_DURATION_MS;
+  bool shotConfirmationEnabled = true;
+  uint32_t confirmationTimeoutMs = DEFAULT_CONFIRMATION_TIMEOUT_MS;
+  uint32_t minAutoStopMs = 5000;
+  uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
+  int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
+  uint8_t ntpServerPreset = static_cast<uint8_t>(NtpServerPreset::POOL);
+  char ntpServerCustom[NTP_SERVER_HOST_CAPACITY] = {};
+};
+
+struct PersistedSettingsV11 {
+  uint32_t magic;
+  uint32_t schemaVersion;
+  uint32_t structureSize;
+  uint32_t storageRevision;
+  RuntimeConfigV11 runtime;
+  bool staConfigured;
+  bool staOpen;
+  char staSsid[WIFI_SSID_CAPACITY];
+  char staPassword[WIFI_PASSWORD_CAPACITY];
+  char apPassword[WIFI_PASSWORD_CAPACITY];
+  uint8_t authSalt[AUTH_SALT_LENGTH];
+  uint8_t authHash[AUTH_HASH_LENGTH];
+  uint32_t checksum;
+};
+
 static_assert(sizeof(PersistedSettingsV6) < sizeof(PersistedSettingsV7),
               "Schema-7 migration requires a larger v7 record");
-static_assert(sizeof(PersistedSettingsV7) < sizeof(PersistedSettings),
-              "Schema-8 migration requires a larger current record");
+static_assert(sizeof(PersistedSettingsV7) < sizeof(PersistedSettingsV8),
+              "Schema-8 migration requires a larger v8 record");
+static_assert(sizeof(PersistedSettingsV8) < sizeof(PersistedSettingsV9),
+              "Schema-9 migration requires a larger v9 record");
+static_assert(sizeof(PersistedSettingsV9) < sizeof(PersistedSettingsV10),
+              "Schema-10 migration requires a larger v10 record");
+static_assert(sizeof(PersistedSettingsV10) < sizeof(PersistedSettingsV11),
+              "Schema-11 migration requires a larger v11 record");
+static_assert(sizeof(PersistedSettingsV11) >= sizeof(PersistedSettings),
+              "Schema-12 record must fit within the v11 on-flash size");
 
 inline bool calculatePasswordHash(const uint8_t salt[AUTH_SALT_LENGTH],
                                   const char *password,
@@ -306,13 +492,81 @@ inline uint32_t persistedSettingsV7Checksum(
                offsetof(PersistedSettingsV7, checksum));
 }
 
+inline uint32_t persistedSettingsV8Checksum(
+    const PersistedSettingsV8 &settings) {
+  return crc32(reinterpret_cast<const uint8_t *>(&settings),
+               offsetof(PersistedSettingsV8, checksum));
+}
+
+inline uint32_t persistedSettingsV9Checksum(
+    const PersistedSettingsV9 &settings) {
+  return crc32(reinterpret_cast<const uint8_t *>(&settings),
+               offsetof(PersistedSettingsV9, checksum));
+}
+
+inline uint32_t persistedSettingsV10Checksum(
+    const PersistedSettingsV10 &settings) {
+  return crc32(reinterpret_cast<const uint8_t *>(&settings),
+               offsetof(PersistedSettingsV10, checksum));
+}
+
+inline uint32_t persistedSettingsV11Checksum(
+    const PersistedSettingsV11 &settings) {
+  return crc32(reinterpret_cast<const uint8_t *>(&settings),
+               offsetof(PersistedSettingsV11, checksum));
+}
+
+inline void migrateRuntimeConfigV11ToCurrent(const RuntimeConfigV11 &legacy,
+                                             RuntimeConfig &runtime) {
+  runtime.revision = legacy.revision;
+  runtime.goalWeightG = legacy.goalWeightG;
+  runtime.weightOffsetG = legacy.weightOffsetG;
+  runtime.autoTare = legacy.autoTare;
+  runtime.timerOnly = legacy.timerOnly;
+  runtime.canTareStartTimer = legacy.canTareStartTimer;
+  runtime.brewConfirmationBeep = legacy.brewConfirmationBeep;
+  runtime.paddleReturnReminderBeep = legacy.paddleReturnReminderBeep;
+  runtime.paddleReturnReminderIntervalMs =
+      legacy.paddleReturnReminderIntervalMs;
+  runtime.paddleReturnReminderMaxDurationMs =
+      legacy.paddleReturnReminderMaxDurationMs;
+  runtime.rinseGestureMs = legacy.rinseGestureMs;
+  runtime.rinseDurationMs = legacy.rinseDurationMs;
+  runtime.autoRetare = legacy.autoRetare;
+  runtime.retareWindowMs = legacy.retareWindowMs;
+  runtime.minimumCupWeightG = legacy.minimumCupWeightG;
+  runtime.retareStabilitySamples = legacy.retareStabilitySamples;
+  runtime.retareStabilityToleranceG = legacy.retareStabilityToleranceG;
+  runtime.retareStabilityMaxGapMs = legacy.retareStabilityMaxGapMs;
+  runtime.retareStabilityMinDurationMs = legacy.retareStabilityMinDurationMs;
+  runtime.confirmationTimeoutMs = legacy.confirmationTimeoutMs;
+  if (runtime.confirmationTimeoutMs < DEFAULT_CONFIRMATION_TIMEOUT_MS) {
+    runtime.confirmationTimeoutMs = DEFAULT_CONFIRMATION_TIMEOUT_MS;
+  }
+  const uint32_t minimumConfirmation = minimumConfirmationTimeoutMs(runtime);
+  if (runtime.confirmationTimeoutMs < minimumConfirmation) {
+    runtime.confirmationTimeoutMs = minimumConfirmation;
+  }
+  runtime.operationalWallMs = legacy.operationalWallMs;
+  runtime.timezoneOffsetMinutes = legacy.timezoneOffsetMinutes;
+  runtime.ntpServerPreset = legacy.ntpServerPreset;
+  memcpy(runtime.ntpServerCustom, legacy.ntpServerCustom,
+         sizeof(runtime.ntpServerCustom));
+}
+
+inline void normalizeRuntimeConfirmationDefaults(RuntimeConfig &runtime) {
+  if (runtime.confirmationTimeoutMs < DEFAULT_CONFIRMATION_TIMEOUT_MS) {
+    runtime.confirmationTimeoutMs = DEFAULT_CONFIRMATION_TIMEOUT_MS;
+  }
+  const uint32_t minimum = minimumConfirmationTimeoutMs(runtime);
+  if (runtime.confirmationTimeoutMs < minimum) {
+    runtime.confirmationTimeoutMs = minimum;
+  }
+}
+
 inline bool validPersistedSettings(const PersistedSettings &settings) {
   if (settings.magic != PERSISTED_SETTINGS_MAGIC ||
-      (settings.schemaVersion != CONFIG_SCHEMA_VERSION &&
-       settings.schemaVersion != PREVIOUS_CONFIG_SCHEMA_VERSION &&
-       settings.schemaVersion != LEGACY_SCHEMA_FOUR_VERSION &&
-       settings.schemaVersion != LEGACY_PRE_SCHEMA_FOUR_VERSION &&
-       settings.schemaVersion != LEGACY_CONFIG_SCHEMA_VERSION) ||
+      settings.schemaVersion != CONFIG_SCHEMA_VERSION ||
       settings.structureSize != sizeof(PersistedSettings) ||
       settings.checksum != persistedSettingsChecksum(settings) ||
       validateRuntimeConfig(settings.runtime) != ConfigValidationError::NONE ||
@@ -347,7 +601,7 @@ inline bool readV7SettingsSlot(Preferences &preferences, const char *key,
   PersistedSettingsV7 legacy = {};
   if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
       legacy.magic != PERSISTED_SETTINGS_MAGIC ||
-      legacy.schemaVersion != PREVIOUS_CONFIG_SCHEMA_VERSION ||
+      legacy.schemaVersion != 7U ||
       legacy.structureSize != sizeof(PersistedSettingsV7) ||
       legacy.checksum != persistedSettingsV7Checksum(legacy) ||
       !validAccessPointPassword(legacy.apPassword) ||
@@ -382,8 +636,6 @@ inline bool readV7SettingsSlot(Preferences &preferences, const char *key,
       legacy.runtime.paddleReturnReminderMaxDurationMs;
   migrated.runtime.rinseGestureMs = legacy.runtime.rinseGestureMs;
   migrated.runtime.rinseDurationMs = legacy.runtime.rinseDurationMs;
-  migrated.runtime.brewConfirmMs = legacy.runtime.brewConfirmMs;
-  migrated.runtime.minAutoStopMs = legacy.runtime.minAutoStopMs;
   migrated.runtime.operationalWallMs = legacy.runtime.operationalWallMs;
   migrated.runtime.timezoneOffsetMinutes =
       legacy.runtime.timezoneOffsetMinutes;
@@ -398,6 +650,275 @@ inline bool readV7SettingsSlot(Preferences &preferences, const char *key,
          sizeof(migrated.apPassword));
   memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
   memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
+  normalizeRuntimeConfirmationDefaults(migrated.runtime);
+  if (validateRuntimeConfig(migrated.runtime) !=
+      ConfigValidationError::NONE) {
+    return false;
+  }
+  finalizePersistedSettings(migrated);
+  settings = migrated;
+  return true;
+}
+
+inline bool readV8SettingsSlot(Preferences &preferences, const char *key,
+                               PersistedSettings &settings) {
+  if (preferences.getBytesLength(key) != sizeof(PersistedSettingsV8)) {
+    return false;
+  }
+  PersistedSettingsV8 legacy = {};
+  if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
+      legacy.magic != PERSISTED_SETTINGS_MAGIC ||
+      legacy.schemaVersion != 8U ||
+      legacy.structureSize != sizeof(PersistedSettingsV8) ||
+      legacy.checksum != persistedSettingsV8Checksum(legacy) ||
+      !validAccessPointPassword(legacy.apPassword) ||
+      (legacy.staConfigured != 0 &&
+       (!validWifiSsid(legacy.staSsid) ||
+        !validWifiPassword(legacy.staPassword, legacy.staOpen != 0)))) {
+    return false;
+  }
+
+  uint8_t expectedHash[AUTH_HASH_LENGTH] = {};
+  if (!calculatePasswordHash(legacy.authSalt, legacy.apPassword,
+                             expectedHash) ||
+      !constantTimeEqual(legacy.authHash, expectedHash,
+                         sizeof(expectedHash))) {
+    return false;
+  }
+
+  PersistedSettings migrated = {};
+  migrated.storageRevision = legacy.storageRevision;
+  migrated.runtime.revision = legacy.runtime.revision;
+  migrated.runtime.goalWeightG = legacy.runtime.goalWeightG;
+  migrated.runtime.weightOffsetG = legacy.runtime.weightOffsetG;
+  migrated.runtime.autoTare = legacy.runtime.autoTare;
+  migrated.runtime.timerOnly = legacy.runtime.timerOnly;
+  migrated.runtime.canTareStartTimer = legacy.runtime.canTareStartTimer;
+  migrated.runtime.brewConfirmationBeep = legacy.runtime.brewConfirmationBeep;
+  migrated.runtime.paddleReturnReminderBeep =
+      legacy.runtime.paddleReturnReminderBeep;
+  migrated.runtime.paddleReturnReminderIntervalMs =
+      legacy.runtime.paddleReturnReminderIntervalMs;
+  migrated.runtime.paddleReturnReminderMaxDurationMs =
+      legacy.runtime.paddleReturnReminderMaxDurationMs;
+  migrated.runtime.rinseGestureMs = legacy.runtime.rinseGestureMs;
+  migrated.runtime.rinseDurationMs = legacy.runtime.rinseDurationMs;
+  migrated.runtime.operationalWallMs = legacy.runtime.operationalWallMs;
+  migrated.runtime.timezoneOffsetMinutes =
+      legacy.runtime.timezoneOffsetMinutes;
+  migrated.runtime.ntpServerPreset = legacy.runtime.ntpServerPreset;
+  memcpy(migrated.runtime.ntpServerCustom, legacy.runtime.ntpServerCustom,
+         sizeof(migrated.runtime.ntpServerCustom));
+  migrated.staConfigured = legacy.staConfigured;
+  migrated.staOpen = legacy.staOpen;
+  memcpy(migrated.staSsid, legacy.staSsid, sizeof(migrated.staSsid));
+  memcpy(migrated.staPassword, legacy.staPassword,
+         sizeof(migrated.staPassword));
+  memcpy(migrated.apPassword, legacy.apPassword,
+         sizeof(migrated.apPassword));
+  memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
+  memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
+  normalizeRuntimeConfirmationDefaults(migrated.runtime);
+  if (validateRuntimeConfig(migrated.runtime) !=
+      ConfigValidationError::NONE) {
+    return false;
+  }
+  finalizePersistedSettings(migrated);
+  settings = migrated;
+  return true;
+}
+
+inline bool readV9SettingsSlot(Preferences &preferences, const char *key,
+                               PersistedSettings &settings) {
+  if (preferences.getBytesLength(key) != sizeof(PersistedSettingsV9)) {
+    return false;
+  }
+  PersistedSettingsV9 legacy = {};
+  if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
+      legacy.magic != PERSISTED_SETTINGS_MAGIC ||
+      legacy.schemaVersion != 9U ||
+      legacy.structureSize != sizeof(PersistedSettingsV9) ||
+      legacy.checksum != persistedSettingsV9Checksum(legacy) ||
+      !validAccessPointPassword(legacy.apPassword) ||
+      (legacy.staConfigured != 0 &&
+       (!validWifiSsid(legacy.staSsid) ||
+        !validWifiPassword(legacy.staPassword, legacy.staOpen != 0)))) {
+    return false;
+  }
+
+  uint8_t expectedHash[AUTH_HASH_LENGTH] = {};
+  if (!calculatePasswordHash(legacy.authSalt, legacy.apPassword,
+                             expectedHash) ||
+      !constantTimeEqual(legacy.authHash, expectedHash,
+                         sizeof(expectedHash))) {
+    return false;
+  }
+
+  PersistedSettings migrated = {};
+  migrated.storageRevision = legacy.storageRevision;
+  migrated.runtime.revision = legacy.runtime.revision;
+  migrated.runtime.goalWeightG = legacy.runtime.goalWeightG;
+  migrated.runtime.weightOffsetG = legacy.runtime.weightOffsetG;
+  migrated.runtime.autoTare = legacy.runtime.autoTare;
+  migrated.runtime.timerOnly = legacy.runtime.timerOnly;
+  migrated.runtime.canTareStartTimer = legacy.runtime.canTareStartTimer;
+  migrated.runtime.brewConfirmationBeep = legacy.runtime.brewConfirmationBeep;
+  migrated.runtime.paddleReturnReminderBeep =
+      legacy.runtime.paddleReturnReminderBeep;
+  migrated.runtime.paddleReturnReminderIntervalMs =
+      legacy.runtime.paddleReturnReminderIntervalMs;
+  migrated.runtime.paddleReturnReminderMaxDurationMs =
+      legacy.runtime.paddleReturnReminderMaxDurationMs;
+  migrated.runtime.rinseGestureMs = legacy.runtime.rinseGestureMs;
+  migrated.runtime.rinseDurationMs = legacy.runtime.rinseDurationMs;
+  migrated.runtime.autoRetare = legacy.runtime.autoRetare;
+  migrated.runtime.retareWindowMs = legacy.runtime.retareWindowMs;
+  migrated.runtime.minimumCupWeightG = legacy.runtime.minimumCupWeightG;
+  migrated.runtime.confirmationTimeoutMs =
+      legacy.runtime.confirmationTimeoutMs;
+  migrated.runtime.operationalWallMs = legacy.runtime.operationalWallMs;
+  migrated.runtime.timezoneOffsetMinutes =
+      legacy.runtime.timezoneOffsetMinutes;
+  migrated.runtime.ntpServerPreset = legacy.runtime.ntpServerPreset;
+  memcpy(migrated.runtime.ntpServerCustom, legacy.runtime.ntpServerCustom,
+         sizeof(migrated.runtime.ntpServerCustom));
+  migrated.staConfigured = legacy.staConfigured;
+  migrated.staOpen = legacy.staOpen;
+  memcpy(migrated.staSsid, legacy.staSsid, sizeof(migrated.staSsid));
+  memcpy(migrated.staPassword, legacy.staPassword,
+         sizeof(migrated.staPassword));
+  memcpy(migrated.apPassword, legacy.apPassword,
+         sizeof(migrated.apPassword));
+  memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
+  memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
+  normalizeRuntimeConfirmationDefaults(migrated.runtime);
+  if (validateRuntimeConfig(migrated.runtime) !=
+      ConfigValidationError::NONE) {
+    return false;
+  }
+  finalizePersistedSettings(migrated);
+  settings = migrated;
+  return true;
+}
+
+inline bool readV10SettingsSlot(Preferences &preferences, const char *key,
+                                PersistedSettings &settings) {
+  if (preferences.getBytesLength(key) != sizeof(PersistedSettingsV10)) {
+    return false;
+  }
+  PersistedSettingsV10 legacy = {};
+  if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
+      legacy.magic != PERSISTED_SETTINGS_MAGIC ||
+      legacy.schemaVersion != 10U ||
+      legacy.structureSize != sizeof(PersistedSettingsV10) ||
+      legacy.checksum != persistedSettingsV10Checksum(legacy) ||
+      !validAccessPointPassword(legacy.apPassword) ||
+      (legacy.staConfigured != 0 &&
+       (!validWifiSsid(legacy.staSsid) ||
+        !validWifiPassword(legacy.staPassword, legacy.staOpen != 0)))) {
+    return false;
+  }
+
+  uint8_t expectedHash[AUTH_HASH_LENGTH] = {};
+  if (!calculatePasswordHash(legacy.authSalt, legacy.apPassword,
+                             expectedHash) ||
+      !constantTimeEqual(legacy.authHash, expectedHash,
+                         sizeof(expectedHash))) {
+    return false;
+  }
+
+  PersistedSettings migrated = {};
+  migrated.storageRevision = legacy.storageRevision;
+  migrated.runtime.revision = legacy.runtime.revision;
+  migrated.runtime.goalWeightG = legacy.runtime.goalWeightG;
+  migrated.runtime.weightOffsetG = legacy.runtime.weightOffsetG;
+  migrated.runtime.autoTare = legacy.runtime.autoTare;
+  migrated.runtime.timerOnly = legacy.runtime.timerOnly;
+  migrated.runtime.canTareStartTimer = legacy.runtime.canTareStartTimer;
+  migrated.runtime.brewConfirmationBeep = legacy.runtime.brewConfirmationBeep;
+  migrated.runtime.paddleReturnReminderBeep =
+      legacy.runtime.paddleReturnReminderBeep;
+  migrated.runtime.paddleReturnReminderIntervalMs =
+      legacy.runtime.paddleReturnReminderIntervalMs;
+  migrated.runtime.paddleReturnReminderMaxDurationMs =
+      legacy.runtime.paddleReturnReminderMaxDurationMs;
+  migrated.runtime.rinseGestureMs = legacy.runtime.rinseGestureMs;
+  migrated.runtime.rinseDurationMs = legacy.runtime.rinseDurationMs;
+  migrated.runtime.autoRetare = legacy.runtime.autoRetare;
+  migrated.runtime.retareWindowMs = legacy.runtime.retareWindowMs;
+  migrated.runtime.minimumCupWeightG = legacy.runtime.minimumCupWeightG;
+  migrated.runtime.retareStabilitySamples =
+      legacy.runtime.retareStabilitySamples;
+  migrated.runtime.retareStabilityToleranceG =
+      legacy.runtime.retareStabilityToleranceG;
+  migrated.runtime.retareStabilityMaxGapMs =
+      legacy.runtime.retareStabilityMaxGapMs;
+  migrated.runtime.confirmationTimeoutMs =
+      legacy.runtime.confirmationTimeoutMs;
+  migrated.runtime.operationalWallMs = legacy.runtime.operationalWallMs;
+  migrated.runtime.timezoneOffsetMinutes =
+      legacy.runtime.timezoneOffsetMinutes;
+  migrated.runtime.ntpServerPreset = legacy.runtime.ntpServerPreset;
+  memcpy(migrated.runtime.ntpServerCustom, legacy.runtime.ntpServerCustom,
+         sizeof(migrated.runtime.ntpServerCustom));
+  migrated.staConfigured = legacy.staConfigured;
+  migrated.staOpen = legacy.staOpen;
+  memcpy(migrated.staSsid, legacy.staSsid, sizeof(migrated.staSsid));
+  memcpy(migrated.staPassword, legacy.staPassword,
+         sizeof(migrated.staPassword));
+  memcpy(migrated.apPassword, legacy.apPassword,
+         sizeof(migrated.apPassword));
+  memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
+  memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
+  normalizeRuntimeConfirmationDefaults(migrated.runtime);
+  if (validateRuntimeConfig(migrated.runtime) !=
+      ConfigValidationError::NONE) {
+    return false;
+  }
+  finalizePersistedSettings(migrated);
+  settings = migrated;
+  return true;
+}
+
+inline bool readV11SettingsSlot(Preferences &preferences, const char *key,
+                                PersistedSettings &settings) {
+  if (preferences.getBytesLength(key) != sizeof(PersistedSettingsV11)) {
+    return false;
+  }
+  PersistedSettingsV11 legacy = {};
+  if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
+      legacy.magic != PERSISTED_SETTINGS_MAGIC ||
+      legacy.schemaVersion != 11U ||
+      legacy.structureSize != sizeof(PersistedSettingsV11) ||
+      legacy.checksum != persistedSettingsV11Checksum(legacy) ||
+      !validAccessPointPassword(legacy.apPassword) ||
+      (legacy.staConfigured != 0 &&
+       (!validWifiSsid(legacy.staSsid) ||
+        !validWifiPassword(legacy.staPassword, legacy.staOpen != 0)))) {
+    return false;
+  }
+
+  uint8_t expectedHash[AUTH_HASH_LENGTH] = {};
+  if (!calculatePasswordHash(legacy.authSalt, legacy.apPassword,
+                             expectedHash) ||
+      !constantTimeEqual(legacy.authHash, expectedHash,
+                         sizeof(expectedHash))) {
+    return false;
+  }
+
+  PersistedSettings migrated = {};
+  migrated.storageRevision = legacy.storageRevision;
+  migrateRuntimeConfigV11ToCurrent(legacy.runtime, migrated.runtime);
+  migrated.staConfigured = legacy.staConfigured;
+  migrated.staOpen = legacy.staOpen;
+  memcpy(migrated.staSsid, legacy.staSsid, sizeof(migrated.staSsid));
+  memcpy(migrated.staPassword, legacy.staPassword,
+         sizeof(migrated.staPassword));
+  memcpy(migrated.apPassword, legacy.apPassword,
+         sizeof(migrated.apPassword));
+  memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
+  memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
+  normalizeRuntimeConfirmationDefaults(migrated.runtime);
   if (validateRuntimeConfig(migrated.runtime) !=
       ConfigValidationError::NONE) {
     return false;
@@ -477,8 +998,6 @@ inline bool readLegacySettingsSlot(Preferences &preferences, const char *key,
       DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
   migrated.runtime.rinseGestureMs = legacy.runtime.rinseGestureMs;
   migrated.runtime.rinseDurationMs = legacy.runtime.rinseDurationMs;
-  migrated.runtime.brewConfirmMs = legacy.runtime.brewConfirmMs;
-  migrated.runtime.minAutoStopMs = legacy.runtime.minAutoStopMs;
   migrated.runtime.operationalWallMs = legacy.runtime.operationalWallMs;
   migrated.staConfigured = legacy.staConfigured != 0;
   migrated.staOpen = legacy.staOpen != 0;
@@ -489,6 +1008,7 @@ inline bool readLegacySettingsSlot(Preferences &preferences, const char *key,
          sizeof(migrated.apPassword));
   memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
   memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
+  normalizeRuntimeConfirmationDefaults(migrated.runtime);
   if (validateRuntimeConfig(migrated.runtime) !=
       ConfigValidationError::NONE) {
     return false;
@@ -543,8 +1063,6 @@ inline bool readV4SettingsSlot(Preferences &preferences, const char *key,
       DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
   migrated.runtime.rinseGestureMs = legacy.runtime.rinseGestureMs;
   migrated.runtime.rinseDurationMs = legacy.runtime.rinseDurationMs;
-  migrated.runtime.brewConfirmMs = legacy.runtime.brewConfirmMs;
-  migrated.runtime.minAutoStopMs = legacy.runtime.minAutoStopMs;
   migrated.runtime.operationalWallMs = legacy.runtime.operationalWallMs;
   migrated.staConfigured = legacy.staConfigured != 0;
   migrated.staOpen = legacy.staOpen != 0;
@@ -555,6 +1073,7 @@ inline bool readV4SettingsSlot(Preferences &preferences, const char *key,
          sizeof(migrated.apPassword));
   memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
   memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
+  normalizeRuntimeConfirmationDefaults(migrated.runtime);
   if (validateRuntimeConfig(migrated.runtime) !=
       ConfigValidationError::NONE) {
     return false;
@@ -615,8 +1134,6 @@ inline bool readV5SettingsSlot(Preferences &preferences, const char *key,
       DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
   migrated.runtime.rinseGestureMs = legacy.runtime.rinseGestureMs;
   migrated.runtime.rinseDurationMs = legacy.runtime.rinseDurationMs;
-  migrated.runtime.brewConfirmMs = legacy.runtime.brewConfirmMs;
-  migrated.runtime.minAutoStopMs = legacy.runtime.minAutoStopMs;
   migrated.runtime.operationalWallMs = legacy.runtime.operationalWallMs;
   migrated.staConfigured = legacy.staConfigured != 0;
   migrated.staOpen = legacy.staOpen != 0;
@@ -627,6 +1144,7 @@ inline bool readV5SettingsSlot(Preferences &preferences, const char *key,
          sizeof(migrated.apPassword));
   memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
   memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
+  normalizeRuntimeConfirmationDefaults(migrated.runtime);
   if (validateRuntimeConfig(migrated.runtime) !=
       ConfigValidationError::NONE) {
     return false;
@@ -681,8 +1199,6 @@ inline bool readV6SettingsSlot(Preferences &preferences, const char *key,
       legacy.runtime.paddleReturnReminderMaxDurationMs;
   migrated.runtime.rinseGestureMs = legacy.runtime.rinseGestureMs;
   migrated.runtime.rinseDurationMs = legacy.runtime.rinseDurationMs;
-  migrated.runtime.brewConfirmMs = legacy.runtime.brewConfirmMs;
-  migrated.runtime.minAutoStopMs = legacy.runtime.minAutoStopMs;
   migrated.runtime.operationalWallMs = legacy.runtime.operationalWallMs;
   migrated.runtime.timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
   migrated.runtime.ntpServerPreset =
@@ -696,6 +1212,7 @@ inline bool readV6SettingsSlot(Preferences &preferences, const char *key,
          sizeof(migrated.apPassword));
   memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
   memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
+  normalizeRuntimeConfirmationDefaults(migrated.runtime);
   if (validateRuntimeConfig(migrated.runtime) !=
       ConfigValidationError::NONE) {
     return false;
@@ -713,22 +1230,35 @@ inline bool readAnySettingsSlot(Preferences &preferences, const char *key,
                         length == sizeof(PersistedSettingsV4) ||
                         length == sizeof(PersistedSettingsV5) ||
                         length == sizeof(PersistedSettingsV6) ||
-                        length == sizeof(PersistedSettingsV7);
+                        length == sizeof(PersistedSettingsV7) ||
+                        length == sizeof(PersistedSettingsV8) ||
+                        length == sizeof(PersistedSettingsV9) ||
+                        length == sizeof(PersistedSettingsV10) ||
+                        length == sizeof(PersistedSettingsV11);
   const bool valid =
       length == sizeof(PersistedSettings)
           ? readSettingsSlot(preferences, key, settings)
-          : length == sizeof(PersistedSettingsV7)
-                ? readV7SettingsSlot(preferences, key, settings)
-                : length == sizeof(PersistedSettingsV6)
-                      ? readV6SettingsSlot(preferences, key, settings)
-                      : length == sizeof(PersistedSettingsV5)
-                            ? readV5SettingsSlot(preferences, key, settings)
-                            : length == sizeof(PersistedSettingsV4)
-                                  ? readV4SettingsSlot(preferences, key,
+          : length == sizeof(PersistedSettingsV11)
+                ? readV11SettingsSlot(preferences, key, settings)
+                : length == sizeof(PersistedSettingsV10)
+                ? readV10SettingsSlot(preferences, key, settings)
+                : length == sizeof(PersistedSettingsV9)
+                      ? readV9SettingsSlot(preferences, key, settings)
+                : length == sizeof(PersistedSettingsV8)
+                      ? readV8SettingsSlot(preferences, key, settings)
+                : length == sizeof(PersistedSettingsV7)
+                      ? readV7SettingsSlot(preferences, key, settings)
+                      : length == sizeof(PersistedSettingsV6)
+                            ? readV6SettingsSlot(preferences, key, settings)
+                            : length == sizeof(PersistedSettingsV5)
+                                  ? readV5SettingsSlot(preferences, key,
                                                        settings)
-                                  : length == sizeof(PersistedSettingsV3) &&
-                                        readLegacySettingsSlot(preferences, key,
-                                                               settings);
+                                  : length == sizeof(PersistedSettingsV4)
+                                        ? readV4SettingsSlot(preferences, key,
+                                                             settings)
+                                        : length == sizeof(PersistedSettingsV3) &&
+                                              readLegacySettingsSlot(
+                                                  preferences, key, settings);
   if (legacyFormat != nullptr) {
     *legacyFormat = valid && isLegacy;
   }
@@ -781,13 +1311,35 @@ inline bool loadPersistedSettings(PersistedSettings &settings) {
     settings.runtime.paddleReturnReminderMaxDurationMs =
         DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
   }
-  if (settings.schemaVersion == PREVIOUS_CONFIG_SCHEMA_VERSION) {
+  if (settings.schemaVersion == 7U) {
     settings.runtime.paddleReturnReminderMaxDurationMs =
         DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
     settings.runtime.timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
     settings.runtime.ntpServerPreset =
         static_cast<uint8_t>(NtpServerPreset::POOL);
     settings.runtime.ntpServerCustom[0] = '\0';
+  }
+  if (settings.schemaVersion == 8U) {
+    settings.runtime.autoRetare = true;
+    settings.runtime.retareWindowMs = DEFAULT_RETARE_WINDOW_MS;
+    settings.runtime.minimumCupWeightG = DEFAULT_MINIMUM_CUP_WEIGHT_G;
+    settings.runtime.confirmationTimeoutMs = DEFAULT_CONFIRMATION_TIMEOUT_MS;
+  }
+  if (settings.schemaVersion == 9U) {
+    settings.runtime.retareStabilitySamples = DEFAULT_RETARE_STABILITY_SAMPLES;
+    settings.runtime.retareStabilityToleranceG =
+        DEFAULT_RETARE_STABILITY_TOLERANCE_G;
+    settings.runtime.retareStabilityMaxGapMs =
+        DEFAULT_RETARE_STABILITY_MAX_GAP_MS;
+    settings.runtime.retareStabilityMinDurationMs =
+        DEFAULT_RETARE_STABILITY_MIN_DURATION_MS;
+  }
+  if (settings.schemaVersion == PREVIOUS_CONFIG_SCHEMA_VERSION) {
+    settings.runtime.retareStabilityMinDurationMs =
+        DEFAULT_RETARE_STABILITY_MIN_DURATION_MS;
+  }
+  if (settings.schemaVersion <= PREVIOUS_CONFIG_SCHEMA_VERSION) {
+    normalizeRuntimeConfirmationDefaults(settings.runtime);
   }
   return true;
 }

@@ -28,7 +28,8 @@ The project was created to achieve these goals:
   software control.
 - Add features and parameterization, including reminder beeps to return the
   paddle to OFF.
-- Remove workarounds such as double tare.
+- Remove workarounds such as manual double tare; automatic retare handles late cup
+  placement during Brew by Weight.
 - Add a Web UI that displays status and can eventually publish sensors to
   other platforms such as Home Assistant.
 - Remove the need to move the paddle to OFF for the stopper to work: software
@@ -98,17 +99,18 @@ closes CN9 and begins gesture qualification.
 - Releasing it within the rinse gesture time starts a rinse. CN9 remains closed
   for the configured rinse duration, and subsequent paddle changes are ignored
   until the rinse ends.
-- Holding it ON until the confirmation time starts an automatic extraction if
-  scale automation was available when the cycle began; otherwise it becomes a
-  manual cycle without a scale.
-- Releasing it after the rinse window but before confirmation produces a short
-  manual extraction and opens CN9.
+- Holding it ON past the rinse gesture starts an automatic extraction if scale
+  automation was available when the cycle begins; otherwise it becomes a manual
+  cycle without a scale. Entry to `BREW` is brief (debounce/BLE only) and does
+  not wait for retare or brew-start confirmation.
+- Releasing it after the rinse window ends the qualifying gesture as a completed
+  brew and opens CN9.
 - Releasing it during an automatic or manual extraction opens CN9 immediately.
 - If the scale disconnects or its samples become stale during an automatic
   extraction, weight control is suspended. It recovers only on the current BLE
   generation after three coherent samples. Paddle OFF and timing limits remain
   authoritative throughout.
-- After the configured minimum time, two fresh samples at or above
+- After brew-start confirmation ends, two fresh samples at or above
   `goal - offset` stop the extraction directly, independently of regression.
   Prediction remains an earlier stop mechanism. Timer-only mode retains timing
   and tare but disables both mechanisms and learning.
@@ -121,9 +123,9 @@ stateDiagram-v2
   REQUIRES_OFF --> READY: physical OFF stable
   READY --> QUALIFYING_ON: physical ON or opt-in Web ON
   QUALIFYING_ON --> RINSE: short gesture
-  QUALIFYING_ON --> BREW: automatic confirmation
+  QUALIFYING_ON --> BREW: scale automation ready
   QUALIFYING_ON --> MANUAL_NO_SCALE: no scale automation
-  QUALIFYING_ON --> READY: short shot
+  QUALIFYING_ON --> READY: paddle OFF after rinse window
   RINSE --> READY: complete, paddle OFF
   RINSE --> REQUIRES_OFF: complete, paddle ON
   BREW --> READY: paddle/Web stop
@@ -142,15 +144,39 @@ stop earlier. Abrupt samples are still visible as observed weight but cannot
 enter regression or learning. Post-drip analysis updates the offset only after
 a continuous, anomaly-free control trajectory.
 
+Automatic Brew by Weight runs two parallel protection windows from shot start
+(`session.startedAtMs`), while the cycle may already be in `BREW`:
+
+1. **Automatic retare** (default ON, 4 s window): if a stable load at or above
+   the configured minimum cup weight appears after the initial tare, the
+   firmware sends a second tare without restarting the shot timer. The window
+   ends when retare runs or when the timer expires. Does not delay entry to
+   `BREW`.
+2. **Brew start confirmation** (default 12 s, always ON for automatic BBW):
+   runs in parallel with retare from shot start. Waits for reliable first drops
+   (after retare ended) or times out. Weight-stop protection ends when first
+   drops are detected, when the timeout expires, or when coffee during retare
+   skips confirmation at retare window end.
+3. **Brew by weight**: automatic stop by weight is inhibited while either
+   retare or brew-start confirmation still blocks. After both windows end,
+   weight stop is armed immediately (no separate minimum auto-stop delay).
+
+During retare and confirmation, automatic stop by weight is inhibited. Manual
+stop, CN9 time limits, and all safety mechanisms remain active. Timer-only and
+manual cycles ignore both windows. Brew start confirmation cannot be disabled;
+only its duration is configurable (minimum: retare window + 3 s).
+
 The status API distinguishes BLE connection, stream freshness and control
 authority, and exposes observed versus accepted weight, connection generation,
 packet sequence/gaps, rejected packets, reconnects and disconnect reason.
 
 New configurations use a 1,500 ms rinse gesture and enable both the Bookoo
-combined tare/start command and **Beep when brew is confirmed**. The latter
-sends an independent Bookoo-compatible beep after an automatic extraction is
-confirmed; it is ignored in timer-only mode, never tares the scale, and cannot
-change BLE connection state.
+combined tare/start command and **Beep on first drops**. The latter sends an
+independent Bookoo-compatible beep when the firmware detects the first coffee
+drops during an automatic extraction; it is ignored in timer-only mode, never
+tares the scale, and cannot change BLE connection state. No beep is emitted
+when the confirmation timeout expires without drops; a later first-drops
+detection still beeps once if enabled.
 
 The default **Scale reminder beep until the physical paddle is switched OFF**
 option emits a safe beep every 15 seconds while the physical paddle GPIO is ON,
@@ -493,6 +519,8 @@ specific circuit remains mandatory before real use.
 - [Main implementation plan](docs/plans/IMPLEMENTATION_PLAN.md)
 - [Wi-Fi and Web UI implementation plan](docs/plans/WIFI_WEB_UI_IMPLEMENTATION_PLAN.md)
 - [Watchdog and CN9 safety plan](docs/plans/WATCHDOG_CN9_SAFETY_IMPLEMENTATION_PLAN.md)
+- [Automatic retare and shot confirmation plan](docs/plans/RETARE_CONFIRMATION_IMPLEMENTATION_PLAN.md)
+- [BBW workflow simplification plan](docs/plans/BBW_WORKFLOW_SIMPLIFICATION_PLAN.md)
 - [Local library documentation](libraries/AcaiaArduinoBLE/README.md)
 
 ## License and acknowledgements

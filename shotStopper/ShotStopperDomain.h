@@ -10,8 +10,8 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 8;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 7;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 12;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 11;
 constexpr size_t NTP_SERVER_HOST_CAPACITY = 64;
 constexpr uint32_t NTP_RESYNC_INTERVAL_MS = 3600UL * 1000UL;
 constexpr uint32_t NTP_UNSYNCED_RETRY_MS = 60UL * 1000UL;
@@ -85,8 +85,29 @@ constexpr uint32_t HARD_MAX_CN9_CLOSED_MS = 60000;
 constexpr uint32_t DEFAULT_OPERATIONAL_WALL_MS = 60000;
 constexpr uint32_t DEFAULT_RINSE_GESTURE_MS = 1500;
 constexpr uint32_t DEFAULT_RINSE_DURATION_MS = 3000;
-constexpr uint32_t DEFAULT_BREW_CONFIRM_MS = 3000;
-constexpr uint32_t DEFAULT_MIN_AUTO_STOP_MS = 5000;
+constexpr uint32_t DEFAULT_RETARE_WINDOW_MS = 4000;
+constexpr uint32_t DEFAULT_CONFIRMATION_TIMEOUT_MS = 12000;
+constexpr uint32_t MIN_CONFIRMATION_AFTER_RETARE_MS = 3000;
+constexpr float DEFAULT_MINIMUM_CUP_WEIGHT_G = 10.0f;
+constexpr float MIN_MINIMUM_CUP_WEIGHT_G = 1.0f;
+constexpr float MAX_MINIMUM_CUP_WEIGHT_G = 500.0f;
+constexpr uint32_t MIN_RETARE_WINDOW_MS = 500;
+constexpr uint32_t MAX_RETARE_WINDOW_MS = 10000;
+constexpr uint32_t MIN_CONFIRMATION_TIMEOUT_MS = 500;
+constexpr uint32_t MAX_CONFIRMATION_TIMEOUT_MS = 30000;
+constexpr float DEFAULT_RETARE_STABILITY_TOLERANCE_G = 2.0f;
+constexpr uint8_t DEFAULT_RETARE_STABILITY_SAMPLES = 3;
+constexpr uint32_t DEFAULT_RETARE_STABILITY_MAX_GAP_MS = 500;
+constexpr uint32_t DEFAULT_RETARE_STABILITY_MIN_DURATION_MS = 300;
+constexpr uint8_t MIN_RETARE_STABILITY_SAMPLES = 2;
+constexpr uint8_t MAX_RETARE_STABILITY_SAMPLES = 10;
+constexpr float MIN_RETARE_STABILITY_TOLERANCE_G = 0.1f;
+constexpr float MAX_RETARE_STABILITY_TOLERANCE_G = 20.0f;
+constexpr uint32_t MIN_RETARE_STABILITY_MAX_GAP_MS = 100;
+constexpr uint32_t MAX_RETARE_STABILITY_MAX_GAP_MS = 5000;
+constexpr uint32_t MIN_RETARE_STABILITY_MIN_DURATION_MS = 0;
+constexpr uint32_t MAX_RETARE_STABILITY_MIN_DURATION_MS = 2000;
+constexpr uint8_t FIRST_DROP_CONFIRMATION_SAMPLES = 2;
 constexpr uint8_t MIN_GOAL_WEIGHT_G = 10;
 constexpr uint8_t MAX_GOAL_WEIGHT_G = 200;
 constexpr uint8_t DEFAULT_GOAL_WEIGHT_G = 36;
@@ -217,8 +238,14 @@ struct RuntimeConfig {
       DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
   uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
   uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
-  uint32_t brewConfirmMs = DEFAULT_BREW_CONFIRM_MS;
-  uint32_t minAutoStopMs = DEFAULT_MIN_AUTO_STOP_MS;
+  bool autoRetare = true;
+  uint32_t retareWindowMs = DEFAULT_RETARE_WINDOW_MS;
+  float minimumCupWeightG = DEFAULT_MINIMUM_CUP_WEIGHT_G;
+  uint8_t retareStabilitySamples = DEFAULT_RETARE_STABILITY_SAMPLES;
+  float retareStabilityToleranceG = DEFAULT_RETARE_STABILITY_TOLERANCE_G;
+  uint32_t retareStabilityMaxGapMs = DEFAULT_RETARE_STABILITY_MAX_GAP_MS;
+  uint32_t retareStabilityMinDurationMs = DEFAULT_RETARE_STABILITY_MIN_DURATION_MS;
+  uint32_t confirmationTimeoutMs = DEFAULT_CONFIRMATION_TIMEOUT_MS;
   uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
   int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
   uint8_t ntpServerPreset = static_cast<uint8_t>(NtpServerPreset::POOL);
@@ -240,8 +267,14 @@ struct CycleConfigSnapshot {
       DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
   uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
   uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
-  uint32_t brewConfirmMs = DEFAULT_BREW_CONFIRM_MS;
-  uint32_t minAutoStopMs = DEFAULT_MIN_AUTO_STOP_MS;
+  bool autoRetare = true;
+  uint32_t retareWindowMs = DEFAULT_RETARE_WINDOW_MS;
+  float minimumCupWeightG = DEFAULT_MINIMUM_CUP_WEIGHT_G;
+  uint8_t retareStabilitySamples = DEFAULT_RETARE_STABILITY_SAMPLES;
+  float retareStabilityToleranceG = DEFAULT_RETARE_STABILITY_TOLERANCE_G;
+  uint32_t retareStabilityMaxGapMs = DEFAULT_RETARE_STABILITY_MAX_GAP_MS;
+  uint32_t retareStabilityMinDurationMs = DEFAULT_RETARE_STABILITY_MIN_DURATION_MS;
+  uint32_t confirmationTimeoutMs = DEFAULT_CONFIRMATION_TIMEOUT_MS;
   uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
 };
 
@@ -261,8 +294,14 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
       config.paddleReturnReminderMaxDurationMs;
   snapshot.rinseGestureMs = config.rinseGestureMs;
   snapshot.rinseDurationMs = config.rinseDurationMs;
-  snapshot.brewConfirmMs = config.brewConfirmMs;
-  snapshot.minAutoStopMs = config.minAutoStopMs;
+  snapshot.autoRetare = config.autoRetare;
+  snapshot.retareWindowMs = config.retareWindowMs;
+  snapshot.minimumCupWeightG = config.minimumCupWeightG;
+  snapshot.retareStabilitySamples = config.retareStabilitySamples;
+  snapshot.retareStabilityToleranceG = config.retareStabilityToleranceG;
+  snapshot.retareStabilityMaxGapMs = config.retareStabilityMaxGapMs;
+  snapshot.retareStabilityMinDurationMs = config.retareStabilityMinDurationMs;
+  snapshot.confirmationTimeoutMs = config.confirmationTimeoutMs;
   snapshot.operationalWallMs = config.operationalWallMs;
   return snapshot;
 }
@@ -273,8 +312,15 @@ enum class ConfigValidationError : uint8_t {
   WEIGHT_OFFSET,
   RINSE_GESTURE,
   RINSE_DURATION,
-  BREW_CONFIRM,
-  MIN_AUTO_STOP,
+  RETARE_WINDOW,
+  MINIMUM_CUP_WEIGHT,
+  RETARE_STABILITY_SAMPLES,
+  RETARE_STABILITY_TOLERANCE,
+  RETARE_STABILITY_MAX_GAP,
+  RETARE_STABILITY_MIN_DURATION,
+  RETARE_STABILITY_RELATION,
+  CONFIRMATION_TIMEOUT,
+  CONFIRMATION_RETARE_RELATION,
   OPERATIONAL_WALL,
   PADDLE_REMINDER_INTERVAL,
   PADDLE_REMINDER_MAX_DURATION,
@@ -284,6 +330,23 @@ enum class ConfigValidationError : uint8_t {
   NTP_SERVER_PRESET,
   NTP_SERVER_CUSTOM
 };
+
+inline uint32_t effectiveRetareWindowMs(const RuntimeConfig &config) {
+  return config.autoRetare ? config.retareWindowMs : 0U;
+}
+
+inline uint32_t minimumConfirmationTimeoutMs(const RuntimeConfig &config) {
+  return effectiveRetareWindowMs(config) + MIN_CONFIRMATION_AFTER_RETARE_MS;
+}
+
+inline uint32_t effectiveRetareWindowMs(const CycleConfigSnapshot &config) {
+  return config.autoRetare ? config.retareWindowMs : 0U;
+}
+
+inline uint32_t minimumConfirmationTimeoutMs(
+    const CycleConfigSnapshot &config) {
+  return effectiveRetareWindowMs(config) + MIN_CONFIRMATION_AFTER_RETARE_MS;
+}
 
 inline ConfigValidationError validateRuntimeConfig(
     const RuntimeConfig &config) {
@@ -301,11 +364,50 @@ inline ConfigValidationError validateRuntimeConfig(
   if (config.rinseDurationMs < 500 || config.rinseDurationMs > 10000) {
     return ConfigValidationError::RINSE_DURATION;
   }
-  if (config.brewConfirmMs < 500 || config.brewConfirmMs > 10000) {
-    return ConfigValidationError::BREW_CONFIRM;
+  if (config.retareWindowMs < MIN_RETARE_WINDOW_MS ||
+      config.retareWindowMs > MAX_RETARE_WINDOW_MS) {
+    return ConfigValidationError::RETARE_WINDOW;
   }
-  if (config.minAutoStopMs < 1000 || config.minAutoStopMs > 30000) {
-    return ConfigValidationError::MIN_AUTO_STOP;
+  if (!isfinite(config.minimumCupWeightG) ||
+      config.minimumCupWeightG < MIN_MINIMUM_CUP_WEIGHT_G ||
+      config.minimumCupWeightG > MAX_MINIMUM_CUP_WEIGHT_G) {
+    return ConfigValidationError::MINIMUM_CUP_WEIGHT;
+  }
+  if (config.retareStabilitySamples < MIN_RETARE_STABILITY_SAMPLES ||
+      config.retareStabilitySamples > MAX_RETARE_STABILITY_SAMPLES) {
+    return ConfigValidationError::RETARE_STABILITY_SAMPLES;
+  }
+  if (!isfinite(config.retareStabilityToleranceG) ||
+      config.retareStabilityToleranceG < MIN_RETARE_STABILITY_TOLERANCE_G ||
+      config.retareStabilityToleranceG > MAX_RETARE_STABILITY_TOLERANCE_G) {
+    return ConfigValidationError::RETARE_STABILITY_TOLERANCE;
+  }
+  if (config.retareStabilityMaxGapMs < MIN_RETARE_STABILITY_MAX_GAP_MS ||
+      config.retareStabilityMaxGapMs > MAX_RETARE_STABILITY_MAX_GAP_MS) {
+    return ConfigValidationError::RETARE_STABILITY_MAX_GAP;
+  }
+  if (config.retareStabilityMinDurationMs <
+          MIN_RETARE_STABILITY_MIN_DURATION_MS ||
+      config.retareStabilityMinDurationMs >
+          MAX_RETARE_STABILITY_MIN_DURATION_MS) {
+    return ConfigValidationError::RETARE_STABILITY_MIN_DURATION;
+  }
+  if (config.retareStabilityMinDurationMs > config.retareWindowMs) {
+    return ConfigValidationError::RETARE_STABILITY_RELATION;
+  }
+  if (config.retareStabilityMinDurationMs > 0U &&
+      config.retareStabilityMinDurationMs >
+          static_cast<uint32_t>(config.retareStabilitySamples) *
+              config.retareStabilityMaxGapMs) {
+    return ConfigValidationError::RETARE_STABILITY_RELATION;
+  }
+  if (config.confirmationTimeoutMs < MIN_CONFIRMATION_TIMEOUT_MS ||
+      config.confirmationTimeoutMs > MAX_CONFIRMATION_TIMEOUT_MS) {
+    return ConfigValidationError::CONFIRMATION_TIMEOUT;
+  }
+  if (config.confirmationTimeoutMs <
+      minimumConfirmationTimeoutMs(config)) {
+    return ConfigValidationError::CONFIRMATION_RETARE_RELATION;
   }
   if (config.operationalWallMs < 5000 ||
       config.operationalWallMs > HARD_MAX_CN9_CLOSED_MS) {
@@ -325,10 +427,12 @@ inline ConfigValidationError validateRuntimeConfig(
           config.paddleReturnReminderIntervalMs) {
     return ConfigValidationError::PADDLE_REMINDER_MAX_DURATION;
   }
-  if (!(config.rinseGestureMs < config.brewConfirmMs &&
-        config.brewConfirmMs < config.minAutoStopMs &&
-        config.minAutoStopMs < config.operationalWallMs) ||
-      config.rinseDurationMs > config.operationalWallMs) {
+  if (!(config.rinseGestureMs < config.operationalWallMs) ||
+      config.rinseDurationMs > config.operationalWallMs ||
+      config.retareWindowMs > config.operationalWallMs ||
+      config.confirmationTimeoutMs > config.operationalWallMs ||
+      config.retareWindowMs + config.confirmationTimeoutMs >
+          config.operationalWallMs) {
     return ConfigValidationError::TIMING_RELATION;
   }
   if (config.canTareStartTimer && !config.autoTare) {
@@ -356,8 +460,22 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
     case ConfigValidationError::WEIGHT_OFFSET: return "weightOffsetG";
     case ConfigValidationError::RINSE_GESTURE: return "rinseGestureMs";
     case ConfigValidationError::RINSE_DURATION: return "rinseDurationMs";
-    case ConfigValidationError::BREW_CONFIRM: return "brewConfirmMs";
-    case ConfigValidationError::MIN_AUTO_STOP: return "minAutoStopMs";
+    case ConfigValidationError::RETARE_WINDOW: return "retareWindowMs";
+    case ConfigValidationError::MINIMUM_CUP_WEIGHT: return "minimumCupWeightG";
+    case ConfigValidationError::RETARE_STABILITY_SAMPLES:
+      return "retareStabilitySamples";
+    case ConfigValidationError::RETARE_STABILITY_TOLERANCE:
+      return "retareStabilityToleranceG";
+    case ConfigValidationError::RETARE_STABILITY_MAX_GAP:
+      return "retareStabilityMaxGapMs";
+    case ConfigValidationError::RETARE_STABILITY_MIN_DURATION:
+      return "retareStabilityMinDurationMs";
+    case ConfigValidationError::RETARE_STABILITY_RELATION:
+      return "retareStabilityRelation";
+    case ConfigValidationError::CONFIRMATION_TIMEOUT:
+      return "confirmationTimeoutMs";
+    case ConfigValidationError::CONFIRMATION_RETARE_RELATION:
+      return "confirmationRetareRelation";
     case ConfigValidationError::OPERATIONAL_WALL:
       return "operationalWallMs";
     case ConfigValidationError::PADDLE_REMINDER_INTERVAL:

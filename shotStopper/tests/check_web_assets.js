@@ -25,7 +25,8 @@ if (Buffer.byteLength(html, 'utf8') > 32768) {
 }
 if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
     !html.includes('Paddle State') || !html.includes('brewConfirmationBeep') ||
-    !html.includes('paddleReturnReminderBeep')) {
+    !html.includes('paddleReturnReminderBeep') ||
+    !html.includes('class="fieldHint"')) {
   throw new Error('Web UI must show the physical paddle state and expose both scale beep options');
 }
 if (!html.includes('id="operationalWallS" type="number" min="5" max="60"') ||
@@ -37,6 +38,14 @@ if (!html.includes('id="operationalWallS" type="number" min="5" max="60"') ||
 }
 if (!network.includes('"brewConfirmationBeep"') ||
     !network.includes('"paddleReturnReminderBeep"') ||
+    !network.includes('"autoRetare"') ||
+    !network.includes('"retareWindowMs"') ||
+    !network.includes('"minimumCupWeightG"') ||
+    !network.includes('"retareStabilitySamples"') ||
+    !network.includes('"retareStabilityToleranceG"') ||
+    !network.includes('"retareStabilityMaxGapMs"') ||
+    !network.includes('"retareStabilityMinDurationMs"') ||
+    !network.includes('"confirmationTimeoutMs"') ||
     !network.includes('"paddleReturnReminderIntervalMs"') ||
     !network.includes('"paddleReturnReminderMaxDurationMs"') ||
     !network.includes('"timezoneOffsetMinutes"') ||
@@ -48,6 +57,15 @@ if (!network.includes('"brewConfirmationBeep"') ||
     !html.includes('id="ntpServerPreset"') ||
     !html.includes('id="ntpServerCustom"') ||
     !html.includes('id="syncTimeButton"') ||
+    !html.includes('id="autoRetare"') ||
+    !html.includes('id="retareWindowS"') ||
+    !html.includes('id="minimumCupWeightG"') ||
+    !html.includes('id="retareStabilitySamples"') ||
+    !html.includes('id="retareStabilityToleranceG"') ||
+    !html.includes('id="retareStabilityMaxGapS"') ||
+    !html.includes('id="retareStabilityMinDurationS"') ||
+    !html.includes('Brew start confirmation (s)') ||
+    !html.includes('id="confirmationTimeoutS"') ||
     !html.includes('/api/v1/time/sync') ||
     !firmware.includes('session.config.brewConfirmationBeep') ||
     !firmware.includes('servicePaddleReturnReminder')) {
@@ -78,7 +96,7 @@ if (!html.includes('id="shotTable"') ||
     !html.includes("confirm:'CLEAR_SHOT_LOG'") ||
     !html.includes('refreshShots()') ||
     !html.includes('formatShotTime(r)') ||
-    !html.includes('sin hora') ||
+    !html.includes('no time') ||
     !html.includes('id="timezoneOffsetMinutes"') ||
     !network.includes('hasWallTime') ||
     !network.includes('endedAtLocalSec') ||
@@ -208,6 +226,9 @@ if (!safeBeep.includes('BEEP_LEVEL_1_BOOKOO') ||
 }
 if (!firmware.includes('requestScaleBrewBeep(session.id)') ||
     !firmware.includes('cancelScaleBrewBeep(session.id)') ||
+    !firmware.includes('onFirstDropsDetected') ||
+    !firmware.includes('brewStartConfirmationOpen') ||
+    !firmware.includes('retareWindowOpen') ||
     !firmware.includes('scale.supportsTareStartTimer()') ||
     /enum class ScaleCommandType[\s\S]*BEEP/.test(
       firmware.slice(firmware.indexOf('enum class ScaleCommandType'),
