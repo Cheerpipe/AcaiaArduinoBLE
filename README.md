@@ -162,6 +162,9 @@ Additional fixed protections (not separately configurable):
 
 ### Web UI, Wi-Fi, and API
 
+See [Factory credentials (first use)](#factory-credentials-first-use) for AP
+name, default passwords, and step-by-step first connection.
+
 - Fully **embedded Web UI** (no external assets; **44 KiB** asset budget) served
   over Wi-Fi.
 - **STA** mode when credentials are saved; **fallback AP**
@@ -173,10 +176,9 @@ Additional fixed protections (not separately configurable):
   window keeps the UI reachable.
 - **Public read-only** status, live shot panel, shot history, diagnostic log,
   and firmware version footer without signing in.
-- **Authenticated** session (factory AP/UI password **`Micra1234`**, stored as
-  hash + salt; changeable from the Web UI) unlocks configuration, Wi-Fi
-  scan/save, calibration reset, factory reset, Stop, and Restart. Up to **2**
-  concurrent web sessions. Login responses include a CSRF token
+- **Authenticated** session (factory password **`Micra1234`** — same as the AP;
+  changeable from the Web UI) unlocks configuration, Wi-Fi scan/save,
+  calibration reset, factory reset, Stop, and Restart. Up to **2** concurrent web sessions. Login responses include a CSRF token
   (`X-CSRF-Token` on mutating requests); repeated failed logins return
   `429 LOGIN_RATE_LIMITED`.
 - **Live shot panel:** current/goal weight, progress bar, elapsed time, first
@@ -412,6 +414,44 @@ active stop weight and time remaining). Shot history and CSV export record
 `ext_guard`, `ext`, `stop`, `max_rec_g`, `min_brew_s`, `early_s`, plus
 `shot_type` and `cut_type`.
 
+## Factory credentials (first use)
+
+On a fresh flash (or after **factory reset**), use these defaults to reach the
+controller over Wi‑Fi. The **same password** protects the fallback access point
+and the Web UI login.
+
+| | Value |
+| --- | --- |
+| **Fallback Wi‑Fi (AP) name** | `MicraShotStopperAP` |
+| **Fallback Wi‑Fi (AP) password** | `Micra1234` |
+| **Web UI address (AP mode)** | `http://192.168.4.1` |
+| **Web UI login password** | `Micra1234` |
+
+Passwords are **case-sensitive** (`M` uppercase, rest lowercase).
+
+### Connect on first boot (no home Wi‑Fi saved yet)
+
+1. Power the ESP32 and wait for boot (scale LED activity is normal).
+2. On your phone or laptop, open Wi‑Fi settings and join **`MicraShotStopperAP`**
+   using password **`Micra1234`**.
+3. Open a browser to **`http://192.168.4.1`**. Status, live shot, history, and
+   the diagnostic log are visible without signing in.
+4. Click **Sign in** (or open the Configuration panel) and enter
+   **`Micra1234`** to change settings, save your home Wi‑Fi, or run
+   maintenance actions.
+
+The fallback AP stays up for **3 minutes** after boot if nobody signs in, then
+shuts down until the next restart — sign in promptly on first use, or configure
+STA Wi‑Fi before that window expires.
+
+### After home Wi‑Fi (STA) is saved
+
+Once STA credentials are stored and the device joins your network, the fallback
+AP is not used. Open the Web UI at **`http://<device-ip>`** (find the IP in
+your router’s DHCP list or serial logs at **9600** baud). Use the same Web UI
+password **`Micra1234`** until you change it under **Access point / UI
+password**. Factory reset restores all values in the table above.
+
 ## Web UI and Wi-Fi (details)
 
 See **Web UI, Wi-Fi, and API** under [Main features](#main-features) for
@@ -429,8 +469,8 @@ notes:
   is ON.
 - `202` responses include a `requestId`; `GET /api/v1/status` publishes the
   terminal command state (`APPLIED`, `PERSISTED`, `FAILED`, `CANCELED`).
-- Factory AP/UI password is **`Micra1234`** (hash + salt in NVS). Change it
-  from the Web UI after first login on a trusted network.
+- Change the default password from the Web UI after first login on a trusted
+  network (see [Factory credentials](#factory-credentials-first-use)).
 
 ## Watchdog and CN9 safety
 
