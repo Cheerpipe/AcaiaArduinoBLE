@@ -30,6 +30,23 @@ struct PersistedSettings {
   bool staOpen = false;
   char staSsid[WIFI_SSID_CAPACITY] = {};
   char staPassword[WIFI_PASSWORD_CAPACITY] = {};
+  uint8_t staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  uint8_t staIp[4] = {};
+  uint8_t staNetmask[4] = {};
+  uint8_t staGateway[4] = {};
+  uint8_t staDns1[4] = {};
+  uint8_t staDns2[4] = {};
+  uint8_t staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  bool lkgValid = false;
+  bool lkgOpen = false;
+  char lkgSsid[WIFI_SSID_CAPACITY] = {};
+  char lkgPassword[WIFI_PASSWORD_CAPACITY] = {};
+  uint8_t lkgIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  uint8_t lkgIp[4] = {};
+  uint8_t lkgNetmask[4] = {};
+  uint8_t lkgGateway[4] = {};
+  uint8_t lkgDns1[4] = {};
+  uint8_t lkgDns2[4] = {};
   char apPassword[WIFI_PASSWORD_CAPACITY] = {};
   uint8_t authSalt[AUTH_SALT_LENGTH] = {};
   uint8_t authHash[AUTH_HASH_LENGTH] = {};
@@ -129,6 +146,22 @@ struct PersistedSettingsV13 {
   uint32_t checksum;
 };
 
+struct PersistedSettingsV14 {
+  uint32_t magic;
+  uint32_t schemaVersion;
+  uint32_t structureSize;
+  uint32_t storageRevision;
+  RuntimeConfig runtime;
+  bool staConfigured;
+  bool staOpen;
+  char staSsid[WIFI_SSID_CAPACITY];
+  char staPassword[WIFI_PASSWORD_CAPACITY];
+  char apPassword[WIFI_PASSWORD_CAPACITY];
+  uint8_t authSalt[AUTH_SALT_LENGTH];
+  uint8_t authHash[AUTH_HASH_LENGTH];
+  uint32_t checksum;
+};
+
 inline bool calculatePasswordHash(const uint8_t salt[AUTH_SALT_LENGTH],
                                   const char *password,
                                   uint8_t output[AUTH_HASH_LENGTH]) {
@@ -197,6 +230,116 @@ inline uint32_t persistedSettingsV13Checksum(
     const PersistedSettingsV13 &settings) {
   return crc32(reinterpret_cast<const uint8_t *>(&settings),
                offsetof(PersistedSettingsV13, checksum));
+}
+
+inline uint32_t persistedSettingsV14Checksum(
+    const PersistedSettingsV14 &settings) {
+  return crc32(reinterpret_cast<const uint8_t *>(&settings),
+               offsetof(PersistedSettingsV14, checksum));
+}
+
+inline void clearStaAddressFields(PersistedSettings &settings) {
+  settings.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  memset(settings.staIp, 0, sizeof(settings.staIp));
+  memset(settings.staNetmask, 0, sizeof(settings.staNetmask));
+  memset(settings.staGateway, 0, sizeof(settings.staGateway));
+  memset(settings.staDns1, 0, sizeof(settings.staDns1));
+  memset(settings.staDns2, 0, sizeof(settings.staDns2));
+  settings.staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+}
+
+inline void clearLkgNetwork(PersistedSettings &settings) {
+  settings.lkgValid = false;
+  settings.lkgOpen = false;
+  memset(settings.lkgSsid, 0, sizeof(settings.lkgSsid));
+  memset(settings.lkgPassword, 0, sizeof(settings.lkgPassword));
+  settings.lkgIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  memset(settings.lkgIp, 0, sizeof(settings.lkgIp));
+  memset(settings.lkgNetmask, 0, sizeof(settings.lkgNetmask));
+  memset(settings.lkgGateway, 0, sizeof(settings.lkgGateway));
+  memset(settings.lkgDns1, 0, sizeof(settings.lkgDns1));
+  memset(settings.lkgDns2, 0, sizeof(settings.lkgDns2));
+}
+
+inline void clearStaNetwork(PersistedSettings &settings) {
+  settings.staConfigured = false;
+  settings.staOpen = false;
+  memset(settings.staSsid, 0, sizeof(settings.staSsid));
+  memset(settings.staPassword, 0, sizeof(settings.staPassword));
+  clearStaAddressFields(settings);
+  clearLkgNetwork(settings);
+}
+
+inline void copyActiveStaToLkg(PersistedSettings &settings) {
+  if (!settings.staConfigured) {
+    clearLkgNetwork(settings);
+    return;
+  }
+  settings.lkgValid = true;
+  settings.lkgOpen = settings.staOpen;
+  memset(settings.lkgSsid, 0, sizeof(settings.lkgSsid));
+  memset(settings.lkgPassword, 0, sizeof(settings.lkgPassword));
+  strncpy(settings.lkgSsid, settings.staSsid, sizeof(settings.lkgSsid) - 1);
+  strncpy(settings.lkgPassword, settings.staPassword,
+          sizeof(settings.lkgPassword) - 1);
+  settings.lkgIpMode = settings.staIpMode;
+  memcpy(settings.lkgIp, settings.staIp, sizeof(settings.lkgIp));
+  memcpy(settings.lkgNetmask, settings.staNetmask, sizeof(settings.lkgNetmask));
+  memcpy(settings.lkgGateway, settings.staGateway, sizeof(settings.lkgGateway));
+  memcpy(settings.lkgDns1, settings.staDns1, sizeof(settings.lkgDns1));
+  memcpy(settings.lkgDns2, settings.staDns2, sizeof(settings.lkgDns2));
+}
+
+inline bool restoreLkgToActive(PersistedSettings &settings) {
+  if (!settings.lkgValid || !validWifiSsid(settings.lkgSsid) ||
+      !validWifiPassword(settings.lkgPassword, settings.lkgOpen) ||
+      !validStaAddressConfig(settings.lkgIpMode, settings.lkgIp,
+                             settings.lkgNetmask, settings.lkgGateway,
+                             settings.lkgDns1, settings.lkgDns2)) {
+    return false;
+  }
+  settings.staConfigured = true;
+  settings.staOpen = settings.lkgOpen;
+  memset(settings.staSsid, 0, sizeof(settings.staSsid));
+  memset(settings.staPassword, 0, sizeof(settings.staPassword));
+  strncpy(settings.staSsid, settings.lkgSsid, sizeof(settings.staSsid) - 1);
+  strncpy(settings.staPassword, settings.lkgPassword,
+          sizeof(settings.staPassword) - 1);
+  settings.staIpMode = settings.lkgIpMode;
+  memcpy(settings.staIp, settings.lkgIp, sizeof(settings.staIp));
+  memcpy(settings.staNetmask, settings.lkgNetmask, sizeof(settings.staNetmask));
+  memcpy(settings.staGateway, settings.lkgGateway, sizeof(settings.staGateway));
+  memcpy(settings.staDns1, settings.lkgDns1, sizeof(settings.staDns1));
+  memcpy(settings.staDns2, settings.lkgDns2, sizeof(settings.staDns2));
+  settings.staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  return true;
+}
+
+inline bool validPersistedStaNetwork(const PersistedSettings &settings) {
+  if (!settings.staConfigured) {
+    return !settings.lkgValid &&
+           settings.staConfigState ==
+               static_cast<uint8_t>(StaConfigState::CONFIRMED) &&
+           validStaAddressConfig(settings.staIpMode, settings.staIp,
+                                 settings.staNetmask, settings.staGateway,
+                                 settings.staDns1, settings.staDns2);
+  }
+  if (!validWifiSsid(settings.staSsid) ||
+      !validWifiPassword(settings.staPassword, settings.staOpen) ||
+      !validStaConfigState(settings.staConfigState) ||
+      !validStaAddressConfig(settings.staIpMode, settings.staIp,
+                             settings.staNetmask, settings.staGateway,
+                             settings.staDns1, settings.staDns2)) {
+    return false;
+  }
+  if (!settings.lkgValid) {
+    return true;
+  }
+  return validWifiSsid(settings.lkgSsid) &&
+         validWifiPassword(settings.lkgPassword, settings.lkgOpen) &&
+         validStaAddressConfig(settings.lkgIpMode, settings.lkgIp,
+                               settings.lkgNetmask, settings.lkgGateway,
+                               settings.lkgDns1, settings.lkgDns2);
 }
 
 inline void normalizeRuntimeConfirmationDefaults(RuntimeConfig &runtime) {
@@ -303,12 +446,8 @@ inline bool validPersistedSettings(const PersistedSettings &settings) {
       settings.structureSize != sizeof(PersistedSettings) ||
       settings.checksum != persistedSettingsChecksum(settings) ||
       validateRuntimeConfig(settings.runtime) != ConfigValidationError::NONE ||
-      !validAccessPointPassword(settings.apPassword)) {
-    return false;
-  }
-  if (settings.staConfigured &&
-      (!validWifiSsid(settings.staSsid) ||
-       !validWifiPassword(settings.staPassword, settings.staOpen))) {
+      !validAccessPointPassword(settings.apPassword) ||
+      !validPersistedStaNetwork(settings)) {
     return false;
   }
   uint8_t expectedHash[AUTH_HASH_LENGTH] = {};
@@ -377,6 +516,8 @@ inline bool readV12SettingsSlot(Preferences &preferences, const char *key,
   memcpy(migrated.staSsid, legacy.staSsid, sizeof(migrated.staSsid));
   memcpy(migrated.staPassword, legacy.staPassword,
          sizeof(migrated.staPassword));
+  clearStaAddressFields(migrated);
+  clearLkgNetwork(migrated);
   memcpy(migrated.apPassword, legacy.apPassword,
          sizeof(migrated.apPassword));
   memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
@@ -398,7 +539,7 @@ inline bool readV13SettingsSlot(Preferences &preferences, const char *key,
   PersistedSettingsV13 legacy = {};
   if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
       legacy.magic != PERSISTED_SETTINGS_MAGIC ||
-      legacy.schemaVersion != PREVIOUS_CONFIG_SCHEMA_VERSION ||
+      legacy.schemaVersion != CONFIG_SCHEMA_VERSION_V13 ||
       legacy.structureSize != sizeof(PersistedSettingsV13) ||
       legacy.checksum != persistedSettingsV13Checksum(legacy) ||
       !validAccessPointPassword(legacy.apPassword) ||
@@ -424,6 +565,8 @@ inline bool readV13SettingsSlot(Preferences &preferences, const char *key,
   memcpy(migrated.staSsid, legacy.staSsid, sizeof(migrated.staSsid));
   memcpy(migrated.staPassword, legacy.staPassword,
          sizeof(migrated.staPassword));
+  clearStaAddressFields(migrated);
+  clearLkgNetwork(migrated);
   memcpy(migrated.apPassword, legacy.apPassword,
          sizeof(migrated.apPassword));
   memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
@@ -437,15 +580,64 @@ inline bool readV13SettingsSlot(Preferences &preferences, const char *key,
   return true;
 }
 
+inline bool readV14SettingsSlot(Preferences &preferences, const char *key,
+                                PersistedSettings &settings) {
+  if (preferences.getBytesLength(key) != sizeof(PersistedSettingsV14)) {
+    return false;
+  }
+  PersistedSettingsV14 legacy = {};
+  if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
+      legacy.magic != PERSISTED_SETTINGS_MAGIC ||
+      legacy.schemaVersion != PREVIOUS_CONFIG_SCHEMA_VERSION ||
+      legacy.structureSize != sizeof(PersistedSettingsV14) ||
+      legacy.checksum != persistedSettingsV14Checksum(legacy) ||
+      !validAccessPointPassword(legacy.apPassword) ||
+      validateRuntimeConfig(legacy.runtime) != ConfigValidationError::NONE ||
+      (legacy.staConfigured != 0 &&
+       (!validWifiSsid(legacy.staSsid) ||
+        !validWifiPassword(legacy.staPassword, legacy.staOpen != 0)))) {
+    return false;
+  }
+
+  uint8_t expectedHash[AUTH_HASH_LENGTH] = {};
+  if (!calculatePasswordHash(legacy.authSalt, legacy.apPassword,
+                             expectedHash) ||
+      !constantTimeEqual(legacy.authHash, expectedHash,
+                         sizeof(expectedHash))) {
+    return false;
+  }
+
+  PersistedSettings migrated = {};
+  migrated.storageRevision = legacy.storageRevision;
+  migrated.runtime = legacy.runtime;
+  migrated.staConfigured = legacy.staConfigured;
+  migrated.staOpen = legacy.staOpen;
+  memcpy(migrated.staSsid, legacy.staSsid, sizeof(migrated.staSsid));
+  memcpy(migrated.staPassword, legacy.staPassword,
+         sizeof(migrated.staPassword));
+  clearStaAddressFields(migrated);
+  clearLkgNetwork(migrated);
+  memcpy(migrated.apPassword, legacy.apPassword,
+         sizeof(migrated.apPassword));
+  memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
+  memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
+  finalizePersistedSettings(migrated);
+  settings = migrated;
+  return true;
+}
+
 inline bool readAnySettingsSlot(Preferences &preferences, const char *key,
                                 PersistedSettings &settings,
                                 bool *legacyFormat = nullptr) {
   const size_t length = preferences.getBytesLength(key);
   const bool isLegacy = length == sizeof(PersistedSettingsV12) ||
-                        length == sizeof(PersistedSettingsV13);
+                        length == sizeof(PersistedSettingsV13) ||
+                        length == sizeof(PersistedSettingsV14);
   bool valid = false;
   if (length == sizeof(PersistedSettings)) {
     valid = readSettingsSlot(preferences, key, settings);
+  } else if (length == sizeof(PersistedSettingsV14)) {
+    valid = readV14SettingsSlot(preferences, key, settings);
   } else if (length == sizeof(PersistedSettingsV13)) {
     valid = readV13SettingsSlot(preferences, key, settings);
   } else if (length == sizeof(PersistedSettingsV12)) {

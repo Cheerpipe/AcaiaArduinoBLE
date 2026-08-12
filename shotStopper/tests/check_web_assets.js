@@ -20,8 +20,8 @@ if (!scriptMatch) throw new Error('Embedded script not found');
 // Parse the exact JavaScript delivered by the controller.
 new Function(scriptMatch[1]);
 
-if (Buffer.byteLength(html, 'utf8') > 51200) {
-  throw new Error('Web UI exceeds the 50 KiB asset budget');
+if (Buffer.byteLength(html, 'utf8') > 55296) {
+  throw new Error('Web UI exceeds the 54 KiB asset budget');
 }
 if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
     !html.includes('Paddle State') || !html.includes('brewConfirmationBeep') ||
@@ -206,6 +206,26 @@ if (!html.includes('id="factoryResetButton"') ||
     !network.includes('FACTORY_RESET_NOT_CONFIRMED') ||
     !network.includes('resetPersistedSettingsToFactory(next)')) {
   throw new Error('Factory reset must require UI and server-side confirmation');
+}
+if (!html.includes('id="staIpMode"') ||
+    !html.includes('id="staStaticIp"') ||
+    !html.includes('id="staNetmask"') ||
+    !html.includes('id="staGateway"') ||
+    !html.includes('id="staDns1"') ||
+    !html.includes('function networkSavePayload(') ||
+    !html.includes("ipMode:$('staIpMode').value") ||
+    !html.includes('staticIpOpt') ||
+    !html.includes('pending confirm') ||
+    !network.includes('WiFi.config(') ||
+    !network.includes('confirmPendingNetwork') ||
+    !network.includes('revertPendingNetwork') ||
+    !network.includes('\\"ipMode\\"') ||
+    !network.includes('\\"configState\\"') ||
+    !network.includes('StaIpMode::STATIC') ||
+    !network.includes('STA_CONFIRM_TIMEOUT_MS') ||
+    !network.includes('action must be \\"save\\", \\"forget\\", or \\"confirm\\".') ||
+    !network.includes('No pending network configuration to confirm.')) {
+  throw new Error('DHCP/static IP mode must be wired in UI, status, WiFi.config, and confirm/revert path');
 }
 if (/<script\s+src=|<link\s+[^>]*href=/i.test(html)) {
   throw new Error('Web UI must not depend on external assets');

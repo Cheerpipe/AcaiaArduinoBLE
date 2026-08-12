@@ -52,7 +52,10 @@ struct NetworkStatusSnapshot {
   bool wifiConfigured = false;
   uint8_t apClients = 0;
   StaState staState = StaState::NOT_CONFIGURED;
+  uint8_t staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  uint8_t staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
   uint32_t windowRemainingMs = 0;
+  uint32_t confirmRemainingMs = 0;
   uint32_t taskAgeMs = 0;
   uint32_t taskStackMinWords = 0;
   uint32_t startupFailures = 0;
@@ -60,6 +63,11 @@ struct NetworkStatusSnapshot {
   CommandResultState lastCommandState = CommandResultState::NONE;
   char apIp[16] = "192.168.4.1";
   char staIp[16] = {};
+  char configuredIp[16] = {};
+  char configuredNetmask[16] = {};
+  char configuredGateway[16] = {};
+  char configuredDns1[16] = {};
+  char configuredDns2[16] = {};
 };
 
 struct NetworkBridgeCallbacks {
@@ -93,6 +101,7 @@ class ShotStopperNetwork {
   static constexpr uint32_t UI_GRACE_MS = 180000;
   static constexpr uint32_t WEB_PADDLE_HEARTBEAT_TIMEOUT_MS = 15000;
   static constexpr uint32_t STA_CONNECT_TIMEOUT_MS = 15000;
+  static constexpr uint32_t STA_CONFIRM_TIMEOUT_MS = 180000;
   static constexpr uint32_t STA_RECONNECT_INTERVAL_MS = 10000;
   static constexpr uint32_t RESTART_DELAY_MS = 750;
   static constexpr uint32_t NETWORK_RETRY_MIN_MS = 1000;
@@ -137,6 +146,8 @@ class ShotStopperNetwork {
   bool heartbeatStopSent_ = false;
   bool acceptedCommandPending_ = false;
   bool completionPending_ = false;
+  bool staConfirmArmed_ = false;
+  bool pendingConfirmRequest_ = false;
   WebCommand acceptedCommand_ = {};
   WebCommand completionCommand_ = {};
   uint8_t acceptedCommandAttempts_ = 0;
@@ -156,6 +167,7 @@ class ShotStopperNetwork {
   uint32_t lastAuthenticatedAtMs_ = 0;
   uint32_t staConnectStartedAtMs_ = 0;
   uint32_t staReconnectAttemptAtMs_ = 0;
+  uint32_t staConfirmDeadlineMs_ = 0;
   uint32_t restartRequestedAtMs_ = 0;
   uint32_t loginWindowStartedAtMs_ = 0;
   uint8_t loginAttemptsInWindow_ = 0;
@@ -190,6 +202,12 @@ class ShotStopperNetwork {
   void serviceSessions(uint32_t now);
   void processAcceptedCommands();
   bool processAcceptedCommand(const WebCommand &command);
+  void publishConfiguredAddressStatus();
+  void armPendingConfirmWindow(uint32_t now);
+  void clearPendingConfirmWindow();
+  void requestPendingNetworkConfirm();
+  bool confirmPendingNetwork(const char *reason);
+  bool revertPendingNetwork(uint32_t now, const char *reason);
   bool controlAllowsNetworkMutation(ControlStatusSnapshot *copy = nullptr);
   void log(DebugCategory category, DebugCode code, int32_t argument1 = 0,
            int32_t argument2 = 0);

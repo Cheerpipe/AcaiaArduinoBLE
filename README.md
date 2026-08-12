@@ -106,7 +106,7 @@ In short: **hard to build, easy to live with.**
 
 All workflow parameters below are editable from the Web UI **Configuration**
 panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
-`settingsB`, config schema **v14**). Defaults are shown in parentheses.
+`settingsB`, config schema **v15**). Defaults are shown in parentheses.
 
 | Setting | What it does |
 | --- | --- |
@@ -172,11 +172,12 @@ Additional fixed protections (not separately configurable):
 See [Factory credentials (first use)](#factory-credentials-first-use) for AP
 name, default passwords, and step-by-step first connection.
 
-- Fully **embedded Web UI** (no external assets; **50 KiB** asset budget) served
+- Fully **embedded Web UI** (no external assets; **54 KiB** asset budget) served
   over Wi-Fi.
 - **STA** mode when credentials are saved; **fallback AP**
   (`MicraShotStopperAP` at `192.168.4.1`) when STA is unavailable. Modes are
-  **exclusive** (STA or AP, not concurrent AP+STA).
+  **exclusive** (STA or AP, not concurrent AP+STA). STA addressing is **DHCP**
+  or **static IP**, with a **3-minute confirm-or-revert** window after save.
 - AP fallback stays up for **3 minutes** after boot if nobody signs in, then
   shuts down until the next restart. Once STA connects, HTTP/Wi-Fi remain
   available (no visibility timer). After logout on AP, a **3-minute grace**
@@ -197,9 +198,10 @@ name, default passwords, and step-by-step first connection.
     **10 s** while signed in)
   - Config: `POST /config`, `POST /calibration/reset`, `POST /time/sync`,
     `POST /access-point/password`
-  - Network: `POST /network` (`save` / `forget`), `POST /network/scan`,
+  - Network: `POST /network` (`save` / `forget` / `confirm`), `POST /network/scan`,
     `GET /network/scan` (async, max **12** networks, **120 s** timeout;
-    cancelable via maintenance lease)
+    cancelable via maintenance lease). `save` accepts `ipMode` (`dhcp`|
+    `static`) plus static fields `ip`/`netmask`/`gateway`/`dns1`/`dns2`.
   - Control: `POST /control/paddle`, `/control/rinse`, `/control/stop`,
     `/control/restart`
   - Maintenance: `POST /factory-reset` (confirm `ERASE_ALL_SETTINGS`),
@@ -508,9 +510,14 @@ STA Wi‑Fi before that window expires.
 
 Once STA credentials are stored and the device joins your network, the fallback
 AP is not used. Open the Web UI at **`http://<device-ip>`** (find the IP in
-your router’s DHCP list or serial logs at **9600** baud). Use the same Web UI
-password **`Micra1234`** until you change it under **Access point / UI
-password**. Factory reset restores all values in the table above.
+your router’s DHCP list, the saved static IP, or serial logs at **9600** baud).
+Use the same Web UI password **`Micra1234`** until you change it under **Access
+point / UI password**. Factory reset restores all values in the table above.
+
+STA addressing can be **DHCP** (default) or **static IP** from the Wi‑Fi panel.
+After any STA save, the new settings stay **pending** until you sign in at the
+device IP within **3 minutes**; otherwise the previous (last-known-good)
+network settings are restored and SoftAP recovery opens again.
 
 ## Web UI and Wi-Fi (details)
 

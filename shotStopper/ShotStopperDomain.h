@@ -11,8 +11,9 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 14;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 13;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 15;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 14;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V13 = 13;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V12 = 12;
 constexpr size_t NTP_SERVER_HOST_CAPACITY = 64;
 constexpr uint32_t NTP_RESYNC_INTERVAL_MS = 3600UL * 1000UL;
@@ -703,6 +704,125 @@ inline bool validAccessPointPassword(const char *password) {
   return validWifiPassword(password, false);
 }
 
+enum class StaIpMode : uint8_t { DHCP = 0, STATIC = 1 };
+
+enum class StaConfigState : uint8_t { CONFIRMED = 0, PENDING = 1 };
+
+inline bool ipv4IsZero(const uint8_t ip[4]) {
+  return ip != nullptr && ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0;
+}
+
+inline uint32_t ipv4ToHostOrder(const uint8_t ip[4]) {
+  if (ip == nullptr) {
+    return 0;
+  }
+  return (static_cast<uint32_t>(ip[0]) << 24) |
+         (static_cast<uint32_t>(ip[1]) << 16) |
+         (static_cast<uint32_t>(ip[2]) << 8) |
+         static_cast<uint32_t>(ip[3]);
+}
+
+inline void formatIpv4(const uint8_t ip[4], char output[16]) {
+  if (output == nullptr) {
+    return;
+  }
+  if (ip == nullptr) {
+    output[0] = '\0';
+    return;
+  }
+  snprintf(output, 16, "%u.%u.%u.%u", static_cast<unsigned>(ip[0]),
+           static_cast<unsigned>(ip[1]), static_cast<unsigned>(ip[2]),
+           static_cast<unsigned>(ip[3]));
+}
+
+inline bool parseIpv4(const char *text, uint8_t output[4]) {
+  if (text == nullptr || output == nullptr) {
+    return false;
+  }
+  unsigned parts[4] = {};
+  char trailer = '\0';
+  if (sscanf(text, "%u.%u.%u.%u%c", &parts[0], &parts[1], &parts[2], &parts[3],
+             &trailer) != 4) {
+    return false;
+  }
+  for (size_t index = 0; index < 4; ++index) {
+    if (parts[index] > 255U) {
+      return false;
+    }
+    output[index] = static_cast<uint8_t>(parts[index]);
+  }
+  return true;
+}
+
+inline bool validIpv4Netmask(const uint8_t netmask[4]) {
+  if (netmask == nullptr || ipv4IsZero(netmask)) {
+    return false;
+  }
+  const uint32_t mask = ipv4ToHostOrder(netmask);
+  // Valid netmasks are a contiguous run of 1-bits followed by 0-bits.
+  const uint32_t inverted = ~mask;
+  return (inverted & (inverted + 1U)) == 0U;
+}
+
+inline bool ipv4SameSubnet(const uint8_t left[4], const uint8_t right[4],
+                           const uint8_t netmask[4]) {
+  if (left == nullptr || right == nullptr || netmask == nullptr) {
+    return false;
+  }
+  const uint32_t mask = ipv4ToHostOrder(netmask);
+  return (ipv4ToHostOrder(left) & mask) == (ipv4ToHostOrder(right) & mask);
+}
+
+inline bool ipv4InSoftApSubnet(const uint8_t ip[4]) {
+  return ip != nullptr && ip[0] == 192 && ip[1] == 168 && ip[2] == 4;
+}
+
+inline bool validStaIpMode(uint8_t mode) {
+  return mode == static_cast<uint8_t>(StaIpMode::DHCP) ||
+         mode == static_cast<uint8_t>(StaIpMode::STATIC);
+}
+
+inline bool validStaConfigState(uint8_t state) {
+  return state == static_cast<uint8_t>(StaConfigState::CONFIRMED) ||
+         state == static_cast<uint8_t>(StaConfigState::PENDING);
+}
+
+inline bool validStaAddressConfig(uint8_t mode, const uint8_t ip[4],
+                                  const uint8_t netmask[4],
+                                  const uint8_t gateway[4],
+                                  const uint8_t dns1[4],
+                                  const uint8_t dns2[4]) {
+  if (!validStaIpMode(mode)) {
+    return false;
+  }
+  if (mode == static_cast<uint8_t>(StaIpMode::DHCP)) {
+    return ipv4IsZero(ip) && ipv4IsZero(netmask) && ipv4IsZero(gateway) &&
+           ipv4IsZero(dns1) && ipv4IsZero(dns2);
+  }
+  if (ipv4IsZero(ip) || ipv4IsZero(gateway) || ipv4IsZero(dns1) ||
+      !validIpv4Netmask(netmask) || ipv4InSoftApSubnet(ip) ||
+      ipv4InSoftApSubnet(gateway) || memcmp(ip, gateway, 4) == 0 ||
+      !ipv4SameSubnet(ip, gateway, netmask)) {
+    return false;
+  }
+  // Host bits must not be all-zero (network) or all-one (broadcast).
+  const uint32_t mask = ipv4ToHostOrder(netmask);
+  const uint32_t host = ipv4ToHostOrder(ip) & ~mask;
+  if (host == 0U || host == ~mask) {
+    return false;
+  }
+  return dns2 != nullptr;
+}
+
+inline const char *staIpModeName(uint8_t mode) {
+  return mode == static_cast<uint8_t>(StaIpMode::STATIC) ? "static" : "dhcp";
+}
+
+inline const char *staConfigStateName(uint8_t state) {
+  return state == static_cast<uint8_t>(StaConfigState::PENDING) ? "PENDING"
+                                                               : "CONFIRMED";
+}
+
 enum class WebCommandType : uint8_t {
   PADDLE_ON,
   PADDLE_OFF,
@@ -772,6 +892,12 @@ struct WebCommand {
   char ssid[WIFI_SSID_CAPACITY] = {};
   char password[WIFI_PASSWORD_CAPACITY] = {};
   bool openNetwork = false;
+  uint8_t staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  uint8_t staIp[4] = {};
+  uint8_t staNetmask[4] = {};
+  uint8_t staGateway[4] = {};
+  uint8_t staDns1[4] = {};
+  uint8_t staDns2[4] = {};
   bool succeeded = false;
   CommandResultState resultState = CommandResultState::NONE;
 };

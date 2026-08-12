@@ -70,11 +70,15 @@ PersistedSettingsV12 makeSchemaTwelveRecord(const PersistedSettings &source,
   return legacy;
 }
 
-void p01_defaults_are_valid_v14() {
+void p01_defaults_are_valid_v15() {
   persistence_host::reset();
   PersistedSettings settings;
   CHECK(initializeDefaultSettings(settings));
   CHECK(settings.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(settings.staIpMode == static_cast<uint8_t>(StaIpMode::DHCP));
+  CHECK(settings.staConfigState ==
+        static_cast<uint8_t>(StaConfigState::CONFIRMED));
+  CHECK(!settings.lkgValid);
   CHECK(!settings.runtime.fastExtractionGuardEnabled);
   CHECK(std::fabs(settings.runtime.maxRecoveryWeightG -
                   DEFAULT_MAX_RECOVERY_WEIGHT_G) < 0.001f);
@@ -227,13 +231,13 @@ void p10_auto_to_manual_guard_trend_and_validation() {
         ConfigValidationError::AUTO_TO_MANUAL_GUARD_MODE);
 }
 
-void p11_schema_thirteen_migrates_to_fourteen() {
+void p11_schema_thirteen_migrates_to_current() {
   persistence_host::reset();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
   PersistedSettingsV13 legacy = {};
   legacy.magic = PERSISTED_SETTINGS_MAGIC;
-  legacy.schemaVersion = PREVIOUS_CONFIG_SCHEMA_VERSION;
+  legacy.schemaVersion = CONFIG_SCHEMA_VERSION_V13;
   legacy.structureSize = sizeof(PersistedSettingsV13);
   legacy.storageRevision = 3;
   legacy.runtime.revision = current.runtime.revision;
@@ -288,6 +292,8 @@ void p11_schema_thirteen_migrates_to_fourteen() {
   CHECK(loaded.runtime.autoToManualGuardEnabled);
   CHECK(loaded.runtime.autoToManualGuardSamplesDs[0] ==
         AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS);
+  CHECK(loaded.staIpMode == static_cast<uint8_t>(StaIpMode::DHCP));
+  CHECK(!loaded.lkgValid);
 }
 
 void p12_shot_log_persists_compact_blob() {
@@ -344,13 +350,85 @@ void p13_shot_log_migrates_v5_full_blob_to_compact() {
   CHECK(found->second.size() == sizeof(ShotLogHeader) + sizeof(ShotLogRecord));
 }
 
+void p14_schema_fourteen_migrates_to_fifteen() {
+  persistence_host::reset();
+  PersistedSettings current;
+  CHECK(initializeDefaultSettings(current));
+  PersistedSettingsV14 legacy = {};
+  legacy.magic = PERSISTED_SETTINGS_MAGIC;
+  legacy.schemaVersion = PREVIOUS_CONFIG_SCHEMA_VERSION;
+  legacy.structureSize = sizeof(PersistedSettingsV14);
+  legacy.storageRevision = 7;
+  legacy.runtime = current.runtime;
+  legacy.runtime.goalWeightG = 44;
+  legacy.staConfigured = true;
+  legacy.staOpen = false;
+  strcpy(legacy.staSsid, "CafeLAN");
+  strcpy(legacy.staPassword, "CafePass1");
+  memcpy(legacy.apPassword, current.apPassword, sizeof(legacy.apPassword));
+  memcpy(legacy.authSalt, current.authSalt, sizeof(legacy.authSalt));
+  memcpy(legacy.authHash, current.authHash, sizeof(legacy.authHash));
+  legacy.checksum = persistedSettingsV14Checksum(legacy);
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &legacy,
+                           sizeof(legacy));
+
+  PersistedSettings loaded;
+  bool migrated = false;
+  CHECK(loadPersistedSettings(loaded, &migrated));
+  CHECK(migrated);
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.runtime.goalWeightG == 44);
+  CHECK(loaded.staConfigured);
+  CHECK(strcmp(loaded.staSsid, "CafeLAN") == 0);
+  CHECK(loaded.staIpMode == static_cast<uint8_t>(StaIpMode::DHCP));
+  CHECK(loaded.staConfigState ==
+        static_cast<uint8_t>(StaConfigState::CONFIRMED));
+  CHECK(!loaded.lkgValid);
+}
+
+void p15_static_ip_address_validation() {
+  uint8_t ip[4] = {192, 168, 1, 50};
+  uint8_t mask[4] = {255, 255, 255, 0};
+  uint8_t gateway[4] = {192, 168, 1, 1};
+  uint8_t dns1[4] = {1, 1, 1, 1};
+  uint8_t dns2[4] = {0, 0, 0, 0};
+  CHECK(validStaAddressConfig(static_cast<uint8_t>(StaIpMode::STATIC), ip, mask,
+                              gateway, dns1, dns2));
+  uint8_t softAp[4] = {192, 168, 4, 10};
+  CHECK(!validStaAddressConfig(static_cast<uint8_t>(StaIpMode::STATIC), softAp,
+                               mask, gateway, dns1, dns2));
+  uint8_t zero[4] = {0, 0, 0, 0};
+  CHECK(validStaAddressConfig(static_cast<uint8_t>(StaIpMode::DHCP), zero, zero,
+                              zero, zero, zero));
+  CHECK(!validStaAddressConfig(static_cast<uint8_t>(StaIpMode::DHCP), ip, mask,
+                               gateway, dns1, dns2));
+
+  PersistedSettings settings;
+  CHECK(initializeDefaultSettings(settings));
+  settings.staConfigured = true;
+  strcpy(settings.staSsid, "CafeLAN");
+  strcpy(settings.staPassword, "CafePass1");
+  settings.staIpMode = static_cast<uint8_t>(StaIpMode::STATIC);
+  memcpy(settings.staIp, ip, 4);
+  memcpy(settings.staNetmask, mask, 4);
+  memcpy(settings.staGateway, gateway, 4);
+  memcpy(settings.staDns1, dns1, 4);
+  settings.staConfigState = static_cast<uint8_t>(StaConfigState::PENDING);
+  copyActiveStaToLkg(settings);
+  finalizePersistedSettings(settings);
+  CHECK(validPersistedSettings(settings));
+  CHECK(restoreLkgToActive(settings));
+  CHECK(settings.staConfigState ==
+        static_cast<uint8_t>(StaConfigState::CONFIRMED));
+}
+
 struct TestCase {
   const char *id;
   void (*function)();
 };
 
 const TestCase tests[] = {
-    {"P01", p01_defaults_are_valid_v14},
+    {"P01", p01_defaults_are_valid_v15},
     {"P02", p02_newest_valid_slot_is_loaded},
     {"P03", p03_corrupt_newest_slot_falls_back},
     {"P04", p04_crc_and_semantic_validation_reject_corruption},
@@ -360,9 +438,11 @@ const TestCase tests[] = {
     {"P08", p08_factory_reset_rebuilds_defaults},
     {"P09", p09_fast_extraction_guard_validation},
     {"P10", p10_auto_to_manual_guard_trend_and_validation},
-    {"P11", p11_schema_thirteen_migrates_to_fourteen},
+    {"P11", p11_schema_thirteen_migrates_to_current},
     {"P12", p12_shot_log_persists_compact_blob},
     {"P13", p13_shot_log_migrates_v5_full_blob_to_compact},
+    {"P14", p14_schema_fourteen_migrates_to_fifteen},
+    {"P15", p15_static_ip_address_validation},
 };
 
 }  // namespace

@@ -429,9 +429,22 @@ NetworkStatusSnapshot ShotStopperNetwork::snapshot() {
   NetworkStatusSnapshot copy;
   portENTER_CRITICAL(&dataMux_);
   copy = status_;
+  const bool pendingConfirm =
+      staConfirmArmed_ &&
+      settings_.staConfigState ==
+          static_cast<uint8_t>(StaConfigState::PENDING) &&
+      !status_.apActive;
+  const uint32_t deadline = staConfirmDeadlineMs_;
   portEXIT_CRITICAL(&dataMux_);
   copy.taskAgeMs = static_cast<uint32_t>(millis() - lastTaskProgressAtMs_);
   copy.taskStackMinWords = taskStackMinWords_;
+  if (pendingConfirm) {
+    const uint32_t now = millis();
+    copy.confirmRemainingMs =
+        static_cast<int32_t>(deadline - now) > 0 ? (deadline - now) : 0;
+  } else {
+    copy.confirmRemainingMs = 0;
+  }
   return copy;
 }
 
@@ -565,6 +578,16 @@ void ShotStopperNetwork::service() {
   }
 
   processAcceptedCommands();
+  bool confirmRequested = false;
+  portENTER_CRITICAL(&dataMux_);
+  confirmRequested = pendingConfirmRequest_;
+  if (confirmRequested) {
+    pendingConfirmRequest_ = false;
+  }
+  portEXIT_CRITICAL(&dataMux_);
+  if (confirmRequested) {
+    confirmPendingNetwork("authenticated request");
+  }
   serviceStaState(now);
   serviceWifiScan(now);
   serviceSessions(now);
@@ -639,6 +662,7 @@ bool ShotStopperNetwork::startNetwork() {
   status_.wifiConfigured = settings.staConfigured;
   strncpy(status_.apIp, AP_IP, sizeof(status_.apIp) - 1);
   portEXIT_CRITICAL(&dataMux_);
+  publishConfiguredAddressStatus();
   if (settings.staConfigured) {
     startStation(settings, now);
     startupComplete_ = true;
@@ -647,6 +671,125 @@ bool ShotStopperNetwork::startNetwork() {
     startupComplete_ = startFallbackAccessPoint(now);
     return startupComplete_;
   }
+}
+
+void ShotStopperNetwork::publishConfiguredAddressStatus() {
+  const PersistedSettings settings = settingsCopy();
+  char configuredIp[16] = {};
+  char configuredNetmask[16] = {};
+  char configuredGateway[16] = {};
+  char configuredDns1[16] = {};
+  char configuredDns2[16] = {};
+  if (settings.staIpMode == static_cast<uint8_t>(StaIpMode::STATIC)) {
+    formatIpv4(settings.staIp, configuredIp);
+    formatIpv4(settings.staNetmask, configuredNetmask);
+    formatIpv4(settings.staGateway, configuredGateway);
+    formatIpv4(settings.staDns1, configuredDns1);
+    if (!ipv4IsZero(settings.staDns2)) {
+      formatIpv4(settings.staDns2, configuredDns2);
+    }
+  }
+  portENTER_CRITICAL(&dataMux_);
+  status_.staIpMode = settings.staIpMode;
+  status_.staConfigState = settings.staConfigState;
+  strncpy(status_.configuredIp, configuredIp, sizeof(status_.configuredIp) - 1);
+  strncpy(status_.configuredNetmask, configuredNetmask,
+          sizeof(status_.configuredNetmask) - 1);
+  strncpy(status_.configuredGateway, configuredGateway,
+          sizeof(status_.configuredGateway) - 1);
+  strncpy(status_.configuredDns1, configuredDns1,
+          sizeof(status_.configuredDns1) - 1);
+  strncpy(status_.configuredDns2, configuredDns2,
+          sizeof(status_.configuredDns2) - 1);
+  portEXIT_CRITICAL(&dataMux_);
+}
+
+void ShotStopperNetwork::armPendingConfirmWindow(uint32_t now) {
+  portENTER_CRITICAL(&dataMux_);
+  staConfirmArmed_ = true;
+  staConfirmDeadlineMs_ = now + STA_CONFIRM_TIMEOUT_MS;
+  portEXIT_CRITICAL(&dataMux_);
+  Serial.println("WiFi STA config pending confirmation for 180 s");
+}
+
+void ShotStopperNetwork::clearPendingConfirmWindow() {
+  portENTER_CRITICAL(&dataMux_);
+  staConfirmArmed_ = false;
+  staConfirmDeadlineMs_ = 0;
+  portEXIT_CRITICAL(&dataMux_);
+}
+
+void ShotStopperNetwork::requestPendingNetworkConfirm() {
+  portENTER_CRITICAL(&dataMux_);
+  pendingConfirmRequest_ = true;
+  portEXIT_CRITICAL(&dataMux_);
+}
+
+bool ShotStopperNetwork::confirmPendingNetwork(const char *reason) {
+  PersistedSettings next = settingsCopy();
+  NetworkStatusSnapshot status = snapshot();
+  if (next.staConfigState != static_cast<uint8_t>(StaConfigState::PENDING) ||
+      !next.staConfigured || status.apActive ||
+      status.staState != StaState::CONNECTED) {
+    return false;
+  }
+  next.staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  copyActiveStaToLkg(next);
+  if (!savePersistedSettings(next)) {
+    return false;
+  }
+  portENTER_CRITICAL(&dataMux_);
+  settings_ = next;
+  status_.staConfigState = next.staConfigState;
+  pendingConfirmRequest_ = false;
+  portEXIT_CRITICAL(&dataMux_);
+  clearPendingConfirmWindow();
+  publishConfiguredAddressStatus();
+  log(DebugCategory::CONFIG, DebugCode::CONFIG_PERSISTED,
+      static_cast<int32_t>(next.runtime.revision));
+  Serial.print("WiFi STA config confirmed");
+  if (reason != nullptr && reason[0] != '\0') {
+    Serial.print(" (");
+    Serial.print(reason);
+    Serial.print(')');
+  }
+  Serial.println();
+  return true;
+}
+
+bool ShotStopperNetwork::revertPendingNetwork(uint32_t now,
+                                              const char *reason) {
+  PersistedSettings next = settingsCopy();
+  if (next.staConfigState != static_cast<uint8_t>(StaConfigState::PENDING)) {
+    return false;
+  }
+  Serial.print("WiFi STA pending config reverted");
+  if (reason != nullptr && reason[0] != '\0') {
+    Serial.print(" (");
+    Serial.print(reason);
+    Serial.print(')');
+  }
+  Serial.println();
+  if (!restoreLkgToActive(next)) {
+    clearStaNetwork(next);
+  }
+  if (!savePersistedSettings(next)) {
+    return false;
+  }
+  portENTER_CRITICAL(&dataMux_);
+  settings_ = next;
+  status_.wifiConfigured = next.staConfigured;
+  status_.staConfigState = next.staConfigState;
+  portEXIT_CRITICAL(&dataMux_);
+  clearPendingConfirmWindow();
+  publishConfiguredAddressStatus();
+  log(DebugCategory::CONFIG, DebugCode::CONFIG_PERSISTED,
+      static_cast<int32_t>(next.runtime.revision));
+  stopNtp();
+  staNtpEligibleAtMs_ = 0;
+  g_wallClock.markDisabled();
+  staEverConnected_ = false;
+  return startFallbackAccessPoint(now);
 }
 
 void ShotStopperNetwork::startStation(const PersistedSettings &settings,
@@ -658,6 +801,7 @@ void ShotStopperNetwork::startStation(const PersistedSettings &settings,
   staReconnectAttemptAtMs_ = now;
   staEverConnected_ = false;
   networkShutdownPending_ = false;
+  clearPendingConfirmWindow();
   portENTER_CRITICAL(&dataMux_);
   status_.networkActive = false;
   status_.apActive = false;
@@ -665,9 +809,32 @@ void ShotStopperNetwork::startStation(const PersistedSettings &settings,
   status_.staState = StaState::CONNECTING;
   status_.staIp[0] = '\0';
   status_.windowRemainingMs = 0;
+  status_.confirmRemainingMs = 0;
   portEXIT_CRITICAL(&dataMux_);
+  publishConfiguredAddressStatus();
   log(DebugCategory::NETWORK, DebugCode::STA_CONNECTING);
-  Serial.println("WiFi STA connecting; AP disabled");
+  if (settings.staIpMode == static_cast<uint8_t>(StaIpMode::STATIC)) {
+    const IPAddress ip(settings.staIp[0], settings.staIp[1], settings.staIp[2],
+                       settings.staIp[3]);
+    const IPAddress gateway(settings.staGateway[0], settings.staGateway[1],
+                            settings.staGateway[2], settings.staGateway[3]);
+    const IPAddress netmask(settings.staNetmask[0], settings.staNetmask[1],
+                            settings.staNetmask[2], settings.staNetmask[3]);
+    const IPAddress dns1(settings.staDns1[0], settings.staDns1[1],
+                         settings.staDns1[2], settings.staDns1[3]);
+    const IPAddress dns2(settings.staDns2[0], settings.staDns2[1],
+                         settings.staDns2[2], settings.staDns2[3]);
+    if (!ipv4IsZero(settings.staDns2)) {
+      WiFi.config(ip, gateway, netmask, dns1, dns2);
+    } else {
+      WiFi.config(ip, gateway, netmask, dns1);
+    }
+    Serial.println("WiFi STA connecting with static IP; AP disabled");
+  } else {
+    const IPAddress none;
+    WiFi.config(none, none, none);
+    Serial.println("WiFi STA connecting; AP disabled");
+  }
   WiFi.begin(settings.staSsid,
              settings.staOpen ? nullptr : settings.staPassword);
 }
@@ -762,6 +929,27 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       status_.networkActive = httpReady;
       portEXIT_CRITICAL(&dataMux_);
     }
+    if (staConfirmArmed_ &&
+        settingsCopy().staConfigState ==
+            static_cast<uint8_t>(StaConfigState::PENDING) &&
+        static_cast<int32_t>(now - staConfirmDeadlineMs_) >= 0) {
+      WiFi.disconnect(false, false);
+      if (!revertPendingNetwork(now, "confirm timeout")) {
+        startupComplete_ = false;
+        if (startupFailures_ < UINT8_MAX) {
+          ++startupFailures_;
+        }
+        networkRetryAtMs_ = now + NETWORK_RETRY_MIN_MS;
+        portENTER_CRITICAL(&dataMux_);
+        status_.startupFailures = startupFailures_;
+        portEXIT_CRITICAL(&dataMux_);
+      } else {
+        startupFailures_ = 0;
+        portENTER_CRITICAL(&dataMux_);
+        status_.startupFailures = 0;
+        portEXIT_CRITICAL(&dataMux_);
+      }
+    }
     return;
   }
 
@@ -786,6 +974,10 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
     Serial.println(address);
     staNtpEligibleAtMs_ = now + NTP_STA_SETTLE_MS;
     ntpRearmPending_ = true;
+    if (settingsCopy().staConfigState ==
+        static_cast<uint8_t>(StaConfigState::PENDING)) {
+      armPendingConfirmWindow(now);
+    }
     return;
   }
 
@@ -798,8 +990,14 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
     portEXIT_CRITICAL(&dataMux_);
     log(DebugCategory::NETWORK, DebugCode::STA_FAILED,
         static_cast<int32_t>(WiFi.status()));
-    Serial.println("WiFi STA failed; starting fallback AP");
-    if (!startFallbackAccessPoint(now)) {
+    const bool pending = settingsCopy().staConfigState ==
+                         static_cast<uint8_t>(StaConfigState::PENDING);
+    Serial.println(pending ? "WiFi STA failed; reverting pending config to AP"
+                           : "WiFi STA failed; starting fallback AP");
+    const bool recovered =
+        pending ? revertPendingNetwork(now, "connect timeout")
+                : startFallbackAccessPoint(now);
+    if (!recovered) {
       startupComplete_ = false;
       if (startupFailures_ < UINT8_MAX) {
         ++startupFailures_;
@@ -1225,9 +1423,17 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
 
     case WebCommandType::SAVE_NETWORK:
       if (!validWifiSsid(command.ssid) ||
-          !validWifiPassword(command.password, command.openNetwork)) {
+          !validWifiPassword(command.password, command.openNetwork) ||
+          !validStaAddressConfig(command.staIpMode, command.staIp,
+                                 command.staNetmask, command.staGateway,
+                                 command.staDns1, command.staDns2)) {
         log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
         return false;
+      }
+      if (next.staConfigured &&
+          next.staConfigState ==
+              static_cast<uint8_t>(StaConfigState::CONFIRMED)) {
+        copyActiveStaToLkg(next);
       }
       next.staConfigured = true;
       next.staOpen = command.openNetwork;
@@ -1236,15 +1442,19 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
       strncpy(next.staSsid, command.ssid, sizeof(next.staSsid) - 1);
       strncpy(next.staPassword, command.password,
               sizeof(next.staPassword) - 1);
+      next.staIpMode = command.staIpMode;
+      memcpy(next.staIp, command.staIp, sizeof(next.staIp));
+      memcpy(next.staNetmask, command.staNetmask, sizeof(next.staNetmask));
+      memcpy(next.staGateway, command.staGateway, sizeof(next.staGateway));
+      memcpy(next.staDns1, command.staDns1, sizeof(next.staDns1));
+      memcpy(next.staDns2, command.staDns2, sizeof(next.staDns2));
+      next.staConfigState = static_cast<uint8_t>(StaConfigState::PENDING);
       persist = true;
       restartPending_ = true;
       break;
 
     case WebCommandType::FORGET_NETWORK:
-      next.staConfigured = false;
-      next.staOpen = false;
-      memset(next.staSsid, 0, sizeof(next.staSsid));
-      memset(next.staPassword, 0, sizeof(next.staPassword));
+      clearStaNetwork(next);
       persist = true;
       restartPending_ = true;
       break;
@@ -1260,10 +1470,7 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
       break;
 
     case WebCommandType::RESET_NETWORK_UI:
-      next.staConfigured = false;
-      next.staOpen = false;
-      memset(next.staSsid, 0, sizeof(next.staSsid));
-      memset(next.staPassword, 0, sizeof(next.staPassword));
+      clearStaNetwork(next);
       if (!initializeDefaultAuthentication(next)) {
         return false;
       }
@@ -1322,14 +1529,19 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
     portENTER_CRITICAL(&dataMux_);
     settings_ = next;
     status_.wifiConfigured = next.staConfigured;
+    status_.staConfigState = next.staConfigState;
     portEXIT_CRITICAL(&dataMux_);
+    publishConfiguredAddressStatus();
     log(DebugCategory::CONFIG, DebugCode::CONFIG_PERSISTED,
         static_cast<int32_t>(next.runtime.revision));
   } else if (factoryReset) {
     portENTER_CRITICAL(&dataMux_);
     settings_ = next;
     status_.wifiConfigured = false;
+    status_.staConfigState =
+        static_cast<uint8_t>(StaConfigState::CONFIRMED);
     portEXIT_CRITICAL(&dataMux_);
+    publishConfiguredAddressStatus();
     log(DebugCategory::CONFIG, DebugCode::CONFIG_PERSISTED,
         static_cast<int32_t>(next.runtime.revision));
   }
@@ -1594,6 +1806,9 @@ bool ShotStopperNetwork::createSession(char token[TOKEN_HEX_CAPACITY],
     log(DebugCategory::SECURITY, DebugCode::UI_REPLACED);
     requestStopForSession(replacedSessionId);
   }
+  if (created) {
+    requestPendingNetworkConfirm();
+  }
   return created;
 }
 
@@ -1631,6 +1846,9 @@ bool ShotStopperNetwork::authenticate(httpd_req_t *request, bool requireCsrf,
     }
   }
   portEXIT_CRITICAL(&dataMux_);
+  if (accepted) {
+    requestPendingNetworkConfirm();
+  }
   return accepted;
 }
 
@@ -2014,7 +2232,11 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"network\":{\"networkActive\":%s,\"uiActive\":%s,"
       "\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
       "\"wifiConfigured\":%s,\"staState\":\"%s\","
-      "\"staIp\":\"%s\",\"windowRemainingMs\":%lu,"
+      "\"staIp\":\"%s\",\"ipMode\":\"%s\",\"configState\":\"%s\","
+      "\"confirmRemainingMs\":%lu,"
+      "\"configuredIp\":\"%s\",\"configuredNetmask\":\"%s\","
+      "\"configuredGateway\":\"%s\",\"configuredDns1\":\"%s\","
+      "\"configuredDns2\":\"%s\",\"windowRemainingMs\":%lu,"
       "\"taskAgeMs\":%lu,\"taskStackMinWords\":%lu,"
       "\"startupFailures\":%lu},"
       "\"health\":{\"uptimeMs\":%lu,\"loopMaxGapMs\":%lu,"
@@ -2123,6 +2345,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned>(network.apClients),
       network.wifiConfigured ? "true" : "false",
       staStateName(network.staState), network.staIp,
+      staIpModeName(network.staIpMode),
+      staConfigStateName(network.staConfigState),
+      static_cast<unsigned long>(network.confirmRemainingMs),
+      network.configuredIp, network.configuredNetmask,
+      network.configuredGateway, network.configuredDns1,
+      network.configuredDns2,
       static_cast<unsigned long>(network.windowRemainingMs),
       static_cast<unsigned long>(network.taskAgeMs),
       static_cast<unsigned long>(network.taskStackMinWords),
@@ -2886,11 +3114,6 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
   }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
-    return sendError(request, STATUS_CONFLICT,
-                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
-                     "Network settings are locked while a cycle is active.");
-  }
   char body[REQUEST_BODY_CAPACITY] = {};
   if (!readJsonBody(request, body)) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
@@ -2901,12 +3124,46 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
   WebCommand command;
   command.requestId = self.allocateRequestId();
   static const char *const forgetFields[] = {"action"};
-  static const char *const saveFields[] = {"action", "ssid", "password",
-                                           "open"};
+  static const char *const confirmFields[] = {"action"};
+  static const char *const saveFields[] = {
+      "action", "ssid",     "password", "open",  "ipMode",
+      "ip",     "netmask",  "gateway",  "dns1",  "dns2"};
   const char *networkError = nullptr;
   bool parsed = root != nullptr &&
                 jsonString(root, "action", action, sizeof(action), false);
-  if (parsed && strcmp(action, "forget") == 0) {
+  if (parsed && strcmp(action, "confirm") == 0) {
+    parsed = jsonHasOnlyUniqueFields(root, confirmFields, 1);
+    if (!parsed) {
+      networkError = "Confirm request must include only action=\"confirm\".";
+    } else {
+      const PersistedSettings settings = self.settingsCopy();
+      const NetworkStatusSnapshot network = self.snapshot();
+      if (settings.staConfigState !=
+              static_cast<uint8_t>(StaConfigState::PENDING) ||
+          !settings.staConfigured || network.apActive ||
+          network.staState != StaState::CONNECTED) {
+        parsed = false;
+        networkError = "No pending network configuration to confirm.";
+      } else {
+        self.requestPendingNetworkConfirm();
+        if (root != nullptr) {
+          cJSON_Delete(root);
+        }
+        memset(body, 0, sizeof(body));
+        return self.sendAccepted(request, command.requestId,
+                                 "\"state\":\"QUEUED\"");
+      }
+    }
+  } else if (parsed && strcmp(action, "forget") == 0) {
+    if (!controlAllowsConfiguration(status)) {
+      if (root != nullptr) {
+        cJSON_Delete(root);
+      }
+      memset(body, 0, sizeof(body));
+      return sendError(request, STATUS_CONFLICT,
+                       "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                       "Network settings are locked while a cycle is active.");
+    }
     parsed = jsonHasOnlyUniqueFields(root, forgetFields, 1);
     if (parsed) {
       command.type = WebCommandType::FORGET_NETWORK;
@@ -2914,28 +3171,92 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
       networkError = "Forget request must include only action=\"forget\".";
     }
   } else if (parsed && strcmp(action, "save") == 0) {
+    if (!controlAllowsConfiguration(status)) {
+      if (root != nullptr) {
+        cJSON_Delete(root);
+      }
+      memset(body, 0, sizeof(body));
+      return sendError(request, STATUS_CONFLICT,
+                       "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                       "Network settings are locked while a cycle is active.");
+    }
     command.type = WebCommandType::SAVE_NETWORK;
-    if (!jsonHasOnlyUniqueFields(root, saveFields, 4) ||
+    char ipMode[16] = {};
+    char ipText[16] = {};
+    char netmaskText[16] = {};
+    char gatewayText[16] = {};
+    char dns1Text[16] = {};
+    char dns2Text[16] = {};
+    const bool hasIp = cJSON_GetObjectItemCaseSensitive(root, "ip") != nullptr;
+    const bool hasNetmask =
+        cJSON_GetObjectItemCaseSensitive(root, "netmask") != nullptr;
+    const bool hasGateway =
+        cJSON_GetObjectItemCaseSensitive(root, "gateway") != nullptr;
+    const bool hasDns1 =
+        cJSON_GetObjectItemCaseSensitive(root, "dns1") != nullptr;
+    const bool hasDns2 =
+        cJSON_GetObjectItemCaseSensitive(root, "dns2") != nullptr;
+    if (!jsonHasOnlyUniqueFields(root, saveFields, 10) ||
         !jsonString(root, "ssid", command.ssid, sizeof(command.ssid), false) ||
         !jsonString(root, "password", command.password,
                     sizeof(command.password), true) ||
-        !jsonBoolean(root, "open", command.openNetwork)) {
+        !jsonBoolean(root, "open", command.openNetwork) ||
+        !jsonString(root, "ipMode", ipMode, sizeof(ipMode), false)) {
       parsed = false;
       networkError =
-          "Save request requires action, ssid, password, and open fields.";
-    } else if (!validWifiSsid(command.ssid)) {
+          "Save request requires action, ssid, password, open, and ipMode.";
+    } else if (strcmp(ipMode, "dhcp") == 0) {
+      command.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+      if (hasIp || hasNetmask || hasGateway || hasDns1 || hasDns2) {
+        parsed = false;
+        networkError = "DHCP save must not include static address fields.";
+      }
+    } else if (strcmp(ipMode, "static") == 0) {
+      command.staIpMode = static_cast<uint8_t>(StaIpMode::STATIC);
+      if (!hasIp || !hasNetmask || !hasGateway || !hasDns1 ||
+          !jsonString(root, "ip", ipText, sizeof(ipText), false) ||
+          !jsonString(root, "netmask", netmaskText, sizeof(netmaskText),
+                      false) ||
+          !jsonString(root, "gateway", gatewayText, sizeof(gatewayText),
+                      false) ||
+          !jsonString(root, "dns1", dns1Text, sizeof(dns1Text), false) ||
+          (hasDns2 && !jsonString(root, "dns2", dns2Text, sizeof(dns2Text),
+                                  false)) ||
+          !parseIpv4(ipText, command.staIp) ||
+          !parseIpv4(netmaskText, command.staNetmask) ||
+          !parseIpv4(gatewayText, command.staGateway) ||
+          !parseIpv4(dns1Text, command.staDns1) ||
+          (hasDns2 && !parseIpv4(dns2Text, command.staDns2))) {
+        parsed = false;
+        networkError =
+            "Static IP save requires valid ip, netmask, gateway, and dns1.";
+      }
+    } else {
+      parsed = false;
+      networkError = "ipMode must be \"dhcp\" or \"static\".";
+    }
+    if (parsed && !validWifiSsid(command.ssid)) {
       parsed = false;
       networkError = "SSID must be 1–32 characters.";
-    } else if (!validWifiPassword(command.password, command.openNetwork)) {
+    } else if (parsed &&
+               !validWifiPassword(command.password, command.openNetwork)) {
       parsed = false;
       networkError = command.openNetwork
                          ? "Open network password must be empty."
                          : "Wi-Fi password must be 8–63 characters for a "
                            "secured network.";
+    } else if (parsed &&
+               !validStaAddressConfig(command.staIpMode, command.staIp,
+                                      command.staNetmask, command.staGateway,
+                                      command.staDns1, command.staDns2)) {
+      parsed = false;
+      networkError =
+          "Static IP, netmask, gateway, and DNS must be valid and on the "
+          "same subnet (not 192.168.4.x).";
     }
   } else {
     parsed = false;
-    networkError = "action must be \"save\" or \"forget\".";
+    networkError = "action must be \"save\", \"forget\", or \"confirm\".";
   }
   if (root != nullptr) {
     cJSON_Delete(root);
