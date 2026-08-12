@@ -79,7 +79,7 @@ if (!html.includes('authenticatedOnly') || !html.includes('Read-only view') ||
 const statusSection = html.match(/<fieldset><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     statusSection[1].includes('class="row"') ||
-    (statusSection[1].match(/class="metric"/g) || []).length !== 13 ||
+    (statusSection[1].match(/class="metric"/g) || []).length !== 14 ||
     !html.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'")) {
   throw new Error('Status must use one metric per row and homologate Paddle/CN9 OPEN/OFF and CLOSED/ON labels');
 }
@@ -87,7 +87,10 @@ if (!html.includes('remoteReady&&authenticated()') ||
     !html.includes('Remote CN9 actuation is disabled by firmware policy') ||
     !network.includes('\\"remoteControlEnabled\\"') ||
     !network.includes('\\"lastCommand\\"') ||
-    !network.includes('\\"maintenance\\"')) {
+    !network.includes('\\"maintenance\\"') ||
+    !network.includes('\\"cycle\\"') ||
+    !network.includes('flowDuringRetare') ||
+    !html.includes('id="cycleDebug"')) {
   throw new Error('Web UI must enforce and display remote policy, maintenance, and durable command state');
 }
 if (!html.includes('id="shotTable"') ||
@@ -227,6 +230,8 @@ if (!safeBeep.includes('BEEP_LEVEL_1_BOOKOO') ||
 if (!firmware.includes('requestScaleBrewBeep(session.id)') ||
     !firmware.includes('cancelScaleBrewBeep(session.id)') ||
     !firmware.includes('onFirstDropsDetected') ||
+    !firmware.includes('notifyRetareFlowDetected') ||
+    !firmware.includes('retareFlowFirstDetectedAtMs') ||
     !firmware.includes('brewStartConfirmationOpen') ||
     !firmware.includes('retareWindowOpen') ||
     !firmware.includes('scale.supportsTareStartTimer()') ||

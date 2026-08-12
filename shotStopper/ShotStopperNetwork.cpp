@@ -1948,6 +1948,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"freeHeapBytes\":%lu,\"minimumFreeHeapBytes\":%lu,"
       "\"largestFreeHeapBlockBytes\":%lu},"
       "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"},"
+      "\"cycle\":{\"active\":%s,\"id\":%lu,\"flowDuringRetare\":%s,"
+      "\"firstDropMs\":%lu,\"retareFlowFirstDetectedAtMs\":%lu,"
+      "\"firstDropElapsedMs\":%lu},"
       "\"debugEventsDropped\":%lu}",
       stopperStateName(control.state), stateLabel(control.state),
       control.relayClosed ? "true" : "false",
@@ -2039,6 +2042,18 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(control.largestFreeHeapBlockBytes),
       static_cast<unsigned long>(network.lastCommandRequestId),
       commandResultStateName(network.lastCommandState),
+      control.activeCycle ? "true" : "false",
+      static_cast<unsigned long>(control.cycleId),
+      control.cycleFlowDuringRetare ? "true" : "false",
+      static_cast<unsigned long>(control.cycleFirstDropMs),
+      static_cast<unsigned long>(control.cycleRetareFlowFirstDetectedAtMs),
+      static_cast<unsigned long>(
+          control.cycleFirstDropMs != 0 &&
+                  control.cycleStartedAtMs != 0 &&
+                  static_cast<int32_t>(control.cycleFirstDropMs -
+                                       control.cycleStartedAtMs) >= 0
+              ? control.cycleFirstDropMs - control.cycleStartedAtMs
+              : 0U),
       static_cast<unsigned long>(control.debugEventsDropped));
   if (written < 0 ||
       static_cast<size_t>(written) >= sizeof(g_statusResponseBuffer)) {

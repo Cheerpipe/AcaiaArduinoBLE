@@ -680,6 +680,10 @@ struct ControlStatusSnapshot {
   RuntimeConfig config = {};
   LastCycleSummary lastCycle = {};
   uint32_t debugEventsDropped = 0;
+  bool cycleFlowDuringRetare = false;
+  uint32_t cycleFirstDropMs = 0;
+  uint32_t cycleRetareFlowFirstDetectedAtMs = 0;
+  uint32_t cycleStartedAtMs = 0;
 };
 
 inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {
@@ -769,7 +773,8 @@ enum class DebugCode : uint8_t {
   NETWORK_RETRY,
   INITIALIZATION_FAILED,
   TIME_SYNC_OK,
-  TIME_SYNC_FAIL
+  TIME_SYNC_FAIL,
+  FIRST_DROP_DURING_RETARE
 };
 
 struct DebugEvent {
@@ -952,6 +957,8 @@ inline const char *debugCodeName(DebugCode code) {
       return "subsystem initialization failed";
     case DebugCode::TIME_SYNC_OK: return "clock synchronized";
     case DebugCode::TIME_SYNC_FAIL: return "clock sync failed";
+    case DebugCode::FIRST_DROP_DURING_RETARE:
+      return "first coffee drop detected during retare";
   }
   return "unknown";
 }

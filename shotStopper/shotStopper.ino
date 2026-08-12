@@ -295,6 +295,7 @@ struct CycleSession {
   bool retareEnded = false;
   bool brewStartConfirmEnded = false;
   bool flowDuringRetare = false;
+  uint32_t retareFlowFirstDetectedAtMs = 0;
   bool retarePerformed = false;
   bool retareDisabled = false;
   bool firstDropsBeepSent = false;
@@ -1446,6 +1447,31 @@ float effectiveStopThreshold() {
 
 void requestScaleBrewBeep(uint32_t cycleId);
 
+void recordFirstDropTimestamp(uint32_t receivedAtMs) {
+  if (session.firstDropMs == 0) {
+    session.firstDropMs = receivedAtMs;
+  }
+}
+
+void requestFirstDropBeep() {
+  if (!session.firstDropsBeepSent && session.config.brewConfirmationBeep) {
+    requestScaleBrewBeep(session.id);
+    session.firstDropsBeepSent = true;
+  }
+}
+
+void notifyRetareFlowDetected(uint32_t receivedAtMs) {
+  if (session.retareFlowFirstDetectedAtMs == 0) {
+    session.retareFlowFirstDetectedAtMs = receivedAtMs;
+    recordFirstDropTimestamp(receivedAtMs);
+    requestFirstDropBeep();
+    addDebugEvent(DebugCategory::SCALE, DebugCode::FIRST_DROP_DURING_RETARE,
+                  static_cast<int32_t>(session.id),
+                  static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+  }
+  session.flowDuringRetare = true;
+}
+
 void resetDirectStopConfirmation() {
   session.thresholdConfirmations = 0;
   session.lastThresholdAtMs = 0;
@@ -1486,11 +1512,9 @@ void skipBrewStartConfirmationDueToRetareFlow(uint32_t receivedAtMs) {
   session.brewStartConfirmEnded = true;
   resetDirectStopConfirmation();
   if (session.firstDropMs == 0) {
-    session.firstDropMs = receivedAtMs;
-  }
-  if (!session.firstDropsBeepSent && session.config.brewConfirmationBeep) {
-    requestScaleBrewBeep(session.id);
-    session.firstDropsBeepSent = true;
+    session.firstDropMs = session.retareFlowFirstDetectedAtMs != 0
+                              ? session.retareFlowFirstDetectedAtMs
+                              : receivedAtMs;
   }
 }
 
@@ -1546,9 +1570,7 @@ void onFirstDropsDetected(uint32_t receivedAtMs) {
   if (retareWindowOpen()) {
     return;
   }
-  if (session.firstDropMs == 0) {
-    session.firstDropMs = receivedAtMs;
-  }
+  recordFirstDropTimestamp(receivedAtMs);
   endBrewStartConfirmation(receivedAtMs, true);
 }
 
@@ -1613,6 +1635,7 @@ void initializeBbwProtection() {
   session.retareEnded = false;
   session.brewStartConfirmEnded = false;
   session.flowDuringRetare = false;
+  session.retareFlowFirstDetectedAtMs = 0;
   session.retarePerformed = false;
   session.retareDisabled = false;
   session.firstDropsBeepSent = false;
@@ -1620,6 +1643,7 @@ void initializeBbwProtection() {
   resetRetareStabilityStreak();
   session.retareFlowLastWeightG = 0.0f;
   session.retareFlowSampleValid = false;
+  session.retareFlowFirstDetectedAtMs = 0;
   session.firstDropConfirmations = 0;
   session.firstDropLastAtMs = 0;
   session.firstDropLastPacketSequence = 0;
@@ -1991,7 +2015,7 @@ void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
       session.firstDropConfirmations = 0;
       return;
     }
-    session.flowDuringRetare = true;
+    notifyRetareFlowDetected(receivedAtMs);
     session.firstDropConfirmations = 0;
     return;
   }
@@ -2798,6 +2822,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
   resetSessionForNewCycle(source, webSessionId, controlLeaseId);
   session.startedAtMs = millis();
   session.firstDropMs = 0;
+  session.retareFlowFirstDetectedAtMs = 0;
   session.scaleBaselineReady = false;
   session.scaleBaselineG = 0.0f;
   session.weightSequenceAtStart = currentWeightSequence;
@@ -3157,6 +3182,7 @@ void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
   resetSessionForNewCycle(ControlSource::WEB, webSessionId, controlLeaseId);
   session.startedAtMs = millis();
   session.firstDropMs = 0;
+  session.retareFlowFirstDetectedAtMs = 0;
   session.scaleBaselineReady = false;
   session.scaleBaselineG = 0.0f;
   session.weightSequenceAtStart = currentWeightSequence;
@@ -3571,6 +3597,13 @@ void publishControlStatus() {
   next.scaleEventsDropped = scaleEventsDropped;
   next.config = runtimeConfig;
   next.lastCycle = lastCycle;
+  if (session.active) {
+    next.cycleFlowDuringRetare = session.flowDuringRetare;
+    next.cycleFirstDropMs = session.firstDropMs;
+    next.cycleRetareFlowFirstDetectedAtMs =
+        session.retareFlowFirstDetectedAtMs;
+    next.cycleStartedAtMs = session.startedAtMs;
+  }
   portENTER_CRITICAL(&debugLogMux);
   next.debugEventsDropped = debugLog.overwritten();
   portEXIT_CRITICAL(&debugLogMux);

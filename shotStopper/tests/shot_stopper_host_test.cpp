@@ -2453,7 +2453,7 @@ void rt07_auto_retare_off_skips_retare_window() {
   CHECK(commandCount(ScaleCommandType::TARE_ONLY) == 0);
 }
 
-void rt09_coffee_during_retare_skips_retare_without_beep() {
+void rt09_coffee_during_retare_beep_on_first_drop_not_at_retare_end() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.autoRetare = true;
@@ -2464,9 +2464,11 @@ void rt09_coffee_during_retare_skips_retare_without_beep() {
   CHECK(retareWindowOpen());
   simulateFirstDrops(0.0f, 10);
   CHECK(session.flowDuringRetare);
-  CHECK(session.firstDropMs == 0);
+  CHECK(session.retareFlowFirstDetectedAtMs != 0);
+  CHECK(session.firstDropMs != 0);
+  CHECK(session.firstDropMs == session.retareFlowFirstDetectedAtMs);
   CHECK(!session.retarePerformed);
-  CHECK(!scaleBeepPending);
+  CHECK(scaleBeepPending);
   waitForRetareEnded();
   CHECK(session.brewStartConfirmEnded);
   publishStableCupWeight(150.0f, 20);
@@ -2586,7 +2588,8 @@ void rs05_coffee_during_min_duration_wait_skips_retare() {
   publishWeight(150.0f, baseMs + 300U, 1, 21);
   CHECK(!session.retarePerformed);
   CHECK(session.flowDuringRetare);
-  CHECK(session.firstDropMs == 0);
+  CHECK(session.firstDropMs != 0);
+  CHECK(session.retareFlowFirstDetectedAtMs != 0);
 }
 
 void r45_slew_rejection_emits_specific_debug_code() {
@@ -3075,7 +3078,7 @@ const TestCase testCases[] = {
     {"RT05", rt05_confirmation_timeout_enables_stop_without_beep},
     {"RT06", rt06_first_drops_beep_after_confirmation_timeout},
     {"RT07", rt07_auto_retare_off_skips_retare_window},
-    {"RT09", rt09_coffee_during_retare_skips_retare_without_beep},
+    {"RT09", rt09_coffee_during_retare_beep_on_first_drop_not_at_retare_end},
     {"RT10", rt10_first_drops_beep_during_confirmation},
     {"RS01", rs01_fast_samples_wait_for_min_duration},
     {"RS02", rs02_slow_samples_meet_min_duration_at_third_sample},
