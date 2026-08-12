@@ -86,19 +86,22 @@ In short: **hard to build, easy to live with.**
   through an isolated relay COM/NO contact.
 - Safe startup: CN9 stays open until a stable physical paddle OFF is detected
   (`REQUIRES_OFF` → `READY`).
-- Short-gesture **rinse** (configurable gesture time and rinse duration), manual
-  extraction, and automatic **brew by weight** when a scale is available.
+- Short-gesture **quick rinse** (configurable gesture time and rinse duration),
+  manual extraction, and automatic **brew by weight** when a scale is available.
 - **Physical paddle has priority** over every remote path. Web commands never
   bypass paddle safety or an active local cycle.
 - Configurable **CN9 limit** per cycle (5–60 s) plus a firmware hard cap of
   60 s on every close path.
-- Learned **stop offset** (default 1.5 g) updated from post-drip analysis;
-  resettable from the Web UI.
+- Learned **stop offset** (default 1.5 g, capped at 5.0 g) updated from
+  post-drip analysis; resettable from the Web UI.
+- **Polarity:** physical paddle ON = GPIO **LOW**; relay closed (CN9
+  energized) = GPIO **LOW**.
 
 ### Brew and weight settings
 
 All workflow parameters below are editable from the Web UI **Configuration**
-panel and persisted in EEPROM. Defaults are shown in parentheses.
+panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
+`settingsB`, config schema **v13**). Defaults are shown in parentheses.
 
 | Setting | What it does |
 | --- | --- |
@@ -111,10 +114,12 @@ panel and persisted in EEPROM. Defaults are shown in parentheses.
 | **Automatic retare** | Allow one late-cup retare during the retare window (default ON). |
 | **Retare window (s)** | Time after shot start to detect and retare a late-placed cup (default 4 s). |
 | **Minimum cup weight (g)** | Stable load threshold that qualifies as a cup for retare (default 10 g). |
-| **Retare stability** | Samples, tolerance (g), max sample gap, and min stable time required before retare fires. |
-| **Brew start confirmation (s)** | **Accidental-weight protection window** at shot start: inhibits automatic weight stop until first drops are confirmed or the timeout expires (default 12 s; minimum retare window + 3 s). |
-| **Rinse gesture (s)** | Maximum paddle ON time that still counts as a rinse when released (default 1.5 s). |
-| **Rinse duration (s)** | How long CN9 stays closed after a rinse starts (default 3 s). |
+| **Retare stability** | Samples (default 3), tolerance (default 2.0 g), max sample gap (default 0.5 s), and min stable time (default 0.3 s) required before retare fires. |
+| **Brew start confirmation (s)** | **Accidental-weight protection window** at shot start for automatic BBW: inhibits automatic weight stop until first drops are confirmed or the timeout expires (default 12 s; minimum retare window + 3 s). Skipped in timer-only mode. |
+| **Quick rinse gesture (s)** | Maximum paddle ON time that still counts as a quick rinse when released (default 1.5 s). |
+| **Quick rinse duration (s)** | How long CN9 stays closed after a quick rinse starts (default 3 s). |
+| **Timezone offset (min)** | Wall-clock offset for shot history labels (default UTC+0). |
+| **NTP server** | Preset (default **pool**) or custom hostname for time sync. |
 
 Additional fixed protections (not separately configurable):
 
@@ -134,20 +139,22 @@ Additional fixed protections (not separately configurable):
 | --- | --- |
 | **Beep when coffee starts** | One scale beep on first coffee drops during an automatic shot (default ON; ignored in timer-only mode). |
 | **Scale reminder beep until paddle OFF** | Repeat scale beeps while the **physical paddle stays ON**, **CN9 is open**, and the scale is connected — i.e. after the brew circuit opened but the paddle was left ON (default ON). |
-| **Paddle reminder interval (s)** | Time between reminder beeps (5–60 s; default 15 s). |
+| **Paddle reminder interval (s)** | Time between reminder beeps (5–60 s; default 10 s). |
 | **Paddle reminder limit (min)** | Stop beeping after this duration even if the paddle remains ON (1–60 min; default 15 min). |
 
 ### Shot history
 
-- Up to **120** completed extractions stored in EEPROM (minimum duration 10 s;
-  rinses and very short gestures are excluded).
+- Up to **120** completed extractions stored in NVS (shot log schema **v5**;
+  minimum duration 10 s; rinses and very short gestures are excluded).
 - Each record includes: local time (when NTP synced), duration, goal weight,
   actual weight, error and error %, learned offset used, average flow (g/s),
-  first-drop time, shot type (`auto`, `timer_only`, `manual`), cut type
-  (`weight`, `prediction`, `manual`, `limit`, etc.), and when the fast
-  extraction guard was active: whether the shot was extended, how it stopped
-  (`normal_target`, `extended_max_weight`, `extended_min_time`, …), and the
-  max recovery weight / minimum brew time that applied.
+  first-drop time, shot type (`auto`, `timer_only`, `manual`), **cut type**
+  (`auto`, `manual`, `limit` — how CN9 opened), **stop detail**
+  (`normal_target`, `prediction`, `extended_max_weight`, `extended_min_time`,
+  `other` — why weight stop fired when applicable), and when the fast
+  extraction guard was active: whether the shot was extended,
+  `targetReachedEarlyS`, and the max recovery weight / minimum brew time that
+  applied.
 - Web UI table with **CSV export**, authenticated **clear all**, and
   **per-shot delete**.
 - Timezone offset and NTP server (preset or custom) configure wall-clock labels;
@@ -155,22 +162,44 @@ Additional fixed protections (not separately configurable):
 
 ### Web UI, Wi-Fi, and API
 
-- Fully **embedded Web UI** (no external assets) served over Wi-Fi.
+- Fully **embedded Web UI** (no external assets; **44 KiB** asset budget) served
+  over Wi-Fi.
 - **STA** mode when credentials are saved; **fallback AP**
-  (`MicraShotStopperAP` at `192.168.4.1`) when STA is unavailable.
+  (`MicraShotStopperAP` at `192.168.4.1`) when STA is unavailable. Modes are
+  **exclusive** (STA or AP, not concurrent AP+STA).
+- AP fallback stays up for **3 minutes** after boot if nobody signs in, then
+  shuts down until the next restart. Once STA connects, HTTP/Wi-Fi remain
+  available (no visibility timer). After logout on AP, a **3-minute grace**
+  window keeps the UI reachable.
 - **Public read-only** status, live shot panel, shot history, diagnostic log,
   and firmware version footer without signing in.
-- **Authenticated** session (unique random password hashed at provisioning;
-  printed once on Serial) unlocks configuration, Wi-Fi scan/save, calibration
-  reset, factory reset, Stop, and Restart.
+- **Authenticated** session (factory AP/UI password **`Micra1234`**, stored as
+  hash + salt; changeable from the Web UI) unlocks configuration, Wi-Fi
+  scan/save, calibration reset, factory reset, Stop, and Restart. Up to **2**
+  concurrent web sessions. Login responses include a CSRF token
+  (`X-CSRF-Token` on mutating requests); repeated failed logins return
+  `429 LOGIN_RATE_LIMITED`.
 - **Live shot panel:** current/goal weight, progress bar, elapsed time, first
-  drop, retare state, shot type, and scale protocol.
-- **REST API** (`/api/v1/…`) for status, config, shots, log, network, and
-  control. Wi-Fi (STA/AP) and the HTTP server start regardless of paddle
-  position; **configuration changes** still use a maintenance lease that
-  requires stable paddle OFF and open CN9.
-- **Factory reset** erases Wi-Fi, settings, calibration, shot history, and the
-  AP/UI password, then restarts.
+  drop, retare state, shot type, scale protocol, and **extraction guard**
+  state (off / on / extended).
+- **REST API** (`/api/v1/…`):
+  - Read: `GET /status`, `GET /log`, `GET /shots`
+  - Auth: `POST /login`, `POST /logout`, `POST /heartbeat` (UI polls every
+    **10 s** while signed in)
+  - Config: `POST /config`, `POST /calibration/reset`, `POST /time/sync`,
+    `POST /access-point/password`
+  - Network: `POST /network` (`save` / `forget`), `POST /network/scan`,
+    `GET /network/scan` (async, max **12** networks, **120 s** timeout;
+    cancelable via maintenance lease)
+  - Control: `POST /control/paddle`, `/control/rinse`, `/control/stop`,
+    `/control/restart`
+  - Maintenance: `POST /factory-reset` (confirm `ERASE_ALL_SETTINGS`),
+    `POST /shots/clear` (confirm `CLEAR_SHOT_LOG`), `POST /shots/delete`
+  - Wi-Fi (STA/AP) and the HTTP server start regardless of paddle position;
+    **configuration changes** still use a maintenance lease that requires
+    stable paddle OFF and open CN9.
+- **Factory reset** erases Wi-Fi, settings, calibration, shot history, and
+  restores the AP/UI password to **`Micra1234`**, then restarts.
 
 **Diagnostics** (Status panel + Log panel + API):
 
@@ -183,20 +212,23 @@ Additional fixed protections (not separately configurable):
 - Hardware monitor: CPU usage, chip temperature (and peak), RAM total/used/free,
   uptime, and last ESP reset reason.
 - NTP/time sync state and configured timezone.
-- **Diagnostic log:** bounded event stream (Scale, State, Relay, Paddle,
-  Network, Config, Web, Security) with category filter, copy, and clear view;
-  also available via `GET /api/v1/log`.
+- **Diagnostic log:** bounded ring of **128** events (Scale, State, Relay,
+  Paddle, Network, Config, Web, Security) with category filter, copy, and
+  clear view (client-side only; firmware log unchanged); also available via
+  `GET /api/v1/log`.
 
 **Web paddle and remote control** (opt-in build only):
 
 - **Virtual paddle** toggle (`POST /api/v1/control/paddle`) starts and ends a
-  remote cycle when signed in and remote CN9 is enabled.
-- **Start rinse**, **Stop shot** (opens CN9 only), and **Restart controller**
-  from the Actions panel.
-- **Remote CN9 actuation is disabled by default.** Virtual paddle and remote
-  rinse require compile-time `SHOT_STOPPER_ENABLE_REMOTE_CN9=1`. Stop always
-  opens CN9 and works without remote enable; monitoring, diagnostics, and
-  configuration work in every build. Physical paddle always has priority.
+  remote cycle when signed in and remote CN9 is enabled. Remote paddle
+  sessions time out after **15 s** without a UI heartbeat.
+- **Start quick rinse**, **Stop shot** (opens CN9 only), and **Restart
+  controller** from the Actions panel.
+- **Remote CN9 actuation for new cycles is disabled by default.** Virtual
+  paddle and remote quick rinse require compile-time
+  `SHOT_STOPPER_ENABLE_REMOTE_CN9=1`. **Stop** always opens CN9 in every
+  build (when authenticated). Monitoring, diagnostics, and configuration work
+  without the flag. Physical paddle always has priority.
 
 ### Scale support
 
@@ -223,7 +255,9 @@ Work is split so paddle/CN9 timing never waits on BLE or HTTP:
 | **`network_manager`** | Wi-Fi STA/AP, HTTP server, NTP, NVS writes for config/network. |
 | **`status_indicator`** | WS2812B LED updates via a one-slot mailbox (never blocks control). |
 
-Each long-running task registers its own **5 s Task Watchdog** subscription.
+`loopTask`, `scale_worker`, and `network_manager` each register a **5 s Task
+Watchdog** subscription. `status_indicator` does **not** subscribe to the TWDT
+(it only drives LEDs).
 
 ### Safety and indicators
 
@@ -257,7 +291,8 @@ The following items are planned but **not present in the current firmware**:
 ├── VERSION                         # Release version (SemVer)
 ├── scripts/gen_version.sh          # Build-time version header generator
 ├── shotStopper/                    # Main firmware sketch and host tests
-│   └── shotStopper.ino
+│   ├── shotStopper.ino
+│   └── tests/                      # Host tests, web asset + firmware checks
 ├── libraries/
 │   └── AcaiaArduinoBLE/            # Local Arduino library and BLE tests
 ├── docs/
@@ -374,8 +409,8 @@ without watching the scale.
 
 The live shot panel shows when the guard is off, on, or **extended** (with the
 active stop weight and time remaining). Shot history and CSV export record
-`extraction_guard_enabled`, `extraction_extended`, `stop_detail`, and the
-max/min settings used for that shot.
+`ext_guard`, `ext`, `stop`, `max_rec_g`, `min_brew_s`, `early_s`, plus
+`shot_type` and `cut_type`.
 
 ## Web UI and Wi-Fi (details)
 
@@ -384,8 +419,9 @@ diagnostics, virtual paddle control, and the full capability list. Operational
 notes:
 
 - The interface cannot change workflow settings during an active cycle.
-- Web actions that can close CN9 are **disabled by default**; enable only with
-  `SHOT_STOPPER_ENABLE_REMOTE_CN9=1` on a trusted network.
+- Virtual paddle and remote quick rinse require
+  `SHOT_STOPPER_ENABLE_REMOTE_CN9=1` on a trusted network. **Stop** works in
+  every build when authenticated.
 - Each remote cycle is bound to its session and a non-reusable lease.
 - Configuration, NVS, Wi-Fi save, and scan operations use a **maintenance
   reservation** that requires stable paddle OFF and open CN9; physical movement
@@ -393,17 +429,18 @@ notes:
   is ON.
 - `202` responses include a `requestId`; `GET /api/v1/status` publishes the
   terminal command state (`APPLIED`, `PERSISTED`, `FAILED`, `CANCELED`).
-- There is no shared factory password: a unique random password is generated at
-  provisioning, printed to Serial once, and stored as hash + salt.
+- Factory AP/UI password is **`Micra1234`** (hash + salt in NVS). Change it
+  from the Web UI after first login on a trusted network.
 
 ## Watchdog and CN9 safety
 
 The firmware configures the ESP-IDF Task Watchdog with a 5-second timeout and
 `trigger_panic=true`. It subscribes `loopTask`, `scale_worker`, and
-`network_manager` separately; no task feeds another task's watchdog. A
-registration or feed failure inhibits new closes, opens CN9, and requests a
-restart from the control loop. Compilation fails unless the core enables TWDT
-panic, IWDT, reboot after panic, and an IRAM GPTimer handler.
+`network_manager` separately; `status_indicator` is not subscribed. No task
+feeds another task's watchdog. A registration or feed failure inhibits new
+closes, opens CN9, and requests a restart from the control loop. Compilation
+fails unless the core enables TWDT panic, IWDT, reboot after panic, and an
+IRAM GPTimer handler.
 
 CN9 closes transactionally: `ARMING` is first published with a new generation,
 then all deadlines are armed, and only then is the relay energized if the
@@ -634,8 +671,9 @@ arduino-cli compile \
   shotStopper
 ```
 
-`-DSHOT_STOPPER_ENABLE_REMOTE_CN9=1` exposes virtual paddle, rinse, and stop
-over the Web UI and API. Use only on a trusted network.
+`-DSHOT_STOPPER_ENABLE_REMOTE_CN9=1` exposes virtual paddle and remote quick
+rinse over the Web UI and API. **Stop** is always available when authenticated,
+even without this flag. Use remote actuation only on a trusted network.
 
 The `min_spiffs` partition scheme gives a **1.9 MB** application slot. The
 default scheme only allows **1.25 MB** (`1310720` bytes); this firmware is
@@ -650,15 +688,20 @@ wc -c < build/esp32/shotStopper.ino.bin
 ```
 
 For the ESP32-S3 variant, generate the version header and use its FQBN and
-output directory:
+output directory. Use the same **`min_spiffs`** partition scheme as the
+classic ESP32 build:
 
 ```sh
 ./scripts/gen_version.sh
 mkdir -p build/esp32-s3
 
-arduino-cli compile --fqbn esp32:esp32:esp32s3 --warnings all \
+arduino-cli compile \
+  --fqbn esp32:esp32:esp32s3:PartitionScheme=min_spiffs \
+  --warnings all \
   --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1' \
-  --library libraries/AcaiaArduinoBLE --build-path build/esp32-s3 shotStopper
+  --library libraries/AcaiaArduinoBLE \
+  --build-path build/esp32-s3 \
+  shotStopper
 ```
 
 ## Upload to the ESP32
@@ -680,8 +723,8 @@ arduino-cli upload \
   shotStopper
 ```
 
-For ESP32-S3, change both `--fqbn` and `--input-dir` to match the compiled
-variant. The generated application image is named `shotStopper.ino.bin`.
+For ESP32-S3, change `--fqbn` (include `PartitionScheme=min_spiffs`) and
+`--input-dir` to match the compiled variant. The generated application image is named `shotStopper.ino.bin`.
 `arduino-cli upload --input-dir` is recommended because it uploads the
 bootloader, partition table, and application at their correct offsets.
 
@@ -759,7 +802,12 @@ Run the tests before uploading firmware:
 ./libraries/AcaiaArduinoBLE/tests/run_host_tests.sh
 ./shotStopper/tests/run_host_tests.sh
 node ./shotStopper/tests/check_web_assets.js
+node ./shotStopper/tests/check_firmware_size.js build/esp32/shotStopper.ino.bin
 ```
+
+The firmware size check verifies the application binary fits the default OTA
+slot (`1310720` bytes). Skip it if you have not compiled yet, or pass another
+`.bin` path as the first argument.
 
 To generate the stopper coverage report when LLVM is installed:
 
