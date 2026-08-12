@@ -2,6 +2,8 @@
 set -eu
 
 test_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH= cd -- "$test_dir/../.." && pwd)
+"$repo_root/scripts/gen_version.sh"
 test_binary=${TMPDIR:-/tmp}/shot_stopper_host_test
 sanitized_binary=${TMPDIR:-/tmp}/shot_stopper_host_test_sanitized
 persistence_binary=${TMPDIR:-/tmp}/shot_stopper_persistence_host_test

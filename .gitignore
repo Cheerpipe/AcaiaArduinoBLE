@@ -21,6 +21,7 @@ secrets.h
 credentials.h
 WiFiSecrets.h
 *.local.h
+shotStopper/ShotStopperVersion.h
 
 # Arduino IDE and Arduino CLI generated state
 .arduinoIDE/

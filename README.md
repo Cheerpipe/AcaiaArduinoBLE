@@ -30,8 +30,7 @@ The project was created to achieve these goals:
   paddle to OFF.
 - Remove workarounds such as manual double tare; automatic retare handles late cup
   placement during Brew by Weight.
-- Add a Web UI that displays status and can eventually publish sensors to
-  other platforms such as Home Assistant.
+- Add a Web UI that displays status, diagnostics, and remote control.
 - Remove the need to move the paddle to OFF for the stopper to work: software
   has full control of the hardware.
 - Support lower-cost hardware, such as ESP32 boards with integrated magnetic
@@ -42,53 +41,182 @@ The project was created to achieve these goals:
 
 ## Main features
 
-- Independent control of the physical paddle and CN9 contact.
-- Safe startup: CN9 remains open until a stable physical paddle OFF state is
-  detected.
-- Short-gesture rinse, manual extraction, and automatic extraction by weight.
-- Configurable operational limit and an absolute safety limit of 60 seconds
-  for every path that closes CN9.
-- Generation-based transactional closing: a timeout during arming invalidates
-  the operation, so resumed execution can no longer energize the relay.
-- Three timing defenses for CN9: an interrupt-driven GPTimer, `esp_timer`
-  timers, and supervisor deadline verification.
-- Explicit 5-second Task Watchdog for control, BLE, and network tasks; each
-  task registers and feeds only itself after making progress.
-- Optional external safety heartbeat and isolated CN9 feedback, with mismatch
-  detection and `LOCKOUT`, for integration with a second physical K2 barrier.
-- Redundant RTC record of relay commands and unsafe resets; a reset during
-  CLOSE or three consecutive unsafe resets requires local recovery.
-- Explicit weight-stream and control-authority states. A transient scale loss
-  suspends by-weight control and can recover only after three coherent samples;
-  it does not silently convert an automatic extraction into manual mode.
-- Local Web UI with status, configuration, emergency stop, restart, Wi-Fi,
-  factory reset, and a bounded diagnostic log. Virtual paddle and remote rinse
-  are opt-in and disabled by default.
-- Local BLE library for Acaia, Bookoo, and Felicita scales.
-- Two independent WS2812B status indicators: one for scale health and one for
-  stopper workflow and safety state.
-- Host tests, coverage, and CI builds for ESP32 and ESP32-S3.
+### Micra paddle and CN9 control
+
+- Independent read of the **physical paddle** (GPIO ↔ GND) and control of **CN9**
+  through an isolated relay COM/NO contact.
+- Safe startup: CN9 stays open until a stable physical paddle OFF is detected
+  (`REQUIRES_OFF` → `READY`).
+- Short-gesture **rinse** (configurable gesture time and rinse duration), manual
+  extraction, and automatic **brew by weight** when a scale is available.
+- **Physical paddle has priority** over every remote path. Web commands never
+  bypass paddle safety or an active local cycle.
+- Configurable **CN9 limit** per cycle (5–60 s) plus a firmware hard cap of
+  60 s on every close path.
+- Learned **stop offset** (default 1.5 g) updated from post-drip analysis;
+  resettable from the Web UI.
+
+### Brew and weight settings
+
+All workflow parameters below are editable from the Web UI **Configuration**
+panel and persisted in EEPROM. Defaults are shown in parentheses.
+
+| Setting | What it does |
+| --- | --- |
+| **Target (g)** | Goal weight for brew by weight (10–200 g; default 36 g). |
+| **CN9 limit (s)** | Maximum CN9 closed time per cycle (5–60 s; default 60 s). |
+| **Automatic tare** | Send an initial tare when an automatic shot starts (default ON). |
+| **Timer only** | Keep tare/timer but disable weight stop and offset learning. |
+| **Bookoo combined command** | Use the scale’s combined tare + start-timer command (requires auto tare; default ON). |
+| **Automatic retare** | Allow one late-cup retare during the retare window (default ON). |
+| **Retare window (s)** | Time after shot start to detect and retare a late-placed cup (default 4 s). |
+| **Minimum cup weight (g)** | Stable load threshold that qualifies as a cup for retare (default 10 g). |
+| **Retare stability** | Samples, tolerance (g), max sample gap, and min stable time required before retare fires. |
+| **Brew start confirmation (s)** | **Accidental-weight protection window** at shot start: inhibits automatic weight stop until first drops are confirmed or the timeout expires (default 12 s; minimum retare window + 3 s). |
+| **Rinse gesture (s)** | Maximum paddle ON time that still counts as a rinse when released (default 1.5 s). |
+| **Rinse duration (s)** | How long CN9 stays closed after a rinse starts (default 3 s). |
+
+Additional fixed protections (not separately configurable):
+
+- **Post-tare baseline grace (2 s):** after a tare, weight must settle within
+  ±50 g before the stream is trusted for stop decisions.
+- **Direct threshold stop:** two fresh samples at `target − learned offset`
+  after confirmation ends.
+- **Predictive stop:** linear regression over recent accepted samples can stop
+  earlier than the direct threshold.
+- **Scale loss handling:** BLE disconnect or stale stream suspends weight
+  control; recovery requires three coherent samples on the current connection
+  generation. Paddle OFF and time limits remain authoritative.
+
+### Alerts and reminders
+
+| Setting | What it does |
+| --- | --- |
+| **Beep when coffee starts** | One scale beep on first coffee drops during an automatic shot (default ON; ignored in timer-only mode). |
+| **Scale reminder beep until paddle OFF** | Repeat scale beeps while the **physical paddle stays ON**, **CN9 is open**, and the scale is connected — i.e. after the brew circuit opened but the paddle was left ON (default ON). |
+| **Paddle reminder interval (s)** | Time between reminder beeps (5–60 s; default 15 s). |
+| **Paddle reminder limit (min)** | Stop beeping after this duration even if the paddle remains ON (1–60 min; default 15 min). |
+
+### Shot history
+
+- Up to **120** completed extractions stored in EEPROM (minimum duration 10 s;
+  rinses and very short gestures are excluded).
+- Each record includes: local time (when NTP synced), duration, goal weight,
+  actual weight, error and error %, learned offset used, average flow (g/s),
+  first-drop time, shot type (`auto`, `timer_only`, `manual`), and cut type
+  (`weight`, `prediction`, `manual`, `limit`, etc.).
+- Web UI table with **CSV export**, authenticated **clear all**, and
+  **per-shot delete**.
+- Timezone offset and NTP server (preset or custom) configure wall-clock labels;
+  manual **Sync now** when signed in.
+
+### Web UI, Wi-Fi, and API
+
+- Fully **embedded Web UI** (no external assets) served over Wi-Fi.
+- **STA** mode when credentials are saved; **fallback AP**
+  (`MicraShotStopperAP` at `192.168.4.1`) when STA is unavailable.
+- **Public read-only** status, live shot panel, shot history, diagnostic log,
+  and firmware version footer without signing in.
+- **Authenticated** session (unique random password hashed at provisioning;
+  printed once on Serial) unlocks configuration, Wi-Fi scan/save, calibration
+  reset, factory reset, Stop, and Restart.
+- **Live shot panel:** current/goal weight, progress bar, elapsed time, first
+  drop, retare state, shot type, and scale protocol.
+- **REST API** (`/api/v1/…`) for status, config, shots, log, network, and
+  control. Configuration changes use a maintenance lease that requires stable
+  paddle OFF and open CN9.
+- **Factory reset** erases Wi-Fi, settings, calibration, shot history, and the
+  AP/UI password, then restarts.
+
+**Diagnostics** (Status panel + Log panel + API):
+
+- Paddle state, CN9 relay state, CN9 safety supervisor (state, fault, watchdog,
+  external hardware present, recovery required).
+- Control source (physical vs web), maintenance lease, last command result.
+- Scale link: BLE availability, protocol, stream/control state, observed vs
+  accepted weight, packet gaps, rejected packets, reconnects, disconnect reason.
+- Loop health: max loop gap, free/min heap, dropped debug events.
+- Hardware monitor: CPU usage, chip temperature (and peak), RAM total/used/free,
+  uptime, and last ESP reset reason.
+- NTP/time sync state and configured timezone.
+- **Diagnostic log:** bounded event stream (Scale, State, Relay, Paddle,
+  Network, Config, Web, Security) with category filter, copy, and clear view;
+  also available via `GET /api/v1/log`.
+
+**Web paddle and remote control** (opt-in build only):
+
+- **Virtual paddle** toggle (`POST /api/v1/control/paddle`) starts and ends a
+  remote cycle when signed in and remote CN9 is enabled.
+- **Start rinse**, **Stop shot** (opens CN9 only), and **Restart controller**
+  from the Actions panel.
+- **Remote CN9 actuation is disabled by default.** Virtual paddle and remote
+  rinse require compile-time `SHOT_STOPPER_ENABLE_REMOTE_CN9=1`. Stop always
+  opens CN9 and works without remote enable; monitoring, diagnostics, and
+  configuration work in every build. Physical paddle always has priority.
+
+### Scale support
+
+- Local **AcaiaArduinoBLE** library (vendored in-repo) for **Acaia** (legacy and
+  current), **Bookoo/generic**, and **Felicita** scales over BLE central.
+- Dedicated **`scale_worker`** FreeRTOS task isolates BLE polling, connection
+  retries, tare/start/stop commands, and beeps from the control loop via
+  bounded command and event queues.
+
+### Runtime architecture
+
+Work is split so paddle/CN9 timing never waits on BLE or HTTP:
+
+| Task | Role |
+| --- | --- |
+| **`loopTask` (Arduino `loop`)** | Paddle debounce, state machine, CN9 arm/open, weight-stop logic, shot logging, web command dispatch, safety supervisor feed. |
+| **`scale_worker`** | BLE connection, weight stream, scale commands and beeps. |
+| **`network_manager`** | Wi-Fi STA/AP, HTTP server, NTP, NVS writes for config/network. |
+| **`status_indicator`** | WS2812B LED updates via a one-slot mailbox (never blocks control). |
+
+Each long-running task registers its own **5 s Task Watchdog** subscription.
+
+### Safety and indicators
+
+- Generation-based **transactional CN9 close**; three timing defenses (GPTimer
+  IRAM handler, `esp_timer`, supervisor deadline).
+- Optional **external heartbeat + CN9 feedback** for a second K2 barrier
+  (compile-time GPIO pins).
+- Redundant RTC relay-command log; unsafe reset during CLOSE or repeated boot
+  loops require **local paddle recovery** (ON then stable OFF).
+- Two independent **WS2812B** pixels: scale/BLE health and stopper workflow /
+  safety state (diagnostic only, not part of CN9 decisions).
+- **Host tests** for workflow, persistence, safety, remote policy, BLE library,
+  and embedded Web UI asset validation.
+
+## Not yet implemented
+
+The following items are planned but **not present in the current firmware**:
+
+- **External buzzer** — piezo or speaker on a dedicated GPIO to alert when the
+  scale is unavailable (e.g. paddle-return reminder without a connected scale).
+  Today, audible alerts use the scale’s own beep command when BLE is connected.
+- **OTA (over-the-air firmware updates)** — remote flash of new builds over
+  Wi-Fi without USB.
+- **Home Assistant integration** — publish status, sensors, and/or controls to
+  Home Assistant (MQTT, REST, or native integration).
 
 ## Repository structure
 
 ```text
 .
-├── shotStopper/                    # Main stopper firmware and tests
+├── VERSION                         # Release version (SemVer)
+├── scripts/gen_version.sh          # Build-time version header generator
+├── shotStopper/                    # Main firmware sketch and host tests
 │   └── shotStopper.ino
 ├── libraries/
 │   └── AcaiaArduinoBLE/            # Local Arduino library and BLE tests
 ├── docs/
-│   ├── audits/                     # Audit reports and remediation tracking
-│   ├── plans/                      # Retained implementation plans
-│   ├── MANUAL_TEST_PLAN.md
-│   └── WIFI_WEB_UI_GUIDE.md
-├── .github/workflows/ci.yml
+│   └── MANUAL_TEST_PLAN.md
 └── LICENSE
 ```
 
-`shotStopper/` is the main sketch; it is no longer published as a library
-example. `libraries/AcaiaArduinoBLE/` follows the standard layout for a local
-Arduino library and is included explicitly during compilation.
+`shotStopper/` is the main sketch. `libraries/AcaiaArduinoBLE/` is included
+explicitly during compilation with `--library`.
 
 ## Functional behavior
 
@@ -133,103 +261,46 @@ stateDiagram-v2
   BREW --> REQUIRES_OFF: threshold, predicted, or safety stop
 ```
 
-## Scale and prediction
+## Scale stop logic
 
-The firmware uses the existing AcaiaArduinoBLE central BLE connection; it does
-not expose a BLE configuration peripheral. During an automatic extraction, the
-scale session starts with the cycle. A confirmed direct threshold of two fresh
-samples at `target - learned offset` is authoritative after the minimum stop
-time, while the predictor uses regression over the latest accepted samples to
-stop earlier. Abrupt samples are still visible as observed weight but cannot
-enter regression or learning. Post-drip analysis updates the offset only after
-a continuous, anomaly-free control trajectory.
+During an automatic extraction the scale session starts with the cycle. Entry to
+`BREW` is brief (debounce/BLE only) and does not wait for retare or brew-start
+confirmation — those windows run in parallel from shot start.
 
-Automatic Brew by Weight runs two parallel protection windows from shot start
-(`session.startedAtMs`), while the cycle may already be in `BREW`:
+1. **Automatic retare** (if enabled): stable cup load after shot start triggers
+   a second tare without restarting the shot timer.
+2. **Brew start confirmation** (always active for automatic BBW): waits for
+   reliable first drops or times out. Automatic stop by weight is inhibited
+   while retare or confirmation still blocks.
+3. **Brew by weight**: after both windows end, direct threshold and predictive
+   stop are armed immediately.
 
-1. **Automatic retare** (default ON, 4 s window): if a stable load at or above
-   the configured minimum cup weight appears after the initial tare, the
-   firmware sends a second tare without restarting the shot timer. The window
-   ends when retare runs or when the timer expires. Does not delay entry to
-   `BREW`.
-2. **Brew start confirmation** (default 12 s, always ON for automatic BBW):
-   runs in parallel with retare from shot start. Waits for reliable first drops
-   (after retare ended) or times out. Weight-stop protection ends when first
-   drops are detected, when the timeout expires, or when coffee during retare
-   skips confirmation at retare window end.
-3. **Brew by weight**: automatic stop by weight is inhibited while either
-   retare or brew-start confirmation still blocks. After both windows end,
-   weight stop is armed immediately (no separate minimum auto-stop delay).
+Manual stop, CN9 time limits, paddle OFF, and all safety mechanisms remain
+active throughout. Timer-only and manual-no-scale cycles skip retare and
+confirmation. Abrupt or implausible samples are visible as observed weight but
+cannot enter regression or offset learning.
 
-During retare and confirmation, automatic stop by weight is inhibited. Manual
-stop, CN9 time limits, and all safety mechanisms remain active. Timer-only and
-manual cycles ignore both windows. Brew start confirmation cannot be disabled;
-only its duration is configurable (minimum: retare window + 3 s).
+The status API distinguishes BLE connection, stream freshness, control
+authority, observed versus accepted weight, connection generation, packet
+gaps, rejected packets, reconnects, and disconnect reason.
 
-The status API distinguishes BLE connection, stream freshness and control
-authority, and exposes observed versus accepted weight, connection generation,
-packet sequence/gaps, rejected packets, reconnects and disconnect reason.
+## Web UI and Wi-Fi (details)
 
-New configurations use a 1,500 ms rinse gesture and enable both the Bookoo
-combined tare/start command and **Beep on first drops**. The latter sends an
-independent Bookoo-compatible beep when the firmware detects the first coffee
-drops during an automatic extraction; it is ignored in timer-only mode, never
-tares the scale, and cannot change BLE connection state. No beep is emitted
-when the confirmation timeout expires without drops; a later first-drops
-detection still beeps once if enabled.
+See **Web UI, Wi-Fi, and API** under [Main features](#main-features) for
+diagnostics, virtual paddle control, and the full capability list. Operational
+notes:
 
-The default **Scale reminder beep until the physical paddle is switched OFF**
-option emits a safe beep every 15 seconds while the physical paddle GPIO is ON,
-CN9 is open, and the scale is connected. It warns that the paddle was left ON
-after an extraction ends. It is configured from the Web UI and produces sound
-only on scales that support an independent beep command, without taring.
-
-The library pins ArduinoBLE 2.1.0 and contains the robustness improvements
-documented in the [remediation record](docs/audits/AUDIT_REMEDIATION.md). See
-also the
-[AcaiaArduinoBLE robustness audit](docs/audits/ACAIA_ARDUINO_BLE_ROBUSTNESS_AUDIT.md)
-and the
-[Shot Stopper audit](docs/audits/SHOT_STOPPER_ROBUSTNESS_SAFETY_AUDIT.md). The
-remaining unbounded wait in ArduinoBLE's HCI transport is a residual dependency
-risk and must not be treated as a safety guarantee.
-
-## Web UI and Wi-Fi
-
-The [Wi-Fi and Web UI guide](docs/WIFI_WEB_UI_GUIDE.md) describes STA and AP
-modes, authentication, configuration, and recovery. The embedded interface is
-in English and provides monitoring, stop, restart, workflow configuration,
-Wi-Fi configuration, asynchronous scanning, confirmed factory reset, and a
-bounded diagnostic log. Virtual paddle and rinse controls are operational only
-in an opt-in remote build.
-
-The interface cannot change the workflow during an active cycle. It neither
-owns nor directly accesses GPIO, relay, or BLE resources: it sends bounded
-commands to the control loop. A slow HTTP client, scan, DHCP exchange, or NVS
-write therefore should not intentionally block control processing.
-
-Web actions that can close CN9 are **disabled by default**. The UI still
-supports monitoring, configuration, and STOP, which only opens CN9. A
-deliberately enabled build must define `SHOT_STOPPER_ENABLE_REMOTE_CN9=1`; use
-it only on a trusted network and preferably with external K2/feedback. Each
-remote cycle is bound to its session and a non-reusable lease: another session
-may stop it but cannot keep it alive or claim its paddle.
-
-Configuration, NVS, Wi-Fi mutations, and scans use a maintenance reservation.
-The reservation confirms a stable physical paddle OFF and open CN9 before work
-begins; any physical movement cancels it into a safe state. `202` responses
-include a `requestId`, and `GET /api/v1/status` publishes the most recent
-terminal state (`APPLIED`, `PERSISTED`, `FAILED`, or `CANCELED`).
-
-There is no shared factory password. During initial provisioning and after a
-reset, a unique random password is generated, printed to Serial, and stored as
-a hash and salt. Record it before disconnecting the console.
-
-The **CN9 Safety** panel displays supervisor state, the latest fault, Task
-Watchdog health, and whether external hardware is configured.
-`GET /api/v1/status` also publishes generation, timer health, and feedback
-without exposing credentials. The same view shows the maintenance reservation,
-latest command result, maximum loop latency, minimum heap, and dropped BLE
-events.
+- The interface cannot change workflow settings during an active cycle.
+- Web actions that can close CN9 are **disabled by default**; enable only with
+  `SHOT_STOPPER_ENABLE_REMOTE_CN9=1` on a trusted network.
+- Each remote cycle is bound to its session and a non-reusable lease.
+- Configuration, NVS, Wi-Fi, and scan operations use a **maintenance
+  reservation** that requires stable paddle OFF and open CN9; physical movement
+  cancels it.
+- `202` responses include a `requestId`; `GET /api/v1/status` publishes the
+  terminal command state (`APPLIED`, `PERSISTED`, `FAILED`, `CANCELED`).
+- There is no shared factory password: a unique random password is generated at
+  provisioning, printed to Serial once, and stored as hash + salt.
 
 ## Watchdog and CN9 safety
 
@@ -337,13 +408,9 @@ Stopper safety and action states override both operating palettes:
 | Fast red blink | Safety lockout, safety trip, watchdog fault, or safety subsystem unavailable |
 
 Slow, medium, and fast use equal ON/OFF phases of 750, 300, and 125 ms,
-respectively. Typical combinations are therefore immediately distinguishable:
-green + solid green means scale-connected and ready for automatic operation;
-green + slow green means automatic brewing; green + fast green means rinsing;
-green + solid salmon means timer-only mode with a healthy scale; and red +
-salmon means operation without a scale. The complete mapping, legacy behavior,
-and board caveats are documented in
-[Status indicators](docs/STATUS_INDICATORS.md).
+respectively. Typical combinations: green + solid green = scale connected and
+ready for automatic operation; green + slow green = automatic brewing; salmon
+palette = timer-only or manual-no-scale mode; red + any = scale disconnected.
 
 An ESP32-S3 chip does not guarantee an onboard RGB LED. Even Espressif's own
 ESP32-S3-DevKitC-1 revisions differ: the initial revision connects an
@@ -434,11 +501,36 @@ Do not install AcaiaArduinoBLE from Library Manager for this application: the
 audited version is included in `libraries/AcaiaArduinoBLE`, and the build
 command selects it through `--library`.
 
-## Compile
+## Firmware version
 
-From the repository root, build for an ESP32 DevKit V4 with:
+Release version lives in `VERSION` at the repository root (`MAJOR.MINOR.PATCH`).
+Bump it manually when publishing a release. The git commit hash is appended
+automatically on every build (`1.0.0+abc1234`, or `-dirty` with uncommitted
+changes).
+
+Before compiling or running host tests, generate the version header:
 
 ```sh
+./scripts/gen_version.sh
+```
+
+This writes `shotStopper/ShotStopperVersion.h` (gitignored). The installed
+firmware reports the version on Serial boot, in `GET /api/v1/status` as
+`firmwareVersion`, and in the Web UI footer.
+
+To verify a compiled binary without flashing:
+
+```sh
+strings build/esp32/shotStopper.ino.bin | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\+'
+```
+
+## Compile
+
+From the repository root, generate the version header and build for an ESP32
+DevKit V4 with:
+
+```sh
+./scripts/gen_version.sh
 mkdir -p build/esp32
 arduino-cli compile \
   --fqbn esp32:esp32:esp32 \
@@ -449,9 +541,11 @@ arduino-cli compile \
   shotStopper
 ```
 
-For the ESP32-S3 variant, use its FQBN and output directory:
+For the ESP32-S3 variant, generate the version header and use its FQBN and
+output directory:
 
 ```sh
+./scripts/gen_version.sh
 mkdir -p build/esp32-s3
 
 arduino-cli compile --fqbn esp32:esp32:esp32s3 --warnings all \
@@ -504,24 +598,13 @@ Automated tests do not replace electrical, RF, power-loss, or
 
 The stopper suite includes host fault injection for a timeout during `ARMING`,
 GPTimer failure, task watchdog failure, stuck/disconnected feedback, and
-heartbeat faults. CI builds both the base variant and the external safety
-interface for ESP32 and ESP32-S3. Bench and HIL testing of the
-specific circuit remains mandatory before real use.
+heartbeat faults. Bench and HIL testing of the specific circuit remains
+mandatory before real use.
 
 ## Additional documentation
 
-- [Wi-Fi and Web UI guide](docs/WIFI_WEB_UI_GUIDE.md)
 - [Manual test plan](docs/MANUAL_TEST_PLAN.md)
-- [Status indicator mapping](docs/STATUS_INDICATORS.md)
-- [AcaiaArduinoBLE robustness audit](docs/audits/ACAIA_ARDUINO_BLE_ROBUSTNESS_AUDIT.md)
-- [Shot Stopper robustness and safety audit](docs/audits/SHOT_STOPPER_ROBUSTNESS_SAFETY_AUDIT.md)
-- [BLE audit remediation](docs/audits/AUDIT_REMEDIATION.md)
-- [Main implementation plan](docs/plans/IMPLEMENTATION_PLAN.md)
-- [Wi-Fi and Web UI implementation plan](docs/plans/WIFI_WEB_UI_IMPLEMENTATION_PLAN.md)
-- [Watchdog and CN9 safety plan](docs/plans/WATCHDOG_CN9_SAFETY_IMPLEMENTATION_PLAN.md)
-- [Automatic retare and shot confirmation plan](docs/plans/RETARE_CONFIRMATION_IMPLEMENTATION_PLAN.md)
-- [BBW workflow simplification plan](docs/plans/BBW_WORKFLOW_SIMPLIFICATION_PLAN.md)
-- [Local library documentation](libraries/AcaiaArduinoBLE/README.md)
+- [Local AcaiaArduinoBLE library](libraries/AcaiaArduinoBLE/README.md)
 
 ## License and acknowledgements
 

@@ -148,6 +148,13 @@ if (!html.includes('id="shotTable"') ||
     !network.includes('SHOT_LOG_CLEAR_NOT_CONFIRMED')) {
   throw new Error('Shot history UI/API must expose table, CSV export, clear confirmation, and timezone setting');
 }
+if (!html.includes('id="firmwareFooter"') ||
+    !html.includes('firmwareVersion') ||
+    !html.includes('updateFirmwareFooter()') ||
+    !network.includes('\\"firmwareVersion\\"') ||
+    !network.includes('FW_VERSION')) {
+  throw new Error('Firmware version must be exposed in status API and web footer');
+}
 if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
     !html.includes('refreshLog();') ||

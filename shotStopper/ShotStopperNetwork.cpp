@@ -1,4 +1,5 @@
 #include "ShotStopperNetwork.h"
+#include "ShotStopperVersion.h"
 #include "ShotStopperWatchdog.h"
 
 #include "ShotStopperWebAssets.h"
@@ -1906,9 +1907,13 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   char safeScaleProtocol[24] = {};
   sanitizeJsonEmbed(control.scaleProtocol, safeScaleProtocol,
                     sizeof(safeScaleProtocol));
+  char safeFirmwareVersion[32] = {};
+  sanitizeJsonEmbed(FW_VERSION, safeFirmwareVersion,
+                    sizeof(safeFirmwareVersion));
   const int written = snprintf(
       g_statusResponseBuffer, sizeof(g_statusResponseBuffer),
-      "{\"state\":\"%s\",\"stateLabel\":\"%s\",\"relayClosed\":%s,"
+      "{\"firmwareVersion\":\"%s\",\"state\":\"%s\",\"stateLabel\":\"%s\","
+      "\"relayClosed\":%s,"
       "\"physicalPaddleOn\":%s,\"virtualPaddleOn\":%s,"
       "\"remoteControlEnabled\":%s,"
       "\"controlSource\":\"%s\",\"cn9ElapsedMs\":%lu,"
@@ -1972,7 +1977,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"firstDropMs\":%lu,\"retareFlowFirstDetectedAtMs\":%lu,"
       "\"firstDropElapsedMs\":%lu},"
       "\"debugEventsDropped\":%lu}",
-      stopperStateName(control.state), stateLabel(control.state),
+      safeFirmwareVersion, stopperStateName(control.state),
+      stateLabel(control.state),
       control.relayClosed ? "true" : "false",
       control.physicalPaddleOn ? "true" : "false",
       control.virtualPaddleOn ? "true" : "false",

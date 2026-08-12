@@ -29,6 +29,7 @@
 #endif
 
 #include "ShotStopperDomain.h"
+#include "ShotStopperVersion.h"
 #include "ShotStopperHardwareTimer.h"
 #include "ShotStopperIndicators.h"
 #include "ShotStopperResetGuard.h"
@@ -3767,7 +3768,8 @@ void setup() {
   }
 
   Serial.begin(9600);
-  Serial.println("Shot Stopper Micra initializing");
+  Serial.print("Shot Stopper Micra ");
+  Serial.println(FW_VERSION);
   statusIndicatorsReady = initializeStatusIndicators();
   if (!statusIndicatorsReady) {
     Serial.println("Status indicators unavailable; control remains active");
