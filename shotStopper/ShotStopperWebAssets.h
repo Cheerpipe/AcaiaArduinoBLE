@@ -11,7 +11,7 @@ const char SHOT_STOPPER_WEB_UI[] PROGMEM = R"HTML(<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Micra Shot Stopper</title>
 <style>
-body{font-family:system-ui,sans-serif;max-width:760px;margin:1rem auto;padding:0 1rem;color:#111}fieldset{margin:1rem 0;padding:1rem}label{display:block;margin:.55rem 0}input,select,button{font:inherit;padding:.4rem}input[type=number],input[type=text],input[type=password],select{width:18rem;max-width:90%}button{margin:.25rem}.row{display:flex;gap:1rem;flex-wrap:wrap}.statusColumn{display:grid;grid-template-columns:minmax(0,1fr);gap:.75rem}.metric{min-width:0;overflow-wrap:anywhere}.error{color:#a00}.ok{color:#075}.warn{color:#8a4b00}.hidden{display:none}#log{box-sizing:border-box;width:100%;height:15rem;font-family:ui-monospace,monospace;white-space:pre;overflow:auto}small{display:block;color:#555}.fieldHint{display:block;font-size:.82em;color:#666;margin:.1rem 0 .2rem;line-height:1.35;max-width:34rem;font-weight:400}.locked{opacity:.55}dt{font-weight:600}dd{margin:0 0 .5rem}.switchRow{display:flex;align-items:center;gap:.7rem;margin:.55rem 0}.switch{position:relative;display:inline-block;width:5.7rem;height:2.15rem}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding:0 .42rem;border-radius:2rem;background:#9b1c1c;color:#fff;font-weight:700;font-size:.72rem;cursor:pointer;transition:.2s}.slider:before{position:absolute;content:"";height:1.65rem;width:1.65rem;left:.25rem;border-radius:50%;background:#fff;transition:.2s}.switch input:checked+.slider{background:#087f23}.switch input:checked+.slider:before{transform:translateX(3.28rem)}.switch input:focus-visible+.slider{outline:3px solid #2563eb;outline-offset:2px}.switch input:disabled+.slider{cursor:not-allowed;opacity:.48}.switchOn{opacity:.45}.switch input:checked+.slider .switchOn{opacity:1}.switch input:checked+.slider .switchOff{opacity:.45}.switchState{min-width:2.3rem;font-weight:700}
+body{font-family:system-ui,sans-serif;max-width:760px;margin:1rem auto;padding:0 1rem;color:#111}fieldset{margin:1rem 0;padding:1rem}#workflowPanel fieldset{margin:.75rem 0;padding:.75rem;border:1px dashed #ccc}#workflowPanel fieldset legend{font-size:.95em;color:#333}label{display:block;margin:.55rem 0}input,select,button{font:inherit;padding:.4rem}input[type=number],input[type=text],input[type=password],select{width:18rem;max-width:90%}button{margin:.25rem}.row{display:flex;gap:1rem;flex-wrap:wrap}.statusColumn{display:grid;grid-template-columns:minmax(0,1fr);gap:.75rem}.metric{min-width:0;overflow-wrap:anywhere}.error{color:#a00}.ok{color:#075}.warn{color:#8a4b00}.hidden{display:none}#log{box-sizing:border-box;width:100%;height:15rem;font-family:ui-monospace,monospace;white-space:pre;overflow:auto}small{display:block;color:#555}.fieldHint{display:block;font-size:.82em;color:#666;margin:.1rem 0 .2rem;line-height:1.35;max-width:34rem;font-weight:400}.locked{opacity:.55}dt{font-weight:600}dd{margin:0 0 .5rem}.switchRow{display:flex;align-items:center;gap:.7rem;margin:.55rem 0}.switch{position:relative;display:inline-block;width:5.7rem;height:2.15rem}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding:0 .42rem;border-radius:2rem;background:#9b1c1c;color:#fff;font-weight:700;font-size:.72rem;cursor:pointer;transition:.2s}.slider:before{position:absolute;content:"";height:1.65rem;width:1.65rem;left:.25rem;border-radius:50%;background:#fff;transition:.2s}.switch input:checked+.slider{background:#087f23}.switch input:checked+.slider:before{transform:translateX(3.28rem)}.switch input:focus-visible+.slider{outline:3px solid #2563eb;outline-offset:2px}.switch input:disabled+.slider{cursor:not-allowed;opacity:.48}.switchOn{opacity:.45}.switch input:checked+.slider .switchOn{opacity:1}.switch input:checked+.slider .switchOff{opacity:.45}.switchState{min-width:2.3rem;font-weight:700}
 #shotTableWrap{overflow:auto;max-height:16rem;margin:.5rem 0}#shotTable{width:100%;border-collapse:collapse;font-size:.85rem}#shotTable th,#shotTable td{border-bottom:1px solid #ddd;padding:.35rem .4rem;text-align:left;white-space:nowrap}#shotTable th{position:sticky;top:0;background:#fff}
 </style>
 </head>
@@ -51,40 +51,52 @@ body{font-family:system-ui,sans-serif;max-width:760px;margin:1rem auto;padding:0
     <small id="controlPolicy">The physical paddle always has priority. Stop only opens CN9.</small>
   </fieldset>
 
-  <fieldset id="workflowPanel"><legend>Workflow</legend>
+  <fieldset id="workflowPanel"><legend>Configuration</legend>
     <p id="readOnlyNotice">Sign in to edit workflow settings.</p>
     <p id="configLock" class="warn hidden">Configuration is locked while a cycle is active.</p>
-    <div class="row">
-      <label>Target (g)<input id="goalWeightG" type="number" min="10" max="200" required><small class="fieldHint">Stop weight for automatic brew by weight; CN9 opens near this target minus the learned offset.</small></label>
-      <label>Rinse gesture (s)<input id="rinseGestureS" type="number" min="0.1" max="5" step="0.1" required><small class="fieldHint">Maximum paddle ON time that still counts as a rinse when you release the paddle.</small></label>
-      <label>Rinse duration (s)<input id="rinseDurationS" type="number" min="0.5" max="10" step="0.1" required><small class="fieldHint">How long CN9 stays closed after a rinse gesture starts.</small></label>
-      <label>CN9 limit (s)<input id="operationalWallS" type="number" min="5" max="60" step="1" required><small class="fieldHint">Maximum time CN9 may remain closed in any cycle; firmware also enforces a 60 s hard safety cap.</small></label>
-    </div>
-    <label><input id="autoTare" type="checkbox"> Automatic tare<small class="fieldHint">Send an initial tare to the scale when an automatic shot starts.</small></label>
-    <label><input id="timerOnly" type="checkbox"> Timer only; do not stop by weight<small class="fieldHint">Keep tare and timer but disable weight stop and post-shot offset learning.</small></label>
-    <label><input id="canTareStartTimer" type="checkbox"> Bookoo combined command<small class="fieldHint">Use the scale combined tare+start-timer command; requires automatic tare.</small></label>
-    <label><input id="brewConfirmationBeep" type="checkbox"> Beep when coffee starts<small class="fieldHint">Beep once when the first coffee drop is detected on the scale, including during the retare window if extraction starts early. No beep on confirmation timeout alone.</small></label>
-    <label><input id="autoRetare" type="checkbox"> Enable automatic retare<small class="fieldHint">If a cup is placed after shot start, allow one second tare during the retare window.</small></label>
-    <label>Retare window (s)<input id="retareWindowS" type="number" min="0.5" max="10" step="0.1" required><small class="fieldHint">Time after shot start to detect a late cup and retare; ignored when automatic retare is off.</small></label>
-    <label>Minimum cup weight (g)<input id="minimumCupWeightG" type="number" min="1" max="500" step="0.1" required><small class="fieldHint">Minimum stable load treated as a cup for retare only; lighter loads are ignored for retare detection.</small></label>
-    <label>Retare stable samples<input id="retareStabilitySamples" type="number" min="2" max="10" step="1" required><small class="fieldHint">Consecutive stable readings required before retare; higher values reduce false retares.</small></label>
-    <label>Retare stability tolerance (g)<input id="retareStabilityToleranceG" type="number" min="0.1" max="20" step="0.1" required><small class="fieldHint">Maximum weight change allowed between stable readings; lower values require a steadier cup.</small></label>
-    <label>Retare sample gap (s)<input id="retareStabilityMaxGapS" type="number" min="0.1" max="5" step="0.1" required><small class="fieldHint">Maximum time between stable readings; longer gaps restart the stability counter.</small></label>
-    <label>Retare min stable time (s)<input id="retareStabilityMinDurationS" type="number" min="0" max="2" step="0.1" required><small class="fieldHint">Minimum time a stable load must persist before retare; blocks retare on very fast reading bursts. Use 0 to disable.</small></label>
-    <label>Brew start confirmation (s)<input id="confirmationTimeoutS" type="number" min="0.5" max="30" step="0.1" required><small class="fieldHint">Minimum: retare window + 3 s. Confirms extraction started (first drops or timeout). Weight stop stays inhibited until this window ends and retare no longer blocks.</small></label>
-    <label><input id="paddleReturnReminderBeep" type="checkbox"> Scale reminder beep until the physical paddle is switched OFF<small class="fieldHint">Repeat a scale beep while the physical paddle stays ON after CN9 has opened.</small></label>
-    <label>Paddle reminder interval (s)<input id="paddleReturnReminderIntervalS" type="number" min="5" max="60" step="1" required><small class="fieldHint">Time between paddle-return reminder beeps.</small></label>
-    <label>Paddle reminder limit (s)<input id="paddleReturnReminderMaxDurationS" type="number" min="60" max="3600" step="1" required><small class="fieldHint">Stop reminder beeps after this duration even if the paddle remains ON.</small></label>
-    <label>Timezone <select id="timezoneOffsetMinutes"></select></label>
-    <label>NTP server <select id="ntpServerPreset"><option value="pool">pool.ntp.org</option><option value="google">time.google.com</option><option value="cloudflare">time.cloudflare.com</option><option value="nist">time.nist.gov</option></select></label>
-    <label>Custom NTP (optional) <input id="ntpServerCustom" type="text" maxlength="63" placeholder="e.g. ntp.example.com"></label>
-    <button class="mutable authenticatedOnly hidden" id="syncTimeButton">Sync now</button>
+    <fieldset><legend>Brew &amp; weight</legend>
+      <div class="row">
+        <label>Target (g)<input id="goalWeightG" type="number" min="10" max="200" required><small class="fieldHint">Stop weight for automatic brew by weight; CN9 opens near this target minus the learned offset.</small></label>
+        <label>CN9 limit (s)<input id="operationalWallS" type="number" min="5" max="60" step="1" required><small class="fieldHint">Maximum time CN9 may remain closed in any cycle; firmware also enforces a 60 s hard safety cap.</small></label>
+      </div>
+      <label>Brew start confirmation (s)<input id="confirmationTimeoutS" type="number" min="0.5" max="30" step="0.1" required><small class="fieldHint">Minimum: retare window + 3 s. Confirms extraction started (first drops or timeout). Weight stop stays inhibited until this window ends and retare no longer blocks.</small></label>
+    </fieldset>
+    <fieldset><legend>Rinse</legend>
+      <div class="row">
+        <label>Rinse gesture (s)<input id="rinseGestureS" type="number" min="0.1" max="5" step="0.1" required><small class="fieldHint">Maximum paddle ON time that still counts as a rinse when you release the paddle.</small></label>
+        <label>Rinse duration (s)<input id="rinseDurationS" type="number" min="0.5" max="10" step="0.1" required><small class="fieldHint">How long CN9 stays closed after a rinse gesture starts.</small></label>
+      </div>
+    </fieldset>
+    <fieldset><legend>Scale &amp; retare</legend>
+      <label><input id="autoTare" type="checkbox"> Automatic tare<small class="fieldHint">Send an initial tare to the scale when an automatic shot starts.</small></label>
+      <label><input id="timerOnly" type="checkbox"> Timer only; do not stop by weight<small class="fieldHint">Keep tare and timer but disable weight stop and post-shot offset learning.</small></label>
+      <label><input id="canTareStartTimer" type="checkbox"> Bookoo combined command<small class="fieldHint">Use the scale combined tare+start-timer command; requires automatic tare.</small></label>
+      <label><input id="autoRetare" type="checkbox"> Enable automatic retare<small class="fieldHint">If a cup is placed after shot start, allow one second tare during the retare window.</small></label>
+      <label>Retare window (s)<input id="retareWindowS" type="number" min="0.5" max="10" step="0.1" required><small class="fieldHint">Time after shot start to detect a late cup and retare; ignored when automatic retare is off.</small></label>
+      <label>Minimum cup weight (g)<input id="minimumCupWeightG" type="number" min="1" max="500" step="0.1" required><small class="fieldHint">Minimum stable load treated as a cup for retare only; lighter loads are ignored for retare detection.</small></label>
+      <label>Retare stable samples<input id="retareStabilitySamples" type="number" min="2" max="10" step="1" required><small class="fieldHint">Consecutive stable readings required before retare; higher values reduce false retares.</small></label>
+      <label>Retare stability tolerance (g)<input id="retareStabilityToleranceG" type="number" min="0.1" max="20" step="0.1" required><small class="fieldHint">Maximum weight change allowed between stable readings; lower values require a steadier cup.</small></label>
+      <label>Retare sample gap (s)<input id="retareStabilityMaxGapS" type="number" min="0.1" max="5" step="0.1" required><small class="fieldHint">Maximum time between stable readings; longer gaps restart the stability counter.</small></label>
+      <label>Retare min stable time (s)<input id="retareStabilityMinDurationS" type="number" min="0" max="2" step="0.1" required><small class="fieldHint">Minimum time a stable load must persist before retare; blocks retare on very fast reading bursts. Use 0 to disable.</small></label>
+    </fieldset>
+    <fieldset><legend>Alerts &amp; reminders</legend>
+      <label><input id="brewConfirmationBeep" type="checkbox"> Beep when coffee starts<small class="fieldHint">Beep once when the first coffee drop is detected on the scale, including during the retare window if extraction starts early. No beep on confirmation timeout alone.</small></label>
+      <label><input id="paddleReturnReminderBeep" type="checkbox"> Scale reminder beep until the physical paddle is switched OFF<small class="fieldHint">Repeat a scale beep while the physical paddle stays ON after CN9 has opened.</small></label>
+      <label>Paddle reminder interval (s)<input id="paddleReturnReminderIntervalS" type="number" min="5" max="60" step="1" required><small class="fieldHint">Time between paddle-return reminder beeps.</small></label>
+      <label>Paddle reminder limit (s)<input id="paddleReturnReminderMaxDurationS" type="number" min="60" max="3600" step="1" required><small class="fieldHint">Stop reminder beeps after this duration even if the paddle remains ON.</small></label>
+    </fieldset>
+    <fieldset><legend>Date &amp; time</legend>
+      <label>Timezone <select id="timezoneOffsetMinutes"></select></label>
+      <label>NTP server <select id="ntpServerPreset"><option value="pool">pool.ntp.org</option><option value="google">time.google.com</option><option value="cloudflare">time.cloudflare.com</option><option value="nist">time.nist.gov</option></select></label>
+      <label>Custom NTP (optional) <input id="ntpServerCustom" type="text" maxlength="63" placeholder="e.g. ntp.example.com"></label>
+      <button class="mutable authenticatedOnly hidden" id="syncTimeButton">Sync now</button>
+    </fieldset>
     <button class="mutable authenticatedOnly hidden" id="saveConfigButton">Save settings</button>
     <button class="mutable authenticatedOnly hidden" id="resetCalibrationButton">Reset learned stop offset (1.5 g)</button>
     <small>Required: rinse gesture &lt; CN9 limit ≤ 60 s; retare window + brew start confirmation ≤ CN9 limit.</small>
   </fieldset>
 
-  <fieldset id="networkPanel" class="authenticatedOnly hidden"><legend>Wi-Fi STA network</legend>
+  <fieldset id="networkPanel" class="authenticatedOnly hidden"><legend>Wi-Fi connection</legend>
     <div id="networkStatus">—</div>
     <button class="mutable" id="scanNetworkButton">Scan networks</button>
     <span id="scanStatus"></span>
@@ -97,7 +109,7 @@ body{font-family:system-ui,sans-serif;max-width:760px;margin:1rem auto;padding:0
     <small>Scanning runs only while Ready and is cancelled when a cycle starts. The SSID field supports hidden networks.</small>
   </fieldset>
 
-  <fieldset id="accessPointPanel" class="authenticatedOnly hidden"><legend>Access point</legend>
+  <fieldset id="accessPointPanel" class="authenticatedOnly hidden"><legend>Web UI password</legend>
     <div id="apStatus">MicraShotStopperAP — 192.168.4.1</div>
     <label>Current password <input id="currentApPassword" type="password" maxlength="63"></label>
     <label>New password <input id="newApPassword" type="password" minlength="8" maxlength="63"></label>
