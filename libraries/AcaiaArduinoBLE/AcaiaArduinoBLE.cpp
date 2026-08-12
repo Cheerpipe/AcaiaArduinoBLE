@@ -413,6 +413,19 @@ bool AcaiaArduinoBLE::isConnected() {
     return true;
 }
 
+const char* AcaiaArduinoBLE::connectedProtocolName() const {
+    if (!_connected) {
+        return "none";
+    }
+    switch (_type) {
+        case OLD: return "acaia_legacy";
+        case NEW: return "acaia";
+        case GENERIC: return "bookoo_generic";
+        case FELICITA: return "felicita";
+    }
+    return "unknown";
+}
+
 bool AcaiaArduinoBLE::newWeightAvailable() {
     if (!isConnected()) {
         return false;

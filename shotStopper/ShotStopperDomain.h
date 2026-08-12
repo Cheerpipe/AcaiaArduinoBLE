@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "ShotStopperSafety.h"
+#include "ShotStopperHwmon.h"
 
 namespace shotstopper {
 
@@ -679,11 +680,18 @@ struct ControlStatusSnapshot {
   uint32_t scaleEventsDropped = 0;
   RuntimeConfig config = {};
   LastCycleSummary lastCycle = {};
+  HwmonSnapshot hwmon = {};
   uint32_t debugEventsDropped = 0;
   bool cycleFlowDuringRetare = false;
+  bool cycleRetarePerformed = false;
+  bool cycleStartedWithScale = false;
+  bool cycleConfirmedBrew = false;
+  bool cycleTimerOnly = false;
   uint32_t cycleFirstDropMs = 0;
   uint32_t cycleRetareFlowFirstDetectedAtMs = 0;
   uint32_t cycleStartedAtMs = 0;
+  uint32_t cycleElapsedMs = 0;
+  char scaleProtocol[20] = "none";
 };
 
 inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {

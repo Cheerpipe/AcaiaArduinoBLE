@@ -36,6 +36,7 @@
 #include "ShotStopperShotLog.h"
 #include "ShotStopperTime.h"
 #include "ShotStopperWatchdog.h"
+#include "ShotStopperHwmon.h"
 
 using namespace shotstopper;
 
@@ -403,6 +404,7 @@ uint32_t scalePacketGaps = 0;
 uint32_t scaleRejectedPackets = 0;
 uint32_t scaleReconnects = 0;
 uint8_t scaleLastDisconnectReason = 0;
+char scaleProtocolName[20] = "none";
 uint32_t scaleWorkerProgressAtMs = 0;
 uint32_t scaleEventsDropped = 0;
 uint32_t scaleWorkerStackMinWords = 0;
@@ -452,6 +454,8 @@ uint32_t healthTelemetryAtMs = 0;
 uint32_t freeHeapBytes = 0;
 uint32_t minimumFreeHeapBytes = 0;
 uint32_t largestFreeHeapBlockBytes = 0;
+Hwmon hwmon;
+HwmonSnapshot hwmonSnapshot = {};
 bool platformClockReady = false;
 bool persistenceReady = false;
 bool bleStackReady = false;
@@ -503,6 +507,7 @@ struct ScaleLinkSnapshot {
   uint32_t reconnects;
   uint8_t lastDisconnectReason;
   uint32_t workerProgressAtMs;
+  char protocolName[20];
 };
 
 struct StatusIndicatorFrame {
@@ -572,7 +577,7 @@ bool enqueueWebCommand(const WebCommand &command) {
 }
 
 ScaleLinkSnapshot getScaleLinkSnapshot() {
-  ScaleLinkSnapshot snapshot;
+  ScaleLinkSnapshot snapshot = {};
   portENTER_CRITICAL(&scaleLinkMux);
   snapshot.state = scaleLinkState;
   snapshot.disconnectSequence = scaleDisconnectSequence;
@@ -583,6 +588,7 @@ ScaleLinkSnapshot getScaleLinkSnapshot() {
   snapshot.reconnects = scaleReconnects;
   snapshot.lastDisconnectReason = scaleLastDisconnectReason;
   snapshot.workerProgressAtMs = scaleWorkerProgressAtMs;
+  memcpy(snapshot.protocolName, scaleProtocolName, sizeof(snapshot.protocolName));
   portEXIT_CRITICAL(&scaleLinkMux);
   return snapshot;
 }
@@ -2284,6 +2290,9 @@ void updateWorkerLinkState() {
   scaleReconnects = scale.reconnectCount();
   scaleLastDisconnectReason =
       static_cast<uint8_t>(scale.lastDisconnectReason());
+  strncpy(scaleProtocolName, scale.connectedProtocolName(),
+          sizeof(scaleProtocolName) - 1);
+  scaleProtocolName[sizeof(scaleProtocolName) - 1] = '\0';
   portEXIT_CRITICAL(&scaleLinkMux);
   setScaleLinkState(scale.isConnected() ? ScaleLinkState::CONNECTED
                                         : ScaleLinkState::DISCONNECTED);
@@ -3594,15 +3603,24 @@ void publishControlStatus() {
   next.freeHeapBytes = freeHeapBytes;
   next.minimumFreeHeapBytes = minimumFreeHeapBytes;
   next.largestFreeHeapBlockBytes = largestFreeHeapBlockBytes;
+  next.hwmon = hwmonSnapshot;
   next.scaleEventsDropped = scaleEventsDropped;
   next.config = runtimeConfig;
   next.lastCycle = lastCycle;
+  strncpy(next.scaleProtocol, scaleLink.protocolName,
+          sizeof(next.scaleProtocol) - 1);
+  next.scaleProtocol[sizeof(next.scaleProtocol) - 1] = '\0';
   if (session.active) {
     next.cycleFlowDuringRetare = session.flowDuringRetare;
+    next.cycleRetarePerformed = session.retarePerformed;
+    next.cycleStartedWithScale = session.startedWithScale;
+    next.cycleConfirmedBrew = shot.confirmedBrew;
+    next.cycleTimerOnly = session.config.timerOnly;
     next.cycleFirstDropMs = session.firstDropMs;
     next.cycleRetareFlowFirstDetectedAtMs =
         session.retareFlowFirstDetectedAtMs;
     next.cycleStartedAtMs = session.startedAtMs;
+    next.cycleElapsedMs = elapsedMs(session.startedAtMs);
   }
   portENTER_CRITICAL(&debugLogMux);
   next.debugEventsDropped = debugLog.overwritten();
@@ -3834,6 +3852,7 @@ void setup() {
     Serial.println("Web command queue unavailable; web control disabled");
   }
 
+  hwmonSnapshot = hwmon.sample(1);
   publishControlStatus();
 #ifndef SHOT_STOPPER_HOST_TEST
   if (settingsReady && webCommandQueue != nullptr) {
@@ -3869,6 +3888,7 @@ void loop() {
   }
   lastLoopAtMs = loopStartedAtMs;
   if (elapsedMs(healthTelemetryAtMs) >= HEALTH_TELEMETRY_INTERVAL_MS) {
+    const uint32_t intervalMs = elapsedMs(healthTelemetryAtMs);
     healthTelemetryAtMs = loopStartedAtMs;
     loopStackMinWords =
         static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
@@ -3878,6 +3898,8 @@ void loop() {
     largestFreeHeapBlockBytes =
         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
 #endif
+    hwmonSnapshot = hwmon.sample(intervalMs > 0U ? intervalMs
+                                                 : HEALTH_TELEMETRY_INTERVAL_MS);
   }
   // Relay and paddle control never wait for BLE. The worker owns every scale,
   // heartbeat, packet, timer and connection operation.
@@ -3913,6 +3935,7 @@ void loop() {
   serviceMaintenanceLease();
   publishControlStatus();
   updateStatusIndicators();
+  hwmon.noteLoopBusyMs(elapsedMs(loopStartedAtMs));
   if (!feedCurrentTaskWatchdog()) {
     reportTaskWatchdogFault();
     tripRelaySafety(RelaySafetyFault::TASK_WATCHDOG_FAILURE);

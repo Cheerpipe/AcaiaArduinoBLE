@@ -20,8 +20,8 @@ if (!scriptMatch) throw new Error('Embedded script not found');
 // Parse the exact JavaScript delivered by the controller.
 new Function(scriptMatch[1]);
 
-if (Buffer.byteLength(html, 'utf8') > 32768) {
-  throw new Error('Web UI exceeds the 32 KiB asset budget');
+if (Buffer.byteLength(html, 'utf8') > 40960) {
+  throw new Error('Web UI exceeds the 40 KiB asset budget');
 }
 if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
     !html.includes('Paddle State') || !html.includes('brewConfirmationBeep') ||
@@ -76,22 +76,51 @@ if (!html.includes('authenticatedOnly') || !html.includes('Read-only view') ||
     !network.includes('Status intentionally has no authentication requirement')) {
   throw new Error('Web UI must expose a public read-only mode and reload after authenticated sign-in');
 }
-const statusSection = html.match(/<fieldset><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
+const statusSection = html.match(/<fieldset[^>]*><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     statusSection[1].includes('class="row"') ||
-    (statusSection[1].match(/class="metric"/g) || []).length !== 14 ||
+    (statusSection[1].match(/class="metric"/g) || []).length !== 17 ||
     !html.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'")) {
   throw new Error('Status must use one metric per row and homologate Paddle/CN9 OPEN/OFF and CLOSED/ON labels');
 }
-if (!html.includes('remoteReady&&authenticated()') ||
+if (!html.includes('id="shotPanel"') ||
+    !html.includes('id="shotBar"') ||
+    !html.includes('id="shotElapsed"') ||
+    !html.includes('id="shotFirstDrop"') ||
+    !html.includes('id="shotRetare"') ||
+    !html.includes('id="shotCurrentWeight"') ||
+    !html.includes('id="shotGoalWeight"') ||
+    !html.includes('id="shotType"') ||
+    !html.includes('id="shotScale"') ||
+    !html.includes('function updateShot(') ||
+    !network.includes('elapsedMs') ||
+    !network.includes('retarePerformed') ||
+    !network.includes('shotType') ||
+    !network.includes('scaleProtocol') ||
+    !network.includes('safeScaleProtocol') ||
+    !html.includes('remoteReady&&authenticated()') ||
     !html.includes('Remote CN9 actuation is disabled by firmware policy') ||
     !network.includes('\\"remoteControlEnabled\\"') ||
     !network.includes('\\"lastCommand\\"') ||
     !network.includes('\\"maintenance\\"') ||
     !network.includes('\\"cycle\\"') ||
     !network.includes('flowDuringRetare') ||
-    !html.includes('id="cycleDebug"')) {
-  throw new Error('Web UI must enforce and display remote policy, maintenance, and durable command state');
+    !html.includes('updateShot(s)')) {
+  throw new Error('Web UI must enforce remote policy, maintenance, durable command state, and live shot status');
+}
+if (!html.includes('id="hCpu"') ||
+    !html.includes('id="hTemp"') ||
+    !html.includes('id="hTPeak"') ||
+    !html.includes('id="hRamT"') ||
+    !html.includes('id="hRamU"') ||
+    !html.includes('id="hRamF"') ||
+    !html.includes('function updH(') ||
+    !html.includes('s.health?.hwmon') ||
+    !network.includes('\\"hwmon\\"') ||
+    !network.includes('cpuUsagePct') ||
+    !network.includes('tempPeakC') ||
+    !network.includes('ramTotalBytes')) {
+  throw new Error('Diagnostics must expose basic hwmon metrics in UI and status API');
 }
 if (!html.includes('id="shotTable"') ||
     !html.includes('id="exportShotsButton"') ||
@@ -106,7 +135,7 @@ if (!html.includes('id="shotTable"') ||
     !network.includes('SHOT_LOG_CLEAR_NOT_CONFIRMED')) {
   throw new Error('Shot history UI/API must expose table, CSV export, clear confirmation, and timezone setting');
 }
-if (!/<fieldset><legend>Log<\/legend>/.test(html) ||
+if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
     !html.includes('refreshLog();') ||
     !html.includes('setInterval(()=>refreshLog(),3000)')) {

@@ -221,6 +221,9 @@ class AcaiaArduinoBLE {
   float getWeight() const { return weight; }
   bool heartbeatRequired() const { return heartbeatRequiredValue; }
   bool isConnected() const { return connected; }
+  const char* connectedProtocolName() const {
+    return connected ? "bookoo_generic" : "none";
+  }
   bool newWeightAvailable() {
     ++newWeightAvailableCalls;
     const bool available = newWeightAvailableValue;

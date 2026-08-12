@@ -87,6 +87,7 @@ class AcaiaArduinoBLE {
         bool heartbeatRequired() const;
         bool isConnected();
         bool newWeightAvailable();
+        const char* connectedProtocolName() const;
 
         AcaiaDisconnectReason lastDisconnectReason() const;
         const char* lastDisconnectReasonName() const;

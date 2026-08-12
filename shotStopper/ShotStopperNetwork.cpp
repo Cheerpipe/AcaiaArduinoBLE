@@ -1816,6 +1816,18 @@ const char *ShotStopperNetwork::controlSourceName(ControlSource source) {
   return "unknown";
 }
 
+const char *activeCycleShotTypeLabel(const ControlStatusSnapshot &control) {
+  if (!control.activeCycle) {
+    return "idle";
+  }
+  if (control.state == StopperState::RINSE) {
+    return "rinse";
+  }
+  return shotLogTypeName(shotLogTypeFromCycle(
+      control.state, control.cycleStartedWithScale, control.cycleTimerOnly,
+      control.cycleConfirmedBrew));
+}
+
 const char *ShotStopperNetwork::endReasonName(EndReason reason) {
   switch (reason) {
     case EndReason::NONE: return "NONE";
@@ -1891,6 +1903,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
                     sizeof(safeNtpCustom));
   sanitizeJsonEmbed(timeStatus.activeServer, safeActiveServer,
                     sizeof(safeActiveServer));
+  char safeScaleProtocol[24] = {};
+  sanitizeJsonEmbed(control.scaleProtocol, safeScaleProtocol,
+                    sizeof(safeScaleProtocol));
   const int written = snprintf(
       g_statusResponseBuffer, sizeof(g_statusResponseBuffer),
       "{\"state\":\"%s\",\"stateLabel\":\"%s\",\"relayClosed\":%s,"
@@ -1906,7 +1921,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"maintenance\":{\"active\":%s,\"leaseId\":%lu,"
       "\"startedAtMs\":%lu},"
       "\"configMutable\":%s,\"config\":{\"revision\":%lu,"
-      "\"goalWeightG\":%u,\"autoTare\":%s,\"timerOnly\":%s,"
+      "\"goalWeightG\":%u,\"weightOffsetG\":%.2f,\"autoTare\":%s,\"timerOnly\":%s,"
       "\"canTareStartTimer\":%s,\"brewConfirmationBeep\":%s,"
       "\"paddleReturnReminderBeep\":%s,"
       "\"paddleReturnReminderIntervalMs\":%lu,"
@@ -1925,7 +1940,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
       "\"nextRetryInMs\":%lu,\"consecutiveFailures\":%u,"
       "\"activeServer\":\"%s\"},"
-      "\"scale\":{\"available\":%s,\"streamState\":\"%s\","
+      "\"scale\":{\"available\":%s,\"protocol\":\"%s\",\"streamState\":\"%s\","
       "\"controlState\":\"%s\",\"controlAccepted\":%s,"
       "\"currentWeightG\":%s,"
       "\"weightAgeMs\":%lu,\"observedWeightG\":%s,"
@@ -1946,9 +1961,14 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"health\":{\"loopMaxGapMs\":%lu,"
       "\"loopStackMinWords\":%lu,\"scaleStackMinWords\":%lu,"
       "\"freeHeapBytes\":%lu,\"minimumFreeHeapBytes\":%lu,"
-      "\"largestFreeHeapBlockBytes\":%lu},"
+      "\"largestFreeHeapBlockBytes\":%lu,"
+      "\"hwmon\":{\"cpuUsagePct\":%u,\"tempValid\":%s,"
+      "\"tempC\":%.1f,\"tempPeakC\":%.1f,"
+      "\"ramTotalBytes\":%lu,\"ramUsedBytes\":%lu,"
+      "\"ramFreeBytes\":%lu}},"
       "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"},"
-      "\"cycle\":{\"active\":%s,\"id\":%lu,\"flowDuringRetare\":%s,"
+      "\"cycle\":{\"active\":%s,\"id\":%lu,\"elapsedMs\":%lu,"
+      "\"retarePerformed\":%s,\"shotType\":\"%s\",\"flowDuringRetare\":%s,"
       "\"firstDropMs\":%lu,\"retareFlowFirstDetectedAtMs\":%lu,"
       "\"firstDropElapsedMs\":%lu},"
       "\"debugEventsDropped\":%lu}",
@@ -1976,6 +1996,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       controlAllowsConfiguration(control) ? "true" : "false",
       static_cast<unsigned long>(control.config.revision),
       static_cast<unsigned>(control.config.goalWeightG),
+      static_cast<double>(control.config.weightOffsetG),
       control.config.autoTare ? "true" : "false",
       control.config.timerOnly ? "true" : "false",
       control.config.canTareStartTimer ? "true" : "false",
@@ -2005,7 +2026,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(timeStatus.nextRetryInMs),
       static_cast<unsigned>(timeStatus.consecutiveFailures),
       safeActiveServer,
-      control.scaleAvailable ? "true" : "false",
+      control.scaleAvailable ? "true" : "false", safeScaleProtocol,
       weightStreamStateName(control.weightStreamState),
       weightControlStateName(control.weightControlState),
       control.currentWeightValid ? "true" : "false", currentWeight,
@@ -2040,10 +2061,21 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(control.freeHeapBytes),
       static_cast<unsigned long>(control.minimumFreeHeapBytes),
       static_cast<unsigned long>(control.largestFreeHeapBlockBytes),
+      static_cast<unsigned>(control.hwmon.cpuUsagePct),
+      control.hwmon.tempValid ? "true" : "false",
+      static_cast<double>(control.hwmon.tempC),
+      static_cast<double>(control.hwmon.tempPeakC),
+      static_cast<unsigned long>(control.hwmon.ramTotalBytes),
+      static_cast<unsigned long>(control.hwmon.ramUsedBytes),
+      static_cast<unsigned long>(control.hwmon.ramFreeBytes),
       static_cast<unsigned long>(network.lastCommandRequestId),
       commandResultStateName(network.lastCommandState),
       control.activeCycle ? "true" : "false",
       static_cast<unsigned long>(control.cycleId),
+      static_cast<unsigned long>(
+          control.activeCycle ? control.cycleElapsedMs : 0U),
+      control.cycleRetarePerformed ? "true" : "false",
+      activeCycleShotTypeLabel(control),
       control.cycleFlowDuringRetare ? "true" : "false",
       static_cast<unsigned long>(control.cycleFirstDropMs),
       static_cast<unsigned long>(control.cycleRetareFlowFirstDetectedAtMs),
