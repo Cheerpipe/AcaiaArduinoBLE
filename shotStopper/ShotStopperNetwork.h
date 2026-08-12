@@ -227,6 +227,7 @@ class ShotStopperNetwork {
   static esp_err_t timeSyncHandler(httpd_req_t *request);
   static esp_err_t configHandler(httpd_req_t *request);
   static esp_err_t resetCalibrationHandler(httpd_req_t *request);
+  static esp_err_t resetGuardSamplesHandler(httpd_req_t *request);
   static esp_err_t paddleHandler(httpd_req_t *request);
   static esp_err_t rinseHandler(httpd_req_t *request);
   static esp_err_t stopHandler(httpd_req_t *request);

@@ -123,6 +123,21 @@ if (!html.includes('id="shotPanel"') ||
     !html.includes('updateShot(s)')) {
   throw new Error('Web UI must enforce remote policy, maintenance, durable command state, and live shot status');
 }
+if (!html.includes('id="autoToManualGuardEnabled"') ||
+    !html.includes('id="autoToManualGuardLimitMode"') ||
+    !html.includes('id="autoToManualGuardManualLimitS"') ||
+    !html.includes('id="autoToManualGuardTrendS"') ||
+    !html.includes('id="resetGuardSamplesButton"') ||
+    !html.includes('A→M ·') ||
+    !html.includes('actual_weight_source') ||
+    !network.includes('autoToManualGuardEnabled') ||
+    !network.includes('autoToManualGuardTrendMs') ||
+    !network.includes('autoToManualGuardEnforced') ||
+    !network.includes('actualWeightSource') ||
+    !network.includes('reset-guard-samples') ||
+    !network.includes('AUTO_TO_MANUAL_GUARD')) {
+  throw new Error('Auto-to-manual time guard must be wired in config UI, live panel, shots API, and routes');
+}
 if (!html.includes('id="hCpu"') ||
     !html.includes('id="hUptime"') ||
     !html.includes('id="hResetReason"') ||
@@ -190,6 +205,7 @@ const expected = new Map([
   ['GET /api/v1/log', 'logHandler'],
   ['POST /api/v1/config', 'configHandler'],
   ['POST /api/v1/calibration/reset', 'resetCalibrationHandler'],
+  ['POST /api/v1/calibration/reset-guard-samples', 'resetGuardSamplesHandler'],
   ['POST /api/v1/control/paddle', 'paddleHandler'],
   ['POST /api/v1/control/rinse', 'rinseHandler'],
   ['POST /api/v1/control/stop', 'stopHandler'],

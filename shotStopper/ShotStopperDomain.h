@@ -11,8 +11,9 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 13;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 12;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 14;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 13;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V12 = 12;
 constexpr size_t NTP_SERVER_HOST_CAPACITY = 64;
 constexpr uint32_t NTP_RESYNC_INTERVAL_MS = 3600UL * 1000UL;
 constexpr uint32_t NTP_UNSYNCED_RETRY_MS = 60UL * 1000UL;
@@ -116,6 +117,11 @@ constexpr uint32_t MIN_MIN_BREW_TIME_MS = 5000;
 constexpr uint32_t MAX_MIN_BREW_TIME_MS = 55000;
 constexpr float MAX_OFFSET_G = 5.0f;
 constexpr float DEFAULT_WEIGHT_OFFSET_G = 1.5f;
+constexpr size_t AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT = 5;
+constexpr uint16_t AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS = 300;  // 30.0 s
+constexpr uint32_t DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS = 30000;
+constexpr uint32_t MIN_AUTO_TO_MANUAL_GUARD_LIMIT_MS = 10000;
+constexpr float AUTO_TO_MANUAL_GUARD_SAMPLE_MAX_ERROR_RATIO = 0.10f;
 constexpr size_t WIFI_SSID_CAPACITY = 33;
 constexpr size_t WIFI_PASSWORD_CAPACITY = 64;
 constexpr size_t WEB_COMMAND_QUEUE_LENGTH = 8;
@@ -223,8 +229,99 @@ enum class EndReason : uint8_t {
   WEB_HEARTBEAT_TIMEOUT,
   RELAY_SAFETY_FAILURE,
   FAST_EXTRACTION_MAX_WEIGHT,
-  FAST_EXTRACTION_MIN_TIME
+  FAST_EXTRACTION_MIN_TIME,
+  AUTO_TO_MANUAL_GUARD
 };
+
+enum class AutoToManualGuardLimitMode : uint8_t {
+  MANUAL = 0,
+  AUTO = 1
+};
+
+enum class ActualWeightSource : uint8_t {
+  NONE = 0,
+  POST_DRIP = 1,
+  LAST_KNOWN = 2
+};
+
+inline void resetAutoToManualGuardSamples(
+    uint16_t samples[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT]) {
+  for (size_t index = 0; index < AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT; ++index) {
+    samples[index] = AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS;
+  }
+}
+
+// Linear least-squares trend over x=0..4, predict x=5 (one step ahead).
+inline uint32_t autoToManualGuardTrendMs(
+    const uint16_t samples[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT],
+    uint32_t operationalWallMs) {
+  // With n=5 and x=0..4: meanX=2, sum((x-meanX)^2)=10.
+  constexpr float meanX = 2.0f;
+  constexpr float denom = 10.0f;
+  float sumY = 0.0f;
+  for (size_t index = 0; index < AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT; ++index) {
+    sumY += static_cast<float>(samples[index]);
+  }
+  const float meanY = sumY / static_cast<float>(AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT);
+  float numer = 0.0f;
+  for (size_t index = 0; index < AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT; ++index) {
+    const float dx = static_cast<float>(index) - meanX;
+    numer += dx * (static_cast<float>(samples[index]) - meanY);
+  }
+  const float slope = numer / denom;
+  const float predictedDs = meanY + slope * (5.0f - meanX);
+  if (!isfinite(predictedDs)) {
+    return DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
+  }
+  float predictedMs = predictedDs * 100.0f;
+  if (predictedMs < static_cast<float>(MIN_AUTO_TO_MANUAL_GUARD_LIMIT_MS)) {
+    predictedMs = static_cast<float>(MIN_AUTO_TO_MANUAL_GUARD_LIMIT_MS);
+  }
+  const uint32_t wallCap =
+      operationalWallMs < MIN_AUTO_TO_MANUAL_GUARD_LIMIT_MS
+          ? MIN_AUTO_TO_MANUAL_GUARD_LIMIT_MS
+          : operationalWallMs;
+  if (predictedMs > static_cast<float>(wallCap)) {
+    predictedMs = static_cast<float>(wallCap);
+  }
+  return static_cast<uint32_t>(predictedMs + 0.5f);
+}
+
+inline uint32_t autoToManualGuardLimitMs(
+    bool enabled, AutoToManualGuardLimitMode mode, uint32_t manualLimitMs,
+    const uint16_t samples[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT],
+    uint32_t operationalWallMs) {
+  (void)enabled;
+  uint32_t limitMs =
+      mode == AutoToManualGuardLimitMode::MANUAL
+          ? manualLimitMs
+          : autoToManualGuardTrendMs(samples, operationalWallMs);
+  if (limitMs < MIN_AUTO_TO_MANUAL_GUARD_LIMIT_MS) {
+    limitMs = MIN_AUTO_TO_MANUAL_GUARD_LIMIT_MS;
+  }
+  if (limitMs > operationalWallMs) {
+    limitMs = operationalWallMs;
+  }
+  return limitMs;
+}
+
+inline bool autoToManualGuardSampleErrorOk(float actualWeightG,
+                                           uint8_t goalWeightG) {
+  if (!isfinite(actualWeightG) || goalWeightG == 0) {
+    return false;
+  }
+  const float goal = static_cast<float>(goalWeightG);
+  return fabsf(actualWeightG - goal) <=
+         goal * AUTO_TO_MANUAL_GUARD_SAMPLE_MAX_ERROR_RATIO;
+}
+
+inline void pushAutoToManualGuardSample(
+    uint16_t samples[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT], uint16_t durationDs) {
+  for (size_t index = 1; index < AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT; ++index) {
+    samples[index - 1] = samples[index];
+  }
+  samples[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT - 1] = durationDs;
+}
 
 struct RuntimeConfig {
   uint32_t revision = 1;
@@ -258,6 +355,17 @@ struct RuntimeConfig {
   bool fastExtractionGuardEnabled = false;
   float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
   uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
+  bool autoToManualGuardEnabled = true;
+  uint8_t autoToManualGuardLimitMode =
+      static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
+  uint32_t autoToManualGuardManualLimitMs =
+      DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
+  uint16_t autoToManualGuardSamplesDs[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT] = {
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS};
 };
 
 struct CycleConfigSnapshot {
@@ -287,6 +395,11 @@ struct CycleConfigSnapshot {
   bool fastExtractionGuardEnabled = false;
   float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
   uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
+  bool autoToManualGuardEnabled = true;
+  uint8_t autoToManualGuardLimitMode =
+      static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
+  uint32_t autoToManualGuardManualLimitMs =
+      DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
 };
 
 inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
@@ -317,6 +430,10 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.fastExtractionGuardEnabled = config.fastExtractionGuardEnabled;
   snapshot.maxRecoveryWeightG = config.maxRecoveryWeightG;
   snapshot.minBrewTimeMs = config.minBrewTimeMs;
+  snapshot.autoToManualGuardEnabled = config.autoToManualGuardEnabled;
+  snapshot.autoToManualGuardLimitMode = config.autoToManualGuardLimitMode;
+  snapshot.autoToManualGuardManualLimitMs =
+      config.autoToManualGuardManualLimitMs;
   return snapshot;
 }
 
@@ -345,7 +462,9 @@ enum class ConfigValidationError : uint8_t {
   NTP_SERVER_CUSTOM,
   MAX_RECOVERY_WEIGHT,
   MIN_BREW_TIME,
-  FAST_EXTRACTION_GUARD_RELATION
+  FAST_EXTRACTION_GUARD_RELATION,
+  AUTO_TO_MANUAL_GUARD_MODE,
+  AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT
 };
 
 inline uint32_t effectiveRetareWindowMs(const RuntimeConfig &config) {
@@ -467,6 +586,15 @@ inline ConfigValidationError validateRuntimeConfig(
       !validNtpHostname(config.ntpServerCustom)) {
     return ConfigValidationError::NTP_SERVER_CUSTOM;
   }
+  if (config.autoToManualGuardLimitMode >
+      static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO)) {
+    return ConfigValidationError::AUTO_TO_MANUAL_GUARD_MODE;
+  }
+  if (config.autoToManualGuardManualLimitMs <
+          MIN_AUTO_TO_MANUAL_GUARD_LIMIT_MS ||
+      config.autoToManualGuardManualLimitMs > config.operationalWallMs) {
+    return ConfigValidationError::AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT;
+  }
   if (!config.fastExtractionGuardEnabled) {
     return ConfigValidationError::NONE;
   }
@@ -531,6 +659,10 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "minBrewTimeMs";
     case ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION:
       return "fastExtractionGuardRelation";
+    case ConfigValidationError::AUTO_TO_MANUAL_GUARD_MODE:
+      return "autoToManualGuardLimitMode";
+    case ConfigValidationError::AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT:
+      return "autoToManualGuardManualLimitMs";
   }
   return "unknown";
 }
@@ -579,6 +711,7 @@ enum class WebCommandType : uint8_t {
   STOP_HEARTBEAT,
   APPLY_CONFIG,
   RESET_WEIGHT_OFFSET,
+  RESET_AUTO_TO_MANUAL_GUARD_SAMPLES,
   SAVE_NETWORK,
   FORGET_NETWORK,
   CHANGE_AP_PASSWORD,
@@ -602,6 +735,8 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::APPLY_CONFIG: return "save workflow";
     case WebCommandType::RESET_WEIGHT_OFFSET:
       return "reset learned weight offset";
+    case WebCommandType::RESET_AUTO_TO_MANUAL_GUARD_SAMPLES:
+      return "reset auto-to-manual guard samples";
     case WebCommandType::SAVE_NETWORK: return "save STA network";
     case WebCommandType::FORGET_NETWORK: return "forget STA network";
     case WebCommandType::CHANGE_AP_PASSWORD: return "change AP password";
@@ -735,6 +870,10 @@ struct ControlStatusSnapshot {
   bool cycleTargetReachedEarly = false;
   float cycleActiveStopWeightG = 0.0f;
   uint32_t cycleMinBrewTimeRemainingMs = 0;
+  bool cycleAutoToManualGuardArmed = false;
+  bool cycleAutoToManualGuardEnforced = false;
+  uint32_t cycleAutoToManualGuardRemainingMs = 0;
+  uint32_t autoToManualGuardTrendMs = DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
   char scaleProtocol[20] = "none";
 };
 
@@ -783,6 +922,11 @@ enum class DebugCode : uint8_t {
   CONFIG_ACCEPTED,
   CONFIG_REJECTED,
   WEIGHT_OFFSET_RESET,
+  AUTO_TO_MANUAL_GUARD_SAMPLES_RESET,
+  AUTO_TO_MANUAL_GUARD_ARMED,
+  AUTO_TO_MANUAL_GUARD_ENFORCED,
+  AUTO_TO_MANUAL_GUARD_CLEARED,
+  AUTO_TO_MANUAL_GUARD_FIRED,
   CONFIG_PERSISTED,
   CONFIG_MIGRATED,
   AP_STARTED,
@@ -953,6 +1097,16 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::CONFIG_REJECTED: return "configuration rejected";
     case DebugCode::WEIGHT_OFFSET_RESET:
       return "learned weight offset reset to default";
+    case DebugCode::AUTO_TO_MANUAL_GUARD_SAMPLES_RESET:
+      return "auto-to-manual guard samples reset";
+    case DebugCode::AUTO_TO_MANUAL_GUARD_ARMED:
+      return "auto-to-manual guard armed";
+    case DebugCode::AUTO_TO_MANUAL_GUARD_ENFORCED:
+      return "auto-to-manual guard enforced";
+    case DebugCode::AUTO_TO_MANUAL_GUARD_CLEARED:
+      return "auto-to-manual guard enforcement cleared";
+    case DebugCode::AUTO_TO_MANUAL_GUARD_FIRED:
+      return "auto-to-manual guard opened CN9";
     case DebugCode::CONFIG_PERSISTED: return "configuration persisted";
     case DebugCode::CONFIG_MIGRATED: return "legacy configuration migrated";
     case DebugCode::AP_STARTED: return "access point started";

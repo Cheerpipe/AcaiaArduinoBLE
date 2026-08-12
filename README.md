@@ -52,6 +52,9 @@ Examples that did not exist (or barely existed) in the original stopper sketch:
   telemetry) with export.
 - **Fast extraction guard** — optional extension when target weight is reached
   too quickly (minimum brew time + max recovery weight); off by default.
+- **Auto-to-manual time guard** — on by default; caps CN9 time if an automatic
+  shot loses the scale mid-brew (Auto trend or Manual limit); reconnect stays
+  preferred for the whole cycle.
 - **Advanced workflow settings** (rinse, CN9 limits, reminders, scale options).
 - **Safety and observability** — supervisor, task watchdog, optional external
   K2/feedback, structured debug log, hardware monitor.
@@ -103,13 +106,14 @@ In short: **hard to build, easy to live with.**
 
 All workflow parameters below are editable from the Web UI **Configuration**
 panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
-`settingsB`, config schema **v13**). Defaults are shown in parentheses.
+`settingsB`, config schema **v14**). Defaults are shown in parentheses.
 
 | Setting | What it does |
 | --- | --- |
 | **Target (g)** | Goal weight for brew by weight (10–200 g; default 36 g). |
 | **CN9 limit (s)** | Maximum CN9 closed time per cycle (5–60 s; default 60 s). |
 | **Fast extraction guard** | Optional; **off by default**. See [Fast extraction guard](#fast-extraction-guard). |
+| **Auto-to-manual time guard** | **On by default**. See [Auto-to-manual time guard](#auto-to-manual-time-guard). |
 | **Automatic tare** | Send an initial tare when an automatic shot starts (default ON). |
 | **Timer only** | Keep tare/timer but disable weight stop and offset learning. |
 | **Bookoo combined command** | Use the scale’s combined tare + start-timer command (requires auto tare; default ON). |
@@ -146,17 +150,18 @@ Additional fixed protections (not separately configurable):
 
 ### Shot history
 
-- Up to **120** completed extractions stored in NVS (shot log schema **v5**;
-  minimum duration 10 s; rinses and very short gestures are excluded).
+- Up to **120** completed extractions stored in NVS (shot log schema **v6**;
+  migrates older v2–v5 stores; minimum duration 10 s; rinses and very short
+  gestures are excluded).
 - Each record includes: local time (when NTP synced), duration, goal weight,
-  actual weight, error and error %, learned offset used, average flow (g/s),
-  first-drop time, shot type (`auto`, `timer_only`, `manual`), **cut type**
+  actual weight, `actual_weight_source` (`post_drip` / `last_known` / `none`),
+  error and error %, learned offset used, average flow (g/s), first-drop time,
+  shot type (`auto`, `timer_only`, `manual`), **cut type**
   (`auto`, `manual`, `limit` — how CN9 opened), **stop detail**
   (`normal_target`, `prediction`, `extended_max_weight`, `extended_min_time`,
-  `other` — why weight stop fired when applicable), and when the fast
-  extraction guard was active: whether the shot was extended,
-  `targetReachedEarlyS`, and the max recovery weight / minimum brew time that
-  applied.
+  `auto_to_manual`, `other`), and when the fast extraction guard was active:
+  whether the shot was extended, `targetReachedEarlyS`, and the max recovery
+  weight / minimum brew time that applied.
 - Web UI table with **CSV export**, authenticated **clear all**, and
   **per-shot delete**.
 - Timezone offset and NTP server (preset or custom) configure wall-clock labels;
@@ -416,6 +421,58 @@ The live shot panel shows when the guard is off, on, or **extended** (with the
 active stop weight and time remaining). Shot history and CSV export record
 `ext_guard`, `ext`, `stop`, `max_rec_g`, `min_brew_s`, `early_s`, plus
 `shot_type` and `cut_type`.
+
+## Auto-to-manual time guard
+
+Safety layer for automatic brew-by-weight shots that lose the scale mid-
+extraction. **Enabled by default.** It does not apply to shots that start
+manual (`MANUAL_NO_SCALE`), timer-only mode, or rinse cycles.
+
+### Why it exists
+
+When BLE drops during an automatic shot, weight stop is suspended while the
+firmware keeps trying to reconnect for the **entire** cycle. That transition
+is easy to miss at the bar: the paddle stays closed, the shot keeps running,
+and the only hard stop left may be the CN9 time limit. The guard closes CN9
+on a shorter, predictable deadline so a silent auto→manual fallback does not
+turn into an over-extracted shot.
+
+There is **no** permanent lockout to manual after a fixed reconnect window.
+Reconnect remains preferred; if the scale returns with three coherent samples,
+weight control (including Fast extraction guard, if enabled) resumes and A→M
+enforcement clears. A later disconnect in the same cycle reuses the same
+absolute deadline from cycle start.
+
+### Configuration
+
+| Setting | Default | Role |
+| --- | --- | --- |
+| **Enable A→M time guard** | ON | Master switch for the CN9 deadline |
+| **Limit mode** | Auto | **Auto** = linear trend of the last five good shot durations; **Manual** = fixed seconds |
+| **Manual limit (s)** | 30 | Used when Limit mode is Manual (clamped to 10 s … CN9 limit) |
+| **Trend (s)** | ~30 | Read-only; current Auto prediction (always shown) |
+
+Deadline = cycle start + limit. Limit is computed once when an automatic brew
+is confirmed. Enforcement starts on the first scale-loss suspend after arming;
+the live panel shows `A→M · Ns` only while enforced.
+
+### Duration samples
+
+Successful shots continuously feed a ring of five durations (deciseconds),
+independent of whether the guard is enabled or which limit mode is selected:
+
+- Total shot duration; error ≤ 10 % vs goal; not extraction-extended; not rinse;
+  not stopped by this guard; post-drip weight available
+- Auto and manual shots qualify when weight/error criteria are met
+- Fresh devices and **Reset A→M duration samples** restore five logical 30 s
+  values (`POST /api/v1/calibration/reset-guard-samples`)
+
+### Telemetry
+
+- Live panel: `A→M · Ns` when enforced (Fast extraction line otherwise)
+- History: `stop_detail = auto_to_manual`, `cut_type = limit`;
+  `actual_weight_source` may be `last_known` when logged without post-drip weight
+- CSV export includes `actual_weight_source`
 
 ## Factory credentials (first use)
 

@@ -316,6 +316,9 @@ struct CycleSession {
   bool extractionExtended = false;
   bool targetReachedEarly = false;
   uint32_t targetReachedAtMs = 0;
+  bool autoToManualGuardArmed = false;
+  bool autoToManualGuardEnforced = false;
+  uint32_t autoToManualGuardDeadlineAtMs = 0;
 };
 
 struct PendingShotFinalize {
@@ -342,6 +345,8 @@ struct PendingShotFinalize {
   uint16_t targetReachedEarlyDs = SHOT_LOG_METRIC_MISSING;
   float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
   uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
+  bool lastKnownWeightValid = false;
+  float lastKnownWeightG = 0.0f;
 };
 
 struct ScaleCommand {
@@ -683,11 +688,27 @@ void setWeightControlState(WeightControlState state) {
     addDebugEvent(DebugCategory::SCALE,
                   DebugCode::SCALE_CONTROL_SUSPENDED,
                   static_cast<int32_t>(previous));
+    if (session.autoToManualGuardArmed &&
+        !session.autoToManualGuardEnforced) {
+      session.autoToManualGuardEnforced = true;
+      addDebugEvent(DebugCategory::SCALE,
+                    DebugCode::AUTO_TO_MANUAL_GUARD_ENFORCED,
+                    static_cast<int32_t>(
+                        elapsedMs(session.startedAtMs)),
+                    static_cast<int32_t>(
+                        session.autoToManualGuardDeadlineAtMs -
+                        session.startedAtMs));
+    }
   } else if (state == WeightControlState::ACTIVE &&
              (previous == WeightControlState::SUSPENDED ||
               previous == WeightControlState::VALIDATING)) {
     addDebugEvent(DebugCategory::SCALE,
                   DebugCode::SCALE_CONTROL_RECOVERED);
+    if (session.autoToManualGuardEnforced) {
+      session.autoToManualGuardEnforced = false;
+      addDebugEvent(DebugCategory::SCALE,
+                    DebugCode::AUTO_TO_MANUAL_GUARD_CLEARED);
+    }
   }
 }
 
@@ -754,6 +775,8 @@ const char *endReasonName(EndReason reason) {
       return "fast extraction max weight";
     case EndReason::FAST_EXTRACTION_MIN_TIME:
       return "fast extraction min time";
+    case EndReason::AUTO_TO_MANUAL_GUARD:
+      return "auto-to-manual time guard";
   }
   return "unknown";
 }
@@ -2148,10 +2171,14 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
     pendingFinalize.targetReachedEarlyDs = static_cast<uint16_t>(
         (session.targetReachedAtMs - session.startedAtMs) / 100U);
   }
+  pendingFinalize.lastKnownWeightValid =
+      session.hasWeightAnchor && isfinite(session.lastAcceptedWeightG);
+  pendingFinalize.lastKnownWeightG = session.lastAcceptedWeightG;
 }
 
 void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeightG,
-                          bool finalWeightValid) {
+                          bool finalWeightValid,
+                          ActualWeightSource weightSource) {
   ShotLogRecord record;
   memset(&record, 0, sizeof(record));
   record.actualWeightCg = SHOT_LOG_WEIGHT_MISSING;
@@ -2196,13 +2223,15 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
     record.minBrewTimeDs = SHOT_LOG_METRIC_MISSING;
   }
   record.targetReachedEarlyDs = snapshot.targetReachedEarlyDs;
+  record.actualWeightSource = static_cast<uint8_t>(weightSource);
 
   if (finalWeightValid) {
     record.actualWeightCg = shotLogWeightToCentigrams(finalWeightG);
     record.errorCg =
         shotLogWeightToCentigrams(finalWeightG -
                            static_cast<float>(snapshot.goalWeightG));
-    if (snapshot.firstDropDs != SHOT_LOG_METRIC_MISSING) {
+    if (snapshot.firstDropDs != SHOT_LOG_METRIC_MISSING &&
+        weightSource == ActualWeightSource::POST_DRIP) {
       const float durationS = snapshot.durationDs / 10.0f;
       const float firstDropS = snapshot.firstDropDs / 10.0f;
       const float brewS = durationS - firstDropS;
@@ -2222,6 +2251,34 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
   }
 }
 
+void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
+                                       float finalWeightG,
+                                       bool postDripWeightValid) {
+  if (!postDripWeightValid || snapshot.timerOnly ||
+      snapshot.extractionExtended ||
+      snapshot.endReason == EndReason::AUTO_TO_MANUAL_GUARD ||
+      snapshot.endReason == EndReason::RINSE_COMPLETE ||
+      snapshot.endReason == EndReason::SHORT_SHOT ||
+      snapshot.durationDs < (MIN_SHOT_LOG_DURATION_MS / 100U) ||
+      !autoToManualGuardSampleErrorOk(finalWeightG, snapshot.goalWeightG)) {
+    return;
+  }
+  RuntimeConfig candidate =
+      runtimePersistPending ? runtimePersistCandidate : runtimeConfig;
+  pushAutoToManualGuardSample(candidate.autoToManualGuardSamplesDs,
+                              snapshot.durationDs);
+  ++candidate.revision;
+  if (candidate.revision == 0) {
+    candidate.revision = 1;
+  }
+  runtimePersistCandidate = candidate;
+  runtimePersistPending = true;
+  runtimePersistRetryAtMs = millis();
+  Serial.print("A->M guard sample queued; trend ms=");
+  Serial.println(autoToManualGuardTrendMs(
+      candidate.autoToManualGuardSamplesDs, candidate.operationalWallMs));
+}
+
 void pendingShotFinalizeTask() {
   if (!pendingFinalize.pending ||
       elapsedMs(pendingFinalize.endedAtMs) < DRIP_DELAY_MS) {
@@ -2232,18 +2289,33 @@ void pendingShotFinalizeTask() {
   pendingFinalize.pending = false;
 
   float finalWeightG = 0.0f;
-  bool finalWeightValid = false;
+  bool postDripWeightValid = false;
   if (scaleAvailable() && isfinite(currentWeight) &&
       currentWeightSequence != snapshot.endedWeightSequence &&
       static_cast<int32_t>(currentWeightReceivedAtMs - snapshot.endedAtMs) >
           0) {
     finalWeightG = currentWeight;
-    finalWeightValid = snapshot.startedWithScale;
+    postDripWeightValid = snapshot.startedWithScale;
+  }
+
+  ActualWeightSource weightSource = ActualWeightSource::NONE;
+  bool logWeightValid = false;
+  float logWeightG = 0.0f;
+  if (postDripWeightValid) {
+    weightSource = ActualWeightSource::POST_DRIP;
+    logWeightValid = true;
+    logWeightG = finalWeightG;
+  } else if (snapshot.lastKnownWeightValid) {
+    weightSource = ActualWeightSource::LAST_KNOWN;
+    logWeightValid = true;
+    logWeightG = snapshot.lastKnownWeightG;
   }
 
   if (snapshot.logEligible) {
-    commitPendingShotLog(snapshot, finalWeightG, finalWeightValid);
+    commitPendingShotLog(snapshot, logWeightG, logWeightValid, weightSource);
   }
+
+  maybeQueueAutoToManualGuardSample(snapshot, finalWeightG, postDripWeightValid);
 
   if (!snapshot.offsetAnalysis) {
     return;
@@ -2285,7 +2357,8 @@ void pendingShotFinalizeTask() {
     return;
   }
 
-  RuntimeConfig candidate = runtimeConfig;
+  RuntimeConfig candidate =
+      runtimePersistPending ? runtimePersistCandidate : runtimeConfig;
   candidate.weightOffsetG = updatedOffset;
   ++candidate.revision;
   if (candidate.revision == 0) {
@@ -2522,6 +2595,7 @@ bool shotCompletionGetsDoubleBeep(EndReason reason) {
     case EndReason::WEB_HEARTBEAT_TIMEOUT:
     case EndReason::FAST_EXTRACTION_MAX_WEIGHT:
     case EndReason::FAST_EXTRACTION_MIN_TIME:
+    case EndReason::AUTO_TO_MANUAL_GUARD:
       return true;
     default:
       return false;
@@ -3024,9 +3098,46 @@ void enterRinse() {
   // from 30 ms later when debounce accepts the transition.
   session.rinseStartedAtMs = rawPaddleChangedAtMs;
   session.automaticEnabled = false;
+  session.autoToManualGuardArmed = false;
+  session.autoToManualGuardEnforced = false;
   Serial.println("Rinse classified; paddle changes ignored until completion");
   transitionTo(StopperState::RINSE);
   maybeRequestNtpSyncOnActivity();
+}
+
+void armAutoToManualGuardForConfirmedBrew() {
+  if (!session.config.autoToManualGuardEnabled ||
+      session.config.timerOnly || !session.startedWithScale ||
+      session.weightControlState == WeightControlState::INACTIVE) {
+    return;
+  }
+  const uint32_t limitMs = autoToManualGuardLimitMs(
+      true,
+      static_cast<AutoToManualGuardLimitMode>(
+          session.config.autoToManualGuardLimitMode),
+      session.config.autoToManualGuardManualLimitMs,
+      runtimeConfig.autoToManualGuardSamplesDs,
+      session.config.operationalWallMs);
+  session.autoToManualGuardArmed = true;
+  session.autoToManualGuardDeadlineAtMs = session.startedAtMs + limitMs;
+  addDebugEvent(DebugCategory::SCALE, DebugCode::AUTO_TO_MANUAL_GUARD_ARMED,
+                static_cast<int32_t>(limitMs));
+  if (session.weightControlState == WeightControlState::SUSPENDED &&
+      !session.autoToManualGuardEnforced) {
+    session.autoToManualGuardEnforced = true;
+    addDebugEvent(DebugCategory::SCALE,
+                  DebugCode::AUTO_TO_MANUAL_GUARD_ENFORCED,
+                  static_cast<int32_t>(elapsedMs(session.startedAtMs)),
+                  static_cast<int32_t>(limitMs));
+  }
+}
+
+bool autoToManualGuardDeadlineDue() {
+  if (!session.active || !session.autoToManualGuardEnforced) {
+    return false;
+  }
+  return static_cast<int32_t>(millis() -
+                              session.autoToManualGuardDeadlineAtMs) >= 0;
 }
 
 void confirmBrewOrManual() {
@@ -3043,6 +3154,7 @@ void confirmBrewOrManual() {
       suspendWeightControl();
     }
     shot.confirmedBrew = true;
+    armAutoToManualGuardForConfirmedBrew();
     Serial.println("Brew confirmed");
     transitionTo(StopperState::BREW);
   } else {
@@ -3248,6 +3360,15 @@ void stateMachineTask() {
         weightStreamState = WeightStreamState::STALE;
         addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_STREAM_STALE);
         Serial.println("Scale stream suspended during brew");
+      }
+
+      if (autoToManualGuardDeadlineDue()) {
+        addDebugEvent(DebugCategory::SCALE,
+                      DebugCode::AUTO_TO_MANUAL_GUARD_FIRED,
+                      static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+        finalizeCycle(EndReason::AUTO_TO_MANUAL_GUARD,
+                      StopperState::REQUIRES_OFF);
+        return;
       }
 
       if (automaticScaleStopDue()) {
@@ -3545,10 +3666,13 @@ void processWebCommand(const WebCommand &command) {
         return;
       }
       RuntimeConfig candidate = command.config;
-      // Offset is learned by the control loop and is intentionally not a Web
-      // field. Preserve the newest value if a form built from an older status
-      // snapshot races with the post-shot analysis.
+      // Offset and A→M duration samples are learned by the control loop and
+      // are intentionally not Web fields. Preserve the newest values if a
+      // form built from an older status snapshot races with post-shot work.
       candidate.weightOffsetG = runtimeConfig.weightOffsetG;
+      memcpy(candidate.autoToManualGuardSamplesDs,
+             runtimeConfig.autoToManualGuardSamplesDs,
+             sizeof(candidate.autoToManualGuardSamplesDs));
       if (validateRuntimeConfig(candidate) != ConfigValidationError::NONE) {
         addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
         return;
@@ -3581,6 +3705,30 @@ void processWebCommand(const WebCommand &command) {
       if (candidate.revision == 0) {
         candidate.revision = 1;
       }
+      WebCommand persist;
+      persist.type = WebCommandType::PERSIST_RUNTIME;
+      persist.requestId = command.requestId;
+      persist.config = candidate;
+      if (!beginMaintenanceLease(persist, true)) {
+        rejectWebCommand(command);
+      }
+      return;
+    }
+
+    case WebCommandType::RESET_AUTO_TO_MANUAL_GUARD_SAMPLES: {
+      if (!controlAllowsConfigurationNow()) {
+        rejectWebCommand(command);
+        return;
+      }
+      pendingFinalize.pending = false;
+      RuntimeConfig candidate = runtimeConfig;
+      resetAutoToManualGuardSamples(candidate.autoToManualGuardSamplesDs);
+      ++candidate.revision;
+      if (candidate.revision == 0) {
+        candidate.revision = 1;
+      }
+      addDebugEvent(DebugCategory::CONFIG,
+                    DebugCode::AUTO_TO_MANUAL_GUARD_SAMPLES_RESET);
       WebCommand persist;
       persist.type = WebCommandType::PERSIST_RUNTIME;
       persist.requestId = command.requestId;
@@ -3741,7 +3889,20 @@ void publishControlStatus() {
           static_cast<float>(session.config.goalWeightG);
       next.cycleMinBrewTimeRemainingMs = 0;
     }
+    next.cycleAutoToManualGuardArmed = session.autoToManualGuardArmed;
+    next.cycleAutoToManualGuardEnforced = session.autoToManualGuardEnforced;
+    if (session.autoToManualGuardEnforced) {
+      const uint32_t nowMs = millis();
+      next.cycleAutoToManualGuardRemainingMs =
+          static_cast<int32_t>(session.autoToManualGuardDeadlineAtMs -
+                               nowMs) <= 0
+              ? 0U
+              : session.autoToManualGuardDeadlineAtMs - nowMs;
+    }
   }
+  next.autoToManualGuardTrendMs = autoToManualGuardTrendMs(
+      runtimeConfig.autoToManualGuardSamplesDs,
+      runtimeConfig.operationalWallMs);
   portENTER_CRITICAL(&debugLogMux);
   next.debugEventsDropped = debugLog.overwritten();
   portEXIT_CRITICAL(&debugLogMux);

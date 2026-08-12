@@ -11,7 +11,7 @@
 namespace shotstopper {
 
 constexpr uint32_t SHOT_LOG_MAGIC = 0x534C4F47U;  // "SLOG"
-constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 5;
+constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 6;
 constexpr size_t SHOT_LOG_CAPACITY = 120;
 constexpr uint32_t MIN_SHOT_LOG_DURATION_MS = 10000;
 constexpr float FIRST_DROP_THRESHOLD_G = 0.3f;
@@ -35,6 +35,7 @@ enum class ShotLogStopDetail : uint8_t {
   PREDICTION = 1,
   EXTENDED_MAX_WEIGHT = 2,
   EXTENDED_MIN_TIME = 3,
+  AUTO_TO_MANUAL = 4,
   OTHER = 255
 };
 
@@ -44,7 +45,17 @@ inline const char *shotLogStopDetailName(ShotLogStopDetail detail) {
     case ShotLogStopDetail::PREDICTION: return "prediction";
     case ShotLogStopDetail::EXTENDED_MAX_WEIGHT: return "extended_max_weight";
     case ShotLogStopDetail::EXTENDED_MIN_TIME: return "extended_min_time";
+    case ShotLogStopDetail::AUTO_TO_MANUAL: return "auto_to_manual";
     case ShotLogStopDetail::OTHER: return "other";
+  }
+  return "unknown";
+}
+
+inline const char *actualWeightSourceName(ActualWeightSource source) {
+  switch (source) {
+    case ActualWeightSource::NONE: return "none";
+    case ActualWeightSource::POST_DRIP: return "post_drip";
+    case ActualWeightSource::LAST_KNOWN: return "last_known";
   }
   return "unknown";
 }
@@ -56,6 +67,8 @@ inline ShotLogStopDetail shotLogStopDetailFromEndReason(
       return ShotLogStopDetail::EXTENDED_MAX_WEIGHT;
     case EndReason::FAST_EXTRACTION_MIN_TIME:
       return ShotLogStopDetail::EXTENDED_MIN_TIME;
+    case EndReason::AUTO_TO_MANUAL_GUARD:
+      return ShotLogStopDetail::AUTO_TO_MANUAL;
     case EndReason::SCALE_PREDICTION:
       return ShotLogStopDetail::PREDICTION;
     case EndReason::SCALE_THRESHOLD:
@@ -149,6 +162,32 @@ struct ShotLogRecord {
   int16_t maxRecoveryWeightCg;
   uint16_t minBrewTimeDs;
   uint16_t targetReachedEarlyDs;
+  uint8_t actualWeightSource;
+};
+
+struct ShotLogRecordV5 {
+  uint32_t id;
+  uint32_t bootId;
+  uint32_t endedAtMs;
+  uint32_t endedAtUnixSec;
+  uint32_t endedAtLocalSec;
+  int16_t timezoneOffsetMinutesAtCommit;
+  uint16_t durationDs;
+  uint8_t goalWeightG;
+  uint8_t hasWallTime;
+  int16_t actualWeightCg;
+  int16_t errorCg;
+  int16_t offsetUsedCg;
+  uint16_t firstDropDs;
+  uint16_t avgFlowCgS;
+  uint8_t shotType;
+  uint8_t cutType;
+  uint8_t extractionGuardEnabled;
+  uint8_t extractionExtended;
+  uint8_t stopDetail;
+  int16_t maxRecoveryWeightCg;
+  uint16_t minBrewTimeDs;
+  uint16_t targetReachedEarlyDs;
 };
 
 struct ShotLogRecordV4 {
@@ -215,6 +254,11 @@ struct ShotLogHeader {
 struct ShotLogStore {
   ShotLogHeader header;
   ShotLogRecord records[SHOT_LOG_CAPACITY];
+};
+
+struct ShotLogStoreV5 {
+  ShotLogHeader header;
+  ShotLogRecordV5 records[SHOT_LOG_CAPACITY];
 };
 
 struct ShotLogStoreV4 {
@@ -301,6 +345,61 @@ inline void finalizeShotLogStore(ShotLogStore &store) {
   store.header.checksum = shotLogChecksum(store);
 }
 
+inline void migrateShotLogRecordV5ToV6(const ShotLogRecordV5 &source,
+                                       ShotLogRecord &dest) {
+  dest.id = source.id;
+  dest.bootId = source.bootId;
+  dest.endedAtMs = source.endedAtMs;
+  dest.endedAtUnixSec = source.endedAtUnixSec;
+  dest.endedAtLocalSec = source.endedAtLocalSec;
+  dest.timezoneOffsetMinutesAtCommit = source.timezoneOffsetMinutesAtCommit;
+  dest.durationDs = source.durationDs;
+  dest.goalWeightG = source.goalWeightG;
+  dest.hasWallTime = source.hasWallTime;
+  dest.actualWeightCg = source.actualWeightCg;
+  dest.errorCg = source.errorCg;
+  dest.offsetUsedCg = source.offsetUsedCg;
+  dest.firstDropDs = source.firstDropDs;
+  dest.avgFlowCgS = source.avgFlowCgS;
+  dest.shotType = source.shotType;
+  dest.cutType = source.cutType;
+  dest.extractionGuardEnabled = source.extractionGuardEnabled;
+  dest.extractionExtended = source.extractionExtended;
+  dest.stopDetail = source.stopDetail;
+  dest.maxRecoveryWeightCg = source.maxRecoveryWeightCg;
+  dest.minBrewTimeDs = source.minBrewTimeDs;
+  dest.targetReachedEarlyDs = source.targetReachedEarlyDs;
+  dest.actualWeightSource =
+      source.actualWeightCg == SHOT_LOG_WEIGHT_MISSING
+          ? static_cast<uint8_t>(ActualWeightSource::NONE)
+          : static_cast<uint8_t>(ActualWeightSource::POST_DRIP);
+}
+
+inline void migrateShotLogStoreV5(const ShotLogStoreV5 &legacy,
+                                  ShotLogStore &store) {
+  memset(&store, 0, sizeof(store));
+  store.header.bootId = legacy.header.bootId;
+  store.header.nextRecordId = legacy.header.nextRecordId;
+  store.header.count = legacy.header.count;
+  store.header.writeIndex = legacy.header.writeIndex;
+  for (size_t index = 0; index < SHOT_LOG_CAPACITY; ++index) {
+    migrateShotLogRecordV5ToV6(legacy.records[index], store.records[index]);
+  }
+  finalizeShotLogStore(store);
+}
+
+inline bool validShotLogStoreV5(const ShotLogStoreV5 &store) {
+  if (store.header.magic != SHOT_LOG_MAGIC ||
+      store.header.schemaVersion != 5 ||
+      store.header.recordSize != sizeof(ShotLogRecordV5) ||
+      store.header.count > SHOT_LOG_CAPACITY ||
+      store.header.writeIndex >= SHOT_LOG_CAPACITY ||
+      store.header.checksum != shotLogChecksumBytes(store.header)) {
+    return false;
+  }
+  return true;
+}
+
 inline void migrateShotLogRecordV4ToV5(const ShotLogRecordV4 &source,
                                        ShotLogRecord &dest) {
   dest.id = source.id;
@@ -325,6 +424,10 @@ inline void migrateShotLogRecordV4ToV5(const ShotLogRecordV4 &source,
   dest.maxRecoveryWeightCg = SHOT_LOG_WEIGHT_MISSING;
   dest.minBrewTimeDs = SHOT_LOG_METRIC_MISSING;
   dest.targetReachedEarlyDs = SHOT_LOG_METRIC_MISSING;
+  dest.actualWeightSource =
+      source.actualWeightCg == SHOT_LOG_WEIGHT_MISSING
+          ? static_cast<uint8_t>(ActualWeightSource::NONE)
+          : static_cast<uint8_t>(ActualWeightSource::POST_DRIP);
 }
 
 inline void migrateShotLogStoreV4(const ShotLogStoreV4 &legacy,
@@ -379,6 +482,10 @@ inline void migrateShotLogStoreV2(const ShotLogStoreV2 &legacy, ShotLogStore &st
     dest.maxRecoveryWeightCg = SHOT_LOG_WEIGHT_MISSING;
     dest.minBrewTimeDs = SHOT_LOG_METRIC_MISSING;
     dest.targetReachedEarlyDs = SHOT_LOG_METRIC_MISSING;
+    dest.actualWeightSource =
+        source.actualWeightCg == SHOT_LOG_WEIGHT_MISSING
+            ? static_cast<uint8_t>(ActualWeightSource::NONE)
+            : static_cast<uint8_t>(ActualWeightSource::POST_DRIP);
   }
   finalizeShotLogStore(store);
 }
@@ -411,6 +518,10 @@ inline void migrateShotLogStoreV3(const ShotLogStoreV3 &legacy, ShotLogStore &st
     dest.maxRecoveryWeightCg = SHOT_LOG_WEIGHT_MISSING;
     dest.minBrewTimeDs = SHOT_LOG_METRIC_MISSING;
     dest.targetReachedEarlyDs = SHOT_LOG_METRIC_MISSING;
+    dest.actualWeightSource =
+        source.actualWeightCg == SHOT_LOG_WEIGHT_MISSING
+            ? static_cast<uint8_t>(ActualWeightSource::NONE)
+            : static_cast<uint8_t>(ActualWeightSource::POST_DRIP);
   }
   finalizeShotLogStore(store);
 }
@@ -460,6 +571,14 @@ class ShotLog {
           validShotLogStore(store_)) {
         loaded = true;
       }
+    } else if (length == sizeof(ShotLogStoreV5)) {
+      ShotLogStoreV5 legacy = {};
+      if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
+              sizeof(legacy) &&
+          validShotLogStoreV5(legacy)) {
+        migrateShotLogStoreV5(legacy, store_);
+        loaded = true;
+      }
     } else if (length == sizeof(ShotLogStoreV4)) {
       ShotLogStoreV4 legacy = {};
       if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
@@ -488,7 +607,8 @@ class ShotLog {
     preferences.end();
     if (!loaded) {
       resetShotLogStore(store_, 1);
-    } else if (length == sizeof(ShotLogStoreV4) ||
+    } else if (length == sizeof(ShotLogStoreV5) ||
+               length == sizeof(ShotLogStoreV4) ||
                length == sizeof(ShotLogStoreV3) ||
                length == sizeof(ShotLogStoreV2)) {
       save();

@@ -201,8 +201,35 @@ const char *configValidationMessage(ConfigValidationError error) {
     case ConfigValidationError::MIN_BREW_TIME:
     case ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION:
       break;
+    case ConfigValidationError::AUTO_TO_MANUAL_GUARD_MODE:
+      return "A→M limit mode must be manual or auto.";
+    case ConfigValidationError::AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT:
+      return "A→M manual limit must be from 10 s up to the CN9 limit.";
   }
   return "Invalid configuration.";
+}
+
+bool jsonAutoToManualGuardLimitMode(cJSON *object, const char *name,
+                                    uint8_t &output) {
+  cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+  if (!cJSON_IsString(item) || item->valuestring == nullptr) {
+    return false;
+  }
+  if (strcmp(item->valuestring, "manual") == 0) {
+    output = static_cast<uint8_t>(AutoToManualGuardLimitMode::MANUAL);
+    return true;
+  }
+  if (strcmp(item->valuestring, "auto") == 0) {
+    output = static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
+    return true;
+  }
+  return false;
+}
+
+const char *autoToManualGuardLimitModeId(uint8_t mode) {
+  return mode == static_cast<uint8_t>(AutoToManualGuardLimitMode::MANUAL)
+             ? "manual"
+             : "auto";
 }
 
 bool jsonNtpPreset(cJSON *object, const char *name, uint8_t &output) {
@@ -1439,7 +1466,7 @@ bool ShotStopperNetwork::startHttpServer() {
   // Two sockets is too low: Safari/Chrome open parallel fetches and show
   // "Load failed" / connection errors for /api/v1/{status,log,shots}.
   config.max_open_sockets = 4;
-  config.max_uri_handlers = 23;
+  config.max_uri_handlers = 24;
   config.max_resp_headers = 8;
   config.backlog_conn = 4;
   config.lru_purge_enable = true;
@@ -1468,6 +1495,8 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/config", HTTP_POST, configHandler) &&
       registerHandler(server_, "/api/v1/calibration/reset", HTTP_POST,
                       resetCalibrationHandler) &&
+      registerHandler(server_, "/api/v1/calibration/reset-guard-samples",
+                      HTTP_POST, resetGuardSamplesHandler) &&
       registerHandler(server_, "/api/v1/control/paddle", HTTP_POST,
                       paddleHandler) &&
       registerHandler(server_, "/api/v1/control/rinse", HTTP_POST,
@@ -1853,6 +1882,8 @@ const char *ShotStopperNetwork::endReasonName(EndReason reason) {
       return "FAST_EXTRACTION_MAX_WEIGHT";
     case EndReason::FAST_EXTRACTION_MIN_TIME:
       return "FAST_EXTRACTION_MIN_TIME";
+    case EndReason::AUTO_TO_MANUAL_GUARD:
+      return "AUTO_TO_MANUAL_GUARD";
   }
   return "UNKNOWN";
 }
@@ -1950,6 +1981,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"fastExtractionGuardEnabled\":%s,"
       "\"maxRecoveryWeightG\":%.1f,"
       "\"minBrewTimeMs\":%lu,"
+      "\"autoToManualGuardEnabled\":%s,"
+      "\"autoToManualGuardLimitMode\":\"%s\","
+      "\"autoToManualGuardManualLimitMs\":%lu,"
+      "\"autoToManualGuardTrendMs\":%lu,"
       "\"timezoneOffsetMinutes\":%d,"
       "\"ntpServerPreset\":\"%s\",\"ntpServerCustom\":\"%s\"},"
       "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
@@ -1987,7 +2022,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"firstDropMs\":%lu,\"retareFlowFirstDetectedAtMs\":%lu,"
       "\"firstDropElapsedMs\":%lu,"
       "\"extractionExtended\":%s,\"targetReachedEarly\":%s,"
-      "\"activeStopWeightG\":%.1f,\"minBrewTimeRemainingMs\":%lu},"
+      "\"activeStopWeightG\":%.1f,\"minBrewTimeRemainingMs\":%lu,"
+      "\"autoToManualGuardArmed\":%s,"
+      "\"autoToManualGuardEnforced\":%s,"
+      "\"autoToManualGuardRemainingMs\":%lu},"
       "\"debugEventsDropped\":%lu}",
       safeFirmwareVersion, stopperStateName(control.state),
       stateLabel(control.state),
@@ -2038,6 +2076,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.config.fastExtractionGuardEnabled ? "true" : "false",
       static_cast<double>(control.config.maxRecoveryWeightG),
       static_cast<unsigned long>(control.config.minBrewTimeMs),
+      control.config.autoToManualGuardEnabled ? "true" : "false",
+      autoToManualGuardLimitModeId(control.config.autoToManualGuardLimitMode),
+      static_cast<unsigned long>(control.config.autoToManualGuardManualLimitMs),
+      static_cast<unsigned long>(control.autoToManualGuardTrendMs),
       static_cast<int>(control.config.timezoneOffsetMinutes),
       ntpPresetId(control.config.ntpServerPreset),
       safeNtpCustom,
@@ -2112,6 +2154,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.cycleTargetReachedEarly ? "true" : "false",
       static_cast<double>(control.cycleActiveStopWeightG),
       static_cast<unsigned long>(control.cycleMinBrewTimeRemainingMs),
+      control.cycleAutoToManualGuardArmed ? "true" : "false",
+      control.cycleAutoToManualGuardEnforced ? "true" : "false",
+      static_cast<unsigned long>(control.cycleAutoToManualGuardRemainingMs),
       static_cast<unsigned long>(control.debugEventsDropped));
   if (written < 0 ||
       static_cast<size_t>(written) >= sizeof(g_statusResponseBuffer)) {
@@ -2272,7 +2317,8 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
              "\"shotType\":\"%s\",\"cutType\":\"%s\","
              "\"extractionGuardEnabled\":%s,\"extractionExtended\":%s,"
              "\"stopDetail\":\"%s\",\"maxRecoveryWeightG\":%s,"
-             "\"minBrewTimeS\":%s,\"targetReachedEarlyS\":%s}",
+             "\"minBrewTimeS\":%s,\"targetReachedEarlyS\":%s,"
+             "\"actualWeightSource\":\"%s\"}",
              index == 0 ? "" : ",",
              static_cast<unsigned long>(record.id),
              static_cast<unsigned long>(record.bootId),
@@ -2292,7 +2338,9 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
              record.extractionExtended ? "true" : "false",
              shotLogStopDetailName(
                  static_cast<ShotLogStopDetail>(record.stopDetail)),
-             maxRecovery, minBrewTime, targetEarly);
+             maxRecovery, minBrewTime, targetEarly,
+             actualWeightSourceName(
+                 static_cast<ActualWeightSource>(record.actualWeightSource)));
     if (httpd_resp_send_chunk(request, item, HTTPD_RESP_USE_STRLEN) != ESP_OK) {
       return ESP_FAIL;
     }
@@ -2437,9 +2485,11 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "retareStabilityMaxGapMs", "retareStabilityMinDurationMs",
       "confirmationTimeoutMs", "fastExtractionGuardEnabled",
       "maxRecoveryWeightG", "minBrewTimeMs",
+      "autoToManualGuardEnabled", "autoToManualGuardLimitMode",
+      "autoToManualGuardManualLimitMs",
       "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom"};
   const bool parsed =
-      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 25) &&
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 28) &&
       jsonUint8(root, "goalWeightG", candidate.goalWeightG) &&
       jsonUint32(root, "rinseGestureMs", candidate.rinseGestureMs) &&
       jsonUint32(root, "rinseDurationMs", candidate.rinseDurationMs) &&
@@ -2472,6 +2522,12 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
                   candidate.fastExtractionGuardEnabled) &&
       jsonFloat(root, "maxRecoveryWeightG", candidate.maxRecoveryWeightG) &&
       jsonUint32(root, "minBrewTimeMs", candidate.minBrewTimeMs) &&
+      jsonBoolean(root, "autoToManualGuardEnabled",
+                  candidate.autoToManualGuardEnabled) &&
+      jsonAutoToManualGuardLimitMode(root, "autoToManualGuardLimitMode",
+                                     candidate.autoToManualGuardLimitMode) &&
+      jsonUint32(root, "autoToManualGuardManualLimitMs",
+                 candidate.autoToManualGuardManualLimitMs) &&
       jsonInt16(root, "timezoneOffsetMinutes",
                 candidate.timezoneOffsetMinutes) &&
       jsonNtpPreset(root, "ntpServerPreset", candidate.ntpServerPreset) &&
@@ -2539,6 +2595,45 @@ esp_err_t ShotStopperNetwork::resetCalibrationHandler(httpd_req_t *request) {
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; calibration was not reset.");
+  }
+  return self.sendAccepted(request, command.requestId);
+}
+
+esp_err_t ShotStopperNetwork::resetGuardSamplesHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authenticate(request, true)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
+                     "Invalid session or CSRF token.");
+  }
+  ControlStatusSnapshot status;
+  self.callbacks_.copyControlStatus(status);
+  if (!controlAllowsConfiguration(status)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "Guard samples are locked while a cycle is active.");
+  }
+  char body[REQUEST_BODY_CAPACITY] = {};
+  if (!readJsonBody(request, body)) {
+    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
+                     "An empty JSON object is required.");
+  }
+  cJSON *root = cJSON_Parse(body);
+  static const char *const noFields[] = {nullptr};
+  const bool parsed = root != nullptr &&
+                      jsonHasOnlyUniqueFields(root, noFields, 0);
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  if (!parsed) {
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_REQUEST",
+                     "The guard samples reset request must be an empty object.");
+  }
+  WebCommand command;
+  command.type = WebCommandType::RESET_AUTO_TO_MANUAL_GUARD_SAMPLES;
+  command.requestId = self.allocateRequestId();
+  if (!self.callbacks_.enqueueWebCommand(command)) {
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
+                     "Control is busy; guard samples were not reset.");
   }
   return self.sendAccepted(request, command.requestId);
 }

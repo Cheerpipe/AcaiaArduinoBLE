@@ -1505,6 +1505,7 @@ void w11_operational_timer_opens_without_control_loop() {
   reachReadyFromBoot();
   runtimeConfig.operationalWallMs = 20000;
   runtimeConfig.confirmationTimeoutMs = 7000;
+  runtimeConfig.autoToManualGuardManualLimitMs = 15000;
   CHECK(validateRuntimeConfig(runtimeConfig) == ConfigValidationError::NONE);
   startCycle();
   hostMillis = cn9ClosedAtMs + runtimeConfig.operationalWallMs;
@@ -3054,6 +3055,70 @@ void s10_shot_log_migrates_schema_v4() {
         static_cast<uint8_t>(ShotLogStopDetail::NORMAL_TARGET));
 }
 
+void r51_auto_to_manual_guard_fires_while_scale_lost() {
+  resetHarness(false, true);
+  runtimeConfig.autoToManualGuardEnabled = true;
+  runtimeConfig.autoToManualGuardLimitMode =
+      static_cast<uint8_t>(AutoToManualGuardLimitMode::MANUAL);
+  runtimeConfig.autoToManualGuardManualLimitMs = 15000;
+  reachReadyFromBoot();
+  startCycle();
+  advanceToBrewFromQualifying();
+  endBrewStartConfirmationForTests();
+  CHECK(session.autoToManualGuardArmed);
+  CHECK(!session.autoToManualGuardEnforced);
+  setScaleConnected(false);
+  loop();
+  CHECK(session.weightControlState == WeightControlState::SUSPENDED);
+  CHECK(session.autoToManualGuardEnforced);
+  reachSessionElapsed(15000);
+  CHECK(session.endReason == EndReason::AUTO_TO_MANUAL_GUARD);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void r52_auto_to_manual_guard_clears_on_scale_recovery() {
+  resetHarness(false, true);
+  runtimeConfig.autoToManualGuardEnabled = true;
+  runtimeConfig.autoToManualGuardLimitMode =
+      static_cast<uint8_t>(AutoToManualGuardLimitMode::MANUAL);
+  runtimeConfig.autoToManualGuardManualLimitMs = 20000;
+  reachReadyFromBoot();
+  startCycle();
+  advanceToBrewFromQualifying();
+  const uint32_t deadline = session.autoToManualGuardDeadlineAtMs;
+  CHECK(session.autoToManualGuardArmed);
+  setScaleConnected(false);
+  loop();
+  CHECK(session.autoToManualGuardEnforced);
+  setScaleConnected(true);
+  publishWeight(1.0f);
+  publishWeight(2.0f, hostMillis + 1);
+  publishWeight(3.0f, hostMillis + 2);
+  CHECK(session.weightControlState == WeightControlState::ACTIVE);
+  CHECK(!session.autoToManualGuardEnforced);
+  CHECK(session.autoToManualGuardDeadlineAtMs == deadline);
+  setScaleConnected(false);
+  loop();
+  CHECK(session.autoToManualGuardEnforced);
+  CHECK(session.autoToManualGuardDeadlineAtMs == deadline);
+}
+
+void r53_auto_to_manual_guard_disabled_does_not_cut_early() {
+  resetHarness(false, true);
+  runtimeConfig.autoToManualGuardEnabled = false;
+  runtimeConfig.autoToManualGuardManualLimitMs = 10000;
+  reachReadyFromBoot();
+  startCycle();
+  advanceToBrewFromQualifying();
+  endBrewStartConfirmationForTests();
+  CHECK(!session.autoToManualGuardArmed);
+  setScaleConnected(false);
+  loop();
+  reachSessionElapsed(15000);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(session.endReason == EndReason::NONE);
+}
+
 void r48_guard_disabled_stops_at_target_normally() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -3185,6 +3250,9 @@ const TestCase testCases[] = {
     {"R48", r48_guard_disabled_stops_at_target_normally},
     {"R49", r49_guard_extends_and_stops_at_max_weight},
     {"R50", r50_guard_extends_and_stops_at_min_time},
+    {"R51", r51_auto_to_manual_guard_fires_while_scale_lost},
+    {"R52", r52_auto_to_manual_guard_clears_on_scale_recovery},
+    {"R53", r53_auto_to_manual_guard_disabled_does_not_cut_early},
     {"R32", r32_old_connection_generation_cannot_update_weight},
     {"R33", r33_weight_mailbox_keeps_latest_and_reports_gap},
     {"R34", r34_suspended_control_recovers_after_three_attributed_samples},
