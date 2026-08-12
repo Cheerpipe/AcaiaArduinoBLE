@@ -35,6 +35,7 @@ build-*/
 
 # ESP32, compiler and linker outputs
 artifacts/
+artifacts/shotStopper-esp32/
 *.bin
 *.elf
 *.map
