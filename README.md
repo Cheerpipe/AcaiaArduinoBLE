@@ -13,6 +13,7 @@ independently.
 > relay remains open during startup, reset, and power loss. Complete the entire
 > [manual test plan](docs/MANUAL_TEST_PLAN.md) before connecting the machine.
 > This project cannot make an unsuitable relay module or unsafe wiring safe.
+> See the [Disclaimer](#disclaimer) — use at your own risk.
 
 ## Origin and evolution
 
@@ -73,7 +74,8 @@ there**:
 Complexity lives in firmware parameters, state machines, and safety — not in
 the barista workflow. Defaults and automatic behaviors (retare, confirmation,
 offset learning, paddle-return beeps) exist so most users never touch the Web
-UI after initial setup. The UI and API are there for tuning and diagnosis, not
+UI after initial setup. If something feels unexpected, see the
+[FAQ (Spanish)](docs/FAQ.md). The UI and API are there for tuning and diagnosis, not
 for operating every shot.
 
 In short: **hard to build, easy to live with.**
@@ -298,6 +300,7 @@ The following items are planned but **not present in the current firmware**:
 ├── libraries/
 │   └── AcaiaArduinoBLE/            # Local Arduino library and BLE tests
 ├── docs/
+│   ├── FAQ.md
 │   └── MANUAL_TEST_PLAN.md
 └── LICENSE
 ```
@@ -865,6 +868,7 @@ mandatory before real use.
 
 ## Additional documentation
 
+- [FAQ (Spanish)](docs/FAQ.md) — confusing automatic behaviors, defaults, and compatibility
 - [Manual test plan](docs/MANUAL_TEST_PLAN.md)
 - [Local AcaiaArduinoBLE library](libraries/AcaiaArduinoBLE/README.md)
 
@@ -881,6 +885,47 @@ The application firmware, safety model, Web UI, and Micra-specific workflow are
 substantial new work on top of that foundation.
 
 ## Disclaimer
+
+**Use at your own risk.** Anyone who builds, installs, configures, or operates
+firmware from this repository does so **under their sole responsibility**. The
+authors and contributors **accept no liability** for any harm, loss, or damage
+whatsoever — including but not limited to **personal injury, death, property
+damage, equipment damage, business interruption, or psychological distress** —
+arising from the use or misuse of this software, documentation, or any
+derivative work.
+
+You are solely responsible for:
+
+- **Designing and building a correct, safe circuit** — suitable relay or contact,
+  electrical isolation, ratings, polarity, feedback, and any external safety
+  barrier (e.g. K2) appropriate for your machine and jurisdiction.
+- **Installing and verifying that circuit** on your equipment, including bench
+  tests and the full [manual test plan](docs/MANUAL_TEST_PLAN.md) before
+  connecting to a live espresso machine.
+- **Configuring the firmware correctly and safely** — including GPIO assignment,
+  compile-time pin maps, polarity, CN9 limits, and workflow parameters — so
+  that paddle readback, CN9 control, and automatic stop behavior match your
+  hardware. GPIO and other safety-critical pin assignments are **not**
+  configurable from the Web UI; they must be set in source and verified at
+  build time (see [FAQ](docs/FAQ.md)).
+
+**Espresso machines are inherently hazardous.** A machine such as the La
+Marzocco Linea Micra contains **pressurized boilers, hot water, and steam at high
+temperature**. Adding automatic or remote control — including brew-by-weight
+stop, relay actuation, Wi‑Fi commands, and timer-based limits — can increase
+risk if wiring, isolation, configuration, or software behavior is wrong.
+Malfunction or misconfiguration could leave the brew circuit energized too long,
+defeat intended safety interlocks, or cause scalding, flooding, electrical
+hazard, or fire. **Do not connect this firmware to mains-powered espresso
+equipment unless you understand these risks and have validated your entire
+system on the bench first.**
+
+This project provides software and documentation only. It **does not**
+certify, warrant, or guarantee safe operation on any machine. No statement in
+this repository should be interpreted as professional electrical, plumbing, or
+machinery safety advice.
+
+### Development assistance
 
 This project was developed with substantial assistance from artificial
 intelligence tools. AI helped with design, implementation, documentation, and
