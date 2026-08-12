@@ -493,6 +493,7 @@ uint32_t feedbackTransitionStartedAtMs = 0;
 bool safetyHeartbeatLevel = false;
 uint32_t safetyHeartbeatToggledAtMs = 0;
 volatile bool safeRestartRequested = false;
+uint32_t bootStartedAtMs = 0;
 SafetyResetSnapshot safetyResetStatus;
 bool resetRecoverySawPaddleOn = false;
 uint32_t resetRecoveryOffStartedAtMs = 0;
@@ -3597,6 +3598,7 @@ void publishControlStatus() {
   next.scaleRejectedPackets = scaleLink.rejectedPackets;
   next.scaleReconnects = scaleLink.reconnects;
   next.scaleLastDisconnectReason = scaleLink.lastDisconnectReason;
+  next.uptimeMs = elapsedMs(bootStartedAtMs);
   next.loopMaxGapMs = loopMaxGapMs;
   next.loopStackMinWords = loopStackMinWords;
   next.scaleStackMinWords = scaleWorkerStackMinWords;
@@ -3721,6 +3723,7 @@ void updateStatusIndicators() {
 // ---------------------------------------------------------------------------
 
 void setup() {
+  bootStartedAtMs = millis();
   // Establish the relay's safe electrical state before Serial, EEPROM or BLE.
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
 

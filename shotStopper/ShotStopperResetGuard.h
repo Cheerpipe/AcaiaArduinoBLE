@@ -117,6 +117,28 @@ inline bool currentSafetyResetIsPowerOn() {
 #endif
 }
 
+inline const char *safetyResetReasonName(uint32_t code) {
+  switch (code) {
+    case 0: return "Unknown";
+    case 1: return "Power-on";
+    case 2: return "External";
+    case 3: return "Software";
+    case 4: return "Panic";
+    case 5: return "Interrupt WDT";
+    case 6: return "Task WDT";
+    case 7: return "Watchdog";
+    case 8: return "Deep sleep";
+    case 9: return "Brownout";
+    case 10: return "SDIO";
+    case 11: return "USB";
+    case 12: return "JTAG";
+    case 13: return "eFuse";
+    case 14: return "Power glitch";
+    case 15: return "CPU lockup";
+  }
+  return "Unknown";
+}
+
 inline SafetyResetSnapshot beginSafetyResetGuard() {
   SafetyResetSnapshot snapshot;
   const bool valid = safetyResetRecordValid();

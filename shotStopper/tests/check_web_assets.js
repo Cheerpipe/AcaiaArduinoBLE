@@ -66,6 +66,12 @@ if (!network.includes('"brewConfirmationBeep"') ||
     !html.includes('id="retareStabilityMinDurationS"') ||
     !html.includes('Brew start confirmation (s)') ||
     !html.includes('id="confirmationTimeoutS"') ||
+    !html.includes('Paddle reminder limit (min)') ||
+    !html.includes('id="paddleReturnReminderMaxDurationMin"') ||
+    !html.includes("number('paddleReturnReminderMaxDurationMin')*60000") ||
+    !html.includes('id="sessionBar"') ||
+    !html.includes('id="logoutButton"') ||
+    html.includes('Up to 120 shots') ||
     !html.includes('/api/v1/time/sync') ||
     !firmware.includes('session.config.brewConfirmationBeep') ||
     !firmware.includes('servicePaddleReturnReminder')) {
@@ -79,7 +85,7 @@ if (!html.includes('authenticatedOnly') || !html.includes('Read-only view') ||
 const statusSection = html.match(/<fieldset[^>]*><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     statusSection[1].includes('class="row"') ||
-    (statusSection[1].match(/class="metric"/g) || []).length !== 17 ||
+    (statusSection[1].match(/class="metric"/g) || []).length !== 19 ||
     !html.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'")) {
   throw new Error('Status must use one metric per row and homologate Paddle/CN9 OPEN/OFF and CLOSED/ON labels');
 }
@@ -99,7 +105,7 @@ if (!html.includes('id="shotPanel"') ||
     !network.includes('scaleProtocol') ||
     !network.includes('safeScaleProtocol') ||
     !html.includes('remoteReady&&authenticated()') ||
-    !html.includes('Remote CN9 actuation is disabled by firmware policy') ||
+    !html.includes('Remote CN9 disabled by policy') ||
     !network.includes('\\"remoteControlEnabled\\"') ||
     !network.includes('\\"lastCommand\\"') ||
     !network.includes('\\"maintenance\\"') ||
@@ -109,17 +115,24 @@ if (!html.includes('id="shotPanel"') ||
   throw new Error('Web UI must enforce remote policy, maintenance, durable command state, and live shot status');
 }
 if (!html.includes('id="hCpu"') ||
+    !html.includes('id="hUptime"') ||
+    !html.includes('id="hResetReason"') ||
     !html.includes('id="hTemp"') ||
     !html.includes('id="hTPeak"') ||
     !html.includes('id="hRamT"') ||
     !html.includes('id="hRamU"') ||
     !html.includes('id="hRamF"') ||
     !html.includes('function updH(') ||
-    !html.includes('s.health?.hwmon') ||
+    !html.includes('updH(s.health,s.safety)') ||
+    !html.includes('h.uptimeMs') ||
+    !html.includes('resetReasonCode') ||
+    !html.includes("RR[s.resetReasonCode]") ||
     !network.includes('\\"hwmon\\"') ||
     !network.includes('cpuUsagePct') ||
     !network.includes('tempPeakC') ||
-    !network.includes('ramTotalBytes')) {
+    !network.includes('ramTotalBytes') ||
+    !network.includes('\\"uptimeMs\\"') ||
+    !network.includes('\\"resetReasonCode\\"')) {
   throw new Error('Diagnostics must expose basic hwmon metrics in UI and status API');
 }
 if (!html.includes('id="shotTable"') ||
@@ -142,7 +155,7 @@ if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
   throw new Error('Diagnostic log must remain visible and refresh in public read-only mode');
 }
 if (!html.includes('id="factoryResetButton"') ||
-    !html.includes("confirm('Restore every stopper setting") ||
+    !html.includes("confirm('Restore all factory settings?") ||
     !html.includes("confirm:'ERASE_ALL_SETTINGS'") ||
     !network.includes('FACTORY_RESET_NOT_CONFIRMED') ||
     !network.includes('resetPersistedSettingsToFactory(next)')) {

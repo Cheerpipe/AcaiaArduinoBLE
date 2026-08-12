@@ -671,6 +671,7 @@ struct ControlStatusSnapshot {
   uint32_t scaleRejectedPackets = 0;
   uint32_t scaleReconnects = 0;
   uint8_t scaleLastDisconnectReason = 0;
+  uint32_t uptimeMs = 0;
   uint32_t loopMaxGapMs = 0;
   uint32_t loopStackMinWords = 0;
   uint32_t scaleStackMinWords = 0;

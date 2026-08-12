@@ -3,6 +3,7 @@
 #define SHOT_STOPPER_ENABLE_REMOTE_CN9 1
 
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -56,6 +57,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   deleteHostResources();
 
   hostMillis = 0;
+  bootStartedAtMs = 0;
   hostPinLevel.fill(HIGH);
   hostPinMode.fill(0);
   hostTrackedRelayPin = RELAY_GPIO;
@@ -1717,6 +1719,24 @@ void w26_status_is_a_copied_snapshot() {
   CHECK(status.config.revision == session.config.revision);
 }
 
+void w46_status_reports_uptime_since_boot() {
+  resetHarness(false, false);
+  bootStartedAtMs = 1000;
+  hostMillis = 6500;
+  publishControlStatus();
+  ControlStatusSnapshot status;
+  copyControlStatus(status);
+  CHECK(status.uptimeMs == 5500);
+}
+
+void r47_reset_reason_name_maps_known_codes() {
+  CHECK(strcmp(safetyResetReasonName(1), "Power-on") == 0);
+  CHECK(strcmp(safetyResetReasonName(3), "Software") == 0);
+  CHECK(strcmp(safetyResetReasonName(6), "Task WDT") == 0);
+  CHECK(strcmp(safetyResetReasonName(9), "Brownout") == 0);
+  CHECK(strcmp(safetyResetReasonName(999), "Unknown") == 0);
+}
+
 void w27_stale_weight_is_not_presented_as_current() {
   resetHarness(false, true);
   currentWeight = 12.0f;
@@ -3086,6 +3106,7 @@ const TestCase testCases[] = {
     {"RS04", rs04_zero_min_duration_retares_on_sample_count_only},
     {"RS05", rs05_coffee_during_min_duration_wait_skips_retare},
     {"R46", r46_range_rejection_emits_specific_debug_code},
+    {"R47", r47_reset_reason_name_maps_known_codes},
     {"W01", w01_default_runtime_configuration_is_valid},
     {"W02", w02_each_runtime_field_is_validated},
     {"W03", w03_runtime_timing_relations_are_transactional},
@@ -3099,6 +3120,7 @@ const TestCase testCases[] = {
     {"W11", w11_operational_timer_opens_without_control_loop},
     {"W12", w12_hard_limit_cannot_be_configured_above_sixty_seconds},
     {"W45", w45_confirmation_retare_relation_is_validated},
+    {"W46", w46_status_reports_uptime_since_boot},
     {"W13", w13_virtual_paddle_uses_normal_state_machine},
     {"W14", w14_physical_motion_overrides_web_control},
     {"W15", w15_web_rinse_starts_scale_timer},

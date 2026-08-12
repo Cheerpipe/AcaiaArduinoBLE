@@ -183,8 +183,8 @@ const char *configValidationMessage(ConfigValidationError error) {
     case ConfigValidationError::PADDLE_REMINDER_INTERVAL:
       return "Paddle reminder interval must be from 5,000 to 60,000 ms.";
     case ConfigValidationError::PADDLE_REMINDER_MAX_DURATION:
-      return "Paddle reminder limit must be from 60,000 to 3,600,000 ms and "
-             "at least the reminder interval.";
+      return "Paddle reminder limit must be from 1 to 60 minutes and at least "
+             "the reminder interval.";
     case ConfigValidationError::TIMING_RELATION:
       return "Required: rinse gesture < CN9 limit, rinse duration <= limit, "
              "retare window + brew start confirmation <= limit.";
@@ -1958,7 +1958,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"staIp\":\"%s\",\"windowRemainingMs\":%lu,"
       "\"taskAgeMs\":%lu,\"taskStackMinWords\":%lu,"
       "\"startupFailures\":%lu},"
-      "\"health\":{\"loopMaxGapMs\":%lu,"
+      "\"health\":{\"uptimeMs\":%lu,\"loopMaxGapMs\":%lu,"
       "\"loopStackMinWords\":%lu,\"scaleStackMinWords\":%lu,"
       "\"freeHeapBytes\":%lu,\"minimumFreeHeapBytes\":%lu,"
       "\"largestFreeHeapBlockBytes\":%lu,"
@@ -2055,6 +2055,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(network.taskAgeMs),
       static_cast<unsigned long>(network.taskStackMinWords),
       static_cast<unsigned long>(network.startupFailures),
+      static_cast<unsigned long>(control.uptimeMs),
       static_cast<unsigned long>(control.loopMaxGapMs),
       static_cast<unsigned long>(control.loopStackMinWords),
       static_cast<unsigned long>(control.scaleStackMinWords),
