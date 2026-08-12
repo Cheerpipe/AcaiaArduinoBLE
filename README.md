@@ -172,7 +172,7 @@ Additional fixed protections (not separately configurable):
 See [Factory credentials (first use)](#factory-credentials-first-use) for AP
 name, default passwords, and step-by-step first connection.
 
-- Fully **embedded Web UI** (no external assets; **44 KiB** asset budget) served
+- Fully **embedded Web UI** (no external assets; **50 KiB** asset budget) served
   over Wi-Fi.
 - **STA** mode when credentials are saved; **fallback AP**
   (`MicraShotStopperAP` at `192.168.4.1`) when STA is unavailable. Modes are

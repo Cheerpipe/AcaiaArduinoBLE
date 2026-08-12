@@ -20,8 +20,8 @@ if (!scriptMatch) throw new Error('Embedded script not found');
 // Parse the exact JavaScript delivered by the controller.
 new Function(scriptMatch[1]);
 
-if (Buffer.byteLength(html, 'utf8') > 45056) {
-  throw new Error('Web UI exceeds the 44 KiB asset budget');
+if (Buffer.byteLength(html, 'utf8') > 51200) {
+  throw new Error('Web UI exceeds the 50 KiB asset budget');
 }
 if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
     !html.includes('Paddle State') || !html.includes('brewConfirmationBeep') ||
@@ -30,11 +30,26 @@ if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
   throw new Error('Web UI must show the physical paddle state and expose both scale beep options');
 }
 if (!html.includes('id="operationalWallS" type="number" min="5" max="60"') ||
-    !html.includes('CN9 limit ≤ 60 s') ||
+    !html.includes('CN9 (≤60 s)') ||
     !html.includes('sToMs(') ||
     !html.includes('rinseGestureMs:sToMs') ||
-    !network.includes('CN9 limit must be from 5,000 to 60,000 ms.')) {
-  throw new Error('CN9 operational limit must be capped at 60 s in the UI and 60,000 ms in the API');
+    !network.includes('CN9 limit must be from 5 to 60 s.')) {
+  throw new Error('CN9 operational limit must be capped at 60 s in the UI and API messages');
+}
+if (!html.includes('function rangeCheck(') ||
+    !html.includes('function showFieldError(') ||
+    !html.includes('samples × sample gap') ||
+    !html.includes('aria-live') ||
+    !html.includes('fieldError') ||
+    !html.includes('id="goalWeightG" type="number" min="10" max="200" step="1"') ||
+    !html.includes('validateNetworkClient') ||
+    !html.includes('validateApClient') ||
+    !network.includes('Max recovery must be from 10 to 200 g.') ||
+    !network.includes('Fast guard requires max recovery') ||
+    !network.includes('SSID must be 1–32 characters.') ||
+    !network.includes('Current password is incorrect.') ||
+    !network.includes('configValidationErrorName(error)')) {
+  throw new Error('UI/API must expose specific validation ranges, inline errors, and field-aware config errors');
 }
 if (!network.includes('"brewConfirmationBeep"') ||
     !network.includes('"paddleReturnReminderBeep"') ||

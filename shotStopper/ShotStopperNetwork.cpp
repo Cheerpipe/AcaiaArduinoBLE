@@ -157,38 +157,39 @@ const char *configValidationMessage(ConfigValidationError error) {
     case ConfigValidationError::WEIGHT_OFFSET:
       return "Internal offset is invalid; it cannot be edited from the Web UI.";
     case ConfigValidationError::RINSE_GESTURE:
-      return "Rinse gesture must be from 100 to 5,000 ms.";
+      return "Rinse gesture must be from 0.1 to 5 s.";
     case ConfigValidationError::RINSE_DURATION:
-      return "Rinse duration must be from 500 to 10,000 ms.";
+      return "Rinse duration must be from 0.5 to 10 s.";
     case ConfigValidationError::RETARE_WINDOW:
-      return "Retare window must be from 500 to 10,000 ms.";
+      return "Retare window must be from 0.5 to 10 s.";
     case ConfigValidationError::MINIMUM_CUP_WEIGHT:
       return "Minimum cup weight must be from 1 to 500 g.";
     case ConfigValidationError::RETARE_STABILITY_SAMPLES:
       return "Retare stable samples must be from 2 to 10.";
     case ConfigValidationError::RETARE_STABILITY_TOLERANCE:
-      return "Retare stability tolerance must be from 0.1 to 20.0 g.";
+      return "Retare stability tolerance must be from 0.1 to 20 g.";
     case ConfigValidationError::RETARE_STABILITY_MAX_GAP:
-      return "Retare sample gap must be from 100 to 5,000 ms.";
+      return "Retare sample gap must be from 0.1 to 5 s.";
     case ConfigValidationError::RETARE_STABILITY_MIN_DURATION:
-      return "Retare min stable time must be from 0 to 2,000 ms.";
+      return "Retare min stable time must be from 0 to 2 s.";
     case ConfigValidationError::RETARE_STABILITY_RELATION:
-      return "Retare min stable time must fit within the retare window and "
-             "sample count times the sample gap.";
+      return "Retare min stable time must be ≤ retare window and ≤ "
+             "samples × sample gap.";
     case ConfigValidationError::CONFIRMATION_TIMEOUT:
-      return "Brew start confirmation must be from 500 to 30,000 ms.";
+      return "Brew start confirmation must be from 0.5 to 30 s.";
     case ConfigValidationError::CONFIRMATION_RETARE_RELATION:
-      return "Brew start confirmation must be at least retare window + 3 s.";
+      return "Brew start confirmation must be at least effective retare "
+             "window + 3 s.";
     case ConfigValidationError::OPERATIONAL_WALL:
-      return "CN9 limit must be from 5,000 to 60,000 ms.";
+      return "CN9 limit must be from 5 to 60 s.";
     case ConfigValidationError::PADDLE_REMINDER_INTERVAL:
-      return "Paddle reminder interval must be from 5,000 to 60,000 ms.";
+      return "Paddle reminder interval must be from 5 to 60 s.";
     case ConfigValidationError::PADDLE_REMINDER_MAX_DURATION:
-      return "Paddle reminder limit must be from 1 to 60 minutes and at least "
+      return "Paddle reminder limit must be from 1 to 60 min and at least "
              "the reminder interval.";
     case ConfigValidationError::TIMING_RELATION:
-      return "Required: rinse gesture < CN9 limit, rinse duration <= limit, "
-             "retare window + brew start confirmation <= limit.";
+      return "Required: rinse gesture < CN9 limit; rinse duration, retare "
+             "window, and confirmation each ≤ CN9; retare + confirmation ≤ CN9.";
     case ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE:
       return "The Bookoo combined command requires automatic tare.";
     case ConfigValidationError::TIMEZONE_OFFSET:
@@ -196,11 +197,15 @@ const char *configValidationMessage(ConfigValidationError error) {
     case ConfigValidationError::NTP_SERVER_PRESET:
       return "NTP server preset must be pool, google, cloudflare, or nist.";
     case ConfigValidationError::NTP_SERVER_CUSTOM:
-      return "Custom NTP hostname is invalid.";
+      return "Custom NTP hostname is invalid (letters, digits, '.', '-'; "
+             "max 63 chars).";
     case ConfigValidationError::MAX_RECOVERY_WEIGHT:
+      return "Max recovery must be from 10 to 200 g.";
     case ConfigValidationError::MIN_BREW_TIME:
+      return "Min brew time must be from 5 to 55 s.";
     case ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION:
-      break;
+      return "Fast guard requires max recovery > target, min brew < CN9 "
+             "limit, and min brew ≥ brew confirmation.";
     case ConfigValidationError::AUTO_TO_MANUAL_GUARD_MODE:
       return "A→M limit mode must be manual or auto.";
     case ConfigValidationError::AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT:
@@ -2494,57 +2499,99 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "autoToManualGuardEnabled", "autoToManualGuardLimitMode",
       "autoToManualGuardManualLimitMs",
       "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom"};
-  const bool parsed =
-      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 28) &&
-      jsonUint8(root, "goalWeightG", candidate.goalWeightG) &&
-      jsonUint32(root, "rinseGestureMs", candidate.rinseGestureMs) &&
-      jsonUint32(root, "rinseDurationMs", candidate.rinseDurationMs) &&
-      jsonUint32(root, "operationalWallMs", candidate.operationalWallMs) &&
-      jsonBoolean(root, "autoTare", candidate.autoTare) &&
-      jsonBoolean(root, "timerOnly", candidate.timerOnly) &&
-      jsonBoolean(root, "canTareStartTimer", candidate.canTareStartTimer) &&
-      jsonBoolean(root, "brewConfirmationBeep",
-                  candidate.brewConfirmationBeep) &&
-      jsonBoolean(root, "paddleReturnReminderBeep",
-                  candidate.paddleReturnReminderBeep) &&
-      jsonUint32(root, "paddleReturnReminderIntervalMs",
-                 candidate.paddleReturnReminderIntervalMs) &&
-      jsonUint32(root, "paddleReturnReminderMaxDurationMs",
-                 candidate.paddleReturnReminderMaxDurationMs) &&
-      jsonBoolean(root, "autoRetare", candidate.autoRetare) &&
-      jsonUint32(root, "retareWindowMs", candidate.retareWindowMs) &&
-      jsonFloat(root, "minimumCupWeightG", candidate.minimumCupWeightG) &&
-      jsonUint8(root, "retareStabilitySamples",
-                candidate.retareStabilitySamples) &&
-      jsonFloat(root, "retareStabilityToleranceG",
-                candidate.retareStabilityToleranceG) &&
-      jsonUint32(root, "retareStabilityMaxGapMs",
-                 candidate.retareStabilityMaxGapMs) &&
-      jsonUint32(root, "retareStabilityMinDurationMs",
-                 candidate.retareStabilityMinDurationMs) &&
-      jsonUint32(root, "confirmationTimeoutMs",
-                 candidate.confirmationTimeoutMs) &&
-      jsonBoolean(root, "fastExtractionGuardEnabled",
-                  candidate.fastExtractionGuardEnabled) &&
-      jsonFloat(root, "maxRecoveryWeightG", candidate.maxRecoveryWeightG) &&
-      jsonUint32(root, "minBrewTimeMs", candidate.minBrewTimeMs) &&
-      jsonBoolean(root, "autoToManualGuardEnabled",
-                  candidate.autoToManualGuardEnabled) &&
-      jsonAutoToManualGuardLimitMode(root, "autoToManualGuardLimitMode",
-                                     candidate.autoToManualGuardLimitMode) &&
-      jsonUint32(root, "autoToManualGuardManualLimitMs",
-                 candidate.autoToManualGuardManualLimitMs) &&
-      jsonInt16(root, "timezoneOffsetMinutes",
-                candidate.timezoneOffsetMinutes) &&
-      jsonNtpPreset(root, "ntpServerPreset", candidate.ntpServerPreset) &&
-      jsonString(root, "ntpServerCustom", customNtp, sizeof(customNtp), true);
+  const char *parseError = nullptr;
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 28)) {
+    parseError =
+        "Config must include exactly the expected fields with correct types.";
+  } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
+    parseError = "goalWeightG must be an integer from 10 to 200.";
+  } else if (!jsonUint32(root, "rinseGestureMs", candidate.rinseGestureMs)) {
+    parseError = "rinseGestureMs must be an integer (milliseconds).";
+  } else if (!jsonUint32(root, "rinseDurationMs", candidate.rinseDurationMs)) {
+    parseError = "rinseDurationMs must be an integer (milliseconds).";
+  } else if (!jsonUint32(root, "operationalWallMs",
+                         candidate.operationalWallMs)) {
+    parseError = "operationalWallMs must be an integer (milliseconds).";
+  } else if (!jsonBoolean(root, "autoTare", candidate.autoTare)) {
+    parseError = "autoTare must be a boolean.";
+  } else if (!jsonBoolean(root, "timerOnly", candidate.timerOnly)) {
+    parseError = "timerOnly must be a boolean.";
+  } else if (!jsonBoolean(root, "canTareStartTimer",
+                          candidate.canTareStartTimer)) {
+    parseError = "canTareStartTimer must be a boolean.";
+  } else if (!jsonBoolean(root, "brewConfirmationBeep",
+                          candidate.brewConfirmationBeep)) {
+    parseError = "brewConfirmationBeep must be a boolean.";
+  } else if (!jsonBoolean(root, "paddleReturnReminderBeep",
+                          candidate.paddleReturnReminderBeep)) {
+    parseError = "paddleReturnReminderBeep must be a boolean.";
+  } else if (!jsonUint32(root, "paddleReturnReminderIntervalMs",
+                         candidate.paddleReturnReminderIntervalMs)) {
+    parseError =
+        "paddleReturnReminderIntervalMs must be an integer (milliseconds).";
+  } else if (!jsonUint32(root, "paddleReturnReminderMaxDurationMs",
+                         candidate.paddleReturnReminderMaxDurationMs)) {
+    parseError =
+        "paddleReturnReminderMaxDurationMs must be an integer (milliseconds).";
+  } else if (!jsonBoolean(root, "autoRetare", candidate.autoRetare)) {
+    parseError = "autoRetare must be a boolean.";
+  } else if (!jsonUint32(root, "retareWindowMs", candidate.retareWindowMs)) {
+    parseError = "retareWindowMs must be an integer (milliseconds).";
+  } else if (!jsonFloat(root, "minimumCupWeightG",
+                        candidate.minimumCupWeightG)) {
+    parseError = "minimumCupWeightG must be a number.";
+  } else if (!jsonUint8(root, "retareStabilitySamples",
+                        candidate.retareStabilitySamples)) {
+    parseError = "retareStabilitySamples must be an integer from 2 to 10.";
+  } else if (!jsonFloat(root, "retareStabilityToleranceG",
+                        candidate.retareStabilityToleranceG)) {
+    parseError = "retareStabilityToleranceG must be a number.";
+  } else if (!jsonUint32(root, "retareStabilityMaxGapMs",
+                         candidate.retareStabilityMaxGapMs)) {
+    parseError = "retareStabilityMaxGapMs must be an integer (milliseconds).";
+  } else if (!jsonUint32(root, "retareStabilityMinDurationMs",
+                         candidate.retareStabilityMinDurationMs)) {
+    parseError =
+        "retareStabilityMinDurationMs must be an integer (milliseconds).";
+  } else if (!jsonUint32(root, "confirmationTimeoutMs",
+                         candidate.confirmationTimeoutMs)) {
+    parseError = "confirmationTimeoutMs must be an integer (milliseconds).";
+  } else if (!jsonBoolean(root, "fastExtractionGuardEnabled",
+                          candidate.fastExtractionGuardEnabled)) {
+    parseError = "fastExtractionGuardEnabled must be a boolean.";
+  } else if (!jsonFloat(root, "maxRecoveryWeightG",
+                        candidate.maxRecoveryWeightG)) {
+    parseError = "maxRecoveryWeightG must be a number.";
+  } else if (!jsonUint32(root, "minBrewTimeMs", candidate.minBrewTimeMs)) {
+    parseError = "minBrewTimeMs must be an integer (milliseconds).";
+  } else if (!jsonBoolean(root, "autoToManualGuardEnabled",
+                          candidate.autoToManualGuardEnabled)) {
+    parseError = "autoToManualGuardEnabled must be a boolean.";
+  } else if (!jsonAutoToManualGuardLimitMode(
+                 root, "autoToManualGuardLimitMode",
+                 candidate.autoToManualGuardLimitMode)) {
+    parseError = "autoToManualGuardLimitMode must be \"manual\" or \"auto\".";
+  } else if (!jsonUint32(root, "autoToManualGuardManualLimitMs",
+                         candidate.autoToManualGuardManualLimitMs)) {
+    parseError =
+        "autoToManualGuardManualLimitMs must be an integer (milliseconds).";
+  } else if (!jsonInt16(root, "timezoneOffsetMinutes",
+                        candidate.timezoneOffsetMinutes)) {
+    parseError = "timezoneOffsetMinutes must be an integer.";
+  } else if (!jsonNtpPreset(root, "ntpServerPreset",
+                            candidate.ntpServerPreset)) {
+    parseError = "ntpServerPreset must be pool, google, cloudflare, or nist.";
+  } else if (!jsonString(root, "ntpServerCustom", customNtp, sizeof(customNtp),
+                         true)) {
+    parseError = "ntpServerCustom must be a string of at most 63 characters.";
+  }
   if (root != nullptr) {
     cJSON_Delete(root);
   }
-  if (!parsed) {
+  if (parseError != nullptr) {
     memset(customNtp, 0, sizeof(customNtp));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
-                     "A field is missing or has an invalid type.");
+                     parseError);
   }
   memcpy(candidate.ntpServerCustom, customNtp, sizeof(candidate.ntpServerCustom));
   memset(customNtp, 0, sizeof(customNtp));
@@ -2552,8 +2599,11 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   if (error != ConfigValidationError::NONE) {
     self.log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED,
              static_cast<int32_t>(error));
-    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_CONFIG",
-                     configValidationMessage(error));
+    char errorBody[320] = {};
+    snprintf(errorBody, sizeof(errorBody),
+             "{\"error\":\"INVALID_CONFIG\",\"message\":\"%s\",\"field\":\"%s\"}",
+             configValidationMessage(error), configValidationErrorName(error));
+    return sendJson(request, STATUS_UNPROCESSABLE, errorBody);
   }
   WebCommand command;
   command.type = WebCommandType::APPLY_CONFIG;
@@ -2853,25 +2903,39 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
   static const char *const forgetFields[] = {"action"};
   static const char *const saveFields[] = {"action", "ssid", "password",
                                            "open"};
+  const char *networkError = nullptr;
   bool parsed = root != nullptr &&
                 jsonString(root, "action", action, sizeof(action), false);
   if (parsed && strcmp(action, "forget") == 0) {
     parsed = jsonHasOnlyUniqueFields(root, forgetFields, 1);
     if (parsed) {
       command.type = WebCommandType::FORGET_NETWORK;
+    } else {
+      networkError = "Forget request must include only action=\"forget\".";
     }
   } else if (parsed && strcmp(action, "save") == 0) {
     command.type = WebCommandType::SAVE_NETWORK;
-    parsed = jsonHasOnlyUniqueFields(root, saveFields, 4) &&
-             jsonString(root, "ssid", command.ssid, sizeof(command.ssid),
-                        false) &&
-             jsonString(root, "password", command.password,
-                        sizeof(command.password), true) &&
-             jsonBoolean(root, "open", command.openNetwork) &&
-             validWifiSsid(command.ssid) &&
-             validWifiPassword(command.password, command.openNetwork);
+    if (!jsonHasOnlyUniqueFields(root, saveFields, 4) ||
+        !jsonString(root, "ssid", command.ssid, sizeof(command.ssid), false) ||
+        !jsonString(root, "password", command.password,
+                    sizeof(command.password), true) ||
+        !jsonBoolean(root, "open", command.openNetwork)) {
+      parsed = false;
+      networkError =
+          "Save request requires action, ssid, password, and open fields.";
+    } else if (!validWifiSsid(command.ssid)) {
+      parsed = false;
+      networkError = "SSID must be 1–32 characters.";
+    } else if (!validWifiPassword(command.password, command.openNetwork)) {
+      parsed = false;
+      networkError = command.openNetwork
+                         ? "Open network password must be empty."
+                         : "Wi-Fi password must be 8–63 characters for a "
+                           "secured network.";
+    }
   } else {
     parsed = false;
+    networkError = "action must be \"save\" or \"forget\".";
   }
   if (root != nullptr) {
     cJSON_Delete(root);
@@ -2880,7 +2944,9 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
   if (!parsed) {
     memset(command.password, 0, sizeof(command.password));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_NETWORK",
-                     "Invalid network SSID or password.");
+                     networkError != nullptr
+                         ? networkError
+                         : "Invalid network SSID or password.");
   }
   if (!self.callbacks_.enqueueWebCommand(command)) {
     memset(command.password, 0, sizeof(command.password));
@@ -2996,13 +3062,23 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
     cJSON_Delete(root);
   }
   memset(body, 0, sizeof(body));
-  const bool currentValid =
-      parsed && verifyAdminPassword(self.settingsCopy(), currentPassword);
-  memset(currentPassword, 0, sizeof(currentPassword));
-  if (!currentValid || !validAccessPointPassword(command.password)) {
+  if (!parsed) {
+    memset(currentPassword, 0, sizeof(currentPassword));
     memset(command.password, 0, sizeof(command.password));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_AP_PASSWORD",
-                     "The current password is incorrect or the new password is not 8–63 characters long.");
+                     "Current and new password fields are required.");
+  }
+  const bool currentValid = verifyAdminPassword(self.settingsCopy(), currentPassword);
+  memset(currentPassword, 0, sizeof(currentPassword));
+  if (!currentValid) {
+    memset(command.password, 0, sizeof(command.password));
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_AP_PASSWORD",
+                     "Current password is incorrect.");
+  }
+  if (!validAccessPointPassword(command.password)) {
+    memset(command.password, 0, sizeof(command.password));
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_AP_PASSWORD",
+                     "New password must be 8–63 characters.");
   }
   if (!self.callbacks_.enqueueWebCommand(command)) {
     memset(command.password, 0, sizeof(command.password));
