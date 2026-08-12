@@ -721,7 +721,13 @@ void ShotStopperNetwork::clearPendingConfirmWindow() {
 
 void ShotStopperNetwork::requestPendingNetworkConfirm() {
   portENTER_CRITICAL(&dataMux_);
-  pendingConfirmRequest_ = true;
+  const bool pending =
+      settings_.staConfigState ==
+          static_cast<uint8_t>(StaConfigState::PENDING) &&
+      settings_.staConfigured && !status_.apActive;
+  if (pending) {
+    pendingConfirmRequest_ = true;
+  }
   portEXIT_CRITICAL(&dataMux_);
 }
 
@@ -1683,16 +1689,16 @@ bool ShotStopperNetwork::startHttpServer() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.task_priority = tskIDLE_PRIORITY + 1;
   config.stack_size = 12288;
-  // Web UI polls status/log/shots (and may keep the document socket alive).
-  // Two sockets is too low: Safari/Chrome open parallel fetches and show
-  // "Load failed" / connection errors for /api/v1/{status,log,shots}.
-  config.max_open_sockets = 4;
+  // Browser keep-alive + overlapping status/log/shots/heartbeat/commands need
+  // more than four sockets; otherwise Safari shows intermittent connection
+  // failures ("Device unreachable") while the UI still partially works.
+  config.max_open_sockets = 7;
   config.max_uri_handlers = 24;
   config.max_resp_headers = 8;
-  config.backlog_conn = 4;
+  config.backlog_conn = 8;
   config.lru_purge_enable = true;
-  config.recv_wait_timeout = 2;
-  config.send_wait_timeout = 2;
+  config.recv_wait_timeout = 3;
+  config.send_wait_timeout = 3;
   if (httpd_start(&server_, &config) != ESP_OK) {
     server_ = nullptr;
     return false;
