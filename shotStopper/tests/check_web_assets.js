@@ -166,7 +166,7 @@ if (!html.includes('id="firmwareFooter"') ||
 }
 if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
-    !html.includes('refreshLog();') ||
+    !html.includes('await refreshLog()') ||
     !html.includes('setInterval(()=>refreshLog(),3000)')) {
   throw new Error('Diagnostic log must remain visible and refresh in public read-only mode');
 }
@@ -205,6 +205,13 @@ const expected = new Map([
   ['POST /api/v1/access-point/password', 'apPasswordHandler'],
 ]);
 
+const maxSocketsMatch = network.match(/max_open_sockets\s*=\s*(\d+)/);
+if (!maxSocketsMatch || Number(maxSocketsMatch[1]) < 4) {
+  throw new Error('HTTP server must allow at least 4 open sockets for Web UI polling');
+}
+if (!html.includes('(async()=>{await refreshStatus();await refreshShots();await refreshLog()})()')) {
+  throw new Error('Web UI must serialize the initial status/shots/log fetches');
+}
 const maxHandlersMatch = network.match(/max_uri_handlers\s*=\s*(\d+)/);
 if (!maxHandlersMatch) {
   throw new Error('HTTP server max_uri_handlers not found');
