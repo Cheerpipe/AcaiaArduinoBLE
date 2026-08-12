@@ -977,8 +977,14 @@ enum class DebugCode : uint8_t {
   FIRST_DROP_DURING_RETARE,
   FAST_EXTRACTION_ENTERED,
   FAST_EXTRACTION_STOP_MAX,
-  FAST_EXTRACTION_STOP_MIN_TIME
+  FAST_EXTRACTION_STOP_MIN_TIME,
+  SHOT_LOG_PERSIST_FAILED,
+  RUNTIME_PERSIST_FAILED
 };
+
+// Bitmask for argument2 on RUNTIME_PERSIST_FAILED (what was pending in NVS).
+constexpr int32_t RUNTIME_PERSIST_REASON_OFFSET = 1;
+constexpr int32_t RUNTIME_PERSIST_REASON_ATM_SAMPLES = 2;
 
 struct DebugEvent {
   uint32_t sequence = 0;
@@ -1178,6 +1184,10 @@ inline const char *debugCodeName(DebugCode code) {
       return "fast extraction guard stopped at max weight";
     case DebugCode::FAST_EXTRACTION_STOP_MIN_TIME:
       return "fast extraction guard stopped at min brew time";
+    case DebugCode::SHOT_LOG_PERSIST_FAILED:
+      return "shot history NVS persist failed";
+    case DebugCode::RUNTIME_PERSIST_FAILED:
+      return "workflow NVS persist failed";
   }
   return "unknown";
 }
@@ -1235,6 +1245,48 @@ inline bool formatScaleSampleDebugMessage(const DebugEvent &event, char *message
                debugCodeName(event.code),
                static_cast<long>(event.argument1),
                static_cast<long>(event.argument2));
+      return true;
+    default:
+      return false;
+  }
+}
+
+inline const char *runtimePersistReasonLabel(int32_t reasonBits) {
+  const bool offset = (reasonBits & RUNTIME_PERSIST_REASON_OFFSET) != 0;
+  const bool samples =
+      (reasonBits & RUNTIME_PERSIST_REASON_ATM_SAMPLES) != 0;
+  if (offset && samples) {
+    return "A->M samples+offset";
+  }
+  if (samples) {
+    return "A->M duration samples";
+  }
+  if (offset) {
+    return "learned weight offset";
+  }
+  return "runtime config";
+}
+
+// Builds Web UI /api/v1/log lines for NVS persist failures with origin clues.
+inline bool formatPersistDebugMessage(const DebugEvent &event, char *message,
+                                      size_t capacity) {
+  if (message == nullptr || capacity == 0) {
+    return false;
+  }
+  switch (event.code) {
+    case DebugCode::SHOT_LOG_PERSIST_FAILED:
+      snprintf(message, capacity,
+               "shot history NVS write failed "
+               "(ShotLog.save shotlog/records bytes=%ld count=%ld)",
+               static_cast<long>(event.argument1),
+               static_cast<long>(event.argument2));
+      return true;
+    case DebugCode::RUNTIME_PERSIST_FAILED:
+      snprintf(message, capacity,
+               "workflow NVS write failed "
+               "(PERSIST_RUNTIME settingsA/B rev=%ld; %s)",
+               static_cast<long>(event.argument1),
+               runtimePersistReasonLabel(event.argument2));
       return true;
     default:
       return false;

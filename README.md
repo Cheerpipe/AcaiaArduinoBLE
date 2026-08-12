@@ -151,8 +151,8 @@ Additional fixed protections (not separately configurable):
 ### Shot history
 
 - Up to **120** completed extractions stored in NVS (shot log schema **v6**;
-  migrates older v2–v5 stores; minimum duration 10 s; rinses and very short
-  gestures are excluded).
+  migrates older v2–v5 stores; writes a compact blob of only used records;
+  minimum duration 10 s; rinses and very short gestures are excluded).
 - Each record includes: local time (when NTP synced), duration, goal weight,
   actual weight, `actual_weight_source` (`post_drip` / `last_known` / `none`),
   error and error %, learned offset used, average flow (g/s), first-drop time,

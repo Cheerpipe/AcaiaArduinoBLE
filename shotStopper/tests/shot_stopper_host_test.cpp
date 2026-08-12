@@ -103,6 +103,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   runtimePersistCandidate = RuntimeConfig{};
   runtimePersistRequestId = 0;
   runtimePersistRetryAtMs = 0;
+  runtimePersistReasonBits = 0;
   nextInternalRequestId = 0x80000000UL;
   currentWeight = 0.0f;
   currentWeightReceivedAtMs = 0;
@@ -3055,6 +3056,68 @@ void s10_shot_log_migrates_schema_v4() {
         static_cast<uint8_t>(ShotLogStopDetail::NORMAL_TARGET));
 }
 
+void s11_shot_log_record_stays_v5_size() {
+  CHECK(sizeof(ShotLogRecord) == 48);
+  CHECK(sizeof(ShotLogRecord) == sizeof(ShotLogRecordV5));
+  CHECK(sizeof(ShotLogStore) == sizeof(ShotLogStoreV5));
+}
+
+void s12_shot_log_migrates_schema_v5() {
+  ShotLogStoreV5 legacy = {};
+  legacy.header.bootId = 5;
+  legacy.header.nextRecordId = 2;
+  legacy.header.count = 1;
+  legacy.header.writeIndex = 1;
+  legacy.records[0].id = 1;
+  legacy.records[0].bootId = 5;
+  legacy.records[0].durationDs = 280;
+  legacy.records[0].goalWeightG = 36;
+  legacy.records[0].actualWeightCg = 3600;
+  legacy.header.magic = SHOT_LOG_MAGIC;
+  legacy.header.schemaVersion = 5;
+  legacy.header.recordSize = sizeof(ShotLogRecordV5);
+  legacy.header.checksum = shotLogChecksumBytes(legacy.header);
+  CHECK(validShotLogStoreV5(legacy));
+
+  ShotLogStore migrated = {};
+  migrateShotLogStoreV5(legacy, migrated);
+  CHECK(validShotLogStore(migrated));
+  CHECK(migrated.records[0].actualWeightSource ==
+        static_cast<uint8_t>(ActualWeightSource::POST_DRIP));
+  compactShotLogStore(migrated);
+  finalizeShotLogStore(migrated);
+  CHECK(shotLogPersistedBytes(migrated) ==
+        sizeof(ShotLogHeader) + sizeof(ShotLogRecord));
+}
+
+void s13_persist_debug_messages_identify_origin() {
+  char message[128] = {};
+  DebugEvent shotLogEvent = {};
+  shotLogEvent.code = DebugCode::SHOT_LOG_PERSIST_FAILED;
+  shotLogEvent.argument1 = 72;
+  shotLogEvent.argument2 = 0;
+  CHECK(formatPersistDebugMessage(shotLogEvent, message, sizeof(message)));
+  CHECK(strstr(message, "shot history") != nullptr);
+  CHECK(strstr(message, "shotlog/records") != nullptr);
+  CHECK(strstr(message, "ShotLog.save") != nullptr);
+
+  DebugEvent runtimeEvent = {};
+  runtimeEvent.code = DebugCode::RUNTIME_PERSIST_FAILED;
+  runtimeEvent.argument1 = 9;
+  runtimeEvent.argument2 = RUNTIME_PERSIST_REASON_ATM_SAMPLES;
+  CHECK(formatPersistDebugMessage(runtimeEvent, message, sizeof(message)));
+  CHECK(strstr(message, "PERSIST_RUNTIME") != nullptr);
+  CHECK(strstr(message, "settingsA/B") != nullptr);
+  CHECK(strstr(message, "A->M duration samples") != nullptr);
+  CHECK(strstr(message, "learned weight offset") == nullptr);
+
+  runtimeEvent.argument2 =
+      RUNTIME_PERSIST_REASON_ATM_SAMPLES | RUNTIME_PERSIST_REASON_OFFSET;
+  CHECK(formatPersistDebugMessage(runtimeEvent, message, sizeof(message)));
+  CHECK(strstr(message, "A->M samples+offset") != nullptr);
+  CHECK(strlen(message) < sizeof(message));
+}
+
 void r51_auto_to_manual_guard_fires_while_scale_lost() {
   resetHarness(false, true);
   runtimeConfig.autoToManualGuardEnabled = true;
@@ -3334,6 +3397,9 @@ const TestCase testCases[] = {
     {"S08", s08_shot_log_without_sync_has_no_wall_time},
     {"S09", s09_shot_log_migrates_schema_v3},
     {"S10", s10_shot_log_migrates_schema_v4},
+    {"S11", s11_shot_log_record_stays_v5_size},
+    {"S12", s12_shot_log_migrates_schema_v5},
+    {"S13", s13_persist_debug_messages_identify_origin},
     {"N01", n01_wall_clock_tracks_utc_from_anchor},
     {"N02", n02_ntp_hostname_validation},
     {"N03", n03_unsynced_retry_is_one_minute},

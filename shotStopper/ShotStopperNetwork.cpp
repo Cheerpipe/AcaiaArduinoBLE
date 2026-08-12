@@ -1307,7 +1307,11 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
     if (!savePersistedSettings(next)) {
       restartPending_ = false;
       apRestartPending_ = false;
-      log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
+      // NVS write failure is not a config validation reject. PERSIST_RUNTIME
+      // failures are reported clearly when the maintenance lease completes.
+      if (command.type != WebCommandType::PERSIST_RUNTIME) {
+        log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
+      }
       return false;
     }
     portENTER_CRITICAL(&dataMux_);
@@ -2221,6 +2225,8 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
                    static_cast<WebCommandType>(events[index].argument1)));
     } else if (formatScaleSampleDebugMessage(events[index], message,
                                              sizeof(message))) {
+    } else if (formatPersistDebugMessage(events[index], message,
+                                         sizeof(message))) {
     } else {
       strncpy(message, debugCodeName(events[index].code),
               sizeof(message) - 1);

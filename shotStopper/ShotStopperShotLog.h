@@ -2,11 +2,12 @@
 
 #include "ShotStopperDomain.h"
 
-#if defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST) || defined(SHOT_STOPPER_HOST_TEST)
-// Host tests keep the shot log in memory only.
-#else
+#if defined(SHOT_STOPPER_HOST_TEST)
+// State-machine host tests keep the shot log in memory only.
+#elif !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
 #include <Preferences.h>
 #endif
+// Persistence host tests provide Preferences via persistence_host_stubs.h.
 
 namespace shotstopper {
 
@@ -159,10 +160,11 @@ struct ShotLogRecord {
   uint8_t extractionGuardEnabled;
   uint8_t extractionExtended;
   uint8_t stopDetail;
+  // Placed in the former v5 padding byte so sizeof stays 48 (no NVS growth).
+  uint8_t actualWeightSource;
   int16_t maxRecoveryWeightCg;
   uint16_t minBrewTimeDs;
   uint16_t targetReachedEarlyDs;
-  uint8_t actualWeightSource;
 };
 
 struct ShotLogRecordV5 {
@@ -189,6 +191,11 @@ struct ShotLogRecordV5 {
   uint16_t minBrewTimeDs;
   uint16_t targetReachedEarlyDs;
 };
+
+static_assert(sizeof(ShotLogRecord) == 48,
+              "ShotLogRecord must stay 48 bytes for NVS headroom");
+static_assert(sizeof(ShotLogRecord) == sizeof(ShotLogRecordV5),
+              "v6 record size must match v5 to avoid enlarging the blob");
 
 struct ShotLogRecordV4 {
   uint32_t id;
@@ -538,6 +545,46 @@ inline bool validShotLogStore(const ShotLogStore &store) {
   return true;
 }
 
+inline size_t shotLogPersistedBytes(const ShotLogStore &store) {
+  return sizeof(ShotLogHeader) +
+         static_cast<size_t>(store.header.count) * sizeof(ShotLogRecord);
+}
+
+inline bool shotLogBlobLengthMatches(const ShotLogStore &store, size_t length) {
+  if (length == sizeof(ShotLogStore)) {
+    return true;
+  }
+  return length == shotLogPersistedBytes(store);
+}
+
+// Pack the ring into records[0..count) (oldest first) so NVS can store only
+// the used prefix instead of the full capacity array.
+inline void compactShotLogStore(ShotLogStore &store) {
+  const uint16_t count = store.header.count;
+  if (count == 0) {
+    store.header.writeIndex = 0;
+    memset(store.records, 0, sizeof(store.records));
+    return;
+  }
+
+  ShotLogRecord ordered[SHOT_LOG_CAPACITY];
+  size_t index = store.header.writeIndex;
+  for (uint16_t step = 0; step < count; ++step) {
+    if (index == 0) {
+      index = SHOT_LOG_CAPACITY;
+    }
+    --index;
+  }
+  for (uint16_t i = 0; i < count; ++i) {
+    ordered[i] = store.records[index];
+    index = (index + 1U) % SHOT_LOG_CAPACITY;
+  }
+  memset(store.records, 0, sizeof(store.records));
+  memcpy(store.records, ordered, static_cast<size_t>(count) * sizeof(ShotLogRecord));
+  store.header.writeIndex =
+      static_cast<uint16_t>(count % SHOT_LOG_CAPACITY);
+}
+
 inline void resetShotLogStore(ShotLogStore &store, uint32_t bootId) {
   memset(&store, 0, sizeof(store));
   store.header.bootId = bootId == 0 ? 1U : bootId;
@@ -548,7 +595,7 @@ inline void resetShotLogStore(ShotLogStore &store, uint32_t bootId) {
 class ShotLog {
  public:
   bool load() {
-#if defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST) || defined(SHOT_STOPPER_HOST_TEST)
+#if defined(SHOT_STOPPER_HOST_TEST)
     resetShotLogStore(store_, 1);
     if (hostStorageValid_) {
       memcpy(&store_, &hostStorage_, sizeof(store_));
@@ -565,52 +612,60 @@ class ShotLog {
     }
     const size_t length = preferences.getBytesLength(SHOT_LOG_KEY);
     bool loaded = false;
-    if (length == sizeof(store_)) {
+    bool needsRewrite = false;
+    if (length > 0 && length <= sizeof(store_)) {
+      memset(&store_, 0, sizeof(store_));
       if (preferences.getBytes(SHOT_LOG_KEY, &store_, sizeof(store_)) ==
-              sizeof(store_) &&
-          validShotLogStore(store_)) {
+              length &&
+          validShotLogStore(store_) &&
+          shotLogBlobLengthMatches(store_, length)) {
         loaded = true;
+        if (length != shotLogPersistedBytes(store_)) {
+          needsRewrite = true;
+        }
       }
-    } else if (length == sizeof(ShotLogStoreV5)) {
+    }
+    if (!loaded && length == sizeof(ShotLogStoreV5)) {
       ShotLogStoreV5 legacy = {};
       if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
               sizeof(legacy) &&
           validShotLogStoreV5(legacy)) {
         migrateShotLogStoreV5(legacy, store_);
         loaded = true;
+        needsRewrite = true;
       }
-    } else if (length == sizeof(ShotLogStoreV4)) {
+    } else if (!loaded && length == sizeof(ShotLogStoreV4)) {
       ShotLogStoreV4 legacy = {};
       if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
               sizeof(legacy) &&
           validShotLogStoreV4(legacy)) {
         migrateShotLogStoreV4(legacy, store_);
         loaded = true;
+        needsRewrite = true;
       }
-    } else if (length == sizeof(ShotLogStoreV3)) {
+    } else if (!loaded && length == sizeof(ShotLogStoreV3)) {
       ShotLogStoreV3 legacy = {};
       if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
               sizeof(legacy) &&
           validShotLogStoreV3(legacy)) {
         migrateShotLogStoreV3(legacy, store_);
         loaded = true;
+        needsRewrite = true;
       }
-    } else if (length == sizeof(ShotLogStoreV2)) {
+    } else if (!loaded && length == sizeof(ShotLogStoreV2)) {
       ShotLogStoreV2 legacy = {};
       if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
               sizeof(legacy) &&
           validShotLogStoreV2(legacy)) {
         migrateShotLogStoreV2(legacy, store_);
         loaded = true;
+        needsRewrite = true;
       }
     }
     preferences.end();
     if (!loaded) {
       resetShotLogStore(store_, 1);
-    } else if (length == sizeof(ShotLogStoreV5) ||
-               length == sizeof(ShotLogStoreV4) ||
-               length == sizeof(ShotLogStoreV3) ||
-               length == sizeof(ShotLogStoreV2)) {
+    } else if (needsRewrite) {
       save();
     }
     return true;
@@ -618,20 +673,28 @@ class ShotLog {
   }
 
   bool save() {
+    compactShotLogStore(store_);
     finalizeShotLogStore(store_);
-#if defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST) || defined(SHOT_STOPPER_HOST_TEST)
+#if defined(SHOT_STOPPER_HOST_TEST)
     memcpy(&hostStorage_, &store_, sizeof(store_));
     hostStorageValid_ = true;
     return true;
 #else
+    const size_t bytes = shotLogPersistedBytes(store_);
     Preferences preferences;
     if (!preferences.begin(SHOT_LOG_NAMESPACE, false)) {
       return false;
     }
-    const size_t written =
-        preferences.putBytes(SHOT_LOG_KEY, &store_, sizeof(store_));
+    // Try in-place replace first so a failed write does not erase history.
+    size_t written = preferences.putBytes(SHOT_LOG_KEY, &store_, bytes);
+    if (written != bytes) {
+      // Free the previous blob and retry (NVS copy-on-write often needs the
+      // old entry gone before a large/new write can succeed).
+      preferences.remove(SHOT_LOG_KEY);
+      written = preferences.putBytes(SHOT_LOG_KEY, &store_, bytes);
+    }
     preferences.end();
-    return written == sizeof(store_);
+    return written == bytes;
 #endif
   }
 
@@ -646,6 +709,11 @@ class ShotLog {
   uint32_t bootId() const { return store_.header.bootId; }
 
   bool append(const ShotLogRecord &record) {
+    const uint16_t previousWriteIndex = store_.header.writeIndex;
+    const uint16_t previousCount = store_.header.count;
+    const uint32_t previousNextRecordId = store_.header.nextRecordId;
+    const ShotLogRecord overwritten = store_.records[previousWriteIndex];
+
     ShotLogRecord stored = record;
     stored.id = store_.header.nextRecordId;
     if (store_.header.nextRecordId < UINT32_MAX) {
@@ -658,7 +726,16 @@ class ShotLog {
     if (store_.header.count < SHOT_LOG_CAPACITY) {
       ++store_.header.count;
     }
-    return save();
+    if (save()) {
+      return true;
+    }
+    store_.records[previousWriteIndex] = overwritten;
+    store_.header.writeIndex = previousWriteIndex;
+    store_.header.count = previousCount;
+    store_.header.nextRecordId = previousNextRecordId;
+    // If the failed save erased the NVS key, try to put the prior ring back.
+    save();
+    return false;
   }
 
   bool removeById(uint32_t id) {
@@ -690,13 +767,21 @@ class ShotLog {
         ++store_.header.count;
       }
     }
-    return save();
+    if (save()) {
+      return true;
+    }
+    load();
+    return false;
   }
 
   bool clear() {
     const uint32_t bootId = store_.header.bootId;
     resetShotLogStore(store_, bootId);
-    return save();
+    if (save()) {
+      return true;
+    }
+    load();
+    return false;
   }
 
   size_t count() const { return store_.header.count; }
@@ -724,13 +809,13 @@ class ShotLog {
 
   ShotLogStore store_;
 
-#if defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST) || defined(SHOT_STOPPER_HOST_TEST)
+#if defined(SHOT_STOPPER_HOST_TEST)
   static ShotLogStore hostStorage_;
   static bool hostStorageValid_;
 #endif
 };
 
-#if defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST) || defined(SHOT_STOPPER_HOST_TEST)
+#if defined(SHOT_STOPPER_HOST_TEST)
 ShotLogStore ShotLog::hostStorage_;
 bool ShotLog::hostStorageValid_ = false;
 #endif

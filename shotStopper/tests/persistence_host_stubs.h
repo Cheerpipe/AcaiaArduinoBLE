@@ -103,6 +103,14 @@ class Preferences {
     return length;
   }
 
+  bool remove(const char *key) {
+    if (!active_ || readOnly_ || key == nullptr) {
+      return false;
+    }
+    return persistence_host::records.erase(
+               persistence_host::storageKey(nameSpace_.c_str(), key)) > 0;
+  }
+
   bool clear() {
     if (!active_ || readOnly_) return false;
     const std::string prefix = nameSpace_ + "/";

@@ -461,6 +461,7 @@ bool runtimePersistPending = false;
 RuntimeConfig runtimePersistCandidate;
 uint32_t runtimePersistRequestId = 0;
 uint32_t runtimePersistRetryAtMs = 0;
+int32_t runtimePersistReasonBits = 0;
 uint32_t nextInternalRequestId = 0x80000000UL;
 uint32_t lastLoopAtMs = 0;
 uint32_t loopMaxGapMs = 0;
@@ -2247,7 +2248,19 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
   }
 
   if (!shotLog.append(record)) {
-    Serial.println("Shot log persist failed");
+    const size_t nextCount =
+        shotLog.count() < SHOT_LOG_CAPACITY ? shotLog.count() + 1U
+                                            : SHOT_LOG_CAPACITY;
+    const size_t blobBytes =
+        sizeof(ShotLogHeader) + nextCount * sizeof(ShotLogRecord);
+    Serial.print("Shot history NVS persist failed (shotlog/records, bytes=");
+    Serial.print(static_cast<unsigned long>(blobBytes));
+    Serial.print(", count=");
+    Serial.print(static_cast<unsigned long>(shotLog.count()));
+    Serial.println(')');
+    addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
+                  static_cast<int32_t>(blobBytes),
+                  static_cast<int32_t>(shotLog.count()));
   }
 }
 
@@ -2274,6 +2287,7 @@ void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
   runtimePersistCandidate = candidate;
   runtimePersistPending = true;
   runtimePersistRetryAtMs = millis();
+  runtimePersistReasonBits |= RUNTIME_PERSIST_REASON_ATM_SAMPLES;
   Serial.print("A->M guard sample queued; trend ms=");
   Serial.println(autoToManualGuardTrendMs(
       candidate.autoToManualGuardSamplesDs, candidate.operationalWallMs));
@@ -2367,6 +2381,7 @@ void pendingShotFinalizeTask() {
   runtimePersistCandidate = candidate;
   runtimePersistPending = true;
   runtimePersistRetryAtMs = millis();
+  runtimePersistReasonBits |= RUNTIME_PERSIST_REASON_OFFSET;
   Serial.print("New offset pending durable commit: ");
   Serial.println(candidate.weightOffsetG);
 }
@@ -3566,10 +3581,22 @@ void completeMaintenanceLease(const WebCommand &result) {
     runtimeConfig = result.config;
     addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED,
                   static_cast<int32_t>(runtimeConfig.revision));
+    if (maintenanceLease.command.type == WebCommandType::PERSIST_RUNTIME) {
+      runtimePersistReasonBits = 0;
+    }
   }
   if (!result.succeeded &&
       maintenanceLease.command.type == WebCommandType::PERSIST_RUNTIME &&
       maintenanceLease.id == runtimePersistRequestId) {
+    addDebugEvent(
+        DebugCategory::CONFIG, DebugCode::RUNTIME_PERSIST_FAILED,
+        static_cast<int32_t>(maintenanceLease.command.config.revision),
+        runtimePersistReasonBits);
+    Serial.print("Workflow NVS persist failed (shotstopper settingsA/B, rev=");
+    Serial.print(maintenanceLease.command.config.revision);
+    Serial.print(", payload=");
+    Serial.print(runtimePersistReasonLabel(runtimePersistReasonBits));
+    Serial.println(')');
     runtimePersistCandidate = maintenanceLease.command.config;
     runtimePersistPending = true;
     runtimePersistRetryAtMs = millis() + RUNTIME_PERSIST_RETRY_MS;

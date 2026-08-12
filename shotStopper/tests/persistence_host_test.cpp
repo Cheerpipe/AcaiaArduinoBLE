@@ -1,5 +1,6 @@
 #define SHOT_STOPPER_PERSISTENCE_HOST_TEST
 #include "../ShotStopperPersistence.h"
+#include "../ShotStopperShotLog.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -289,6 +290,60 @@ void p11_schema_thirteen_migrates_to_fourteen() {
         AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS);
 }
 
+void p12_shot_log_persists_compact_blob() {
+  persistence_host::reset();
+  ShotLog log;
+  CHECK(log.load());
+  ShotLogRecord record = {};
+  record.durationDs = 250;
+  record.goalWeightG = 36;
+  record.actualWeightCg = 3600;
+  record.actualWeightSource =
+      static_cast<uint8_t>(ActualWeightSource::POST_DRIP);
+  CHECK(log.append(record));
+  CHECK(log.count() == 1);
+
+  const auto found = persistence_host::records.find("shotlog/records");
+  CHECK(found != persistence_host::records.end());
+  CHECK(found->second.size() == sizeof(ShotLogHeader) + sizeof(ShotLogRecord));
+
+  ShotLog reloaded;
+  CHECK(reloaded.load());
+  CHECK(reloaded.count() == 1);
+  ShotLogRecord out[1] = {};
+  CHECK(reloaded.copyNewestFirst(out, 1) == 1);
+  CHECK(out[0].goalWeightG == 36);
+  CHECK(out[0].actualWeightSource ==
+        static_cast<uint8_t>(ActualWeightSource::POST_DRIP));
+}
+
+void p13_shot_log_migrates_v5_full_blob_to_compact() {
+  persistence_host::reset();
+  ShotLogStoreV5 legacy = {};
+  legacy.header.bootId = 9;
+  legacy.header.nextRecordId = 2;
+  legacy.header.count = 1;
+  legacy.header.writeIndex = 1;
+  legacy.records[0].id = 1;
+  legacy.records[0].bootId = 9;
+  legacy.records[0].durationDs = 300;
+  legacy.records[0].goalWeightG = 40;
+  legacy.records[0].actualWeightCg = 4000;
+  legacy.header.magic = SHOT_LOG_MAGIC;
+  legacy.header.schemaVersion = 5;
+  legacy.header.recordSize = sizeof(ShotLogRecordV5);
+  legacy.header.checksum = shotLogChecksumBytes(legacy.header);
+  CHECK(validShotLogStoreV5(legacy));
+  persistence_host::putRaw("shotlog", "records", &legacy, sizeof(legacy));
+
+  ShotLog log;
+  CHECK(log.load());
+  CHECK(log.count() == 1);
+  const auto found = persistence_host::records.find("shotlog/records");
+  CHECK(found != persistence_host::records.end());
+  CHECK(found->second.size() == sizeof(ShotLogHeader) + sizeof(ShotLogRecord));
+}
+
 struct TestCase {
   const char *id;
   void (*function)();
@@ -306,6 +361,8 @@ const TestCase tests[] = {
     {"P09", p09_fast_extraction_guard_validation},
     {"P10", p10_auto_to_manual_guard_trend_and_validation},
     {"P11", p11_schema_thirteen_migrates_to_fourteen},
+    {"P12", p12_shot_log_persists_compact_blob},
+    {"P13", p13_shot_log_migrates_v5_full_blob_to_compact},
 };
 
 }  // namespace
