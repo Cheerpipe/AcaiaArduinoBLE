@@ -182,17 +182,28 @@ class BLEClass {
 public:
     int scan() {
         ++scanCalls;
+        lastScanAddress.clear();
         delivered_ = false;
         scanning_ = scanResult;
         return scanResult ? 1 : 0;
     }
-    int scanForAddress(String) { return scan(); }
+    int scanForAddress(String address) {
+        ++scanForAddressCalls;
+        lastScanAddress = address.c_str() ? std::string(address.c_str()) : "";
+        delivered_ = false;
+        scanning_ = scanResult;
+        return scanResult ? 1 : 0;
+    }
     void stopScan() {
         scanning_ = false;
         ++stopScanCalls;
     }
     BLEDevice available() {
         if (!scanning_ || delivered_ || !availableState) {
+            return BLEDevice();
+        }
+        if (!lastScanAddress.empty() &&
+            availableState->address != lastScanAddress) {
             return BLEDevice();
         }
         delivered_ = true;
@@ -216,15 +227,19 @@ public:
         scanning_ = false;
         delivered_ = false;
         scanCalls = 0;
+        scanForAddressCalls = 0;
         stopScanCalls = 0;
         timeoutMs = 0;
+        lastScanAddress.clear();
         availableState.reset();
     }
 
     bool scanResult = true;
     int scanCalls = 0;
+    int scanForAddressCalls = 0;
     int stopScanCalls = 0;
     unsigned long timeoutMs = 0;
+    std::string lastScanAddress;
     std::shared_ptr<FakeBLE::PeripheralState> availableState;
 
 private:

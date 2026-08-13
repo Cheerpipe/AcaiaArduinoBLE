@@ -84,6 +84,8 @@ struct NetworkBridgeCallbacks {
   size_t (*copyShotRecords)(ShotLogRecord *output, size_t capacity) = nullptr;
   bool (*deleteShotRecord)(uint32_t id) = nullptr;
   bool (*clearShotLog)() = nullptr;
+  // Keeps NVS Wi-Fi/runtime saves from overwriting a newer preferred scale MAC.
+  void (*copyPreferredScaleMac)(char *out, size_t capacity) = nullptr;
 };
 
 class ShotStopperNetwork {
@@ -97,8 +99,10 @@ class ShotStopperNetwork {
   bool enqueueAcceptedCommand(const WebCommand &command);
   NetworkStatusSnapshot snapshot();
   void requestNtpSyncIfNeeded();
+  void syncPreferredScaleMac(const char *mac);
 
   private:
+  void mergePreferredScaleMac(PersistedSettings &settings);
   static constexpr uint32_t AP_WINDOW_MS = 180000;
   static constexpr uint32_t UI_GRACE_MS = 180000;
   static constexpr uint32_t WEB_PADDLE_HEARTBEAT_TIMEOUT_MS = 15000;

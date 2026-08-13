@@ -11,13 +11,15 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 17;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 16;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 18;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 17;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V17 = 17;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V16 = 16;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V15 = 15;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V14 = 14;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V13 = 13;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V12 = 12;
+constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
 constexpr size_t NTP_SERVER_HOST_CAPACITY = 64;
 constexpr uint32_t NTP_RESYNC_INTERVAL_MS = 3600UL * 1000UL;
 constexpr uint32_t NTP_UNSYNCED_RETRY_MS = 60UL * 1000UL;
@@ -747,6 +749,35 @@ inline bool shouldReuseSavedWifiCredentials(const char *ssid,
 
 inline bool validAccessPointPassword(const char *password) {
   return validWifiPassword(password, false);
+}
+
+inline bool validBleMacNibble(char c) {
+  return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') ||
+         (c >= 'a' && c <= 'f');
+}
+
+// Empty = no preferred scale. Otherwise canonical "AA:BB:CC:DD:EE:FF".
+inline bool validPreferredScaleMac(const char *mac) {
+  if (mac == nullptr) {
+    return false;
+  }
+  const size_t length = strnlen(mac, PREFERRED_SCALE_MAC_CAPACITY);
+  if (length == 0) {
+    return mac[0] == '\0';
+  }
+  if (length != 17 || mac[17] != '\0') {
+    return false;
+  }
+  for (size_t index = 0; index < 17; ++index) {
+    if ((index % 3) == 2) {
+      if (mac[index] != ':') {
+        return false;
+      }
+    } else if (!validBleMacNibble(mac[index])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 enum class StaIpMode : uint8_t { DHCP = 0, STATIC = 1 };

@@ -183,6 +183,37 @@ void testNonBlockingScanConnectsWithoutInit() {
     CHECK(scale.isConnected());
     CHECK(!scale.isScanning());
     CHECK(fixture.peripheral->connected);
+    CHECK(scale.address() == String("01:02:03:04:05:06"));
+    CHECK(scale.localName() == String("PYXIS"));
+}
+
+void testDirectedScanUsesAddressFilter() {
+    resetFake();
+    ScaleFixture fixture = makeScale(NEW);
+    fixture.peripheral->address = "AA:BB:CC:DD:EE:FF";
+    AcaiaArduinoBLE scale(false);
+    CHECK(scale.startScan("AA:BB:CC:DD:EE:FF"));
+    CHECK(scale.isDirectedScan());
+    CHECK(BLE.scanCalls == 0);
+    CHECK(BLE.scanForAddressCalls == 1);
+    CHECK(BLE.lastScanAddress == "AA:BB:CC:DD:EE:FF");
+    CHECK(scale.pollScan());
+    CHECK(scale.isConnected());
+    CHECK(!scale.isDirectedScan());
+    CHECK(scale.address() == String("AA:BB:CC:DD:EE:FF"));
+
+    resetFake();
+    fixture = makeScale(NEW);
+    fixture.peripheral->address = "11:22:33:44:55:66";
+    AcaiaArduinoBLE mismatch(false);
+    CHECK(mismatch.startScan("AA:BB:CC:DD:EE:FF"));
+    CHECK(!mismatch.pollScan());
+    CHECK(mismatch.isScanning());
+    fakeMillis = SCALE_SCAN_TIMEOUT_MS;
+    CHECK(!mismatch.pollScan());
+    CHECK(!mismatch.isScanning());
+    CHECK(mismatch.lastDisconnectReason() ==
+          AcaiaDisconnectReason::SCAN_TIMEOUT);
 }
 
 void testCleanupOnInitializationFailures() {
@@ -523,6 +554,7 @@ int main() {
     testScanDiagnostics();
     testNonBlockingScanDoesNotRestartOrResetIdle();
     testNonBlockingScanConnectsWithoutInit();
+    testDirectedScanUsesAddressFilter();
     testCleanupOnInitializationFailures();
     testFirstPacketAndSteadyStateTimeouts();
     testAcaiaValidationAndDebugBounds();

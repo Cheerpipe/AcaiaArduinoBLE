@@ -460,6 +460,25 @@ PersistedSettings ShotStopperNetwork::settingsCopy() {
   return copy;
 }
 
+void ShotStopperNetwork::mergePreferredScaleMac(PersistedSettings &settings) {
+  if (callbacks_.copyPreferredScaleMac == nullptr) {
+    return;
+  }
+  callbacks_.copyPreferredScaleMac(settings.preferredScaleMac,
+                                   sizeof(settings.preferredScaleMac));
+}
+
+void ShotStopperNetwork::syncPreferredScaleMac(const char *mac) {
+  if (mac == nullptr || !validPreferredScaleMac(mac)) {
+    return;
+  }
+  portENTER_CRITICAL(&dataMux_);
+  strncpy(settings_.preferredScaleMac, mac,
+          sizeof(settings_.preferredScaleMac) - 1);
+  settings_.preferredScaleMac[sizeof(settings_.preferredScaleMac) - 1] = '\0';
+  portEXIT_CRITICAL(&dataMux_);
+}
+
 uint32_t ShotStopperNetwork::allocateRequestId() {
   portENTER_CRITICAL(&dataMux_);
   const uint32_t id = nextRequestId_++;
@@ -752,6 +771,7 @@ bool ShotStopperNetwork::confirmPendingNetwork(const char *reason) {
   }
   next.staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
   copyActiveStaToLkg(next);
+  mergePreferredScaleMac(next);
   if (!savePersistedSettings(next)) {
     return false;
   }
@@ -790,6 +810,7 @@ bool ShotStopperNetwork::revertPendingNetwork(uint32_t now,
   if (!restoreLkgToActive(next)) {
     clearStaNetwork(next);
   }
+  mergePreferredScaleMac(next);
   if (!savePersistedSettings(next)) {
     return false;
   }
@@ -1552,6 +1573,7 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
   }
 
   if (persist) {
+    mergePreferredScaleMac(next);
     if (!savePersistedSettings(next)) {
       restartPending_ = false;
       apRestartPending_ = false;

@@ -103,6 +103,10 @@ class AcaiaArduinoBLE {
         bool isConnected();
         bool newWeightAvailable();
         const char* connectedProtocolName() const;
+        // Empty when not connected / no remembered peripheral.
+        String address() const;
+        String localName() const;
+        bool isDirectedScan() const;
 
         AcaiaDisconnectReason lastDisconnectReason() const;
         const char* lastDisconnectReasonName() const;
@@ -177,6 +181,7 @@ class AcaiaArduinoBLE {
         bool                _loggedVersion;
         scale_type          _type;
         bool                _debug;
+        String              _scanMac;
         AcaiaDisconnectReason _lastDisconnectReason;
 };
 

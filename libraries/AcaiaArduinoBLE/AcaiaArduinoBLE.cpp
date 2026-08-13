@@ -108,6 +108,7 @@ AcaiaArduinoBLE::AcaiaArduinoBLE(bool debug) :
     _loggedVersion(false),
     _type(OLD),
     _debug(debug),
+    _scanMac(),
     _lastDisconnectReason(AcaiaDisconnectReason::NONE) {
 }
 
@@ -132,6 +133,7 @@ void AcaiaArduinoBLE::stopIdleScan(AcaiaDisconnectReason reason) {
     }
     _connected = false;
     _scanStartedAt = 0;
+    _scanMac = "";
     if (reason != AcaiaDisconnectReason::NONE) {
         _lastDisconnectReason = reason;
     }
@@ -152,7 +154,13 @@ bool AcaiaArduinoBLE::startScan(String mac) {
 
     BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
     if (_debug) {
-        Serial.println("Scanning for scale...");
+        if (mac.length() == 0) {
+            Serial.println("Scanning for any compatible scale (name scan)...");
+        } else {
+            Serial.print("Scanning for preferred scale ");
+            Serial.print(mac);
+            Serial.println("...");
+        }
     }
 
     const bool scanStarted = (mac.length() == 0)
@@ -163,6 +171,7 @@ bool AcaiaArduinoBLE::startScan(String mac) {
         stopIdleScan(AcaiaDisconnectReason::SCAN_START_FAILED);
         return false;
     }
+    _scanMac = mac;
     _scanning = true;
     _scanStartedAt = static_cast<uint32_t>(millis());
     return true;
@@ -195,12 +204,19 @@ bool AcaiaArduinoBLE::pollScan() {
         BLE.stopScan();
         _scanning = false;
         _scanStartedAt = 0;
+        _scanMac = "";
         return completeConnection(peripheral);
     }
 
     if (elapsedSince(_scanStartedAt) >= SCALE_SCAN_TIMEOUT_MS) {
         if (_debug) {
-            Serial.println("Scale scan timed out");
+            if (_scanMac.length() == 0) {
+                Serial.println("Scale name scan timed out");
+            } else {
+                Serial.print("Preferred scale scan timed out (");
+                Serial.print(_scanMac);
+                Serial.println(")");
+            }
         }
         stopIdleScan(AcaiaDisconnectReason::SCAN_TIMEOUT);
         return false;
@@ -542,6 +558,24 @@ const char* AcaiaArduinoBLE::connectedProtocolName() const {
     return "unknown";
 }
 
+String AcaiaArduinoBLE::address() const {
+    if (!_hasPeripheral) {
+        return String("");
+    }
+    return _peripheral.address();
+}
+
+String AcaiaArduinoBLE::localName() const {
+    if (!_hasPeripheral) {
+        return String("");
+    }
+    return _peripheral.localName();
+}
+
+bool AcaiaArduinoBLE::isDirectedScan() const {
+    return _scanning && _scanMac.length() > 0;
+}
+
 bool AcaiaArduinoBLE::newWeightAvailable() {
     if (!isConnected()) {
         return false;
@@ -843,6 +877,7 @@ void AcaiaArduinoBLE::resetConnection(bool disconnectPeer,
         _scanning = false;
     }
     _scanStartedAt = 0;
+    _scanMac = "";
 
     // Release retained remote attributes before ArduinoBLE removes the peer's
     // service tree. This ordering also makes repeated cleanup idempotent.
@@ -875,7 +910,8 @@ void AcaiaArduinoBLE::rejectPacket(const char* reason) {
     }
     if (_connected &&
         _consecutiveRejectedPackets >= MAX_CONSECUTIVE_REJECTED_PACKETS) {
-        Serial.println("Invalid scale packet stream; reconnecting");
+        Serial.println(
+            "Invalid scale packet stream; disconnecting (worker will rescan)");
         resetConnection(true,
                         AcaiaDisconnectReason::INVALID_PACKET_STREAM);
     }

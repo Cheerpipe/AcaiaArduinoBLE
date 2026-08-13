@@ -97,6 +97,12 @@ void p01_defaults_are_valid_v16() {
   CHECK(validPersistedSettings(settings));
   CHECK(passwordIsFactoryDefault(settings));
   CHECK(verifyAdminPassword(settings, DEFAULT_AP_PASSWORD));
+  CHECK(settings.preferredScaleMac[0] == '\0');
+  CHECK(validPreferredScaleMac(settings.preferredScaleMac));
+  CHECK(validPreferredScaleMac("AA:BB:CC:DD:EE:FF"));
+  CHECK(validPreferredScaleMac("aa:bb:cc:dd:ee:ff"));
+  CHECK(!validPreferredScaleMac("AA:BB:CC:DD:EE"));
+  CHECK(!validPreferredScaleMac("GG:BB:CC:DD:EE:FF"));
 }
 
 void p02_newest_valid_slot_is_loaded() {
@@ -238,12 +244,15 @@ void p08_factory_reset_rebuilds_defaults() {
   CHECK(initializeDefaultSettings(settings));
   settings.runtime.goalWeightG = 63;
   settings.runtime.maxRecoveryWeightG = 70.0f;
+  strcpy(settings.preferredScaleMac, "AA:BB:CC:DD:EE:FF");
+  finalizePersistedSettings(settings);
   CHECK(savePersistedSettings(settings));
   CHECK(resetPersistedSettingsToFactory(settings));
   CHECK(settings.schemaVersion == CONFIG_SCHEMA_VERSION);
   CHECK(settings.runtime.goalWeightG == DEFAULT_GOAL_WEIGHT_G);
   CHECK(settings.runtime.fastExtractionGuardEnabled);
   CHECK(settings.runtime.autoToManualGuardEnabled);
+  CHECK(settings.preferredScaleMac[0] == '\0');
 }
 
 void p09_fast_extraction_guard_validation() {
@@ -652,6 +661,49 @@ void p20_schema_sixteen_migrates_to_seventeen() {
   CHECK(loaded.runtime.shotTimerStartDelayMs ==
         DEFAULT_SHOT_TIMER_START_DELAY_MS);
   CHECK(strcmp(loaded.staSsid, "CafeWiFi") == 0);
+  CHECK(loaded.preferredScaleMac[0] == '\0');
+}
+
+void p21_schema_seventeen_migrates_to_eighteen() {
+  persistence_host::reset();
+  PersistedSettings current;
+  CHECK(initializeDefaultSettings(current));
+  PersistedSettingsV17 legacy = {};
+  legacy.magic = PERSISTED_SETTINGS_MAGIC;
+  legacy.schemaVersion = CONFIG_SCHEMA_VERSION_V17;
+  legacy.structureSize = sizeof(PersistedSettingsV17);
+  legacy.storageRevision = 11;
+  legacy.runtime = current.runtime;
+  legacy.runtime.goalWeightG = 41;
+  legacy.staConfigured = true;
+  legacy.staOpen = false;
+  strcpy(legacy.staSsid, "CafeWiFi17");
+  strcpy(legacy.staPassword, "CafePass17");
+  legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  legacy.staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  legacy.lkgValid = false;
+  memcpy(legacy.apPassword, current.apPassword, sizeof(legacy.apPassword));
+  memcpy(legacy.authSalt, current.authSalt, sizeof(legacy.authSalt));
+  memcpy(legacy.authHash, current.authHash, sizeof(legacy.authHash));
+  legacy.checksum = persistedSettingsV17Checksum(legacy);
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &legacy,
+                           sizeof(legacy));
+
+  PersistedSettings loaded;
+  bool migrated = false;
+  CHECK(loadPersistedSettings(loaded, &migrated));
+  CHECK(migrated);
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.runtime.goalWeightG == 41);
+  CHECK(strcmp(loaded.staSsid, "CafeWiFi17") == 0);
+  CHECK(loaded.preferredScaleMac[0] == '\0');
+
+  strcpy(loaded.preferredScaleMac, "11:22:33:44:55:66");
+  finalizePersistedSettings(loaded);
+  CHECK(savePersistedSettings(loaded));
+  PersistedSettings reloaded;
+  CHECK(loadPersistedSettings(reloaded));
+  CHECK(strcmp(reloaded.preferredScaleMac, "11:22:33:44:55:66") == 0);
 }
 
 void p16_static_ip_address_validation() {
@@ -712,6 +764,7 @@ const TestCase tests[] = {
     {"P14", p14_schema_fourteen_migrates_to_current},
     {"P15", p15_schema_fifteen_migrates_to_sixteen},
     {"P20", p20_schema_sixteen_migrates_to_seventeen},
+    {"P21", p21_schema_seventeen_migrates_to_eighteen},
     {"P16", p16_static_ip_address_validation},
     {"P17", p17_legacy_password_hash_still_verifies},
     {"P18", p18_shot_log_keeps_history_when_inactive_slot_write_fails},

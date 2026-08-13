@@ -209,7 +209,8 @@ class AcaiaArduinoBLE {
     return connected;
   }
   bool startScan(String mac = "") {
-    (void)mac;
+    lastStartScanMac = mac;
+    directedScan = !mac.empty();
     if (connected) {
       scanning = false;
       return false;
@@ -223,15 +224,20 @@ class AcaiaArduinoBLE {
   bool pollScan() {
     if (connected) {
       scanning = false;
+      directedScan = false;
       return true;
     }
     if (!scanning) {
       return false;
     }
     scanning = false;
+    directedScan = false;
     return false;
   }
   bool isScanning() const { return scanning; }
+  bool isDirectedScan() const { return scanning && directedScan; }
+  String address() const { return connected ? connectedAddress : String(); }
+  String localName() const { return connected ? connectedLocalName : String(); }
   bool tare() {
     commandLog.push_back("tare");
     ++tareCalls;
@@ -279,9 +285,6 @@ class AcaiaArduinoBLE {
   uint32_t lastTimerAgeMs() const { return timerValid ? timerAgeMs : 0xffffffffUL; }
   bool heartbeatRequired() const { return heartbeatRequiredValue; }
   bool isConnected() const { return connected; }
-  const char* connectedProtocolName() const {
-    return connected ? "bookoo_generic" : "none";
-  }
   bool newWeightAvailable() {
     ++newWeightAvailableCalls;
     const bool available = newWeightAvailableValue;
@@ -291,14 +294,29 @@ class AcaiaArduinoBLE {
     }
     return available;
   }
+  const char* connectedProtocolName() const {
+    return connected ? "bookoo_generic" : "none";
+  }
   AcaiaDisconnectReason lastDisconnectReason() const {
     return disconnectReason;
+  }
+  const char* lastDisconnectReasonName() const {
+    switch (disconnectReason) {
+      case AcaiaDisconnectReason::NONE: return "none";
+      case AcaiaDisconnectReason::SCAN_START_FAILED: return "scan start failed";
+      case AcaiaDisconnectReason::SCAN_TIMEOUT: return "scan timeout";
+      default: return "unknown";
+    }
   }
   uint32_t rejectedPacketCount() const { return rejectedPackets; }
   uint32_t reconnectCount() const { return reconnects; }
 
   bool connected = false;
   bool scanning = false;
+  bool directedScan = false;
+  String lastStartScanMac;
+  String connectedAddress = "01:02:03:04:05:06";
+  String connectedLocalName = "BOOKOO";
   bool tareSucceeds = true;
   bool startTimerSucceeds = true;
   bool stopTimerSucceeds = true;
