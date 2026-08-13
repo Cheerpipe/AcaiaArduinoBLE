@@ -1802,10 +1802,13 @@ bool ShotStopperNetwork::startHttpServer() {
                       wifiScanStatusHandler) &&
       registerHandler(server_, "/api/v1/access-point/password", HTTP_POST,
                       apPasswordHandler);
-  if (!registered) {
+  if (!registered ||
+      httpd_register_err_handler(server_, HTTPD_404_NOT_FOUND,
+                                 notFoundHandler) != ESP_OK) {
     stopHttpServer();
+    return false;
   }
-  return registered;
+  return true;
 }
 
 void ShotStopperNetwork::stopHttpServer() {
@@ -2099,6 +2102,19 @@ esp_err_t ShotStopperNetwork::cssHandler(httpd_req_t *request) {
   return httpd_resp_send(
       request, reinterpret_cast<const char *>(SHOT_STOPPER_WEB_CSS_GZIP),
       SHOT_STOPPER_WEB_CSS_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::notFoundHandler(httpd_req_t *request,
+                                              httpd_err_code_t) {
+  // Keep API 404s as JSON; browser paths bounce to Home.
+  if (strncmp(request->uri, "/api/", 5) == 0) {
+    return sendError(request, STATUS_NOT_FOUND, "NOT_FOUND",
+                     "The requested resource was not found.");
+  }
+  httpd_resp_set_status(request, "302 Found");
+  httpd_resp_set_hdr(request, "Location", "/");
+  httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+  return httpd_resp_send(request, nullptr, 0);
 }
 
 esp_err_t ShotStopperNetwork::loginHandler(httpd_req_t *request) {

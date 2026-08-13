@@ -241,6 +241,7 @@ class ShotStopperNetwork {
 
   static esp_err_t rootHandler(httpd_req_t *request);
   static esp_err_t cssHandler(httpd_req_t *request);
+  static esp_err_t notFoundHandler(httpd_req_t *request, httpd_err_code_t error);
   static esp_err_t loginHandler(httpd_req_t *request);
   static esp_err_t logoutHandler(httpd_req_t *request);
   static esp_err_t heartbeatHandler(httpd_req_t *request);

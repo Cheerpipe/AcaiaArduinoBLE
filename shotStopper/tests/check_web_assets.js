@@ -103,10 +103,15 @@ if (!network.includes('"firstDropBeep"') ||
     !firmware.includes('servicePaddleReturnReminder')) {
   throw new Error('Scale beep settings must be configurable end-to-end');
 }
-if (!html.includes('authenticatedOnly') || !html.includes('Read-only view') ||
+if (!html.includes('authenticatedOnly') ||
     !html.includes('sessionStorage.setItem') || !html.includes('window.location.reload()') ||
-    !network.includes('Status intentionally has no authentication requirement')) {
-  throw new Error('Web UI must expose a public read-only mode and reload after authenticated sign-in');
+    !html.includes('pageNav authenticatedOnly') ||
+    !html.includes('function knownPath(') ||
+    !html.includes("authenticated()&&known") ||
+    !network.includes('Status intentionally has no authentication requirement') ||
+    !network.includes('HTTPD_404_NOT_FOUND') ||
+    !network.includes('notFoundHandler')) {
+  throw new Error('Web UI must expose a public read-only Home, hide other tabs until sign-in, and redirect unknown routes to /');
 }
 const statusSection = html.match(/<fieldset[^>]*><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
@@ -482,13 +487,17 @@ if (!network.includes('If-None-Match')) {
 }
 const rootHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::rootHandler');
 const cssHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::cssHandler');
+const notFoundHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::notFoundHandler');
 const loginHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::loginHandler');
-if (rootHandlerStart < 0 || cssHandlerStart < 0 || loginHandlerStart < 0 ||
-    !(rootHandlerStart < cssHandlerStart && cssHandlerStart < loginHandlerStart)) {
-  throw new Error('rootHandler/cssHandler order not found');
+if (rootHandlerStart < 0 || cssHandlerStart < 0 || notFoundHandlerStart < 0 ||
+    loginHandlerStart < 0 ||
+    !(rootHandlerStart < cssHandlerStart && cssHandlerStart < notFoundHandlerStart &&
+      notFoundHandlerStart < loginHandlerStart)) {
+  throw new Error('rootHandler/cssHandler/notFoundHandler order not found');
 }
 const rootHandler = network.slice(rootHandlerStart, cssHandlerStart);
-const cssHandler = network.slice(cssHandlerStart, loginHandlerStart);
+const cssHandler = network.slice(cssHandlerStart, notFoundHandlerStart);
+const notFoundHandler = network.slice(notFoundHandlerStart, loginHandlerStart);
 if (rootHandler.includes('no-store') || !rootHandler.includes('no-cache') ||
     !rootHandler.includes('STATUS_NOT_MODIFIED') ||
     !rootHandler.includes('ifNoneMatchEquals') ||
@@ -504,6 +513,13 @@ if (cssHandler.includes('no-store') ||
     !cssHandler.includes('SHOT_STOPPER_WEB_CSS_GZIP') ||
     !cssHandler.includes('text/css')) {
   throw new Error('GET /app.css must serve immutable gzip CSS with ETag/304');
+}
+if (!notFoundHandler.includes('302 Found') ||
+    !notFoundHandler.includes('Location') ||
+    !notFoundHandler.includes('"/api/"') ||
+    !notFoundHandler.includes('STATUS_NOT_FOUND') ||
+    notFoundHandler.includes('!= nullptr')) {
+  throw new Error('Unknown non-API routes must 302 to /, while unknown /api/* stay JSON 404');
 }
 if (network.includes('sendJson') &&
     !network.slice(network.indexOf('esp_err_t ShotStopperNetwork::sendJson'),
