@@ -56,6 +56,9 @@ void deleteHostResources() {
 void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   deleteHostResources();
 
+  Serial.reset();
+  resetSerialCliState();
+
   hostMillis = 0;
   bootStartedAtMs = 0;
   hostPinLevel.fill(HIGH);
@@ -2998,6 +3001,142 @@ void n09_network_bringup_ignores_paddle() {
   CHECK(controlAllowsNetworkBringup(status));
 }
 
+void feedSerial(const char *text) {
+  Serial.inject(text);
+  size_t guard = 0;
+  while (Serial.available() > 0 && guard < 40) {
+    runLoopAfter(0);
+    ++guard;
+  }
+  runLoopAfter(0);
+}
+
+bool serialTxContains(const char *text) {
+  return Serial.tx.find(text) != std::string::npos;
+}
+
+void sc01_hello_replies_how_are_you() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  feedSerial("hello\n");
+  CHECK(serialTxContains("how are you"));
+}
+
+void sc02_factory_reset_rejected_while_active() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  startCycle();
+  feedSerial("FACTORY_RESET\n");
+  CHECK(serialTxContains("ERR not ready"));
+  CHECK(session.active);
+  CHECK(getRelaySafetySnapshot().closed);
+}
+
+void sc03_set_wifi_queues_save_network() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  feedSerial("SET_WIFI CafeLAN CafePass1\n");
+  CHECK(serialTxContains("OK queued SET_WIFI"));
+  runLoopAfter(MAINTENANCE_LEASE_SETTLE_MS);
+  CHECK(hostLastForwardedNetworkCommand.type == WebCommandType::SAVE_NETWORK);
+  CHECK(strcmp(hostLastForwardedNetworkCommand.ssid, "CafeLAN") == 0);
+  CHECK(strcmp(hostLastForwardedNetworkCommand.password, "CafePass1") == 0);
+  CHECK(!hostLastForwardedNetworkCommand.openNetwork);
+}
+
+void sc04_clear_shots_empties_log() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  shotLog.clear();
+  ShotLogRecord record = {};
+  record.durationDs = 100;
+  CHECK(shotLog.append(record));
+  CHECK(shotLog.count() == 1);
+  feedSerial("CLEAR_SHOTS\n");
+  CHECK(serialTxContains("OK shots cleared"));
+  CHECK(shotLog.count() == 0);
+}
+
+void sc05_serial_cli_parser_covers_supported_commands() {
+  SerialCliRequest request;
+  CHECK(serialCliParseLine("HELLO", request));
+  CHECK(request.verb == SerialCliVerb::HELLO);
+  CHECK(serialCliParseLine("SET_AP_PASSWORD password1234", request));
+  CHECK(request.verb == SerialCliVerb::SET_AP_PASSWORD);
+  CHECK(strcmp(request.arg1, "password1234") == 0);
+  CHECK(serialCliParseLine("SET_WIFI ssid_de_wifi pass_del_wifi", request));
+  CHECK(request.verb == SerialCliVerb::SET_WIFI);
+  CHECK(strcmp(request.arg1, "ssid_de_wifi") == 0);
+  CHECK(strcmp(request.arg2, "pass_del_wifi") == 0);
+  CHECK(!request.openNetwork);
+  CHECK(serialCliParseLine("SET_WIFI \"Cafe LAN\" SecretPass1", request));
+  CHECK(request.verb == SerialCliVerb::SET_WIFI);
+  CHECK(strcmp(request.arg1, "Cafe LAN") == 0);
+  CHECK(strcmp(request.arg2, "SecretPass1") == 0);
+  CHECK(serialCliParseLine("SET_WIFI OpenNet", request));
+  CHECK(request.verb == SerialCliVerb::SET_WIFI);
+  CHECK(request.openNetwork);
+  CHECK(serialCliParseLine("FACTORY_RESET", request));
+  CHECK(request.verb == SerialCliVerb::FACTORY_RESET);
+  CHECK(serialCliParseLine("RESET_AP_PASSWORD", request));
+  CHECK(request.verb == SerialCliVerb::RESET_AP_PASSWORD);
+  CHECK(serialCliParseLine("CLEAR_WIFI", request));
+  CHECK(request.verb == SerialCliVerb::CLEAR_WIFI);
+  CHECK(serialCliParseLine("RESET_NETWORK_UI", request));
+  CHECK(request.verb == SerialCliVerb::RESET_NETWORK_UI);
+  CHECK(serialCliParseLine("SET_AP_PASSWORD Micra1234", request));
+  CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
+  CHECK(serialCliParseLine("SET_WIFI Cafe short", request));
+  CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
+  CHECK(serialCliParseLine("not_a_command", request));
+  CHECK(request.verb == SerialCliVerb::UNKNOWN);
+  CHECK(!serialCliParseLine("   ", request));
+}
+
+void sc06_serial_cli_feed_completes_on_crlf() {
+  SerialCliParser parser;
+  SerialCliRequest request;
+  bool ready = false;
+  const char *line = "HELLO\r\n";
+  for (size_t index = 0; line[index] != '\0'; ++index) {
+    if (serialCliFeed(parser, line[index], request)) {
+      CHECK(!ready);
+      CHECK(request.verb == SerialCliVerb::HELLO);
+      ready = true;
+    }
+  }
+  CHECK(ready);
+}
+
+void sc07_reset_ap_password_and_clear_wifi_queue() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  feedSerial("RESET_AP_PASSWORD\n");
+  CHECK(serialTxContains("OK queued RESET_AP_PASSWORD"));
+  runLoopAfter(MAINTENANCE_LEASE_SETTLE_MS);
+  CHECK(hostLastForwardedNetworkCommand.type ==
+        WebCommandType::RESET_AP_PASSWORD);
+
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  feedSerial("CLEAR_WIFI\n");
+  CHECK(serialTxContains("OK queued CLEAR_WIFI"));
+  runLoopAfter(MAINTENANCE_LEASE_SETTLE_MS);
+  CHECK(hostLastForwardedNetworkCommand.type ==
+        WebCommandType::FORGET_NETWORK);
+}
+
+void sc08_set_ap_password_queues_change() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  feedSerial("SET_AP_PASSWORD password1234\n");
+  CHECK(serialTxContains("OK queued SET_AP_PASSWORD"));
+  runLoopAfter(MAINTENANCE_LEASE_SETTLE_MS);
+  CHECK(hostLastForwardedNetworkCommand.type ==
+        WebCommandType::CHANGE_AP_PASSWORD);
+  CHECK(strcmp(hostLastForwardedNetworkCommand.password, "password1234") == 0);
+}
+
 void s04_shot_log_remove_by_id() {
   resetHarness(false, true);
   shotLog.clear();
@@ -3487,6 +3626,14 @@ const TestCase testCases[] = {
     {"N07", n07_syncing_clock_skips_activity_ntp_request},
     {"N08", n08_web_rinse_requests_ntp_when_unsynced},
     {"N09", n09_network_bringup_ignores_paddle},
+    {"SC01", sc01_hello_replies_how_are_you},
+    {"SC02", sc02_factory_reset_rejected_while_active},
+    {"SC03", sc03_set_wifi_queues_save_network},
+    {"SC04", sc04_clear_shots_empties_log},
+    {"SC05", sc05_serial_cli_parser_covers_supported_commands},
+    {"SC06", sc06_serial_cli_feed_completes_on_crlf},
+    {"SC07", sc07_reset_ap_password_and_clear_wifi_queue},
+    {"SC08", sc08_set_ap_password_queues_change},
 };
 
 }  // namespace

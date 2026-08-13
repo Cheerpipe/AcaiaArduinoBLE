@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
-#include <string>
+#include <sstream>
 #include <type_traits>
 #include <vector>
 
@@ -104,19 +104,49 @@ inline void portEXIT_CRITICAL_ISR(portMUX_TYPE *mux) { (void)mux; }
 
 class HostSerial {
  public:
+  std::string rx;
+  std::string tx;
+  size_t rxIndex = 0;
+
   void begin(unsigned long baud) { (void)baud; }
+
+  void reset() {
+    rx.clear();
+    tx.clear();
+    rxIndex = 0;
+  }
+
+  void inject(const char *text) {
+    if (text != nullptr) {
+      rx.append(text);
+    }
+  }
+
+  int available() const {
+    return rxIndex < rx.size() ? static_cast<int>(rx.size() - rxIndex) : 0;
+  }
+
+  int read() {
+    if (rxIndex >= rx.size()) {
+      return -1;
+    }
+    return static_cast<unsigned char>(rx[rxIndex++]);
+  }
 
   template <typename T>
   void print(const T &value) {
-    (void)value;
+    std::ostringstream stream;
+    stream << value;
+    tx += stream.str();
   }
 
   template <typename T>
   void println(const T &value) {
-    (void)value;
+    print(value);
+    tx += '\n';
   }
 
-  void println() {}
+  void println() { tx += '\n'; }
 };
 
 inline HostSerial Serial;

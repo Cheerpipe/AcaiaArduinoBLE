@@ -844,6 +844,7 @@ enum class WebCommandType : uint8_t {
   SAVE_NETWORK,
   FORGET_NETWORK,
   CHANGE_AP_PASSWORD,
+  RESET_AP_PASSWORD,
   RESTART,
   RESET_NETWORK_UI,
   FACTORY_RESET,
@@ -869,6 +870,8 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::SAVE_NETWORK: return "save STA network";
     case WebCommandType::FORGET_NETWORK: return "forget STA network";
     case WebCommandType::CHANGE_AP_PASSWORD: return "change AP password";
+    case WebCommandType::RESET_AP_PASSWORD:
+      return "restore AP/UI password";
     case WebCommandType::RESTART: return "restart";
     case WebCommandType::RESET_NETWORK_UI: return "recover network/UI";
     case WebCommandType::FACTORY_RESET: return "restore factory settings";
@@ -1148,7 +1151,8 @@ enum class DebugCode : uint8_t {
   TIMER_ONLY_BREW_STARTED,
   MANUAL_CYCLE_STARTED,
   RINSE_CLASSIFIED,
-  SYSTEM_LOG_OVERRUN
+  SYSTEM_LOG_OVERRUN,
+  AP_PASSWORD_RESET
 };
 
 // Bitmask for argument2 on RUNTIME_PERSIST_FAILED (what was pending in NVS).
@@ -1447,6 +1451,7 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::WEB_STOP: return "web safe stop";
     case DebugCode::RESTART_REQUESTED: return "restart requested";
     case DebugCode::NETWORK_RESET: return "network settings reset";
+    case DebugCode::AP_PASSWORD_RESET: return "AP/UI password restored";
     case DebugCode::FACTORY_RESET: return "factory settings restored";
     case DebugCode::MAINTENANCE_RESERVED:
       return "maintenance lease reserved";

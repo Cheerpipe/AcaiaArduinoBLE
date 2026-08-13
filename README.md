@@ -184,9 +184,10 @@ name, default passwords, and step-by-step first connection.
   window keeps the UI reachable.
 - **Public read-only** status, live shot panel, shot history, diagnostic log,
   and firmware version footer without signing in.
-- **Authenticated** session (factory password **`Micra1234`** — same as the AP;
-  changeable from the Web UI) unlocks configuration, Wi-Fi scan/save,
-  calibration reset, factory reset, Stop, and Restart. Up to **2** concurrent web sessions. Login responses include a CSRF token
+- Authenticated session (factory password **`Micra1234`** — same as the AP;
+  changeable from the Web UI or USB serial CLI) unlocks configuration, Wi-Fi
+  scan/save, calibration reset, factory reset, Stop, and Restart. Up to **2**
+  concurrent web sessions. Login responses include a CSRF token
   (`X-CSRF-Token` on mutating requests); repeated failed logins return
   `429 LOGIN_RATE_LIMITED`.
 - **Live shot panel:** current/goal weight, progress bar, elapsed time, first
@@ -230,6 +231,9 @@ name, default passwords, and step-by-step first connection.
   filters, dropped-event counter, copy, and clear view (client-side only);
   also available via `GET /api/v1/log`. Serial and UI share the same structured
   pipeline (`logEmit`); default retain/print level is Info.
+- **USB serial CLI** at **9600** baud for recovery and provisioning without the
+  Web UI: factory reset, AP/UI password, STA Wi-Fi, shot-history clear, and a
+  `HELLO` probe. See [USB serial CLI](#usb-serial-cli).
 
 **Web paddle and remote control** (opt-in build only):
 
@@ -306,6 +310,7 @@ The following items are planned but **not present in the current firmware**:
 ├── scripts/gen_version.sh          # Build-time version header generator
 ├── shotStopper/                    # Main firmware sketch and host tests
 │   ├── shotStopper.ino
+│   ├── ShotStopperSerialCli.h      # USB serial command parser
 │   └── tests/                      # Host tests, web asset + firmware checks
 ├── libraries/
 │   └── AcaiaArduinoBLE/            # Local Arduino library and BLE tests
@@ -519,6 +524,9 @@ AP is not used. Open the Web UI at **`http://<device-ip>`** (find the IP in
 your router’s DHCP list, the saved static IP, or serial logs at **9600** baud).
 Use the same Web UI password **`Micra1234`** until you change it under **Access
 point / UI password**. Factory reset restores all values in the table above.
+If you lose STA or the UI password, recover over USB with the
+[USB serial CLI](#usb-serial-cli) (`HELLO`, `RESET_AP_PASSWORD`, `CLEAR_WIFI`,
+or `FACTORY_RESET`).
 
 STA addressing can be **DHCP** (default) or **static IP** from the Wi‑Fi panel.
 After any STA save, the new settings stay **pending** until you sign in at the
@@ -870,6 +878,91 @@ arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=9600
 You should see lines such as `Shot Stopper Micra …` and `Goal weight: …`.
 Press **RST** on the board if the monitor was already open. Exit with
 `Ctrl+C`.
+
+### USB serial CLI
+
+The firmware accepts **line-based commands** on the same USB serial port as the
+logs (**9600** baud). Commands are case-insensitive; SSIDs and passwords are
+case-sensitive. Destructive commands use the same safety gate as the Web UI:
+physical paddle **OFF**, CN9 open, state **Ready**, no active cycle.
+
+Do not type into the scrolling monitor if you cannot see what you send. Close
+any other serial client, then **pipe** the command with `arduino-cli monitor`.
+The `sleep 4` waits for the USB-serial chip to reopen (opening the port often
+resets the ESP32). Replace the port with yours from `arduino-cli board list`.
+
+| Command | Parameters | Effect |
+| --- | --- | --- |
+| `HELLO` | none | Replies `how are you` (probe that serial commands work) |
+| `FACTORY_RESET` | none | Erases Wi-Fi, workflow settings, calibration, and shot history; restores AP/UI password **`Micra1234`**; restarts |
+| `RESET_AP_PASSWORD` | none | Restores AP and Web UI password to **`Micra1234`** (does not change STA Wi-Fi) |
+| `SET_AP_PASSWORD` | `<password>` | Sets AP and Web UI password (8–63 characters; cannot be `Micra1234`) |
+| `SET_WIFI` | `<ssid> <password>` | Saves home Wi-Fi (STA, DHCP) and restarts. Password 8–63 characters. Open network: omit the password. SSID/password with spaces: wrap in double quotes |
+| `CLEAR_WIFI` | none | Forgets saved STA Wi-Fi only (AP/UI password unchanged); restarts |
+| `CLEAR_SHOTS` | none | Clears recorded shot history |
+| `RESET_NETWORK_UI` | none | Convenience combo: forgets STA Wi-Fi **and** restores AP/UI password to **`Micra1234`**; restarts |
+
+Successful mutating commands print `OK queued …` (or `OK shots cleared` /
+`how are you`). Rejections print `ERR …`. Passwords are not echoed in the OK
+line.
+
+Probe:
+
+```sh
+(sleep 4; printf 'HELLO\n'; sleep 2) | arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=9600
+```
+
+Factory reset:
+
+```sh
+(sleep 4; printf 'FACTORY_RESET\n'; sleep 6) | arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=9600
+```
+
+Restore AP/Web UI password to `Micra1234`:
+
+```sh
+(sleep 4; printf 'RESET_AP_PASSWORD\n'; sleep 4) | arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=9600
+```
+
+Set AP/Web UI password:
+
+```sh
+(sleep 4; printf 'SET_AP_PASSWORD password1234\n'; sleep 4) | arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=9600
+```
+
+Set home Wi-Fi SSID and password:
+
+```sh
+(sleep 4; printf 'SET_WIFI ssid_de_wifi pass_del_wifi\n'; sleep 6) | arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=9600
+```
+
+SSID with spaces:
+
+```sh
+(sleep 4; printf 'SET_WIFI "Cafe LAN" SecretPass1\n'; sleep 6) | arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=9600
+```
+
+Open network (no password):
+
+```sh
+(sleep 4; printf 'SET_WIFI OpenNet\n'; sleep 6) | arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=9600
+```
+
+Forget saved Wi-Fi only:
+
+```sh
+(sleep 4; printf 'CLEAR_WIFI\n'; sleep 6) | arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=9600
+```
+
+Clear shot history:
+
+```sh
+(sleep 4; printf 'CLEAR_SHOTS\n'; sleep 2) | arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=9600
+```
+
+`SET_WIFI` always uses **DHCP**. Static IP must still be set from the Web UI.
+After `SET_WIFI` / `CLEAR_WIFI` / `FACTORY_RESET` the board restarts; the
+monitor session may drop — run `arduino-cli monitor` again if you need logs.
 
 ### Troubleshooting serial output
 

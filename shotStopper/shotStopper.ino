@@ -29,6 +29,7 @@
 #endif
 
 #include "ShotStopperDomain.h"
+#include "ShotStopperSerialCli.h"
 #include "ShotStopperVersion.h"
 #include "ShotStopperHardwareTimer.h"
 #include "ShotStopperIndicators.h"
@@ -3852,6 +3853,7 @@ void processWebCommand(const WebCommand &command) {
     case WebCommandType::SAVE_NETWORK:
     case WebCommandType::FORGET_NETWORK:
     case WebCommandType::CHANGE_AP_PASSWORD:
+    case WebCommandType::RESET_AP_PASSWORD:
     case WebCommandType::RESTART:
     case WebCommandType::RESET_NETWORK_UI:
     case WebCommandType::FACTORY_RESET:
@@ -4021,31 +4023,135 @@ void publishControlStatus() {
   portEXIT_CRITICAL(&webStatusMux);
 }
 
-#ifndef SHOT_STOPPER_HOST_TEST
-void serviceSerialRecovery() {
-  static constexpr char commandText[] = "RESET_NETWORK_UI";
-  static size_t matched = 0;
-  size_t consumed = 0;
-  while (Serial.available() > 0 && consumed < 4) {
-    const char received = static_cast<char>(Serial.read());
-    ++consumed;
-    if (received == commandText[matched]) {
-      ++matched;
-      if (matched == sizeof(commandText) - 1) {
-        WebCommand command;
-        command.type = WebCommandType::RESET_NETWORK_UI;
-        command.requestId = millis();
-        if (!enqueueWebCommand(command)) {
-          Serial.println("Network reset rejected: control queue full");
-        }
-        matched = 0;
+SerialCliParser serialCliParser;
+
+void resetSerialCliState() {
+  serialCliResetParser(serialCliParser);
+}
+
+void serialCliReply(const char *message) {
+  Serial.println(message);
+}
+
+void serialCliWipeCommandSecrets(WebCommand &command) {
+  memset(command.password, 0, sizeof(command.password));
+}
+
+void serialCliRejectUnsafe() {
+  serialCliReply(
+      "ERR not ready: paddle OFF, CN9 open, Ready, no active cycle");
+}
+
+void serialCliQueueCommand(WebCommand &command, SerialCliVerb verb) {
+  command.requestId = millis();
+  if (!enqueueWebCommand(command)) {
+    serialCliWipeCommandSecrets(command);
+    serialCliReply("ERR control queue full");
+    return;
+  }
+  serialCliWipeCommandSecrets(command);
+  char line[48] = {};
+  snprintf(line, sizeof(line), "OK queued %s", serialCliVerbName(verb));
+  serialCliReply(line);
+}
+
+void serialCliQueueIfSafe(WebCommand &command, SerialCliVerb verb) {
+  if (!controlAllowsConfigurationNow()) {
+    serialCliWipeCommandSecrets(command);
+    serialCliRejectUnsafe();
+    return;
+  }
+  serialCliQueueCommand(command, verb);
+}
+
+void dispatchSerialCliRequest(SerialCliRequest &request) {
+  switch (request.verb) {
+    case SerialCliVerb::NONE:
+      return;
+    case SerialCliVerb::HELLO:
+      serialCliReply("how are you");
+      return;
+    case SerialCliVerb::UNKNOWN:
+    case SerialCliVerb::LINE_TOO_LONG:
+    case SerialCliVerb::INVALID_ARGS:
+      Serial.print("ERR ");
+      Serial.println(request.error != nullptr ? request.error
+                                              : "invalid arguments");
+      return;
+    case SerialCliVerb::FACTORY_RESET: {
+      WebCommand command;
+      command.type = WebCommandType::FACTORY_RESET;
+      serialCliQueueIfSafe(command, request.verb);
+      return;
+    }
+    case SerialCliVerb::RESET_AP_PASSWORD: {
+      WebCommand command;
+      command.type = WebCommandType::RESET_AP_PASSWORD;
+      serialCliQueueIfSafe(command, request.verb);
+      return;
+    }
+    case SerialCliVerb::SET_AP_PASSWORD: {
+      WebCommand command;
+      command.type = WebCommandType::CHANGE_AP_PASSWORD;
+      strncpy(command.password, request.arg1, sizeof(command.password) - 1);
+      serialCliQueueIfSafe(command, request.verb);
+      memset(request.arg1, 0, sizeof(request.arg1));
+      return;
+    }
+    case SerialCliVerb::SET_WIFI: {
+      WebCommand command;
+      command.type = WebCommandType::SAVE_NETWORK;
+      strncpy(command.ssid, request.arg1, sizeof(command.ssid) - 1);
+      strncpy(command.password, request.arg2, sizeof(command.password) - 1);
+      command.openNetwork = request.openNetwork;
+      serialCliQueueIfSafe(command, request.verb);
+      memset(request.arg1, 0, sizeof(request.arg1));
+      memset(request.arg2, 0, sizeof(request.arg2));
+      return;
+    }
+    case SerialCliVerb::CLEAR_WIFI: {
+      WebCommand command;
+      command.type = WebCommandType::FORGET_NETWORK;
+      serialCliQueueIfSafe(command, request.verb);
+      return;
+    }
+    case SerialCliVerb::RESET_NETWORK_UI: {
+      WebCommand command;
+      command.type = WebCommandType::RESET_NETWORK_UI;
+      serialCliQueueIfSafe(command, request.verb);
+      return;
+    }
+    case SerialCliVerb::CLEAR_SHOTS: {
+      if (!controlAllowsConfigurationNow()) {
+        serialCliRejectUnsafe();
+        return;
       }
-    } else {
-      matched = received == commandText[0] ? 1 : 0;
+      if (!clearShotLog()) {
+        serialCliReply("ERR shot history clear failed");
+        return;
+      }
+      serialCliReply("OK shots cleared");
+      return;
     }
   }
 }
-#endif
+
+void serviceSerialCli() {
+  size_t consumed = 0;
+  while (Serial.available() > 0 &&
+         consumed < SERIAL_CLI_MAX_BYTES_PER_LOOP) {
+    const int incoming = Serial.read();
+    ++consumed;
+    if (incoming < 0) {
+      break;
+    }
+    SerialCliRequest request;
+    if (serialCliFeed(serialCliParser, static_cast<char>(incoming),
+                      request)) {
+      dispatchSerialCliRequest(request);
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Status indication
@@ -4357,9 +4463,7 @@ void loop() {
   serviceScaleCompletionBeep();
   serviceRemoteTimerStopRetry();
   pendingShotFinalizeTask();
-#ifndef SHOT_STOPPER_HOST_TEST
-  serviceSerialRecovery();
-#endif
+  serviceSerialCli();
   serviceMaintenanceCancellation();
   serviceControlCommandResult();
   processWebCommands();

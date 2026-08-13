@@ -1406,6 +1406,7 @@ bool ShotStopperNetwork::enqueueMaintenanceCompletion(
                            command.type == WebCommandType::SAVE_NETWORK ||
                            command.type == WebCommandType::FORGET_NETWORK ||
                            command.type == WebCommandType::CHANGE_AP_PASSWORD ||
+                           command.type == WebCommandType::RESET_AP_PASSWORD ||
                            command.type == WebCommandType::RESET_NETWORK_UI ||
                            command.type == WebCommandType::FACTORY_RESET
                        ? CommandResultState::PERSISTED
@@ -1488,6 +1489,16 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
       persist = true;
       authenticationChanged = true;
       apRestartPending_ = snapshot().apActive;
+      break;
+
+    case WebCommandType::RESET_AP_PASSWORD:
+      if (!initializeDefaultAuthentication(next)) {
+        return false;
+      }
+      persist = true;
+      authenticationChanged = true;
+      apRestartPending_ = snapshot().apActive;
+      log(DebugCategory::SECURITY, DebugCode::AP_PASSWORD_RESET);
       break;
 
     case WebCommandType::RESET_NETWORK_UI:
