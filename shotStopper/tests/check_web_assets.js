@@ -279,6 +279,7 @@ const expected = new Map([
   ['GET /', 'rootHandler'],
   ['GET /log', 'rootHandler'],
   ['GET /history', 'rootHandler'],
+  ['GET /admin', 'rootHandler'],
   ['GET /settings', 'rootHandler'],
   ['GET /app.css', 'cssHandler'],
   ['POST /api/v1/login', 'loginHandler'],
@@ -326,7 +327,7 @@ if (!html.includes('async function loadStatus(){') ||
     !html.includes('function refreshStatus(){return withPollGate(loadStatus)}') ||
     !html.includes('function refreshShots(){return withPollGate(loadShots)}') ||
     !html.includes('function refreshLog(){return withPollGate(loadLog)}') ||
-    !html.includes("name==='home'||name==='settings'") ||
+    !html.includes("name==='home'||name==='settings'||name==='admin'") ||
     !html.includes("name==='history'") ||
     !html.includes('renderRoute(location.pathname)') ||
     html.includes('Promise.all([loadShots(),loadLog()])')) {
@@ -335,9 +336,11 @@ if (!html.includes('async function loadStatus(){') ||
 if (!html.includes('id="view-home"') ||
     !html.includes('id="view-history"') ||
     !html.includes('id="view-settings"') ||
+    !html.includes('id="view-admin"') ||
     !html.includes('data-route="/settings"') ||
+    !html.includes('data-route="/admin"') ||
     !html.includes('history.pushState')) {
-  throw new Error('Web UI must expose Home/History/Log/Settings routes as an SPA');
+  throw new Error('Web UI must expose Home/History/Admin/Log/Settings routes as an SPA');
 }
 const maxHandlersMatch = network.match(/max_uri_handlers\s*=\s*(\d+)/);
 if (!maxHandlersMatch) {
