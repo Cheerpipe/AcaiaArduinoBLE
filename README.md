@@ -172,10 +172,12 @@ Additional fixed protections (not separately configurable):
 See [Factory credentials (first use)](#factory-credentials-first-use) for AP
 name, default passwords, and step-by-step first connection.
 
-- Fully **embedded Web UI** (no external assets; **64 KiB** source budget,
-  served gzip-precompressed from flash, **20 KiB** gzip cap) over Wi-Fi. Reloads
-  revalidate with `ETag` (`Cache-Control: no-cache`) so unchanged firmware
-  returns **304**.
+- Fully **embedded Web UI** SPA with four routes (`/`, `/history`, `/log`,
+  `/settings`): same-origin assets only (no CDN). HTML source budget **64 KiB**;
+  gzip HTML ≤ **18 KiB**, gzip CSS ≤ **6 KiB**, combined ≤ **22 KiB**. Reloads
+  revalidate HTML with `ETag` (`Cache-Control: no-cache`) so unchanged firmware
+  returns **304**. Shared stylesheet is `GET /app.css` (gzip, versioned query,
+  long-lived `immutable` cache). Inactive views do not poll their APIs.
 - **STA** mode when credentials are saved; **fallback AP**
   (`MicraShotStopperAP` at `192.168.4.1`) when STA is unavailable. Modes are
   **exclusive** (STA or AP, not concurrent AP+STA). STA addressing is **DHCP**
@@ -184,8 +186,8 @@ name, default passwords, and step-by-step first connection.
   shuts down until the next restart. Once STA connects, HTTP/Wi-Fi remain
   available (no visibility timer). After logout on AP, a **3-minute grace**
   window keeps the UI reachable.
-- **Public read-only** status, live shot panel, shot history, diagnostic log,
-  and firmware version footer without signing in.
+- **Public read-only** home (shot + status), shot history, diagnostic log,
+  settings preview, and firmware version footer without signing in.
 - Authenticated session (factory password **`Micra1234`** — same as the AP;
   changeable from the Web UI or USB serial CLI) unlocks configuration, Wi-Fi
   scan/save, calibration reset, factory reset, Stop, and Restart. Up to **2**
@@ -310,7 +312,8 @@ The following items are planned but **not present in the current firmware**:
 .
 ├── VERSION                         # Release version (SemVer)
 ├── scripts/gen_version.sh          # Build-time version header generator
-├── scripts/gen_web_ui.js           # Gzip-precompressed Web UI header generator
+├── scripts/gen_web_ui.js           # Gzip-precompressed Web UI/CSS header generator
+├── shotStopper/web/app.css         # Authored Web UI stylesheet (embedded via generator)
 ├── shotStopper/                    # Main firmware sketch and host tests
 │   ├── shotStopper.ino
 │   ├── ShotStopperSerialCli.h      # USB serial command parser
@@ -528,8 +531,8 @@ STA Wi‑Fi before that window expires.
 Once STA credentials are stored and the device joins your network, the fallback
 AP is not used. Open the Web UI at **`http://<device-ip>`** (find the IP in
 your router’s DHCP list, the saved static IP, or serial logs at **9600** baud).
-Use the same Web UI password **`Micra1234`** until you change it under **Access
-point / UI password**. Factory reset restores all values in the table above.
+Use the same Web UI password **`Micra1234`** (or the password you set under
+**Web UI password**). Factory reset restores all values in the table above.
 If you lose STA or the UI password, recover over USB with the
 [USB serial CLI](#usb-serial-cli) (`HELLO`, `RESET_AP_PASSWORD`, `CLEAR_WIFI`,
 or `FACTORY_RESET`).
@@ -556,8 +559,9 @@ notes:
   is ON.
 - `202` responses include a `requestId`; `GET /api/v1/status` publishes the
   terminal command state (`APPLIED`, `PERSISTED`, `FAILED`, `CANCELED`).
-- Change the default password from the Web UI after first login on a trusted
-  network (see [Factory credentials](#factory-credentials-first-use)).
+- You may optionally change the default password from the Web UI on a trusted
+  network (see [Factory credentials](#factory-credentials-first-use)); it is
+  not required to unlock controls.
 
 ## Watchdog and CN9 safety
 
@@ -774,11 +778,13 @@ node ./scripts/gen_web_ui.js
 ```
 
 This writes `shotStopper/ShotStopperVersion.h` and
-`shotStopper/ShotStopperWebAssetsGzip.h` (both gitignored). The installed
+`shotStopper/ShotStopperWebAssetsGzip.h` (both gitignored). The generator reads
+`shotStopper/ShotStopperWebAssets.h` and `shotStopper/web/app.css`. The installed
 firmware reports the version on Serial boot, in `GET /api/v1/status` as
-`firmwareVersion`, and in the Web UI footer. `GET /` is served as gzip with an
-`ETag` derived from that version. Use `curl --compressed` if you fetch the HTML
-from the command line.
+`firmwareVersion`, and in the Web UI footer. `GET /` (and `/history`, `/log`,
+`/settings`) serves the SPA HTML as gzip with an `ETag` derived from that
+version. `GET /app.css` is gzip with a long-lived cache and the same ETag
+family. Use `curl --compressed` if you fetch HTML/CSS from the command line.
 
 To verify a compiled binary without flashing:
 

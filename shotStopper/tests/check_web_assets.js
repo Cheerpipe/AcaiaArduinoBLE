@@ -222,10 +222,12 @@ if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
     !html.includes('loadLog()') ||
     !html.includes('setInterval(()=>refreshLog(),2500)') ||
+    !html.includes('id="view-log"') ||
+    !html.includes("name==='log'") ||
     !html.includes('id="logLevelFilter"') ||
     !html.includes('e.level') ||
     !html.includes('value="boot"')) {
-  throw new Error('Diagnostic log must remain visible and refresh in public read-only mode');
+  throw new Error('Diagnostic log must remain a public view with view-scoped refresh');
 }
 if (!html.includes('id="factoryResetButton"') ||
     !html.includes("confirm('Restore all factory settings?") ||
@@ -261,12 +263,24 @@ if (!html.includes('id="staIpMode"') ||
     !network.includes('No pending network configuration to confirm.')) {
   throw new Error('DHCP/static IP mode must be wired in UI, status, WiFi.config, and confirm/revert path');
 }
-if (/<script\s+src=|<link\s+[^>]*href=/i.test(html)) {
-  throw new Error('Web UI must not depend on external assets');
+if (/<script\s+src=/i.test(html)) {
+  throw new Error('Web UI must keep JavaScript embedded (no external script src)');
+}
+if (!/<link\s+rel="stylesheet"\s+href="\/app\.css\?v=/.test(html) &&
+    !html.includes('href="/app.css?v=__FW_VERSION__"')) {
+  throw new Error('Web UI must load same-origin /app.css with a firmware version query');
+}
+if (/<link\s+[^>]*href=["']https?:\/\//i.test(html) ||
+    /cdn\.|unpkg\.|jsdelivr\./i.test(html)) {
+  throw new Error('Web UI must not depend on CDN or third-party assets');
 }
 
 const expected = new Map([
   ['GET /', 'rootHandler'],
+  ['GET /log', 'rootHandler'],
+  ['GET /history', 'rootHandler'],
+  ['GET /settings', 'rootHandler'],
+  ['GET /app.css', 'cssHandler'],
   ['POST /api/v1/login', 'loginHandler'],
   ['POST /api/v1/logout', 'logoutHandler'],
   ['POST /api/v1/heartbeat', 'heartbeatHandler'],
@@ -300,8 +314,11 @@ if (!maxRespHeadersMatch || Number(maxRespHeadersMatch[1]) < 12) {
 }
 if (!html.includes('function withPollGate(') ||
     !html.includes('noteReachFail(') ||
+    !html.includes('function startView(') ||
+    !html.includes('function stopViewPolls(') ||
+    !html.includes('function renderRoute(') ||
     !html.includes('setInterval(()=>refreshStatus(),2500)')) {
-  throw new Error('Web UI must serialize background polls and soft-fail unreachable bursts');
+  throw new Error('Web UI must serialize view-scoped polls and soft-fail unreachable bursts');
 }
 if (!html.includes('async function loadStatus(){') ||
     !html.includes('async function loadShots(){') ||
@@ -309,8 +326,18 @@ if (!html.includes('async function loadStatus(){') ||
     !html.includes('function refreshStatus(){return withPollGate(loadStatus)}') ||
     !html.includes('function refreshShots(){return withPollGate(loadShots)}') ||
     !html.includes('function refreshLog(){return withPollGate(loadLog)}') ||
-    !html.includes('(async()=>{await loadStatus();await Promise.all([loadShots(),loadLog()])})()')) {
-  throw new Error('Web UI must load status first, then fetch shots and log in parallel; background polls stay gated');
+    !html.includes("name==='home'||name==='settings'") ||
+    !html.includes("name==='history'") ||
+    !html.includes('renderRoute(location.pathname)') ||
+    html.includes('Promise.all([loadShots(),loadLog()])')) {
+  throw new Error('Web UI must lazy-load status/shots/log per active SPA view; background polls stay gated');
+}
+if (!html.includes('id="view-home"') ||
+    !html.includes('id="view-history"') ||
+    !html.includes('id="view-settings"') ||
+    !html.includes('data-route="/settings"') ||
+    !html.includes('history.pushState')) {
+  throw new Error('Web UI must expose Home/History/Log/Settings routes as an SPA');
 }
 const maxHandlersMatch = network.match(/max_uri_handlers\s*=\s*(\d+)/);
 if (!maxHandlersMatch) {
@@ -380,12 +407,12 @@ if (!network.includes('WiFi.scanNetworks(true, false, false, 120)') ||
 if (!network.includes('if (!network.apActive)')) {
   throw new Error('STA-only mode must bypass AP/session shutdown policy');
 }
-if (!network.includes('\\"passwordChangeRequired\\"') ||
-    !network.includes('PASSWORD_CHANGE_REQUIRED') ||
-    !network.includes('New password cannot be the factory default.') ||
-    !html.includes('passwordChangeRequired') ||
-    !html.includes('factory AP/UI password')) {
-  throw new Error('Factory password change gate must be exposed in status/UI/API');
+if (network.includes('\\"passwordChangeRequired\\"') ||
+    network.includes('PASSWORD_CHANGE_REQUIRED') ||
+    html.includes('passwordChangeRequired') ||
+    html.includes('factory AP/UI password') ||
+    html.includes('Change the factory AP/UI password')) {
+  throw new Error('Factory password change gate must remain removed from status/UI/API');
 }
 
 const safeBeepStart = bleLibrary.indexOf('bool AcaiaArduinoBLE::beepWithoutStateChange()');
@@ -418,8 +445,18 @@ const roundTrip = zlib.gunzipSync(generated.gzip).toString('utf8');
 if (roundTrip !== generated.html) {
   throw new Error('Generated gzip Web UI does not round-trip to the minified HTML');
 }
-if (generated.gzip.length > 20480) {
-  throw new Error('Compressed Web UI exceeds the 20 KiB gzip budget');
+const cssRoundTrip = zlib.gunzipSync(generated.cssGzip).toString('utf8');
+if (cssRoundTrip !== generated.css) {
+  throw new Error('Generated gzip Web CSS does not round-trip to the minified CSS');
+}
+if (generated.gzip.length > 18432) {
+  throw new Error('Compressed Web UI HTML exceeds the 18 KiB gzip budget');
+}
+if (generated.cssGzip.length > 6144) {
+  throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
+}
+if (generated.gzip.length + generated.cssGzip.length > 22528) {
+  throw new Error('Combined HTML+CSS gzip exceeds the 22 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
@@ -427,9 +464,11 @@ if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
 }
 if (!network.includes('SHOT_STOPPER_WEB_UI_GZIP') ||
     !network.includes('SHOT_STOPPER_WEB_UI_GZIP_LEN') ||
+    !network.includes('SHOT_STOPPER_WEB_CSS_GZIP') ||
+    !network.includes('SHOT_STOPPER_WEB_CSS_GZIP_LEN') ||
     !network.includes('"Content-Encoding"') ||
     !network.includes('"gzip"')) {
-  throw new Error('GET / must send the precompressed gzip body with Content-Encoding');
+  throw new Error('GET / and GET /app.css must send precompressed gzip bodies');
 }
 if (network.includes('zlib.h') || network.includes('miniz.h') ||
     /mz_compress|deflateInit|gzipCompress/.test(network)) {
@@ -439,17 +478,29 @@ if (!network.includes('If-None-Match')) {
   throw new Error('GET / must honor If-None-Match for cached Web UI revalidation');
 }
 const rootHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::rootHandler');
-const rootHandlerEnd = network.indexOf('esp_err_t ShotStopperNetwork::loginHandler', rootHandlerStart);
-if (rootHandlerStart < 0 || rootHandlerEnd < 0) {
-  throw new Error('rootHandler not found');
+const cssHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::cssHandler');
+const loginHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::loginHandler');
+if (rootHandlerStart < 0 || cssHandlerStart < 0 || loginHandlerStart < 0 ||
+    !(rootHandlerStart < cssHandlerStart && cssHandlerStart < loginHandlerStart)) {
+  throw new Error('rootHandler/cssHandler order not found');
 }
-const rootHandler = network.slice(rootHandlerStart, rootHandlerEnd);
+const rootHandler = network.slice(rootHandlerStart, cssHandlerStart);
+const cssHandler = network.slice(cssHandlerStart, loginHandlerStart);
 if (rootHandler.includes('no-store') || !rootHandler.includes('no-cache') ||
     !rootHandler.includes('STATUS_NOT_MODIFIED') ||
     !rootHandler.includes('ifNoneMatchEquals') ||
     !rootHandler.includes('ETag') ||
+    !rootHandler.includes("style-src 'self'") ||
     rootHandler.includes('HTTPD_RESP_USE_STRLEN')) {
-  throw new Error('GET / must revalidate with ETag/304 and send gzip by length, not no-store');
+  throw new Error('GET / must revalidate with ETag/304, CSP style-src self, and gzip by length');
+}
+if (cssHandler.includes('no-store') ||
+    !cssHandler.includes('max-age=31536000') ||
+    !cssHandler.includes('immutable') ||
+    !cssHandler.includes('STATUS_NOT_MODIFIED') ||
+    !cssHandler.includes('SHOT_STOPPER_WEB_CSS_GZIP') ||
+    !cssHandler.includes('text/css')) {
+  throw new Error('GET /app.css must serve immutable gzip CSS with ETag/304');
 }
 if (network.includes('sendJson') &&
     !network.slice(network.indexOf('esp_err_t ShotStopperNetwork::sendJson'),
@@ -458,4 +509,8 @@ if (network.includes('sendJson') &&
   throw new Error('JSON API responses must remain Cache-Control: no-store');
 }
 
-console.log(`Embedded Web UI: JavaScript valid, ${Buffer.byteLength(html, 'utf8')} bytes source, ${generated.gzip.length} bytes gzip, ${expected.size} routes checked`);
+console.log(
+  `Embedded Web UI: JavaScript valid, ${Buffer.byteLength(html, 'utf8')} bytes HTML source, ` +
+  `${generated.gzip.length} bytes HTML gzip, ${generated.cssGzip.length} bytes CSS gzip, ` +
+  `${expected.size} routes checked`
+);

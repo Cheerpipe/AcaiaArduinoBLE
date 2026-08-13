@@ -482,8 +482,7 @@ inline bool refreshAuthentication(PersistedSettings &settings,
 }
 
 inline bool initializeDefaultAuthentication(PersistedSettings &settings) {
-  // Factory boot keeps the known SoftAP password, but UI mutations require a
-  // change (see passwordIsFactoryDefault).
+  // Factory boot keeps the published SoftAP / Web UI password.
   if (!validAccessPointPassword(DEFAULT_AP_PASSWORD)) {
     return false;
   }
