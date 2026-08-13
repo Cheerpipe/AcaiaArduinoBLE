@@ -57,10 +57,38 @@ float decimalDivisor(byte exponent) {
     return divisors[exponent];
 }
 
+bool looksLikeAcaiaTimer(byte minutes, byte seconds, byte tenths) {
+    return minutes <= 99 && seconds <= 59 && tenths <= 9;
+}
+
+uint32_t acaiaTimerToMs(byte minutes, byte seconds, byte tenths) {
+    return (static_cast<uint32_t>(minutes) * 60UL + seconds) * 1000UL +
+           static_cast<uint32_t>(tenths) * 100UL;
+}
+
+bool felicitaAsciiTimer(const byte data[], uint32_t& timerMs) {
+    for (int i = 9; i <= 13; ++i) {
+        if (data[i] < '0' || data[i] > '9') {
+            return false;
+        }
+    }
+    const byte minutes = static_cast<byte>((data[9] - '0') * 10 + (data[10] - '0'));
+    const byte seconds = static_cast<byte>((data[11] - '0') * 10 + (data[12] - '0'));
+    const byte tenths = static_cast<byte>(data[13] - '0');
+    if (!looksLikeAcaiaTimer(minutes, seconds, tenths)) {
+        return false;
+    }
+    timerMs = acaiaTimerToMs(minutes, seconds, tenths);
+    return true;
+}
+
 } // namespace
 
 AcaiaArduinoBLE::AcaiaArduinoBLE(bool debug) :
     _currentWeight(0.0f),
+    _currentTimerMs(0),
+    _lastTimerPacket(0),
+    _hasTimer(false),
     _write(),
     _read(),
     _peripheral(),
@@ -293,6 +321,9 @@ bool AcaiaArduinoBLE::completeConnection(BLEDevice& peripheral) {
     _lastPacket = 0;
     _packetPeriod = 0;
     _hasValidPacket = false;
+    _hasTimer = false;
+    _currentTimerMs = 0;
+    _lastTimerPacket = 0;
     if (_successfulConnections > 0) {
         ++_reconnects;
     }
@@ -470,6 +501,18 @@ float AcaiaArduinoBLE::getWeight() const {
     return _currentWeight;
 }
 
+bool AcaiaArduinoBLE::hasTimer() const {
+    return _connected && _hasTimer;
+}
+
+uint32_t AcaiaArduinoBLE::getTimerMs() const {
+    return _hasTimer ? _currentTimerMs : 0;
+}
+
+uint32_t AcaiaArduinoBLE::lastTimerAgeMs() const {
+    return _hasTimer ? elapsedSince(_lastTimerPacket) : 0xffffffffUL;
+}
+
 bool AcaiaArduinoBLE::heartbeatRequired() const {
     return _connected && (_type == OLD || _type == NEW) &&
            elapsedSince(_lastHeartBeat) >= HEARTBEAT_PERIOD_MS;
@@ -544,7 +587,10 @@ bool AcaiaArduinoBLE::newWeightAvailable() {
     }
 
     float parsedWeight = 0.0f;
-    if (!parseWeightPacket(input, bytesRead, parsedWeight)) {
+    uint32_t parsedTimerMs = 0;
+    const bool hasWeight = parseWeightPacket(input, bytesRead, parsedWeight);
+    const bool hasTimer = parseTimerPacket(input, bytesRead, parsedTimerMs);
+    if (!hasWeight && !hasTimer) {
         rejectPacket("invalid frame");
         return false;
     }
@@ -553,10 +599,18 @@ bool AcaiaArduinoBLE::newWeightAvailable() {
     if (_hasValidPacket) {
         _packetPeriod = static_cast<uint32_t>(receivedAt - _lastPacket);
     }
-    _currentWeight = parsedWeight;
     _lastPacket = receivedAt;
     _hasValidPacket = true;
     _consecutiveRejectedPackets = 0;
+    if (hasTimer) {
+        _currentTimerMs = parsedTimerMs;
+        _lastTimerPacket = receivedAt;
+        _hasTimer = true;
+    }
+    if (!hasWeight) {
+        return false;
+    }
+    _currentWeight = parsedWeight;
     return true;
 }
 
@@ -565,7 +619,7 @@ bool AcaiaArduinoBLE::supportedPacketLength(int length) const {
         case OLD:
             return length == 10 || length == 14;
         case NEW:
-            return length == 13 || length == 17;
+            return length == 10 || length == 13 || length == 17;
         case GENERIC:
             return length == 20;
         case FELICITA:
@@ -585,6 +639,56 @@ bool AcaiaArduinoBLE::parseWeightPacket(const byte data[], int length,
             return parseGenericPacket(data, length, weight);
         case FELICITA:
             return parseFelicitaPacket(data, length, weight);
+    }
+    return false;
+}
+
+bool AcaiaArduinoBLE::parseTimerPacket(const byte data[], int length,
+                                        uint32_t& timerMs) const {
+    switch (_type) {
+        case NEW:
+            if ((length != 10 && length != 13 && length != 17) ||
+                data[0] != 0xef || data[1] != 0xdd || data[2] != 0x0c ||
+                static_cast<int>(data[3]) + 5 != length ||
+                !validAcaiaChecksum(data, length)) {
+                return false;
+            }
+            if (data[4] == 0x07 &&
+                looksLikeAcaiaTimer(data[5], data[6], data[7])) {
+                timerMs = acaiaTimerToMs(data[5], data[6], data[7]);
+                return true;
+            }
+            if (data[4] == 0x05 && length == 17 &&
+                looksLikeAcaiaTimer(data[11], data[12], data[13])) {
+                timerMs = acaiaTimerToMs(data[11], data[12], data[13]);
+                return true;
+            }
+            return false;
+        case GENERIC: {
+            float ignoredWeight = 0.0f;
+            if (!parseGenericPacket(data, length, ignoredWeight)) {
+                return false;
+            }
+            timerMs = (static_cast<uint32_t>(data[2]) << 16) |
+                      (static_cast<uint32_t>(data[3]) << 8) | data[4];
+            return true;
+        }
+        case FELICITA: {
+            float ignoredWeight = 0.0f;
+            if (!parseFelicitaPacket(data, length, ignoredWeight)) {
+                return false;
+            }
+            if (felicitaAsciiTimer(data, timerMs)) {
+                return true;
+            }
+            if (looksLikeAcaiaTimer(data[9], data[10], data[11])) {
+                timerMs = acaiaTimerToMs(data[9], data[10], data[11]);
+                return true;
+            }
+            return false;
+        }
+        case OLD:
+            break;
     }
     return false;
 }
@@ -756,6 +860,9 @@ void AcaiaArduinoBLE::resetConnection(bool disconnectPeer,
     _packetPeriod = 0;
     _hasValidPacket = false;
     _consecutiveRejectedPackets = 0;
+    _hasTimer = false;
+    _currentTimerMs = 0;
+    _lastTimerPacket = 0;
     _type = OLD;
 }
 

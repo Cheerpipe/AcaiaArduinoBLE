@@ -2181,6 +2181,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   char currentWeight[32] = "null";
   char observedWeight[32] = "null";
   char lastWeight[32] = "null";
+  char scaleTimer[32] = "null";
   if (control.currentWeightValid) {
     snprintf(currentWeight, sizeof(currentWeight), "%.2f",
              static_cast<double>(control.currentWeightG));
@@ -2188,6 +2189,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   if (control.observedWeightValid) {
     snprintf(observedWeight, sizeof(observedWeight), "%.2f",
              static_cast<double>(control.observedWeightG));
+  }
+  if (control.currentTimerValid) {
+    snprintf(scaleTimer, sizeof(scaleTimer), "%lu",
+             static_cast<unsigned long>(control.currentTimerMs));
   }
   if (control.lastCycle.weightValid) {
     snprintf(lastWeight, sizeof(lastWeight), "%.2f",
@@ -2255,7 +2260,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"controlState\":\"%s\",\"controlAccepted\":%s,"
       "\"currentWeightG\":%s,"
       "\"weightAgeMs\":%lu,\"observedWeightG\":%s,"
-      "\"observedWeightAgeMs\":%lu,\"connectionGeneration\":%lu,"
+      "\"observedWeightAgeMs\":%lu,\"timerMs\":%s,\"timerAgeMs\":%lu,"
+      "\"connectionGeneration\":%lu,"
       "\"packetSequence\":%lu,\"packetGaps\":%lu,"
       "\"rejectedPackets\":%lu,\"reconnects\":%lu,"
       "\"lastDisconnectReason\":%u,"
@@ -2362,6 +2368,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(control.currentWeightAgeMs),
       observedWeight,
       static_cast<unsigned long>(control.observedWeightAgeMs),
+      scaleTimer,
+      static_cast<unsigned long>(control.currentTimerAgeMs),
       static_cast<unsigned long>(control.scaleConnectionGeneration),
       static_cast<unsigned long>(control.scalePacketSequence),
       static_cast<unsigned long>(control.scalePacketGaps),

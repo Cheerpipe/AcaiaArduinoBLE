@@ -274,6 +274,9 @@ class AcaiaArduinoBLE {
     return runCommand(heartbeatSucceeds);
   }
   float getWeight() const { return weight; }
+  bool hasTimer() const { return connected && timerValid; }
+  uint32_t getTimerMs() const { return timerValid ? timerMs : 0; }
+  uint32_t lastTimerAgeMs() const { return timerValid ? timerAgeMs : 0xffffffffUL; }
   bool heartbeatRequired() const { return heartbeatRequiredValue; }
   bool isConnected() const { return connected; }
   const char* connectedProtocolName() const {
@@ -309,6 +312,9 @@ class AcaiaArduinoBLE {
   bool newWeightAvailableValue = false;
   bool disconnectWhenCheckingWeight = false;
   float weight = 0.0f;
+  bool timerValid = false;
+  uint32_t timerMs = 0;
+  uint32_t timerAgeMs = 0;
   AcaiaDisconnectReason disconnectReason = AcaiaDisconnectReason::NONE;
   uint32_t rejectedPackets = 0;
   uint32_t reconnects = 0;

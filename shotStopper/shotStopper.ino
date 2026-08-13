@@ -417,6 +417,9 @@ uint32_t scalePacketGaps = 0;
 uint32_t scaleRejectedPackets = 0;
 uint32_t scaleReconnects = 0;
 uint8_t scaleLastDisconnectReason = 0;
+bool scaleTimerValid = false;
+uint32_t scaleTimerMs = 0;
+uint32_t scaleTimerAgeMs = 0;
 char scaleProtocolName[20] = "none";
 uint32_t scaleWorkerProgressAtMs = 0;
 uint32_t scaleEventsDropped = 0;
@@ -522,6 +525,9 @@ struct ScaleLinkSnapshot {
   uint32_t reconnects;
   uint8_t lastDisconnectReason;
   uint32_t workerProgressAtMs;
+  bool timerValid;
+  uint32_t timerMs;
+  uint32_t timerAgeMs;
   char protocolName[20];
 };
 
@@ -711,6 +717,9 @@ ScaleLinkSnapshot getScaleLinkSnapshot() {
   snapshot.reconnects = scaleReconnects;
   snapshot.lastDisconnectReason = scaleLastDisconnectReason;
   snapshot.workerProgressAtMs = scaleWorkerProgressAtMs;
+  snapshot.timerValid = scaleTimerValid;
+  snapshot.timerMs = scaleTimerMs;
+  snapshot.timerAgeMs = scaleTimerAgeMs;
   memcpy(snapshot.protocolName, scaleProtocolName, sizeof(snapshot.protocolName));
   portEXIT_CRITICAL(&scaleLinkMux);
   return snapshot;
@@ -734,6 +743,11 @@ void setScaleLinkState(ScaleLinkState state) {
   }
   scaleLinkState = state;
   scaleWorkerProgressAtMs = progressAtMs;
+  if (state != ScaleLinkState::CONNECTED) {
+    scaleTimerValid = false;
+    scaleTimerMs = 0;
+    scaleTimerAgeMs = 0;
+  }
   portEXIT_CRITICAL(&scaleLinkMux);
   if (previous != state) {
     addDebugEvent(DebugCategory::SCALE,
@@ -2574,6 +2588,9 @@ bool publishScaleEvent(const ScaleEvent &event, bool critical) {
 }
 
 void updateWorkerLinkState() {
+  const bool timerValid = scale.hasTimer();
+  const uint32_t timerMs = timerValid ? scale.getTimerMs() : 0;
+  const uint32_t timerAgeMs = timerValid ? scale.lastTimerAgeMs() : 0;
   portENTER_CRITICAL(&scaleLinkMux);
   scaleRejectedPackets = scale.rejectedPacketCount();
   scaleReconnects = scale.reconnectCount();
@@ -2582,6 +2599,9 @@ void updateWorkerLinkState() {
   strncpy(scaleProtocolName, scale.connectedProtocolName(),
           sizeof(scaleProtocolName) - 1);
   scaleProtocolName[sizeof(scaleProtocolName) - 1] = '\0';
+  scaleTimerValid = timerValid;
+  scaleTimerMs = timerMs;
+  scaleTimerAgeMs = timerAgeMs;
   portEXIT_CRITICAL(&scaleLinkMux);
   setScaleLinkState(scale.isConnected() ? ScaleLinkState::CONNECTED
                                         : ScaleLinkState::DISCONNECTED);
@@ -4015,6 +4035,9 @@ void publishControlStatus() {
   next.observedWeightAgeMs = next.observedWeightValid
                                  ? elapsedMs(observedWeightReceivedAtMs)
                                  : 0;
+  next.currentTimerValid = next.scaleAvailable && scaleLink.timerValid;
+  next.currentTimerMs = next.currentTimerValid ? scaleLink.timerMs : 0;
+  next.currentTimerAgeMs = next.currentTimerValid ? scaleLink.timerAgeMs : 0;
   next.scaleConnectionGeneration = scaleLink.connectionGeneration;
   next.scalePacketSequence = scaleLink.packetSequence;
   next.scalePacketGaps = scaleLink.packetGaps;

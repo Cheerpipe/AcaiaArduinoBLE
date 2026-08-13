@@ -357,6 +357,7 @@ void testOldAndGenericPacketValidation() {
     notify(old, oldPacket);
     CHECK(oldScale.newWeightAvailable());
     CHECK(std::fabs(oldScale.getWeight() - 123.4f) < 0.01f);
+    CHECK(!oldScale.hasTimer());
     oldPacket[6] = 5;
     notify(old, oldPacket);
     CHECK(!oldScale.newWeightAvailable());
@@ -367,15 +368,83 @@ void testOldAndGenericPacketValidation() {
     CHECK(genericScale.init());
     std::vector<byte> genericPacket(20, 0);
     genericPacket[0] = 0x03;
+    genericPacket[2] = 0x00;
+    genericPacket[3] = 0x30;
+    genericPacket[4] = 0x39;
     genericPacket[6] = '-';
     genericPacket[8] = 0x04;
     genericPacket[9] = 0xd2;
     notify(generic, genericPacket);
     CHECK(genericScale.newWeightAvailable());
     CHECK(std::fabs(genericScale.getWeight() + 12.34f) < 0.01f);
+    CHECK(genericScale.hasTimer());
+    CHECK(genericScale.getTimerMs() == 12345UL);
     genericPacket[0] = 0xff;
     notify(generic, genericPacket);
     CHECK(!genericScale.newWeightAvailable());
+}
+
+std::vector<byte> acaiaNewTimer(byte minutes, byte seconds, byte tenths,
+                                int length = 10) {
+    std::vector<byte> packet(static_cast<size_t>(length), 0);
+    packet[0] = 0xef;
+    packet[1] = 0xdd;
+    packet[2] = 0x0c;
+    packet[3] = static_cast<byte>(length - 5);
+    packet[4] = 0x07;
+    packet[5] = minutes;
+    packet[6] = seconds;
+    packet[7] = tenths;
+    setAcaiaChecksum(packet);
+    return packet;
+}
+
+void testScaleTimerParsing() {
+    resetFake();
+    ScaleFixture acaia = makeScale(NEW);
+    AcaiaArduinoBLE scale(false);
+    CHECK(scale.init());
+    notify(acaia, acaiaNewWeight(18.5f));
+    CHECK(scale.newWeightAvailable());
+    CHECK(!scale.hasTimer());
+
+    notify(acaia, acaiaNewTimer(1, 5, 3));
+    CHECK(!scale.newWeightAvailable());
+    CHECK(scale.hasTimer());
+    CHECK(scale.getTimerMs() == 65300UL);
+    CHECK(std::fabs(scale.getWeight() - 18.5f) < 0.01f);
+
+    std::vector<byte> weightWithTimer = acaiaNewWeight(20.0f, 17);
+    weightWithTimer[11] = 0;
+    weightWithTimer[12] = 12;
+    weightWithTimer[13] = 4;
+    setAcaiaChecksum(weightWithTimer);
+    notify(acaia, weightWithTimer);
+    CHECK(scale.newWeightAvailable());
+    CHECK(std::fabs(scale.getWeight() - 20.0f) < 0.01f);
+    CHECK(scale.getTimerMs() == 12400UL);
+    scale.disconnect();
+    CHECK(!scale.hasTimer());
+
+    resetFake();
+    ScaleFixture felicita = makeScale(FELICITA);
+    AcaiaArduinoBLE felicitaScale(false);
+    CHECK(felicitaScale.init());
+    std::vector<byte> packet(18, 0);
+    packet[2] = '+';
+    const char digits[] = "001234";
+    for (int i = 0; i < 6; ++i) {
+        packet[3 + i] = static_cast<byte>(digits[i]);
+    }
+    const char timeDigits[] = "01053";
+    for (int i = 0; i < 5; ++i) {
+        packet[9 + i] = static_cast<byte>(timeDigits[i]);
+    }
+    notify(felicita, packet);
+    CHECK(felicitaScale.newWeightAvailable());
+    CHECK(std::fabs(felicitaScale.getWeight() - 12.34f) < 0.01f);
+    CHECK(felicitaScale.hasTimer());
+    CHECK(felicitaScale.getTimerMs() == 65300UL);
 }
 
 void testRemoteDisconnectAndReconnectTelemetry() {
@@ -460,6 +529,7 @@ int main() {
     testFelicitaAsciiValidation();
     testCapabilitiesAndWriteCleanup();
     testOldAndGenericPacketValidation();
+    testScaleTimerParsing();
     testRemoteDisconnectAndReconnectTelemetry();
     testRejectedPacketsDoNotRefreshAvailability();
     testPacketLengthCorpusAndReconnectSoak();

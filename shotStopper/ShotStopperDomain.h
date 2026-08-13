@@ -978,6 +978,9 @@ struct ControlStatusSnapshot {
   bool observedWeightValid = false;
   float observedWeightG = 0.0f;
   uint32_t observedWeightAgeMs = 0;
+  bool currentTimerValid = false;
+  uint32_t currentTimerMs = 0;
+  uint32_t currentTimerAgeMs = 0;
   uint32_t scaleConnectionGeneration = 0;
   uint32_t scalePacketSequence = 0;
   uint32_t scalePacketGaps = 0;

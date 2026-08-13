@@ -11,7 +11,7 @@
 #ifndef AcaiaArduinoBLE_h
 #define AcaiaArduinoBLE_h
 
-#define LIBRARY_VERSION                 "3.5.0"
+#define LIBRARY_VERSION                 "3.6.0"
 #define WRITE_CHAR_OLD_VERSION          "2a80"
 #define READ_CHAR_OLD_VERSION           "2a80"
 #define WRITE_CHAR_NEW_VERSION          "49535343-8841-43f4-a8d4-ecbe34729bb3"
@@ -96,6 +96,9 @@ class AcaiaArduinoBLE {
 
         bool heartbeat();
         float getWeight() const;
+        bool hasTimer() const;
+        uint32_t getTimerMs() const;
+        uint32_t lastTimerAgeMs() const;
         bool heartbeatRequired() const;
         bool isConnected();
         bool newWeightAvailable();
@@ -115,6 +118,8 @@ class AcaiaArduinoBLE {
                                       const char* readUuid);
         bool parseWeightPacket(const byte data[], int length,
                                float& weight) const;
+        bool parseTimerPacket(const byte data[], int length,
+                              uint32_t& timerMs) const;
         bool parseAcaiaNewPacket(const byte data[], int length,
                                  float& weight) const;
         bool parseAcaiaOldPacket(const byte data[], int length,
@@ -150,6 +155,9 @@ class AcaiaArduinoBLE {
         void printData(const unsigned char data[], int length);
 
         float               _currentWeight;
+        uint32_t            _currentTimerMs;
+        uint32_t            _lastTimerPacket;
+        bool                _hasTimer;
         BLECharacteristic   _write;
         BLECharacteristic   _read;
         BLEDevice           _peripheral;

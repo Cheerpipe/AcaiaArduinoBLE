@@ -109,8 +109,15 @@ if (!html.includes('authenticatedOnly') || !html.includes('Read-only view') ||
 const statusSection = html.match(/<fieldset[^>]*><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     statusSection[1].includes('class="row"') ||
-    (statusSection[1].match(/class="metric"/g) || []).length !== 19 ||
-    !html.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'")) {
+    (statusSection[1].match(/class="metric"/g) || []).length !== 21 ||
+    !html.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'") ||
+    !html.includes('id="scaleWeight"') ||
+    !html.includes('id="scaleTimer"') ||
+    !html.includes('Weight (scale)') ||
+    !html.includes('Timer (scale)') ||
+    !html.includes('function formatScaleWeight(') ||
+    !html.includes('function formatScaleTimer(') ||
+    !network.includes('\\"timerMs\\"')) {
   throw new Error('Status must use one metric per row and homologate Paddle/CN9 OPEN/OFF and CLOSED/ON labels');
 }
 if (!html.includes('id="shotPanel"') ||

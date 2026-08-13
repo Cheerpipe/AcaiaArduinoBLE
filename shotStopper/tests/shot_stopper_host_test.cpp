@@ -133,6 +133,9 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scaleRejectedPackets = 0;
   scaleReconnects = 0;
   scaleLastDisconnectReason = 0;
+  scaleTimerValid = false;
+  scaleTimerMs = 0;
+  scaleTimerAgeMs = 0;
   scaleWorkerProgressAtMs = hostMillis;
   scaleEventsDropped = 0;
   scaleWorkerStackMinWords = 0;
@@ -1769,6 +1772,30 @@ void w46_status_reports_uptime_since_boot() {
   ControlStatusSnapshot status;
   copyControlStatus(status);
   CHECK(status.uptimeMs == 5500);
+}
+
+void w47_status_reports_live_scale_weight_and_timer() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  publishWeight(18.5f);
+  scale.timerValid = true;
+  scale.timerMs = 12340;
+  scale.timerAgeMs = 40;
+  updateWorkerLinkState();
+  publishControlStatus();
+  ControlStatusSnapshot status;
+  copyControlStatus(status);
+  CHECK(status.observedWeightValid);
+  CHECK(fabsf(status.observedWeightG - 18.5f) < 0.01f);
+  CHECK(status.currentTimerValid);
+  CHECK(status.currentTimerMs == 12340);
+  CHECK(status.currentTimerAgeMs == 40);
+
+  setScaleConnected(false);
+  publishControlStatus();
+  copyControlStatus(status);
+  CHECK(!status.currentTimerValid);
+  CHECK(status.currentTimerMs == 0);
 }
 
 void r47_reset_reason_name_maps_known_codes() {
@@ -3572,6 +3599,7 @@ const TestCase testCases[] = {
     {"W12", w12_hard_limit_cannot_be_configured_above_sixty_seconds},
     {"W45", w45_bbw_protection_retare_relation_is_validated},
     {"W46", w46_status_reports_uptime_since_boot},
+    {"W47", w47_status_reports_live_scale_weight_and_timer},
     {"W13", w13_virtual_paddle_uses_normal_state_machine},
     {"W14", w14_physical_motion_overrides_web_control},
     {"W15", w15_web_rinse_starts_scale_timer},
