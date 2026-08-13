@@ -11,8 +11,10 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 15;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 14;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 16;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 15;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V15 = 15;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V14 = 14;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V13 = 13;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V12 = 12;
 constexpr size_t NTP_SERVER_HOST_CAPACITY = 64;
@@ -83,7 +85,7 @@ constexpr uint32_t MAX_PADDLE_RETURN_REMINDER_MAX_DURATION_MS =
 constexpr uint32_t HARD_MAX_CN9_CLOSED_MS = 60000;
 constexpr uint32_t DEFAULT_OPERATIONAL_WALL_MS = 60000;
 constexpr uint32_t DEFAULT_RINSE_GESTURE_MS = 1500;
-constexpr uint32_t DEFAULT_RINSE_DURATION_MS = 3000;
+constexpr uint32_t DEFAULT_RINSE_DURATION_MS = 4000;
 constexpr uint32_t DEFAULT_RETARE_WINDOW_MS = 4000;
 constexpr uint32_t DEFAULT_BBW_PROTECTION_MS = 12000;
 constexpr uint32_t MIN_BBW_PROTECTION_AFTER_RETARE_MS = 3000;
@@ -113,14 +115,16 @@ constexpr uint8_t DEFAULT_GOAL_WEIGHT_G = 36;
 constexpr float DEFAULT_MAX_RECOVERY_WEIGHT_G = 42.5f;
 constexpr float MIN_MAX_RECOVERY_WEIGHT_G = 10.0f;
 constexpr float MAX_MAX_RECOVERY_WEIGHT_G = 200.0f;
-constexpr uint32_t DEFAULT_MIN_BREW_TIME_MS = 26000;
+constexpr uint32_t DEFAULT_MIN_BREW_TIME_MS = 28000;
 constexpr uint32_t MIN_MIN_BREW_TIME_MS = 5000;
 constexpr uint32_t MAX_MIN_BREW_TIME_MS = 55000;
 constexpr float MAX_OFFSET_G = 5.0f;
 constexpr float DEFAULT_WEIGHT_OFFSET_G = 1.5f;
 constexpr size_t AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT = 5;
-constexpr uint16_t AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS = 300;  // 30.0 s
-constexpr uint32_t DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS = 30000;
+constexpr uint32_t DEFAULT_AUTO_TO_MANUAL_GUARD_BASELINE_MS = 32000;
+constexpr uint16_t AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS = 320;  // 32.0 s
+constexpr uint32_t DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS =
+    DEFAULT_AUTO_TO_MANUAL_GUARD_BASELINE_MS;
 constexpr uint32_t MIN_AUTO_TO_MANUAL_GUARD_LIMIT_MS = 10000;
 constexpr float AUTO_TO_MANUAL_GUARD_SAMPLE_MAX_ERROR_RATIO = 0.10f;
 constexpr size_t WIFI_SSID_CAPACITY = 33;
@@ -243,10 +247,16 @@ enum class ActualWeightSource : uint8_t {
   LAST_KNOWN = 2
 };
 
+inline uint16_t autoToManualGuardBaselineDs(uint32_t baselineMs) {
+  return static_cast<uint16_t>((baselineMs + 50U) / 100U);
+}
+
 inline void resetAutoToManualGuardSamples(
-    uint16_t samples[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT]) {
+    uint16_t samples[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT],
+    uint32_t baselineMs = DEFAULT_AUTO_TO_MANUAL_GUARD_BASELINE_MS) {
+  const uint16_t seedDs = autoToManualGuardBaselineDs(baselineMs);
   for (size_t index = 0; index < AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT; ++index) {
-    samples[index] = AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS;
+    samples[index] = seedDs;
   }
 }
 
@@ -270,7 +280,7 @@ inline uint32_t autoToManualGuardTrendMs(
   const float slope = numer / denom;
   const float predictedDs = meanY + slope * (5.0f - meanX);
   if (!isfinite(predictedDs)) {
-    return DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
+    return DEFAULT_AUTO_TO_MANUAL_GUARD_BASELINE_MS;
   }
   float predictedMs = predictedDs * 100.0f;
   if (predictedMs < static_cast<float>(MIN_AUTO_TO_MANUAL_GUARD_LIMIT_MS)) {
@@ -360,6 +370,8 @@ struct RuntimeConfig {
       static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
   uint32_t autoToManualGuardManualLimitMs =
       DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
+  uint32_t autoToManualGuardBaselineMs =
+      DEFAULT_AUTO_TO_MANUAL_GUARD_BASELINE_MS;
   uint16_t autoToManualGuardSamplesDs[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT] = {
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
@@ -464,7 +476,8 @@ enum class ConfigValidationError : uint8_t {
   MIN_BREW_TIME,
   FAST_EXTRACTION_GUARD_RELATION,
   AUTO_TO_MANUAL_GUARD_MODE,
-  AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT
+  AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT,
+  AUTO_TO_MANUAL_GUARD_BASELINE
 };
 
 inline uint32_t effectiveRetareWindowMs(const RuntimeConfig &config) {
@@ -595,6 +608,10 @@ inline ConfigValidationError validateRuntimeConfig(
       config.autoToManualGuardManualLimitMs > config.operationalWallMs) {
     return ConfigValidationError::AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT;
   }
+  if (config.autoToManualGuardBaselineMs < MIN_AUTO_TO_MANUAL_GUARD_LIMIT_MS ||
+      config.autoToManualGuardBaselineMs > config.operationalWallMs) {
+    return ConfigValidationError::AUTO_TO_MANUAL_GUARD_BASELINE;
+  }
   if (!config.fastExtractionGuardEnabled) {
     return ConfigValidationError::NONE;
   }
@@ -663,6 +680,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "autoToManualGuardLimitMode";
     case ConfigValidationError::AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT:
       return "autoToManualGuardManualLimitMs";
+    case ConfigValidationError::AUTO_TO_MANUAL_GUARD_BASELINE:
+      return "autoToManualGuardBaselineMs";
   }
   return "unknown";
 }

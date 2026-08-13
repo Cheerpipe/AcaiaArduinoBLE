@@ -3913,7 +3913,8 @@ void processWebCommand(const WebCommand &command) {
       }
       pendingFinalize.pending = false;
       RuntimeConfig candidate = runtimeConfig;
-      resetAutoToManualGuardSamples(candidate.autoToManualGuardSamplesDs);
+      resetAutoToManualGuardSamples(candidate.autoToManualGuardSamplesDs,
+                                    candidate.autoToManualGuardBaselineMs);
       ++candidate.revision;
       if (candidate.revision == 0) {
         candidate.revision = 1;

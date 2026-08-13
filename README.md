@@ -123,7 +123,7 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | **Retare stability** | Samples (default 3), tolerance (default 2.0 g), max sample gap (default 0.5 s), and min stable time (default 0.3 s) required before retare fires. |
 | **BBW protection (s)** | **Pre-arm / accidental-weight protection window** at shot start for automatic BBW: inhibits automatic weight stop until first drops are detected or the timeout expires (default 12 s; minimum retare window + 3 s). Runs in parallel with retare. Skipped when Brew by weight is off. |
 | **Quick rinse gesture (s)** | Maximum paddle ON time that still counts as a quick rinse when released (default 1.5 s). |
-| **Quick rinse duration (s)** | How long CN9 stays closed after a quick rinse starts (default 3 s). |
+| **Quick rinse duration (s)** | How long CN9 stays closed after a quick rinse starts (default 4 s). |
 | **Timezone offset (min)** | Wall-clock offset for shot history labels (default UTC+0). |
 | **NTP server** | Preset (default **pool**) or custom hostname for time sync. |
 
@@ -404,7 +404,7 @@ also configure:
 | --- | --- | --- |
 | **Enable** | ON | Master switch for the extended-shot recovery |
 | **Max recovery weight (g)** | 42.5 | Hard ceiling if the shot must be extended |
-| **Minimum brew time (s)** | 26 | Minimum extraction time for a normal target stop |
+| **Minimum brew time (s)** | 28 | Minimum extraction time for a normal target stop |
 
 ### How it works
 
@@ -422,7 +422,7 @@ recovery thresholds.
 
 ### Why it is useful
 
-If coffee hits 36 g in ~22 s but you know a good shot needs ~26 s, the guard
+If coffee hits 36 g in ~22 s but you know a good shot needs ~28 s, the guard
 lets the extraction continue toward 42.5 g or until the minimum time passes —
 similar to manually allowing the shot to reach your next weight checkpoint
 without watching the scale.
@@ -461,8 +461,9 @@ absolute deadline from cycle start.
 | --- | --- | --- |
 | **Enable A→M time guard** | ON | Master switch for the CN9 deadline |
 | **Limit mode** | Auto | **Auto** = linear trend of the last five good shot durations; **Manual** = fixed seconds |
-| **Manual limit (s)** | 30 | Used when Limit mode is Manual (clamped to 10 s … CN9 limit) |
-| **Trend (s)** | ~30 | Read-only; current Auto prediction (always shown) |
+| **Baseline duration (s)** | 32 | Seed used by **Reset A→M samples** (five equal values). Factory default for Manual limit |
+| **Manual limit (s)** | 32 | Used when Limit mode is Manual (clamped to 10 s … CN9 limit) |
+| **Trend (s)** | ~32 | Read-only; current Auto prediction (always shown) |
 
 Deadline = cycle start + limit. Limit is computed once when an automatic brew
 is confirmed. Enforcement starts on the first scale-loss suspend after arming;
@@ -477,8 +478,9 @@ independent of whether the guard is enabled or which limit mode is selected:
 - Total shot duration; error ≤ 10 % vs goal; not extraction-extended; not rinse;
   not stopped by this guard; post-drip weight available
 - Auto and manual shots qualify when weight/error criteria are met
-- Fresh devices and **Reset A→M duration samples** restore five logical 30 s
-  values (`POST /api/v1/calibration/reset-guard-samples`)
+- Fresh devices restore five logical **32 s** samples. **Reset A→M samples to
+  baseline** fills all five with the configured **Baseline duration**
+  (`POST /api/v1/calibration/reset-guard-samples`; save baseline first)
 
 ### Telemetry
 

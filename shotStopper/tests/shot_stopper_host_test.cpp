@@ -1545,6 +1545,7 @@ void w11_operational_timer_opens_without_control_loop() {
   runtimeConfig.operationalWallMs = 20000;
   runtimeConfig.bbwProtectionMs = 7000;
   runtimeConfig.autoToManualGuardManualLimitMs = 15000;
+  runtimeConfig.autoToManualGuardBaselineMs = 15000;
   CHECK(validateRuntimeConfig(runtimeConfig) == ConfigValidationError::NONE);
   startCycle();
   hostMillis = cn9ClosedAtMs + runtimeConfig.operationalWallMs;
