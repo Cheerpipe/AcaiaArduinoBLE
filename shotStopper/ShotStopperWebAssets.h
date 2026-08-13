@@ -104,9 +104,9 @@ body{font-family:system-ui;max-width:760px;margin:1rem auto;padding:0 1rem;color
     <details class="cfgGroup"><summary>A→M time guard</summary>
       <label><input id="autoToManualGuardEnabled" type="checkbox"> Enable A→M guard<small class="fieldHint">If the scale is lost mid-shot, close CN9 on a deadline instead of the full CN9 limit. Reconnect preferred.</small></label>
       <label>Limit mode <select id="autoToManualGuardLimitMode"><option value="auto">Auto (trend)</option><option value="manual">Manual</option></select><small class="fieldHint">Auto uses the trend of the last five good shot times. Manual uses the fixed limit below.</small></label>
-      <label>Baseline duration (s)<input id="autoToManualGuardBaselineS" type="number" min="10" max="60" step="1" required><small class="fieldHint">Seed for Reset A→M samples (5×). Also factory Manual limit default. 10 s…CN9; save before reset.</small></label>
       <label class="atmManualOpt">Manual limit (s)<input id="autoToManualGuardManualLimitS" type="number" min="10" max="60" step="1" required><small class="fieldHint">Fixed CN9 deadline from cycle start when the scale is lost (Manual mode). Integer 10 s…CN9 limit.</small></label>
       <div class="metric"><strong>Trend (s)</strong><div id="autoToManualGuardTrendS">—</div></div>
+      <label>Baseline duration (s)<input id="autoToManualGuardBaselineS" type="number" min="10" max="60" step="1" required><small class="fieldHint">Seed for Reset A→M samples (5×). Also factory Manual limit default. 10 s…CN9; save before reset.</small></label>
       <button class="mutable authenticatedOnly hidden" type="button" id="resetGuardSamplesButton">Reset A→M samples to baseline</button>
     </details>
     <details class="cfgGroup"><summary>Quick rinse</summary>

@@ -122,7 +122,7 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | **Minimum cup weight (g)** | Stable load threshold that qualifies as a cup for retare (default 10 g). |
 | **Retare stability** | Samples (default 3), tolerance (default 2.0 g), max sample gap (default 0.5 s), and min stable time (default 0.3 s) required before retare fires. |
 | **BBW protection (s)** | **Pre-arm / accidental-weight protection window** at shot start for automatic BBW: inhibits automatic weight stop until first drops are detected or the timeout expires (default 12 s; minimum retare window + 3 s). Runs in parallel with retare. Skipped when Brew by weight is off. |
-| **Quick rinse gesture (s)** | Maximum paddle ON time that still counts as a quick rinse when released (default 1.5 s). |
+| **Quick rinse gesture (s)** | Maximum paddle ON time that still counts as a quick rinse when released (default 1 s). |
 | **Quick rinse duration (s)** | How long CN9 stays closed after a quick rinse starts (default 4 s). |
 | **Timezone offset (min)** | Wall-clock offset for shot history labels (default UTC+0). |
 | **NTP server** | Preset (default **pool**) or custom hostname for time sync. |
@@ -464,9 +464,9 @@ absolute deadline from cycle start.
 | --- | --- | --- |
 | **Enable A→M time guard** | ON | Master switch for the CN9 deadline |
 | **Limit mode** | Auto | **Auto** = linear trend of the last five good shot durations; **Manual** = fixed seconds |
-| **Baseline duration (s)** | 32 | Seed used by **Reset A→M samples** (five equal values). Factory default for Manual limit |
 | **Manual limit (s)** | 32 | Used when Limit mode is Manual (clamped to 10 s … CN9 limit) |
 | **Trend (s)** | ~32 | Read-only; current Auto prediction (always shown) |
+| **Baseline duration (s)** | 32 | Seed used by **Reset A→M samples** (five equal values). Factory default for Manual limit |
 
 Deadline = cycle start + limit. Limit is computed once when an automatic brew
 is confirmed. Enforcement starts on the first scale-loss suspend after arming;

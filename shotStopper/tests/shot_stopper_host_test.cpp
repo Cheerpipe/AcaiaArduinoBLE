@@ -1389,7 +1389,8 @@ void w01_default_runtime_configuration_is_valid() {
   const RuntimeConfig config;
   CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
   CHECK(config.operationalWallMs == HARD_MAX_CN9_CLOSED_MS);
-  CHECK(config.rinseGestureMs == 1500);
+  CHECK(config.rinseGestureMs == 1000);
+  CHECK(config.minBrewTimeMs == 28000);
   CHECK(config.canTareStartTimer);
   CHECK(config.shotTimerStartDelayMs == DEFAULT_SHOT_TIMER_START_DELAY_MS);
   CHECK(config.firstDropBeep);

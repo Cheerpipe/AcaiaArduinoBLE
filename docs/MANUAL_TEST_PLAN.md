@@ -61,5 +61,6 @@ Perform all relay and CN9 tests on a bench first. Do not connect CN9 to the mach
 | M53 | Let BBW protection timeout expire without detecting drops, then allow coffee to accumulate. | No beep at timeout; when first drops are later detected, optional beep plays once; weight stop then works normally. |
 | M54 | Shorten BBW protection below retare window + 3 s in the Web UI and save. | Server rejects the transaction or clamps to the minimum; UI hint explains the rule. |
 | M55 | With automatic retare off, run an automatic shot. | Retare window is skipped; BBW protection still inhibits weight stop until it ends. |
+| M56 | Open the Web UI, then reload and sign in while a scale is connected. | First load is gzip (`Content-Encoding: gzip`, ~17 KiB). Reload and post-login reload return **304** when the firmware is unchanged. Scale stays connected; no `PACKET_TIMEOUT`. Safari does not show “Device unreachable”. |
 
 Record firmware version, board/FQBN, scale model/firmware, measured timings, relay continuity and pass/fail evidence for every run.

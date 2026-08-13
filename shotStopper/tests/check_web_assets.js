@@ -154,6 +154,14 @@ if (!html.includes('id="autoToManualGuardEnabled"') ||
     !html.includes('id="autoToManualGuardManualLimitS"') ||
     !html.includes('id="autoToManualGuardTrendS"') ||
     !html.includes('id="resetGuardSamplesButton"') ||
+    html.indexOf('id="autoToManualGuardLimitMode"') >
+        html.indexOf('id="autoToManualGuardManualLimitS"') ||
+    html.indexOf('id="autoToManualGuardManualLimitS"') >
+        html.indexOf('id="autoToManualGuardTrendS"') ||
+    html.indexOf('id="autoToManualGuardTrendS"') >
+        html.indexOf('id="autoToManualGuardBaselineS"') ||
+    html.indexOf('id="autoToManualGuardBaselineS"') >
+        html.indexOf('id="resetGuardSamplesButton"') ||
     !html.includes('Reset A→M samples to baseline') ||
     !html.includes('id="shotAtmGuard"') ||
     !html.includes('A→M ·') ||
