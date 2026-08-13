@@ -1690,15 +1690,16 @@ bool ShotStopperNetwork::startHttpServer() {
   config.task_priority = tskIDLE_PRIORITY + 1;
   config.stack_size = 12288;
   // Browser keep-alive + overlapping status/log/shots/heartbeat/commands need
-  // more than four sockets; otherwise Safari shows intermittent connection
-  // failures ("Device unreachable") while the UI still partially works.
-  config.max_open_sockets = 7;
+  // headroom beyond four sockets; otherwise Safari shows intermittent
+  // connection failures ("Device unreachable") while the UI still partially
+  // works. ESP-IDF uses (max_open_sockets + 3) LWIP sockets total.
+  config.max_open_sockets = 10;
   config.max_uri_handlers = 24;
   config.max_resp_headers = 8;
-  config.backlog_conn = 8;
+  config.backlog_conn = 10;
   config.lru_purge_enable = true;
-  config.recv_wait_timeout = 3;
-  config.send_wait_timeout = 3;
+  config.recv_wait_timeout = 4;
+  config.send_wait_timeout = 4;
   if (httpd_start(&server_, &config) != ESP_OK) {
     server_ = nullptr;
     return false;

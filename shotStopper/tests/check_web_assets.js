@@ -197,7 +197,7 @@ if (!html.includes('id="firmwareFooter"') ||
 if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
     !html.includes('await refreshLog()') ||
-    !html.includes('setInterval(()=>refreshLog(),4000)')) {
+    !html.includes('setInterval(()=>refreshLog(),5000)')) {
   throw new Error('Diagnostic log must remain visible and refresh in public read-only mode');
 }
 if (!html.includes('id="factoryResetButton"') ||
@@ -257,12 +257,12 @@ const expected = new Map([
 ]);
 
 const maxSocketsMatch = network.match(/max_open_sockets\s*=\s*(\d+)/);
-if (!maxSocketsMatch || Number(maxSocketsMatch[1]) < 7) {
-  throw new Error('HTTP server must allow at least 7 open sockets for Web UI polling');
+if (!maxSocketsMatch || Number(maxSocketsMatch[1]) < 10) {
+  throw new Error('HTTP server must allow at least 10 open sockets for Web UI polling');
 }
 if (!html.includes('function withPollGate(') ||
     !html.includes('noteReachFail(') ||
-    !html.includes('setInterval(()=>refreshStatus(),2000)')) {
+    !html.includes('setInterval(()=>refreshStatus(),2500)')) {
   throw new Error('Web UI must serialize background polls and soft-fail unreachable bursts');
 }
 if (!html.includes('(async()=>{await refreshStatus();await refreshShots();await refreshLog()})()')) {
