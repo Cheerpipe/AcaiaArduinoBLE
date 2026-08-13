@@ -2,7 +2,7 @@
 #include "ShotStopperVersion.h"
 #include "ShotStopperWatchdog.h"
 
-#include "ShotStopperWebAssets.h"
+#include "ShotStopperWebAssetsGzip.h"
 
 #include <Arduino.h>
 #include <cJSON.h>
@@ -26,7 +26,10 @@ constexpr const char *AP_SSID = "MicraShotStopperAP";
 constexpr const char *AP_IP = "192.168.4.1";
 constexpr const char *JSON_CONTENT_TYPE = "application/json";
 constexpr const char *STATUS_OK = "200 OK";
+constexpr const char *STATUS_NOT_MODIFIED = "304 Not Modified";
 constexpr const char *STATUS_ACCEPTED = "202 Accepted";
+constexpr size_t WEB_UI_ETAG_CAPACITY = 64;
+constexpr size_t IF_NONE_MATCH_CAPACITY = 80;
 constexpr const char *STATUS_BAD_REQUEST = "400 Bad Request";
 constexpr const char *STATUS_UNAUTHORIZED = "401 Unauthorized";
 constexpr const char *STATUS_TOO_MANY = "429 Too Many Requests";
@@ -1747,7 +1750,7 @@ bool ShotStopperNetwork::startHttpServer() {
   // works. ESP-IDF uses (max_open_sockets + 3) LWIP sockets total.
   config.max_open_sockets = 10;
   config.max_uri_handlers = 24;
-  config.max_resp_headers = 8;
+  config.max_resp_headers = 12;
   config.backlog_conn = 10;
   config.lru_purge_enable = true;
   config.recv_wait_timeout = 4;
@@ -2030,16 +2033,44 @@ bool ShotStopperNetwork::readJsonBody(
   return true;
 }
 
+static void formatWebUiEtag(char etag[WEB_UI_ETAG_CAPACITY]) {
+  snprintf(etag, WEB_UI_ETAG_CAPACITY, "\"%s\"", FW_VERSION);
+}
+
+static bool ifNoneMatchEquals(httpd_req_t *request, const char *etag) {
+  const size_t length = httpd_req_get_hdr_value_len(request, "If-None-Match");
+  if (length == 0 || length >= IF_NONE_MATCH_CAPACITY) {
+    return false;
+  }
+  char value[IF_NONE_MATCH_CAPACITY] = {};
+  if (httpd_req_get_hdr_value_str(request, "If-None-Match", value,
+                                  sizeof(value)) != ESP_OK) {
+    return false;
+  }
+  return strcmp(value, etag) == 0;
+}
+
 esp_err_t ShotStopperNetwork::rootHandler(httpd_req_t *request) {
+  char etag[WEB_UI_ETAG_CAPACITY] = {};
+  formatWebUiEtag(etag);
+  if (ifNoneMatchEquals(request, etag)) {
+    httpd_resp_set_status(request, STATUS_NOT_MODIFIED);
+    httpd_resp_set_hdr(request, "Cache-Control", "no-cache");
+    httpd_resp_set_hdr(request, "ETag", etag);
+    return httpd_resp_send(request, nullptr, 0);
+  }
   httpd_resp_set_type(request, "text/html; charset=utf-8");
-  httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+  httpd_resp_set_hdr(request, "Content-Encoding", "gzip");
+  httpd_resp_set_hdr(request, "Cache-Control", "no-cache");
+  httpd_resp_set_hdr(request, "ETag", etag);
   httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
   httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
   httpd_resp_set_hdr(
       request, "Content-Security-Policy",
       "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'");
-  return httpd_resp_send(request, SHOT_STOPPER_WEB_UI,
-                         HTTPD_RESP_USE_STRLEN);
+  return httpd_resp_send(
+      request, reinterpret_cast<const char *>(SHOT_STOPPER_WEB_UI_GZIP),
+      SHOT_STOPPER_WEB_UI_GZIP_LEN);
 }
 
 esp_err_t ShotStopperNetwork::loginHandler(httpd_req_t *request) {

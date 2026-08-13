@@ -28,6 +28,7 @@ Para detalle técnico completo, consulta el [README principal](../README.md).
 | **¿Puedo cambiar la contraseña?** | Sí, desde la Web UI (**Access point / UI password**) estando autenticado, o por **USB serial** con `SET_AP_PASSWORD` / `RESET_AP_PASSWORD`. Cambia la contraseña del AP y del login Web. Comandos: [USB serial CLI](../README.md#usb-serial-cli). |
 | **Perdí el Wi‑Fi o la contraseña de la UI. ¿Cómo recupero el acceso por USB?** | Conecta por USB a **9600** baud y envía comandos serie (paddle OFF). `HELLO` debe responder `how are you`. `RESET_AP_PASSWORD` vuelve a **`Micra1234`**. `CLEAR_WIFI` olvida la red de casa. `FACTORY_RESET` borra todo. Ejemplos con `arduino-cli`: [USB serial CLI](../README.md#usb-serial-cli). |
 | **¿Puedo controlar el shot desde el móvil?** | La Web UI permite monitorización siempre. **Paddle virtual**, rinse remoto y ciclos nuevos por red requieren compilar con **`SHOT_STOPPER_ENABLE_REMOTE_CN9=1`** (desactivado en builds conservadores). **Stop** remoto abre CN9 en cualquier build autenticado. El **paddle físico siempre tiene prioridad**. |
+| **La Web UI se ve como basura en `curl`.** | El HTML se sirve **gzip**. Los navegadores lo descomprimen solos. Desde terminal usa `curl --compressed http://<ip>/`. |
 
 ## Hardware y compatibilidad
 

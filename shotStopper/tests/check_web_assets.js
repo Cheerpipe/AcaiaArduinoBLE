@@ -2,6 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
+const webUi = require('../../scripts/gen_web_ui.js');
 
 const sketchDir = path.resolve(__dirname, '..');
 const asset = fs.readFileSync(path.join(sketchDir, 'ShotStopperWebAssets.h'), 'utf8');
@@ -20,8 +22,8 @@ if (!scriptMatch) throw new Error('Embedded script not found');
 // Parse the exact JavaScript delivered by the controller.
 new Function(scriptMatch[1]);
 
-if (Buffer.byteLength(html, 'utf8') > 61440) {
-  throw new Error('Web UI exceeds the 60 KiB asset budget');
+if (Buffer.byteLength(html, 'utf8') > 65536) {
+  throw new Error('Web UI source exceeds the 64 KiB authoring budget');
 }
 if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
     !html.includes('Paddle State') || !html.includes('firstDropBeep') ||
@@ -210,7 +212,7 @@ if (!html.includes('id="firmwareFooter"') ||
 }
 if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
-    !html.includes('await refreshLog()') ||
+    !html.includes('loadLog()') ||
     !html.includes('setInterval(()=>refreshLog(),2500)') ||
     !html.includes('id="logLevelFilter"') ||
     !html.includes('e.level') ||
@@ -284,13 +286,23 @@ const maxSocketsMatch = network.match(/max_open_sockets\s*=\s*(\d+)/);
 if (!maxSocketsMatch || Number(maxSocketsMatch[1]) < 10) {
   throw new Error('HTTP server must allow at least 10 open sockets for Web UI polling');
 }
+const maxRespHeadersMatch = network.match(/max_resp_headers\s*=\s*(\d+)/);
+if (!maxRespHeadersMatch || Number(maxRespHeadersMatch[1]) < 12) {
+  throw new Error('HTTP server must allow at least 12 response headers for gzip and ETag');
+}
 if (!html.includes('function withPollGate(') ||
     !html.includes('noteReachFail(') ||
     !html.includes('setInterval(()=>refreshStatus(),2500)')) {
   throw new Error('Web UI must serialize background polls and soft-fail unreachable bursts');
 }
-if (!html.includes('(async()=>{await refreshStatus();await refreshShots();await refreshLog()})()')) {
-  throw new Error('Web UI must serialize the initial status/shots/log fetches');
+if (!html.includes('async function loadStatus(){') ||
+    !html.includes('async function loadShots(){') ||
+    !html.includes('async function loadLog(){') ||
+    !html.includes('function refreshStatus(){return withPollGate(loadStatus)}') ||
+    !html.includes('function refreshShots(){return withPollGate(loadShots)}') ||
+    !html.includes('function refreshLog(){return withPollGate(loadLog)}') ||
+    !html.includes('(async()=>{await loadStatus();await Promise.all([loadShots(),loadLog()])})()')) {
+  throw new Error('Web UI must load status first, then fetch shots and log in parallel; background polls stay gated');
 }
 const maxHandlersMatch = network.match(/max_uri_handlers\s*=\s*(\d+)/);
 if (!maxHandlersMatch) {
@@ -393,4 +405,49 @@ if (!firmware.includes('requestScaleBrewBeep(session.id)') ||
   throw new Error('Best-effort beep must stay outside the critical BLE command queue');
 }
 
-console.log(`Embedded Web UI: JavaScript valid, ${Buffer.byteLength(html, 'utf8')} bytes, ${expected.size} routes checked`);
+const generated = webUi.generate();
+const roundTrip = zlib.gunzipSync(generated.gzip).toString('utf8');
+if (roundTrip !== generated.html) {
+  throw new Error('Generated gzip Web UI does not round-trip to the minified HTML');
+}
+if (generated.gzip.length > 20480) {
+  throw new Error('Compressed Web UI exceeds the 20 KiB gzip budget');
+}
+if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
+    network.includes('#include "ShotStopperWebAssets.h"')) {
+  throw new Error('Firmware must embed the gzip Web UI, not the HTML source string');
+}
+if (!network.includes('SHOT_STOPPER_WEB_UI_GZIP') ||
+    !network.includes('SHOT_STOPPER_WEB_UI_GZIP_LEN') ||
+    !network.includes('"Content-Encoding"') ||
+    !network.includes('"gzip"')) {
+  throw new Error('GET / must send the precompressed gzip body with Content-Encoding');
+}
+if (network.includes('zlib.h') || network.includes('miniz.h') ||
+    /mz_compress|deflateInit|gzipCompress/.test(network)) {
+  throw new Error('Firmware must not compress the Web UI at runtime');
+}
+if (!network.includes('If-None-Match')) {
+  throw new Error('GET / must honor If-None-Match for cached Web UI revalidation');
+}
+const rootHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::rootHandler');
+const rootHandlerEnd = network.indexOf('esp_err_t ShotStopperNetwork::loginHandler', rootHandlerStart);
+if (rootHandlerStart < 0 || rootHandlerEnd < 0) {
+  throw new Error('rootHandler not found');
+}
+const rootHandler = network.slice(rootHandlerStart, rootHandlerEnd);
+if (rootHandler.includes('no-store') || !rootHandler.includes('no-cache') ||
+    !rootHandler.includes('STATUS_NOT_MODIFIED') ||
+    !rootHandler.includes('ifNoneMatchEquals') ||
+    !rootHandler.includes('ETag') ||
+    rootHandler.includes('HTTPD_RESP_USE_STRLEN')) {
+  throw new Error('GET / must revalidate with ETag/304 and send gzip by length, not no-store');
+}
+if (network.includes('sendJson') &&
+    !network.slice(network.indexOf('esp_err_t ShotStopperNetwork::sendJson'),
+                   network.indexOf('esp_err_t ShotStopperNetwork::sendError'))
+        .includes('no-store')) {
+  throw new Error('JSON API responses must remain Cache-Control: no-store');
+}
+
+console.log(`Embedded Web UI: JavaScript valid, ${Buffer.byteLength(html, 'utf8')} bytes source, ${generated.gzip.length} bytes gzip, ${expected.size} routes checked`);

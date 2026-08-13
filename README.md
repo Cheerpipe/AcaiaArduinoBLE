@@ -172,8 +172,10 @@ Additional fixed protections (not separately configurable):
 See [Factory credentials (first use)](#factory-credentials-first-use) for AP
 name, default passwords, and step-by-step first connection.
 
-- Fully **embedded Web UI** (no external assets; **60 KiB** asset budget) served
-  over Wi-Fi.
+- Fully **embedded Web UI** (no external assets; **64 KiB** source budget,
+  served gzip-precompressed from flash, **20 KiB** gzip cap) over Wi-Fi. Reloads
+  revalidate with `ETag` (`Cache-Control: no-cache`) so unchanged firmware
+  returns **304**.
 - **STA** mode when credentials are saved; **fallback AP**
   (`MicraShotStopperAP` at `192.168.4.1`) when STA is unavailable. Modes are
   **exclusive** (STA or AP, not concurrent AP+STA). STA addressing is **DHCP**
@@ -308,6 +310,7 @@ The following items are planned but **not present in the current firmware**:
 .
 ├── VERSION                         # Release version (SemVer)
 ├── scripts/gen_version.sh          # Build-time version header generator
+├── scripts/gen_web_ui.js           # Gzip-precompressed Web UI header generator
 ├── shotStopper/                    # Main firmware sketch and host tests
 │   ├── shotStopper.ino
 │   ├── ShotStopperSerialCli.h      # USB serial command parser
@@ -762,15 +765,20 @@ Bump it manually when publishing a release. The git commit hash is appended
 automatically on every build (`1.0.0+abc1234`, or `-dirty` with uncommitted
 changes).
 
-Before compiling or running host tests, generate the version header:
+Before compiling or running host tests, generate the version and gzip Web UI
+headers:
 
 ```sh
 ./scripts/gen_version.sh
+node ./scripts/gen_web_ui.js
 ```
 
-This writes `shotStopper/ShotStopperVersion.h` (gitignored). The installed
+This writes `shotStopper/ShotStopperVersion.h` and
+`shotStopper/ShotStopperWebAssetsGzip.h` (both gitignored). The installed
 firmware reports the version on Serial boot, in `GET /api/v1/status` as
-`firmwareVersion`, and in the Web UI footer.
+`firmwareVersion`, and in the Web UI footer. `GET /` is served as gzip with an
+`ETag` derived from that version. Use `curl --compressed` if you fetch the HTML
+from the command line.
 
 To verify a compiled binary without flashing:
 
@@ -780,11 +788,12 @@ strings build/esp32/shotStopper.ino.bin | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\+'
 
 ## Compile
 
-From the repository root, generate the version header and build for an ESP32
-DevKit V4 with:
+From the repository root, generate the version and Web UI headers and build for
+an ESP32 DevKit V4 with:
 
 ```sh
 ./scripts/gen_version.sh
+node ./scripts/gen_web_ui.js
 mkdir -p build/esp32
 arduino-cli compile \
   --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs \
@@ -811,12 +820,13 @@ slot (optional sanity check):
 wc -c < build/esp32/shotStopper.ino.bin
 ```
 
-For the ESP32-S3 variant, generate the version header and use its FQBN and
-output directory. Use the same **`min_spiffs`** partition scheme as the
+For the ESP32-S3 variant, generate the version and Web UI headers and use its
+FQBN and output directory. Use the same **`min_spiffs`** partition scheme as the
 classic ESP32 build:
 
 ```sh
 ./scripts/gen_version.sh
+node ./scripts/gen_web_ui.js
 mkdir -p build/esp32-s3
 
 arduino-cli compile \

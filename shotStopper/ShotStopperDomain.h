@@ -122,7 +122,7 @@ constexpr uint32_t DEFAULT_MIN_BREW_TIME_MS = 28000;
 constexpr uint32_t MIN_MIN_BREW_TIME_MS = 5000;
 constexpr uint32_t MAX_MIN_BREW_TIME_MS = 55000;
 // Delay FW shot-timer arm after paddle/CN9 so elapsed aligns with scale BLE start.
-constexpr uint32_t DEFAULT_SHOT_TIMER_START_DELAY_MS = 200;
+constexpr uint32_t DEFAULT_SHOT_TIMER_START_DELAY_MS = 300;
 constexpr uint32_t MIN_SHOT_TIMER_START_DELAY_MS = 0;
 constexpr uint32_t MAX_SHOT_TIMER_START_DELAY_MS = 1000;
 constexpr float MAX_OFFSET_G = 5.0f;
