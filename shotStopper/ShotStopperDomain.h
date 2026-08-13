@@ -351,7 +351,7 @@ struct RuntimeConfig {
   int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
   uint8_t ntpServerPreset = static_cast<uint8_t>(NtpServerPreset::POOL);
   char ntpServerCustom[NTP_SERVER_HOST_CAPACITY] = {};
-  bool fastExtractionGuardEnabled = false;
+  bool fastExtractionGuardEnabled = true;
   float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
   uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
   bool autoToManualGuardEnabled = true;

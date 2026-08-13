@@ -522,7 +522,7 @@ inline void migrateRuntimeConfigV12ToV13(const RuntimeConfigV12 &legacy,
   runtime.ntpServerPreset = legacy.ntpServerPreset;
   memcpy(runtime.ntpServerCustom, legacy.ntpServerCustom,
          sizeof(runtime.ntpServerCustom));
-  runtime.fastExtractionGuardEnabled = true;
+  runtime.fastExtractionGuardEnabled = false;
   runtime.maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
   runtime.minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
 }

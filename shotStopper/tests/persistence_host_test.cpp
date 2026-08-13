@@ -104,6 +104,7 @@ void p02_newest_valid_slot_is_loaded() {
   CHECK(savePersistedSettings(settings));
   const uint32_t firstRevision = settings.storageRevision;
   settings.runtime.goalWeightG = 47;
+  settings.runtime.maxRecoveryWeightG = 55.0f;
   CHECK(savePersistedSettings(settings));
   CHECK(settings.storageRevision == firstRevision + 1);
 
@@ -119,6 +120,7 @@ void p03_corrupt_newest_slot_falls_back() {
   settings.runtime.goalWeightG = 40;
   CHECK(savePersistedSettings(settings));
   settings.runtime.goalWeightG = 48;
+  settings.runtime.maxRecoveryWeightG = 55.0f;
   CHECK(savePersistedSettings(settings));
   CHECK(persistence_host::corrupt(SETTINGS_NAMESPACE, SETTINGS_SLOT_B,
                                   offsetof(PersistedSettings, runtime)));
@@ -133,6 +135,7 @@ void p04_crc_and_semantic_validation_reject_corruption() {
   PersistedSettings settings;
   CHECK(initializeDefaultSettings(settings));
   settings.runtime.goalWeightG = 50;
+  settings.runtime.maxRecoveryWeightG = 58.0f;
   CHECK(!validPersistedSettings(settings));
   finalizePersistedSettings(settings);
   CHECK(validPersistedSettings(settings));
@@ -213,7 +216,7 @@ void p06_schema_twelve_migrates_to_thirteen() {
   CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
   CHECK(loaded.runtime.goalWeightG == 52);
   CHECK(std::fabs(loaded.runtime.weightOffsetG - 2.1f) < 0.001f);
-  CHECK(loaded.runtime.fastExtractionGuardEnabled);
+  CHECK(!loaded.runtime.fastExtractionGuardEnabled);
   CHECK(std::fabs(loaded.runtime.maxRecoveryWeightG -
                   DEFAULT_MAX_RECOVERY_WEIGHT_G) < 0.001f);
   CHECK(loaded.runtime.minBrewTimeMs == DEFAULT_MIN_BREW_TIME_MS);
@@ -232,6 +235,7 @@ void p08_factory_reset_rebuilds_defaults() {
   PersistedSettings settings;
   CHECK(initializeDefaultSettings(settings));
   settings.runtime.goalWeightG = 63;
+  settings.runtime.maxRecoveryWeightG = 70.0f;
   CHECK(savePersistedSettings(settings));
   CHECK(resetPersistedSettingsToFactory(settings));
   CHECK(settings.schemaVersion == CONFIG_SCHEMA_VERSION);
@@ -416,6 +420,7 @@ void p14_schema_fourteen_migrates_to_fifteen() {
   legacy.storageRevision = 7;
   legacy.runtime = current.runtime;
   legacy.runtime.goalWeightG = 44;
+  legacy.runtime.maxRecoveryWeightG = 52.0f;
   legacy.staConfigured = true;
   legacy.staOpen = false;
   strcpy(legacy.staSsid, "CafeLAN");
