@@ -190,8 +190,9 @@ name, default passwords, and step-by-step first connection.
   (`X-CSRF-Token` on mutating requests); repeated failed logins return
   `429 LOGIN_RATE_LIMITED`.
 - **Live shot panel:** current/goal weight, progress bar, elapsed time, first
-  drop, retare state, shot type, scale protocol, and **extraction guard**
-  state (off / on / extended).
+  drop, retare state, shot type, scale protocol, **extraction guard** state
+  (off / on / extended), and **A→M time guard** state (off / idle / armed /
+  `A→M · Ns` when enforced).
 - **REST API** (`/api/v1/…`):
   - Read: `GET /status`, `GET /log`, `GET /shots`
   - Auth: `POST /login`, `POST /logout`, `POST /heartbeat` (UI polls every
@@ -459,7 +460,8 @@ absolute deadline from cycle start.
 
 Deadline = cycle start + limit. Limit is computed once when an automatic brew
 is confirmed. Enforcement starts on the first scale-loss suspend after arming;
-the live panel shows `A→M · Ns` only while enforced.
+the live shot panel has a dedicated **A→M time guard** line (`Off` / `Idle` /
+`Armed` / `A→M · Ns` while enforced).
 
 ### Duration samples
 
@@ -474,7 +476,8 @@ independent of whether the guard is enabled or which limit mode is selected:
 
 ### Telemetry
 
-- Live panel: `A→M · Ns` when enforced (Fast extraction line otherwise)
+- Live panel **A→M time guard** line: `Off` / `Idle` / `Armed` / `A→M · Ns`
+  when enforced (separate from Fast extraction guard)
 - History: `stop_detail = auto_to_manual`, `cut_type = limit`;
   `actual_weight_source` may be `last_known` when logged without post-drip weight
 - CSV export includes `actual_weight_source`

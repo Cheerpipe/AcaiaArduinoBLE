@@ -143,11 +143,13 @@ if (!html.includes('id="autoToManualGuardEnabled"') ||
     !html.includes('id="autoToManualGuardManualLimitS"') ||
     !html.includes('id="autoToManualGuardTrendS"') ||
     !html.includes('id="resetGuardSamplesButton"') ||
+    !html.includes('id="shotAtmGuard"') ||
     !html.includes('A→M ·') ||
     !html.includes('actual_weight_source') ||
     !network.includes('autoToManualGuardEnabled') ||
     !network.includes('autoToManualGuardTrendMs') ||
     !network.includes('autoToManualGuardEnforced') ||
+    !network.includes('autoToManualGuardArmed') ||
     !network.includes('actualWeightSource') ||
     !network.includes('reset-guard-samples') ||
     !network.includes('AUTO_TO_MANUAL_GUARD')) {
