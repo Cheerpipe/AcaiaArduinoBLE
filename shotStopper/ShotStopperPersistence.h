@@ -1172,20 +1172,28 @@ inline void finalizePersistedSettings(PersistedSettings &settings) {
   settings.checksum = persistedSettingsChecksum(settings);
 }
 
+// Dual-slot / migrate / save scratch. Kept off the Arduino loopTask stack
+// (default 8 KB): sizeof(PersistedSettings) is 1216; nested load→save would
+// otherwise put 5× copies (~6 KB) on the stack and panic in NVS (LoadStoreError).
+inline PersistedSettings &persistedSettingsScratch(uint8_t index) {
+  static PersistedSettings slots[3] = {};
+  return slots[index % 3];
+}
+
 inline bool readSettingsSlot(Preferences &preferences, const char *key,
                              PersistedSettings &settings) {
   if (preferences.getBytesLength(key) != sizeof(PersistedSettings)) {
     return false;
   }
-  PersistedSettings candidate = {};
-  if (preferences.getBytes(key, &candidate, sizeof(candidate)) !=
-      sizeof(candidate)) {
+  // Read directly into the out-param to avoid borrowing scratch slots that
+  // load/save may already hold (candidate lives in scratch[2] during save).
+  if (preferences.getBytes(key, &settings, sizeof(settings)) !=
+      sizeof(settings)) {
     return false;
   }
-  if (!validPersistedSettings(candidate)) {
+  if (!validPersistedSettings(settings)) {
     return false;
   }
-  settings = candidate;
   return true;
 }
 
@@ -1569,48 +1577,48 @@ inline bool readV18SettingsSlot(Preferences &preferences, const char *key,
     return false;
   }
 
-  PersistedSettings migrated = {};
-  migrated.storageRevision = legacy.storageRevision;
-  migrateRuntimeConfigV18ToCurrent(legacy.runtime, migrated.runtime);
-  normalizeRuntimeBbwProtectionDefaults(migrated.runtime);
-  migrated.staConfigured = legacy.staConfigured;
-  migrated.staOpen = legacy.staOpen;
-  memcpy(migrated.staSsid, legacy.staSsid, sizeof(migrated.staSsid));
-  memcpy(migrated.staPassword, legacy.staPassword,
-         sizeof(migrated.staPassword));
-  migrated.staIpMode = legacy.staIpMode;
-  memcpy(migrated.staIp, legacy.staIp, sizeof(migrated.staIp));
-  memcpy(migrated.staNetmask, legacy.staNetmask, sizeof(migrated.staNetmask));
-  memcpy(migrated.staGateway, legacy.staGateway, sizeof(migrated.staGateway));
-  memcpy(migrated.staDns1, legacy.staDns1, sizeof(migrated.staDns1));
-  memcpy(migrated.staDns2, legacy.staDns2, sizeof(migrated.staDns2));
-  migrated.staConfigState = legacy.staConfigState;
-  migrated.lkgValid = legacy.lkgValid;
-  migrated.lkgOpen = legacy.lkgOpen;
-  memcpy(migrated.lkgSsid, legacy.lkgSsid, sizeof(migrated.lkgSsid));
-  memcpy(migrated.lkgPassword, legacy.lkgPassword,
-         sizeof(migrated.lkgPassword));
-  migrated.lkgIpMode = legacy.lkgIpMode;
-  memcpy(migrated.lkgIp, legacy.lkgIp, sizeof(migrated.lkgIp));
-  memcpy(migrated.lkgNetmask, legacy.lkgNetmask, sizeof(migrated.lkgNetmask));
-  memcpy(migrated.lkgGateway, legacy.lkgGateway, sizeof(migrated.lkgGateway));
-  memcpy(migrated.lkgDns1, legacy.lkgDns1, sizeof(migrated.lkgDns1));
-  memcpy(migrated.lkgDns2, legacy.lkgDns2, sizeof(migrated.lkgDns2));
-  memcpy(migrated.apPassword, legacy.apPassword,
-         sizeof(migrated.apPassword));
-  memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
-  memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
-  memcpy(migrated.preferredScaleMac, legacy.preferredScaleMac,
-         sizeof(migrated.preferredScaleMac));
-  if (validateRuntimeConfig(migrated.runtime) !=
+  // Write into the out-param (often static scratch) — avoid another
+  // PersistedSettings temporary on the Arduino loop stack during migrate.
+  settings = PersistedSettings{};
+  settings.storageRevision = legacy.storageRevision;
+  migrateRuntimeConfigV18ToCurrent(legacy.runtime, settings.runtime);
+  normalizeRuntimeBbwProtectionDefaults(settings.runtime);
+  settings.staConfigured = legacy.staConfigured;
+  settings.staOpen = legacy.staOpen;
+  memcpy(settings.staSsid, legacy.staSsid, sizeof(settings.staSsid));
+  memcpy(settings.staPassword, legacy.staPassword,
+         sizeof(settings.staPassword));
+  settings.staIpMode = legacy.staIpMode;
+  memcpy(settings.staIp, legacy.staIp, sizeof(settings.staIp));
+  memcpy(settings.staNetmask, legacy.staNetmask, sizeof(settings.staNetmask));
+  memcpy(settings.staGateway, legacy.staGateway, sizeof(settings.staGateway));
+  memcpy(settings.staDns1, legacy.staDns1, sizeof(settings.staDns1));
+  memcpy(settings.staDns2, legacy.staDns2, sizeof(settings.staDns2));
+  settings.staConfigState = legacy.staConfigState;
+  settings.lkgValid = legacy.lkgValid;
+  settings.lkgOpen = legacy.lkgOpen;
+  memcpy(settings.lkgSsid, legacy.lkgSsid, sizeof(settings.lkgSsid));
+  memcpy(settings.lkgPassword, legacy.lkgPassword,
+         sizeof(settings.lkgPassword));
+  settings.lkgIpMode = legacy.lkgIpMode;
+  memcpy(settings.lkgIp, legacy.lkgIp, sizeof(settings.lkgIp));
+  memcpy(settings.lkgNetmask, legacy.lkgNetmask, sizeof(settings.lkgNetmask));
+  memcpy(settings.lkgGateway, legacy.lkgGateway, sizeof(settings.lkgGateway));
+  memcpy(settings.lkgDns1, legacy.lkgDns1, sizeof(settings.lkgDns1));
+  memcpy(settings.lkgDns2, legacy.lkgDns2, sizeof(settings.lkgDns2));
+  memcpy(settings.apPassword, legacy.apPassword, sizeof(settings.apPassword));
+  memcpy(settings.authSalt, legacy.authSalt, sizeof(settings.authSalt));
+  memcpy(settings.authHash, legacy.authHash, sizeof(settings.authHash));
+  memcpy(settings.preferredScaleMac, legacy.preferredScaleMac,
+         sizeof(settings.preferredScaleMac));
+  if (validateRuntimeConfig(settings.runtime) !=
       ConfigValidationError::NONE) {
     return false;
   }
-  if (!validPersistedStaNetwork(migrated)) {
+  if (!validPersistedStaNetwork(settings)) {
     return false;
   }
-  finalizePersistedSettings(migrated);
-  settings = migrated;
+  finalizePersistedSettings(settings);
   return true;
 }
 
@@ -1641,48 +1649,46 @@ inline bool readV19SettingsSlot(Preferences &preferences, const char *key,
     return false;
   }
 
-  PersistedSettings migrated = {};
-  migrated.storageRevision = legacy.storageRevision;
-  migrateRuntimeConfigV19ToCurrent(legacy.runtime, migrated.runtime);
-  normalizeRuntimeBbwProtectionDefaults(migrated.runtime);
-  migrated.staConfigured = legacy.staConfigured;
-  migrated.staOpen = legacy.staOpen;
-  memcpy(migrated.staSsid, legacy.staSsid, sizeof(migrated.staSsid));
-  memcpy(migrated.staPassword, legacy.staPassword,
-         sizeof(migrated.staPassword));
-  migrated.staIpMode = legacy.staIpMode;
-  memcpy(migrated.staIp, legacy.staIp, sizeof(migrated.staIp));
-  memcpy(migrated.staNetmask, legacy.staNetmask, sizeof(migrated.staNetmask));
-  memcpy(migrated.staGateway, legacy.staGateway, sizeof(migrated.staGateway));
-  memcpy(migrated.staDns1, legacy.staDns1, sizeof(migrated.staDns1));
-  memcpy(migrated.staDns2, legacy.staDns2, sizeof(migrated.staDns2));
-  migrated.staConfigState = legacy.staConfigState;
-  migrated.lkgValid = legacy.lkgValid;
-  migrated.lkgOpen = legacy.lkgOpen;
-  memcpy(migrated.lkgSsid, legacy.lkgSsid, sizeof(migrated.lkgSsid));
-  memcpy(migrated.lkgPassword, legacy.lkgPassword,
-         sizeof(migrated.lkgPassword));
-  migrated.lkgIpMode = legacy.lkgIpMode;
-  memcpy(migrated.lkgIp, legacy.lkgIp, sizeof(migrated.lkgIp));
-  memcpy(migrated.lkgNetmask, legacy.lkgNetmask, sizeof(migrated.lkgNetmask));
-  memcpy(migrated.lkgGateway, legacy.lkgGateway, sizeof(migrated.lkgGateway));
-  memcpy(migrated.lkgDns1, legacy.lkgDns1, sizeof(migrated.lkgDns1));
-  memcpy(migrated.lkgDns2, legacy.lkgDns2, sizeof(migrated.lkgDns2));
-  memcpy(migrated.apPassword, legacy.apPassword,
-         sizeof(migrated.apPassword));
-  memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
-  memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
-  memcpy(migrated.preferredScaleMac, legacy.preferredScaleMac,
-         sizeof(migrated.preferredScaleMac));
-  if (validateRuntimeConfig(migrated.runtime) !=
+  settings = PersistedSettings{};
+  settings.storageRevision = legacy.storageRevision;
+  migrateRuntimeConfigV19ToCurrent(legacy.runtime, settings.runtime);
+  normalizeRuntimeBbwProtectionDefaults(settings.runtime);
+  settings.staConfigured = legacy.staConfigured;
+  settings.staOpen = legacy.staOpen;
+  memcpy(settings.staSsid, legacy.staSsid, sizeof(settings.staSsid));
+  memcpy(settings.staPassword, legacy.staPassword,
+         sizeof(settings.staPassword));
+  settings.staIpMode = legacy.staIpMode;
+  memcpy(settings.staIp, legacy.staIp, sizeof(settings.staIp));
+  memcpy(settings.staNetmask, legacy.staNetmask, sizeof(settings.staNetmask));
+  memcpy(settings.staGateway, legacy.staGateway, sizeof(settings.staGateway));
+  memcpy(settings.staDns1, legacy.staDns1, sizeof(settings.staDns1));
+  memcpy(settings.staDns2, legacy.staDns2, sizeof(settings.staDns2));
+  settings.staConfigState = legacy.staConfigState;
+  settings.lkgValid = legacy.lkgValid;
+  settings.lkgOpen = legacy.lkgOpen;
+  memcpy(settings.lkgSsid, legacy.lkgSsid, sizeof(settings.lkgSsid));
+  memcpy(settings.lkgPassword, legacy.lkgPassword,
+         sizeof(settings.lkgPassword));
+  settings.lkgIpMode = legacy.lkgIpMode;
+  memcpy(settings.lkgIp, legacy.lkgIp, sizeof(settings.lkgIp));
+  memcpy(settings.lkgNetmask, legacy.lkgNetmask, sizeof(settings.lkgNetmask));
+  memcpy(settings.lkgGateway, legacy.lkgGateway, sizeof(settings.lkgGateway));
+  memcpy(settings.lkgDns1, legacy.lkgDns1, sizeof(settings.lkgDns1));
+  memcpy(settings.lkgDns2, legacy.lkgDns2, sizeof(settings.lkgDns2));
+  memcpy(settings.apPassword, legacy.apPassword, sizeof(settings.apPassword));
+  memcpy(settings.authSalt, legacy.authSalt, sizeof(settings.authSalt));
+  memcpy(settings.authHash, legacy.authHash, sizeof(settings.authHash));
+  memcpy(settings.preferredScaleMac, legacy.preferredScaleMac,
+         sizeof(settings.preferredScaleMac));
+  if (validateRuntimeConfig(settings.runtime) !=
       ConfigValidationError::NONE) {
     return false;
   }
-  if (!validPersistedStaNetwork(migrated)) {
+  if (!validPersistedStaNetwork(settings)) {
     return false;
   }
-  finalizePersistedSettings(migrated);
-  settings = migrated;
+  finalizePersistedSettings(settings);
   return true;
 }
 
@@ -1733,8 +1739,10 @@ inline bool loadPersistedSettings(PersistedSettings &settings,
   if (!preferences.begin(SETTINGS_NAMESPACE, true)) {
     return false;
   }
-  PersistedSettings first = {};
-  PersistedSettings second = {};
+  PersistedSettings &first = persistedSettingsScratch(0);
+  PersistedSettings &second = persistedSettingsScratch(1);
+  first = PersistedSettings{};
+  second = PersistedSettings{};
   bool firstLegacy = false;
   bool secondLegacy = false;
   const bool firstValid = readAnySettingsSlot(
@@ -1776,8 +1784,10 @@ inline bool loadPersistedSettings(PersistedSettings &settings,
 }
 
 inline bool savePersistedSettings(PersistedSettings &settings) {
-  PersistedSettings candidate = settings;
-  PersistedSettings current = {};
+  PersistedSettings &candidate = persistedSettingsScratch(2);
+  PersistedSettings &current = persistedSettingsScratch(0);
+  candidate = settings;
+  current = PersistedSettings{};
   if (loadPersistedSettings(current)) {
     candidate.storageRevision = current.storageRevision;
   }
@@ -1796,7 +1806,8 @@ inline bool savePersistedSettings(PersistedSettings &settings) {
   const bool written =
       preferences.putBytes(target, &candidate, sizeof(candidate)) ==
       sizeof(candidate);
-  PersistedSettings verified = {};
+  PersistedSettings &verified = persistedSettingsScratch(0);
+  verified = PersistedSettings{};
   const bool saved = written &&
                      readSettingsSlot(preferences, target, verified) &&
                      verified.storageRevision == candidate.storageRevision &&
@@ -1818,13 +1829,15 @@ inline bool initializeDefaultSettings(PersistedSettings &settings) {
 }
 
 inline bool resetPersistedSettingsToFactory(PersistedSettings &settings) {
-  PersistedSettings first = {};
+  PersistedSettings &first = persistedSettingsScratch(0);
+  first = PersistedSettings{};
   if (!initializeDefaultSettings(first)) {
     return false;
   }
   first.storageRevision = 1;
   finalizePersistedSettings(first);
-  PersistedSettings second = first;
+  PersistedSettings &second = persistedSettingsScratch(1);
+  second = first;
   second.storageRevision = 2;
   finalizePersistedSettings(second);
 
@@ -1842,11 +1855,14 @@ inline bool resetPersistedSettingsToFactory(PersistedSettings &settings) {
   const bool secondSaved =
       preferences.putBytes(SETTINGS_SLOT_B, &second, sizeof(second)) ==
       sizeof(second);
-  PersistedSettings verifiedFirst = {};
-  PersistedSettings verifiedSecond = {};
+  PersistedSettings &verifiedFirst = persistedSettingsScratch(2);
+  verifiedFirst = PersistedSettings{};
   const bool firstVerified =
       firstSaved && readSettingsSlot(preferences, SETTINGS_SLOT_A,
                                      verifiedFirst);
+  // Reuse slot 0 for the second verification (slot contents no longer needed).
+  PersistedSettings &verifiedSecond = persistedSettingsScratch(0);
+  verifiedSecond = PersistedSettings{};
   const bool secondVerified =
       secondSaved && readSettingsSlot(preferences, SETTINGS_SLOT_B,
                                       verifiedSecond);
