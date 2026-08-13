@@ -11,8 +11,9 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 16;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 15;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 17;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 16;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V16 = 16;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V15 = 15;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V14 = 14;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V13 = 13;
@@ -118,6 +119,10 @@ constexpr float MAX_MAX_RECOVERY_WEIGHT_G = 200.0f;
 constexpr uint32_t DEFAULT_MIN_BREW_TIME_MS = 28000;
 constexpr uint32_t MIN_MIN_BREW_TIME_MS = 5000;
 constexpr uint32_t MAX_MIN_BREW_TIME_MS = 55000;
+// Delay FW shot-timer arm after paddle/CN9 so elapsed aligns with scale BLE start.
+constexpr uint32_t DEFAULT_SHOT_TIMER_START_DELAY_MS = 200;
+constexpr uint32_t MIN_SHOT_TIMER_START_DELAY_MS = 0;
+constexpr uint32_t MAX_SHOT_TIMER_START_DELAY_MS = 1000;
 constexpr float MAX_OFFSET_G = 5.0f;
 constexpr float DEFAULT_WEIGHT_OFFSET_G = 1.5f;
 constexpr size_t AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT = 5;
@@ -340,6 +345,8 @@ struct RuntimeConfig {
   // Internal polarity: true disables weight stop. UI/API brewByWeight is the inverse.
   bool timerOnly = false;
   bool canTareStartTimer = true;
+  // Delay before the firmware shot timer starts (CN9 + scale start stay immediate).
+  uint32_t shotTimerStartDelayMs = DEFAULT_SHOT_TIMER_START_DELAY_MS;
   // Optional beep when the first coffee drop is detected.
   bool firstDropBeep = true;
   // Remind the user to release the physical paddle after CN9 has opened.
@@ -387,6 +394,7 @@ struct CycleConfigSnapshot {
   bool autoTare = true;
   bool timerOnly = false;
   bool canTareStartTimer = true;
+  uint32_t shotTimerStartDelayMs = DEFAULT_SHOT_TIMER_START_DELAY_MS;
   bool firstDropBeep = true;
   bool paddleReturnReminderBeep = true;
   uint32_t paddleReturnReminderIntervalMs =
@@ -422,6 +430,7 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.autoTare = config.autoTare;
   snapshot.timerOnly = config.timerOnly;
   snapshot.canTareStartTimer = config.canTareStartTimer;
+  snapshot.shotTimerStartDelayMs = config.shotTimerStartDelayMs;
   snapshot.firstDropBeep = config.firstDropBeep;
   snapshot.paddleReturnReminderBeep = config.paddleReturnReminderBeep;
   snapshot.paddleReturnReminderIntervalMs =
@@ -469,6 +478,7 @@ enum class ConfigValidationError : uint8_t {
   PADDLE_REMINDER_MAX_DURATION,
   TIMING_RELATION,
   COMBINED_TARE_REQUIRES_AUTOTARE,
+  SHOT_TIMER_START_DELAY,
   TIMEZONE_OFFSET,
   NTP_SERVER_PRESET,
   NTP_SERVER_CUSTOM,
@@ -587,6 +597,10 @@ inline ConfigValidationError validateRuntimeConfig(
   if (config.canTareStartTimer && !config.autoTare) {
     return ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE;
   }
+  if (config.shotTimerStartDelayMs < MIN_SHOT_TIMER_START_DELAY_MS ||
+      config.shotTimerStartDelayMs > MAX_SHOT_TIMER_START_DELAY_MS) {
+    return ConfigValidationError::SHOT_TIMER_START_DELAY;
+  }
   if (config.timezoneOffsetMinutes < MIN_TIMEZONE_OFFSET_MINUTES ||
       config.timezoneOffsetMinutes > MAX_TIMEZONE_OFFSET_MINUTES) {
     return ConfigValidationError::TIMEZONE_OFFSET;
@@ -664,6 +678,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
     case ConfigValidationError::TIMING_RELATION: return "timingRelation";
     case ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE:
       return "canTareStartTimer";
+    case ConfigValidationError::SHOT_TIMER_START_DELAY:
+      return "shotTimerStartDelayMs";
     case ConfigValidationError::TIMEZONE_OFFSET:
       return "timezoneOffsetMinutes";
     case ConfigValidationError::NTP_SERVER_PRESET:

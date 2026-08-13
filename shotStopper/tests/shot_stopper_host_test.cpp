@@ -90,6 +90,8 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   runtimeConfig.autoRetare = false;
   runtimeConfig.bbwProtectionMs = 3000;
   runtimeConfig.fastExtractionGuardEnabled = false;
+  // Host scenarios assert immediate FW elapsed; delay is covered by dedicated tests.
+  runtimeConfig.shotTimerStartDelayMs = 0;
   lastCycle = LastCycleSummary{};
   debugLog.clear();
   lastReportedLogOverwritten = 0;
@@ -1389,6 +1391,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.operationalWallMs == HARD_MAX_CN9_CLOSED_MS);
   CHECK(config.rinseGestureMs == 1500);
   CHECK(config.canTareStartTimer);
+  CHECK(config.shotTimerStartDelayMs == DEFAULT_SHOT_TIMER_START_DELAY_MS);
   CHECK(config.firstDropBeep);
   CHECK(config.paddleReturnReminderBeep);
   CHECK(config.fastExtractionGuardEnabled);
@@ -1439,6 +1442,10 @@ void w03_runtime_timing_relations_are_transactional() {
   config.autoTare = false;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE);
+  config = RuntimeConfig{};
+  config.shotTimerStartDelayMs = MAX_SHOT_TIMER_START_DELAY_MS + 1;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::SHOT_TIMER_START_DELAY);
 }
 
 void w04_wifi_credentials_have_strict_bounds() {
@@ -2460,6 +2467,28 @@ void r44_first_shot_after_reconnect_enters_brew() {
   advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.receivedFreshWeightInCycle);
+}
+
+void st01_shot_timer_start_delay_defers_fw_elapsed() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.shotTimerStartDelayMs = 200;
+  startCycle();
+  CHECK(session.active);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(session.timerStartCommandQueued);
+  CHECK(!session.shotTimerArmed);
+  CHECK(cycleShotElapsedMs() == 0U);
+  const uint32_t armedAt = session.startedAtMs;
+  runLoopAfter(199);
+  CHECK(!session.shotTimerArmed);
+  CHECK(cycleShotElapsedMs() == 0U);
+  runLoopAfter(1);
+  CHECK(session.shotTimerArmed);
+  CHECK(session.shotTimerStartedAtMs == armedAt + 200U);
+  CHECK(cycleShotElapsedMs() == 0U);
+  runLoopAfter(50);
+  CHECK(cycleShotElapsedMs() == 50U);
 }
 
 void rt01_late_cup_triggers_single_retare() {
@@ -3570,6 +3599,7 @@ const TestCase testCases[] = {
     {"R54", r54_post_tare_baseline_keeps_weight_control},
     {"R44", r44_first_shot_after_reconnect_enters_brew},
     {"R45", r45_slew_rejection_emits_specific_debug_code},
+    {"ST01", st01_shot_timer_start_delay_defers_fw_elapsed},
     {"RT01", rt01_late_cup_triggers_single_retare},
     {"RT02", rt02_sub_minimum_stable_cup_is_ignored},
     {"RT03", rt03_spike_without_stable_cup_does_not_retare},

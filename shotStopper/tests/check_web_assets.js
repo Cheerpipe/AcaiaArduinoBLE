@@ -148,6 +148,7 @@ if (!html.includes('id="shotPanel"') ||
 if (!html.includes('id="autoToManualGuardEnabled"') ||
     !html.includes('id="autoToManualGuardLimitMode"') ||
     !html.includes('id="autoToManualGuardBaselineS"') ||
+    !html.includes('id="shotTimerStartDelayMs"') ||
     !html.includes('id="autoToManualGuardManualLimitS"') ||
     !html.includes('id="autoToManualGuardTrendS"') ||
     !html.includes('id="resetGuardSamplesButton"') ||
@@ -157,6 +158,7 @@ if (!html.includes('id="autoToManualGuardEnabled"') ||
     !html.includes('actual_weight_source') ||
     !network.includes('autoToManualGuardEnabled') ||
     !network.includes('autoToManualGuardBaselineMs') ||
+    !network.includes('shotTimerStartDelayMs') ||
     !network.includes('autoToManualGuardTrendMs') ||
     !network.includes('autoToManualGuardEnforced') ||
     !network.includes('autoToManualGuardArmed') ||

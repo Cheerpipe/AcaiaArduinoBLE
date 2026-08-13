@@ -192,6 +192,8 @@ const char *configValidationMessage(ConfigValidationError error) {
              "window, and BBW protection each ≤ CN9.";
     case ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE:
       return "The Bookoo combined command requires automatic tare.";
+    case ConfigValidationError::SHOT_TIMER_START_DELAY:
+      return "Shot timer start delay must be from 0 to 1000 ms.";
     case ConfigValidationError::TIMEZONE_OFFSET:
       return "Timezone offset must be from -720 to +840 minutes.";
     case ConfigValidationError::NTP_SERVER_PRESET:
@@ -2233,7 +2235,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"startedAtMs\":%lu},"
       "\"configMutable\":%s,\"config\":{\"revision\":%lu,"
       "\"goalWeightG\":%u,\"weightOffsetG\":%.2f,\"autoTare\":%s,\"brewByWeight\":%s,"
-      "\"canTareStartTimer\":%s,\"firstDropBeep\":%s,"
+      "\"canTareStartTimer\":%s,\"shotTimerStartDelayMs\":%lu,\"firstDropBeep\":%s,"
       "\"paddleReturnReminderBeep\":%s,"
       "\"paddleReturnReminderIntervalMs\":%lu,"
       "\"paddleReturnReminderMaxDurationMs\":%lu,\"rinseGestureMs\":%lu,"
@@ -2331,6 +2333,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.config.autoTare ? "true" : "false",
       control.config.timerOnly ? "false" : "true",
       control.config.canTareStartTimer ? "true" : "false",
+      static_cast<unsigned long>(control.config.shotTimerStartDelayMs),
       control.config.firstDropBeep ? "true" : "false",
       control.config.paddleReturnReminderBeep ? "true" : "false",
       static_cast<unsigned long>(
@@ -2801,7 +2804,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   static const char *const fields[] = {
       "goalWeightG", "rinseGestureMs", "rinseDurationMs", "operationalWallMs",
       "autoTare", "brewByWeight",
-      "canTareStartTimer", "firstDropBeep", "paddleReturnReminderBeep",
+      "canTareStartTimer", "shotTimerStartDelayMs", "firstDropBeep",
+      "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
       "autoRetare", "retareWindowMs", "minimumCupWeightG",
       "retareStabilitySamples", "retareStabilityToleranceG",
@@ -2812,7 +2816,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "autoToManualGuardManualLimitMs", "autoToManualGuardBaselineMs",
       "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 29)) {
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 30)) {
     parseError =
         "Config must include exactly the expected fields with correct types.";
   } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
@@ -2831,6 +2835,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (!jsonBoolean(root, "canTareStartTimer",
                           candidate.canTareStartTimer)) {
     parseError = "canTareStartTimer must be a boolean.";
+  } else if (!jsonUint32(root, "shotTimerStartDelayMs",
+                         candidate.shotTimerStartDelayMs)) {
+    parseError = "shotTimerStartDelayMs must be an integer (milliseconds).";
   } else if (!jsonBoolean(root, "firstDropBeep",
                           candidate.firstDropBeep)) {
     parseError = "firstDropBeep must be a boolean.";

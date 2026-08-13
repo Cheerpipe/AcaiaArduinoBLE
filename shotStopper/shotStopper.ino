@@ -273,6 +273,9 @@ struct CycleSession {
   uint32_t connectionGenerationAtStart = 0;
   uint32_t ownedConnectionGeneration = 0;
   uint32_t startedAtMs = 0;
+  bool shotTimerArmed = false;
+  uint32_t shotTimerDueAtMs = 0;
+  uint32_t shotTimerStartedAtMs = 0;
   uint32_t rinseStartedAtMs = 0;
   uint32_t postTareBaselineDeadlineMs = 0;
   uint32_t stopTimerRetryDeadlineMs = 0;
@@ -869,7 +872,43 @@ bool enqueueScaleCommand(const ScaleCommand &command) {
 }
 
 float cycleElapsedSeconds() {
-  return session.active ? elapsedMs(session.startedAtMs) / 1000.0f : 0.0f;
+  if (!session.active || !session.shotTimerArmed) {
+    return 0.0f;
+  }
+  return elapsedMs(session.shotTimerStartedAtMs) / 1000.0f;
+}
+
+uint32_t cycleShotElapsedMs() {
+  if (!session.active || !session.shotTimerArmed) {
+    return 0U;
+  }
+  return elapsedMs(session.shotTimerStartedAtMs);
+}
+
+void armShotTimerNow(uint32_t atMs) {
+  session.shotTimerArmed = true;
+  session.shotTimerDueAtMs = 0;
+  session.shotTimerStartedAtMs = atMs;
+}
+
+void scheduleShotTimerArm(uint32_t armedAtMs, uint32_t delayMs) {
+  if (delayMs == 0U) {
+    armShotTimerNow(armedAtMs);
+    return;
+  }
+  session.shotTimerArmed = false;
+  session.shotTimerStartedAtMs = 0;
+  session.shotTimerDueAtMs = armedAtMs + delayMs;
+}
+
+void serviceShotTimerStart() {
+  if (!session.active || session.shotTimerArmed) {
+    return;
+  }
+  if (static_cast<int32_t>(millis() - session.shotTimerDueAtMs) < 0) {
+    return;
+  }
+  armShotTimerNow(session.shotTimerDueAtMs);
 }
 
 const char *stateName(StopperState state) {
@@ -1629,7 +1668,9 @@ bool fastExtractionGuardSession() {
 }
 
 bool minBrewTimeReached() {
-  return elapsedMs(session.startedAtMs) >= session.config.minBrewTimeMs;
+  return session.shotTimerArmed &&
+         elapsedMs(session.shotTimerStartedAtMs) >=
+             session.config.minBrewTimeMs;
 }
 
 bool targetWeightReached(float weight) {
@@ -2269,14 +2310,17 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   pendingFinalize.logEligible = logEligible;
   pendingFinalize.endedAtMs = millis();
   pendingFinalize.endedWeightSequence = currentWeightSequence;
-  pendingFinalize.cycleStartedAtMs = session.startedAtMs;
+  pendingFinalize.cycleStartedAtMs =
+      session.shotTimerArmed ? session.shotTimerStartedAtMs
+                             : session.startedAtMs;
   pendingFinalize.bootId = shotLog.bootId();
   pendingFinalize.durationDs =
       static_cast<uint16_t>(durationMs / 100U);
+  const uint32_t shotAnchorMs = pendingFinalize.cycleStartedAtMs;
   if (session.firstDropMs != 0 &&
-      static_cast<int32_t>(session.firstDropMs - session.startedAtMs) >= 0) {
+      static_cast<int32_t>(session.firstDropMs - shotAnchorMs) >= 0) {
     pendingFinalize.firstDropDs = static_cast<uint16_t>(
-        (session.firstDropMs - session.startedAtMs) / 100U);
+        (session.firstDropMs - shotAnchorMs) / 100U);
   }
   pendingFinalize.goalWeightG = session.config.goalWeightG;
   pendingFinalize.weightOffsetG = session.config.weightOffsetG;
@@ -2294,10 +2338,9 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   pendingFinalize.maxRecoveryWeightG = session.config.maxRecoveryWeightG;
   pendingFinalize.minBrewTimeMs = session.config.minBrewTimeMs;
   if (session.targetReachedAtMs != 0 &&
-      static_cast<int32_t>(session.targetReachedAtMs - session.startedAtMs) >=
-          0) {
+      static_cast<int32_t>(session.targetReachedAtMs - shotAnchorMs) >= 0) {
     pendingFinalize.targetReachedEarlyDs = static_cast<uint16_t>(
-        (session.targetReachedAtMs - session.startedAtMs) / 100U);
+        (session.targetReachedAtMs - shotAnchorMs) / 100U);
   }
   pendingFinalize.lastKnownWeightValid =
       session.hasWeightAnchor && isfinite(session.lastAcceptedWeightG);
@@ -3201,6 +3244,8 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
 
   resetSessionForNewCycle(source, webSessionId, controlLeaseId);
   session.startedAtMs = millis();
+  scheduleShotTimerArm(session.startedAtMs,
+                       session.config.shotTimerStartDelayMs);
   session.firstDropMs = 0;
   session.retareFlowFirstDetectedAtMs = 0;
   session.scaleBaselineReady = false;
@@ -3594,6 +3639,7 @@ void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
   }
   resetSessionForNewCycle(ControlSource::WEB, webSessionId, controlLeaseId);
   session.startedAtMs = millis();
+  armShotTimerNow(session.startedAtMs);
   session.firstDropMs = 0;
   session.retareFlowFirstDetectedAtMs = 0;
   session.scaleBaselineReady = false;
@@ -4068,8 +4114,9 @@ void publishControlStatus() {
     next.cycleFirstDropMs = session.firstDropMs;
     next.cycleRetareFlowFirstDetectedAtMs =
         session.retareFlowFirstDetectedAtMs;
-    next.cycleStartedAtMs = session.startedAtMs;
-    next.cycleElapsedMs = elapsedMs(session.startedAtMs);
+    next.cycleStartedAtMs =
+        session.shotTimerArmed ? session.shotTimerStartedAtMs : 0U;
+    next.cycleElapsedMs = cycleShotElapsedMs();
     next.cycleExtractionExtended =
         session.extractionExtended && fastExtractionGuardSession();
     next.cycleTargetReachedEarly = session.targetReachedEarly;
@@ -4545,6 +4592,7 @@ void loop() {
   stateMachineTask();
   servicePaddleReturnReminder();
   serviceScaleCompletionBeep();
+  serviceShotTimerStart();
   serviceRemoteTimerStopRetry();
   pendingShotFinalizeTask();
   serviceSerialCli();
