@@ -2225,7 +2225,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"maintenance\":{\"active\":%s,\"leaseId\":%lu,"
       "\"startedAtMs\":%lu},"
       "\"configMutable\":%s,\"config\":{\"revision\":%lu,"
-      "\"goalWeightG\":%u,\"weightOffsetG\":%.2f,\"autoTare\":%s,\"timerOnly\":%s,"
+      "\"goalWeightG\":%u,\"weightOffsetG\":%.2f,\"autoTare\":%s,\"brewByWeight\":%s,"
       "\"canTareStartTimer\":%s,\"firstDropBeep\":%s,"
       "\"paddleReturnReminderBeep\":%s,"
       "\"paddleReturnReminderIntervalMs\":%lu,"
@@ -2320,7 +2320,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned>(control.config.goalWeightG),
       static_cast<double>(control.config.weightOffsetG),
       control.config.autoTare ? "true" : "false",
-      control.config.timerOnly ? "true" : "false",
+      control.config.timerOnly ? "false" : "true",
       control.config.canTareStartTimer ? "true" : "false",
       control.config.firstDropBeep ? "true" : "false",
       control.config.paddleReturnReminderBeep ? "true" : "false",
@@ -2783,11 +2783,12 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   }
   cJSON *root = cJSON_Parse(body);
   RuntimeConfig candidate = status.config;
+  bool brewByWeight = true;
   char customNtp[NTP_SERVER_HOST_CAPACITY] = {};
   memcpy(customNtp, candidate.ntpServerCustom, sizeof(customNtp));
   static const char *const fields[] = {
       "goalWeightG", "rinseGestureMs", "rinseDurationMs", "operationalWallMs",
-      "autoTare", "timerOnly",
+      "autoTare", "brewByWeight",
       "canTareStartTimer", "firstDropBeep", "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
       "autoRetare", "retareWindowMs", "minimumCupWeightG",
@@ -2813,8 +2814,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
     parseError = "operationalWallMs must be an integer (milliseconds).";
   } else if (!jsonBoolean(root, "autoTare", candidate.autoTare)) {
     parseError = "autoTare must be a boolean.";
-  } else if (!jsonBoolean(root, "timerOnly", candidate.timerOnly)) {
-    parseError = "timerOnly must be a boolean.";
+  } else if (!jsonBoolean(root, "brewByWeight", brewByWeight)) {
+    parseError = "brewByWeight must be a boolean.";
   } else if (!jsonBoolean(root, "canTareStartTimer",
                           candidate.canTareStartTimer)) {
     parseError = "canTareStartTimer must be a boolean.";
@@ -2892,6 +2893,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
                      parseError);
   }
+  candidate.timerOnly = !brewByWeight;
   memcpy(candidate.ntpServerCustom, customNtp, sizeof(candidate.ntpServerCustom));
   memset(customNtp, 0, sizeof(customNtp));
   const ConfigValidationError error = validateRuntimeConfig(candidate);

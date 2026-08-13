@@ -327,6 +327,7 @@ struct RuntimeConfig {
   uint8_t goalWeightG = DEFAULT_GOAL_WEIGHT_G;
   float weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
   bool autoTare = true;
+  // Internal polarity: true disables weight stop. UI/API brewByWeight is the inverse.
   bool timerOnly = false;
   bool canTareStartTimer = true;
   // Optional beep when the first coffee drop is detected.

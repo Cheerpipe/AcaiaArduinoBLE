@@ -16,7 +16,7 @@ Para detalle técnico completo, consulta el [README principal](../README.md).
 | **¿Puedo poner el vaso después de iniciar el shot?** | **Sí**, si **Automatic retare** está activado (por defecto **Sí**). Durante la **ventana de retarificación** (por defecto **4 s** tras el inicio) el firmware detecta una carga estable (vaso ≥ peso mínimo de vaso, p. ej. 10 g) y envía una segunda tara **sin reiniciar** el cronómetro del shot. |
 | **¿Por qué el shot no para exactamente en el peso objetivo?** | El firmware usa un **offset de parada aprendido** (por defecto 1,5 g, máx. 5 g) para compensar el goteo post-corte. Además puede parar **por predicción** (regresión sobre muestras recientes) ligeramente antes del umbral directo. En el historial verás `cut_type` y `stop_detail`. |
 | **La balanza se desconectó a mitad del shot. ¿Qué pasa?** | En shots automáticos el control por peso se **suspende** y el firmware **sigue intentando reconectar** durante todo el ciclo (no hay lockout permanente a manual tras N segundos). Si recupera tres muestras coherentes, vuelve el stop por peso (incluido Fast extraction guard si aplica) y el **A→M time guard** deja de enforcearse. Mientras la balanza esté caída y el A→M guard esté **ON**, corre un **deadline absoluto desde el inicio del ciclo** (tendencia Auto o límite Manual) y puede **cerrar CN9** antes del límite CN9 — incluso mientras BLE sigue reintentando. En el panel verás la línea **A→M time guard** con `A→M · …s`. Si el guard está **OFF** y la balanza no vuelve, el shot sigue hasta paddle OFF o el wall CN9 / hard 60 s. |
-| **Activé “Timer only”. ¿Por qué no para por peso?** | En **modo solo temporizador** se mantiene tara/cronómetro pero se **desactivan** el stop por peso, la retarificación automática, la protección BBW / first-drop arming y el aprendizaje de offset. El corte depende del paddle, del límite CN9 o de **Stop** remoto. |
+| **Apagué “Brew by weight”. ¿Por qué no para por peso?** | Con **Brew by weight** en OFF se mantiene tara/cronómetro pero se **desactivan** el stop por peso, la retarificación automática, la protección BBW / first-drop arming y el aprendizaje de offset. El corte depende del paddle, del límite CN9 o de **Stop** remoto. |
 
 ## Configuración, red y acceso
 
@@ -58,4 +58,4 @@ Para detalle técnico completo, consulta el [README principal](../README.md).
 | Shot que pasa del objetivo unos gramos | **Fast extraction guard** (Enable, Min brew time, Max recovery) |
 | No para al llegar al peso al inicio | **BBW protection (s)** |
 | Vaso tardío | **Automatic retare**, **Retare window (s)**, **Minimum cup weight (g)** |
-| Sin stop por peso | **Timer only** |
+| Sin stop por peso | **Brew by weight** (OFF) |

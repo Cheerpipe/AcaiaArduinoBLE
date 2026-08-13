@@ -115,13 +115,13 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | **Fast extraction guard** | **On by default**. See [Fast extraction guard](#fast-extraction-guard). |
 | **Auto-to-manual time guard** | **On by default**. See [Auto-to-manual time guard](#auto-to-manual-time-guard). |
 | **Automatic tare** | Send an initial tare when an automatic shot starts (default ON). |
-| **Timer only** | Keep tare/timer but disable weight stop and offset learning. |
+| **Brew by weight** | **On by default**. Stop the shot by scale weight. Off keeps tare/timer but disables weight stop, BBW protection, automatic retare, and offset learning (same as the former Timer only setting). |
 | **Bookoo combined command** | Use the scale’s combined tare + start-timer command (requires auto tare; default ON). |
 | **Automatic retare** | Allow one late-cup retare during the retare window (default ON). |
 | **Retare window (s)** | Time after shot start to detect and retare a late-placed cup (default 4 s). |
 | **Minimum cup weight (g)** | Stable load threshold that qualifies as a cup for retare (default 10 g). |
 | **Retare stability** | Samples (default 3), tolerance (default 2.0 g), max sample gap (default 0.5 s), and min stable time (default 0.3 s) required before retare fires. |
-| **BBW protection (s)** | **Pre-arm / accidental-weight protection window** at shot start for automatic BBW: inhibits automatic weight stop until first drops are detected or the timeout expires (default 12 s; minimum retare window + 3 s). Runs in parallel with retare. Skipped in timer-only mode. |
+| **BBW protection (s)** | **Pre-arm / accidental-weight protection window** at shot start for automatic BBW: inhibits automatic weight stop until first drops are detected or the timeout expires (default 12 s; minimum retare window + 3 s). Runs in parallel with retare. Skipped when Brew by weight is off. |
 | **Quick rinse gesture (s)** | Maximum paddle ON time that still counts as a quick rinse when released (default 1.5 s). |
 | **Quick rinse duration (s)** | How long CN9 stays closed after a quick rinse starts (default 3 s). |
 | **Timezone offset (min)** | Wall-clock offset for shot history labels (default UTC+0). |
@@ -143,7 +143,7 @@ Additional fixed protections (not separately configurable):
 
 | Setting | What it does |
 | --- | --- |
-| **Beep when coffee starts** | One scale beep on first coffee drops during an automatic shot (default ON; ignored in timer-only mode). |
+| **Beep when coffee starts** | One scale beep on first coffee drops during an automatic shot (default ON; ignored when Brew by weight is off). |
 | **Scale reminder beep until paddle OFF** | Repeat scale beeps while the **physical paddle stays ON**, **CN9 is open**, and the scale is connected — i.e. after the brew circuit opened but the paddle was left ON (default ON). |
 | **Paddle reminder interval (s)** | Time between reminder beeps (5–60 s; default 10 s). |
 | **Paddle reminder limit (min)** | Stop beeping after this duration even if the paddle remains ON (1–60 min; default 15 min). |
