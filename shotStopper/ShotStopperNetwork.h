@@ -50,6 +50,7 @@ struct NetworkStatusSnapshot {
   bool apActive = false;
   bool uiAuthenticated = false;
   bool wifiConfigured = false;
+  bool staOpen = false;
   uint8_t apClients = 0;
   StaState staState = StaState::NOT_CONFIGURED;
   uint8_t staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
@@ -63,6 +64,7 @@ struct NetworkStatusSnapshot {
   CommandResultState lastCommandState = CommandResultState::NONE;
   char apIp[16] = "192.168.4.1";
   char staIp[16] = {};
+  char staSsid[WIFI_SSID_CAPACITY] = {};
   char configuredIp[16] = {};
   char configuredNetmask[16] = {};
   char configuredGateway[16] = {};

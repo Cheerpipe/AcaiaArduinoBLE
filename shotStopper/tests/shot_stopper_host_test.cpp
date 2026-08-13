@@ -1441,6 +1441,19 @@ void w04_wifi_credentials_have_strict_bounds() {
   CHECK(!validWifiPassword("1234", false));
   CHECK(validWifiPassword("", true));
   CHECK(validAccessPointPassword("Micra1234"));
+  CHECK(shouldReuseSavedWifiCredentials("CafeLAN", "", false, true, "CafeLAN",
+                                        false));
+  CHECK(shouldReuseSavedWifiCredentials("CafeLAN", "", true, true, "CafeLAN",
+                                        true));
+  CHECK(!shouldReuseSavedWifiCredentials("CafeLAN", "CafePass1", false, true,
+                                         "CafeLAN", false));
+  CHECK(!shouldReuseSavedWifiCredentials("OtherNet", "", false, true, "CafeLAN",
+                                         false));
+  CHECK(!shouldReuseSavedWifiCredentials("CafeLAN", "", false, false, "CafeLAN",
+                                         false));
+  CHECK(!shouldReuseSavedWifiCredentials("CafeLAN", "", true, true, "CafeLAN",
+                                         false));
+  CHECK(!shouldReuseSavedWifiCredentials("", "", false, true, "CafeLAN", false));
 }
 
 void attemptActiveConfigUpdate() {

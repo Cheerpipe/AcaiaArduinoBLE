@@ -698,6 +698,17 @@ inline bool validWifiPassword(const char *password, bool openNetwork) {
   return openNetwork ? length == 0 : length >= 8 && length <= 63;
 }
 
+inline bool shouldReuseSavedWifiCredentials(const char *ssid,
+                                            const char *password,
+                                            bool openNetwork,
+                                            bool staConfigured,
+                                            const char *savedSsid,
+                                            bool savedOpen) {
+  return password != nullptr && password[0] == '\0' && staConfigured &&
+         validWifiSsid(ssid) && validWifiSsid(savedSsid) &&
+         strcmp(ssid, savedSsid) == 0 && openNetwork == savedOpen;
+}
+
 inline bool validAccessPointPassword(const char *password) {
   return validWifiPassword(password, false);
 }

@@ -675,11 +675,15 @@ bool ShotStopperNetwork::startNetwork() {
 
 void ShotStopperNetwork::publishConfiguredAddressStatus() {
   const PersistedSettings settings = settingsCopy();
+  char staSsid[WIFI_SSID_CAPACITY] = {};
   char configuredIp[16] = {};
   char configuredNetmask[16] = {};
   char configuredGateway[16] = {};
   char configuredDns1[16] = {};
   char configuredDns2[16] = {};
+  if (settings.staConfigured) {
+    strncpy(staSsid, settings.staSsid, sizeof(staSsid) - 1);
+  }
   if (settings.staIpMode == static_cast<uint8_t>(StaIpMode::STATIC)) {
     formatIpv4(settings.staIp, configuredIp);
     formatIpv4(settings.staNetmask, configuredNetmask);
@@ -690,8 +694,11 @@ void ShotStopperNetwork::publishConfiguredAddressStatus() {
     }
   }
   portENTER_CRITICAL(&dataMux_);
+  status_.staOpen = settings.staConfigured && settings.staOpen;
   status_.staIpMode = settings.staIpMode;
   status_.staConfigState = settings.staConfigState;
+  memset(status_.staSsid, 0, sizeof(status_.staSsid));
+  strncpy(status_.staSsid, staSsid, sizeof(status_.staSsid) - 1);
   strncpy(status_.configuredIp, configuredIp, sizeof(status_.configuredIp) - 1);
   strncpy(status_.configuredNetmask, configuredNetmask,
           sizeof(status_.configuredNetmask) - 1);
@@ -1427,12 +1434,19 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
       persist = true;
       break;
 
-    case WebCommandType::SAVE_NETWORK:
+    case WebCommandType::SAVE_NETWORK: {
+      char password[WIFI_PASSWORD_CAPACITY] = {};
+      const bool reusePassword = shouldReuseSavedWifiCredentials(
+          command.ssid, command.password, command.openNetwork,
+          next.staConfigured, next.staSsid, next.staOpen);
+      strncpy(password, reusePassword ? next.staPassword : command.password,
+              sizeof(password) - 1);
       if (!validWifiSsid(command.ssid) ||
-          !validWifiPassword(command.password, command.openNetwork) ||
+          !validWifiPassword(password, command.openNetwork) ||
           !validStaAddressConfig(command.staIpMode, command.staIp,
                                  command.staNetmask, command.staGateway,
                                  command.staDns1, command.staDns2)) {
+        memset(password, 0, sizeof(password));
         log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
         return false;
       }
@@ -1446,8 +1460,8 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
       memset(next.staSsid, 0, sizeof(next.staSsid));
       memset(next.staPassword, 0, sizeof(next.staPassword));
       strncpy(next.staSsid, command.ssid, sizeof(next.staSsid) - 1);
-      strncpy(next.staPassword, command.password,
-              sizeof(next.staPassword) - 1);
+      strncpy(next.staPassword, password, sizeof(next.staPassword) - 1);
+      memset(password, 0, sizeof(password));
       next.staIpMode = command.staIpMode;
       memcpy(next.staIp, command.staIp, sizeof(next.staIp));
       memcpy(next.staNetmask, command.staNetmask, sizeof(next.staNetmask));
@@ -1458,6 +1472,7 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
       persist = true;
       restartPending_ = true;
       break;
+    }
 
     case WebCommandType::FORGET_NETWORK:
       clearStaNetwork(next);
@@ -2181,6 +2196,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   char safeFirmwareVersion[32] = {};
   sanitizeJsonEmbed(FW_VERSION, safeFirmwareVersion,
                     sizeof(safeFirmwareVersion));
+  char safeStaSsid[WIFI_SSID_CAPACITY] = {};
+  sanitizeJsonEmbed(network.staSsid, safeStaSsid, sizeof(safeStaSsid));
   const int written = snprintf(
       g_statusResponseBuffer, sizeof(g_statusResponseBuffer),
       "{\"firmwareVersion\":\"%s\",\"state\":\"%s\",\"stateLabel\":\"%s\","
@@ -2237,7 +2254,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"lastWeightG\":%s,\"weightAgeMs\":%lu},"
       "\"network\":{\"networkActive\":%s,\"uiActive\":%s,"
       "\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
-      "\"wifiConfigured\":%s,\"staState\":\"%s\","
+      "\"wifiConfigured\":%s,\"ssid\":\"%s\",\"open\":%s,\"staState\":\"%s\","
       "\"staIp\":\"%s\",\"ipMode\":\"%s\",\"configState\":\"%s\","
       "\"confirmRemainingMs\":%lu,"
       "\"configuredIp\":\"%s\",\"configuredNetmask\":\"%s\","
@@ -2351,6 +2368,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       network.apActive ? "true" : "false", network.apIp,
       static_cast<unsigned>(network.apClients),
       network.wifiConfigured ? "true" : "false",
+      safeStaSsid, network.staOpen ? "true" : "false",
       staStateName(network.staState), network.staIp,
       staIpModeName(network.staIpMode),
       staConfigStateName(network.staConfigState),
@@ -3312,21 +3330,29 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
     if (parsed && !validWifiSsid(command.ssid)) {
       parsed = false;
       networkError = "SSID must be 1–32 characters.";
-    } else if (parsed &&
-               !validWifiPassword(command.password, command.openNetwork)) {
-      parsed = false;
-      networkError = command.openNetwork
-                         ? "Open network password must be empty."
-                         : "Wi-Fi password must be 8–63 characters for a "
-                           "secured network.";
-    } else if (parsed &&
-               !validStaAddressConfig(command.staIpMode, command.staIp,
-                                      command.staNetmask, command.staGateway,
-                                      command.staDns1, command.staDns2)) {
-      parsed = false;
-      networkError =
-          "Static IP, netmask, gateway, and DNS must be valid and on the "
-          "same subnet (not 192.168.4.x).";
+    } else if (parsed) {
+      const PersistedSettings settings = self.settingsCopy();
+      const bool reusePassword = shouldReuseSavedWifiCredentials(
+          command.ssid, command.password, command.openNetwork,
+          settings.staConfigured, settings.staSsid, settings.staOpen);
+      if (!reusePassword &&
+          !validWifiPassword(command.password, command.openNetwork)) {
+        parsed = false;
+        networkError = command.openNetwork
+                           ? "Open network password must be empty."
+                           : (settings.staConfigured
+                                  ? "Wi-Fi password must be 8–63 characters, "
+                                    "or empty to keep the saved password."
+                                  : "Wi-Fi password must be 8–63 characters for a "
+                                    "secured network.");
+      } else if (!validStaAddressConfig(command.staIpMode, command.staIp,
+                                        command.staNetmask, command.staGateway,
+                                        command.staDns1, command.staDns2)) {
+        parsed = false;
+        networkError =
+            "Static IP, netmask, gateway, and DNS must be valid and on the "
+            "same subnet (not 192.168.4.x).";
+      }
     }
   } else {
     parsed = false;

@@ -221,11 +221,18 @@ if (!html.includes('id="staIpMode"') ||
     !html.includes("ipMode:$('staIpMode').value") ||
     !html.includes('staticIpOpt') ||
     !html.includes('pending confirm') ||
+    !html.includes('savedStaSsid') ||
+    !html.includes('Leave empty to keep the saved password') ||
+    !html.includes('keep=!!savedStaSsid') ||
+    !html.includes("savedStaSsid=n.wifiConfigured&&n.ssid?n.ssid:''") ||
     !network.includes('WiFi.config(') ||
     !network.includes('confirmPendingNetwork') ||
     !network.includes('revertPendingNetwork') ||
     !network.includes('\\"ipMode\\"') ||
     !network.includes('\\"configState\\"') ||
+    !network.includes('\\"ssid\\"') ||
+    !network.includes('shouldReuseSavedWifiCredentials') ||
+    !network.includes('or empty to keep the saved password.') ||
     !network.includes('StaIpMode::STATIC') ||
     !network.includes('STA_CONFIRM_TIMEOUT_MS') ||
     !network.includes('action must be \\"save\\", \\"forget\\", or \\"confirm\\".') ||
