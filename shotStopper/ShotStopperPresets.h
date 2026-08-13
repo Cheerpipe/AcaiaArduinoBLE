@@ -156,10 +156,13 @@ inline bool validateShotPresetBank(const ShotPresetBank &bank,
 inline void ensureShotPresetBank(ShotPresetBank &bank,
                                  uint32_t machineRetareWindowMs,
                                  bool machineAutoRetare) {
-  if (bank.count == 0 || bank.count > MAX_SHOT_PRESETS ||
-      findShotPresetIndex(bank, bank.activeId) < 0) {
+  if (bank.count == 0 || bank.count > MAX_SHOT_PRESETS) {
     seedDefaultShotPresetBank(bank);
     return;
+  }
+  // Invalid activeId: keep customs; retarget to the first slot.
+  if (findShotPresetIndex(bank, bank.activeId) < 0) {
+    bank.activeId = bank.presets[0].id;
   }
   // Structural repair only — never wipe customs for cross-field clamp issues.
   for (uint8_t i = 0; i < bank.count; ++i) {
@@ -416,6 +419,7 @@ inline bool duplicateShotPreset(ShotPresetBank &bank, uint8_t sourceId,
   if (source == nullptr) {
     return false;
   }
+  const uint8_t savedNextId = bank.nextId;
   uint8_t id = 0;
   if (!allocateShotPresetId(bank, id)) {
     return false;
@@ -426,6 +430,8 @@ inline bool duplicateShotPreset(ShotPresetBank &bank, uint8_t sourceId,
   slot.isFactory = false;
   if (!makeDuplicatePresetName(bank, source->name, slot.name,
                                SHOT_PRESET_NAME_CAPACITY)) {
+    memset(&slot, 0, sizeof(slot));
+    bank.nextId = savedNextId;
     return false;
   }
   ++bank.count;

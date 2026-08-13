@@ -1008,6 +1008,45 @@ void p24_preset_bank_size_and_crud_budgets() {
   CHECK(!duplicateShotPreset(bank, FACTORY_PRESET_ID_SINGLE, overflow));
 }
 
+
+void p25_invalid_active_id_keeps_customs() {
+  ShotPresetBank bank;
+  seedDefaultShotPresetBank(bank);
+  uint8_t customId = 0;
+  CHECK(createUntitledShotPreset(bank, customId));
+  CHECK(bank.count == 3);
+  bank.activeId = 99;  // missing
+  ensureShotPresetBank(bank, DEFAULT_RETARE_WINDOW_MS, true);
+  CHECK(bank.count == 3);
+  CHECK(findShotPresetIndex(bank, customId) >= 0);
+  CHECK(findShotPresetIndex(bank, bank.activeId) >= 0);
+
+  PersistedSettings settings;
+  CHECK(initializeDefaultSettings(settings));
+  CHECK(createUntitledShotPreset(settings.presets, customId));
+  settings.presets.activeId = 99;
+  settings.runtime.timerOnly = true;
+  ensurePersistedPresetBank(settings);
+  CHECK(settings.presets.count >= 3);
+  CHECK(findShotPresetIndex(settings.presets, customId) >= 0);
+  const ShotPreset *dbl =
+      findShotPreset(settings.presets, FACTORY_PRESET_ID_DOUBLE);
+  CHECK(dbl != nullptr);
+  CHECK(dbl->brewByWeight);  // must not inherit session Manual
+}
+
+void p26_save_candidate_validation_does_not_require_live_mutation() {
+  ShotPresetBank bank;
+  seedDefaultShotPresetBank(bank);
+  ShotPreset *preset = mutableShotPreset(bank, FACTORY_PRESET_ID_DOUBLE);
+  CHECK(preset != nullptr);
+  const uint8_t originalGoal = preset->goalWeightG;
+  ShotPreset candidate = *preset;
+  candidate.goalWeightG = 5;  // invalid
+  CHECK(!validateShotPresetRecipe(candidate, DEFAULT_RETARE_WINDOW_MS, true));
+  CHECK(preset->goalWeightG == originalGoal);
+}
+
 void p16_static_ip_address_validation() {
   uint8_t ip[4] = {192, 168, 1, 50};
   uint8_t mask[4] = {255, 255, 255, 0};
@@ -1070,6 +1109,8 @@ const TestCase tests[] = {
     {"P22", p22_schema_eighteen_migrates_to_nineteen},
     {"P23", p23_schema_nineteen_migrates_to_twenty_with_preset_bank},
     {"P24", p24_preset_bank_size_and_crud_budgets},
+    {"P25", p25_invalid_active_id_keeps_customs},
+    {"P26", p26_save_candidate_validation_does_not_require_live_mutation},
     {"P16", p16_static_ip_address_validation},
     {"P17", p17_legacy_password_hash_still_verifies},
     {"P18", p18_shot_log_keeps_history_when_inactive_slot_write_fails},

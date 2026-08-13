@@ -319,6 +319,7 @@ struct CycleSession {
   bool autoToManualGuardArmed = false;
   bool autoToManualGuardEnforced = false;
   uint32_t autoToManualGuardDeadlineAtMs = 0;
+  uint8_t activePresetId = 0;
 };
 
 struct PendingShotFinalize {
@@ -2364,7 +2365,9 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   pendingFinalize.lastKnownWeightValid =
       session.hasWeightAnchor && isfinite(session.lastAcceptedWeightG);
   pendingFinalize.lastKnownWeightG = session.lastAcceptedWeightG;
-  pendingFinalize.activePresetId = presetBank.activeId;
+  pendingFinalize.activePresetId = session.activePresetId != 0
+                                       ? session.activePresetId
+                                       : presetBank.activeId;
 }
 
 void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeightG,
@@ -2466,9 +2469,12 @@ void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
       !autoToManualGuardSampleErrorOk(finalWeightG, snapshot.goalWeightG)) {
     return;
   }
-  ShotPreset *preset = mutableShotPreset(presetBank, snapshot.activePresetId);
+  ShotPreset *preset = mutableShotPreset(
+      presetBank, snapshot.activePresetId != 0 ? snapshot.activePresetId
+                                               : presetBank.activeId);
   if (preset == nullptr) {
-    preset = &mutableActiveShotPreset(presetBank);
+    Serial.println("A->M sample skipped; shot preset no longer exists");
+    return;
   }
   pushAutoToManualGuardSample(preset->autoToManualGuardSamplesDs,
                               snapshot.durationDs);
@@ -2570,9 +2576,12 @@ void pendingShotFinalizeTask() {
     return;
   }
 
-  ShotPreset *preset = mutableShotPreset(presetBank, snapshot.activePresetId);
+  ShotPreset *preset = mutableShotPreset(
+      presetBank, snapshot.activePresetId != 0 ? snapshot.activePresetId
+                                               : presetBank.activeId);
   if (preset == nullptr) {
-    preset = &mutableActiveShotPreset(presetBank);
+    Serial.println("Offset learn skipped; shot preset no longer exists");
+    return;
   }
   preset->weightOffsetG = updatedOffset;
   RuntimeConfig candidate =
@@ -3415,6 +3424,7 @@ void resetSessionForNewCycle(ControlSource source, uint32_t webSessionId = 0,
   }
 #endif
   session.config = snapshotConfig(effectiveRuntimeConfig());
+  session.activePresetId = presetBank.activeId;
   session.endReason = EndReason::NONE;
 }
 
@@ -3554,7 +3564,7 @@ void armAutoToManualGuardForAutomaticBrew() {
       static_cast<AutoToManualGuardLimitMode>(
           session.config.autoToManualGuardLimitMode),
       session.config.autoToManualGuardManualLimitMs,
-      runtimeConfig.autoToManualGuardSamplesDs,
+      session.config.autoToManualGuardSamplesDs,
       session.config.operationalWallMs);
   session.autoToManualGuardArmed = true;
   session.autoToManualGuardDeadlineAtMs = session.startedAtMs + limitMs;
@@ -4218,13 +4228,20 @@ void processWebCommand(const WebCommand &command) {
           if (preset == nullptr) {
             preset = &mutableActiveShotPreset(presetBank);
           }
-          copyUserRecipeFromConfig(command.config, *preset);
-          // Force brewByWeight from config brew polarity; Manual session must not
-          // poison the recipe when saving from Brew form (form sends brewByWeight).
-          preset->brewByWeight = !command.config.timerOnly;
-          ok = validateShotPresetRecipe(*preset, runtimeConfig.retareWindowMs,
+          ShotPreset candidateRecipe = *preset;
+          copyUserRecipeFromConfig(command.config, candidateRecipe);
+          // Form sends brewByWeight explicitly; do not use session Manual.
+          candidateRecipe.brewByWeight = !command.config.timerOnly;
+          ok = validateShotPresetRecipe(candidateRecipe,
+                                        runtimeConfig.retareWindowMs,
                                         runtimeConfig.autoRetare);
           if (ok) {
+            // Preserve learned fields from the live preset.
+            candidateRecipe.weightOffsetG = preset->weightOffsetG;
+            memcpy(candidateRecipe.autoToManualGuardSamplesDs,
+                   preset->autoToManualGuardSamplesDs,
+                   sizeof(candidateRecipe.autoToManualGuardSamplesDs));
+            *preset = candidateRecipe;
             presetBank.activeId = preset->id;
           }
           break;

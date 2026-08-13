@@ -1030,8 +1030,9 @@ inline void migrateRuntimeConfigV19ToCurrent(const RuntimeConfigV19 &legacy,
 }
 
 inline void ensurePersistedPresetBank(PersistedSettings &settings) {
-  if (settings.presets.count == 0 ||
-      findShotPresetIndex(settings.presets, settings.presets.activeId) < 0) {
+  // Only migrate recipe→bank when empty. Invalid activeId is repaired in
+  // ensureShotPresetBank without wiping customs or copying session Manual.
+  if (settings.presets.count == 0) {
     migrateRecipeFromRuntimeToBank(settings.runtime, settings.presets);
   }
   ensureShotPresetBank(settings.presets, settings.runtime.retareWindowMs,

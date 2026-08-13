@@ -358,6 +358,7 @@ esp_err_t sendJsonStringChunk(httpd_req_t *request, const char *value) {
 }
 
 char g_statusResponseBuffer[7680];
+char g_presetsStatusJson[2800];
 
 void sanitizeJsonEmbed(const char *input, char *output, size_t capacity) {
   if (capacity == 0) {
@@ -2326,10 +2327,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
                     sizeof(safeFirmwareVersion));
   char safeStaSsid[WIFI_SSID_CAPACITY] = {};
   sanitizeJsonEmbed(network.staSsid, safeStaSsid, sizeof(safeStaSsid));
-  char presetsJson[1600] = "{}";
+  g_presetsStatusJson[0] = '{';
+  g_presetsStatusJson[1] = '}';
+  g_presetsStatusJson[2] = 0;
   {
     size_t used = 0;
-    int n = snprintf(presetsJson, sizeof(presetsJson),
+    int n = snprintf(g_presetsStatusJson, sizeof(g_presetsStatusJson),
                      "{\"activeId\":%u,\"items\":[",
                      static_cast<unsigned>(control.presets.activeId));
     if (n > 0) {
@@ -2341,7 +2344,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       char safeName[SHOT_PRESET_NAME_CAPACITY * 2] = {};
       sanitizeJsonEmbed(p.name, safeName, sizeof(safeName));
       n = snprintf(
-          presetsJson + used, sizeof(presetsJson) - used,
+          g_presetsStatusJson + used, sizeof(g_presetsStatusJson) - used,
           "%s{\"id\":%u,\"name\":\"%s\",\"isFactory\":%s,\"brewByWeight\":%s,"
           "\"goalWeightG\":%u,\"minBrewTimeMs\":%lu,\"maxRecoveryWeightG\":%.1f,"
           "\"bbwProtectionMs\":%lu,\"operationalWallMs\":%lu,"
@@ -2358,15 +2361,16 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
           static_cast<double>(p.weightOffsetBaselineG),
           p.fastExtractionGuardEnabled ? "true" : "false",
           p.autoToManualGuardEnabled ? "true" : "false");
-      if (n < 0 || static_cast<size_t>(n) >= sizeof(presetsJson) - used) {
+      if (n < 0 ||
+          static_cast<size_t>(n) >= sizeof(g_presetsStatusJson) - used) {
         break;
       }
       used += static_cast<size_t>(n);
     }
-    if (used + 2 < sizeof(presetsJson)) {
-      presetsJson[used++] = ']';
-      presetsJson[used++] = '}';
-      presetsJson[used] = 0;
+    if (used + 2 < sizeof(g_presetsStatusJson)) {
+      g_presetsStatusJson[used++] = ']';
+      g_presetsStatusJson[used++] = '}';
+      g_presetsStatusJson[used] = 0;
     }
   }
   const int written = snprintf(
@@ -2515,7 +2519,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<int>(control.config.timezoneOffsetMinutes),
       ntpPresetId(control.config.ntpServerPreset),
       safeNtpCustom,
-      presetsJson,
+      g_presetsStatusJson,
       timeSyncStateName(timeStatus.state),
       static_cast<unsigned long>(timeStatus.utcSec),
       static_cast<unsigned long>(timeStatus.lastSyncAgeMs),

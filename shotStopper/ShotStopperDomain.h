@@ -426,6 +426,12 @@ struct CycleConfigSnapshot {
       static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
   uint32_t autoToManualGuardManualLimitMs =
       DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
+  uint16_t autoToManualGuardSamplesDs[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT] = {
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS};
 };
 
 inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
@@ -461,6 +467,8 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.autoToManualGuardLimitMode = config.autoToManualGuardLimitMode;
   snapshot.autoToManualGuardManualLimitMs =
       config.autoToManualGuardManualLimitMs;
+  memcpy(snapshot.autoToManualGuardSamplesDs, config.autoToManualGuardSamplesDs,
+         sizeof(snapshot.autoToManualGuardSamplesDs));
   return snapshot;
 }
 
