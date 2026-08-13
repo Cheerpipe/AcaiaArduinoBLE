@@ -606,6 +606,14 @@ inline bool shotLogBlobLengthMatches(const ShotLogStore &store, size_t length) {
   return length == shotLogPersistedBytes(store);
 }
 
+// Full-store scratch for load/migrate/compact. Kept off the Arduino loopTask
+// stack (default 8 KB): sizeof(ShotLogStore) is 5784 and nested load→save
+// would otherwise trip the stack canary during boot.
+inline ShotLogStore &shotLogScratchStore() {
+  static ShotLogStore scratch = {};
+  return scratch;
+}
+
 // Pack the ring into records[0..count) (oldest first) so NVS can store only
 // the used prefix instead of the full capacity array.
 inline void compactShotLogStore(ShotLogStore &store) {
@@ -616,7 +624,7 @@ inline void compactShotLogStore(ShotLogStore &store) {
     return;
   }
 
-  ShotLogRecord ordered[SHOT_LOG_CAPACITY];
+  ShotLogStore &scratch = shotLogScratchStore();
   size_t index = store.header.writeIndex;
   for (uint16_t step = 0; step < count; ++step) {
     if (index == 0) {
@@ -625,11 +633,12 @@ inline void compactShotLogStore(ShotLogStore &store) {
     --index;
   }
   for (uint16_t i = 0; i < count; ++i) {
-    ordered[i] = store.records[index];
+    scratch.records[i] = store.records[index];
     index = (index + 1U) % SHOT_LOG_CAPACITY;
   }
   memset(store.records, 0, sizeof(store.records));
-  memcpy(store.records, ordered, static_cast<size_t>(count) * sizeof(ShotLogRecord));
+  memcpy(store.records, scratch.records,
+         static_cast<size_t>(count) * sizeof(ShotLogRecord));
   store.header.writeIndex =
       static_cast<uint16_t>(count % SHOT_LOG_CAPACITY);
 }
@@ -676,7 +685,8 @@ class ShotLog {
       if (length == 0 || length > sizeof(store_)) {
         return false;
       }
-      ShotLogStore candidate = {};
+      ShotLogStore &candidate = shotLogScratchStore();
+      memset(&candidate, 0, sizeof(candidate));
       if (preferences.getBytes(key, &candidate, sizeof(candidate)) != length) {
         return false;
       }
@@ -730,7 +740,10 @@ class ShotLog {
         }
       }
       if (!loaded && length == sizeof(ShotLogStoreV5)) {
-        ShotLogStoreV5 legacy = {};
+        ShotLogStore &scratch = shotLogScratchStore();
+        ShotLogStoreV5 &legacy =
+            *reinterpret_cast<ShotLogStoreV5 *>(&scratch);
+        memset(&legacy, 0, sizeof(legacy));
         if (preferences.getBytes(SHOT_LOG_KEY_LEGACY, &legacy,
                                  sizeof(legacy)) == sizeof(legacy) &&
             validShotLogStoreV5(legacy)) {
@@ -859,31 +872,31 @@ class ShotLog {
     if (id == 0 || store_.header.count == 0) {
       return false;
     }
-    ShotLogRecord newestFirst[SHOT_LOG_CAPACITY];
-    const size_t total = copyNewestFirst(newestFirst, SHOT_LOG_CAPACITY);
-    ShotLogRecord kept[SHOT_LOG_CAPACITY];
-    size_t keptCount = 0;
-    for (size_t index = 0; index < total; ++index) {
-      if (newestFirst[index].id != id) {
-        kept[keptCount++] = newestFirst[index];
+    // Compact to a linear prefix so deletion is a memmove, avoiding two
+    // SHOT_LOG_CAPACITY arrays on the 8 KB loopTask stack.
+    compactShotLogStore(store_);
+    bool found = false;
+    size_t foundIndex = 0;
+    for (size_t index = 0; index < store_.header.count; ++index) {
+      if (store_.records[index].id == id) {
+        found = true;
+        foundIndex = index;
+        break;
       }
     }
-    if (keptCount == total) {
+    if (!found) {
       return false;
     }
-    const uint32_t bootId = store_.header.bootId;
-    const uint32_t nextRecordId = store_.header.nextRecordId;
-    resetShotLogStore(store_, bootId);
-    store_.header.nextRecordId = nextRecordId;
-    for (size_t index = keptCount; index > 0; --index) {
-      store_.records[store_.header.writeIndex] = kept[index - 1];
-      store_.header.writeIndex =
-          static_cast<uint16_t>((store_.header.writeIndex + 1U) %
-                                SHOT_LOG_CAPACITY);
-      if (store_.header.count < SHOT_LOG_CAPACITY) {
-        ++store_.header.count;
-      }
+    const uint16_t previousCount = store_.header.count;
+    if (foundIndex + 1U < previousCount) {
+      memmove(&store_.records[foundIndex], &store_.records[foundIndex + 1U],
+              static_cast<size_t>(previousCount - foundIndex - 1U) *
+                  sizeof(ShotLogRecord));
     }
+    --store_.header.count;
+    store_.header.writeIndex =
+        static_cast<uint16_t>(store_.header.count % SHOT_LOG_CAPACITY);
+    memset(&store_.records[store_.header.count], 0, sizeof(ShotLogRecord));
     if (save()) {
       return true;
     }
