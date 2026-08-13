@@ -126,7 +126,7 @@ constexpr float AUTO_TO_MANUAL_GUARD_SAMPLE_MAX_ERROR_RATIO = 0.10f;
 constexpr size_t WIFI_SSID_CAPACITY = 33;
 constexpr size_t WIFI_PASSWORD_CAPACITY = 64;
 constexpr size_t WEB_COMMAND_QUEUE_LENGTH = 8;
-constexpr size_t DEBUG_EVENT_CAPACITY = 128;
+constexpr size_t DEBUG_EVENT_CAPACITY = 192;
 constexpr uint32_t MAX_AUTOMATION_WEIGHT_AGE_MS = 1000;
 constexpr float MIN_AUTOMATION_WEIGHT_G = -500.0f;
 constexpr float MAX_AUTOMATION_WEIGHT_G = 1000.0f;
@@ -1011,6 +1011,15 @@ inline bool controlAllowsNetworkBringup(const ControlStatusSnapshot &) {
   return true;
 }
 
+enum class LogLevel : uint8_t {
+  CRITICAL = 0,
+  ERROR = 1,
+  WARNING = 2,
+  INFO = 3,
+  DEBUG = 4,
+  NONE = 5
+};
+
 enum class DebugCategory : uint8_t {
   PADDLE,
   RELAY,
@@ -1019,7 +1028,18 @@ enum class DebugCategory : uint8_t {
   CONFIG,
   NETWORK,
   SECURITY,
-  WEB
+  WEB,
+  BOOT,
+  SYSTEM
+};
+
+enum class Cn9ArmFailReason : int32_t {
+  INVALID_LIMIT = 1,
+  SAFETY_LOCKOUT = 2,
+  SUPERVISOR_UNAVAILABLE = 3,
+  FEEDBACK_STUCK_CLOSED = 4,
+  TIMER_ARM_FAILED = 5,
+  ARM_CANCELED = 6
 };
 
 enum class DebugCode : uint8_t {
@@ -1103,16 +1123,44 @@ enum class DebugCode : uint8_t {
   FAST_EXTRACTION_STOP_MAX,
   FAST_EXTRACTION_STOP_MIN_TIME,
   SHOT_LOG_PERSIST_FAILED,
-  RUNTIME_PERSIST_FAILED
+  RUNTIME_PERSIST_FAILED,
+  BOOT_BANNER,
+  BOOT_RESET_REASON,
+  BOOT_SUBSYSTEM,
+  BOOT_RUNTIME_CONFIG,
+  BOOT_READY,
+  SAFETY_LOCKOUT_ACTIVE,
+  CN9_ARM_FAILED,
+  CYCLE_STARTED,
+  CYCLE_ENDED,
+  BREW_STARTED,
+  TIMER_ONLY_BREW_STARTED,
+  MANUAL_CYCLE_STARTED,
+  RINSE_CLASSIFIED,
+  SYSTEM_LOG_OVERRUN
 };
 
 // Bitmask for argument2 on RUNTIME_PERSIST_FAILED (what was pending in NVS).
 constexpr int32_t RUNTIME_PERSIST_REASON_OFFSET = 1;
 constexpr int32_t RUNTIME_PERSIST_REASON_ATM_SAMPLES = 2;
 
+// argument1 values for BOOT_SUBSYSTEM / INITIALIZATION_FAILED.
+constexpr int32_t BOOT_SUBSYSTEM_CPU = 1;
+constexpr int32_t BOOT_SUBSYSTEM_PERSISTENCE = 2;
+constexpr int32_t BOOT_SUBSYSTEM_BLE = 3;
+constexpr int32_t BOOT_SUBSYSTEM_SETTINGS_SAVE = 4;
+constexpr int32_t BOOT_SUBSYSTEM_RELAY_TIMERS = 5;
+constexpr int32_t BOOT_SUBSYSTEM_TASK_WDT = 6;
+constexpr int32_t BOOT_SUBSYSTEM_SCALE_WORKER = 7;
+constexpr int32_t BOOT_SUBSYSTEM_WEB_QUEUE = 8;
+constexpr int32_t BOOT_SUBSYSTEM_NETWORK = 9;
+constexpr int32_t BOOT_SUBSYSTEM_INDICATORS = 10;
+
 struct DebugEvent {
   uint32_t sequence = 0;
   uint32_t atMs = 0;
+  uint32_t wallSec = 0;
+  LogLevel level = LogLevel::INFO;
   DebugCategory category = DebugCategory::STATE;
   DebugCode code = DebugCode::STATE_TRANSITION;
   int32_t argument1 = 0;
@@ -1131,8 +1179,9 @@ class DebugRingBuffer {
     }
   }
 
-  void add(uint32_t atMs, DebugCategory category, DebugCode code,
-           int32_t argument1 = 0, int32_t argument2 = 0) {
+  void add(uint32_t atMs, uint32_t wallSec, LogLevel level,
+           DebugCategory category, DebugCode code, int32_t argument1 = 0,
+           int32_t argument2 = 0) {
     if (count_ == DEBUG_EVENT_CAPACITY) {
       ++overwritten_;
     } else {
@@ -1144,6 +1193,8 @@ class DebugRingBuffer {
       nextSequence_ = 1;
     }
     event.atMs = atMs;
+    event.wallSec = wallSec;
+    event.level = level;
     event.category = category;
     event.code = code;
     event.argument1 = argument1;
@@ -1179,6 +1230,96 @@ class DebugRingBuffer {
   uint32_t overwritten_ = 0;
 };
 
+inline const char *logLevelName(LogLevel level) {
+  switch (level) {
+    case LogLevel::CRITICAL: return "critical";
+    case LogLevel::ERROR: return "error";
+    case LogLevel::WARNING: return "warning";
+    case LogLevel::INFO: return "info";
+    case LogLevel::DEBUG: return "debug";
+    case LogLevel::NONE: return "none";
+  }
+  return "unknown";
+}
+
+inline char logLevelLetter(LogLevel level) {
+  switch (level) {
+    case LogLevel::CRITICAL: return 'C';
+    case LogLevel::ERROR: return 'E';
+    case LogLevel::WARNING: return 'W';
+    case LogLevel::INFO: return 'I';
+    case LogLevel::DEBUG: return 'D';
+    case LogLevel::NONE: return '-';
+  }
+  return '?';
+}
+
+inline bool logLevelAtMost(LogLevel level, LogLevel threshold) {
+  return static_cast<uint8_t>(level) <= static_cast<uint8_t>(threshold);
+}
+
+inline LogLevel debugCodeDefaultLevel(DebugCode code) {
+  switch (code) {
+    case DebugCode::INITIALIZATION_FAILED:
+    case DebugCode::CN9_ARM_FAILED:
+    case DebugCode::SAFETY_LOCKOUT_ACTIVE:
+    case DebugCode::HARD_LIMIT:
+      return LogLevel::CRITICAL;
+    case DebugCode::SCALE_TIMER_START_FAILED:
+    case DebugCode::SCALE_TIMER_STOP_FAILED:
+    case DebugCode::SCALE_BEEP_FAILED:
+    case DebugCode::SCALE_PADDLE_REMINDER_BEEP_FAILED:
+    case DebugCode::STA_FAILED:
+    case DebugCode::COMMAND_FAILED:
+    case DebugCode::SHOT_LOG_PERSIST_FAILED:
+    case DebugCode::RUNTIME_PERSIST_FAILED:
+    case DebugCode::SCALE_STREAM_STALE:
+    case DebugCode::SCALE_CONTROL_SUSPENDED:
+    case DebugCode::SCALE_BEEP_UNSUPPORTED:
+    case DebugCode::SCALE_PADDLE_REMINDER_BEEP_UNSUPPORTED:
+      return LogLevel::ERROR;
+    case DebugCode::SCALE_SAMPLE_REJECTED_INVALID:
+    case DebugCode::SCALE_SAMPLE_REJECTED_RANGE:
+    case DebugCode::SCALE_SAMPLE_REJECTED_SLEW:
+    case DebugCode::SCALE_SAMPLE_REJECTED_RECOVERY:
+    case DebugCode::SCALE_SAMPLE_REJECTED_PRE_CYCLE:
+    case DebugCode::SCALE_POST_TARE_BASELINE_TIMEOUT:
+    case DebugCode::SCALE_EVENT_DROPPED:
+    case DebugCode::SCALE_PACKET_GAP:
+    case DebugCode::SCALE_STALE_EVENT_REJECTED:
+    case DebugCode::CONFIG_REJECTED:
+    case DebugCode::NETWORK_RETRY:
+    case DebugCode::WIFI_SCAN_ERROR:
+    case DebugCode::WIFI_SCAN_CANCELED:
+    case DebugCode::TIME_SYNC_FAIL:
+    case DebugCode::UI_EXPIRED:
+    case DebugCode::UI_REPLACED:
+    case DebugCode::WEB_COMMAND_REJECTED:
+    case DebugCode::COMMAND_RETRY:
+    case DebugCode::OPERATIONAL_LIMIT:
+    case DebugCode::SYSTEM_LOG_OVERRUN:
+    case DebugCode::FIRST_DROP_DURING_RETARE:
+      return LogLevel::WARNING;
+    case DebugCode::SCALE_CONNECTING:
+    case DebugCode::SCALE_TIMER_START_OK:
+    case DebugCode::SCALE_TIMER_STOP_OK:
+    case DebugCode::SCALE_BEEP_OK:
+    case DebugCode::SCALE_PADDLE_REMINDER_BEEP_OK:
+    case DebugCode::STA_CONNECTING:
+    case DebugCode::WIFI_SCAN_STARTED:
+    case DebugCode::WIFI_SCAN_COMPLETE:
+    case DebugCode::UI_LOGIN:
+    case DebugCode::UI_LOGOUT:
+    case DebugCode::WEB_COMMAND_ACCEPTED:
+    case DebugCode::MAINTENANCE_RESERVED:
+    case DebugCode::MAINTENANCE_COMPLETED:
+    case DebugCode::MAINTENANCE_CANCELED:
+      return LogLevel::DEBUG;
+    default:
+      return LogLevel::INFO;
+  }
+}
+
 inline const char *debugCategoryName(DebugCategory category) {
   switch (category) {
     case DebugCategory::PADDLE: return "paddle";
@@ -1189,6 +1330,40 @@ inline const char *debugCategoryName(DebugCategory category) {
     case DebugCategory::NETWORK: return "network";
     case DebugCategory::SECURITY: return "security";
     case DebugCategory::WEB: return "web";
+    case DebugCategory::BOOT: return "boot";
+    case DebugCategory::SYSTEM: return "system";
+  }
+  return "unknown";
+}
+
+inline const char *cn9ArmFailReasonName(Cn9ArmFailReason reason) {
+  switch (reason) {
+    case Cn9ArmFailReason::INVALID_LIMIT: return "invalid safety limit";
+    case Cn9ArmFailReason::SAFETY_LOCKOUT: return "safety lockout is active";
+    case Cn9ArmFailReason::SUPERVISOR_UNAVAILABLE:
+      return "safety supervisor unavailable";
+    case Cn9ArmFailReason::FEEDBACK_STUCK_CLOSED:
+      return "feedback is already closed";
+    case Cn9ArmFailReason::TIMER_ARM_FAILED:
+      return "failed to arm safety deadline";
+    case Cn9ArmFailReason::ARM_CANCELED:
+      return "arm transaction was canceled";
+  }
+  return "unknown";
+}
+
+inline const char *bootSubsystemName(int32_t subsystem) {
+  switch (subsystem) {
+    case BOOT_SUBSYSTEM_CPU: return "cpu";
+    case BOOT_SUBSYSTEM_PERSISTENCE: return "persistence";
+    case BOOT_SUBSYSTEM_BLE: return "ble";
+    case BOOT_SUBSYSTEM_SETTINGS_SAVE: return "settings_save";
+    case BOOT_SUBSYSTEM_RELAY_TIMERS: return "relay_timers";
+    case BOOT_SUBSYSTEM_TASK_WDT: return "task_watchdog";
+    case BOOT_SUBSYSTEM_SCALE_WORKER: return "scale_worker";
+    case BOOT_SUBSYSTEM_WEB_QUEUE: return "web_queue";
+    case BOOT_SUBSYSTEM_NETWORK: return "network";
+    case BOOT_SUBSYSTEM_INDICATORS: return "indicators";
   }
   return "unknown";
 }
@@ -1312,6 +1487,20 @@ inline const char *debugCodeName(DebugCode code) {
       return "shot history NVS persist failed";
     case DebugCode::RUNTIME_PERSIST_FAILED:
       return "workflow NVS persist failed";
+    case DebugCode::BOOT_BANNER: return "firmware boot";
+    case DebugCode::BOOT_RESET_REASON: return "reset reason";
+    case DebugCode::BOOT_SUBSYSTEM: return "boot subsystem";
+    case DebugCode::BOOT_RUNTIME_CONFIG: return "runtime config loaded";
+    case DebugCode::BOOT_READY: return "boot ready";
+    case DebugCode::SAFETY_LOCKOUT_ACTIVE: return "safety lockout active";
+    case DebugCode::CN9_ARM_FAILED: return "cannot close CN9";
+    case DebugCode::CYCLE_STARTED: return "cycle started";
+    case DebugCode::CYCLE_ENDED: return "cycle ended";
+    case DebugCode::BREW_STARTED: return "brew started";
+    case DebugCode::TIMER_ONLY_BREW_STARTED: return "timer-only brew started";
+    case DebugCode::MANUAL_CYCLE_STARTED: return "manual cycle started";
+    case DebugCode::RINSE_CLASSIFIED: return "rinse classified";
+    case DebugCode::SYSTEM_LOG_OVERRUN: return "diagnostic log overrun";
   }
   return "unknown";
 }
@@ -1411,6 +1600,81 @@ inline bool formatPersistDebugMessage(const DebugEvent &event, char *message,
                "(PERSIST_RUNTIME settingsA/B rev=%ld; %s)",
                static_cast<long>(event.argument1),
                runtimePersistReasonLabel(event.argument2));
+      return true;
+    default:
+      return false;
+  }
+}
+
+inline const char *endReasonDebugName(EndReason reason) {
+  switch (reason) {
+    case EndReason::NONE: return "none";
+    case EndReason::PADDLE: return "paddle";
+    case EndReason::SCALE_PREDICTION: return "scale prediction";
+    case EndReason::SCALE_THRESHOLD: return "scale threshold";
+    case EndReason::WEIGHT_ANOMALY: return "weight anomaly";
+    case EndReason::GLOBAL_LIMIT: return "global CN9 limit";
+    case EndReason::CONFIGURED_WALL_LIMIT: return "configured wall limit";
+    case EndReason::SHORT_SHOT: return "short shot";
+    case EndReason::RINSE_COMPLETE: return "rinse complete";
+    case EndReason::WEB_STOP: return "web stop";
+    case EndReason::PHYSICAL_OVERRIDE: return "physical override";
+    case EndReason::WEB_HEARTBEAT_TIMEOUT: return "web heartbeat timeout";
+    case EndReason::RELAY_SAFETY_FAILURE: return "relay safety failure";
+    case EndReason::FAST_EXTRACTION_MAX_WEIGHT:
+      return "fast extraction max weight";
+    case EndReason::FAST_EXTRACTION_MIN_TIME:
+      return "fast extraction min time";
+    case EndReason::AUTO_TO_MANUAL_GUARD: return "auto-to-manual time guard";
+  }
+  return "unknown";
+}
+
+inline bool formatLifecycleDebugMessage(const DebugEvent &event, char *message,
+                                        size_t capacity) {
+  if (message == nullptr || capacity == 0) {
+    return false;
+  }
+  char weightText[24] = {};
+  char offsetText[24] = {};
+  switch (event.code) {
+    case DebugCode::BOOT_BANNER:
+      snprintf(message, capacity, "firmware boot (bootId=%ld)",
+               static_cast<long>(event.argument1));
+      return true;
+    case DebugCode::BOOT_RESET_REASON:
+      snprintf(message, capacity, "reset reason code=%ld",
+               static_cast<long>(event.argument1));
+      return true;
+    case DebugCode::BOOT_SUBSYSTEM:
+      snprintf(message, capacity, "%s=%s",
+               bootSubsystemName(event.argument1),
+               event.argument2 != 0 ? "ok" : "fail");
+      return true;
+    case DebugCode::BOOT_RUNTIME_CONFIG:
+      formatWeightCentigrams(event.argument1, weightText, sizeof(weightText));
+      formatWeightCentigrams(event.argument2, offsetText, sizeof(offsetText));
+      snprintf(message, capacity, "runtime config goal=%s offset=%s",
+               weightText, offsetText);
+      return true;
+    case DebugCode::CN9_ARM_FAILED:
+      snprintf(message, capacity, "cannot close CN9: %s",
+               cn9ArmFailReasonName(
+                   static_cast<Cn9ArmFailReason>(event.argument1)));
+      return true;
+    case DebugCode::CYCLE_STARTED:
+      formatWeightCentigrams(event.argument1, weightText, sizeof(weightText));
+      formatWeightCentigrams(event.argument2, offsetText, sizeof(offsetText));
+      snprintf(message, capacity, "cycle started; goal=%s offset=%s",
+               weightText, offsetText);
+      return true;
+    case DebugCode::CYCLE_ENDED:
+      snprintf(message, capacity, "cycle ended by %s",
+               endReasonDebugName(static_cast<EndReason>(event.argument1)));
+      return true;
+    case DebugCode::SYSTEM_LOG_OVERRUN:
+      snprintf(message, capacity, "diagnostic log overrun dropped=%ld",
+               static_cast<long>(event.argument1));
       return true;
     default:
       return false;

@@ -2434,12 +2434,24 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
   DebugEvent events[LOG_BATCH_SIZE] = {};
   const size_t count =
       self.callbacks_.copyDebugEvents(after, events, LOG_BATCH_SIZE);
+  ControlStatusSnapshot control;
+  self.callbacks_.copyControlStatus(control);
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
   httpd_resp_set_hdr(request, "Cache-Control", "no-store");
-  httpd_resp_send_chunk(request, "{\"events\":[", HTTPD_RESP_USE_STRLEN);
+  char header[96] = {};
+  snprintf(header, sizeof(header),
+           "{\"dropped\":%lu,\"bootId\":%lu,\"events\":[",
+           static_cast<unsigned long>(control.debugEventsDropped),
+           static_cast<unsigned long>(control.bootId));
+  if (httpd_resp_send_chunk(request, header, HTTPD_RESP_USE_STRLEN) != ESP_OK) {
+    return ESP_FAIL;
+  }
   for (size_t index = 0; index < count; ++index) {
     char message[128] = {};
-    if (events[index].code == DebugCode::STATE_TRANSITION &&
+    if (events[index].code == DebugCode::BOOT_BANNER) {
+      snprintf(message, sizeof(message), "Shot Stopper Micra %s (bootId=%ld)",
+               FW_VERSION, static_cast<long>(events[index].argument1));
+    } else if (events[index].code == DebugCode::STATE_TRANSITION &&
         events[index].argument1 >=
             static_cast<int32_t>(StopperState::REQUIRES_OFF) &&
         events[index].argument1 <=
@@ -2468,18 +2480,24 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
                                              sizeof(message))) {
     } else if (formatPersistDebugMessage(events[index], message,
                                          sizeof(message))) {
+    } else if (formatLifecycleDebugMessage(events[index], message,
+                                           sizeof(message))) {
     } else {
       strncpy(message, debugCodeName(events[index].code),
               sizeof(message) - 1);
     }
-    char item[256] = {};
+    char item[320] = {};
     snprintf(item, sizeof(item),
-             "%s{\"sequence\":%lu,\"atMs\":%lu,\"category\":\"%s\","
+             "%s{\"sequence\":%lu,\"atMs\":%lu,\"wallSec\":%lu,"
+             "\"level\":\"%s\",\"category\":\"%s\",\"code\":%u,"
              "\"message\":\"%s\",\"argument1\":%ld,\"argument2\":%ld}",
              index == 0 ? "" : ",",
              static_cast<unsigned long>(events[index].sequence),
              static_cast<unsigned long>(events[index].atMs),
+             static_cast<unsigned long>(events[index].wallSec),
+             logLevelName(events[index].level),
              debugCategoryName(events[index].category),
+             static_cast<unsigned>(events[index].code),
              message,
              static_cast<long>(events[index].argument1),
              static_cast<long>(events[index].argument2));

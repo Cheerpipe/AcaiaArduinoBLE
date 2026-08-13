@@ -20,8 +20,8 @@ if (!scriptMatch) throw new Error('Embedded script not found');
 // Parse the exact JavaScript delivered by the controller.
 new Function(scriptMatch[1]);
 
-if (Buffer.byteLength(html, 'utf8') > 55296) {
-  throw new Error('Web UI exceeds the 54 KiB asset budget');
+if (Buffer.byteLength(html, 'utf8') > 57344) {
+  throw new Error('Web UI exceeds the 56 KiB asset budget');
 }
 if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
     !html.includes('Paddle State') || !html.includes('firstDropBeep') ||
@@ -197,7 +197,10 @@ if (!html.includes('id="firmwareFooter"') ||
 if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
     !html.includes('await refreshLog()') ||
-    !html.includes('setInterval(()=>refreshLog(),5000)')) {
+    !html.includes('setInterval(()=>refreshLog(),2500)') ||
+    !html.includes('id="logLevelFilter"') ||
+    !html.includes('e.level') ||
+    !html.includes('value="boot"')) {
   throw new Error('Diagnostic log must remain visible and refresh in public read-only mode');
 }
 if (!html.includes('id="factoryResetButton"') ||

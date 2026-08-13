@@ -115,7 +115,7 @@ class ShotStopperNetwork {
   static constexpr size_t TOKEN_BYTES = 16;
   static constexpr size_t TOKEN_HEX_CAPACITY = TOKEN_BYTES * 2 + 1;
   static constexpr size_t REQUEST_BODY_CAPACITY = 1025;
-  static constexpr size_t LOG_BATCH_SIZE = 24;
+  static constexpr size_t LOG_BATCH_SIZE = 48;
 
   struct WebSession {
     bool active = false;

@@ -172,7 +172,7 @@ Additional fixed protections (not separately configurable):
 See [Factory credentials (first use)](#factory-credentials-first-use) for AP
 name, default passwords, and step-by-step first connection.
 
-- Fully **embedded Web UI** (no external assets; **54 KiB** asset budget) served
+- Fully **embedded Web UI** (no external assets; **56 KiB** asset budget) served
   over Wi-Fi.
 - **STA** mode when credentials are saved; **fallback AP**
   (`MicraShotStopperAP` at `192.168.4.1`) when STA is unavailable. Modes are
@@ -223,10 +223,12 @@ name, default passwords, and step-by-step first connection.
 - Hardware monitor: CPU usage, chip temperature (and peak), RAM total/used/free,
   uptime, and last ESP reset reason.
 - NTP/time sync state and configured timezone.
-- **Diagnostic log:** bounded ring of **128** events (Scale, State, Relay,
-  Paddle, Network, Config, Web, Security) with category filter, copy, and
-  clear view (client-side only; firmware log unchanged); also available via
-  `GET /api/v1/log`.
+- **Diagnostic log:** bounded ring of **192** events with severity levels
+  (Critical / Error / Warning / Info / Debug), categories (including Boot and
+  System), uptime or wall-clock timestamps when NTP is synced, level + category
+  filters, dropped-event counter, copy, and clear view (client-side only);
+  also available via `GET /api/v1/log`. Serial and UI share the same structured
+  pipeline (`logEmit`); default retain/print level is Info.
 
 **Web paddle and remote control** (opt-in build only):
 

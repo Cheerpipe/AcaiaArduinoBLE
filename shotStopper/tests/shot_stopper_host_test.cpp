@@ -88,6 +88,9 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   runtimeConfig.bbwProtectionMs = 3000;
   lastCycle = LastCycleSummary{};
   debugLog.clear();
+  lastReportedLogOverwritten = 0;
+  serialLogLevel = LogLevel::INFO;
+  ringRetainLogLevel = LogLevel::INFO;
   publishedControlStatus = ControlStatusSnapshot{};
   maintenanceLease = MaintenanceLease{};
   maintenanceCancellationCommand = WebCommand{};
@@ -1704,7 +1707,7 @@ void w23_combined_tare_command_uses_cycle_snapshot() {
 void w24_debug_ring_is_bounded_and_ordered() {
   DebugRingBuffer ring;
   for (size_t index = 0; index < DEBUG_EVENT_CAPACITY + 5; ++index) {
-    ring.add(static_cast<uint32_t>(index), DebugCategory::WEB,
+    ring.add(static_cast<uint32_t>(index), 0, LogLevel::INFO, DebugCategory::WEB,
              DebugCode::WEB_COMMAND_ACCEPTED, static_cast<int32_t>(index));
   }
   CHECK(ring.overwritten() == 5);
@@ -2297,6 +2300,37 @@ bool debugEventExists(DebugCode code, int32_t argument1 = INT32_MIN,
     return true;
   }
   return false;
+}
+
+void w25b_log_levels_and_cycle_events_reach_ring() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  ringRetainLogLevel = LogLevel::INFO;
+  serialLogLevel = LogLevel::NONE;
+  startCycle();
+  CHECK(debugEventExists(DebugCode::CYCLE_STARTED));
+  CHECK(debugEventExists(DebugCode::BREW_STARTED) ||
+        debugEventExists(DebugCode::MANUAL_CYCLE_STARTED) ||
+        debugEventExists(DebugCode::TIMER_ONLY_BREW_STARTED));
+  DebugEvent events[DEBUG_EVENT_CAPACITY] = {};
+  const size_t count = copyDebugEvents(0, events, DEBUG_EVENT_CAPACITY);
+  bool sawLevel = false;
+  for (size_t index = 0; index < count; ++index) {
+    if (events[index].code == DebugCode::CYCLE_STARTED) {
+      CHECK(events[index].level == LogLevel::INFO);
+      sawLevel = true;
+    }
+  }
+  CHECK(sawLevel);
+  char message[128] = {};
+  DebugEvent cn9 = {};
+  cn9.code = DebugCode::CN9_ARM_FAILED;
+  cn9.argument1 = static_cast<int32_t>(Cn9ArmFailReason::SAFETY_LOCKOUT);
+  CHECK(formatLifecycleDebugMessage(cn9, message, sizeof(message)));
+  CHECK(std::string(message).find("safety lockout") != std::string::npos);
+  CHECK(debugCodeDefaultLevel(DebugCode::CN9_ARM_FAILED) ==
+        LogLevel::CRITICAL);
+  CHECK(debugCodeDefaultLevel(DebugCode::SCALE_CONNECTING) == LogLevel::DEBUG);
 }
 
 void r41_negative_weight_in_range_starts_automatic_cycle() {
@@ -3398,6 +3432,7 @@ const TestCase testCases[] = {
     {"W23", w23_combined_tare_command_uses_cycle_snapshot},
     {"W24", w24_debug_ring_is_bounded_and_ordered},
     {"W25", w25_weight_samples_do_not_fill_debug_log},
+    {"W25B", w25b_log_levels_and_cycle_events_reach_ring},
     {"W26", w26_status_is_a_copied_snapshot},
     {"W27", w27_stale_weight_is_not_presented_as_current},
     {"W28", w28_web_command_queue_is_bounded},

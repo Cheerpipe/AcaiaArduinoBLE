@@ -382,6 +382,9 @@ PendingShotFinalize pendingFinalize;
 RuntimeConfig runtimeConfig;
 LastCycleSummary lastCycle;
 DebugRingBuffer debugLog;
+LogLevel serialLogLevel = LogLevel::INFO;
+LogLevel ringRetainLogLevel = LogLevel::INFO;
+uint32_t lastReportedLogOverwritten = 0;
 ShotLog shotLog;
 
 float currentWeight = 0.0f;
@@ -539,11 +542,119 @@ uint32_t elapsedMs(uint32_t sinceMs) {
   return static_cast<uint32_t>(millis() - sinceMs);
 }
 
+void formatDebugEventMessage(const DebugEvent &event, char *message,
+                             size_t capacity) {
+  if (message == nullptr || capacity == 0) {
+    return;
+  }
+  if (event.code == DebugCode::BOOT_BANNER) {
+    snprintf(message, capacity, "Shot Stopper Micra %s (bootId=%ld)",
+             FW_VERSION, static_cast<long>(event.argument1));
+    return;
+  }
+  if (event.code == DebugCode::STATE_TRANSITION &&
+      event.argument1 >= static_cast<int32_t>(StopperState::REQUIRES_OFF) &&
+      event.argument1 <= static_cast<int32_t>(StopperState::MANUAL_NO_SCALE) &&
+      event.argument2 >= static_cast<int32_t>(StopperState::REQUIRES_OFF) &&
+      event.argument2 <= static_cast<int32_t>(StopperState::MANUAL_NO_SCALE)) {
+    snprintf(message, capacity, "%s -> %s",
+             stopperStateName(static_cast<StopperState>(event.argument1)),
+             stopperStateName(static_cast<StopperState>(event.argument2)));
+    return;
+  }
+  if (formatScaleSampleDebugMessage(event, message, capacity)) {
+    return;
+  }
+  if (formatPersistDebugMessage(event, message, capacity)) {
+    return;
+  }
+  if (formatLifecycleDebugMessage(event, message, capacity)) {
+    return;
+  }
+  if ((event.code == DebugCode::WEB_COMMAND_ACCEPTED ||
+       event.code == DebugCode::WEB_COMMAND_REJECTED) &&
+      event.argument1 >= static_cast<int32_t>(WebCommandType::PADDLE_ON) &&
+      event.argument1 <=
+          static_cast<int32_t>(WebCommandType::MAINTENANCE_COMPLETE)) {
+    snprintf(message, capacity, "%s: %s", debugCodeName(event.code),
+             webCommandTypeName(
+                 static_cast<WebCommandType>(event.argument1)));
+    return;
+  }
+  strncpy(message, debugCodeName(event.code), capacity - 1);
+  message[capacity - 1] = '\0';
+}
+
+void writeSerialLogLine(const DebugEvent &event) {
+  char message[128] = {};
+  formatDebugEventMessage(event, message, sizeof(message));
+  char line[192] = {};
+  const uint32_t wholeSec = event.atMs / 1000U;
+  const uint32_t fracMs = event.atMs % 1000U;
+  snprintf(line, sizeof(line), "%c (%lu.%03lu)[%s] %s",
+           logLevelLetter(event.level),
+           static_cast<unsigned long>(wholeSec),
+           static_cast<unsigned long>(fracMs),
+           debugCategoryName(event.category), message);
+  Serial.println(line);
+}
+
+void maybeReportLogOverrunLocked() {
+  const uint32_t overwritten = debugLog.overwritten();
+  if (overwritten == 0 || overwritten == lastReportedLogOverwritten) {
+    return;
+  }
+  if (lastReportedLogOverwritten != 0 &&
+      overwritten < lastReportedLogOverwritten + 16U) {
+    return;
+  }
+  lastReportedLogOverwritten = overwritten;
+  const uint32_t atMs = millis();
+  const uint32_t wallSec = g_wallClock.nowUtcSec(atMs);
+  if (logLevelAtMost(LogLevel::WARNING, ringRetainLogLevel)) {
+    debugLog.add(atMs, wallSec, LogLevel::WARNING, DebugCategory::SYSTEM,
+                 DebugCode::SYSTEM_LOG_OVERRUN,
+                 static_cast<int32_t>(overwritten), 0);
+  }
+}
+
+void logEmit(LogLevel level, DebugCategory category, DebugCode code,
+             int32_t argument1 = 0, int32_t argument2 = 0) {
+  if (level == LogLevel::NONE) {
+    return;
+  }
+  const uint32_t atMs = millis();
+  const uint32_t wallSec = g_wallClock.nowUtcSec(atMs);
+  DebugEvent event;
+  event.atMs = atMs;
+  event.wallSec = wallSec;
+  event.level = level;
+  event.category = category;
+  event.code = code;
+  event.argument1 = argument1;
+  event.argument2 = argument2;
+
+  const bool toSerial = logLevelAtMost(level, serialLogLevel);
+  const bool toRing = logLevelAtMost(level, ringRetainLogLevel);
+  if (!toSerial && !toRing) {
+    return;
+  }
+
+  portENTER_CRITICAL(&debugLogMux);
+  if (toRing) {
+    debugLog.add(atMs, wallSec, level, category, code, argument1, argument2);
+    maybeReportLogOverrunLocked();
+  }
+  portEXIT_CRITICAL(&debugLogMux);
+
+  if (toSerial) {
+    writeSerialLogLine(event);
+  }
+}
+
 void addDebugEvent(DebugCategory category, DebugCode code,
                    int32_t argument1 = 0, int32_t argument2 = 0) {
-  portENTER_CRITICAL(&debugLogMux);
-  debugLog.add(millis(), category, code, argument1, argument2);
-  portEXIT_CRITICAL(&debugLogMux);
+  logEmit(debugCodeDefaultLevel(code), category, code, argument1, argument2);
 }
 
 size_t copyDebugEvents(uint32_t afterSequence, DebugEvent *output,
@@ -781,10 +892,6 @@ void transitionTo(StopperState nextState) {
   }
 
   const StopperState previousState = stopperState;
-  Serial.print("State ");
-  Serial.print(stateName(stopperState));
-  Serial.print(" -> ");
-  Serial.println(stateName(nextState));
   stopperState = nextState;
   addDebugEvent(DebugCategory::STATE, DebugCode::STATE_TRANSITION,
                 static_cast<int32_t>(previousState),
@@ -1048,11 +1155,13 @@ bool setCn9Closed(bool closed,
     if (operationalLimitMs < 1 ||
         operationalLimitMs > HARD_MAX_CN9_CLOSED_MS) {
       tripRelaySafety(RelaySafetyFault::INVALID_LIMIT);
-      Serial.println("Cannot close CN9: invalid safety limit");
+      addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
+                    static_cast<int32_t>(Cn9ArmFailReason::INVALID_LIMIT));
       return false;
     }
     if (before.state == RelaySafetyState::LOCKOUT) {
-      Serial.println("Cannot close CN9: safety lockout is active");
+      addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
+                    static_cast<int32_t>(Cn9ArmFailReason::SAFETY_LOCKOUT));
       return false;
     }
     if (!platformClockReady || !relaySafetyTimersReady || !taskWatchdogReady ||
@@ -1061,12 +1170,16 @@ bool setCn9Closed(bool closed,
       tripRelaySafety(!taskWatchdogReady || criticalTaskWatchdogFault
                           ? RelaySafetyFault::WATCHDOG_UNAVAILABLE
                           : RelaySafetyFault::INITIALIZATION_FAILED);
-      Serial.println("Cannot close CN9: safety supervisor unavailable");
+      addDebugEvent(
+          DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
+          static_cast<int32_t>(Cn9ArmFailReason::SUPERVISOR_UNAVAILABLE));
       return false;
     }
     if (EXTERNAL_SAFETY_HARDWARE_PRESENT && readCn9FeedbackClosed()) {
       tripRelaySafety(RelaySafetyFault::FEEDBACK_STUCK_CLOSED);
-      Serial.println("Cannot close CN9: feedback is already closed");
+      addDebugEvent(
+          DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
+          static_cast<int32_t>(Cn9ArmFailReason::FEEDBACK_STUCK_CLOSED));
       return false;
     }
 
@@ -1103,7 +1216,8 @@ bool setCn9Closed(bool closed,
 
     if (!armed) {
       tripRelaySafety(RelaySafetyFault::TIMER_ARM_FAILED);
-      Serial.println("Cannot close CN9: failed to arm safety deadline");
+      addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
+                    static_cast<int32_t>(Cn9ArmFailReason::TIMER_ARM_FAILED));
       return false;
     }
 
@@ -1136,10 +1250,10 @@ bool setCn9Closed(bool closed,
     portEXIT_CRITICAL(&relayMux);
     if (!committed) {
       stopRelayDeadlineTimers();
-      Serial.println("Cannot close CN9: arm transaction was canceled");
+      addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
+                    static_cast<int32_t>(Cn9ArmFailReason::ARM_CANCELED));
       return false;
     }
-    Serial.println("CN9 closed");
     addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_CLOSED,
                   static_cast<int32_t>(operationalLimitMs));
     return true;
@@ -1168,7 +1282,6 @@ bool setCn9Closed(bool closed,
   portEXIT_CRITICAL(&relayMux);
   stopRelayDeadlineTimers();
   if (wasClosed) {
-    Serial.println("CN9 open");
     addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_OPENED);
   }
   return true;
@@ -1862,7 +1975,7 @@ bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
   session.lastAcceptedPacketSequence = packetSequence;
   calculateExpectedEndTime();
 
-  if (DEBUG) {
+  if (logLevelAtMost(LogLevel::DEBUG, serialLogLevel)) {
     Serial.print(weight);
     Serial.print("g, t=");
     Serial.print(shot.timeS[index]);
@@ -3060,11 +3173,10 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
 
   enterBrewOrManualFromStart();
 
-  Serial.print("Cycle started; goal snapshot=");
-  Serial.print(session.config.goalWeightG);
-  Serial.print("g, offset snapshot=");
-  Serial.print(session.config.weightOffsetG);
-  Serial.println("g");
+  addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_STARTED,
+                weightToCentigrams(
+                    static_cast<float>(session.config.goalWeightG)),
+                weightToCentigrams(session.config.weightOffsetG));
   maybeRequestNtpSyncOnActivity();
 }
 
@@ -3102,8 +3214,8 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   lastCycle.calibrationEligible = session.calibrationEligible;
   session.active = false;
   virtualPaddleOn = false;
-  Serial.print("Cycle ended by ");
-  Serial.println(endReasonName(reason));
+  addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_ENDED,
+                static_cast<int32_t>(reason));
   transitionTo(nextState);
 }
 
@@ -3114,7 +3226,7 @@ void enterRinse() {
   session.automaticEnabled = false;
   session.autoToManualGuardArmed = false;
   session.autoToManualGuardEnforced = false;
-  Serial.println("Rinse classified; paddle changes ignored until completion");
+  addDebugEvent(DebugCategory::STATE, DebugCode::RINSE_CLASSIFIED);
   transitionTo(StopperState::RINSE);
   maybeRequestNtpSyncOnActivity();
 }
@@ -3156,21 +3268,21 @@ bool autoToManualGuardDeadlineDue() {
 
 void enterBrewOrManualFromStart() {
   if (session.config.timerOnly && session.startedWithScale) {
-    Serial.println("Timer-only brew started");
+    addDebugEvent(DebugCategory::STATE, DebugCode::TIMER_ONLY_BREW_STARTED);
     transitionTo(StopperState::BREW);
     return;
   }
   if (session.automaticEnabled) {
     shot.automaticBrew = true;
     armAutoToManualGuardForAutomaticBrew();
-    Serial.println("Brew started");
+    addDebugEvent(DebugCategory::STATE, DebugCode::BREW_STARTED);
     transitionTo(StopperState::BREW);
     return;
   }
   session.automaticEnabled = false;
   session.retareEnded = true;
   session.bbwProtectionEnded = true;
-  Serial.println("Manual cycle started (no scale automation)");
+  addDebugEvent(DebugCategory::STATE, DebugCode::MANUAL_CYCLE_STARTED);
   transitionTo(StopperState::MANUAL_NO_SCALE);
 }
 
@@ -4044,27 +4156,33 @@ void setup() {
   }
 
   Serial.begin(9600);
-  Serial.print("Shot Stopper Micra ");
-  Serial.println(FW_VERSION);
   statusIndicatorsReady = initializeStatusIndicators();
-  if (!statusIndicatorsReady) {
-    Serial.println("Status indicators unavailable; control remains active");
-  }
   updateStatusIndicators();
-  if (!relaySafetyTimersReady) {
-    Serial.println("FATAL: relay safety timers unavailable; CN9 will not close");
-  }
+
+  logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_RESET_REASON,
+          static_cast<int32_t>(safetyResetStatus.reasonCode));
+  logEmit(relaySafetyTimersReady ? LogLevel::INFO : LogLevel::CRITICAL,
+          DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+          BOOT_SUBSYSTEM_RELAY_TIMERS, relaySafetyTimersReady ? 1 : 0);
+  logEmit(platformClockReady ? LogLevel::INFO : LogLevel::CRITICAL,
+          DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM, BOOT_SUBSYSTEM_CPU,
+          platformClockReady ? 1 : 0);
   if (!platformClockReady) {
-    Serial.println("FATAL: CPU frequency setup failed; CN9 will not close");
-    addDebugEvent(DebugCategory::SECURITY,
-                  DebugCode::INITIALIZATION_FAILED, 1);
+    addDebugEvent(DebugCategory::SECURITY, DebugCode::INITIALIZATION_FAILED,
+                  BOOT_SUBSYSTEM_CPU);
   }
-  if (!taskWatchdogReady) {
-    Serial.println("FATAL: task watchdog unavailable; CN9 will not close");
+  logEmit(taskWatchdogReady ? LogLevel::INFO : LogLevel::CRITICAL,
+          DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+          BOOT_SUBSYSTEM_TASK_WDT, taskWatchdogReady ? 1 : 0);
+  if (!statusIndicatorsReady) {
+    logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_INDICATORS, 0);
+  } else {
+    logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_INDICATORS, 1);
   }
   if (safetyResetStatus.recoveryRequired) {
-    Serial.println(
-        "SAFETY LOCKOUT: cycle physical paddle ON then OFF to recover");
+    addDebugEvent(DebugCategory::SECURITY, DebugCode::SAFETY_LOCKOUT_ACTIVE);
   }
 
   persistenceReady = EEPROM.begin(EEPROM_SIZE);
@@ -4078,16 +4196,16 @@ void setup() {
       if (savePersistedSettings(persistedSettings)) {
         addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_MIGRATED);
       } else {
-        Serial.println("WARN: settings save failed");
         addDebugEvent(DebugCategory::CONFIG, DebugCode::INITIALIZATION_FAILED,
-                      4);
+                      BOOT_SUBSYSTEM_SETTINGS_SAVE);
       }
     }
   } else if (persistenceReady) {
     if (initializeDefaultSettings(persistedSettings)) {
       settingsLoaded = true;
       if (!savePersistedSettings(persistedSettings)) {
-        Serial.println("WARN: settings save failed");
+        addDebugEvent(DebugCategory::CONFIG, DebugCode::INITIALIZATION_FAILED,
+                      BOOT_SUBSYSTEM_SETTINGS_SAVE);
       }
     }
   }
@@ -4107,15 +4225,23 @@ void setup() {
   shotLog.onBoot();
 #endif
 
+  addDebugEvent(DebugCategory::BOOT, DebugCode::BOOT_BANNER,
+                static_cast<int32_t>(shotLog.bootId()));
+
   if (!persistenceReady) {
-    Serial.println("Persistence unavailable; using volatile defaults");
-    addDebugEvent(DebugCategory::CONFIG, DebugCode::INITIALIZATION_FAILED, 2);
+    addDebugEvent(DebugCategory::CONFIG, DebugCode::INITIALIZATION_FAILED,
+                  BOOT_SUBSYSTEM_PERSISTENCE);
+    logEmit(LogLevel::ERROR, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_PERSISTENCE, 0);
+  } else {
+    logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_PERSISTENCE, 1);
   }
 
-  Serial.print("Goal weight: ");
-  Serial.println(runtimeConfig.goalWeightG);
-  Serial.print("Weight offset: ");
-  Serial.println(runtimeConfig.weightOffsetG);
+  addDebugEvent(DebugCategory::BOOT, DebugCode::BOOT_RUNTIME_CONFIG,
+                weightToCentigrams(
+                    static_cast<float>(runtimeConfig.goalWeightG)),
+                weightToCentigrams(runtimeConfig.weightOffsetG));
 
   bleStackReady = BLE.begin();
   if (bleStackReady) {
@@ -4124,22 +4250,33 @@ void setup() {
     // watchdog and stream-staleness telemetry react promptly.
     BLE.setTimeout(SCALE_ATT_TIMEOUT_MS);
   }
-  Serial.println(bleStackReady
-                     ? "BLE scale central active; local configuration removed"
-                     : "BLE unavailable; stopper restricted to manual mode");
   if (!bleStackReady) {
-    addDebugEvent(DebugCategory::SCALE, DebugCode::INITIALIZATION_FAILED, 3);
+    addDebugEvent(DebugCategory::SCALE, DebugCode::INITIALIZATION_FAILED,
+                  BOOT_SUBSYSTEM_BLE);
+    logEmit(LogLevel::ERROR, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_BLE, 0);
+  } else {
+    logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_BLE, 1);
   }
 
   if (bleStackReady && !initializeScaleWorker()) {
-    Serial.println("Scale worker unavailable; manual mode only");
+    logEmit(LogLevel::ERROR, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_SCALE_WORKER, 0);
     bleStackReady = false;
+  } else if (bleStackReady) {
+    logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_SCALE_WORKER, 1);
   }
 
   webCommandQueue =
       xQueueCreate(WEB_COMMAND_QUEUE_LENGTH, sizeof(WebCommand));
   if (webCommandQueue == nullptr) {
-    Serial.println("Web command queue unavailable; web control disabled");
+    logEmit(LogLevel::ERROR, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_WEB_QUEUE, 0);
+  } else {
+    logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_WEB_QUEUE, 1);
   }
 
   hwmonSnapshot = hwmon.sample(1);
@@ -4157,13 +4294,19 @@ void setup() {
     callbacks.deleteShotRecord = deleteShotRecord;
     callbacks.clearShotLog = clearShotLog;
     if (!networkManager.begin(persistedSettings, callbacks)) {
-      Serial.println("Network manager unavailable; stopper remains local");
+      logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+              BOOT_SUBSYSTEM_NETWORK, 0);
+    } else {
+      logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+              BOOT_SUBSYSTEM_NETWORK, 1);
     }
   } else if (!settingsLoaded) {
-    Serial.println("Network settings unavailable; stopper remains local");
+    logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_NETWORK, 0);
   }
 #endif
 
+  addDebugEvent(DebugCategory::BOOT, DebugCode::BOOT_READY);
   firmwareInitializationComplete = true;
   updateStatusIndicators();
 }
