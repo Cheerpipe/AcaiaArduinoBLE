@@ -144,7 +144,7 @@ Additional fixed protections (not separately configurable):
 | Setting | What it does |
 | --- | --- |
 | **Beep when coffee starts** | One scale beep on first coffee drops during an automatic shot (default ON; ignored when Brew by weight is off). |
-| **Scale reminder beep until paddle OFF** | Repeat scale beeps while the **physical paddle stays ON**, **CN9 is open**, and the scale is connected — i.e. after the brew circuit opened but the paddle was left ON (default ON). |
+| **Paddle-off reminder** | Repeat scale beeps while the **physical paddle stays ON**, **CN9 is open**, and the scale is connected — i.e. after the brew circuit opened but the paddle was left ON (default ON). |
 | **Paddle reminder interval (s)** | Time between reminder beeps (5–60 s; default 10 s). |
 | **Paddle reminder limit (min)** | Stop beeping after this duration even if the paddle remains ON (1–60 min; default 15 min). |
 
@@ -172,7 +172,7 @@ Additional fixed protections (not separately configurable):
 See [Factory credentials (first use)](#factory-credentials-first-use) for AP
 name, default passwords, and step-by-step first connection.
 
-- Fully **embedded Web UI** (no external assets; **56 KiB** asset budget) served
+- Fully **embedded Web UI** (no external assets; **60 KiB** asset budget) served
   over Wi-Fi.
 - **STA** mode when credentials are saved; **fallback AP**
   (`MicraShotStopperAP` at `192.168.4.1`) when STA is unavailable. Modes are

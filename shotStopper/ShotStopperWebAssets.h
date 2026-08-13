@@ -19,7 +19,7 @@ body{font-family:system-ui;max-width:760px;margin:1rem auto;padding:0 1rem;color
 <div id="sessionBar" class="authenticatedOnly hidden"><button id="logoutButton">Sign out</button></div>
 <p id="message" role="status" aria-live="polite">Read-only view. Sign in to control the device.</p>
 <section id="loginPanel">
-  <label>Administrator password <input id="loginPassword" type="password" maxlength="63" autocomplete="current-password"></label>
+  <label>Administrator password <input id="loginPassword" type="password" maxlength="63" autocomplete="current-password"><small class="fieldHint">Same as the AP/Web password (factory Micra1234). Up to 63 characters.</small></label>
   <button id="loginButton">Sign in</button>
 </section>
 <main id="app">
@@ -71,6 +71,7 @@ body{font-family:system-ui;max-width:760px;margin:1rem auto;padding:0 1rem;color
 
   <fieldset id="actionsPanel" class="authenticatedOnly hidden"><legend>Actions</legend>
     <div class="switchRow"><span>Virtual paddle</span><label class="switch" for="virtualPaddle"><input id="virtualPaddle" type="checkbox" role="switch" aria-label="Virtual paddle"><span class="slider"><span class="switchOff">OFF</span><span class="switchOn">ON</span></span></label><span id="virtualPaddleState" class="switchState">OFF</span></div>
+    <small class="fieldHint">Remote paddle when remote CN9 is compiled in. Physical paddle always has priority.</small>
     <button id="rinseButton">Start rinse</button>
     <button id="stopButton" class="btnDanger">Stop shot</button>
     <button id="restartButton" class="btnWarn">Restart controller</button>
@@ -85,75 +86,74 @@ body{font-family:system-ui;max-width:760px;margin:1rem auto;padding:0 1rem;color
       <small id="configDirtyHint" class="warn hidden">Unsaved changes</small>
     </div>
     <details class="cfgGroup"><summary>Brew & weight</summary>
-      <label><input id="brewByWeight" type="checkbox" checked> Brew by weight<small class="fieldHint">Stop by scale weight. Off keeps tare and timer only.</small></label>
+      <label><input id="brewByWeight" type="checkbox" checked> Brew by weight<small class="fieldHint">Stop the shot by scale weight. Off keeps tare and timer only — no weight stop, retare, BBW protection, or offset learning.</small></label>
       <div class="row">
-        <label>Target (g)<input id="goalWeightG" type="number" min="10" max="200" step="1" required><small class="fieldHint">Integer 10–200 g.</small></label>
-        <label>CN9 limit (s)<input id="operationalWallS" type="number" min="5" max="60" step="1" required><small class="fieldHint">5–60 s hard cap.</small></label>
+        <label>Target (g)<input id="goalWeightG" type="number" min="10" max="200" step="1" required><small class="fieldHint">Weight where an automatic shot stops (plus learned offset). Integer 10–200 g.</small></label>
+        <label>CN9 limit (s)<input id="operationalWallS" type="number" min="5" max="60" step="1" required><small class="fieldHint">Max time CN9 stays closed each cycle. Integer 5–60 s (firmware also hard-caps at 60 s).</small></label>
       </div>
       <div class="metric"><strong>Learned stop offset (g)</strong><div id="learnedOffsetG">—</div></div>
-      <label>BBW protection (s)<input id="bbwProtectionS" type="number" min="0.5" max="30" step="0.1" required><small class="fieldHint">0.5–30 s pre-arm; ≥ effective retare + 3 s. Parallel with retare.</small></label>
+      <label>BBW protection (s)<input id="bbwProtectionS" type="number" min="0.5" max="30" step="0.1" required><small class="fieldHint">Blocks weight-stop at start so cup placement or noise cannot cut early. Ends on first drops or this timeout. 0.5–30 s; ≥ retare window + 3 s if retare is on; ≤ CN9.</small></label>
     </details>
     <details class="cfgGroup"><summary>Fast extraction guard</summary>
-      <label><input id="fastExtractionGuardEnabled" type="checkbox"> Enable</label>
-      <label class="fastGuardOpt">Max recovery (g)<input id="maxRecoveryWeightG" type="number" min="10" max="200" step="0.1" required><small class="fieldHint">10–200 g; &gt; target.</small></label>
-      <label class="fastGuardOpt">Min brew time (s)<input id="minBrewTimeS" type="number" min="5" max="55" step="0.5" required><small class="fieldHint">5–55 s; ≥ BBW protection, &lt; CN9.</small></label>
+      <label><input id="fastExtractionGuardEnabled" type="checkbox"> Enable fast extraction guard<small class="fieldHint">If the target is reached too soon (fast/channeling shot), keep brewing instead of stopping immediately.</small></label>
+      <label class="fastGuardOpt">Max recovery (g)<input id="maxRecoveryWeightG" type="number" min="10" max="200" step="0.1" required><small class="fieldHint">Hard stop weight while the shot is extended. 10–200 g; must be &gt; target.</small></label>
+      <label class="fastGuardOpt">Min brew time (s)<input id="minBrewTimeS" type="number" min="5" max="55" step="0.5" required><small class="fieldHint">Earliest time a normal target stop is allowed. Hitting target sooner extends the shot. 5–55 s; ≥ BBW protection; &lt; CN9.</small></label>
     </details>
     <details class="cfgGroup"><summary>A→M time guard</summary>
-      <label><input id="autoToManualGuardEnabled" type="checkbox"> Enable A→M guard</label>
-      <label>Limit mode <select id="autoToManualGuardLimitMode"><option value="auto">Auto (trend)</option><option value="manual">Manual</option></select></label>
-      <label class="atmManualOpt">Manual limit (s)<input id="autoToManualGuardManualLimitS" type="number" min="10" max="60" step="1" required><small class="fieldHint">10 s…CN9 limit.</small></label>
+      <label><input id="autoToManualGuardEnabled" type="checkbox"> Enable A→M guard<small class="fieldHint">If the scale is lost mid automatic shot, close CN9 on a deadline instead of waiting for the full CN9 limit. Reconnect still preferred.</small></label>
+      <label>Limit mode <select id="autoToManualGuardLimitMode"><option value="auto">Auto (trend)</option><option value="manual">Manual</option></select><small class="fieldHint">Auto uses the trend of the last five good shot times. Manual uses the fixed limit below.</small></label>
+      <label class="atmManualOpt">Manual limit (s)<input id="autoToManualGuardManualLimitS" type="number" min="10" max="60" step="1" required><small class="fieldHint">Fixed CN9 deadline from cycle start when the scale is lost (Manual mode). Integer 10 s…CN9 limit.</small></label>
       <div class="metric"><strong>Trend (s)</strong><div id="autoToManualGuardTrendS">—</div></div>
       <button class="mutable authenticatedOnly hidden" type="button" id="resetGuardSamplesButton">Reset A→M samples</button>
     </details>
     <details class="cfgGroup"><summary>Quick rinse</summary>
       <div class="row">
-        <label>Rinse gesture (s)<input id="rinseGestureS" type="number" min="0.1" max="5" step="0.1" required><small class="fieldHint">0.1–5 s; &lt; CN9.</small></label>
-        <label>Rinse duration (s)<input id="rinseDurationS" type="number" min="0.5" max="10" step="0.1" required><small class="fieldHint">0.5–10 s; ≤ CN9.</small></label>
+        <label>Rinse gesture (s)<input id="rinseGestureS" type="number" min="0.1" max="5" step="0.1" required><small class="fieldHint">Max paddle-ON time that still counts as a quick rinse when released. 0.1–5 s; must be &lt; CN9.</small></label>
+        <label>Rinse duration (s)<input id="rinseDurationS" type="number" min="0.5" max="10" step="0.1" required><small class="fieldHint">How long CN9 stays closed after a rinse starts. 0.5–10 s; ≤ CN9.</small></label>
       </div>
     </details>
     <details class="cfgGroup"><summary>Scale & retare</summary>
-      <label><input id="autoTare" type="checkbox"> Automatic tare<small class="fieldHint">Tare when an automatic shot starts.</small></label>
-      <label><input id="canTareStartTimer" type="checkbox"> Bookoo combined command<small class="fieldHint">Requires automatic tare.</small></label>
-      <label><input id="autoRetare" type="checkbox"> Enable automatic retare<small class="fieldHint">Late-cup tare in retare window.</small></label>
-      <label class="retareOpt">Retare window (s)<input id="retareWindowS" type="number" min="0.5" max="10" step="0.1" required><small class="fieldHint">0.5–10 s.</small></label>
-      <label class="retareOpt">Minimum cup weight (g)<input id="minimumCupWeightG" type="number" min="1" max="500" step="0.1" required><small class="fieldHint">1–500 g.</small></label>
-      <label class="retareOpt">Retare stable samples<input id="retareStabilitySamples" type="number" min="2" max="10" step="1" required><small class="fieldHint">Integer 2–10.</small></label>
-      <label class="retareOpt">Retare stability tolerance (g)<input id="retareStabilityToleranceG" type="number" min="0.1" max="20" step="0.1" required><small class="fieldHint">0.1–20 g.</small></label>
-      <label class="retareOpt">Retare sample gap (s)<input id="retareStabilityMaxGapS" type="number" min="0.1" max="5" step="0.1" required><small class="fieldHint">0.1–5 s.</small></label>
-      <label class="retareOpt">Retare min stable time (s)<input id="retareStabilityMinDurationS" type="number" min="0" max="2" step="0.1" required><small class="fieldHint">0–2 s; ≤ window and ≤ samples×gap.</small></label>
+      <label><input id="autoTare" type="checkbox"> Automatic tare<small class="fieldHint">Tare the scale when an automatic shot starts.</small></label>
+      <label><input id="canTareStartTimer" type="checkbox"> Bookoo combined command<small class="fieldHint">Bookoo/generic: tare and start the scale timer in one command. Requires automatic tare.</small></label>
+      <label><input id="autoRetare" type="checkbox"> Enable automatic retare<small class="fieldHint">If the cup is placed after start, tare once more without resetting the shot timer.</small></label>
+      <label class="retareOpt">Retare window (s)<input id="retareWindowS" type="number" min="0.5" max="10" step="0.1" required><small class="fieldHint">How long after start to look for a late cup. 0.5–10 s; ≤ CN9.</small></label>
+      <label class="retareOpt">Minimum cup weight (g)<input id="minimumCupWeightG" type="number" min="1" max="500" step="0.1" required><small class="fieldHint">Stable load that counts as a cup for retare. 1–500 g.</small></label>
+      <label class="retareOpt">Retare stable samples<input id="retareStabilitySamples" type="number" min="2" max="10" step="1" required><small class="fieldHint">Consecutive stable readings required before retare. Integer 2–10.</small></label>
+      <label class="retareOpt">Retare stability tolerance (g)<input id="retareStabilityToleranceG" type="number" min="0.1" max="20" step="0.1" required><small class="fieldHint">Max weight change between those readings. 0.1–20 g.</small></label>
+      <label class="retareOpt">Retare sample gap (s)<input id="retareStabilityMaxGapS" type="number" min="0.1" max="5" step="0.1" required><small class="fieldHint">Max time between consecutive readings. 0.1–5 s.</small></label>
+      <label class="retareOpt">Retare min stable time (s)<input id="retareStabilityMinDurationS" type="number" min="0" max="2" step="0.1" required><small class="fieldHint">How long the cup must stay stable before retare. 0–2 s; ≤ window and ≤ samples×gap.</small></label>
     </details>
     <details class="cfgGroup"><summary>Alerts</summary>
-      <label><input id="firstDropBeep" type="checkbox"> Beep when coffee starts<small class="fieldHint">Beep on first coffee drop.</small></label>
-      <label><input id="paddleReturnReminderBeep" type="checkbox"> Scale reminder beep until the physical paddle is switched OFF<small class="fieldHint">Beep while paddle stays ON after CN9 opens.</small></label>
-      <label class="paddleOpt">Paddle reminder interval (s)<input id="paddleReturnReminderIntervalS" type="number" min="5" max="60" step="1" required><small class="fieldHint">5–60 s.</small></label>
-      <label class="paddleOpt">Paddle reminder limit (min)<input id="paddleReturnReminderMaxDurationMin" type="number" min="1" max="60" step="1" required><small class="fieldHint">1–60 min; ≥ interval.</small></label>
+      <label><input id="firstDropBeep" type="checkbox"> Beep when coffee starts<small class="fieldHint">One scale beep when first coffee drops are detected (automatic shots).</small></label>
+      <label><input id="paddleReturnReminderBeep" type="checkbox"> Paddle-off reminder<small class="fieldHint">Repeat scale beeps after CN9 opens while the physical paddle is still ON.</small></label>
+      <label class="paddleOpt">Paddle reminder interval (s)<input id="paddleReturnReminderIntervalS" type="number" min="5" max="60" step="1" required><small class="fieldHint">Time between reminder beeps. Integer 5–60 s.</small></label>
+      <label class="paddleOpt">Paddle reminder limit (min)<input id="paddleReturnReminderMaxDurationMin" type="number" min="1" max="60" step="1" required><small class="fieldHint">Stop reminding after this time even if the paddle stays ON. Integer 1–60 min; ≥ interval.</small></label>
     </details>
     <details class="cfgGroup"><summary>Date & time</summary>
-      <label>Timezone <select id="timezoneOffsetMinutes"></select></label>
-      <label>NTP server <select id="ntpServerPreset"><option value="pool">pool.ntp.org</option><option value="google">time.google.com</option><option value="cloudflare">time.cloudflare.com</option><option value="nist">time.nist.gov</option></select></label>
-      <label>Custom NTP (optional) <input id="ntpServerCustom" type="text" maxlength="63" placeholder="e.g. ntp.example.com"></label>
+      <label>Timezone <select id="timezoneOffsetMinutes"></select><small class="fieldHint">Offset for shot-history and log timestamps. UTC−12:00 to UTC+14:00, 1 h steps.</small></label>
+      <label>NTP server <select id="ntpServerPreset"><option value="pool">pool.ntp.org</option><option value="google">time.google.com</option><option value="cloudflare">time.cloudflare.com</option><option value="nist">time.nist.gov</option></select><small class="fieldHint">Public NTP host used when Custom NTP is empty.</small></label>
+      <label>Custom NTP (optional) <input id="ntpServerCustom" type="text" maxlength="63" placeholder="e.g. ntp.example.com"><small class="fieldHint">Optional hostname that overrides the preset. Empty = use preset. Up to 63 characters (letters, digits, hyphen, dot).</small></label>
       <button class="mutable authenticatedOnly hidden" id="syncTimeButton">Sync now</button>
     </details>
     <button class="mutable authenticatedOnly hidden" id="saveConfigButton">Save settings</button>
     <button class="mutable authenticatedOnly hidden" id="resetCalibrationButton">Reset learned stop offset (1.5 g)</button>
-    <small>Rules: rinse gesture &lt; CN9 (≤60 s); rinse duration, retare, BBW protection each ≤ CN9; min stable ≤ window and ≤ samples×gap.</small>
   </fieldset>
 
   <fieldset id="networkPanel" class="authenticatedOnly hidden"><legend>Wi-Fi</legend>
     <div id="networkStatus">—</div>
     <button class="mutable" id="scanNetworkButton">Scan networks</button>
     <span id="scanStatus"></span>
-    <label>Detected network <select id="staNetwork"><option value="">Select…</option></select></label>
-    <label>Selected SSID or hidden network <input id="staSsid" type="text" maxlength="32"><small class="fieldHint">1–32 characters.</small></label>
-    <label>Password <input id="staPassword" type="password" maxlength="63" autocomplete="new-password"><small class="fieldHint">Leave empty to keep the saved password. Otherwise 8–63 characters, or empty if open.</small></label>
-    <label><input id="staOpen" type="checkbox"> Open network<small class="fieldHint">Leave password empty.</small></label>
-    <label>IP mode <select id="staIpMode"><option value="dhcp">DHCP</option><option value="static">Static IP</option></select></label>
+    <label>Detected network <select id="staNetwork"><option value="">Select…</option></select><small class="fieldHint">Choose a scanned network to fill SSID and open/secured. Scan only while Ready.</small></label>
+    <label>Selected SSID or hidden network <input id="staSsid" type="text" maxlength="32"><small class="fieldHint">Home Wi-Fi name, including hidden networks. 1–32 characters.</small></label>
+    <label>Password <input id="staPassword" type="password" maxlength="63" autocomplete="new-password"><small class="fieldHint">STA password. Leave empty to keep the saved password. Otherwise 8–63 characters, or empty if open.</small></label>
+    <label><input id="staOpen" type="checkbox"> Open network<small class="fieldHint">Network has no password. Leave the password field empty.</small></label>
+    <label>IP mode <select id="staIpMode"><option value="dhcp">DHCP</option><option value="static">Static IP</option></select><small class="fieldHint">DHCP from the router, or a fixed address. STA must not use 192.168.4.x.</small></label>
     <div class="staticIpOpt">
-      <label>IP <input id="staStaticIp" type="text" maxlength="15" inputmode="decimal" placeholder="192.168.1.50"></label>
-      <label>Mask <input id="staNetmask" type="text" maxlength="15" inputmode="decimal" placeholder="255.255.255.0"></label>
-      <label>Gateway <input id="staGateway" type="text" maxlength="15" inputmode="decimal" placeholder="192.168.1.1"></label>
-      <label>DNS 1 <input id="staDns1" type="text" maxlength="15" inputmode="decimal" placeholder="1.1.1.1"></label>
-      <label>DNS 2 <input id="staDns2" type="text" maxlength="15" inputmode="decimal" placeholder="optional"></label>
+      <label>IP <input id="staStaticIp" type="text" maxlength="15" inputmode="decimal" placeholder="192.168.1.50"><small class="fieldHint">Device IPv4. Not 192.168.4.x; not network or broadcast.</small></label>
+      <label>Mask <input id="staNetmask" type="text" maxlength="15" inputmode="decimal" placeholder="255.255.255.0"><small class="fieldHint">Subnet mask, e.g. 255.255.255.0.</small></label>
+      <label>Gateway <input id="staGateway" type="text" maxlength="15" inputmode="decimal" placeholder="192.168.1.1"><small class="fieldHint">Router IPv4. Same subnet as IP; not 192.168.4.x; must differ from IP.</small></label>
+      <label>DNS 1 <input id="staDns1" type="text" maxlength="15" inputmode="decimal" placeholder="1.1.1.1"><small class="fieldHint">Primary DNS. Valid IPv4.</small></label>
+      <label>DNS 2 <input id="staDns2" type="text" maxlength="15" inputmode="decimal" placeholder="optional"><small class="fieldHint">Secondary DNS. Valid IPv4, or empty.</small></label>
     </div>
     <button class="mutable" id="saveNetworkButton">Save and restart</button>
     <button class="mutable" id="forgetNetworkButton">Forget network and restart</button>
@@ -162,9 +162,9 @@ body{font-family:system-ui;max-width:760px;margin:1rem auto;padding:0 1rem;color
 
   <fieldset id="accessPointPanel" class="authenticatedOnly hidden"><legend>Web UI password</legend>
     <div id="apStatus">MicraShotStopperAP — 192.168.4.1</div>
-    <label>Current password <input id="currentApPassword" type="password" maxlength="63" required></label>
-    <label>New password <input id="newApPassword" type="password" minlength="8" maxlength="63" required><small class="fieldHint">8–63 characters.</small></label>
-    <label>Confirm new password <input id="confirmApPassword" type="password" minlength="8" maxlength="63" required></label>
+    <label>Current password <input id="currentApPassword" type="password" maxlength="63" required><small class="fieldHint">Current AP and Web UI password.</small></label>
+    <label>New password <input id="newApPassword" type="password" minlength="8" maxlength="63" required><small class="fieldHint">Sets both SoftAP and Web login. 8–63 characters; cannot be the factory default.</small></label>
+    <label>Confirm new password <input id="confirmApPassword" type="password" minlength="8" maxlength="63" required><small class="fieldHint">Must match the new password.</small></label>
     <button id="changeApPasswordButton">Change AP/UI password</button>
   </fieldset>
 
@@ -181,8 +181,8 @@ body{font-family:system-ui;max-width:760px;margin:1rem auto;padding:0 1rem;color
   </fieldset>
 
   <fieldset id="logPanel"><legend>Log</legend>
-    <label>Level <select id="logLevelFilter"><option value="0">Critical</option><option value="1">Error</option><option value="2">Warning</option><option value="3" selected>Info</option><option value="4">Debug</option></select></label>
-    <label>Category <select id="logFilter"><option value="">All</option><option value="boot">boot</option><option value="system">system</option><option value="scale">scale</option><option value="state">state</option><option value="relay">relay</option><option value="paddle">paddle</option><option value="network">network</option><option value="config">config</option><option value="web">web</option><option value="security">security</option></select></label>
+    <label>Level <select id="logLevelFilter"><option value="0">Critical</option><option value="1">Error</option><option value="2">Warning</option><option value="3" selected>Info</option><option value="4">Debug</option></select><small class="fieldHint">Show this severity and more serious. Does not change what the device records.</small></label>
+    <label>Category <select id="logFilter"><option value="">All</option><option value="boot">boot</option><option value="system">system</option><option value="scale">scale</option><option value="state">state</option><option value="relay">relay</option><option value="paddle">paddle</option><option value="network">network</option><option value="config">config</option><option value="web">web</option><option value="security">security</option></select><small class="fieldHint">Show one subsystem, or All.</small></label>
     <p id="logDropped" class="fieldHint" hidden>Dropped: <span id="logDroppedCount">0</span></p>
     <textarea id="log" readonly></textarea>
     <button id="copyLogButton">Copy</button><button id="clearLogButton">Clear view</button>

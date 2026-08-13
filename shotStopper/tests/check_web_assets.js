@@ -20,8 +20,8 @@ if (!scriptMatch) throw new Error('Embedded script not found');
 // Parse the exact JavaScript delivered by the controller.
 new Function(scriptMatch[1]);
 
-if (Buffer.byteLength(html, 'utf8') > 57344) {
-  throw new Error('Web UI exceeds the 56 KiB asset budget');
+if (Buffer.byteLength(html, 'utf8') > 61440) {
+  throw new Error('Web UI exceeds the 60 KiB asset budget');
 }
 if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
     !html.includes('Paddle State') || !html.includes('firstDropBeep') ||
@@ -30,7 +30,7 @@ if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
   throw new Error('Web UI must show the physical paddle state and expose both scale beep options');
 }
 if (!html.includes('id="operationalWallS" type="number" min="5" max="60"') ||
-    !html.includes('CN9 (≤60 s)') ||
+    !html.includes('hard-caps at 60 s') ||
     !html.includes('sToMs(') ||
     !html.includes('rinseGestureMs:sToMs') ||
     !network.includes('CN9 limit must be from 5 to 60 s.')) {
