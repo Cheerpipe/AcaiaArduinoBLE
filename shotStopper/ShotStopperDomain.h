@@ -11,8 +11,9 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 20;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 19;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 21;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 20;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V20 = 20;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V19 = 19;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V18 = 18;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V17 = 17;
@@ -22,6 +23,8 @@ constexpr uint32_t CONFIG_SCHEMA_VERSION_V14 = 14;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V13 = 13;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V12 = 12;
 constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
+constexpr size_t PREFERRED_SCALE_NAME_CAPACITY = 32;
+constexpr uint32_t SCALE_MAC_CACHE_WRITE_PAUSE_MS = 60000;
 constexpr size_t NTP_SERVER_HOST_CAPACITY = 64;
 constexpr uint32_t NTP_RESYNC_INTERVAL_MS = 3600UL * 1000UL;
 constexpr uint32_t NTP_UNSYNCED_RETRY_MS = 60UL * 1000UL;
@@ -37,6 +40,49 @@ enum class NtpServerPreset : uint8_t {
   CLOUDFLARE = 2,
   NIST = 3
 };
+
+// How preferred-scale MAC cache affects BLE discovery.
+enum class ScaleMacCacheMode : uint8_t {
+  // Named OFF (not DISABLED): ESP32 Arduino defines a DISABLED GPIO macro.
+  OFF = 0,      // Never directed; do not write cache on connect.
+  PARTIAL = 1,  // Directed attempts then name-scan fallback (legacy default).
+  FULL = 2      // Directed only while a MAC is cached.
+};
+
+inline bool validScaleMacCacheMode(uint8_t mode) {
+  return mode <= static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+}
+
+inline const char *scaleMacCacheModeId(uint8_t mode) {
+  switch (static_cast<ScaleMacCacheMode>(mode)) {
+    case ScaleMacCacheMode::OFF:
+      return "disabled";
+    case ScaleMacCacheMode::FULL:
+      return "full";
+    case ScaleMacCacheMode::PARTIAL:
+    default:
+      return "partial";
+  }
+}
+
+inline bool parseScaleMacCacheMode(const char *text, uint8_t &mode) {
+  if (text == nullptr) {
+    return false;
+  }
+  if (strcmp(text, "disabled") == 0) {
+    mode = static_cast<uint8_t>(ScaleMacCacheMode::OFF);
+    return true;
+  }
+  if (strcmp(text, "partial") == 0) {
+    mode = static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL);
+    return true;
+  }
+  if (strcmp(text, "full") == 0) {
+    mode = static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+    return true;
+  }
+  return false;
+}
 
 inline bool validNtpHostnameChar(char c) {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
@@ -391,6 +437,8 @@ struct RuntimeConfig {
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS};
+  uint8_t scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL);
 };
 
 struct CycleConfigSnapshot {
@@ -502,7 +550,8 @@ enum class ConfigValidationError : uint8_t {
   AUTO_TO_MANUAL_GUARD_MODE,
   AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT,
   AUTO_TO_MANUAL_GUARD_BASELINE,
-  WEIGHT_OFFSET_BASELINE
+  WEIGHT_OFFSET_BASELINE,
+  SCALE_MAC_CACHE_MODE
 };
 
 constexpr size_t MAX_SHOT_PRESETS = 8;
@@ -705,6 +754,9 @@ inline ConfigValidationError validateRuntimeConfig(
       config.autoToManualGuardBaselineMs > config.operationalWallMs) {
     return ConfigValidationError::AUTO_TO_MANUAL_GUARD_BASELINE;
   }
+  if (!validScaleMacCacheMode(config.scaleMacCacheMode)) {
+    return ConfigValidationError::SCALE_MAC_CACHE_MODE;
+  }
   if (!config.fastExtractionGuardEnabled) {
     return ConfigValidationError::NONE;
   }
@@ -779,6 +831,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "autoToManualGuardBaselineMs";
     case ConfigValidationError::WEIGHT_OFFSET_BASELINE:
       return "weightOffsetBaselineG";
+    case ConfigValidationError::SCALE_MAC_CACHE_MODE:
+      return "scaleMacCacheMode";
   }
   return "unknown";
 }
@@ -853,6 +907,24 @@ inline bool validPreferredScaleMac(const char *mac) {
         return false;
       }
     } else if (!validBleMacNibble(mac[index])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Empty name is allowed. Otherwise printable ASCII without quotes/controls.
+inline bool validPreferredScaleName(const char *name) {
+  if (name == nullptr) {
+    return false;
+  }
+  const size_t length = strnlen(name, PREFERRED_SCALE_NAME_CAPACITY);
+  if (length >= PREFERRED_SCALE_NAME_CAPACITY) {
+    return false;
+  }
+  for (size_t index = 0; index < length; ++index) {
+    const unsigned char c = static_cast<unsigned char>(name[index]);
+    if (c < 0x20 || c > 0x7e || c == '"' || c == '\\') {
       return false;
     }
   }
@@ -996,6 +1068,7 @@ enum class WebCommandType : uint8_t {
   RESET_NETWORK_UI,
   FACTORY_RESET,
   CLEAR_SHOT_LOG,
+  CLEAR_PREFERRED_SCALE,
   PERSIST_RUNTIME,
   START_WIFI_SCAN,
   MAINTENANCE_COMPLETE
@@ -1024,6 +1097,8 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::RESET_NETWORK_UI: return "recover network/UI";
     case WebCommandType::FACTORY_RESET: return "restore factory settings";
     case WebCommandType::CLEAR_SHOT_LOG: return "clear shot history";
+    case WebCommandType::CLEAR_PREFERRED_SCALE:
+      return "clear preferred scale cache";
     case WebCommandType::PERSIST_RUNTIME: return "persist workflow";
     case WebCommandType::START_WIFI_SCAN: return "scan Wi-Fi networks";
     case WebCommandType::MAINTENANCE_COMPLETE:
@@ -1173,6 +1248,9 @@ struct ControlStatusSnapshot {
   uint32_t cycleAutoToManualGuardRemainingMs = 0;
   uint32_t autoToManualGuardTrendMs = DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
   char scaleProtocol[20] = "none";
+  char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+  char preferredScaleName[PREFERRED_SCALE_NAME_CAPACITY] = {};
+  uint32_t scaleMacCachePauseRemainingMs = 0;
 };
 
 inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {

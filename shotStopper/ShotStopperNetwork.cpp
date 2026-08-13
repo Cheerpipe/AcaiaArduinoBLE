@@ -219,6 +219,8 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "A→M baseline must be from 10 s up to the CN9 limit.";
     case ConfigValidationError::WEIGHT_OFFSET_BASELINE:
       return "Offset baseline must be from 0 to 5.0 g.";
+    case ConfigValidationError::SCALE_MAC_CACHE_MODE:
+      return "Scale MAC cache mode must be disabled, partial, or full.";
   }
   return "Invalid configuration.";
 }
@@ -268,6 +270,14 @@ bool jsonNtpPreset(cJSON *object, const char *name, uint8_t &output) {
     return true;
   }
   return false;
+}
+
+bool jsonScaleMacCacheMode(cJSON *object, const char *name, uint8_t &output) {
+  cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+  if (!cJSON_IsString(item) || item->valuestring == nullptr) {
+    return false;
+  }
+  return parseScaleMacCacheMode(item->valuestring, output);
 }
 
 const char *ntpPresetId(uint8_t preset) {
@@ -467,21 +477,35 @@ PersistedSettings ShotStopperNetwork::settingsCopy() {
 }
 
 void ShotStopperNetwork::mergePreferredScaleMac(PersistedSettings &settings) {
-  if (callbacks_.copyPreferredScaleMac == nullptr) {
-    return;
+  if (callbacks_.copyPreferredScaleMac != nullptr) {
+    callbacks_.copyPreferredScaleMac(settings.preferredScaleMac,
+                                     sizeof(settings.preferredScaleMac));
   }
-  callbacks_.copyPreferredScaleMac(settings.preferredScaleMac,
-                                   sizeof(settings.preferredScaleMac));
+  if (callbacks_.copyPreferredScaleName != nullptr) {
+    callbacks_.copyPreferredScaleName(settings.preferredScaleName,
+                                      sizeof(settings.preferredScaleName));
+  }
 }
 
 void ShotStopperNetwork::syncPreferredScaleMac(const char *mac) {
+  syncPreferredScale(mac, nullptr);
+}
+
+void ShotStopperNetwork::syncPreferredScale(const char *mac, const char *name) {
   if (mac == nullptr || !validPreferredScaleMac(mac)) {
     return;
+  }
+  char safeName[PREFERRED_SCALE_NAME_CAPACITY] = {};
+  if (name != nullptr && validPreferredScaleName(name)) {
+    strncpy(safeName, name, sizeof(safeName) - 1);
   }
   portENTER_CRITICAL(&dataMux_);
   strncpy(settings_.preferredScaleMac, mac,
           sizeof(settings_.preferredScaleMac) - 1);
   settings_.preferredScaleMac[sizeof(settings_.preferredScaleMac) - 1] = '\0';
+  strncpy(settings_.preferredScaleName, safeName,
+          sizeof(settings_.preferredScaleName) - 1);
+  settings_.preferredScaleName[sizeof(settings_.preferredScaleName) - 1] = '\0';
   portEXIT_CRITICAL(&dataMux_);
 }
 
@@ -1792,6 +1816,8 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/time/sync", HTTP_POST,
                       timeSyncHandler) &&
       registerHandler(server_, "/api/v1/config", HTTP_POST, configHandler) &&
+      registerHandler(server_, "/api/v1/scale/preferred/clear", HTTP_POST,
+                      preferredScaleClearHandler) &&
       registerHandler(server_, "/api/v1/presets", HTTP_POST, presetsHandler) &&
       registerHandler(server_, "/api/v1/calibration/reset", HTTP_POST,
                       resetCalibrationHandler) &&
@@ -2322,6 +2348,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   char safeScaleProtocol[24] = {};
   sanitizeJsonEmbed(control.scaleProtocol, safeScaleProtocol,
                     sizeof(safeScaleProtocol));
+  char safePreferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY * 2] = {};
+  sanitizeJsonEmbed(control.preferredScaleMac, safePreferredScaleMac,
+                    sizeof(safePreferredScaleMac));
+  char safePreferredScaleName[PREFERRED_SCALE_NAME_CAPACITY * 2] = {};
+  sanitizeJsonEmbed(control.preferredScaleName, safePreferredScaleName,
+                    sizeof(safePreferredScaleName));
   char safeFirmwareVersion[32] = {};
   sanitizeJsonEmbed(FW_VERSION, safeFirmwareVersion,
                     sizeof(safeFirmwareVersion));
@@ -2413,7 +2445,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"autoToManualGuardBaselineMs\":%lu,"
       "\"autoToManualGuardTrendMs\":%lu,"
       "\"timezoneOffsetMinutes\":%d,"
-      "\"ntpServerPreset\":\"%s\",\"ntpServerCustom\":\"%s\"},"
+      "\"ntpServerPreset\":\"%s\",\"ntpServerCustom\":\"%s\","
+      "\"scaleMacCacheMode\":\"%s\"},"
       "\"presets\":%s,"
       "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
       "\"nextRetryInMs\":%lu,\"consecutiveFailures\":%u,"
@@ -2427,7 +2460,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"packetSequence\":%lu,\"packetGaps\":%lu,"
       "\"rejectedPackets\":%lu,\"reconnects\":%lu,"
       "\"lastDisconnectReason\":%u,"
-      "\"lastDisconnectReasonName\":\"%s\",\"eventsDropped\":%lu},"
+      "\"lastDisconnectReasonName\":\"%s\",\"eventsDropped\":%lu,"
+      "\"preferredMac\":\"%s\",\"preferredName\":\"%s\","
+      "\"macCachePauseRemainingMs\":%lu},"
       "\"lastCycle\":{\"valid\":%s,"
       "\"durationMs\":%lu,\"endReason\":\"%s\","
       "\"lastWeightG\":%s,\"weightAgeMs\":%lu},"
@@ -2519,6 +2554,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<int>(control.config.timezoneOffsetMinutes),
       ntpPresetId(control.config.ntpServerPreset),
       safeNtpCustom,
+      scaleMacCacheModeId(control.config.scaleMacCacheMode),
       g_presetsStatusJson,
       timeSyncStateName(timeStatus.state),
       static_cast<unsigned long>(timeStatus.utcSec),
@@ -2543,6 +2579,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned>(control.scaleLastDisconnectReason),
       scaleDisconnectReasonName(control.scaleLastDisconnectReason),
       static_cast<unsigned long>(control.scaleEventsDropped),
+      safePreferredScaleMac, safePreferredScaleName,
+      static_cast<unsigned long>(control.scaleMacCachePauseRemainingMs),
       control.lastCycle.valid ? "true" : "false",
       static_cast<unsigned long>(control.lastCycle.durationMs),
       endReasonName(control.lastCycle.endReason), lastWeight,
@@ -2956,9 +2994,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "autoToManualGuardEnabled", "autoToManualGuardLimitMode",
       "autoToManualGuardManualLimitMs", "autoToManualGuardBaselineMs",
       "weightOffsetBaselineG",
-      "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom"};
+      "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom",
+      "scaleMacCacheMode"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 31)) {
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 32)) {
     parseError =
         "Config must include exactly the expected fields with correct types.";
   } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
@@ -3052,6 +3091,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (!jsonString(root, "ntpServerCustom", customNtp, sizeof(customNtp),
                          true)) {
     parseError = "ntpServerCustom must be a string of at most 63 characters.";
+  } else if (!jsonScaleMacCacheMode(root, "scaleMacCacheMode",
+                                    candidate.scaleMacCacheMode)) {
+    parseError = "scaleMacCacheMode must be disabled, partial, or full.";
   }
   if (root != nullptr) {
     cJSON_Delete(root);
@@ -3081,6 +3123,30 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; nothing was saved.");
+  }
+  return self.sendAccepted(request, command.requestId);
+}
+
+esp_err_t ShotStopperNetwork::preferredScaleClearHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authenticate(request, true)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
+                     "Invalid session or CSRF token.");
+  }
+  ControlStatusSnapshot status;
+  self.callbacks_.copyControlStatus(status);
+  if (!controlAllowsConfiguration(status)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "Preferred scale cache cannot be cleared while a cycle "
+                     "is active.");
+  }
+  WebCommand command;
+  command.type = WebCommandType::CLEAR_PREFERRED_SCALE;
+  command.requestId = self.allocateRequestId();
+  if (!self.callbacks_.enqueueWebCommand(command)) {
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
+                     "Control is busy; nothing was cleared.");
   }
   return self.sendAccepted(request, command.requestId);
 }

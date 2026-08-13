@@ -55,6 +55,7 @@ struct PersistedSettings {
   uint8_t authSalt[AUTH_SALT_LENGTH] = {};
   uint8_t authHash[AUTH_HASH_LENGTH] = {};
   char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+  char preferredScaleName[PREFERRED_SCALE_NAME_CAPACITY] = {};
   uint32_t checksum = 0;
 };
 
@@ -115,6 +116,45 @@ struct PersistedSettingsV19 {
   uint32_t structureSize;
   uint32_t storageRevision;
   RuntimeConfigV19 runtime;
+  bool staConfigured;
+  bool staOpen;
+  char staSsid[WIFI_SSID_CAPACITY];
+  char staPassword[WIFI_PASSWORD_CAPACITY];
+  uint8_t staIpMode;
+  uint8_t staIp[4];
+  uint8_t staNetmask[4];
+  uint8_t staGateway[4];
+  uint8_t staDns1[4];
+  uint8_t staDns2[4];
+  uint8_t staConfigState;
+  bool lkgValid;
+  bool lkgOpen;
+  char lkgSsid[WIFI_SSID_CAPACITY];
+  char lkgPassword[WIFI_PASSWORD_CAPACITY];
+  uint8_t lkgIpMode;
+  uint8_t lkgIp[4];
+  uint8_t lkgNetmask[4];
+  uint8_t lkgGateway[4];
+  uint8_t lkgDns1[4];
+  uint8_t lkgDns2[4];
+  char apPassword[WIFI_PASSWORD_CAPACITY];
+  uint8_t authSalt[AUTH_SALT_LENGTH];
+  uint8_t authHash[AUTH_HASH_LENGTH];
+  char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY];
+  uint32_t checksum;
+};
+
+// Schema 20 runtime matches V19 (offset baseline; no scaleMacCacheMode).
+using RuntimeConfigV20 = RuntimeConfigV19;
+
+// Schema 20 blob: preset bank + preferredScaleMac; no preferredScaleName.
+struct PersistedSettingsV20 {
+  uint32_t magic;
+  uint32_t schemaVersion;
+  uint32_t structureSize;
+  uint32_t storageRevision;
+  RuntimeConfigV20 runtime;
+  ShotPresetBank presets;
   bool staConfigured;
   bool staOpen;
   char staSsid[WIFI_SSID_CAPACITY];
@@ -721,6 +761,12 @@ inline uint32_t persistedSettingsV19Checksum(
                offsetof(PersistedSettingsV19, checksum));
 }
 
+inline uint32_t persistedSettingsV20Checksum(
+    const PersistedSettingsV20 &settings) {
+  return crc32(reinterpret_cast<const uint8_t *>(&settings),
+               offsetof(PersistedSettingsV20, checksum));
+}
+
 inline void clearStaAddressFields(PersistedSettings &settings) {
   settings.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
   memset(settings.staIp, 0, sizeof(settings.staIp));
@@ -983,6 +1029,8 @@ inline void migrateRuntimeConfigV18ToCurrent(const RuntimeConfigV18 &legacy,
   runtime.autoToManualGuardBaselineMs = legacy.autoToManualGuardBaselineMs;
   memcpy(runtime.autoToManualGuardSamplesDs, legacy.autoToManualGuardSamplesDs,
          sizeof(runtime.autoToManualGuardSamplesDs));
+  runtime.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL);
 }
 
 inline void migrateRuntimeConfigV19ToCurrent(const RuntimeConfigV19 &legacy,
@@ -1027,6 +1075,54 @@ inline void migrateRuntimeConfigV19ToCurrent(const RuntimeConfigV19 &legacy,
   runtime.autoToManualGuardBaselineMs = legacy.autoToManualGuardBaselineMs;
   memcpy(runtime.autoToManualGuardSamplesDs, legacy.autoToManualGuardSamplesDs,
          sizeof(runtime.autoToManualGuardSamplesDs));
+  runtime.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL);
+}
+
+inline void migrateRuntimeConfigV20ToCurrent(const RuntimeConfigV20 &legacy,
+                                             RuntimeConfig &runtime) {
+  runtime = RuntimeConfig{};
+  runtime.revision = legacy.revision;
+  runtime.goalWeightG = legacy.goalWeightG;
+  runtime.weightOffsetG = legacy.weightOffsetG;
+  runtime.weightOffsetBaselineG = legacy.weightOffsetBaselineG;
+  runtime.autoTare = legacy.autoTare;
+  runtime.timerOnly = legacy.timerOnly;
+  runtime.canTareStartTimer = legacy.canTareStartTimer;
+  runtime.shotTimerStartDelayMs = legacy.shotTimerStartDelayMs;
+  runtime.firstDropBeep = legacy.firstDropBeep;
+  runtime.paddleReturnReminderBeep = legacy.paddleReturnReminderBeep;
+  runtime.paddleReturnReminderIntervalMs =
+      legacy.paddleReturnReminderIntervalMs;
+  runtime.paddleReturnReminderMaxDurationMs =
+      legacy.paddleReturnReminderMaxDurationMs;
+  runtime.rinseGestureMs = legacy.rinseGestureMs;
+  runtime.rinseDurationMs = legacy.rinseDurationMs;
+  runtime.autoRetare = legacy.autoRetare;
+  runtime.retareWindowMs = legacy.retareWindowMs;
+  runtime.minimumCupWeightG = legacy.minimumCupWeightG;
+  runtime.retareStabilitySamples = legacy.retareStabilitySamples;
+  runtime.retareStabilityToleranceG = legacy.retareStabilityToleranceG;
+  runtime.retareStabilityMaxGapMs = legacy.retareStabilityMaxGapMs;
+  runtime.retareStabilityMinDurationMs = legacy.retareStabilityMinDurationMs;
+  runtime.bbwProtectionMs = legacy.bbwProtectionMs;
+  runtime.operationalWallMs = legacy.operationalWallMs;
+  runtime.timezoneOffsetMinutes = legacy.timezoneOffsetMinutes;
+  runtime.ntpServerPreset = legacy.ntpServerPreset;
+  memcpy(runtime.ntpServerCustom, legacy.ntpServerCustom,
+         sizeof(runtime.ntpServerCustom));
+  runtime.fastExtractionGuardEnabled = legacy.fastExtractionGuardEnabled;
+  runtime.maxRecoveryWeightG = legacy.maxRecoveryWeightG;
+  runtime.minBrewTimeMs = legacy.minBrewTimeMs;
+  runtime.autoToManualGuardEnabled = legacy.autoToManualGuardEnabled;
+  runtime.autoToManualGuardLimitMode = legacy.autoToManualGuardLimitMode;
+  runtime.autoToManualGuardManualLimitMs =
+      legacy.autoToManualGuardManualLimitMs;
+  runtime.autoToManualGuardBaselineMs = legacy.autoToManualGuardBaselineMs;
+  memcpy(runtime.autoToManualGuardSamplesDs, legacy.autoToManualGuardSamplesDs,
+         sizeof(runtime.autoToManualGuardSamplesDs));
+  runtime.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL);
 }
 
 inline void ensurePersistedPresetBank(PersistedSettings &settings) {
@@ -1156,6 +1252,7 @@ inline bool validPersistedSettings(const PersistedSettings &settings) {
                               settings.runtime.autoRetare) ||
       !validAccessPointPassword(settings.apPassword) ||
       !validPreferredScaleMac(settings.preferredScaleMac) ||
+      !validPreferredScaleName(settings.preferredScaleName) ||
       !validPersistedStaNetwork(settings)) {
     return false;
   }
@@ -1538,6 +1635,7 @@ inline bool readV17SettingsSlot(Preferences &preferences, const char *key,
   memcpy(migrated.authSalt, legacy.authSalt, sizeof(migrated.authSalt));
   memcpy(migrated.authHash, legacy.authHash, sizeof(migrated.authHash));
   migrated.preferredScaleMac[0] = '\0';
+  migrated.preferredScaleName[0] = '\0';
   if (validateRuntimeConfig(migrated.runtime) !=
       ConfigValidationError::NONE) {
     return false;
@@ -1692,6 +1790,78 @@ inline bool readV19SettingsSlot(Preferences &preferences, const char *key,
   return true;
 }
 
+inline bool readV20SettingsSlot(Preferences &preferences, const char *key,
+                                PersistedSettings &settings) {
+  if (preferences.getBytesLength(key) != sizeof(PersistedSettingsV20)) {
+    return false;
+  }
+  PersistedSettingsV20 legacy = {};
+  if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
+      legacy.magic != PERSISTED_SETTINGS_MAGIC ||
+      legacy.schemaVersion != CONFIG_SCHEMA_VERSION_V20 ||
+      legacy.structureSize != sizeof(PersistedSettingsV20) ||
+      legacy.checksum != persistedSettingsV20Checksum(legacy) ||
+      !validAccessPointPassword(legacy.apPassword) ||
+      !validPreferredScaleMac(legacy.preferredScaleMac) ||
+      (legacy.staConfigured != 0 &&
+       (!validWifiSsid(legacy.staSsid) ||
+        !validWifiPassword(legacy.staPassword, legacy.staOpen != 0) ||
+        !validStaAddressConfig(legacy.staIpMode, legacy.staIp, legacy.staNetmask,
+                               legacy.staGateway, legacy.staDns1,
+                               legacy.staDns2)))) {
+    return false;
+  }
+
+  if (!passwordHashMatches(legacy.authSalt, legacy.apPassword,
+                           legacy.authHash)) {
+    return false;
+  }
+
+  settings = PersistedSettings{};
+  settings.storageRevision = legacy.storageRevision;
+  migrateRuntimeConfigV20ToCurrent(legacy.runtime, settings.runtime);
+  normalizeRuntimeBbwProtectionDefaults(settings.runtime);
+  settings.presets = legacy.presets;
+  settings.staConfigured = legacy.staConfigured;
+  settings.staOpen = legacy.staOpen;
+  memcpy(settings.staSsid, legacy.staSsid, sizeof(settings.staSsid));
+  memcpy(settings.staPassword, legacy.staPassword,
+         sizeof(settings.staPassword));
+  settings.staIpMode = legacy.staIpMode;
+  memcpy(settings.staIp, legacy.staIp, sizeof(settings.staIp));
+  memcpy(settings.staNetmask, legacy.staNetmask, sizeof(settings.staNetmask));
+  memcpy(settings.staGateway, legacy.staGateway, sizeof(settings.staGateway));
+  memcpy(settings.staDns1, legacy.staDns1, sizeof(settings.staDns1));
+  memcpy(settings.staDns2, legacy.staDns2, sizeof(settings.staDns2));
+  settings.staConfigState = legacy.staConfigState;
+  settings.lkgValid = legacy.lkgValid;
+  settings.lkgOpen = legacy.lkgOpen;
+  memcpy(settings.lkgSsid, legacy.lkgSsid, sizeof(settings.lkgSsid));
+  memcpy(settings.lkgPassword, legacy.lkgPassword,
+         sizeof(settings.lkgPassword));
+  settings.lkgIpMode = legacy.lkgIpMode;
+  memcpy(settings.lkgIp, legacy.lkgIp, sizeof(settings.lkgIp));
+  memcpy(settings.lkgNetmask, legacy.lkgNetmask, sizeof(settings.lkgNetmask));
+  memcpy(settings.lkgGateway, legacy.lkgGateway, sizeof(settings.lkgGateway));
+  memcpy(settings.lkgDns1, legacy.lkgDns1, sizeof(settings.lkgDns1));
+  memcpy(settings.lkgDns2, legacy.lkgDns2, sizeof(settings.lkgDns2));
+  memcpy(settings.apPassword, legacy.apPassword, sizeof(settings.apPassword));
+  memcpy(settings.authSalt, legacy.authSalt, sizeof(settings.authSalt));
+  memcpy(settings.authHash, legacy.authHash, sizeof(settings.authHash));
+  memcpy(settings.preferredScaleMac, legacy.preferredScaleMac,
+         sizeof(settings.preferredScaleMac));
+  settings.preferredScaleName[0] = '\0';
+  if (validateRuntimeConfig(settings.runtime) !=
+      ConfigValidationError::NONE) {
+    return false;
+  }
+  if (!validPersistedStaNetwork(settings)) {
+    return false;
+  }
+  finalizePersistedSettings(settings);
+  return true;
+}
+
 inline bool readAnySettingsSlot(Preferences &preferences, const char *key,
                                 PersistedSettings &settings,
                                 bool *legacyFormat = nullptr) {
@@ -1703,10 +1873,13 @@ inline bool readAnySettingsSlot(Preferences &preferences, const char *key,
                         length == sizeof(PersistedSettingsV16) ||
                         length == sizeof(PersistedSettingsV17) ||
                         length == sizeof(PersistedSettingsV18) ||
-                        length == sizeof(PersistedSettingsV19);
+                        length == sizeof(PersistedSettingsV19) ||
+                        length == sizeof(PersistedSettingsV20);
   bool valid = false;
   if (length == sizeof(PersistedSettings)) {
     valid = readSettingsSlot(preferences, key, settings);
+  } else if (length == sizeof(PersistedSettingsV20)) {
+    valid = readV20SettingsSlot(preferences, key, settings);
   } else if (length == sizeof(PersistedSettingsV19)) {
     valid = readV19SettingsSlot(preferences, key, settings);
   } else if (length == sizeof(PersistedSettingsV18)) {

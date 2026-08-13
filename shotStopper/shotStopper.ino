@@ -431,7 +431,10 @@ uint32_t scaleTimerMs = 0;
 uint32_t scaleTimerAgeMs = 0;
 char scaleProtocolName[20] = "none";
 char scalePreferredMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+char scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY] = {};
 bool scalePreferredMacDirty = false;
+uint32_t scaleCacheWritePausedUntilMs = 0;
+uint32_t scalePreferredDirectedResetGeneration = 0;
 uint32_t scaleWorkerProgressAtMs = 0;
 uint32_t scaleEventsDropped = 0;
 uint32_t scaleWorkerStackMinWords = 0;
@@ -2944,42 +2947,108 @@ void copyPreferredScaleMac(char *out, size_t capacity) {
   portEXIT_CRITICAL(&scalePreferredMacMux);
 }
 
+void copyPreferredScaleName(char *out, size_t capacity) {
+  if (out == nullptr || capacity == 0) {
+    return;
+  }
+  portENTER_CRITICAL(&scalePreferredMacMux);
+  strncpy(out, scalePreferredName, capacity - 1);
+  out[capacity - 1] = '\0';
+  portEXIT_CRITICAL(&scalePreferredMacMux);
+}
+
 bool hasPreferredScaleMac() {
   char mac[PREFERRED_SCALE_MAC_CAPACITY];
   copyPreferredScaleMac(mac, sizeof(mac));
   return mac[0] != '\0' && validPreferredScaleMac(mac);
 }
 
-void notePreferredScaleMac(const char *mac) {
+uint32_t scaleMacCachePauseRemainingMs(uint32_t nowMs) {
+  portENTER_CRITICAL(&scalePreferredMacMux);
+  const uint32_t until = scaleCacheWritePausedUntilMs;
+  portEXIT_CRITICAL(&scalePreferredMacMux);
+  if (until == 0) {
+    return 0;
+  }
+  const int32_t remaining = static_cast<int32_t>(until - nowMs);
+  return remaining > 0 ? static_cast<uint32_t>(remaining) : 0;
+}
+
+bool scaleMacCacheWritePaused(uint32_t nowMs = millis()) {
+  return scaleMacCachePauseRemainingMs(nowMs) > 0;
+}
+
+ScaleMacCacheMode currentScaleMacCacheMode() {
+  return static_cast<ScaleMacCacheMode>(runtimeConfig.scaleMacCacheMode);
+}
+
+void notePreferredScale(const char *mac, const char *name) {
+  if (currentScaleMacCacheMode() == ScaleMacCacheMode::OFF) {
+    return;
+  }
+  if (scaleMacCacheWritePaused()) {
+    return;
+  }
   if (mac == nullptr || !validPreferredScaleMac(mac) || mac[0] == '\0') {
     return;
   }
+  char safeName[PREFERRED_SCALE_NAME_CAPACITY] = {};
+  if (name != nullptr && validPreferredScaleName(name)) {
+    strncpy(safeName, name, PREFERRED_SCALE_NAME_CAPACITY - 1);
+  }
+  bool changed = false;
+  bool macChanged = false;
   portENTER_CRITICAL(&scalePreferredMacMux);
-  const bool changed = strncmp(scalePreferredMac, mac,
-                               PREFERRED_SCALE_MAC_CAPACITY) != 0;
-  if (changed) {
+  macChanged = strncmp(scalePreferredMac, mac, PREFERRED_SCALE_MAC_CAPACITY) != 0;
+  const bool nameChanged =
+      strncmp(scalePreferredName, safeName, PREFERRED_SCALE_NAME_CAPACITY) != 0;
+  if (macChanged || nameChanged) {
     strncpy(scalePreferredMac, mac, PREFERRED_SCALE_MAC_CAPACITY - 1);
     scalePreferredMac[PREFERRED_SCALE_MAC_CAPACITY - 1] = '\0';
+    strncpy(scalePreferredName, safeName, PREFERRED_SCALE_NAME_CAPACITY - 1);
+    scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY - 1] = '\0';
     scalePreferredMacDirty = true;
+    changed = true;
   }
   portEXIT_CRITICAL(&scalePreferredMacMux);
+  if (changed && macChanged) {
+    Serial.print("Preferred scale updated: ");
+    Serial.print(safeName[0] != '\0' ? safeName : "(unknown)");
+    Serial.print(" — ");
+    Serial.println(mac);
+  }
+}
+
+void clearPreferredScaleCache() {
+  portENTER_CRITICAL(&scalePreferredMacMux);
+  scalePreferredMac[0] = '\0';
+  scalePreferredName[0] = '\0';
+  scalePreferredMacDirty = true;
+  scaleCacheWritePausedUntilMs = millis() + SCALE_MAC_CACHE_WRITE_PAUSE_MS;
+  ++scalePreferredDirectedResetGeneration;
+  portEXIT_CRITICAL(&scalePreferredMacMux);
+  Serial.println("Preferred scale cleared; caching paused for 60 s");
 }
 
 void servicePreferredScaleMacPersistence() {
 #ifndef SHOT_STOPPER_HOST_TEST
   char mac[PREFERRED_SCALE_MAC_CAPACITY];
+  char name[PREFERRED_SCALE_NAME_CAPACITY];
   bool dirty = false;
   portENTER_CRITICAL(&scalePreferredMacMux);
   dirty = scalePreferredMacDirty;
   if (dirty) {
     memcpy(mac, scalePreferredMac, sizeof(mac));
+    memcpy(name, scalePreferredName, sizeof(name));
   }
   portEXIT_CRITICAL(&scalePreferredMacMux);
   if (!dirty) {
     return;
   }
   if (strncmp(persistedSettings.preferredScaleMac, mac,
-              PREFERRED_SCALE_MAC_CAPACITY) == 0) {
+              PREFERRED_SCALE_MAC_CAPACITY) == 0 &&
+      strncmp(persistedSettings.preferredScaleName, name,
+              PREFERRED_SCALE_NAME_CAPACITY) == 0) {
     portENTER_CRITICAL(&scalePreferredMacMux);
     scalePreferredMacDirty = false;
     portEXIT_CRITICAL(&scalePreferredMacMux);
@@ -2987,6 +3056,8 @@ void servicePreferredScaleMacPersistence() {
   }
   memcpy(persistedSettings.preferredScaleMac, mac,
          sizeof(persistedSettings.preferredScaleMac));
+  memcpy(persistedSettings.preferredScaleName, name,
+         sizeof(persistedSettings.preferredScaleName));
   finalizePersistedSettings(persistedSettings);
   if (!savePersistedSettings(persistedSettings)) {
     return;
@@ -2994,9 +3065,15 @@ void servicePreferredScaleMacPersistence() {
   portENTER_CRITICAL(&scalePreferredMacMux);
   scalePreferredMacDirty = false;
   portEXIT_CRITICAL(&scalePreferredMacMux);
-  networkManager.syncPreferredScaleMac(mac);
-  Serial.print("Preferred scale MAC saved: ");
-  Serial.println(mac);
+  networkManager.syncPreferredScale(mac, name);
+  if (mac[0] == '\0') {
+    Serial.println("Preferred scale MAC cleared in NVS");
+  } else {
+    Serial.print("Preferred scale MAC saved: ");
+    Serial.print(name[0] != '\0' ? name : "(unknown)");
+    Serial.print(" — ");
+    Serial.println(mac);
+  }
 #endif
 }
 
@@ -3011,7 +3088,19 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
                                  uint32_t &connectRetryMs,
                                  bool &connectAttemptSeriesActive,
                                  uint8_t &preferredDirectedFailures,
-                                 bool &loggedPreferredFallback) {
+                                 bool &loggedPreferredFallback,
+                                 uint32_t &seenPreferredResetGeneration) {
+  portENTER_CRITICAL(&scalePreferredMacMux);
+  const uint32_t resetGeneration = scalePreferredDirectedResetGeneration;
+  portEXIT_CRITICAL(&scalePreferredMacMux);
+  if (resetGeneration != seenPreferredResetGeneration) {
+    seenPreferredResetGeneration = resetGeneration;
+    preferredDirectedFailures = 0;
+    loggedPreferredFallback = false;
+  }
+
+  const ScaleMacCacheMode cacheMode = currentScaleMacCacheMode();
+
   if (scale.isScanning()) {
     const bool connected = scale.pollScan();
     if (connected) {
@@ -3021,7 +3110,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       loggedPreferredFallback = false;
       const String address = scale.address();
       const String name = scale.localName();
-      notePreferredScaleMac(address.c_str());
+      notePreferredScale(address.c_str(), name.c_str());
       Serial.print("Scale connected: ");
       Serial.print(name.length() > 0 ? name : String("(unknown)"));
       Serial.print(" @ ");
@@ -3040,22 +3129,28 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     lastScanCycleMs = millis();
     const AcaiaDisconnectReason reason = scale.lastDisconnectReason();
     const bool finishedDirectedAttempt =
-        hasPreferredScaleMac() &&
-        preferredDirectedFailures < SCALE_PREFERRED_DIRECTED_ATTEMPTS;
+        cacheMode != ScaleMacCacheMode::OFF && hasPreferredScaleMac() &&
+        (cacheMode == ScaleMacCacheMode::FULL ||
+         preferredDirectedFailures < SCALE_PREFERRED_DIRECTED_ATTEMPTS);
 
     if (finishedDirectedAttempt) {
-      ++preferredDirectedFailures;
-      Serial.print("Preferred scale attempt failed (");
-      Serial.print(preferredDirectedFailures);
-      Serial.print('/');
-      Serial.print(SCALE_PREFERRED_DIRECTED_ATTEMPTS);
-      Serial.print("): ");
-      Serial.println(scale.lastDisconnectReasonName());
-      if (preferredDirectedFailures >= SCALE_PREFERRED_DIRECTED_ATTEMPTS &&
-          !loggedPreferredFallback) {
-        loggedPreferredFallback = true;
-        Serial.println(
-            "Preferred scale not found; falling back to name scan");
+      if (cacheMode == ScaleMacCacheMode::PARTIAL) {
+        ++preferredDirectedFailures;
+        Serial.print("Preferred scale attempt failed (");
+        Serial.print(preferredDirectedFailures);
+        Serial.print('/');
+        Serial.print(SCALE_PREFERRED_DIRECTED_ATTEMPTS);
+        Serial.print("): ");
+        Serial.println(scale.lastDisconnectReasonName());
+        if (preferredDirectedFailures >= SCALE_PREFERRED_DIRECTED_ATTEMPTS &&
+            !loggedPreferredFallback) {
+          loggedPreferredFallback = true;
+          Serial.println(
+              "Preferred scale not found; falling back to name scan");
+        }
+      } else {
+        Serial.print("Preferred scale attempt failed: ");
+        Serial.println(scale.lastDisconnectReasonName());
       }
     }
 
@@ -3088,9 +3183,15 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
   lastScanCycleMs = millis();
   char preferredMac[PREFERRED_SCALE_MAC_CAPACITY];
   copyPreferredScaleMac(preferredMac, sizeof(preferredMac));
-  const bool useDirected =
-      preferredMac[0] != '\0' && validPreferredScaleMac(preferredMac) &&
-      preferredDirectedFailures < SCALE_PREFERRED_DIRECTED_ATTEMPTS;
+  const bool hasMac =
+      preferredMac[0] != '\0' && validPreferredScaleMac(preferredMac);
+  bool useDirected = false;
+  if (cacheMode == ScaleMacCacheMode::FULL) {
+    useDirected = hasMac;
+  } else if (cacheMode == ScaleMacCacheMode::PARTIAL) {
+    useDirected =
+        hasMac && preferredDirectedFailures < SCALE_PREFERRED_DIRECTED_ATTEMPTS;
+  }
   const bool logAttempt =
       !connectAttemptSeriesActive ||
       elapsedMs(lastConnectLogMs) >= SCALE_CONNECT_LOG_MS;
@@ -3112,17 +3213,21 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
 
   connectRetryMs = nextScaleConnectRetryMs(connectRetryMs);
   if (useDirected) {
-    ++preferredDirectedFailures;
-    Serial.print("Preferred scale scan failed to start (");
-    Serial.print(preferredDirectedFailures);
-    Serial.print('/');
-    Serial.print(SCALE_PREFERRED_DIRECTED_ATTEMPTS);
-    Serial.println(')');
-    if (preferredDirectedFailures >= SCALE_PREFERRED_DIRECTED_ATTEMPTS &&
-        !loggedPreferredFallback) {
-      loggedPreferredFallback = true;
-      Serial.println(
-          "Preferred scale not found; falling back to name scan");
+    if (cacheMode == ScaleMacCacheMode::PARTIAL) {
+      ++preferredDirectedFailures;
+      Serial.print("Preferred scale scan failed to start (");
+      Serial.print(preferredDirectedFailures);
+      Serial.print('/');
+      Serial.print(SCALE_PREFERRED_DIRECTED_ATTEMPTS);
+      Serial.println(')');
+      if (preferredDirectedFailures >= SCALE_PREFERRED_DIRECTED_ATTEMPTS &&
+          !loggedPreferredFallback) {
+        loggedPreferredFallback = true;
+        Serial.println(
+            "Preferred scale not found; falling back to name scan");
+      }
+    } else {
+      Serial.println("Preferred scale scan failed to start");
     }
   } else if (logAttempt) {
     logScaleConnectionFailed(false);
@@ -3170,6 +3275,7 @@ void scaleWorkerTask(void *) {
   bool connectAttemptSeriesActive = false;
   uint8_t preferredDirectedFailures = 0;
   bool loggedPreferredFallback = false;
+  uint32_t seenPreferredResetGeneration = 0;
   uint32_t telemetryAtMs = 0;
 
   if (!subscribeCurrentTaskToWatchdog()) {
@@ -3211,7 +3317,8 @@ void scaleWorkerTask(void *) {
                                     connectRetryMs,
                                     connectAttemptSeriesActive,
                                     preferredDirectedFailures,
-                                    loggedPreferredFallback);
+                                    loggedPreferredFallback,
+                                    seenPreferredResetGeneration);
       }
     }
 
@@ -4125,6 +4232,11 @@ void processWebCommand(const WebCommand &command) {
       candidate.ntpServerPreset = command.config.ntpServerPreset;
       memcpy(candidate.ntpServerCustom, command.config.ntpServerCustom,
              sizeof(candidate.ntpServerCustom));
+      if (candidate.scaleMacCacheMode != command.config.scaleMacCacheMode) {
+        Serial.print("Scale MAC cache mode: ");
+        Serial.println(scaleMacCacheModeId(command.config.scaleMacCacheMode));
+      }
+      candidate.scaleMacCacheMode = command.config.scaleMacCacheMode;
       // Session Manual switch may arrive via brewByWeight on Home; keep as timerOnly.
       candidate.timerOnly = command.config.timerOnly;
 #if defined(SHOT_STOPPER_HOST_TEST)
@@ -4311,6 +4423,16 @@ void processWebCommand(const WebCommand &command) {
       rejectWebCommand(command);
       return;
 
+    case WebCommandType::CLEAR_PREFERRED_SCALE:
+      if (!controlAllowsConfigurationNow()) {
+        rejectWebCommand(command);
+        return;
+      }
+      clearPreferredScaleCache();
+      servicePreferredScaleMacPersistence();
+      reportControlCommandResult(command, CommandResultState::APPLIED);
+      return;
+
     case WebCommandType::START_WIFI_SCAN:
       if (!beginMaintenanceLease(command, false)) {
         rejectWebCommand(command);
@@ -4416,6 +4538,10 @@ void publishControlStatus() {
   strncpy(next.scaleProtocol, scaleLink.protocolName,
           sizeof(next.scaleProtocol) - 1);
   next.scaleProtocol[sizeof(next.scaleProtocol) - 1] = '\0';
+  copyPreferredScaleMac(next.preferredScaleMac, sizeof(next.preferredScaleMac));
+  copyPreferredScaleName(next.preferredScaleName,
+                         sizeof(next.preferredScaleName));
+  next.scaleMacCachePauseRemainingMs = scaleMacCachePauseRemainingMs(now);
   if (session.active) {
     next.cycleFlowDuringRetare = session.flowDuringRetare;
     next.cycleRetarePerformed = session.retarePerformed;
@@ -4769,6 +4895,11 @@ void setup() {
               PREFERRED_SCALE_MAC_CAPACITY - 1);
       scalePreferredMac[PREFERRED_SCALE_MAC_CAPACITY - 1] = '\0';
     }
+    if (validPreferredScaleName(persistedSettings.preferredScaleName)) {
+      strncpy(scalePreferredName, persistedSettings.preferredScaleName,
+              PREFERRED_SCALE_NAME_CAPACITY - 1);
+      scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY - 1] = '\0';
+    }
   }
 #else
   runtimeConfig = RuntimeConfig{};
@@ -4853,6 +4984,7 @@ void setup() {
     callbacks.deleteShotRecord = deleteShotRecord;
     callbacks.clearShotLog = clearShotLog;
     callbacks.copyPreferredScaleMac = copyPreferredScaleMac;
+    callbacks.copyPreferredScaleName = copyPreferredScaleName;
     callbacks.copyPresetBank = copyPresetBank;
     if (!networkManager.begin(persistedSettings, callbacks)) {
       logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,

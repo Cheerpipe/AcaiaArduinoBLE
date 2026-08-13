@@ -109,6 +109,10 @@ if (!html.includes('authenticatedOnly') ||
     !html.includes('pageNav authenticatedOnly') ||
     !html.includes('function knownPath(') ||
     !html.includes("authenticated()&&known") ||
+    !html.includes('class="brand"') ||
+    !html.includes('>Micra Shot Stopper</a>') ||
+    !html.includes('href="/" data-route="/"') ||
+    !html.includes("querySelectorAll('a[data-route]')") ||
     !network.includes('Status intentionally has no authentication requirement') ||
     !network.includes('HTTPD_404_NOT_FOUND') ||
     !network.includes('notFoundHandler')) {
@@ -117,7 +121,7 @@ if (!html.includes('authenticatedOnly') ||
 const statusSection = html.match(/<fieldset[^>]*><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     statusSection[1].includes('class="row"') ||
-    (statusSection[1].match(/class="metric"/g) || []).length !== 21 ||
+    (statusSection[1].match(/class="metric"/g) || []).length !== 22 ||
     !html.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'") ||
     !html.includes('id="scaleWeight"') ||
     !html.includes('id="scaleTimer"') ||
@@ -125,6 +129,16 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !html.includes('Timer (scale)') ||
     !html.includes('function formatScaleWeight(') ||
     !html.includes('function formatScaleTimer(') ||
+    !html.includes('id="preferredScale"') ||
+    !html.includes('id="preferredScaleSettings"') ||
+    !html.includes('id="scaleMacCacheMode"') ||
+    !html.includes('id="clearPreferredScale"') ||
+    !html.includes('id="scaleMacCacheFullWarn"') ||
+    !html.includes('scaleMacCacheMode') ||
+    !html.includes('/api/v1/scale/preferred/clear') ||
+    !html.includes('function formatPreferredScale(') ||
+    !network.includes('preferredScaleClearHandler') ||
+    !network.includes('/api/v1/scale/preferred/clear') ||
     !network.includes('\\"timerMs\\"')) {
   throw new Error('Status must use one metric per row and homologate Paddle/CN9 OPEN/OFF and CLOSED/ON labels');
 }
@@ -337,6 +351,7 @@ const expected = new Map([
   ['GET /api/v1/status', 'statusHandler'],
   ['GET /api/v1/log', 'logHandler'],
   ['POST /api/v1/config', 'configHandler'],
+  ['POST /api/v1/scale/preferred/clear', 'preferredScaleClearHandler'],
   ['POST /api/v1/presets', 'presetsHandler'],
   ['POST /api/v1/calibration/reset', 'resetCalibrationHandler'],
   ['POST /api/v1/calibration/reset-guard-samples', 'resetGuardSamplesHandler'],
