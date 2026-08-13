@@ -391,7 +391,7 @@ struct CycleConfigSnapshot {
   uint32_t retareStabilityMinDurationMs = DEFAULT_RETARE_STABILITY_MIN_DURATION_MS;
   uint32_t bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
   uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
-  bool fastExtractionGuardEnabled = false;
+  bool fastExtractionGuardEnabled = true;
   float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
   uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
   bool autoToManualGuardEnabled = true;

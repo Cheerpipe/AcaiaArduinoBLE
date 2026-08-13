@@ -79,7 +79,7 @@ void p01_defaults_are_valid_v15() {
   CHECK(settings.staConfigState ==
         static_cast<uint8_t>(StaConfigState::CONFIRMED));
   CHECK(!settings.lkgValid);
-  CHECK(!settings.runtime.fastExtractionGuardEnabled);
+  CHECK(settings.runtime.fastExtractionGuardEnabled);
   CHECK(std::fabs(settings.runtime.maxRecoveryWeightG -
                   DEFAULT_MAX_RECOVERY_WEIGHT_G) < 0.001f);
   CHECK(settings.runtime.minBrewTimeMs == DEFAULT_MIN_BREW_TIME_MS);
@@ -213,7 +213,7 @@ void p06_schema_twelve_migrates_to_thirteen() {
   CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
   CHECK(loaded.runtime.goalWeightG == 52);
   CHECK(std::fabs(loaded.runtime.weightOffsetG - 2.1f) < 0.001f);
-  CHECK(!loaded.runtime.fastExtractionGuardEnabled);
+  CHECK(loaded.runtime.fastExtractionGuardEnabled);
   CHECK(std::fabs(loaded.runtime.maxRecoveryWeightG -
                   DEFAULT_MAX_RECOVERY_WEIGHT_G) < 0.001f);
   CHECK(loaded.runtime.minBrewTimeMs == DEFAULT_MIN_BREW_TIME_MS);
@@ -236,7 +236,7 @@ void p08_factory_reset_rebuilds_defaults() {
   CHECK(resetPersistedSettingsToFactory(settings));
   CHECK(settings.schemaVersion == CONFIG_SCHEMA_VERSION);
   CHECK(settings.runtime.goalWeightG == DEFAULT_GOAL_WEIGHT_G);
-  CHECK(!settings.runtime.fastExtractionGuardEnabled);
+  CHECK(settings.runtime.fastExtractionGuardEnabled);
   CHECK(settings.runtime.autoToManualGuardEnabled);
 }
 

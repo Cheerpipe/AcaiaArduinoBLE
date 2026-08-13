@@ -89,6 +89,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   runtimeConfig = RuntimeConfig{};
   runtimeConfig.autoRetare = false;
   runtimeConfig.bbwProtectionMs = 3000;
+  runtimeConfig.fastExtractionGuardEnabled = false;
   lastCycle = LastCycleSummary{};
   debugLog.clear();
   lastReportedLogOverwritten = 0;
@@ -1387,7 +1388,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.canTareStartTimer);
   CHECK(config.firstDropBeep);
   CHECK(config.paddleReturnReminderBeep);
-  CHECK(!config.fastExtractionGuardEnabled);
+  CHECK(config.fastExtractionGuardEnabled);
 }
 
 void w02_each_runtime_field_is_validated() {

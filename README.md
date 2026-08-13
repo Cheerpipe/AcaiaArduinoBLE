@@ -51,7 +51,7 @@ Examples that did not exist (or barely existed) in the original stopper sketch:
 - **Shot history** (duration, weight, flow, first drop, cut type, extraction guard
   telemetry) with export.
 - **Fast extraction guard** — optional extension when target weight is reached
-  too quickly (minimum brew time + max recovery weight); off by default.
+  too quickly (minimum brew time + max recovery weight); on by default.
 - **Auto-to-manual time guard** — on by default; caps CN9 time if an automatic
   shot loses the scale mid-brew (Auto trend or Manual limit); reconnect stays
   preferred for the whole cycle.
@@ -112,7 +112,7 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | --- | --- |
 | **Target (g)** | Goal weight for brew by weight (10–200 g; default 36 g). |
 | **CN9 limit (s)** | Maximum CN9 closed time per cycle (5–60 s; default 60 s). |
-| **Fast extraction guard** | Optional; **off by default**. See [Fast extraction guard](#fast-extraction-guard). |
+| **Fast extraction guard** | **On by default**. See [Fast extraction guard](#fast-extraction-guard). |
 | **Auto-to-manual time guard** | **On by default**. See [Auto-to-manual time guard](#auto-to-manual-time-guard). |
 | **Automatic tare** | Send an initial tare when an automatic shot starts (default ON). |
 | **Timer only** | Keep tare/timer but disable weight stop and offset learning. |
@@ -392,7 +392,7 @@ gaps, rejected packets, reconnects, and disconnect reason.
 
 ## Fast extraction guard
 
-Optional brew-by-weight enhancement, **disabled by default**. It addresses
+Optional brew-by-weight enhancement, **enabled by default**. It addresses
 shots that reach the target weight too quickly — often a sign of channeling or
 a grind that is too coarse — where stopping immediately would yield a thin,
 under-extracted cup.
@@ -402,6 +402,7 @@ also configure:
 
 | Setting | Default | Role |
 | --- | --- | --- |
+| **Enable** | ON | Master switch for the extended-shot recovery |
 | **Max recovery weight (g)** | 42.5 | Hard ceiling if the shot must be extended |
 | **Minimum brew time (s)** | 26 | Minimum extraction time for a normal target stop |
 
