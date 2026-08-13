@@ -12,12 +12,25 @@
 namespace shotstopper {
 
 constexpr uint32_t SHOT_LOG_MAGIC = 0x534C4F47U;  // "SLOG"
-constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 6;
+constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 7;
+constexpr uint16_t SHOT_LOG_SCHEMA_VERSION_V6 = 6;
 constexpr size_t SHOT_LOG_CAPACITY = 120;
 constexpr uint32_t MIN_SHOT_LOG_DURATION_MS = 10000;
 constexpr float FIRST_DROP_THRESHOLD_G = 0.3f;
-constexpr int16_t SHOT_LOG_WEIGHT_MISSING = INT16_MAX;
+// INT16_MIN leaves the full positive int16 centigram range usable.
+constexpr int16_t SHOT_LOG_WEIGHT_MISSING = INT16_MIN;
+constexpr int16_t SHOT_LOG_WEIGHT_MISSING_LEGACY = INT16_MAX;
 constexpr uint16_t SHOT_LOG_METRIC_MISSING = UINT16_MAX;
+
+inline bool shotLogWeightIsMissing(int16_t centigrams) {
+  return centigrams == SHOT_LOG_WEIGHT_MISSING ||
+         centigrams == SHOT_LOG_WEIGHT_MISSING_LEGACY;
+}
+
+inline int16_t normalizeLegacyShotLogWeight(int16_t centigrams) {
+  return centigrams == SHOT_LOG_WEIGHT_MISSING_LEGACY ? SHOT_LOG_WEIGHT_MISSING
+                                                     : centigrams;
+}
 
 enum class ShotLogType : uint8_t {
   AUTO = 0,
@@ -292,8 +305,18 @@ inline uint32_t shotLogChecksumBytes(const ShotLogHeader &header) {
                offsetof(ShotLogHeader, checksum));
 }
 
+// Schema 7+: header prefix + packed records[0..count). Legacy v2–v6 used
+// header-only CRCs via shotLogChecksumBytes / shotLogChecksumV*.
 inline uint32_t shotLogChecksum(const ShotLogStore &store) {
-  return shotLogChecksumBytes(store.header);
+  uint32_t crc = crc32Update(
+      0xFFFFFFFFU, reinterpret_cast<const uint8_t *>(&store.header),
+      offsetof(ShotLogHeader, checksum));
+  if (store.header.count > 0) {
+    crc = crc32Update(crc, reinterpret_cast<const uint8_t *>(store.records),
+                      static_cast<size_t>(store.header.count) *
+                          sizeof(ShotLogRecord));
+  }
+  return ~crc;
 }
 
 inline uint32_t shotLogChecksumV2(const ShotLogStoreV2 &store) {
@@ -363,9 +386,9 @@ inline void migrateShotLogRecordV5ToV6(const ShotLogRecordV5 &source,
   dest.durationDs = source.durationDs;
   dest.goalWeightG = source.goalWeightG;
   dest.hasWallTime = source.hasWallTime;
-  dest.actualWeightCg = source.actualWeightCg;
-  dest.errorCg = source.errorCg;
-  dest.offsetUsedCg = source.offsetUsedCg;
+  dest.actualWeightCg = normalizeLegacyShotLogWeight(source.actualWeightCg);
+  dest.errorCg = normalizeLegacyShotLogWeight(source.errorCg);
+  dest.offsetUsedCg = normalizeLegacyShotLogWeight(source.offsetUsedCg);
   dest.firstDropDs = source.firstDropDs;
   dest.avgFlowCgS = source.avgFlowCgS;
   dest.shotType = source.shotType;
@@ -373,11 +396,12 @@ inline void migrateShotLogRecordV5ToV6(const ShotLogRecordV5 &source,
   dest.extractionGuardEnabled = source.extractionGuardEnabled;
   dest.extractionExtended = source.extractionExtended;
   dest.stopDetail = source.stopDetail;
-  dest.maxRecoveryWeightCg = source.maxRecoveryWeightCg;
+  dest.maxRecoveryWeightCg =
+      normalizeLegacyShotLogWeight(source.maxRecoveryWeightCg);
   dest.minBrewTimeDs = source.minBrewTimeDs;
   dest.targetReachedEarlyDs = source.targetReachedEarlyDs;
   dest.actualWeightSource =
-      source.actualWeightCg == SHOT_LOG_WEIGHT_MISSING
+      shotLogWeightIsMissing(source.actualWeightCg)
           ? static_cast<uint8_t>(ActualWeightSource::NONE)
           : static_cast<uint8_t>(ActualWeightSource::POST_DRIP);
 }
@@ -391,6 +415,31 @@ inline void migrateShotLogStoreV5(const ShotLogStoreV5 &legacy,
   store.header.writeIndex = legacy.header.writeIndex;
   for (size_t index = 0; index < SHOT_LOG_CAPACITY; ++index) {
     migrateShotLogRecordV5ToV6(legacy.records[index], store.records[index]);
+  }
+  finalizeShotLogStore(store);
+}
+
+inline bool validShotLogStoreV6(const ShotLogStore &store) {
+  if (store.header.magic != SHOT_LOG_MAGIC ||
+      store.header.schemaVersion != SHOT_LOG_SCHEMA_VERSION_V6 ||
+      store.header.recordSize != sizeof(ShotLogRecord) ||
+      store.header.count > SHOT_LOG_CAPACITY ||
+      store.header.writeIndex >= SHOT_LOG_CAPACITY ||
+      store.header.checksum != shotLogChecksumBytes(store.header)) {
+    return false;
+  }
+  return true;
+}
+
+inline void migrateShotLogStoreV6(ShotLogStore &store) {
+  for (uint16_t index = 0; index < store.header.count; ++index) {
+    ShotLogRecord &record = store.records[index];
+    record.actualWeightCg =
+        normalizeLegacyShotLogWeight(record.actualWeightCg);
+    record.errorCg = normalizeLegacyShotLogWeight(record.errorCg);
+    record.offsetUsedCg = normalizeLegacyShotLogWeight(record.offsetUsedCg);
+    record.maxRecoveryWeightCg =
+        normalizeLegacyShotLogWeight(record.maxRecoveryWeightCg);
   }
   finalizeShotLogStore(store);
 }
@@ -418,9 +467,9 @@ inline void migrateShotLogRecordV4ToV5(const ShotLogRecordV4 &source,
   dest.durationDs = source.durationDs;
   dest.goalWeightG = source.goalWeightG;
   dest.hasWallTime = source.hasWallTime;
-  dest.actualWeightCg = source.actualWeightCg;
-  dest.errorCg = source.errorCg;
-  dest.offsetUsedCg = source.offsetUsedCg;
+  dest.actualWeightCg = normalizeLegacyShotLogWeight(source.actualWeightCg);
+  dest.errorCg = normalizeLegacyShotLogWeight(source.errorCg);
+  dest.offsetUsedCg = normalizeLegacyShotLogWeight(source.offsetUsedCg);
   dest.firstDropDs = source.firstDropDs;
   dest.avgFlowCgS = source.avgFlowCgS;
   dest.shotType = source.shotType;
@@ -432,7 +481,7 @@ inline void migrateShotLogRecordV4ToV5(const ShotLogRecordV4 &source,
   dest.minBrewTimeDs = SHOT_LOG_METRIC_MISSING;
   dest.targetReachedEarlyDs = SHOT_LOG_METRIC_MISSING;
   dest.actualWeightSource =
-      source.actualWeightCg == SHOT_LOG_WEIGHT_MISSING
+      shotLogWeightIsMissing(source.actualWeightCg)
           ? static_cast<uint8_t>(ActualWeightSource::NONE)
           : static_cast<uint8_t>(ActualWeightSource::POST_DRIP);
 }
@@ -476,9 +525,9 @@ inline void migrateShotLogStoreV2(const ShotLogStoreV2 &legacy, ShotLogStore &st
     dest.endedAtMs = source.endedAtMs;
     dest.durationDs = source.durationDs;
     dest.goalWeightG = source.goalWeightG;
-    dest.actualWeightCg = source.actualWeightCg;
-    dest.errorCg = source.errorCg;
-    dest.offsetUsedCg = source.offsetUsedCg;
+    dest.actualWeightCg = normalizeLegacyShotLogWeight(source.actualWeightCg);
+    dest.errorCg = normalizeLegacyShotLogWeight(source.errorCg);
+    dest.offsetUsedCg = normalizeLegacyShotLogWeight(source.offsetUsedCg);
     dest.firstDropDs = source.firstDropDs;
     dest.avgFlowCgS = source.avgFlowCgS;
     dest.shotType = source.shotType;
@@ -490,7 +539,7 @@ inline void migrateShotLogStoreV2(const ShotLogStoreV2 &legacy, ShotLogStore &st
     dest.minBrewTimeDs = SHOT_LOG_METRIC_MISSING;
     dest.targetReachedEarlyDs = SHOT_LOG_METRIC_MISSING;
     dest.actualWeightSource =
-        source.actualWeightCg == SHOT_LOG_WEIGHT_MISSING
+        shotLogWeightIsMissing(source.actualWeightCg)
             ? static_cast<uint8_t>(ActualWeightSource::NONE)
             : static_cast<uint8_t>(ActualWeightSource::POST_DRIP);
   }
@@ -512,9 +561,9 @@ inline void migrateShotLogStoreV3(const ShotLogStoreV3 &legacy, ShotLogStore &st
     dest.endedAtUnixSec = source.endedAtUnixSec;
     dest.durationDs = source.durationDs;
     dest.goalWeightG = source.goalWeightG;
-    dest.actualWeightCg = source.actualWeightCg;
-    dest.errorCg = source.errorCg;
-    dest.offsetUsedCg = source.offsetUsedCg;
+    dest.actualWeightCg = normalizeLegacyShotLogWeight(source.actualWeightCg);
+    dest.errorCg = normalizeLegacyShotLogWeight(source.errorCg);
+    dest.offsetUsedCg = normalizeLegacyShotLogWeight(source.offsetUsedCg);
     dest.firstDropDs = source.firstDropDs;
     dest.avgFlowCgS = source.avgFlowCgS;
     dest.shotType = source.shotType;
@@ -526,7 +575,7 @@ inline void migrateShotLogStoreV3(const ShotLogStoreV3 &legacy, ShotLogStore &st
     dest.minBrewTimeDs = SHOT_LOG_METRIC_MISSING;
     dest.targetReachedEarlyDs = SHOT_LOG_METRIC_MISSING;
     dest.actualWeightSource =
-        source.actualWeightCg == SHOT_LOG_WEIGHT_MISSING
+        shotLogWeightIsMissing(source.actualWeightCg)
             ? static_cast<uint8_t>(ActualWeightSource::NONE)
             : static_cast<uint8_t>(ActualWeightSource::POST_DRIP);
   }
@@ -600,7 +649,11 @@ class ShotLog {
     if (hostStorageValid_) {
       memcpy(&store_, &hostStorage_, sizeof(store_));
     }
-    if (!validShotLogStore(store_)) {
+    if (validShotLogStoreV6(store_)) {
+      migrateShotLogStoreV6(store_);
+      hostStorageValid_ = true;
+      memcpy(&hostStorage_, &store_, sizeof(store_));
+    } else if (!validShotLogStore(store_)) {
       resetShotLogStore(store_, store_.header.bootId);
     }
     return true;
@@ -610,56 +663,108 @@ class ShotLog {
       resetShotLogStore(store_, 1);
       return false;
     }
-    const size_t length = preferences.getBytesLength(SHOT_LOG_KEY);
     bool loaded = false;
     bool needsRewrite = false;
-    if (length > 0 && length <= sizeof(store_)) {
-      memset(&store_, 0, sizeof(store_));
-      if (preferences.getBytes(SHOT_LOG_KEY, &store_, sizeof(store_)) ==
-              length &&
-          validShotLogStore(store_) &&
-          shotLogBlobLengthMatches(store_, length)) {
-        loaded = true;
-        if (length != shotLogPersistedBytes(store_)) {
+    uint8_t activeSlot = 0;
+    const bool haveActive =
+        preferences.getBytesLength(SHOT_LOG_ACTIVE_KEY) == 1 &&
+        preferences.getBytes(SHOT_LOG_ACTIVE_KEY, &activeSlot, 1) == 1 &&
+        activeSlot <= 1;
+
+    auto tryLoadKey = [&](const char *key) -> bool {
+      const size_t length = preferences.getBytesLength(key);
+      if (length == 0 || length > sizeof(store_)) {
+        return false;
+      }
+      ShotLogStore candidate = {};
+      if (preferences.getBytes(key, &candidate, sizeof(candidate)) != length) {
+        return false;
+      }
+      if (validShotLogStore(candidate) &&
+          shotLogBlobLengthMatches(candidate, length)) {
+        store_ = candidate;
+        if (length != shotLogPersistedBytes(candidate)) {
+          needsRewrite = true;
+        }
+        return true;
+      }
+      if (validShotLogStoreV6(candidate) &&
+          shotLogBlobLengthMatches(candidate, length)) {
+        migrateShotLogStoreV6(candidate);
+        store_ = candidate;
+        needsRewrite = true;
+        return true;
+      }
+      return false;
+    };
+
+    if (haveActive) {
+      loaded = tryLoadKey(slotKey(activeSlot));
+      if (!loaded) {
+        loaded = tryLoadKey(slotKey(static_cast<uint8_t>(1U - activeSlot)));
+        if (loaded) {
           needsRewrite = true;
         }
       }
     }
-    if (!loaded && length == sizeof(ShotLogStoreV5)) {
-      ShotLogStoreV5 legacy = {};
-      if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
-              sizeof(legacy) &&
-          validShotLogStoreV5(legacy)) {
-        migrateShotLogStoreV5(legacy, store_);
-        loaded = true;
-        needsRewrite = true;
+    if (!loaded) {
+      loaded = tryLoadKey(SHOT_LOG_KEY_A) || tryLoadKey(SHOT_LOG_KEY_B);
+    }
+    // Legacy single-key blob from schema ≤6.
+    if (!loaded) {
+      const size_t length = preferences.getBytesLength(SHOT_LOG_KEY_LEGACY);
+      if (length > 0 && length <= sizeof(store_)) {
+        memset(&store_, 0, sizeof(store_));
+        if (preferences.getBytes(SHOT_LOG_KEY_LEGACY, &store_,
+                                 sizeof(store_)) == length) {
+          if (validShotLogStore(store_) &&
+              shotLogBlobLengthMatches(store_, length)) {
+            loaded = true;
+            needsRewrite = true;
+          } else if (validShotLogStoreV6(store_) &&
+                     shotLogBlobLengthMatches(store_, length)) {
+            migrateShotLogStoreV6(store_);
+            loaded = true;
+            needsRewrite = true;
+          }
+        }
       }
-    } else if (!loaded && length == sizeof(ShotLogStoreV4)) {
-      ShotLogStoreV4 legacy = {};
-      if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
-              sizeof(legacy) &&
-          validShotLogStoreV4(legacy)) {
-        migrateShotLogStoreV4(legacy, store_);
-        loaded = true;
-        needsRewrite = true;
-      }
-    } else if (!loaded && length == sizeof(ShotLogStoreV3)) {
-      ShotLogStoreV3 legacy = {};
-      if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
-              sizeof(legacy) &&
-          validShotLogStoreV3(legacy)) {
-        migrateShotLogStoreV3(legacy, store_);
-        loaded = true;
-        needsRewrite = true;
-      }
-    } else if (!loaded && length == sizeof(ShotLogStoreV2)) {
-      ShotLogStoreV2 legacy = {};
-      if (preferences.getBytes(SHOT_LOG_KEY, &legacy, sizeof(legacy)) ==
-              sizeof(legacy) &&
-          validShotLogStoreV2(legacy)) {
-        migrateShotLogStoreV2(legacy, store_);
-        loaded = true;
-        needsRewrite = true;
+      if (!loaded && length == sizeof(ShotLogStoreV5)) {
+        ShotLogStoreV5 legacy = {};
+        if (preferences.getBytes(SHOT_LOG_KEY_LEGACY, &legacy,
+                                 sizeof(legacy)) == sizeof(legacy) &&
+            validShotLogStoreV5(legacy)) {
+          migrateShotLogStoreV5(legacy, store_);
+          loaded = true;
+          needsRewrite = true;
+        }
+      } else if (!loaded && length == sizeof(ShotLogStoreV4)) {
+        ShotLogStoreV4 legacy = {};
+        if (preferences.getBytes(SHOT_LOG_KEY_LEGACY, &legacy,
+                                 sizeof(legacy)) == sizeof(legacy) &&
+            validShotLogStoreV4(legacy)) {
+          migrateShotLogStoreV4(legacy, store_);
+          loaded = true;
+          needsRewrite = true;
+        }
+      } else if (!loaded && length == sizeof(ShotLogStoreV3)) {
+        ShotLogStoreV3 legacy = {};
+        if (preferences.getBytes(SHOT_LOG_KEY_LEGACY, &legacy,
+                                 sizeof(legacy)) == sizeof(legacy) &&
+            validShotLogStoreV3(legacy)) {
+          migrateShotLogStoreV3(legacy, store_);
+          loaded = true;
+          needsRewrite = true;
+        }
+      } else if (!loaded && length == sizeof(ShotLogStoreV2)) {
+        ShotLogStoreV2 legacy = {};
+        if (preferences.getBytes(SHOT_LOG_KEY_LEGACY, &legacy,
+                                 sizeof(legacy)) == sizeof(legacy) &&
+            validShotLogStoreV2(legacy)) {
+          migrateShotLogStoreV2(legacy, store_);
+          loaded = true;
+          needsRewrite = true;
+        }
       }
     }
     preferences.end();
@@ -685,16 +790,30 @@ class ShotLog {
     if (!preferences.begin(SHOT_LOG_NAMESPACE, false)) {
       return false;
     }
-    // Try in-place replace first so a failed write does not erase history.
-    size_t written = preferences.putBytes(SHOT_LOG_KEY, &store_, bytes);
+    uint8_t activeSlot = 0;
+    if (preferences.getBytesLength(SHOT_LOG_ACTIVE_KEY) == 1) {
+      (void)preferences.getBytes(SHOT_LOG_ACTIVE_KEY, &activeSlot, 1);
+    }
+    if (activeSlot > 1) {
+      activeSlot = 0;
+    }
+    const uint8_t targetSlot = static_cast<uint8_t>(1U - activeSlot);
+    const char *target = slotKey(targetSlot);
+    // Write the inactive slot first so a failed put never erases the last
+    // good history. Only flip the active pointer after a size-matched write.
+    const size_t written = preferences.putBytes(target, &store_, bytes);
     if (written != bytes) {
-      // Free the previous blob and retry (NVS copy-on-write often needs the
-      // old entry gone before a large/new write can succeed).
-      preferences.remove(SHOT_LOG_KEY);
-      written = preferences.putBytes(SHOT_LOG_KEY, &store_, bytes);
+      preferences.end();
+      return false;
+    }
+    const bool pointed =
+        preferences.putBytes(SHOT_LOG_ACTIVE_KEY, &targetSlot, 1) == 1;
+    // Best-effort cleanup of the pre-dual-slot key after a durable write.
+    if (pointed) {
+      preferences.remove(SHOT_LOG_KEY_LEGACY);
     }
     preferences.end();
-    return written == bytes;
+    return pointed;
 #endif
   }
 
@@ -733,8 +852,6 @@ class ShotLog {
     store_.header.writeIndex = previousWriteIndex;
     store_.header.count = previousCount;
     store_.header.nextRecordId = previousNextRecordId;
-    // If the failed save erased the NVS key, try to put the prior ring back.
-    save();
     return false;
   }
 
@@ -805,7 +922,14 @@ class ShotLog {
 
  private:
   static constexpr const char *SHOT_LOG_NAMESPACE = "shotlog";
-  static constexpr const char *SHOT_LOG_KEY = "records";
+  static constexpr const char *SHOT_LOG_KEY_LEGACY = "records";
+  static constexpr const char *SHOT_LOG_KEY_A = "recordsA";
+  static constexpr const char *SHOT_LOG_KEY_B = "recordsB";
+  static constexpr const char *SHOT_LOG_ACTIVE_KEY = "active";
+
+  static const char *slotKey(uint8_t slot) {
+    return slot == 0 ? SHOT_LOG_KEY_A : SHOT_LOG_KEY_B;
+  }
 
   ShotLogStore store_;
 
@@ -825,7 +949,8 @@ inline int16_t shotLogWeightToCentigrams(float weightG) {
     return SHOT_LOG_WEIGHT_MISSING;
   }
   const int32_t centigrams = weightToCentigrams(weightG);
-  if (centigrams == INT32_MAX || centigrams < INT16_MIN ||
+  // INT16_MIN is reserved as the missing sentinel.
+  if (centigrams == INT32_MAX || centigrams <= INT16_MIN ||
       centigrams > INT16_MAX) {
     return SHOT_LOG_WEIGHT_MISSING;
   }

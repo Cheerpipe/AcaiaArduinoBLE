@@ -1419,8 +1419,7 @@ inline bool formatPersistDebugMessage(const DebugEvent &event, char *message,
   }
 }
 
-inline uint32_t crc32(const uint8_t *data, size_t length) {
-  uint32_t crc = 0xFFFFFFFFU;
+inline uint32_t crc32Update(uint32_t crc, const uint8_t *data, size_t length) {
   for (size_t index = 0; index < length; ++index) {
     crc ^= data[index];
     for (uint8_t bit = 0; bit < 8; ++bit) {
@@ -1428,7 +1427,11 @@ inline uint32_t crc32(const uint8_t *data, size_t length) {
       crc = (crc >> 1U) ^ (0xEDB88320U & mask);
     }
   }
-  return ~crc;
+  return crc;
+}
+
+inline uint32_t crc32(const uint8_t *data, size_t length) {
+  return ~crc32Update(0xFFFFFFFFU, data, length);
 }
 
 }  // namespace shotstopper

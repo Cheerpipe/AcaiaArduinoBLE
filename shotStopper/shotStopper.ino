@@ -1473,8 +1473,12 @@ void calculateExpectedEndTime() {
   const float predicted =
       (session.config.goalWeightG - session.config.weightOffsetG - intercept) /
       slope;
-
-  if (!isfinite(predicted)) {
+  // Reject fits that already expired (or land inside the sample window): a
+  // noisy early regression must not trip SCALE_PREDICTION immediately.
+  const float latestSampleS = shot.timeS[shot.datapoints - 1];
+  constexpr float kMinPredictionHorizonS = 0.25f;
+  if (!isfinite(predicted) ||
+      predicted < latestSampleS + kMinPredictionHorizonS) {
     shot.expectedEndS = session.config.operationalWallMs / 1000.0f;
   } else {
     shot.expectedEndS = predicted;
@@ -1623,6 +1627,12 @@ bool bbwWeightStopInhibited() {
 }
 
 bool readyToConfirmBrew() {
+  // Hold gesture classification open until post-tare baseline settles (or the
+  // grace window expires). Confirming earlier would demote a scale-started
+  // cycle to manual while non-zero pre-tare samples are still rejected.
+  if (session.awaitingPostTareBaseline) {
+    return false;
+  }
   return elapsedMs(session.startedAtMs) > session.config.rinseGestureMs;
 }
 
@@ -3161,6 +3171,9 @@ void confirmBrewOrManual() {
     transitionTo(StopperState::BREW);
     return;
   }
+  // Scale-started cycles keep by-weight authority once a sample is accepted
+  // (or a direct-threshold confirm landed). readyToConfirmBrew() already
+  // defers while post-tare baseline is still rejecting non-zero weights.
   if (session.startedWithScale && !session.config.timerOnly &&
       (session.receivedFreshWeightInCycle ||
        session.thresholdConfirmations > 0) &&

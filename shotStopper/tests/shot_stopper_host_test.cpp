@@ -1065,6 +1065,15 @@ void r05_regression_uses_last_ten_valid_samples() {
                        shot.startMs + static_cast<uint32_t>(i * 1000));
   }
   CHECK(shot.expectedEndS == HARD_MAX_CN9_CLOSED_MS / 1000.0f);
+
+  // Intercept already above target with a positive slope predicts a time in
+  // the past of the sample window; fall back to the operational wall.
+  resetShotTrajectory(session.startedAtMs);
+  for (size_t i = 0; i < TREND_POINT_COUNT; ++i) {
+    recordWeightSample(40.0f + static_cast<float>(i) * 0.1f,
+                       shot.startMs + static_cast<uint32_t>(i * 1000));
+  }
+  CHECK(shot.expectedEndS == session.config.operationalWallMs / 1000.0f);
 }
 
 void r06_hard_timer_opens_cn9_without_control_loop() {
@@ -2330,6 +2339,27 @@ void r43_post_tare_baseline_accepts_zero_after_pre_tare_weight() {
   CHECK(stopperState == StopperState::BREW);
 }
 
+void r54_confirm_waits_for_post_tare_baseline_then_keeps_weight_control() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  currentWeight = 236.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  publishWeight(236.0f, hostMillis + 1);
+  CHECK(session.awaitingPostTareBaseline);
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  CHECK(stopperState == StopperState::QUALIFYING_ON);
+  CHECK(session.awaitingPostTareBaseline);
+  publishWeight(0.0f, hostMillis + 2);
+  CHECK(!session.awaitingPostTareBaseline);
+  runLoopAfter(1);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.weightControlState == WeightControlState::ACTIVE);
+  CHECK(session.automaticEnabled);
+}
+
 void r44_first_shot_after_reconnect_confirms_brew() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -3323,6 +3353,7 @@ const TestCase testCases[] = {
     {"R41", r41_negative_weight_in_range_starts_automatic_cycle},
     {"R42", r42_weight_below_automation_min_stays_manual},
     {"R43", r43_post_tare_baseline_accepts_zero_after_pre_tare_weight},
+    {"R54", r54_confirm_waits_for_post_tare_baseline_then_keeps_weight_control},
     {"R44", r44_first_shot_after_reconnect_confirms_brew},
     {"R45", r45_slew_rejection_emits_specific_debug_code},
     {"RT01", rt01_late_cup_triggers_single_retare},

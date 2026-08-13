@@ -336,6 +336,13 @@ if (!network.includes('WiFi.scanNetworks(true, false, false, 120)') ||
 if (!network.includes('if (!network.apActive)')) {
   throw new Error('STA-only mode must bypass AP/session shutdown policy');
 }
+if (!network.includes('\\"passwordChangeRequired\\"') ||
+    !network.includes('PASSWORD_CHANGE_REQUIRED') ||
+    !network.includes('New password cannot be the factory default.') ||
+    !html.includes('passwordChangeRequired') ||
+    !html.includes('factory AP/UI password')) {
+  throw new Error('Factory password change gate must be exposed in status/UI/API');
+}
 
 const safeBeepStart = bleLibrary.indexOf('bool AcaiaArduinoBLE::beepWithoutStateChange()');
 const safeBeepEnd = bleLibrary.indexOf('bool AcaiaArduinoBLE::heartbeat()', safeBeepStart);

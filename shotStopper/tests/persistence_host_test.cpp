@@ -93,6 +93,8 @@ void p01_defaults_are_valid_v15() {
           AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS);
   }
   CHECK(validPersistedSettings(settings));
+  CHECK(passwordIsFactoryDefault(settings));
+  CHECK(verifyAdminPassword(settings, DEFAULT_AP_PASSWORD));
 }
 
 void p02_newest_valid_slot_is_loaded() {
@@ -140,10 +142,54 @@ void p05_password_change_updates_hash() {
   persistence_host::reset();
   PersistedSettings settings;
   CHECK(initializeDefaultSettings(settings));
+  CHECK(!refreshAuthentication(settings, DEFAULT_AP_PASSWORD));
   CHECK(refreshAuthentication(settings, "NuevaClaveSegura"));
   finalizePersistedSettings(settings);
   CHECK(validPersistedSettings(settings));
   CHECK(verifyAdminPassword(settings, "NuevaClaveSegura"));
+  CHECK(!passwordIsFactoryDefault(settings));
+}
+
+void p16_legacy_password_hash_still_verifies() {
+  persistence_host::reset();
+  PersistedSettings settings;
+  CHECK(initializeDefaultSettings(settings));
+  CHECK(calculatePasswordHashLegacy(settings.authSalt, settings.apPassword,
+                                    settings.authHash));
+  finalizePersistedSettings(settings);
+  CHECK(validPersistedSettings(settings));
+  CHECK(verifyAdminPassword(settings, DEFAULT_AP_PASSWORD));
+}
+
+void p17_shot_log_keeps_history_when_inactive_slot_write_fails() {
+  persistence_host::reset();
+  ShotLog log;
+  CHECK(log.load());
+  ShotLogRecord record = {};
+  record.durationDs = 250;
+  record.goalWeightG = 36;
+  record.actualWeightCg = 3600;
+  CHECK(log.append(record));
+  CHECK(log.count() == 1);
+
+  persistence_host::failNextWrite = true;
+  ShotLogRecord second = {};
+  second.durationDs = 260;
+  second.goalWeightG = 36;
+  CHECK(!log.append(second));
+  CHECK(log.count() == 1);
+
+  ShotLog reloaded;
+  CHECK(reloaded.load());
+  CHECK(reloaded.count() == 1);
+}
+
+void p18_shot_log_weight_sentinel_allows_int16_max() {
+  CHECK(shotLogWeightToCentigrams(327.67f) == INT16_MAX);
+  CHECK(shotLogWeightIsMissing(SHOT_LOG_WEIGHT_MISSING));
+  CHECK(shotLogWeightIsMissing(SHOT_LOG_WEIGHT_MISSING_LEGACY));
+  CHECK(!shotLogWeightIsMissing(3600));
+  CHECK(shotLogWeightToCentigrams(400.0f) == SHOT_LOG_WEIGHT_MISSING);
 }
 
 void p06_schema_twelve_migrates_to_thirteen() {
@@ -309,9 +355,14 @@ void p12_shot_log_persists_compact_blob() {
   CHECK(log.append(record));
   CHECK(log.count() == 1);
 
-  const auto found = persistence_host::records.find("shotlog/records");
-  CHECK(found != persistence_host::records.end());
-  CHECK(found->second.size() == sizeof(ShotLogHeader) + sizeof(ShotLogRecord));
+  const auto foundA = persistence_host::records.find("shotlog/recordsA");
+  const auto foundB = persistence_host::records.find("shotlog/recordsB");
+  CHECK(foundA != persistence_host::records.end() ||
+        foundB != persistence_host::records.end());
+  const auto &blob =
+      foundA != persistence_host::records.end() ? foundA->second : foundB->second;
+  CHECK(blob.size() == sizeof(ShotLogHeader) + sizeof(ShotLogRecord));
+  CHECK(persistence_host::records.count("shotlog/active") == 1);
 
   ShotLog reloaded;
   CHECK(reloaded.load());
@@ -345,9 +396,13 @@ void p13_shot_log_migrates_v5_full_blob_to_compact() {
   ShotLog log;
   CHECK(log.load());
   CHECK(log.count() == 1);
-  const auto found = persistence_host::records.find("shotlog/records");
-  CHECK(found != persistence_host::records.end());
-  CHECK(found->second.size() == sizeof(ShotLogHeader) + sizeof(ShotLogRecord));
+  const auto foundA = persistence_host::records.find("shotlog/recordsA");
+  const auto foundB = persistence_host::records.find("shotlog/recordsB");
+  CHECK(foundA != persistence_host::records.end() ||
+        foundB != persistence_host::records.end());
+  const auto &blob =
+      foundA != persistence_host::records.end() ? foundA->second : foundB->second;
+  CHECK(blob.size() == sizeof(ShotLogHeader) + sizeof(ShotLogRecord));
 }
 
 void p14_schema_fourteen_migrates_to_fifteen() {
@@ -443,6 +498,9 @@ const TestCase tests[] = {
     {"P13", p13_shot_log_migrates_v5_full_blob_to_compact},
     {"P14", p14_schema_fourteen_migrates_to_fifteen},
     {"P15", p15_static_ip_address_validation},
+    {"P16", p16_legacy_password_hash_still_verifies},
+    {"P17", p17_shot_log_keeps_history_when_inactive_slot_write_fails},
+    {"P18", p18_shot_log_weight_sentinel_allows_int16_max},
 };
 
 }  // namespace

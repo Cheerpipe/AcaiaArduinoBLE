@@ -18,6 +18,8 @@ constexpr const char *SETTINGS_SLOT_A = "settingsA";
 constexpr const char *SETTINGS_SLOT_B = "settingsB";
 constexpr size_t AUTH_SALT_LENGTH = 16;
 constexpr size_t AUTH_HASH_LENGTH = 32;
+// ~1k SHA-256 rounds: strong enough for SoftAP offline guessing, cheap on ESP32.
+constexpr uint16_t AUTH_HASH_ITERATIONS = 1000;
 constexpr const char *DEFAULT_AP_PASSWORD = "Micra1234";
 
 struct PersistedSettings {
@@ -162,9 +164,22 @@ struct PersistedSettingsV14 {
   uint32_t checksum;
 };
 
-inline bool calculatePasswordHash(const uint8_t salt[AUTH_SALT_LENGTH],
-                                  const char *password,
-                                  uint8_t output[AUTH_HASH_LENGTH]) {
+inline bool sha256Bytes(const uint8_t *data, size_t length,
+                        uint8_t output[AUTH_HASH_LENGTH]) {
+  mbedtls_sha256_context context;
+  mbedtls_sha256_init(&context);
+  const bool success =
+      mbedtls_sha256_starts(&context, 0) == 0 &&
+      mbedtls_sha256_update(&context, data, length) == 0 &&
+      mbedtls_sha256_finish(&context, output) == 0;
+  mbedtls_sha256_free(&context);
+  return success;
+}
+
+// Legacy single-pass SHA-256(salt || password). Kept for verifying older NVS.
+inline bool calculatePasswordHashLegacy(const uint8_t salt[AUTH_SALT_LENGTH],
+                                        const char *password,
+                                        uint8_t output[AUTH_HASH_LENGTH]) {
   size_t passwordLength = 0;
   if (!boundedCString(password, WIFI_PASSWORD_CAPACITY, &passwordLength)) {
     return false;
@@ -182,6 +197,38 @@ inline bool calculatePasswordHash(const uint8_t salt[AUTH_SALT_LENGTH],
   return success;
 }
 
+// Iterated SHA-256: H0 = SHA256(salt || password), Hi = SHA256(Hi-1 || salt).
+// Avoids mbedtls PBKDF2/HMAC deps while remaining cheap on ESP32.
+inline bool calculatePasswordHash(const uint8_t salt[AUTH_SALT_LENGTH],
+                                  const char *password,
+                                  uint8_t output[AUTH_HASH_LENGTH]) {
+  size_t passwordLength = 0;
+  if (!boundedCString(password, WIFI_PASSWORD_CAPACITY, &passwordLength)) {
+    return false;
+  }
+
+  uint8_t block[AUTH_SALT_LENGTH + WIFI_PASSWORD_CAPACITY] = {};
+  memcpy(block, salt, AUTH_SALT_LENGTH);
+  memcpy(block + AUTH_SALT_LENGTH, password, passwordLength);
+  if (!sha256Bytes(block, AUTH_SALT_LENGTH + passwordLength, output)) {
+    memset(block, 0, sizeof(block));
+    return false;
+  }
+  memset(block, 0, sizeof(block));
+
+  uint8_t roundInput[AUTH_HASH_LENGTH + AUTH_SALT_LENGTH] = {};
+  for (uint16_t round = 1; round < AUTH_HASH_ITERATIONS; ++round) {
+    memcpy(roundInput, output, AUTH_HASH_LENGTH);
+    memcpy(roundInput + AUTH_HASH_LENGTH, salt, AUTH_SALT_LENGTH);
+    if (!sha256Bytes(roundInput, sizeof(roundInput), output)) {
+      memset(roundInput, 0, sizeof(roundInput));
+      return false;
+    }
+  }
+  memset(roundInput, 0, sizeof(roundInput));
+  return true;
+}
+
 inline bool constantTimeEqual(const uint8_t *left, const uint8_t *right,
                               size_t length) {
   uint8_t difference = 0;
@@ -191,9 +238,49 @@ inline bool constantTimeEqual(const uint8_t *left, const uint8_t *right,
   return difference == 0;
 }
 
+inline bool passwordHashMatches(const uint8_t salt[AUTH_SALT_LENGTH],
+                                const char *password,
+                                const uint8_t stored[AUTH_HASH_LENGTH]) {
+  uint8_t candidate[AUTH_HASH_LENGTH] = {};
+  if (calculatePasswordHash(salt, password, candidate) &&
+      constantTimeEqual(stored, candidate, AUTH_HASH_LENGTH)) {
+    memset(candidate, 0, sizeof(candidate));
+    return true;
+  }
+  if (calculatePasswordHashLegacy(salt, password, candidate) &&
+      constantTimeEqual(stored, candidate, AUTH_HASH_LENGTH)) {
+    memset(candidate, 0, sizeof(candidate));
+    return true;
+  }
+  memset(candidate, 0, sizeof(candidate));
+  return false;
+}
+
+inline bool isFactoryDefaultPassword(const char *password) {
+  size_t storedLength = 0;
+  size_t defaultLength = 0;
+  if (!boundedCString(password, WIFI_PASSWORD_CAPACITY, &storedLength) ||
+      !boundedCString(DEFAULT_AP_PASSWORD, WIFI_PASSWORD_CAPACITY,
+                      &defaultLength) ||
+      storedLength != defaultLength) {
+    return false;
+  }
+  return constantTimeEqual(reinterpret_cast<const uint8_t *>(password),
+                           reinterpret_cast<const uint8_t *>(DEFAULT_AP_PASSWORD),
+                           storedLength);
+}
+
+inline bool passwordIsFactoryDefault(const PersistedSettings &settings) {
+  return isFactoryDefaultPassword(settings.apPassword);
+}
+
 inline bool refreshAuthentication(PersistedSettings &settings,
                                   const char *newPassword) {
   if (!validAccessPointPassword(newPassword)) {
+    return false;
+  }
+  // Refuse re-selecting the published factory credential.
+  if (isFactoryDefaultPassword(newPassword)) {
     return false;
   }
   memset(settings.apPassword, 0, sizeof(settings.apPassword));
@@ -204,15 +291,22 @@ inline bool refreshAuthentication(PersistedSettings &settings,
 }
 
 inline bool initializeDefaultAuthentication(PersistedSettings &settings) {
-  return refreshAuthentication(settings, DEFAULT_AP_PASSWORD);
+  // Factory boot keeps the known SoftAP password, but UI mutations require a
+  // change (see passwordIsFactoryDefault).
+  if (!validAccessPointPassword(DEFAULT_AP_PASSWORD)) {
+    return false;
+  }
+  memset(settings.apPassword, 0, sizeof(settings.apPassword));
+  strncpy(settings.apPassword, DEFAULT_AP_PASSWORD,
+          sizeof(settings.apPassword) - 1);
+  esp_fill_random(settings.authSalt, sizeof(settings.authSalt));
+  return calculatePasswordHash(settings.authSalt, settings.apPassword,
+                               settings.authHash);
 }
 
 inline bool verifyAdminPassword(const PersistedSettings &settings,
                                 const char *candidate) {
-  uint8_t candidateHash[AUTH_HASH_LENGTH] = {};
-  return calculatePasswordHash(settings.authSalt, candidate, candidateHash) &&
-         constantTimeEqual(settings.authHash, candidateHash,
-                           sizeof(candidateHash));
+  return passwordHashMatches(settings.authSalt, candidate, settings.authHash);
 }
 
 inline uint32_t persistedSettingsChecksum(const PersistedSettings &settings) {
@@ -450,11 +544,8 @@ inline bool validPersistedSettings(const PersistedSettings &settings) {
       !validPersistedStaNetwork(settings)) {
     return false;
   }
-  uint8_t expectedHash[AUTH_HASH_LENGTH] = {};
-  return calculatePasswordHash(settings.authSalt, settings.apPassword,
-                               expectedHash) &&
-         constantTimeEqual(settings.authHash, expectedHash,
-                           sizeof(expectedHash));
+  return passwordHashMatches(settings.authSalt, settings.apPassword,
+                             settings.authHash);
 }
 
 inline void finalizePersistedSettings(PersistedSettings &settings) {
@@ -500,11 +591,8 @@ inline bool readV12SettingsSlot(Preferences &preferences, const char *key,
     return false;
   }
 
-  uint8_t expectedHash[AUTH_HASH_LENGTH] = {};
-  if (!calculatePasswordHash(legacy.authSalt, legacy.apPassword,
-                             expectedHash) ||
-      !constantTimeEqual(legacy.authHash, expectedHash,
-                         sizeof(expectedHash))) {
+  if (!passwordHashMatches(legacy.authSalt, legacy.apPassword,
+                           legacy.authHash)) {
     return false;
   }
 
@@ -549,11 +637,8 @@ inline bool readV13SettingsSlot(Preferences &preferences, const char *key,
     return false;
   }
 
-  uint8_t expectedHash[AUTH_HASH_LENGTH] = {};
-  if (!calculatePasswordHash(legacy.authSalt, legacy.apPassword,
-                             expectedHash) ||
-      !constantTimeEqual(legacy.authHash, expectedHash,
-                         sizeof(expectedHash))) {
+  if (!passwordHashMatches(legacy.authSalt, legacy.apPassword,
+                           legacy.authHash)) {
     return false;
   }
 
@@ -599,11 +684,8 @@ inline bool readV14SettingsSlot(Preferences &preferences, const char *key,
     return false;
   }
 
-  uint8_t expectedHash[AUTH_HASH_LENGTH] = {};
-  if (!calculatePasswordHash(legacy.authSalt, legacy.apPassword,
-                             expectedHash) ||
-      !constantTimeEqual(legacy.authHash, expectedHash,
-                         sizeof(expectedHash))) {
+  if (!passwordHashMatches(legacy.authSalt, legacy.apPassword,
+                           legacy.authHash)) {
     return false;
   }
 

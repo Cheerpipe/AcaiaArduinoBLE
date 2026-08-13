@@ -2264,7 +2264,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"autoToManualGuardArmed\":%s,"
       "\"autoToManualGuardEnforced\":%s,"
       "\"autoToManualGuardRemainingMs\":%lu},"
-      "\"debugEventsDropped\":%lu}",
+      "\"debugEventsDropped\":%lu,"
+      "\"passwordChangeRequired\":%s}",
       safeFirmwareVersion, stopperStateName(control.state),
       stateLabel(control.state),
       control.relayClosed ? "true" : "false",
@@ -2401,7 +2402,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.cycleAutoToManualGuardArmed ? "true" : "false",
       control.cycleAutoToManualGuardEnforced ? "true" : "false",
       static_cast<unsigned long>(control.cycleAutoToManualGuardRemainingMs),
-      static_cast<unsigned long>(control.debugEventsDropped));
+      static_cast<unsigned long>(control.debugEventsDropped),
+      passwordIsFactoryDefault(self.settingsCopy()) ? "true" : "false");
   if (written < 0 ||
       static_cast<size_t>(written) >= sizeof(g_statusResponseBuffer)) {
     return sendError(request, "500 Internal Server Error", "STATUS_TOO_LARGE",
@@ -2521,7 +2523,7 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
     char maxRecovery[16] = "null";
     char minBrewTime[16] = "null";
     char targetEarly[16] = "null";
-    if (record.actualWeightCg != SHOT_LOG_WEIGHT_MISSING) {
+    if (!shotLogWeightIsMissing(record.actualWeightCg)) {
       snprintf(actual, sizeof(actual), "%.2f",
                static_cast<double>(record.actualWeightCg) / 100.0);
       snprintf(errorG, sizeof(errorG), "%.2f",
@@ -2540,7 +2542,7 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
       snprintf(firstDrop, sizeof(firstDrop), "%.1f",
                static_cast<double>(record.firstDropDs) / 10.0);
     }
-    if (record.maxRecoveryWeightCg != SHOT_LOG_WEIGHT_MISSING) {
+    if (!shotLogWeightIsMissing(record.maxRecoveryWeightCg)) {
       snprintf(maxRecovery, sizeof(maxRecovery), "%.2f",
                static_cast<double>(record.maxRecoveryWeightCg) / 100.0);
     }
@@ -2602,6 +2604,10 @@ esp_err_t ShotStopperNetwork::shotsClearHandler(httpd_req_t *request) {
     return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
                      "Invalid session or CSRF token.");
   }
+  if (passwordIsFactoryDefault(self.settingsCopy())) {
+    return sendError(request, "403 Forbidden", "PASSWORD_CHANGE_REQUIRED",
+                     "Change the factory AP/UI password before continuing.");
+  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -2647,6 +2653,10 @@ esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
     return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
                      "Invalid session or CSRF token.");
   }
+  if (passwordIsFactoryDefault(self.settingsCopy())) {
+    return sendError(request, "403 Forbidden", "PASSWORD_CHANGE_REQUIRED",
+                     "Change the factory AP/UI password before continuing.");
+  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -2688,6 +2698,10 @@ esp_err_t ShotStopperNetwork::timeSyncHandler(httpd_req_t *request) {
     return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
                      "Invalid session or CSRF token.");
   }
+  if (passwordIsFactoryDefault(self.settingsCopy())) {
+    return sendError(request, "403 Forbidden", "PASSWORD_CHANGE_REQUIRED",
+                     "Change the factory AP/UI password before continuing.");
+  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -2704,6 +2718,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   if (!self.authenticate(request, true)) {
     return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
                      "Invalid session or CSRF token.");
+  }
+  if (passwordIsFactoryDefault(self.settingsCopy())) {
+    return sendError(request, "403 Forbidden", "PASSWORD_CHANGE_REQUIRED",
+                     "Change the factory AP/UI password before continuing.");
   }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
@@ -2857,6 +2875,10 @@ esp_err_t ShotStopperNetwork::resetCalibrationHandler(httpd_req_t *request) {
     return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
                      "Invalid session or CSRF token.");
   }
+  if (passwordIsFactoryDefault(self.settingsCopy())) {
+    return sendError(request, "403 Forbidden", "PASSWORD_CHANGE_REQUIRED",
+                     "Change the factory AP/UI password before continuing.");
+  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -2895,6 +2917,10 @@ esp_err_t ShotStopperNetwork::resetGuardSamplesHandler(httpd_req_t *request) {
   if (!self.authenticate(request, true)) {
     return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
                      "Invalid session or CSRF token.");
+  }
+  if (passwordIsFactoryDefault(self.settingsCopy())) {
+    return sendError(request, "403 Forbidden", "PASSWORD_CHANGE_REQUIRED",
+                     "Change the factory AP/UI password before continuing.");
   }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
@@ -2935,6 +2961,10 @@ esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
   if (!self.authenticate(request, true, &sessionIndex)) {
     return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
                      "Invalid session or CSRF token.");
+  }
+  if (passwordIsFactoryDefault(self.settingsCopy())) {
+    return sendError(request, "403 Forbidden", "PASSWORD_CHANGE_REQUIRED",
+                     "Change the factory AP/UI password before continuing.");
   }
   char body[REQUEST_BODY_CAPACITY] = {};
   if (!readJsonBody(request, body)) {
@@ -2994,6 +3024,10 @@ esp_err_t ShotStopperNetwork::rinseHandler(httpd_req_t *request) {
     return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
                      "Invalid session or CSRF token.");
   }
+  if (passwordIsFactoryDefault(self.settingsCopy())) {
+    return sendError(request, "403 Forbidden", "PASSWORD_CHANGE_REQUIRED",
+                     "Change the factory AP/UI password before continuing.");
+  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!REMOTE_CN9_CONTROL_ENABLED) {
@@ -3026,6 +3060,10 @@ esp_err_t ShotStopperNetwork::stopHandler(httpd_req_t *request) {
     return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
                      "Invalid session or CSRF token.");
   }
+  if (passwordIsFactoryDefault(self.settingsCopy())) {
+    return sendError(request, "403 Forbidden", "PASSWORD_CHANGE_REQUIRED",
+                     "Change the factory AP/UI password before continuing.");
+  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!status.activeCycle || !status.relayClosed) {
@@ -3047,6 +3085,10 @@ esp_err_t ShotStopperNetwork::restartHandler(httpd_req_t *request) {
   if (!self.authenticate(request, true)) {
     return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
                      "Invalid session or CSRF token.");
+  }
+  if (passwordIsFactoryDefault(self.settingsCopy())) {
+    return sendError(request, "403 Forbidden", "PASSWORD_CHANGE_REQUIRED",
+                     "Change the factory AP/UI password before continuing.");
   }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
@@ -3070,6 +3112,10 @@ esp_err_t ShotStopperNetwork::factoryResetHandler(httpd_req_t *request) {
   if (!self.authenticate(request, true)) {
     return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
                      "Invalid session or CSRF token.");
+  }
+  if (passwordIsFactoryDefault(self.settingsCopy())) {
+    return sendError(request, "403 Forbidden", "PASSWORD_CHANGE_REQUIRED",
+                     "Change the factory AP/UI password before continuing.");
   }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
@@ -3118,6 +3164,10 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
   if (!self.authenticate(request, true)) {
     return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
                      "Invalid session or CSRF token.");
+  }
+  if (passwordIsFactoryDefault(self.settingsCopy())) {
+    return sendError(request, "403 Forbidden", "PASSWORD_CHANGE_REQUIRED",
+                     "Change the factory AP/UI password before continuing.");
   }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
@@ -3291,6 +3341,10 @@ esp_err_t ShotStopperNetwork::wifiScanStartHandler(httpd_req_t *request) {
     return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
                      "Invalid session or CSRF token.");
   }
+  if (passwordIsFactoryDefault(self.settingsCopy())) {
+    return sendError(request, "403 Forbidden", "PASSWORD_CHANGE_REQUIRED",
+                     "Change the factory AP/UI password before continuing.");
+  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -3407,6 +3461,11 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
     memset(command.password, 0, sizeof(command.password));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_AP_PASSWORD",
                      "New password must be 8–63 characters.");
+  }
+  if (isFactoryDefaultPassword(command.password)) {
+    memset(command.password, 0, sizeof(command.password));
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_AP_PASSWORD",
+                     "New password cannot be the factory default.");
   }
   if (!self.callbacks_.enqueueWebCommand(command)) {
     memset(command.password, 0, sizeof(command.password));
