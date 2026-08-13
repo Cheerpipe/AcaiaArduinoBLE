@@ -4076,10 +4076,10 @@ void processWebCommand(const WebCommand &command) {
         return;
       }
       // Prevent a completed shot's delayed drip analysis from immediately
-      // replacing the user-requested default calibration.
+      // replacing the user-requested baseline calibration.
       pendingFinalize.pending = false;
       RuntimeConfig candidate = runtimeConfig;
-      candidate.weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
+      candidate.weightOffsetG = candidate.weightOffsetBaselineG;
       ++candidate.revision;
       if (candidate.revision == 0) {
         candidate.revision = 1;

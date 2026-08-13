@@ -217,6 +217,8 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "A→M manual limit must be from 10 s up to the CN9 limit.";
     case ConfigValidationError::AUTO_TO_MANUAL_GUARD_BASELINE:
       return "A→M baseline must be from 10 s up to the CN9 limit.";
+    case ConfigValidationError::WEIGHT_OFFSET_BASELINE:
+      return "Offset baseline must be from 0 to 5.0 g.";
   }
   return "Invalid configuration.";
 }
@@ -2331,7 +2333,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"maintenance\":{\"active\":%s,\"leaseId\":%lu,"
       "\"startedAtMs\":%lu},"
       "\"configMutable\":%s,\"config\":{\"revision\":%lu,"
-      "\"goalWeightG\":%u,\"weightOffsetG\":%.2f,\"autoTare\":%s,\"brewByWeight\":%s,"
+      "\"goalWeightG\":%u,\"weightOffsetG\":%.2f,"
+      "\"weightOffsetBaselineG\":%.2f,\"autoTare\":%s,\"brewByWeight\":%s,"
       "\"canTareStartTimer\":%s,\"shotTimerStartDelayMs\":%lu,\"firstDropBeep\":%s,"
       "\"paddleReturnReminderBeep\":%s,"
       "\"paddleReturnReminderIntervalMs\":%lu,"
@@ -2426,6 +2429,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(control.config.revision),
       static_cast<unsigned>(control.config.goalWeightG),
       static_cast<double>(control.config.weightOffsetG),
+      static_cast<double>(control.config.weightOffsetBaselineG),
       control.config.autoTare ? "true" : "false",
       control.config.timerOnly ? "false" : "true",
       control.config.canTareStartTimer ? "true" : "false",
@@ -2893,9 +2897,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "maxRecoveryWeightG", "minBrewTimeMs",
       "autoToManualGuardEnabled", "autoToManualGuardLimitMode",
       "autoToManualGuardManualLimitMs", "autoToManualGuardBaselineMs",
+      "weightOffsetBaselineG",
       "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 30)) {
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 31)) {
     parseError =
         "Config must include exactly the expected fields with correct types.";
   } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
@@ -2977,6 +2982,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
                          candidate.autoToManualGuardBaselineMs)) {
     parseError =
         "autoToManualGuardBaselineMs must be an integer (milliseconds).";
+  } else if (!jsonFloat(root, "weightOffsetBaselineG",
+                        candidate.weightOffsetBaselineG)) {
+    parseError = "weightOffsetBaselineG must be a number.";
   } else if (!jsonInt16(root, "timezoneOffsetMinutes",
                         candidate.timezoneOffsetMinutes)) {
     parseError = "timezoneOffsetMinutes must be an integer.";

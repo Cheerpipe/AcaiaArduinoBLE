@@ -24,7 +24,7 @@ Perform all relay and CN9 tests on a bench first. Do not connect CN9 to the mach
 | M16 | Scan Wi-Fi in Ready, then start a physical cycle. | Scan is cancelled; control and relay behavior are unaffected. |
 | M17 | On the remote-control opt-in build, leave a browser virtual paddle ON, then close/disconnect it. | Heartbeat timeout safely opens CN9. |
 | M18 | Reset or remove controller power while measuring relay COM/NO. | Contact remains open; there is no unintended close pulse. |
-| M19 | From Ready, press **Reset learned stop offset**, confirm, then restart. | The learned offset is reset and remains at the default 1.5 g; a pending post-shot analysis cannot overwrite it. |
+| M19 | From Ready, set **Baseline offset**, save, press **Reset learned stop offset to baseline**, confirm, then restart. | The learned offset is reset to the configured baseline (factory default 1.5 g) and remains there; a pending post-shot analysis cannot overwrite it. |
 | M20 | Open the Web UI status with the external safety macros disabled. | `CN9 Safety` reports timers and WDT ready, plus `external not configured`; this build is identified as software-only protection. |
 | M21 | On an isolated bench load, use an instrumented test build to stop `loopTask` immediately after CN9 closes. Do not attach OpenOCD during the measurement. | GPTimer/K2 opens CN9 within the configured measured limit and TWDT reboots the board within its 5 s timeout; the boot never recloses CN9. |
 | M22 | Freeze only `scale_worker` while leaving control responsive. | Its own TWDT subscription causes a reboot within 5 s; CN9 opens on or before reset and does not resume afterward. |

@@ -11,8 +11,9 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 18;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 17;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 19;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 18;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V18 = 18;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V17 = 17;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V16 = 16;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V15 = 15;
@@ -343,6 +344,8 @@ struct RuntimeConfig {
   uint32_t revision = 1;
   uint8_t goalWeightG = DEFAULT_GOAL_WEIGHT_G;
   float weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
+  // Seed for Reset learned stop offset; factory default remains 1.5 g.
+  float weightOffsetBaselineG = DEFAULT_WEIGHT_OFFSET_G;
   bool autoTare = true;
   // Internal polarity: true disables weight stop. UI/API brewByWeight is the inverse.
   bool timerOnly = false;
@@ -489,7 +492,8 @@ enum class ConfigValidationError : uint8_t {
   FAST_EXTRACTION_GUARD_RELATION,
   AUTO_TO_MANUAL_GUARD_MODE,
   AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT,
-  AUTO_TO_MANUAL_GUARD_BASELINE
+  AUTO_TO_MANUAL_GUARD_BASELINE,
+  WEIGHT_OFFSET_BASELINE
 };
 
 inline uint32_t effectiveRetareWindowMs(const RuntimeConfig &config) {
@@ -518,6 +522,11 @@ inline ConfigValidationError validateRuntimeConfig(
   if (!isfinite(config.weightOffsetG) || config.weightOffsetG < 0.0f ||
       config.weightOffsetG > MAX_OFFSET_G) {
     return ConfigValidationError::WEIGHT_OFFSET;
+  }
+  if (!isfinite(config.weightOffsetBaselineG) ||
+      config.weightOffsetBaselineG < 0.0f ||
+      config.weightOffsetBaselineG > MAX_OFFSET_G) {
+    return ConfigValidationError::WEIGHT_OFFSET_BASELINE;
   }
   if (config.rinseGestureMs < 100 || config.rinseGestureMs > 5000) {
     return ConfigValidationError::RINSE_GESTURE;
@@ -700,6 +709,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "autoToManualGuardManualLimitMs";
     case ConfigValidationError::AUTO_TO_MANUAL_GUARD_BASELINE:
       return "autoToManualGuardBaselineMs";
+    case ConfigValidationError::WEIGHT_OFFSET_BASELINE:
+      return "weightOffsetBaselineG";
   }
   return "unknown";
 }

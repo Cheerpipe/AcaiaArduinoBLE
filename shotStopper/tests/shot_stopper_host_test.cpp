@@ -1924,9 +1924,10 @@ void w33_first_drop_beep_can_be_disabled() {
   CHECK(scale.beepCalls == 0);
 }
 
-void w34_calibration_reset_restores_default_and_cancels_analysis() {
+void w34_calibration_reset_restores_baseline_and_cancels_analysis() {
   resetHarness(false, true);
   reachReadyFromBoot();
+  runtimeConfig.weightOffsetBaselineG = 2.0f;
   runtimeConfig.weightOffsetG = 3.2f;
   const uint32_t previousRevision = runtimeConfig.revision;
   pendingFinalize.pending = true;
@@ -1934,8 +1935,8 @@ void w34_calibration_reset_restores_default_and_cancels_analysis() {
   reset.type = WebCommandType::RESET_WEIGHT_OFFSET;
   processWebCommand(reset);
   finishHostMaintenance();
-  CHECK(fabsf(runtimeConfig.weightOffsetG - DEFAULT_WEIGHT_OFFSET_G) <
-        0.001f);
+  CHECK(fabsf(runtimeConfig.weightOffsetG - 2.0f) < 0.001f);
+  CHECK(fabsf(runtimeConfig.weightOffsetBaselineG - 2.0f) < 0.001f);
   CHECK(runtimeConfig.revision == previousRevision + 1);
   CHECK(!pendingFinalize.pending);
 }
@@ -3654,7 +3655,7 @@ const TestCase testCases[] = {
     {"W31", w31_unsupported_scale_never_uses_tare_as_a_beep},
     {"W32", w32_full_scale_queue_cannot_block_brew_start},
     {"W33", w33_first_drop_beep_can_be_disabled},
-    {"W34", w34_calibration_reset_restores_default_and_cancels_analysis},
+    {"W34", w34_calibration_reset_restores_baseline_and_cancels_analysis},
     {"W35", w35_status_reports_the_live_physical_paddle_gpio},
     {"W36", w36_paddle_return_reminder_beeps_at_configured_interval_only_while_open},
     {"W37", w37_factory_reset_is_rejected_while_control_is_active},

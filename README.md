@@ -98,7 +98,8 @@ In short: **hard to build, easy to live with.**
 - Configurable **CN9 limit** per cycle (5–60 s) plus a firmware hard cap of
   60 s on every close path.
 - Learned **stop offset** (default 1.5 g, capped at 5.0 g) updated from
-  post-drip analysis; resettable from the Web UI.
+  post-drip analysis; resettable from the Web UI to a configurable baseline
+  (factory default 1.5 g).
 - **Polarity:** physical paddle ON = GPIO **LOW**; relay closed (CN9
   energized) = GPIO **LOW**.
 
@@ -112,6 +113,7 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | --- | --- |
 | **Target (g)** | Goal weight for brew by weight (10–200 g; default 36 g). |
 | **CN9 limit (s)** | Maximum CN9 closed time per cycle (5–60 s; default 60 s). |
+| **Baseline offset (g)** | Seed for **Reset learned stop offset to baseline** (0–5 g; factory default 1.5 g). Save before reset. |
 | **Fast extraction guard** | **On by default**. See [Fast extraction guard](#fast-extraction-guard). |
 | **Auto-to-manual time guard** | **On by default**. See [Auto-to-manual time guard](#auto-to-manual-time-guard). |
 | **Automatic tare** | Send an initial tare when an automatic shot starts (default ON). |

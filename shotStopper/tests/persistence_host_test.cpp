@@ -90,6 +90,8 @@ void p01_defaults_are_valid_v16() {
         DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS);
   CHECK(settings.runtime.autoToManualGuardBaselineMs ==
         DEFAULT_AUTO_TO_MANUAL_GUARD_BASELINE_MS);
+  CHECK(std::fabs(settings.runtime.weightOffsetBaselineG -
+                  DEFAULT_WEIGHT_OFFSET_G) < 0.001f);
   for (size_t i = 0; i < AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT; ++i) {
     CHECK(settings.runtime.autoToManualGuardSamplesDs[i] ==
           AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS);
@@ -294,6 +296,16 @@ void p10_auto_to_manual_guard_trend_and_validation() {
   config.autoToManualGuardLimitMode = 9;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::AUTO_TO_MANUAL_GUARD_MODE);
+  config.autoToManualGuardLimitMode =
+      static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
+  config.weightOffsetBaselineG = -0.1f;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::WEIGHT_OFFSET_BASELINE);
+  config.weightOffsetBaselineG = MAX_OFFSET_G + 0.1f;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::WEIGHT_OFFSET_BASELINE);
+  config.weightOffsetBaselineG = 2.25f;
+  CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
 
   uint16_t seeded[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT] = {};
   resetAutoToManualGuardSamples(seeded, 28000);
@@ -664,7 +676,7 @@ void p20_schema_sixteen_migrates_to_seventeen() {
   CHECK(loaded.preferredScaleMac[0] == '\0');
 }
 
-void p21_schema_seventeen_migrates_to_eighteen() {
+void p21_schema_seventeen_migrates_to_current() {
   persistence_host::reset();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
@@ -673,8 +685,55 @@ void p21_schema_seventeen_migrates_to_eighteen() {
   legacy.schemaVersion = CONFIG_SCHEMA_VERSION_V17;
   legacy.structureSize = sizeof(PersistedSettingsV17);
   legacy.storageRevision = 11;
-  legacy.runtime = current.runtime;
+  legacy.runtime.revision = current.runtime.revision;
   legacy.runtime.goalWeightG = 41;
+  legacy.runtime.weightOffsetG = current.runtime.weightOffsetG;
+  legacy.runtime.autoTare = current.runtime.autoTare;
+  legacy.runtime.timerOnly = current.runtime.timerOnly;
+  legacy.runtime.canTareStartTimer = current.runtime.canTareStartTimer;
+  legacy.runtime.shotTimerStartDelayMs = current.runtime.shotTimerStartDelayMs;
+  legacy.runtime.firstDropBeep = current.runtime.firstDropBeep;
+  legacy.runtime.paddleReturnReminderBeep =
+      current.runtime.paddleReturnReminderBeep;
+  legacy.runtime.paddleReturnReminderIntervalMs =
+      current.runtime.paddleReturnReminderIntervalMs;
+  legacy.runtime.paddleReturnReminderMaxDurationMs =
+      current.runtime.paddleReturnReminderMaxDurationMs;
+  legacy.runtime.rinseGestureMs = current.runtime.rinseGestureMs;
+  legacy.runtime.rinseDurationMs = current.runtime.rinseDurationMs;
+  legacy.runtime.autoRetare = current.runtime.autoRetare;
+  legacy.runtime.retareWindowMs = current.runtime.retareWindowMs;
+  legacy.runtime.minimumCupWeightG = current.runtime.minimumCupWeightG;
+  legacy.runtime.retareStabilitySamples =
+      current.runtime.retareStabilitySamples;
+  legacy.runtime.retareStabilityToleranceG =
+      current.runtime.retareStabilityToleranceG;
+  legacy.runtime.retareStabilityMaxGapMs =
+      current.runtime.retareStabilityMaxGapMs;
+  legacy.runtime.retareStabilityMinDurationMs =
+      current.runtime.retareStabilityMinDurationMs;
+  legacy.runtime.bbwProtectionMs = current.runtime.bbwProtectionMs;
+  legacy.runtime.operationalWallMs = current.runtime.operationalWallMs;
+  legacy.runtime.timezoneOffsetMinutes =
+      current.runtime.timezoneOffsetMinutes;
+  legacy.runtime.ntpServerPreset = current.runtime.ntpServerPreset;
+  memcpy(legacy.runtime.ntpServerCustom, current.runtime.ntpServerCustom,
+         sizeof(legacy.runtime.ntpServerCustom));
+  legacy.runtime.fastExtractionGuardEnabled =
+      current.runtime.fastExtractionGuardEnabled;
+  legacy.runtime.maxRecoveryWeightG = current.runtime.maxRecoveryWeightG;
+  legacy.runtime.minBrewTimeMs = current.runtime.minBrewTimeMs;
+  legacy.runtime.autoToManualGuardEnabled =
+      current.runtime.autoToManualGuardEnabled;
+  legacy.runtime.autoToManualGuardLimitMode =
+      current.runtime.autoToManualGuardLimitMode;
+  legacy.runtime.autoToManualGuardManualLimitMs =
+      current.runtime.autoToManualGuardManualLimitMs;
+  legacy.runtime.autoToManualGuardBaselineMs =
+      current.runtime.autoToManualGuardBaselineMs;
+  memcpy(legacy.runtime.autoToManualGuardSamplesDs,
+         current.runtime.autoToManualGuardSamplesDs,
+         sizeof(legacy.runtime.autoToManualGuardSamplesDs));
   legacy.staConfigured = true;
   legacy.staOpen = false;
   strcpy(legacy.staSsid, "CafeWiFi17");
@@ -695,6 +754,8 @@ void p21_schema_seventeen_migrates_to_eighteen() {
   CHECK(migrated);
   CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
   CHECK(loaded.runtime.goalWeightG == 41);
+  CHECK(std::fabs(loaded.runtime.weightOffsetBaselineG -
+                  DEFAULT_WEIGHT_OFFSET_G) < 0.001f);
   CHECK(strcmp(loaded.staSsid, "CafeWiFi17") == 0);
   CHECK(loaded.preferredScaleMac[0] == '\0');
 
@@ -704,6 +765,93 @@ void p21_schema_seventeen_migrates_to_eighteen() {
   PersistedSettings reloaded;
   CHECK(loadPersistedSettings(reloaded));
   CHECK(strcmp(reloaded.preferredScaleMac, "11:22:33:44:55:66") == 0);
+}
+
+void p22_schema_eighteen_migrates_to_nineteen() {
+  persistence_host::reset();
+  PersistedSettings current;
+  CHECK(initializeDefaultSettings(current));
+  PersistedSettingsV18 legacy = {};
+  legacy.magic = PERSISTED_SETTINGS_MAGIC;
+  legacy.schemaVersion = CONFIG_SCHEMA_VERSION_V18;
+  legacy.structureSize = sizeof(PersistedSettingsV18);
+  legacy.storageRevision = 12;
+  legacy.runtime.revision = current.runtime.revision;
+  legacy.runtime.goalWeightG = 39;
+  legacy.runtime.weightOffsetG = 2.75f;
+  legacy.runtime.autoTare = current.runtime.autoTare;
+  legacy.runtime.timerOnly = current.runtime.timerOnly;
+  legacy.runtime.canTareStartTimer = current.runtime.canTareStartTimer;
+  legacy.runtime.shotTimerStartDelayMs = 250;
+  legacy.runtime.firstDropBeep = current.runtime.firstDropBeep;
+  legacy.runtime.paddleReturnReminderBeep =
+      current.runtime.paddleReturnReminderBeep;
+  legacy.runtime.paddleReturnReminderIntervalMs =
+      current.runtime.paddleReturnReminderIntervalMs;
+  legacy.runtime.paddleReturnReminderMaxDurationMs =
+      current.runtime.paddleReturnReminderMaxDurationMs;
+  legacy.runtime.rinseGestureMs = current.runtime.rinseGestureMs;
+  legacy.runtime.rinseDurationMs = current.runtime.rinseDurationMs;
+  legacy.runtime.autoRetare = current.runtime.autoRetare;
+  legacy.runtime.retareWindowMs = current.runtime.retareWindowMs;
+  legacy.runtime.minimumCupWeightG = current.runtime.minimumCupWeightG;
+  legacy.runtime.retareStabilitySamples =
+      current.runtime.retareStabilitySamples;
+  legacy.runtime.retareStabilityToleranceG =
+      current.runtime.retareStabilityToleranceG;
+  legacy.runtime.retareStabilityMaxGapMs =
+      current.runtime.retareStabilityMaxGapMs;
+  legacy.runtime.retareStabilityMinDurationMs =
+      current.runtime.retareStabilityMinDurationMs;
+  legacy.runtime.bbwProtectionMs = current.runtime.bbwProtectionMs;
+  legacy.runtime.operationalWallMs = current.runtime.operationalWallMs;
+  legacy.runtime.timezoneOffsetMinutes =
+      current.runtime.timezoneOffsetMinutes;
+  legacy.runtime.ntpServerPreset = current.runtime.ntpServerPreset;
+  memcpy(legacy.runtime.ntpServerCustom, current.runtime.ntpServerCustom,
+         sizeof(legacy.runtime.ntpServerCustom));
+  legacy.runtime.fastExtractionGuardEnabled =
+      current.runtime.fastExtractionGuardEnabled;
+  legacy.runtime.maxRecoveryWeightG = current.runtime.maxRecoveryWeightG;
+  legacy.runtime.minBrewTimeMs = current.runtime.minBrewTimeMs;
+  legacy.runtime.autoToManualGuardEnabled =
+      current.runtime.autoToManualGuardEnabled;
+  legacy.runtime.autoToManualGuardLimitMode =
+      current.runtime.autoToManualGuardLimitMode;
+  legacy.runtime.autoToManualGuardManualLimitMs =
+      current.runtime.autoToManualGuardManualLimitMs;
+  legacy.runtime.autoToManualGuardBaselineMs =
+      current.runtime.autoToManualGuardBaselineMs;
+  memcpy(legacy.runtime.autoToManualGuardSamplesDs,
+         current.runtime.autoToManualGuardSamplesDs,
+         sizeof(legacy.runtime.autoToManualGuardSamplesDs));
+  legacy.staConfigured = true;
+  legacy.staOpen = false;
+  strcpy(legacy.staSsid, "CafeWiFi18");
+  strcpy(legacy.staPassword, "CafePass18");
+  legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  legacy.staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  legacy.lkgValid = false;
+  memcpy(legacy.apPassword, current.apPassword, sizeof(legacy.apPassword));
+  memcpy(legacy.authSalt, current.authSalt, sizeof(legacy.authSalt));
+  memcpy(legacy.authHash, current.authHash, sizeof(legacy.authHash));
+  strcpy(legacy.preferredScaleMac, "AA:BB:CC:DD:EE:FF");
+  legacy.checksum = persistedSettingsV18Checksum(legacy);
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &legacy,
+                           sizeof(legacy));
+
+  PersistedSettings loaded;
+  bool migrated = false;
+  CHECK(loadPersistedSettings(loaded, &migrated));
+  CHECK(migrated);
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.runtime.goalWeightG == 39);
+  CHECK(std::fabs(loaded.runtime.weightOffsetG - 2.75f) < 0.001f);
+  CHECK(std::fabs(loaded.runtime.weightOffsetBaselineG -
+                  DEFAULT_WEIGHT_OFFSET_G) < 0.001f);
+  CHECK(loaded.runtime.shotTimerStartDelayMs == 250);
+  CHECK(strcmp(loaded.staSsid, "CafeWiFi18") == 0);
+  CHECK(strcmp(loaded.preferredScaleMac, "AA:BB:CC:DD:EE:FF") == 0);
 }
 
 void p16_static_ip_address_validation() {
@@ -764,7 +912,8 @@ const TestCase tests[] = {
     {"P14", p14_schema_fourteen_migrates_to_current},
     {"P15", p15_schema_fifteen_migrates_to_sixteen},
     {"P20", p20_schema_sixteen_migrates_to_seventeen},
-    {"P21", p21_schema_seventeen_migrates_to_eighteen},
+    {"P21", p21_schema_seventeen_migrates_to_current},
+    {"P22", p22_schema_eighteen_migrates_to_nineteen},
     {"P16", p16_static_ip_address_validation},
     {"P17", p17_legacy_password_hash_still_verifies},
     {"P18", p18_shot_log_keeps_history_when_inactive_slot_write_fails},

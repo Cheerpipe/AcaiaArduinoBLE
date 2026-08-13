@@ -182,6 +182,19 @@ if (!html.includes('id="autoToManualGuardEnabled"') ||
     !network.includes('AUTO_TO_MANUAL_GUARD')) {
   throw new Error('Auto-to-manual time guard must be wired in config UI, live panel, shots API, and routes');
 }
+if (!html.includes('id="learnedOffsetG"') ||
+    !html.includes('id="weightOffsetBaselineG"') ||
+    !html.includes('id="resetCalibrationButton"') ||
+    html.indexOf('id="learnedOffsetG"') >
+        html.indexOf('id="weightOffsetBaselineG"') ||
+    html.indexOf('id="weightOffsetBaselineG"') >
+        html.indexOf('id="resetCalibrationButton"') ||
+    !html.includes('Reset learned stop offset to baseline') ||
+    !html.includes('Seed for Reset learned stop offset') ||
+    !network.includes('weightOffsetBaselineG') ||
+    !html.includes('weightOffsetBaselineG')) {
+  throw new Error('Learned stop offset baseline must be wired like A→M baseline reset');
+}
 if (!html.includes('id="hCpu"') ||
     !html.includes('id="hUptime"') ||
     !html.includes('id="hResetReason"') ||
