@@ -213,6 +213,18 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   initializePaddleInput();
   hostRelayOpenWrites = 0;
   hostRelayClosedWrites = 0;
+  seedDefaultShotPresetBank(presetBank);
+  ensureShotPresetBank(presetBank, runtimeConfig.retareWindowMs,
+                       runtimeConfig.autoRetare);
+  {
+    ShotPreset &preset = mutableActiveShotPreset(presetBank);
+    copyUserRecipeFromConfig(runtimeConfig, preset);
+    preset.weightOffsetG = runtimeConfig.weightOffsetG;
+    memcpy(preset.autoToManualGuardSamplesDs,
+           runtimeConfig.autoToManualGuardSamplesDs,
+           sizeof(preset.autoToManualGuardSamplesDs));
+  }
+  runtimeConfig = composeEffectiveConfig(runtimeConfig, presetBank);
 }
 
 void verifySafetyInvariants() {
@@ -1521,6 +1533,7 @@ void w09_valid_config_applies_only_from_ready() {
   resetHarness(false, false);
   reachReadyFromBoot();
   runtimeConfig.weightOffsetG = 2.25f;
+  mutableActiveShotPreset(presetBank).weightOffsetG = 2.25f;
   WebCommand update;
   update.type = WebCommandType::APPLY_CONFIG;
   update.config = runtimeConfig;
@@ -1929,6 +1942,11 @@ void w34_calibration_reset_restores_baseline_and_cancels_analysis() {
   reachReadyFromBoot();
   runtimeConfig.weightOffsetBaselineG = 2.0f;
   runtimeConfig.weightOffsetG = 3.2f;
+  {
+    ShotPreset &preset = mutableActiveShotPreset(presetBank);
+    preset.weightOffsetBaselineG = 2.0f;
+    preset.weightOffsetG = 3.2f;
+  }
   const uint32_t previousRevision = runtimeConfig.revision;
   pendingFinalize.pending = true;
   WebCommand reset;

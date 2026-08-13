@@ -16,14 +16,15 @@ const bleLibrary = fs.readFileSync(
 const htmlMatch = asset.match(/R"HTML\(([\s\S]*?)\)HTML"/);
 if (!htmlMatch) throw new Error('Embedded HTML raw string not found');
 const html = htmlMatch[1];
+const css = fs.readFileSync(path.join(sketchDir, 'web', 'app.css'), 'utf8');
 const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
 if (!scriptMatch) throw new Error('Embedded script not found');
 
 // Parse the exact JavaScript delivered by the controller.
 new Function(scriptMatch[1]);
 
-if (Buffer.byteLength(html, 'utf8') > 65536) {
-  throw new Error('Web UI source exceeds the 64 KiB authoring budget');
+if (Buffer.byteLength(html, 'utf8') > 81920) {
+  throw new Error('Web UI source exceeds the 80 KiB authoring budget');
 }
 if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
     !html.includes('Paddle State') || !html.includes('firstDropBeep') ||
@@ -195,6 +196,35 @@ if (!html.includes('id="learnedOffsetG"') ||
     !html.includes('weightOffsetBaselineG')) {
   throw new Error('Learned stop offset baseline must be wired like A→M baseline reset');
 }
+if (!html.includes('<legend>Brew</legend>') ||
+    !html.includes('<legend>Machine and scale</legend>') ||
+    !html.includes('<legend>Security and connectivity</legend>') ||
+    !html.includes('id="presetCards"') ||
+    !html.includes('id="presetNewBtn"') ||
+    !html.includes('id="presetDupBtn"') ||
+    !html.includes('id="presetLoadBtn"') ||
+    !html.includes('id="presetSaveBtn"') ||
+    !html.includes('id="presetDeleteBtn"') ||
+    !html.includes('id="presetRenameDialog"') ||
+    !html.includes('id="homePresetChips"') ||
+    !html.includes('id="homeBrewByWeight"') ||
+    !html.includes('id="view-presets"') ||
+    !html.includes('data-route="/presets"') ||
+    !html.includes("action:'new'") ||
+    !html.includes("action:'duplicate'") ||
+    !html.includes("action:'rename'") ||
+    !html.includes('function startRenamePreset(') ||
+    !html.includes('saveBrewPreset') ||
+    !html.includes('/api/v1/presets') ||
+    html.includes('id="presetNameInput"') ||
+    !network.includes('/api/v1/presets') ||
+    !network.includes('presetsHandler') ||
+    !network.includes('\\"presets\\"') ||
+    !css.includes('.presetCard') ||
+    !css.includes('.presetChips') ||
+    !css.includes('.btnCompact')) {
+  throw new Error('Brew presets CRUD UI, Home selector, /presets route, and API must be wired');
+}
 if (!html.includes('id="hCpu"') ||
     !html.includes('id="hUptime"') ||
     !html.includes('id="hResetReason"') ||
@@ -299,6 +329,7 @@ const expected = new Map([
   ['GET /history', 'rootHandler'],
   ['GET /admin', 'rootHandler'],
   ['GET /settings', 'rootHandler'],
+  ['GET /presets', 'rootHandler'],
   ['GET /app.css', 'cssHandler'],
   ['POST /api/v1/login', 'loginHandler'],
   ['POST /api/v1/logout', 'logoutHandler'],
@@ -306,6 +337,7 @@ const expected = new Map([
   ['GET /api/v1/status', 'statusHandler'],
   ['GET /api/v1/log', 'logHandler'],
   ['POST /api/v1/config', 'configHandler'],
+  ['POST /api/v1/presets', 'presetsHandler'],
   ['POST /api/v1/calibration/reset', 'resetCalibrationHandler'],
   ['POST /api/v1/calibration/reset-guard-samples', 'resetGuardSamplesHandler'],
   ['POST /api/v1/control/paddle', 'paddleHandler'],
@@ -345,7 +377,7 @@ if (!html.includes('async function loadStatus(){') ||
     !html.includes('function refreshStatus(){return withPollGate(loadStatus)}') ||
     !html.includes('function refreshShots(){return withPollGate(loadShots)}') ||
     !html.includes('function refreshLog(){return withPollGate(loadLog)}') ||
-    !html.includes("name==='home'||name==='settings'||name==='admin'") ||
+    !html.includes("name==='home'||name==='settings'||name==='admin'||name==='presets'") ||
     !html.includes("name==='history'") ||
     !html.includes('renderRoute(location.pathname)') ||
     html.includes('Promise.all([loadShots(),loadLog()])')) {
@@ -354,11 +386,13 @@ if (!html.includes('async function loadStatus(){') ||
 if (!html.includes('id="view-home"') ||
     !html.includes('id="view-history"') ||
     !html.includes('id="view-settings"') ||
+    !html.includes('id="view-presets"') ||
     !html.includes('id="view-admin"') ||
     !html.includes('data-route="/settings"') ||
+    !html.includes('data-route="/presets"') ||
     !html.includes('data-route="/admin"') ||
     !html.includes('history.pushState')) {
-  throw new Error('Web UI must expose Home/History/Admin/Log/Settings routes as an SPA');
+  throw new Error('Web UI must expose Home/Presets/History/Admin/Log/Settings routes as an SPA');
 }
 const maxHandlersMatch = network.match(/max_uri_handlers\s*=\s*(\d+)/);
 if (!maxHandlersMatch) {
@@ -470,14 +504,14 @@ const cssRoundTrip = zlib.gunzipSync(generated.cssGzip).toString('utf8');
 if (cssRoundTrip !== generated.css) {
   throw new Error('Generated gzip Web CSS does not round-trip to the minified CSS');
 }
-if (generated.gzip.length > 18432) {
-  throw new Error('Compressed Web UI HTML exceeds the 18 KiB gzip budget');
+if (generated.gzip.length > 20480) {
+  throw new Error('Compressed Web UI HTML exceeds the 20 KiB gzip budget');
 }
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
 }
-if (generated.gzip.length + generated.cssGzip.length > 22528) {
-  throw new Error('Combined HTML+CSS gzip exceeds the 22 KiB flash budget');
+if (generated.gzip.length + generated.cssGzip.length > 24576) {
+  throw new Error('Combined HTML+CSS gzip exceeds the 24 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {

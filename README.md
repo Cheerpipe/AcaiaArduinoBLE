@@ -103,11 +103,15 @@ In short: **hard to build, easy to live with.**
 - **Polarity:** physical paddle ON = GPIO **LOW**; relay closed (CN9
   energized) = GPIO **LOW**.
 
+### Shot presets
+
+Brew settings live in **named presets** (factory **Single** / **Double**, plus customs). The active preset supplies goal weight, BBW/guards, learned stop offset and its baseline, and A→M samples. Changing preset persists only the active id (no copy-on-select). Manage presets under **Settings → Brew** (dense cards: New · Duplicate · Load · Save · Delete; rename on the card). **New** seeds firmware Double defaults (not the saved Double in NVS). **Home** has Brew-by-weight / Manual plus a preset selector; **`/presets`** is operational select + shot status. Machine/scale, alerts, Wi‑Fi, and password stay outside the recipe.
+
 ### Brew and weight settings
 
-All workflow parameters below are editable from the Web UI **Configuration**
+All workflow parameters below are editable from the Web UI **Settings**
 panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
-`settingsB`, config schema **v15**). Defaults are shown in parentheses.
+`settingsB`, config schema **v20**). Defaults are shown in parentheses.
 
 | Setting | What it does |
 | --- | --- |
@@ -174,9 +178,10 @@ Additional fixed protections (not separately configurable):
 See [Factory credentials (first use)](#factory-credentials-first-use) for AP
 name, default passwords, and step-by-step first connection.
 
-- Fully **embedded Web UI** SPA with four routes (`/`, `/history`, `/log`,
-  `/settings`): same-origin assets only (no CDN). HTML source budget **64 KiB**;
-  gzip HTML ≤ **18 KiB**, gzip CSS ≤ **6 KiB**, combined ≤ **22 KiB**. Reloads
+- Fully **embedded Web UI** SPA with routes (`/`, `/presets`, `/settings`,
+  `/history`, `/admin`, `/log`): same-origin assets only (no CDN). HTML source
+  budget **80 KiB**; gzip HTML ≤ **20 KiB**, gzip CSS ≤ **6 KiB**, combined ≤
+  **24 KiB**. Reloads
   revalidate HTML with `ETag` (`Cache-Control: no-cache`) so unchanged firmware
   returns **304**. Shared stylesheet is `GET /app.css` (gzip, versioned query,
   long-lived `immutable` cache). Inactive views do not poll their APIs.

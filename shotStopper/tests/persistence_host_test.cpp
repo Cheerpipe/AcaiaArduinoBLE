@@ -854,6 +854,160 @@ void p22_schema_eighteen_migrates_to_nineteen() {
   CHECK(strcmp(loaded.preferredScaleMac, "AA:BB:CC:DD:EE:FF") == 0);
 }
 
+
+void p23_schema_nineteen_migrates_to_twenty_with_preset_bank() {
+  persistence_host::reset();
+  PersistedSettings current;
+  CHECK(initializeDefaultSettings(current));
+  PersistedSettingsV19 legacy = {};
+  legacy.magic = PERSISTED_SETTINGS_MAGIC;
+  legacy.schemaVersion = CONFIG_SCHEMA_VERSION_V19;
+  legacy.structureSize = sizeof(PersistedSettingsV19);
+  legacy.storageRevision = 14;
+  legacy.runtime.revision = current.runtime.revision;
+  legacy.runtime.goalWeightG = 40;
+  legacy.runtime.weightOffsetG = 2.25f;
+  legacy.runtime.weightOffsetBaselineG = 1.75f;
+  legacy.runtime.autoTare = current.runtime.autoTare;
+  legacy.runtime.timerOnly = false;
+  legacy.runtime.canTareStartTimer = current.runtime.canTareStartTimer;
+  legacy.runtime.shotTimerStartDelayMs = current.runtime.shotTimerStartDelayMs;
+  legacy.runtime.firstDropBeep = current.runtime.firstDropBeep;
+  legacy.runtime.paddleReturnReminderBeep =
+      current.runtime.paddleReturnReminderBeep;
+  legacy.runtime.paddleReturnReminderIntervalMs =
+      current.runtime.paddleReturnReminderIntervalMs;
+  legacy.runtime.paddleReturnReminderMaxDurationMs =
+      current.runtime.paddleReturnReminderMaxDurationMs;
+  legacy.runtime.rinseGestureMs = current.runtime.rinseGestureMs;
+  legacy.runtime.rinseDurationMs = current.runtime.rinseDurationMs;
+  legacy.runtime.autoRetare = current.runtime.autoRetare;
+  legacy.runtime.retareWindowMs = current.runtime.retareWindowMs;
+  legacy.runtime.minimumCupWeightG = current.runtime.minimumCupWeightG;
+  legacy.runtime.retareStabilitySamples =
+      current.runtime.retareStabilitySamples;
+  legacy.runtime.retareStabilityToleranceG =
+      current.runtime.retareStabilityToleranceG;
+  legacy.runtime.retareStabilityMaxGapMs =
+      current.runtime.retareStabilityMaxGapMs;
+  legacy.runtime.retareStabilityMinDurationMs =
+      current.runtime.retareStabilityMinDurationMs;
+  legacy.runtime.bbwProtectionMs = current.runtime.bbwProtectionMs;
+  legacy.runtime.operationalWallMs = current.runtime.operationalWallMs;
+  legacy.runtime.timezoneOffsetMinutes =
+      current.runtime.timezoneOffsetMinutes;
+  legacy.runtime.ntpServerPreset = current.runtime.ntpServerPreset;
+  memcpy(legacy.runtime.ntpServerCustom, current.runtime.ntpServerCustom,
+         sizeof(legacy.runtime.ntpServerCustom));
+  legacy.runtime.fastExtractionGuardEnabled = true;
+  legacy.runtime.maxRecoveryWeightG = 48.0f;
+  legacy.runtime.minBrewTimeMs = 25000;
+  legacy.runtime.autoToManualGuardEnabled =
+      current.runtime.autoToManualGuardEnabled;
+  legacy.runtime.autoToManualGuardLimitMode =
+      current.runtime.autoToManualGuardLimitMode;
+  legacy.runtime.autoToManualGuardManualLimitMs =
+      current.runtime.autoToManualGuardManualLimitMs;
+  legacy.runtime.autoToManualGuardBaselineMs =
+      current.runtime.autoToManualGuardBaselineMs;
+  memcpy(legacy.runtime.autoToManualGuardSamplesDs,
+         current.runtime.autoToManualGuardSamplesDs,
+         sizeof(legacy.runtime.autoToManualGuardSamplesDs));
+  legacy.staConfigured = true;
+  legacy.staOpen = false;
+  strcpy(legacy.staSsid, "CafeWiFi19");
+  strcpy(legacy.staPassword, "CafePass19");
+  legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  legacy.staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  legacy.lkgValid = false;
+  memcpy(legacy.apPassword, current.apPassword, sizeof(legacy.apPassword));
+  memcpy(legacy.authSalt, current.authSalt, sizeof(legacy.authSalt));
+  memcpy(legacy.authHash, current.authHash, sizeof(legacy.authHash));
+  strcpy(legacy.preferredScaleMac, "AA:BB:CC:DD:EE:11");
+  legacy.checksum = persistedSettingsV19Checksum(legacy);
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &legacy,
+                           sizeof(legacy));
+
+  PersistedSettings loaded;
+  bool migrated = false;
+  CHECK(loadPersistedSettings(loaded, &migrated));
+  CHECK(migrated);
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.presets.count >= 2);
+  CHECK(loaded.presets.activeId == FACTORY_PRESET_ID_DOUBLE);
+  const ShotPreset *dbl =
+      findShotPreset(loaded.presets, FACTORY_PRESET_ID_DOUBLE);
+  const ShotPreset *sgl =
+      findShotPreset(loaded.presets, FACTORY_PRESET_ID_SINGLE);
+  CHECK(dbl != nullptr);
+  CHECK(sgl != nullptr);
+  CHECK(dbl->goalWeightG == 40);
+  CHECK(std::fabs(dbl->weightOffsetG - 2.25f) < 0.001f);
+  CHECK(std::fabs(dbl->weightOffsetBaselineG - 1.75f) < 0.001f);
+  CHECK(std::fabs(dbl->maxRecoveryWeightG - 48.0f) < 0.001f);
+  CHECK(dbl->minBrewTimeMs == 25000);
+  CHECK(sgl->goalWeightG == 18);
+  CHECK(std::fabs(sgl->weightOffsetBaselineG - 0.5f) < 0.001f);
+  CHECK(std::fabs(sgl->weightOffsetG - 0.5f) < 0.001f);
+  CHECK(strcmp(loaded.staSsid, "CafeWiFi19") == 0);
+}
+
+void p24_preset_bank_size_and_crud_budgets() {
+  CHECK(sizeof(ShotPreset) <= 128);
+  CHECK(sizeof(ShotPresetBank) <= 1100);
+  CHECK(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET);
+  CHECK(sizeof(WebCommand) <= 512);
+  CHECK(sizeof(PersistedSettings) > sizeof(PersistedSettingsV19));
+
+  ShotPresetBank bank;
+  seedDefaultShotPresetBank(bank);
+  CHECK(bank.count == 2);
+  CHECK(bank.activeId == FACTORY_PRESET_ID_DOUBLE);
+
+  uint8_t newId = 0;
+  CHECK(createUntitledShotPreset(bank, newId));
+  CHECK(newId != 0);
+  CHECK(bank.activeId == newId);
+  const ShotPreset *created = findShotPreset(bank, newId);
+  CHECK(created != nullptr);
+  CHECK(created->goalWeightG == 36);
+  CHECK(std::fabs(created->weightOffsetBaselineG - 1.5f) < 0.001f);
+  CHECK(std::fabs(created->weightOffsetG - 1.5f) < 0.001f);
+
+  uint8_t copyId = 0;
+  CHECK(duplicateShotPreset(bank, FACTORY_PRESET_ID_DOUBLE, copyId));
+  const ShotPreset *copy = findShotPreset(bank, copyId);
+  CHECK(copy != nullptr);
+  CHECK(strcmp(copy->name, "Double copy") == 0);
+  CHECK(!copy->isFactory);
+
+  uint8_t copy2 = 0;
+  CHECK(duplicateShotPreset(bank, FACTORY_PRESET_ID_DOUBLE, copy2));
+  const ShotPreset *copyB = findShotPreset(bank, copy2);
+  CHECK(copyB != nullptr);
+  CHECK(strcmp(copyB->name, "Double copy 2") == 0);
+
+  CHECK(renameShotPreset(bank, copyId, "Double light"));
+  CHECK(strcmp(findShotPreset(bank, copyId)->name, "Double light") == 0);
+  CHECK(!renameShotPreset(bank, copy2, "Double light"));
+
+  RuntimeConfig machine = {};
+  machine.retareWindowMs = DEFAULT_RETARE_WINDOW_MS;
+  machine.autoRetare = true;
+  machine.timerOnly = true;  // session Manual
+  RuntimeConfig composed = composeEffectiveConfig(machine, bank);
+  CHECK(composed.timerOnly);  // Manual preserved
+  CHECK(composed.goalWeightG == activeShotPreset(bank).goalWeightG);
+
+  while (bank.count < MAX_SHOT_PRESETS) {
+    uint8_t id = 0;
+    CHECK(createUntitledShotPreset(bank, id));
+  }
+  uint8_t overflow = 0;
+  CHECK(!createUntitledShotPreset(bank, overflow));
+  CHECK(!duplicateShotPreset(bank, FACTORY_PRESET_ID_SINGLE, overflow));
+}
+
 void p16_static_ip_address_validation() {
   uint8_t ip[4] = {192, 168, 1, 50};
   uint8_t mask[4] = {255, 255, 255, 0};
@@ -914,6 +1068,8 @@ const TestCase tests[] = {
     {"P20", p20_schema_sixteen_migrates_to_seventeen},
     {"P21", p21_schema_seventeen_migrates_to_current},
     {"P22", p22_schema_eighteen_migrates_to_nineteen},
+    {"P23", p23_schema_nineteen_migrates_to_twenty_with_preset_bank},
+    {"P24", p24_preset_bank_size_and_crud_budgets},
     {"P16", p16_static_ip_address_validation},
     {"P17", p17_legacy_password_hash_still_verifies},
     {"P18", p18_shot_log_keeps_history_when_inactive_slot_write_fails},

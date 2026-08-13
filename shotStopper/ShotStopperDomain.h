@@ -11,8 +11,9 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 19;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 18;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 20;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 19;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V19 = 19;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V18 = 18;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V17 = 17;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V16 = 16;
@@ -496,6 +497,65 @@ enum class ConfigValidationError : uint8_t {
   WEIGHT_OFFSET_BASELINE
 };
 
+constexpr size_t MAX_SHOT_PRESETS = 8;
+constexpr size_t SHOT_PRESET_NAME_CAPACITY = 24;
+constexpr uint8_t FACTORY_PRESET_ID_SINGLE = 1;
+constexpr uint8_t FACTORY_PRESET_ID_DOUBLE = 2;
+constexpr float FACTORY_SINGLE_WEIGHT_OFFSET_G = 0.5f;
+constexpr uint8_t FACTORY_SINGLE_GOAL_WEIGHT_G = 18;
+constexpr float FACTORY_SINGLE_MAX_RECOVERY_WEIGHT_G = 20.0f;
+constexpr uint32_t FACTORY_SINGLE_MIN_BREW_TIME_MS = 16000;
+// NVS dual-slot budget headroom for PersistedSettings including the preset bank.
+constexpr size_t PERSISTED_SETTINGS_NVS_BUDGET = 3072;
+
+enum class PresetAction : uint8_t {
+  APPLY = 0,
+  SAVE = 1,
+  CREATE = 2,
+  DELETE = 3,
+  DUPLICATE = 4,
+  RENAME = 5,
+  RESTORE_FACTORY_VALUES = 6
+};
+
+struct ShotPreset {
+  uint8_t id = 0;
+  char name[SHOT_PRESET_NAME_CAPACITY] = {};
+  bool isFactory = false;
+  bool brewByWeight = true;
+  uint8_t goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
+  uint32_t bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
+  float weightOffsetBaselineG = DEFAULT_WEIGHT_OFFSET_G;
+  float weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
+  bool fastExtractionGuardEnabled = true;
+  float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
+  uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
+  bool autoToManualGuardEnabled = true;
+  uint8_t autoToManualGuardLimitMode =
+      static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
+  uint32_t autoToManualGuardManualLimitMs =
+      DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
+  uint32_t autoToManualGuardBaselineMs =
+      DEFAULT_AUTO_TO_MANUAL_GUARD_BASELINE_MS;
+  uint16_t autoToManualGuardSamplesDs[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT] = {
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
+      AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS};
+};
+
+struct ShotPresetBank {
+  uint8_t count = 0;
+  uint8_t activeId = 0;
+  uint8_t nextId = 3;
+  ShotPreset presets[MAX_SHOT_PRESETS] = {};
+};
+
+static_assert(sizeof(ShotPreset) <= 128, "ShotPreset too large");
+static_assert(sizeof(ShotPresetBank) <= 1100, "ShotPresetBank too large");
+
 inline uint32_t effectiveRetareWindowMs(const RuntimeConfig &config) {
   return config.autoRetare ? config.retareWindowMs : 0U;
 }
@@ -919,6 +979,7 @@ enum class WebCommandType : uint8_t {
   APPLY_CONFIG,
   RESET_WEIGHT_OFFSET,
   RESET_AUTO_TO_MANUAL_GUARD_SAMPLES,
+  PRESET_OP,
   SAVE_NETWORK,
   FORGET_NETWORK,
   CHANGE_AP_PASSWORD,
@@ -945,6 +1006,7 @@ inline const char *webCommandTypeName(WebCommandType type) {
       return "reset learned weight offset";
     case WebCommandType::RESET_AUTO_TO_MANUAL_GUARD_SAMPLES:
       return "reset auto-to-manual guard samples";
+    case WebCommandType::PRESET_OP: return "preset operation";
     case WebCommandType::SAVE_NETWORK: return "save STA network";
     case WebCommandType::FORGET_NETWORK: return "forget STA network";
     case WebCommandType::CHANGE_AP_PASSWORD: return "change AP password";
@@ -979,6 +1041,11 @@ struct WebCommand {
   uint32_t webSessionId = 0;
   uint32_t controlLeaseId = 0;
   RuntimeConfig config = {};
+  // PRESET_OP payload (keep small — no full bank on the queue element).
+  uint8_t presetAction = 0;
+  uint8_t presetId = 0;
+  char presetName[24] = {};
+  bool persistPresets = false;
   char ssid[WIFI_SSID_CAPACITY] = {};
   char password[WIFI_PASSWORD_CAPACITY] = {};
   bool openNetwork = false;
@@ -991,6 +1058,9 @@ struct WebCommand {
   bool succeeded = false;
   CommandResultState resultState = CommandResultState::NONE;
 };
+
+static_assert(sizeof(WebCommand) <= 512, "WebCommand too large for queue");
+
 
 inline const char *commandResultStateName(CommandResultState state) {
   switch (state) {
@@ -1073,6 +1143,7 @@ struct ControlStatusSnapshot {
   uint32_t largestFreeHeapBlockBytes = 0;
   uint32_t scaleEventsDropped = 0;
   RuntimeConfig config = {};
+  ShotPresetBank presets = {};
   LastCycleSummary lastCycle = {};
   HwmonSnapshot hwmon = {};
   uint32_t debugEventsDropped = 0;

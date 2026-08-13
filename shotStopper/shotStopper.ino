@@ -29,6 +29,7 @@
 #endif
 
 #include "ShotStopperDomain.h"
+#include "ShotStopperPresets.h"
 #include "ShotStopperSerialCli.h"
 #include "ShotStopperVersion.h"
 #include "ShotStopperHardwareTimer.h"
@@ -346,6 +347,7 @@ struct PendingShotFinalize {
   uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
   bool lastKnownWeightValid = false;
   float lastKnownWeightG = 0.0f;
+  uint8_t activePresetId = 0;
 };
 
 struct ScaleCommand {
@@ -386,6 +388,7 @@ ShotTrajectory shot;
 CycleSession session;
 PendingShotFinalize pendingFinalize;
 RuntimeConfig runtimeConfig;
+ShotPresetBank presetBank;
 LastCycleSummary lastCycle;
 DebugRingBuffer debugLog;
 LogLevel serialLogLevel = LogLevel::INFO;
@@ -711,6 +714,18 @@ bool enqueueWebCommand(const WebCommand &command) {
   return webCommandQueue != nullptr &&
          xQueueSend(webCommandQueue, &command, 0) == pdTRUE;
 }
+
+RuntimeConfig effectiveRuntimeConfig() {
+  return composeEffectiveConfig(runtimeConfig, presetBank);
+}
+
+void copyPresetBank(ShotPresetBank *out) {
+  if (out == nullptr) {
+    return;
+  }
+  *out = presetBank;
+}
+
 
 ScaleLinkSnapshot getScaleLinkSnapshot() {
   ScaleLinkSnapshot snapshot = {};
@@ -2349,6 +2364,7 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   pendingFinalize.lastKnownWeightValid =
       session.hasWeightAnchor && isfinite(session.lastAcceptedWeightG);
   pendingFinalize.lastKnownWeightG = session.lastAcceptedWeightG;
+  pendingFinalize.activePresetId = presetBank.activeId;
 }
 
 void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeightG,
@@ -2450,10 +2466,19 @@ void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
       !autoToManualGuardSampleErrorOk(finalWeightG, snapshot.goalWeightG)) {
     return;
   }
+  ShotPreset *preset = mutableShotPreset(presetBank, snapshot.activePresetId);
+  if (preset == nullptr) {
+    preset = &mutableActiveShotPreset(presetBank);
+  }
+  pushAutoToManualGuardSample(preset->autoToManualGuardSamplesDs,
+                              snapshot.durationDs);
   RuntimeConfig candidate =
       runtimePersistPending ? runtimePersistCandidate : runtimeConfig;
-  pushAutoToManualGuardSample(candidate.autoToManualGuardSamplesDs,
-                              snapshot.durationDs);
+  applyShotPresetToConfig(activeShotPreset(presetBank), candidate, true);
+  if (preset->id == presetBank.activeId) {
+    memcpy(candidate.autoToManualGuardSamplesDs, preset->autoToManualGuardSamplesDs,
+           sizeof(candidate.autoToManualGuardSamplesDs));
+  }
   ++candidate.revision;
   if (candidate.revision == 0) {
     candidate.revision = 1;
@@ -2464,7 +2489,7 @@ void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
   runtimePersistReasonBits |= RUNTIME_PERSIST_REASON_ATM_SAMPLES;
   Serial.print("A->M guard sample queued; trend ms=");
   Serial.println(autoToManualGuardTrendMs(
-      candidate.autoToManualGuardSamplesDs, candidate.operationalWallMs));
+      preset->autoToManualGuardSamplesDs, preset->operationalWallMs));
 }
 
 void pendingShotFinalizeTask() {
@@ -2545,9 +2570,14 @@ void pendingShotFinalizeTask() {
     return;
   }
 
+  ShotPreset *preset = mutableShotPreset(presetBank, snapshot.activePresetId);
+  if (preset == nullptr) {
+    preset = &mutableActiveShotPreset(presetBank);
+  }
+  preset->weightOffsetG = updatedOffset;
   RuntimeConfig candidate =
       runtimePersistPending ? runtimePersistCandidate : runtimeConfig;
-  candidate.weightOffsetG = updatedOffset;
+  applyShotPresetToConfig(activeShotPreset(presetBank), candidate, true);
   ++candidate.revision;
   if (candidate.revision == 0) {
     candidate.revision = 1;
@@ -2557,7 +2587,7 @@ void pendingShotFinalizeTask() {
   runtimePersistRetryAtMs = millis();
   runtimePersistReasonBits |= RUNTIME_PERSIST_REASON_OFFSET;
   Serial.print("New offset pending durable commit: ");
-  Serial.println(candidate.weightOffsetG);
+  Serial.println(preset->weightOffsetG);
 }
 
 // ---------------------------------------------------------------------------
@@ -3370,7 +3400,21 @@ void resetSessionForNewCycle(ControlSource source, uint32_t webSessionId = 0,
   session.source = source;
   session.webSessionId = webSessionId;
   session.controlLeaseId = controlLeaseId;
-  session.config = snapshotConfig(runtimeConfig);
+#if defined(SHOT_STOPPER_HOST_TEST)
+  // Host tests mutate RuntimeConfig brew fields directly; keep the active
+  // preset (compose source of truth) aligned before snapshotting a cycle.
+  ensureShotPresetBank(presetBank, runtimeConfig.retareWindowMs,
+                       runtimeConfig.autoRetare);
+  {
+    ShotPreset &preset = mutableActiveShotPreset(presetBank);
+    copyUserRecipeFromConfig(runtimeConfig, preset);
+    preset.weightOffsetG = runtimeConfig.weightOffsetG;
+    memcpy(preset.autoToManualGuardSamplesDs,
+           runtimeConfig.autoToManualGuardSamplesDs,
+           sizeof(preset.autoToManualGuardSamplesDs));
+  }
+#endif
+  session.config = snapshotConfig(effectiveRuntimeConfig());
   session.endReason = EndReason::NONE;
 }
 
@@ -3914,6 +3958,7 @@ void serviceRuntimePersistence() {
     nextInternalRequestId = 0x80000000UL;
   }
   persist.config = runtimePersistCandidate;
+  persist.persistPresets = true;
   if (beginMaintenanceLease(persist, true)) {
     runtimePersistPending = false;
     runtimePersistRequestId = persist.requestId;
@@ -4044,26 +4089,59 @@ void processWebCommand(const WebCommand &command) {
         rejectWebCommand(command);
         return;
       }
-      RuntimeConfig candidate = command.config;
-      // Offset and A→M duration samples are learned by the control loop and
-      // are intentionally not Web fields. Preserve the newest values if a
-      // form built from an older status snapshot races with post-shot work.
-      candidate.weightOffsetG = runtimeConfig.weightOffsetG;
-      memcpy(candidate.autoToManualGuardSamplesDs,
-             runtimeConfig.autoToManualGuardSamplesDs,
-             sizeof(candidate.autoToManualGuardSamplesDs));
-      if (validateRuntimeConfig(candidate) != ConfigValidationError::NONE) {
+      // Machine/workflow fields only. Recipe authority stays on the active preset.
+      RuntimeConfig candidate = runtimeConfig;
+      candidate.autoTare = command.config.autoTare;
+      candidate.canTareStartTimer = command.config.canTareStartTimer;
+      candidate.shotTimerStartDelayMs = command.config.shotTimerStartDelayMs;
+      candidate.firstDropBeep = command.config.firstDropBeep;
+      candidate.paddleReturnReminderBeep = command.config.paddleReturnReminderBeep;
+      candidate.paddleReturnReminderIntervalMs =
+          command.config.paddleReturnReminderIntervalMs;
+      candidate.paddleReturnReminderMaxDurationMs =
+          command.config.paddleReturnReminderMaxDurationMs;
+      candidate.rinseGestureMs = command.config.rinseGestureMs;
+      candidate.rinseDurationMs = command.config.rinseDurationMs;
+      candidate.autoRetare = command.config.autoRetare;
+      candidate.retareWindowMs = command.config.retareWindowMs;
+      candidate.minimumCupWeightG = command.config.minimumCupWeightG;
+      candidate.retareStabilitySamples = command.config.retareStabilitySamples;
+      candidate.retareStabilityToleranceG =
+          command.config.retareStabilityToleranceG;
+      candidate.retareStabilityMaxGapMs = command.config.retareStabilityMaxGapMs;
+      candidate.retareStabilityMinDurationMs =
+          command.config.retareStabilityMinDurationMs;
+      candidate.timezoneOffsetMinutes = command.config.timezoneOffsetMinutes;
+      candidate.ntpServerPreset = command.config.ntpServerPreset;
+      memcpy(candidate.ntpServerCustom, command.config.ntpServerCustom,
+             sizeof(candidate.ntpServerCustom));
+      // Session Manual switch may arrive via brewByWeight on Home; keep as timerOnly.
+      candidate.timerOnly = command.config.timerOnly;
+#if defined(SHOT_STOPPER_HOST_TEST)
+      // Host APPLY_CONFIG still carries brew fields; update the active recipe.
+      {
+        ensureShotPresetBank(presetBank, candidate.retareWindowMs,
+                             candidate.autoRetare);
+        ShotPreset &preset = mutableActiveShotPreset(presetBank);
+        copyUserRecipeFromConfig(command.config, preset);
+      }
+#endif
+      RuntimeConfig composed = composeEffectiveConfig(candidate, presetBank);
+      if (validateRuntimeConfig(composed) != ConfigValidationError::NONE) {
         addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
         return;
       }
-      candidate.revision = runtimeConfig.revision + 1;
-      if (candidate.revision == 0) {
-        candidate.revision = 1;
+      composed.revision = runtimeConfig.revision + 1;
+      if (composed.revision == 0) {
+        composed.revision = 1;
       }
+      ensureShotPresetBank(presetBank, composed.retareWindowMs,
+                           composed.autoRetare);
       WebCommand persist;
       persist.type = WebCommandType::PERSIST_RUNTIME;
       persist.requestId = command.requestId;
-      persist.config = candidate;
+      persist.config = composed;
+      persist.persistPresets = true;
       if (!beginMaintenanceLease(persist, true)) {
         rejectWebCommand(command);
       }
@@ -4075,11 +4153,11 @@ void processWebCommand(const WebCommand &command) {
         rejectWebCommand(command);
         return;
       }
-      // Prevent a completed shot's delayed drip analysis from immediately
-      // replacing the user-requested baseline calibration.
       pendingFinalize.pending = false;
+      ShotPreset &preset = mutableActiveShotPreset(presetBank);
+      preset.weightOffsetG = preset.weightOffsetBaselineG;
       RuntimeConfig candidate = runtimeConfig;
-      candidate.weightOffsetG = candidate.weightOffsetBaselineG;
+      applyShotPresetToConfig(preset, candidate, true);
       ++candidate.revision;
       if (candidate.revision == 0) {
         candidate.revision = 1;
@@ -4088,6 +4166,7 @@ void processWebCommand(const WebCommand &command) {
       persist.type = WebCommandType::PERSIST_RUNTIME;
       persist.requestId = command.requestId;
       persist.config = candidate;
+      persist.persistPresets = true;
       if (!beginMaintenanceLease(persist, true)) {
         rejectWebCommand(command);
       }
@@ -4100,9 +4179,11 @@ void processWebCommand(const WebCommand &command) {
         return;
       }
       pendingFinalize.pending = false;
+      ShotPreset &preset = mutableActiveShotPreset(presetBank);
+      resetAutoToManualGuardSamples(preset.autoToManualGuardSamplesDs,
+                                    preset.autoToManualGuardBaselineMs);
       RuntimeConfig candidate = runtimeConfig;
-      resetAutoToManualGuardSamples(candidate.autoToManualGuardSamplesDs,
-                                    candidate.autoToManualGuardBaselineMs);
+      applyShotPresetToConfig(preset, candidate, true);
       ++candidate.revision;
       if (candidate.revision == 0) {
         candidate.revision = 1;
@@ -4113,6 +4194,76 @@ void processWebCommand(const WebCommand &command) {
       persist.type = WebCommandType::PERSIST_RUNTIME;
       persist.requestId = command.requestId;
       persist.config = candidate;
+      persist.persistPresets = true;
+      if (!beginMaintenanceLease(persist, true)) {
+        rejectWebCommand(command);
+      }
+      return;
+    }
+
+    case WebCommandType::PRESET_OP: {
+      if (!controlAllowsConfigurationNow()) {
+        rejectWebCommand(command);
+        return;
+      }
+      bool ok = false;
+      uint8_t newId = 0;
+      const PresetAction action = static_cast<PresetAction>(command.presetAction);
+      switch (action) {
+        case PresetAction::APPLY:
+          ok = setActiveShotPreset(presetBank, command.presetId);
+          break;
+        case PresetAction::SAVE: {
+          ShotPreset *preset = mutableShotPreset(presetBank, command.presetId);
+          if (preset == nullptr) {
+            preset = &mutableActiveShotPreset(presetBank);
+          }
+          copyUserRecipeFromConfig(command.config, *preset);
+          // Force brewByWeight from config brew polarity; Manual session must not
+          // poison the recipe when saving from Brew form (form sends brewByWeight).
+          preset->brewByWeight = !command.config.timerOnly;
+          ok = validateShotPresetRecipe(*preset, runtimeConfig.retareWindowMs,
+                                        runtimeConfig.autoRetare);
+          if (ok) {
+            presetBank.activeId = preset->id;
+          }
+          break;
+        }
+        case PresetAction::CREATE:
+          ok = createUntitledShotPreset(presetBank, newId);
+          break;
+        case PresetAction::DELETE:
+          ok = deleteShotPreset(presetBank, command.presetId);
+          break;
+        case PresetAction::DUPLICATE:
+          ok = duplicateShotPreset(presetBank, command.presetId, newId);
+          break;
+        case PresetAction::RENAME:
+          ok = renameShotPreset(presetBank, command.presetId, command.presetName);
+          break;
+        case PresetAction::RESTORE_FACTORY_VALUES:
+          ok = restoreFactoryShotPresetValues(presetBank, command.presetId);
+          break;
+      }
+      if (!ok) {
+        addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED,
+                      static_cast<int32_t>(command.presetAction));
+        rejectWebCommand(command);
+        return;
+      }
+      ensureShotPresetBank(presetBank, runtimeConfig.retareWindowMs,
+                           runtimeConfig.autoRetare);
+      RuntimeConfig candidate = runtimeConfig;
+      applyShotPresetToConfig(activeShotPreset(presetBank), candidate, true);
+      ++candidate.revision;
+      if (candidate.revision == 0) {
+        candidate.revision = 1;
+      }
+      WebCommand persist;
+      persist.type = WebCommandType::PERSIST_RUNTIME;
+      persist.requestId = command.requestId;
+      persist.config = candidate;
+      persist.persistPresets = true;
       if (!beginMaintenanceLease(persist, true)) {
         rejectWebCommand(command);
       }
@@ -4242,7 +4393,8 @@ void publishControlStatus() {
   next.largestFreeHeapBlockBytes = largestFreeHeapBlockBytes;
   next.hwmon = hwmonSnapshot;
   next.scaleEventsDropped = scaleEventsDropped;
-  next.config = runtimeConfig;
+  next.config = effectiveRuntimeConfig();
+  next.presets = presetBank;
   next.lastCycle = lastCycle;
   strncpy(next.scaleProtocol, scaleLink.protocolName,
           sizeof(next.scaleProtocol) - 1);
@@ -4285,9 +4437,11 @@ void publishControlStatus() {
               : session.autoToManualGuardDeadlineAtMs - nowMs;
     }
   }
-  next.autoToManualGuardTrendMs = autoToManualGuardTrendMs(
-      runtimeConfig.autoToManualGuardSamplesDs,
-      runtimeConfig.operationalWallMs);
+  {
+    const ShotPreset &active = activeShotPreset(presetBank);
+    next.autoToManualGuardTrendMs = autoToManualGuardTrendMs(
+        active.autoToManualGuardSamplesDs, active.operationalWallMs);
+  }
   portENTER_CRITICAL(&debugLogMux);
   next.debugEventsDropped = debugLog.overwritten();
   portEXIT_CRITICAL(&debugLogMux);
@@ -4590,6 +4744,9 @@ void setup() {
   }
   if (settingsLoaded) {
     runtimeConfig = persistedSettings.runtime;
+    presetBank = persistedSettings.presets;
+    ensureShotPresetBank(presetBank, runtimeConfig.retareWindowMs,
+                         runtimeConfig.autoRetare);
     if (validPreferredScaleMac(persistedSettings.preferredScaleMac)) {
       strncpy(scalePreferredMac, persistedSettings.preferredScaleMac,
               PREFERRED_SCALE_MAC_CAPACITY - 1);
@@ -4598,6 +4755,7 @@ void setup() {
   }
 #else
   runtimeConfig = RuntimeConfig{};
+  seedDefaultShotPresetBank(presetBank);
 #endif
 
 #ifndef SHOT_STOPPER_HOST_TEST
@@ -4678,6 +4836,7 @@ void setup() {
     callbacks.deleteShotRecord = deleteShotRecord;
     callbacks.clearShotLog = clearShotLog;
     callbacks.copyPreferredScaleMac = copyPreferredScaleMac;
+    callbacks.copyPresetBank = copyPresetBank;
     if (!networkManager.begin(persistedSettings, callbacks)) {
       logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
               BOOT_SUBSYSTEM_NETWORK, 0);

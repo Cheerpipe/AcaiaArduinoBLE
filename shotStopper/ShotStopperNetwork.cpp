@@ -357,7 +357,7 @@ esp_err_t sendJsonStringChunk(httpd_req_t *request, const char *value) {
   return httpd_resp_send_chunk(request, "\"", 1);
 }
 
-char g_statusResponseBuffer[6144];
+char g_statusResponseBuffer[7680];
 
 void sanitizeJsonEmbed(const char *input, char *output, size_t capacity) {
   if (capacity == 0) {
@@ -1457,9 +1457,16 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
   bool authenticationChanged = false;
   switch (command.type) {
     case WebCommandType::PERSIST_RUNTIME:
-      if (validateRuntimeConfig(command.config) != ConfigValidationError::NONE) {
-        log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
-        return false;
+      if (command.persistPresets && callbacks_.copyPresetBank != nullptr) {
+        callbacks_.copyPresetBank(&next.presets);
+      }
+      {
+        const RuntimeConfig composed =
+            composeEffectiveConfig(command.config, next.presets);
+        if (validateRuntimeConfig(composed) != ConfigValidationError::NONE) {
+          log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
+          return false;
+        }
       }
       next.runtime = command.config;
       persist = true;
@@ -1751,7 +1758,7 @@ bool ShotStopperNetwork::startHttpServer() {
   // connection failures ("Device unreachable") while the UI still partially
   // works. ESP-IDF uses (max_open_sockets + 3) LWIP sockets total.
   config.max_open_sockets = 10;
-  config.max_uri_handlers = 28;
+  config.max_uri_handlers = 30;
   config.max_resp_headers = 12;
   config.backlog_conn = 10;
   config.lru_purge_enable = true;
@@ -1768,6 +1775,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/history", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/admin", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/settings", HTTP_GET, rootHandler) &&
+      registerHandler(server_, "/presets", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/app.css", HTTP_GET, cssHandler) &&
       registerHandler(server_, "/api/v1/login", HTTP_POST, loginHandler) &&
       registerHandler(server_, "/api/v1/logout", HTTP_POST, logoutHandler) &&
@@ -1783,6 +1791,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/time/sync", HTTP_POST,
                       timeSyncHandler) &&
       registerHandler(server_, "/api/v1/config", HTTP_POST, configHandler) &&
+      registerHandler(server_, "/api/v1/presets", HTTP_POST, presetsHandler) &&
       registerHandler(server_, "/api/v1/calibration/reset", HTTP_POST,
                       resetCalibrationHandler) &&
       registerHandler(server_, "/api/v1/calibration/reset-guard-samples",
@@ -2317,6 +2326,49 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
                     sizeof(safeFirmwareVersion));
   char safeStaSsid[WIFI_SSID_CAPACITY] = {};
   sanitizeJsonEmbed(network.staSsid, safeStaSsid, sizeof(safeStaSsid));
+  char presetsJson[1600] = "{}";
+  {
+    size_t used = 0;
+    int n = snprintf(presetsJson, sizeof(presetsJson),
+                     "{\"activeId\":%u,\"items\":[",
+                     static_cast<unsigned>(control.presets.activeId));
+    if (n > 0) {
+      used = static_cast<size_t>(n);
+    }
+    for (uint8_t i = 0; i < control.presets.count && i < MAX_SHOT_PRESETS;
+         ++i) {
+      const ShotPreset &p = control.presets.presets[i];
+      char safeName[SHOT_PRESET_NAME_CAPACITY * 2] = {};
+      sanitizeJsonEmbed(p.name, safeName, sizeof(safeName));
+      n = snprintf(
+          presetsJson + used, sizeof(presetsJson) - used,
+          "%s{\"id\":%u,\"name\":\"%s\",\"isFactory\":%s,\"brewByWeight\":%s,"
+          "\"goalWeightG\":%u,\"minBrewTimeMs\":%lu,\"maxRecoveryWeightG\":%.1f,"
+          "\"bbwProtectionMs\":%lu,\"operationalWallMs\":%lu,"
+          "\"weightOffsetG\":%.2f,\"weightOffsetBaselineG\":%.2f,"
+          "\"fastExtractionGuardEnabled\":%s,\"autoToManualGuardEnabled\":%s}",
+          i == 0 ? "" : ",", static_cast<unsigned>(p.id), safeName,
+          p.isFactory ? "true" : "false", p.brewByWeight ? "true" : "false",
+          static_cast<unsigned>(p.goalWeightG),
+          static_cast<unsigned long>(p.minBrewTimeMs),
+          static_cast<double>(p.maxRecoveryWeightG),
+          static_cast<unsigned long>(p.bbwProtectionMs),
+          static_cast<unsigned long>(p.operationalWallMs),
+          static_cast<double>(p.weightOffsetG),
+          static_cast<double>(p.weightOffsetBaselineG),
+          p.fastExtractionGuardEnabled ? "true" : "false",
+          p.autoToManualGuardEnabled ? "true" : "false");
+      if (n < 0 || static_cast<size_t>(n) >= sizeof(presetsJson) - used) {
+        break;
+      }
+      used += static_cast<size_t>(n);
+    }
+    if (used + 2 < sizeof(presetsJson)) {
+      presetsJson[used++] = ']';
+      presetsJson[used++] = '}';
+      presetsJson[used] = 0;
+    }
+  }
   const int written = snprintf(
       g_statusResponseBuffer, sizeof(g_statusResponseBuffer),
       "{\"firmwareVersion\":\"%s\",\"state\":\"%s\",\"stateLabel\":\"%s\","
@@ -2358,6 +2410,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"autoToManualGuardTrendMs\":%lu,"
       "\"timezoneOffsetMinutes\":%d,"
       "\"ntpServerPreset\":\"%s\",\"ntpServerCustom\":\"%s\"},"
+      "\"presets\":%s,"
       "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
       "\"nextRetryInMs\":%lu,\"consecutiveFailures\":%u,"
       "\"activeServer\":\"%s\"},"
@@ -2462,6 +2515,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<int>(control.config.timezoneOffsetMinutes),
       ntpPresetId(control.config.ntpServerPreset),
       safeNtpCustom,
+      presetsJson,
       timeSyncStateName(timeStatus.state),
       static_cast<unsigned long>(timeStatus.utcSec),
       static_cast<unsigned long>(timeStatus.lastSyncAgeMs),
@@ -3020,6 +3074,124 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   command.type = WebCommandType::APPLY_CONFIG;
   command.requestId = self.allocateRequestId();
   command.config = candidate;
+  if (!self.callbacks_.enqueueWebCommand(command)) {
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
+                     "Control is busy; nothing was saved.");
+  }
+  return self.sendAccepted(request, command.requestId);
+}
+
+esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authenticate(request, true)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
+                     "Invalid session or CSRF token.");
+  }
+  ControlStatusSnapshot status;
+  self.callbacks_.copyControlStatus(status);
+  if (!controlAllowsConfiguration(status)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "Presets are locked while a cycle is active.");
+  }
+
+  char body[REQUEST_BODY_CAPACITY] = {};
+  if (!readJsonBody(request, body)) {
+    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
+                     "A bounded JSON request is required.");
+  }
+  cJSON *root = cJSON_Parse(body);
+  char action[24] = {};
+  uint8_t presetId = 0;
+  char presetName[SHOT_PRESET_NAME_CAPACITY] = {};
+  const char *parseError = nullptr;
+  PresetAction presetAction = PresetAction::APPLY;
+  WebCommand command;
+  command.type = WebCommandType::PRESET_OP;
+  command.requestId = self.allocateRequestId();
+  command.config = status.config;
+
+  if (root == nullptr || !jsonString(root, "action", action, sizeof(action),
+                                     false)) {
+    parseError = "action is required.";
+  } else if (strcmp(action, "apply") == 0 || strcmp(action, "load") == 0) {
+    presetAction = PresetAction::APPLY;
+    if (!jsonUint8(root, "id", presetId) || presetId == 0) {
+      parseError = "id must be a non-zero integer.";
+    }
+  } else if (strcmp(action, "create") == 0 || strcmp(action, "new") == 0) {
+    presetAction = PresetAction::CREATE;
+  } else if (strcmp(action, "delete") == 0) {
+    presetAction = PresetAction::DELETE;
+    if (!jsonUint8(root, "id", presetId) || presetId == 0) {
+      parseError = "id must be a non-zero integer.";
+    }
+  } else if (strcmp(action, "duplicate") == 0) {
+    presetAction = PresetAction::DUPLICATE;
+    if (!jsonUint8(root, "id", presetId) || presetId == 0) {
+      parseError = "id must be a non-zero integer.";
+    }
+  } else if (strcmp(action, "rename") == 0) {
+    presetAction = PresetAction::RENAME;
+    if (!jsonUint8(root, "id", presetId) || presetId == 0) {
+      parseError = "id must be a non-zero integer.";
+    } else if (!jsonString(root, "name", presetName, sizeof(presetName),
+                           false)) {
+      parseError = "name is required.";
+    }
+  } else if (strcmp(action, "restore_factory_values") == 0) {
+    presetAction = PresetAction::RESTORE_FACTORY_VALUES;
+    if (!jsonUint8(root, "id", presetId) || presetId == 0) {
+      parseError = "id must be a non-zero integer.";
+    }
+  } else if (strcmp(action, "save") == 0 || strcmp(action, "update") == 0) {
+    presetAction = PresetAction::SAVE;
+    if (!jsonUint8(root, "id", presetId) || presetId == 0) {
+      parseError = "id must be a non-zero integer.";
+    } else {
+      bool brewByWeight = true;
+      if (!jsonBoolean(root, "brewByWeight", brewByWeight) ||
+          !jsonUint8(root, "goalWeightG", command.config.goalWeightG) ||
+          !jsonUint32(root, "operationalWallMs",
+                      command.config.operationalWallMs) ||
+          !jsonUint32(root, "bbwProtectionMs",
+                      command.config.bbwProtectionMs) ||
+          !jsonFloat(root, "weightOffsetBaselineG",
+                     command.config.weightOffsetBaselineG) ||
+          !jsonBoolean(root, "fastExtractionGuardEnabled",
+                       command.config.fastExtractionGuardEnabled) ||
+          !jsonFloat(root, "maxRecoveryWeightG",
+                     command.config.maxRecoveryWeightG) ||
+          !jsonUint32(root, "minBrewTimeMs", command.config.minBrewTimeMs) ||
+          !jsonBoolean(root, "autoToManualGuardEnabled",
+                       command.config.autoToManualGuardEnabled) ||
+          !jsonAutoToManualGuardLimitMode(
+              root, "autoToManualGuardLimitMode",
+              command.config.autoToManualGuardLimitMode) ||
+          !jsonUint32(root, "autoToManualGuardManualLimitMs",
+                      command.config.autoToManualGuardManualLimitMs) ||
+          !jsonUint32(root, "autoToManualGuardBaselineMs",
+                      command.config.autoToManualGuardBaselineMs)) {
+        parseError = "save requires the full Brew recipe field set.";
+      } else {
+        command.config.timerOnly = !brewByWeight;
+      }
+    }
+  } else {
+    parseError = "Unknown preset action.";
+  }
+
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  memset(body, 0, sizeof(body));
+  if (parseError != nullptr) {
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD", parseError);
+  }
+
+  command.presetAction = static_cast<uint8_t>(presetAction);
+  command.presetId = presetId;
+  strncpy(command.presetName, presetName, sizeof(command.presetName) - 1);
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; nothing was saved.");
