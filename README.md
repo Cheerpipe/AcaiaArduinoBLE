@@ -31,7 +31,7 @@ dependency.
 | --- | --- | --- |
 | **Scope** | Generic, intended to work on several machines | Dedicated to the Micra and its independent paddle |
 | **Architecture** | Simple, mostly single-threaded | FreeRTOS tasks, queues, and isolation between control, BLE, and network |
-| **Features** | Minimal brew-by-weight stop | Rich workflow: retare, confirmation windows, rinse, shot history, Web UI, diagnostics, safety layers |
+| **Features** | Minimal brew-by-weight stop | Rich workflow: retare, BBW protection, rinse, shot history, Web UI, diagnostics, safety layers |
 | **Paddle machines** | Assumes you can work within the original machine constraints | Reads the physical paddle on GPIO and controls CN9 independently — no need to “fight” the paddle wiring |
 | **Resilience** | Straightforward happy path | Explicit state machines, watchdogs, transactional CN9 close, stream validation, recovery paths |
 
@@ -44,7 +44,7 @@ handling, and persistence that survives resets and misconfiguration.
 
 Examples that did not exist (or barely existed) in the original stopper sketch:
 
-- **Intelligent retare** and brew-start confirmation so late cup placement does
+- **Intelligent retare** and BBW protection so late cup placement does
   not break the shot.
 - **Embedded Web UI** with Wi-Fi, diagnostics, configuration, and optional
   remote control — no extra display or buttons on the machine.
@@ -72,10 +72,10 @@ there**:
 - Flip the paddle, brew, walk away.
 - No extra screen on the espresso bar, no accessory buttons, no ritual double
   tare, no “did the stopper accept my cup?” — the firmware handles timing,
-  retare, confirmation, stop, and reminders in the background.
+  retare, BBW protection, stop, and reminders in the background.
 
 Complexity lives in firmware parameters, state machines, and safety — not in
-the barista workflow. Defaults and automatic behaviors (retare, confirmation,
+the barista workflow. Defaults and automatic behaviors (retare, BBW protection,
 offset learning, paddle-return beeps) exist so most users never touch the Web
 UI after initial setup. If something feels unexpected, see the
 [FAQ (Spanish)](docs/FAQ.md). The UI and API are there for tuning and diagnosis, not
@@ -121,7 +121,7 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | **Retare window (s)** | Time after shot start to detect and retare a late-placed cup (default 4 s). |
 | **Minimum cup weight (g)** | Stable load threshold that qualifies as a cup for retare (default 10 g). |
 | **Retare stability** | Samples (default 3), tolerance (default 2.0 g), max sample gap (default 0.5 s), and min stable time (default 0.3 s) required before retare fires. |
-| **Brew start confirmation (s)** | **Accidental-weight protection window** at shot start for automatic BBW: inhibits automatic weight stop until first drops are confirmed or the timeout expires (default 12 s; minimum retare window + 3 s). Skipped in timer-only mode. |
+| **BBW protection (s)** | **Pre-arm / accidental-weight protection window** at shot start for automatic BBW: inhibits automatic weight stop until first drops are detected or the timeout expires (default 12 s; minimum retare window + 3 s). Runs in parallel with retare. Skipped in timer-only mode. |
 | **Quick rinse gesture (s)** | Maximum paddle ON time that still counts as a quick rinse when released (default 1.5 s). |
 | **Quick rinse duration (s)** | How long CN9 stays closed after a quick rinse starts (default 3 s). |
 | **Timezone offset (min)** | Wall-clock offset for shot history labels (default UTC+0). |
@@ -132,7 +132,7 @@ Additional fixed protections (not separately configurable):
 - **Post-tare baseline grace (2 s):** after a tare, weight must settle within
   ±50 g before the stream is trusted for stop decisions.
 - **Direct threshold stop:** two fresh samples at `target − learned offset`
-  after confirmation ends.
+  after BBW protection ends.
 - **Predictive stop:** linear regression over recent accepted samples can stop
   earlier than the direct threshold.
 - **Scale loss handling:** BLE disconnect or stale stream suspends weight
@@ -319,23 +319,23 @@ explicitly during compilation with `--library`.
 
 At startup, the relay is open. The controller must detect a stable physical
 paddle OFF state before entering `READY`. From `READY`, moving the paddle to ON
-closes CN9 and begins gesture qualification.
+closes CN9 and starts a brew (or a manual cycle if scale automation is
+unavailable). Retare and BBW protection run in parallel from that moment.
 
-- Releasing it within the rinse gesture time starts a rinse. CN9 remains closed
-  for the configured rinse duration, and subsequent paddle changes are ignored
-  until the rinse ends.
-- Holding it ON past the rinse gesture starts an automatic extraction if scale
-  automation was available when the cycle begins; otherwise it becomes a manual
-  cycle without a scale. Entry to `BREW` is brief (debounce/BLE only) and does
-  not wait for retare or brew-start confirmation.
-- Releasing it after the rinse window ends the qualifying gesture as a completed
-  brew and opens CN9.
-- Releasing it during an automatic or manual extraction opens CN9 immediately.
+- Releasing the paddle within the rinse gesture time **demotes** the cycle to a
+  rinse. CN9 remains closed for the configured rinse duration, and subsequent
+  paddle changes are ignored until the rinse ends.
+- Holding it ON past the rinse gesture keeps the brew. Automatic by-weight stop
+  is available when scale automation was present at start; otherwise the cycle
+  stays manual without a scale.
+- Releasing it after the rinse window ends the brew and opens CN9.
+- Releasing it during an automatic or manual extraction (after the rinse window)
+  opens CN9 immediately.
 - If the scale disconnects or its samples become stale during an automatic
   extraction, weight control is suspended. It recovers only on the current BLE
   generation after three coherent samples. Paddle OFF and timing limits remain
   authoritative throughout.
-- After brew-start confirmation ends, two fresh samples at or above
+- After BBW protection ends, two fresh samples at or above
   `goal - offset` stop the extraction directly, independently of regression.
   Prediction remains an earlier stop mechanism. Timer-only mode retains timing
   and tare but disables both mechanisms and learning.
@@ -346,11 +346,12 @@ closes CN9 and begins gesture qualification.
 stateDiagram-v2
   [*] --> REQUIRES_OFF
   REQUIRES_OFF --> READY: physical OFF stable
-  READY --> QUALIFYING_ON: physical ON or opt-in Web ON
-  QUALIFYING_ON --> RINSE: short gesture
-  QUALIFYING_ON --> BREW: scale automation ready
-  QUALIFYING_ON --> MANUAL_NO_SCALE: no scale automation
-  QUALIFYING_ON --> READY: paddle OFF after rinse window
+  READY --> BREW: ON with scale automation
+  READY --> MANUAL_NO_SCALE: ON without scale automation
+  BREW --> RINSE: short gesture (demotion)
+  MANUAL_NO_SCALE --> RINSE: short gesture (demotion)
+  BREW --> READY: paddle OFF after rinse window
+  MANUAL_NO_SCALE --> READY: paddle OFF after rinse window
   RINSE --> READY: complete, paddle OFF
   RINSE --> REQUIRES_OFF: complete, paddle ON
   BREW --> READY: paddle/Web stop
@@ -360,21 +361,21 @@ stateDiagram-v2
 
 ## Scale stop logic
 
-During an automatic extraction the scale session starts with the cycle. Entry to
-`BREW` is brief (debounce/BLE only) and does not wait for retare or brew-start
-confirmation — those windows run in parallel from shot start.
+During an automatic extraction the scale session starts with the cycle. The
+cycle enters `BREW` (or `MANUAL_NO_SCALE`) immediately at paddle ON. Retare and
+BBW protection run in parallel from shot start and do not delay that entry.
 
 1. **Automatic retare** (if enabled): stable cup load after shot start triggers
    a second tare without restarting the shot timer.
-2. **Brew start confirmation** (always active for automatic BBW): waits for
+2. **BBW protection / pre-arm** (always active for automatic BBW): waits for
    reliable first drops or times out. Automatic stop by weight is inhibited
-   while retare or confirmation still blocks.
+   while retare or BBW protection still blocks.
 3. **Brew by weight**: after both windows end, direct threshold and predictive
    stop are armed immediately.
 
 Manual stop, CN9 time limits, paddle OFF, and all safety mechanisms remain
 active throughout. Timer-only and manual-no-scale cycles skip retare and
-confirmation. Abrupt or implausible samples are visible as observed weight but
+BBW protection. Abrupt or implausible samples are visible as observed weight but
 cannot enter regression or offset learning.
 
 The status API distinguishes BLE connection, stream freshness, control

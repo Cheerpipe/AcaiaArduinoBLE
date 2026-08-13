@@ -24,7 +24,7 @@ if (Buffer.byteLength(html, 'utf8') > 55296) {
   throw new Error('Web UI exceeds the 54 KiB asset budget');
 }
 if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
-    !html.includes('Paddle State') || !html.includes('brewConfirmationBeep') ||
+    !html.includes('Paddle State') || !html.includes('firstDropBeep') ||
     !html.includes('paddleReturnReminderBeep') ||
     !html.includes('class="fieldHint"')) {
   throw new Error('Web UI must show the physical paddle state and expose both scale beep options');
@@ -51,7 +51,7 @@ if (!html.includes('function rangeCheck(') ||
     !network.includes('configValidationErrorName(error)')) {
   throw new Error('UI/API must expose specific validation ranges, inline errors, and field-aware config errors');
 }
-if (!network.includes('"brewConfirmationBeep"') ||
+if (!network.includes('"firstDropBeep"') ||
     !network.includes('"paddleReturnReminderBeep"') ||
     !network.includes('"autoRetare"') ||
     !network.includes('"retareWindowMs"') ||
@@ -60,7 +60,7 @@ if (!network.includes('"brewConfirmationBeep"') ||
     !network.includes('"retareStabilityToleranceG"') ||
     !network.includes('"retareStabilityMaxGapMs"') ||
     !network.includes('"retareStabilityMinDurationMs"') ||
-    !network.includes('"confirmationTimeoutMs"') ||
+    !network.includes('"bbwProtectionMs"') ||
     !network.includes('"fastExtractionGuardEnabled"') ||
     !network.includes('"maxRecoveryWeightG"') ||
     !network.includes('"minBrewTimeMs"') ||
@@ -88,8 +88,8 @@ if (!network.includes('"brewConfirmationBeep"') ||
     !html.includes('id="retareStabilityToleranceG"') ||
     !html.includes('id="retareStabilityMaxGapS"') ||
     !html.includes('id="retareStabilityMinDurationS"') ||
-    !html.includes('Brew start confirmation (s)') ||
-    !html.includes('id="confirmationTimeoutS"') ||
+    !html.includes('BBW protection (s)') ||
+    !html.includes('id="bbwProtectionS"') ||
     !html.includes('Paddle reminder limit (min)') ||
     !html.includes('id="paddleReturnReminderMaxDurationMin"') ||
     !html.includes("number('paddleReturnReminderMaxDurationMin')*60000") ||
@@ -97,7 +97,7 @@ if (!network.includes('"brewConfirmationBeep"') ||
     !html.includes('id="logoutButton"') ||
     html.includes('Up to 120 shots') ||
     !html.includes('/api/v1/time/sync') ||
-    !firmware.includes('session.config.brewConfirmationBeep') ||
+    !firmware.includes('session.config.firstDropBeep') ||
     !firmware.includes('servicePaddleReturnReminder')) {
   throw new Error('Scale beep settings must be configurable end-to-end');
 }
@@ -353,14 +353,14 @@ const safeBeep = bleLibrary.slice(safeBeepStart, safeBeepEnd);
 if (!safeBeep.includes('BEEP_LEVEL_1_BOOKOO') ||
     safeBeep.includes('TARE_ACAIA') || safeBeep.includes('TARE_GENERIC') ||
     safeBeep.includes('_connected = false')) {
-  throw new Error('Brew-confirmation beep must not tare or mutate scale connection state');
+  throw new Error('First-drop beep must not tare or mutate scale connection state');
 }
 if (!firmware.includes('requestScaleBrewBeep(session.id)') ||
     !firmware.includes('cancelScaleBrewBeep(session.id)') ||
     !firmware.includes('onFirstDropsDetected') ||
     !firmware.includes('notifyRetareFlowDetected') ||
     !firmware.includes('retareFlowFirstDetectedAtMs') ||
-    !firmware.includes('brewStartConfirmationOpen') ||
+    !firmware.includes('bbwProtectionActive') ||
     !firmware.includes('retareWindowOpen') ||
     !firmware.includes('scale.supportsTareStartTimer()') ||
     /enum class ScaleCommandType[\s\S]*BEEP/.test(

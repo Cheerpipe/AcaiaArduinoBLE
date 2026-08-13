@@ -224,13 +224,6 @@ enum class ScaleEventType : uint8_t {
   TIMER_STOP_RESULT
 };
 
-enum class BbwProtectionPhase : uint8_t {
-  NONE,
-  RETARE,
-  CONFIRMATION,
-  NORMAL
-};
-
 enum class TimerStopResult : uint8_t {
   NOT_REQUIRED,
   NOT_ATTEMPTED,
@@ -245,7 +238,7 @@ struct ShotTrajectory {
   float weight[MAX_SHOT_DATAPOINTS] = {};
   float timeS[MAX_SHOT_DATAPOINTS] = {};
   size_t datapoints = 0;
-  bool confirmedBrew = false;
+  bool automaticBrew = false;
 };
 
 struct CycleSession {
@@ -295,7 +288,7 @@ struct CycleSession {
   float lastAcceptedWeightG = 0.0f;
   float recoveryLastWeightG = 0.0f;
   bool retareEnded = false;
-  bool brewStartConfirmEnded = false;
+  bool bbwProtectionEnded = false;
   bool flowDuringRetare = false;
   uint32_t retareFlowFirstDetectedAtMs = 0;
   bool retarePerformed = false;
@@ -336,7 +329,7 @@ struct PendingShotFinalize {
   float scaleBaselineG = 0.0f;
   bool startedWithScale = false;
   bool timerOnly = false;
-  bool confirmedBrew = false;
+  bool automaticBrew = false;
   StopperState finalState = StopperState::READY;
   EndReason endReason = EndReason::NONE;
   bool extractionGuardEnabled = false;
@@ -1427,7 +1420,7 @@ void resetShotTrajectory(uint32_t startedAtMs) {
   shot.startMs = startedAtMs;
   shot.expectedEndS = session.config.operationalWallMs / 1000.0f;
   shot.datapoints = 0;
-  shot.confirmedBrew = false;
+  shot.automaticBrew = false;
 }
 
 void calculateExpectedEndTime() {
@@ -1489,8 +1482,7 @@ bool shouldTrackWeight() {
   return session.active && !session.config.timerOnly &&
          session.weightControlState != WeightControlState::INACTIVE &&
          session.weightControlState != WeightControlState::FAULT_STOPPED &&
-         (stopperState == StopperState::QUALIFYING_ON ||
-          stopperState == StopperState::BREW);
+         stopperState == StopperState::BREW;
 }
 
 float effectiveStopThreshold() {
@@ -1516,6 +1508,8 @@ bool targetWeightReached(float weight) {
 }
 
 void requestScaleBrewBeep(uint32_t cycleId);
+void enterBrewOrManualFromStart();
+void demoteActiveCycleToRinseOrEnd();
 
 void recordFirstDropTimestamp(uint32_t receivedAtMs) {
   if (session.firstDropMs == 0) {
@@ -1524,7 +1518,7 @@ void recordFirstDropTimestamp(uint32_t receivedAtMs) {
 }
 
 void requestFirstDropBeep() {
-  if (!session.firstDropsBeepSent && session.config.brewConfirmationBeep) {
+  if (!session.firstDropsBeepSent && session.config.firstDropBeep) {
     requestScaleBrewBeep(session.id);
     session.firstDropsBeepSent = true;
   }
@@ -1571,15 +1565,15 @@ bool retareHasEnded() {
   return session.retareEnded;
 }
 
-bool brewStartConfirmationOpen() {
+bool bbwProtectionActive() {
   if (!bbwAutomaticScaleSession()) {
     return false;
   }
-  return !session.brewStartConfirmEnded;
+  return !session.bbwProtectionEnded;
 }
 
-void skipBrewStartConfirmationDueToRetareFlow(uint32_t receivedAtMs) {
-  session.brewStartConfirmEnded = true;
+void endBbwProtectionDueToRetareFlow(uint32_t receivedAtMs) {
+  session.bbwProtectionEnded = true;
   resetDirectStopConfirmation();
   if (session.firstDropMs == 0) {
     session.firstDropMs = session.retareFlowFirstDetectedAtMs != 0
@@ -1598,16 +1592,16 @@ void markRetareEnded(uint32_t endedAtMs) {
   session.retareDisabled = true;
   resetRetareStabilityStreak();
   if (session.flowDuringRetare && !session.retarePerformed) {
-    skipBrewStartConfirmationDueToRetareFlow(endedAtMs);
+    endBbwProtectionDueToRetareFlow(endedAtMs);
   }
 }
 
-void endBrewStartConfirmation(uint32_t receivedAtMs, bool allowBeep) {
+void endBbwProtection(uint32_t receivedAtMs, bool allowBeep) {
   (void)receivedAtMs;
-  session.brewStartConfirmEnded = true;
+  session.bbwProtectionEnded = true;
   resetDirectStopConfirmation();
   if (allowBeep && !session.firstDropsBeepSent &&
-      session.config.brewConfirmationBeep && retareHasEnded()) {
+      session.config.firstDropBeep && retareHasEnded()) {
     requestScaleBrewBeep(session.id);
     session.firstDropsBeepSent = true;
   }
@@ -1620,20 +1614,14 @@ bool bbwWeightStopInhibited() {
   if (retareWindowOpen()) {
     return true;
   }
-  if (brewStartConfirmationOpen()) {
+  if (bbwProtectionActive()) {
     return true;
   }
   return false;
 }
 
-bool readyToConfirmBrew() {
-  // Hold gesture classification open until post-tare baseline settles (or the
-  // grace window expires). Confirming earlier would demote a scale-started
-  // cycle to manual while non-zero pre-tare samples are still rejected.
-  if (session.awaitingPostTareBaseline) {
-    return false;
-  }
-  return elapsedMs(session.startedAtMs) > session.config.rinseGestureMs;
+bool withinRinseGestureWindow() {
+  return elapsedMs(session.startedAtMs) <= session.config.rinseGestureMs;
 }
 
 void resetRetareStabilityStreak() {
@@ -1647,7 +1635,7 @@ void onFirstDropsDetected(uint32_t receivedAtMs) {
     return;
   }
   recordFirstDropTimestamp(receivedAtMs);
-  endBrewStartConfirmation(receivedAtMs, true);
+  endBbwProtection(receivedAtMs, true);
 }
 
 void performAutomaticRetare() {
@@ -1709,7 +1697,7 @@ void considerRetareCupCandidate(float weight, uint32_t receivedAtMs) {
 void initializeBbwProtection() {
   session.bbwProtectionEnabled = false;
   session.retareEnded = false;
-  session.brewStartConfirmEnded = false;
+  session.bbwProtectionEnded = false;
   session.flowDuringRetare = false;
   session.retareFlowFirstDetectedAtMs = 0;
   session.retarePerformed = false;
@@ -1727,7 +1715,7 @@ void initializeBbwProtection() {
   if (!session.startedWithScale || session.config.timerOnly ||
       !session.automaticEnabled) {
     session.retareEnded = true;
-    session.brewStartConfirmEnded = true;
+    session.bbwProtectionEnded = true;
     return;
   }
   session.bbwProtectionEnabled = true;
@@ -1746,9 +1734,9 @@ void serviceBbwProtectionPhases() {
       elapsedMs(session.startedAtMs) >= session.config.retareWindowMs) {
     markRetareEnded(nowMs);
   }
-  if (!session.brewStartConfirmEnded &&
-      elapsedMs(session.startedAtMs) >= session.config.confirmationTimeoutMs) {
-    session.brewStartConfirmEnded = true;
+  if (!session.bbwProtectionEnded &&
+      elapsedMs(session.startedAtMs) >= session.config.bbwProtectionMs) {
+    session.bbwProtectionEnded = true;
     resetDirectStopConfirmation();
   }
 }
@@ -2140,7 +2128,7 @@ void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
 
 void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   const bool logEligible = shotLogEligible(reason, durationMs);
-  const bool offsetAnalysis = shot.confirmedBrew && !session.config.timerOnly &&
+  const bool offsetAnalysis = shot.automaticBrew && !session.config.timerOnly &&
                               session.calibrationEligible;
   if (!logEligible && !offsetAnalysis) {
     return;
@@ -2167,7 +2155,7 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
       session.scaleBaselineReady ? session.scaleBaselineG : 0.0f;
   pendingFinalize.startedWithScale = session.startedWithScale;
   pendingFinalize.timerOnly = session.config.timerOnly;
-  pendingFinalize.confirmedBrew = shot.confirmedBrew;
+  pendingFinalize.automaticBrew = shot.automaticBrew;
   pendingFinalize.finalState = stopperState;
   pendingFinalize.endReason = reason;
   pendingFinalize.extractionGuardEnabled =
@@ -2216,7 +2204,7 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
   record.offsetUsedCg = shotLogWeightToCentigrams(snapshot.weightOffsetG);
   record.shotType = static_cast<uint8_t>(shotLogTypeFromCycle(
       snapshot.finalState, snapshot.startedWithScale, snapshot.timerOnly,
-      snapshot.confirmedBrew));
+      snapshot.automaticBrew));
   record.cutType = static_cast<uint8_t>(
       shotLogCutFromEndReason(snapshot.endReason));
   record.extractionGuardEnabled = snapshot.extractionGuardEnabled ? 1U : 0U;
@@ -3054,7 +3042,6 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
   }
   resetShotTrajectory(session.startedAtMs);
   initializeBbwProtection();
-  transitionTo(StopperState::QUALIFYING_ON);
 
   if (!setCn9Closed(true, session.config.operationalWallMs)) {
     session.active = false;
@@ -3070,6 +3057,8 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
       Serial.println("Scale start command unavailable; cycle marked manual");
     }
   }
+
+  enterBrewOrManualFromStart();
 
   Serial.print("Cycle started; goal snapshot=");
   Serial.print(session.config.goalWeightG);
@@ -3130,7 +3119,7 @@ void enterRinse() {
   maybeRequestNtpSyncOnActivity();
 }
 
-void armAutoToManualGuardForConfirmedBrew() {
+void armAutoToManualGuardForAutomaticBrew() {
   if (!session.config.autoToManualGuardEnabled ||
       session.config.timerOnly || !session.startedWithScale ||
       session.weightControlState == WeightControlState::INACTIVE) {
@@ -3165,43 +3154,33 @@ bool autoToManualGuardDeadlineDue() {
                               session.autoToManualGuardDeadlineAtMs) >= 0;
 }
 
-void confirmBrewOrManual() {
+void enterBrewOrManualFromStart() {
   if (session.config.timerOnly && session.startedWithScale) {
-    Serial.println("Timer-only brew confirmed");
+    Serial.println("Timer-only brew started");
     transitionTo(StopperState::BREW);
     return;
   }
-  // Scale-started cycles keep by-weight authority once a sample is accepted
-  // (or a direct-threshold confirm landed). readyToConfirmBrew() already
-  // defers while post-tare baseline is still rejecting non-zero weights.
-  if (session.startedWithScale && !session.config.timerOnly &&
-      (session.receivedFreshWeightInCycle ||
-       session.thresholdConfirmations > 0) &&
-      session.weightControlState != WeightControlState::INACTIVE) {
-    if (scaleAutomationUnavailableForSession()) {
-      suspendWeightControl();
-    }
-    shot.confirmedBrew = true;
-    armAutoToManualGuardForConfirmedBrew();
-    Serial.println("Brew confirmed");
+  if (session.automaticEnabled) {
+    shot.automaticBrew = true;
+    armAutoToManualGuardForAutomaticBrew();
+    Serial.println("Brew started");
     transitionTo(StopperState::BREW);
-  } else {
-    session.automaticEnabled = false;
-    session.retareEnded = true;
-    session.brewStartConfirmEnded = true;
-    Serial.println("Manual cycle confirmed (no scale automation)");
-    transitionTo(StopperState::MANUAL_NO_SCALE);
+    return;
   }
+  session.automaticEnabled = false;
+  session.retareEnded = true;
+  session.bbwProtectionEnded = true;
+  Serial.println("Manual cycle started (no scale automation)");
+  transitionTo(StopperState::MANUAL_NO_SCALE);
 }
 
-void handleQualifyingPaddleOff(uint32_t onDurationMs) {
-  if (onDurationMs <= session.config.rinseGestureMs) {
+void demoteActiveCycleToRinseOrEnd() {
+  if (withinRinseGestureWindow()) {
     enterRinse();
     return;
   }
-
   if (session.automaticEnabled) {
-    shot.confirmedBrew = true;
+    shot.automaticBrew = true;
   }
   finalizeCycle(EndReason::PADDLE, StopperState::READY);
 }
@@ -3338,30 +3317,6 @@ void stateMachineTask() {
       }
       return;
 
-    case StopperState::QUALIFYING_ON:
-      // Classify a simultaneous paddle release before degrading the session
-      // for a BLE loss, as required by the event-priority contract.
-      if (paddleTurnedOff) {
-        handleQualifyingPaddleOff(elapsedMs(session.startedAtMs));
-        return;
-      }
-
-      // A BLE loss suspends by-weight authority but does not skip gesture
-      // classification; a quick release must still become a rinse.
-      if (session.weightControlState == WeightControlState::ACTIVE &&
-          scaleAutomationUnavailableForSession()) {
-        suspendWeightControl();
-        Serial.println("Scale stream suspended while qualifying");
-      }
-
-      expirePostTareBaselineIfNeeded();
-      serviceBbwProtectionPhases();
-
-      if (readyToConfirmBrew()) {
-        confirmBrewOrManual();
-      }
-      return;
-
     case StopperState::RINSE:
       // All paddle transitions are intentionally consumed while rinsing.
       if (elapsedMs(session.rinseStartedAtMs) >=
@@ -3374,11 +3329,13 @@ void stateMachineTask() {
       return;
 
     case StopperState::BREW:
+      // Early paddle OFF demotes the brew to a rinse; otherwise ends the shot.
       if (paddleTurnedOff) {
-        finalizeCycle(EndReason::PADDLE, StopperState::READY);
+        demoteActiveCycleToRinseOrEnd();
         return;
       }
 
+      expirePostTareBaselineIfNeeded();
       serviceBbwProtectionPhases();
 
       if ((session.weightControlState == WeightControlState::ACTIVE ||
@@ -3410,7 +3367,8 @@ void stateMachineTask() {
 
     case StopperState::MANUAL_NO_SCALE:
       if (paddleTurnedOff) {
-        finalizeCycle(EndReason::PADDLE, StopperState::READY);
+        demoteActiveCycleToRinseOrEnd();
+        return;
       }
       return;
   }
@@ -3907,7 +3865,7 @@ void publishControlStatus() {
     next.cycleFlowDuringRetare = session.flowDuringRetare;
     next.cycleRetarePerformed = session.retarePerformed;
     next.cycleStartedWithScale = session.startedWithScale;
-    next.cycleConfirmedBrew = shot.confirmedBrew;
+    next.cycleAutomaticBrew = shot.automaticBrew;
     next.cycleTimerOnly = session.config.timerOnly;
     next.cycleFirstDropMs = session.firstDropMs;
     next.cycleRetareFlowFirstDetectedAtMs =

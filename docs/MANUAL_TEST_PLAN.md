@@ -13,7 +13,7 @@ Perform all relay and CN9 tests on a bench first. Do not connect CN9 to the mach
 | M07 | Leave a cycle ON until the configured wall time. | CN9 opens no later than the configured limit, never later than 60 s. |
 | M08 | Disconnect the scale during brew, then reconnect it and resume valid notifications. | Weight control becomes `SUSPENDED` without silently changing the workflow to manual, then returns to `ACTIVE` only after three coherent samples from the new connection generation. Paddle OFF and hard limits always open CN9. |
 | M09 | On a deliberately opt-in build with `SHOT_STOPPER_ENABLE_REMOTE_CN9=1`, open Web UI and use Virtual paddle ON/OFF. | The visual switch changes position and follows normal state-machine behavior. On the default build both close-producing controls are disabled and rejected by the API. |
-| M10 | Change a workflow field during brew, rinse, qualifying and manual states. | UI is disabled and API rejects each change; current snapshot is unchanged. |
+| M10 | Change a workflow field during brew, rinse, and manual states. | UI is disabled and API rejects each change; current snapshot is unchanged. |
 | M11 | Save valid workflow settings while Ready, restart, and reopen UI. | Values persist and apply to the next cycle only. |
 | M12 | Enter a relationship-invalid timing configuration. | Server rejects the complete transaction; no field changes. |
 | M13 | Boot without STA credentials. | AP is reachable at `http://192.168.4.1/` for three minutes. |
@@ -47,19 +47,19 @@ Perform all relay and CN9 tests on a bench first. Do not connect CN9 to the mach
 | M39 | During a 72 h target-specific soak, record `/api/v1/status` health fields and firmware size on every build. | Loop/task age and stack remain bounded, heap minimum/largest block do not trend toward exhaustion, drops are explained, and every `.bin` stays below the CI budget. |
 | M40 | Boot with both WS2812B indicators connected on the configured, electrically verified data GPIOs. | Both pixels start without relay movement; the scale pixel blinks blue during initialization and no LED activity closes CN9. |
 | M41 | Connect, disconnect, stop weight notifications while keeping BLE connected, and deliberately stall the scale worker on an instrumented build. | The scale LED changes between solid green, solid red, slow yellow, and fast red; connected-without-fresh-weight is yellow, never green. CN9 behavior remains controlled by the state machine. |
-| M42 | Exercise Ready, qualifying, brew, rinse, manual no-scale, and timer-only workflows. | The stopper LED uses solid/medium/slow/fast patterns and green/salmon palettes exactly as documented, without stale queued colors. |
+| M42 | Exercise Ready, brew, rinse, manual no-scale, and timer-only workflows. | The stopper LED uses solid/slow/fast patterns and green/salmon palettes exactly as documented, without stale queued colors. |
 | M43 | Trigger maintenance, `REQUIRES_OFF`, watchdog failure, and safety lockout separately. | Blue, amber, and fast-red overrides take priority over workflow colors; safety faults still open or inhibit CN9 independently of the LEDs. |
 | M44 | Disconnect or short each LED data wire in turn, then repeat a normal paddle stop and the 60-second hard-limit test. | Indicator failure cannot delay the control loop, keep CN9 closed, or affect either hard deadline. |
-| M45 | Start an automatic shot with the cup already on the scale before paddle ON. | Initial tare only; retare window runs but does not retare a stable full cup; first drops after retare end trigger optional beep; shot stops at target weight after confirmation ends. |
-| M46 | Power-cycle the scale, reconnect, place a cup, and run the first paddle shot. | The first shot confirms automatic brew; the log does not show `MANUAL_NO_SCALE` from missing fresh weight. |
-| M47 | During qualifying with rejections, inspect the Web UI log. | Each rejection names the reason (`slew`, `range`, etc.) and includes numeric weight context. |
-| M48 | Run an automatic brew to target weight after M45 or M46. | CN9 opens by prediction or threshold after brew-start confirmation ends. |
+| M45 | Start an automatic shot with the cup already on the scale before paddle ON. | Initial tare only; retare window runs but does not retare a stable full cup; first drops after retare end trigger optional beep; shot stops at target weight after BBW protection ends. |
+| M46 | Power-cycle the scale, reconnect, place a cup, and run the first paddle shot. | The first shot enters automatic brew; the log does not show `MANUAL_NO_SCALE` from missing fresh weight. |
+| M47 | During early brew with rejections, inspect the Web UI log. | Each rejection names the reason (`slew`, `range`, etc.) and includes numeric weight context. |
+| M48 | Run an automatic brew to target weight after M45 or M46. | CN9 opens by prediction or threshold after BBW protection ends. |
 | M49 | Start an automatic shot with the cup off the scale, then place a ~150 g cup within 1 s of brew start. | Automatic retare occurs once; shot timer does not restart; first drops beep once after retare window; shot stops at target weight. |
-| M50 | Repeat M49 with automatic retare disabled. | No retare window; brew-start confirmation still runs from shot start. |
-| M51 | During the retare window, place only a stable ~7 g object (below minimum cup weight). | No retare; retare window expires; confirmation continues until drops or timeout. |
-| M52 | Place a heavy cup (> target weight) during the retare window. | Shot does not stop by weight until retare window and brew-start confirmation both end (or first drops / D4 skip at retare end). |
-| M53 | Let brew start confirmation timeout expire without detecting drops, then allow coffee to accumulate. | No beep at timeout; when first drops are later detected, optional beep plays once; weight stop then works normally. |
-| M54 | Shorten brew start confirmation below retare window + 3 s in the Web UI and save. | Server rejects the transaction or clamps to the minimum; UI hint explains the rule. |
-| M55 | With automatic retare off, run an automatic shot. | Retare window is skipped; brew-start confirmation still inhibits weight stop until it ends. |
+| M50 | Repeat M49 with automatic retare disabled. | No retare window; BBW protection still runs from shot start. |
+| M51 | During the retare window, place only a stable ~7 g object (below minimum cup weight). | No retare; retare window expires; BBW protection continues until drops or timeout. |
+| M52 | Place a heavy cup (> target weight) during the retare window. | Shot does not stop by weight until retare window and BBW protection both end (or first drops / D4 skip at retare end). |
+| M53 | Let BBW protection timeout expire without detecting drops, then allow coffee to accumulate. | No beep at timeout; when first drops are later detected, optional beep plays once; weight stop then works normally. |
+| M54 | Shorten BBW protection below retare window + 3 s in the Web UI and save. | Server rejects the transaction or clamps to the minimum; UI hint explains the rule. |
+| M55 | With automatic retare off, run an automatic shot. | Retare window is skipped; BBW protection still inhibits weight stop until it ends. |
 
 Record firmware version, board/FQBN, scale model/firmware, measured timings, relay continuity and pass/fail evidence for every run.

@@ -62,7 +62,7 @@ struct RuntimeConfigV12 {
   bool autoTare = true;
   bool timerOnly = false;
   bool canTareStartTimer = true;
-  bool brewConfirmationBeep = true;
+  bool firstDropBeep = true;
   bool paddleReturnReminderBeep = true;
   uint32_t paddleReturnReminderIntervalMs =
       DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
@@ -77,7 +77,7 @@ struct RuntimeConfigV12 {
   float retareStabilityToleranceG = DEFAULT_RETARE_STABILITY_TOLERANCE_G;
   uint32_t retareStabilityMaxGapMs = DEFAULT_RETARE_STABILITY_MAX_GAP_MS;
   uint32_t retareStabilityMinDurationMs = DEFAULT_RETARE_STABILITY_MIN_DURATION_MS;
-  uint32_t confirmationTimeoutMs = DEFAULT_CONFIRMATION_TIMEOUT_MS;
+  uint32_t bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
   uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
   int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
   uint8_t ntpServerPreset = static_cast<uint8_t>(NtpServerPreset::POOL);
@@ -91,7 +91,7 @@ struct RuntimeConfigV13 {
   bool autoTare = true;
   bool timerOnly = false;
   bool canTareStartTimer = true;
-  bool brewConfirmationBeep = true;
+  bool firstDropBeep = true;
   bool paddleReturnReminderBeep = true;
   uint32_t paddleReturnReminderIntervalMs =
       DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
@@ -106,7 +106,7 @@ struct RuntimeConfigV13 {
   float retareStabilityToleranceG = DEFAULT_RETARE_STABILITY_TOLERANCE_G;
   uint32_t retareStabilityMaxGapMs = DEFAULT_RETARE_STABILITY_MAX_GAP_MS;
   uint32_t retareStabilityMinDurationMs = DEFAULT_RETARE_STABILITY_MIN_DURATION_MS;
-  uint32_t confirmationTimeoutMs = DEFAULT_CONFIRMATION_TIMEOUT_MS;
+  uint32_t bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
   uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
   int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
   uint8_t ntpServerPreset = static_cast<uint8_t>(NtpServerPreset::POOL);
@@ -436,13 +436,13 @@ inline bool validPersistedStaNetwork(const PersistedSettings &settings) {
                                settings.lkgDns1, settings.lkgDns2);
 }
 
-inline void normalizeRuntimeConfirmationDefaults(RuntimeConfig &runtime) {
-  if (runtime.confirmationTimeoutMs < DEFAULT_CONFIRMATION_TIMEOUT_MS) {
-    runtime.confirmationTimeoutMs = DEFAULT_CONFIRMATION_TIMEOUT_MS;
+inline void normalizeRuntimeBbwProtectionDefaults(RuntimeConfig &runtime) {
+  if (runtime.bbwProtectionMs < DEFAULT_BBW_PROTECTION_MS) {
+    runtime.bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
   }
-  const uint32_t minimum = minimumConfirmationTimeoutMs(runtime);
-  if (runtime.confirmationTimeoutMs < minimum) {
-    runtime.confirmationTimeoutMs = minimum;
+  const uint32_t minimum = minimumBbwProtectionMs(runtime);
+  if (runtime.bbwProtectionMs < minimum) {
+    runtime.bbwProtectionMs = minimum;
   }
 }
 
@@ -464,7 +464,7 @@ inline void migrateRuntimeConfigV13ToV14(const RuntimeConfigV13 &legacy,
   runtime.autoTare = legacy.autoTare;
   runtime.timerOnly = legacy.timerOnly;
   runtime.canTareStartTimer = legacy.canTareStartTimer;
-  runtime.brewConfirmationBeep = legacy.brewConfirmationBeep;
+  runtime.firstDropBeep = legacy.firstDropBeep;
   runtime.paddleReturnReminderBeep = legacy.paddleReturnReminderBeep;
   runtime.paddleReturnReminderIntervalMs =
       legacy.paddleReturnReminderIntervalMs;
@@ -479,7 +479,7 @@ inline void migrateRuntimeConfigV13ToV14(const RuntimeConfigV13 &legacy,
   runtime.retareStabilityToleranceG = legacy.retareStabilityToleranceG;
   runtime.retareStabilityMaxGapMs = legacy.retareStabilityMaxGapMs;
   runtime.retareStabilityMinDurationMs = legacy.retareStabilityMinDurationMs;
-  runtime.confirmationTimeoutMs = legacy.confirmationTimeoutMs;
+  runtime.bbwProtectionMs = legacy.bbwProtectionMs;
   runtime.operationalWallMs = legacy.operationalWallMs;
   runtime.timezoneOffsetMinutes = legacy.timezoneOffsetMinutes;
   runtime.ntpServerPreset = legacy.ntpServerPreset;
@@ -489,7 +489,7 @@ inline void migrateRuntimeConfigV13ToV14(const RuntimeConfigV13 &legacy,
   runtime.maxRecoveryWeightG = legacy.maxRecoveryWeightG;
   runtime.minBrewTimeMs = legacy.minBrewTimeMs;
   applyAutoToManualGuardDefaults(runtime);
-  normalizeRuntimeConfirmationDefaults(runtime);
+  normalizeRuntimeBbwProtectionDefaults(runtime);
 }
 
 inline void migrateRuntimeConfigV12ToV13(const RuntimeConfigV12 &legacy,
@@ -501,7 +501,7 @@ inline void migrateRuntimeConfigV12ToV13(const RuntimeConfigV12 &legacy,
   runtime.autoTare = legacy.autoTare;
   runtime.timerOnly = legacy.timerOnly;
   runtime.canTareStartTimer = legacy.canTareStartTimer;
-  runtime.brewConfirmationBeep = legacy.brewConfirmationBeep;
+  runtime.firstDropBeep = legacy.firstDropBeep;
   runtime.paddleReturnReminderBeep = legacy.paddleReturnReminderBeep;
   runtime.paddleReturnReminderIntervalMs =
       legacy.paddleReturnReminderIntervalMs;
@@ -516,7 +516,7 @@ inline void migrateRuntimeConfigV12ToV13(const RuntimeConfigV12 &legacy,
   runtime.retareStabilityToleranceG = legacy.retareStabilityToleranceG;
   runtime.retareStabilityMaxGapMs = legacy.retareStabilityMaxGapMs;
   runtime.retareStabilityMinDurationMs = legacy.retareStabilityMinDurationMs;
-  runtime.confirmationTimeoutMs = legacy.confirmationTimeoutMs;
+  runtime.bbwProtectionMs = legacy.bbwProtectionMs;
   runtime.operationalWallMs = legacy.operationalWallMs;
   runtime.timezoneOffsetMinutes = legacy.timezoneOffsetMinutes;
   runtime.ntpServerPreset = legacy.ntpServerPreset;

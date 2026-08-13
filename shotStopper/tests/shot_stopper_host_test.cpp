@@ -85,7 +85,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   pendingFinalize = PendingShotFinalize{};
   runtimeConfig = RuntimeConfig{};
   runtimeConfig.autoRetare = false;
-  runtimeConfig.confirmationTimeoutMs = 3000;
+  runtimeConfig.bbwProtectionMs = 3000;
   lastCycle = LastCycleSummary{};
   debugLog.clear();
   publishedControlStatus = ControlStatusSnapshot{};
@@ -206,7 +206,6 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
 void verifySafetyInvariants() {
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   const bool stateMayCloseRelay =
-      stopperState == StopperState::QUALIFYING_ON ||
       stopperState == StopperState::BREW ||
       stopperState == StopperState::RINSE ||
       stopperState == StopperState::MANUAL_NO_SCALE;
@@ -314,7 +313,9 @@ uint32_t startCycle() {
   setRawPaddle(true);
   CHECK_VALUE(stopperState == StopperState::READY, rawOnAtMs);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
-  CHECK_VALUE(stopperState == StopperState::QUALIFYING_ON, rawOnAtMs);
+  CHECK_VALUE(stopperState == StopperState::BREW ||
+                  stopperState == StopperState::MANUAL_NO_SCALE,
+              rawOnAtMs);
   CHECK_VALUE(getRelaySafetySnapshot().closed, rawOnAtMs);
   if (session.automaticEnabled) {
     ScaleEvent fresh;
@@ -350,25 +351,25 @@ void waitForRetareEnded(uint32_t maxWaitMs = 15000) {
   CHECK(session.retareEnded);
 }
 
-void waitForBrewStartConfirmationEnded(uint32_t maxWaitMs = 15000) {
+void waitForBbwProtectionEnded(uint32_t maxWaitMs = 15000) {
   uint32_t waited = 0;
-  while (!session.brewStartConfirmEnded && waited < maxWaitMs) {
+  while (!session.bbwProtectionEnded && waited < maxWaitMs) {
     runLoopAfter(25);
     waited += 25;
   }
-  CHECK(session.brewStartConfirmEnded);
+  CHECK(session.bbwProtectionEnded);
 }
 
-void endBrewStartConfirmationForTests() {
-  if (session.brewStartConfirmEnded) {
+void endBbwProtectionForTests() {
+  if (session.bbwProtectionEnded) {
     return;
   }
   if (session.automaticEnabled && scale.connected && !runtimeConfig.timerOnly &&
       session.weightControlState != WeightControlState::SUSPENDED) {
     simulateFirstDrops();
   }
-  if (!session.brewStartConfirmEnded) {
-    const uint32_t target = session.config.confirmationTimeoutMs;
+  if (!session.bbwProtectionEnded) {
+    const uint32_t target = session.config.bbwProtectionMs;
     const uint32_t current = elapsedMs(session.startedAtMs);
     if (current < target) {
       runLoopAfter(target - current);
@@ -376,7 +377,7 @@ void endBrewStartConfirmationForTests() {
       loop();
     }
   }
-  waitForBrewStartConfirmationEnded();
+  waitForBbwProtectionEnded();
 }
 
 void reachBrewState() {
@@ -391,16 +392,21 @@ void reachBrewState() {
   }
   CHECK(stopperState == StopperState::BREW);
   if (!runtimeConfig.timerOnly) {
-    CHECK(shot.confirmedBrew);
+    CHECK(shot.automaticBrew);
   }
 }
 
-void advanceToBrewFromQualifying() {
+void advanceToBrew() {
   if (scale.connected && session.automaticEnabled && !runtimeConfig.timerOnly &&
       session.awaitingPostTareBaseline) {
     establishPostTareBaseline();
   }
   reachBrewState();
+  // Past the rinse demotion window so paddle OFF ends the shot (not rinse).
+  const uint32_t elapsed = elapsedMs(session.startedAtMs);
+  if (elapsed <= runtimeConfig.rinseGestureMs) {
+    runLoopAfter(runtimeConfig.rinseGestureMs - elapsed + 1);
+  }
 }
 
 void reachManualNoScaleState() {
@@ -490,7 +496,7 @@ void t02_boot_with_paddle_on() {
   startCycle();
 }
 
-void t03_sustained_on_confirms_brew_once() {
+void t03_sustained_on_enters_brew_once() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
@@ -504,9 +510,9 @@ void t03_sustained_on_confirms_brew_once() {
   CHECK(scale.commandLog[0] == "tareStartTimer");
   CHECK(session.remoteTimerStarted);
   establishPostTareBaseline();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
-  CHECK(shot.confirmedBrew);
+  CHECK(shot.automaticBrew);
   CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 0);
   CHECK(!scaleBeepPending);
   simulateFirstDrops();
@@ -558,7 +564,7 @@ void t06_paddle_off_during_brew() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
   setRawPaddle(false);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
@@ -572,8 +578,8 @@ void t07_scale_prediction_requires_release_after_stop() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
-  endBrewStartConfirmationForTests();
+  advanceToBrew();
+  endBbwProtectionForTests();
   shot.expectedEndS = 1.0f;
   runLoopAfter(1000);
   loop();
@@ -624,7 +630,7 @@ void t11_ble_loss_suspends_brew_without_late_stop() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   setScaleConnected(false);
   loop();
   CHECK(stopperState == StopperState::BREW);
@@ -651,7 +657,7 @@ void t12_global_limit_opens_manual_and_brew_cycles() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   reachSessionElapsed(HARD_MAX_CN9_CLOSED_MS);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
@@ -691,8 +697,8 @@ void t14_automatic_stop_stays_open_while_paddle_on() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
-  endBrewStartConfirmationForTests();
+  advanceToBrew();
+  endBbwProtectionForTests();
   shot.expectedEndS = 1.0f;
   runLoopAfter(1000);
   loop();
@@ -716,7 +722,7 @@ void t15_repeated_rinse_and_brew_reset_session_state() {
   CHECK(!session.stopTimerRequested);
   CHECK(session.timerStopResult == TimerStopResult::NOT_REQUIRED);
   CHECK(session.endReason == EndReason::NONE);
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
   CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 2);
 }
@@ -731,7 +737,7 @@ void t17_simultaneous_global_limit_and_paddle_off_is_idempotent() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   reachSessionElapsed(HARD_MAX_CN9_CLOSED_MS - PADDLE_DEBOUNCE_MS);
   setRawPaddle(false);
   hostRelayOpenWrites = 0;
@@ -765,6 +771,7 @@ void t19_manual_cycle_without_scale_has_no_timer_commands() {
   startCycle();
   reachManualNoScaleState();
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
   setRawPaddle(false);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
@@ -806,15 +813,15 @@ void t22_scale_connection_does_not_promote_manual_cycle() {
   CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 0);
 }
 
-void t23_prediction_triggers_after_confirmation_ends() {
+void t23_prediction_triggers_after_bbw_protection_ends() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   shot.expectedEndS = 1.0f;
   CHECK(stopperState == StopperState::BREW);
   CHECK(getRelaySafetySnapshot().closed);
-  endBrewStartConfirmationForTests();
+  endBbwProtectionForTests();
   shot.expectedEndS = 1.0f;
   runLoopAfter(1000);
   loop();
@@ -826,14 +833,14 @@ void t24_paddle_off_during_brew_is_immediate() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   setRawPaddle(false);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
 }
 
-void t25_ble_loss_while_qualifying_preserves_classification() {
+void t25_ble_loss_during_rinse_window_preserves_classification() {
   resetHarness(false, true);
   reachReadyFromBoot();
   uint32_t rawOnAt = startCycle();
@@ -847,7 +854,7 @@ void t25_ble_loss_while_qualifying_preserves_classification() {
   startCycle();
   setScaleConnected(false);
   loop();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.weightControlState == WeightControlState::SUSPENDED);
 }
@@ -856,7 +863,7 @@ void t26_reconnected_suspended_cycle_sends_one_stop_on_release() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   setScaleConnected(false);
   loop();
   CHECK(stopperState == StopperState::BREW);
@@ -924,7 +931,7 @@ void r01_transient_disconnect_suspends_weight_control() {
   reachReadyFromBoot();
   startCycle();
   CHECK(executeNextScaleCommand());
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
 
   // Reconnect before the control loop gets a chance to observe DISCONNECTED.
@@ -936,7 +943,7 @@ void r01_transient_disconnect_suspends_weight_control() {
   CHECK(session.weightControlState == WeightControlState::SUSPENDED);
 
   shot.expectedEndS = 0.0f;
-  endBrewStartConfirmationForTests();
+  endBbwProtectionForTests();
   loop();
   CHECK(stopperState == StopperState::BREW);
   CHECK(getRelaySafetySnapshot().closed);
@@ -947,7 +954,7 @@ void r02_stalled_scale_worker_suspends_until_validated() {
   reachReadyFromBoot();
   startCycle();
   CHECK(executeNextScaleCommand());
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
 
   hostAutoScaleWorkerProgress = false;
@@ -1011,7 +1018,7 @@ void r04_scale_commands_execute_once_and_report_results() {
   CHECK(scale.resetTimerCalls == 0);
   CHECK(scale.startTimerCalls == 0);
   CHECK(scale.tareCalls == 0);
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   setRawPaddle(false);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
@@ -1036,7 +1043,7 @@ void r04_scale_commands_execute_once_and_report_results() {
   reachReadyFromBoot();
   startCycle();
   CHECK(executeNextScaleCommand());
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   scale.stopTimerSucceeds = false;
   setRawPaddle(false);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
@@ -1087,7 +1094,7 @@ void r06_hard_timer_opens_cn9_without_control_loop() {
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(getRelaySafetySnapshot().tripped);
   CHECK(hostPinLevel[RELAY_GPIO] == RELAY_OPEN_LEVEL);
-  CHECK(stopperState == StopperState::QUALIFYING_ON);
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
 
   loop();
   CHECK(stopperState == StopperState::REQUIRES_OFF);
@@ -1132,7 +1139,7 @@ void r09_stop_is_not_retried_after_disconnect_before_execution() {
   reachReadyFromBoot();
   startCycle();
   CHECK(executeNextScaleCommand());
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   setRawPaddle(false);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
@@ -1229,7 +1236,7 @@ void r13_full_queue_prevents_stop_without_delaying_relay_open() {
   reachReadyFromBoot();
   startCycle();
   CHECK(executeNextScaleCommand());
-  advanceToBrewFromQualifying();
+  advanceToBrew();
 
   ScaleCommand filler;
   filler.type = ScaleCommandType::START_TIMER_AND_TARE;
@@ -1372,7 +1379,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.operationalWallMs == HARD_MAX_CN9_CLOSED_MS);
   CHECK(config.rinseGestureMs == 1500);
   CHECK(config.canTareStartTimer);
-  CHECK(config.brewConfirmationBeep);
+  CHECK(config.firstDropBeep);
   CHECK(config.paddleReturnReminderBeep);
   CHECK(!config.fastExtractionGuardEnabled);
 }
@@ -1391,13 +1398,13 @@ void w02_each_runtime_field_is_validated() {
   config.rinseDurationMs = 499;
   CHECK(validateRuntimeConfig(config) == ConfigValidationError::RINSE_DURATION);
   config = RuntimeConfig{};
-  config.confirmationTimeoutMs = MIN_CONFIRMATION_TIMEOUT_MS - 1;
+  config.bbwProtectionMs = MIN_BBW_PROTECTION_MS - 1;
   CHECK(validateRuntimeConfig(config) ==
-        ConfigValidationError::CONFIRMATION_TIMEOUT);
+        ConfigValidationError::BBW_PROTECTION_TIMEOUT);
   config = RuntimeConfig{};
-  config.confirmationTimeoutMs = MAX_CONFIRMATION_TIMEOUT_MS + 1;
+  config.bbwProtectionMs = MAX_BBW_PROTECTION_MS + 1;
   CHECK(validateRuntimeConfig(config) ==
-        ConfigValidationError::CONFIRMATION_TIMEOUT);
+        ConfigValidationError::BBW_PROTECTION_TIMEOUT);
   config = RuntimeConfig{};
   config.fastExtractionGuardEnabled = true;
   config.maxRecoveryWeightG = 36.0f;
@@ -1408,14 +1415,13 @@ void w02_each_runtime_field_is_validated() {
 void w03_runtime_timing_relations_are_transactional() {
   RuntimeConfig config;
   config.operationalWallMs = 10000;
-  config.retareWindowMs = 4000;
-  config.confirmationTimeoutMs = 7000;
+  config.bbwProtectionMs = 11000;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::TIMING_RELATION);
   config = RuntimeConfig{};
   config.autoRetare = false;
   config.operationalWallMs = 5000;
-  config.confirmationTimeoutMs = 6000;
+  config.bbwProtectionMs = 6000;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::TIMING_RELATION);
   config = RuntimeConfig{};
@@ -1445,11 +1451,11 @@ void attemptActiveConfigUpdate() {
   CHECK(runtimeConfig.revision == before.revision);
 }
 
-void w05_config_is_blocked_while_qualifying() {
+void w05_config_is_blocked_while_brewing_early() {
   resetHarness(false, false);
   reachReadyFromBoot();
   startCycle();
-  CHECK(stopperState == StopperState::QUALIFYING_ON);
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
   attemptActiveConfigUpdate();
 }
 
@@ -1457,7 +1463,7 @@ void w06_config_is_blocked_while_brewing() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
   attemptActiveConfigUpdate();
 }
@@ -1506,15 +1512,15 @@ void w10_cycle_configuration_snapshot_is_immutable() {
   runtimeConfig.operationalWallMs = 10000;
   CHECK(session.config.goalWeightG == frozen.goalWeightG);
   CHECK(session.config.operationalWallMs == frozen.operationalWallMs);
-  runtimeConfig.brewConfirmationBeep = !frozen.brewConfirmationBeep;
-  CHECK(session.config.brewConfirmationBeep == frozen.brewConfirmationBeep);
+  runtimeConfig.firstDropBeep = !frozen.firstDropBeep;
+  CHECK(session.config.firstDropBeep == frozen.firstDropBeep);
 }
 
 void w11_operational_timer_opens_without_control_loop() {
   resetHarness(false, false);
   reachReadyFromBoot();
   runtimeConfig.operationalWallMs = 20000;
-  runtimeConfig.confirmationTimeoutMs = 7000;
+  runtimeConfig.bbwProtectionMs = 7000;
   runtimeConfig.autoToManualGuardManualLimitMs = 15000;
   CHECK(validateRuntimeConfig(runtimeConfig) == ConfigValidationError::NONE);
   startCycle();
@@ -1522,7 +1528,7 @@ void w11_operational_timer_opens_without_control_loop() {
   hostServiceEspTimer(operationalLimitTimer);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(getRelaySafetySnapshot().operationalTripped);
-  CHECK(stopperState == StopperState::QUALIFYING_ON);
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
   loop();
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(session.endReason == EndReason::CONFIGURED_WALL_LIMIT);
@@ -1535,13 +1541,13 @@ void w12_hard_limit_cannot_be_configured_above_sixty_seconds() {
         ConfigValidationError::OPERATIONAL_WALL);
 }
 
-void w45_confirmation_retare_relation_is_validated() {
+void w45_bbw_protection_retare_relation_is_validated() {
   RuntimeConfig config;
   config.retareWindowMs = 5000;
-  config.confirmationTimeoutMs =
-      config.retareWindowMs + MIN_CONFIRMATION_AFTER_RETARE_MS - 1;
+  config.bbwProtectionMs =
+      config.retareWindowMs + MIN_BBW_PROTECTION_AFTER_RETARE_MS - 1;
   CHECK(validateRuntimeConfig(config) ==
-        ConfigValidationError::CONFIRMATION_RETARE_RELATION);
+        ConfigValidationError::BBW_PROTECTION_RETARE_RELATION);
 }
 
 void w13_virtual_paddle_uses_normal_state_machine() {
@@ -1552,10 +1558,9 @@ void w13_virtual_paddle_uses_normal_state_machine() {
   CHECK(session.active);
   CHECK(session.source == ControlSource::WEB);
   CHECK(virtualPaddleOn);
-  CHECK(stopperState == StopperState::QUALIFYING_ON);
-  CHECK(getRelaySafetySnapshot().closed);
-  reachManualNoScaleState();
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(getRelaySafetySnapshot().closed);
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
   WebCommand off = webControlCommand(WebCommandType::PADDLE_OFF);
   processWebCommand(off);
   CHECK(stopperState == StopperState::READY);
@@ -1627,7 +1632,7 @@ void w18_web_stop_can_end_a_physical_brew_only_by_opening() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   WebCommand stop;
   stop.type = WebCommandType::STOP;
   processWebCommand(stop);
@@ -1655,7 +1660,7 @@ void w20_restart_is_rejected_while_active() {
   processWebCommand(restart);
   CHECK(session.active);
   CHECK(getRelaySafetySnapshot().closed == before.closed);
-  CHECK(stopperState == StopperState::QUALIFYING_ON);
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
 }
 
 void w21_network_change_is_rejected_while_active() {
@@ -1676,7 +1681,7 @@ void w22_timer_only_disables_predictive_stop() {
   reachReadyFromBoot();
   runtimeConfig.timerOnly = true;
   startCycle();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(!scaleBeepPending);
   shot.expectedEndS = 0.0f;
   loop();
@@ -1817,7 +1822,7 @@ void w31_unsupported_scale_never_uses_tare_as_a_beep() {
   CHECK(executeNextScaleCommand());
   establishPostTareBaseline();
   scale.independentBeepSupported = false;
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
   simulateFirstDrops();
   CHECK(scaleBeepPending);
@@ -1829,7 +1834,7 @@ void w31_unsupported_scale_never_uses_tare_as_a_beep() {
   CHECK(session.automaticEnabled);
 }
 
-void w32_full_scale_queue_cannot_block_brew_confirmation() {
+void w32_full_scale_queue_cannot_block_brew_start() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
@@ -1840,23 +1845,23 @@ void w32_full_scale_queue_cannot_block_brew_confirmation() {
   for (size_t index = 0; index < SCALE_COMMAND_QUEUE_LENGTH; ++index) {
     CHECK(xQueueSend(scaleCommandQueue, &filler, 0) == pdTRUE);
   }
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
-  CHECK(shot.confirmedBrew);
+  CHECK(shot.automaticBrew);
   CHECK(getRelaySafetySnapshot().closed);
   simulateFirstDrops();
   CHECK(scaleBeepPending);
   CHECK(scale.beepCalls == 0);
 }
 
-void w33_brew_confirmation_beep_can_be_disabled() {
+void w33_first_drop_beep_can_be_disabled() {
   resetHarness(false, true);
   reachReadyFromBoot();
-  runtimeConfig.brewConfirmationBeep = false;
+  runtimeConfig.firstDropBeep = false;
   startCycle();
   CHECK(executeNextScaleCommand());
   establishPostTareBaseline();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
   simulateFirstDrops();
   CHECK(!scaleBeepPending);
@@ -1937,7 +1942,7 @@ void w37_factory_reset_is_rejected_while_control_is_active() {
 
   CHECK(session.active);
   CHECK(getRelaySafetySnapshot().closed);
-  CHECK(stopperState == StopperState::QUALIFYING_ON);
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
   DebugEvent events[4] = {};
   const size_t count = copyDebugEvents(afterSequence, events, 4);
   bool rejected = false;
@@ -1958,6 +1963,7 @@ void r21_automatic_control_requires_fresh_weight() {
   CHECK(session.active);
   CHECK(!session.startedWithScale);
   CHECK(!session.automaticEnabled);
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
   CHECK(getRelaySafetySnapshot().closed);
 
   resetHarness(false, true);
@@ -1969,11 +1975,9 @@ void r21_automatic_control_requires_fresh_weight() {
   setRawPaddle(true);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
   CHECK(session.startedWithScale);
+  CHECK(session.automaticEnabled);
+  CHECK(stopperState == StopperState::BREW);
   CHECK(!session.receivedFreshWeightInCycle);
-  hostAutoScaleWorkerProgress = false;
-  reachManualNoScaleState();
-  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
-  CHECK(!session.automaticEnabled);
   CHECK(getRelaySafetySnapshot().closed);
 }
 
@@ -1984,9 +1988,9 @@ void r22_confirmed_implausible_weight_stops_fail_safe() {
   CHECK(executeNextScaleCommand());
   establishPostTareBaseline();
   CHECK(session.automaticEnabled);
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
-  endBrewStartConfirmationForTests();
+  endBbwProtectionForTests();
   publishWeight(900.0f, hostMillis, 1, 10);
   CHECK(session.weightControlState == WeightControlState::VALIDATING);
   CHECK(getRelaySafetySnapshot().closed);
@@ -2139,8 +2143,8 @@ void r29_direct_threshold_stops_before_regression_is_ready() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
-  endBrewStartConfirmationForTests();
+  advanceToBrew();
+  endBbwProtectionForTests();
   CHECK(shot.datapoints < TREND_POINT_COUNT);
   const float threshold = effectiveStopThreshold();
   publishWeight(threshold + 0.1f);
@@ -2172,8 +2176,8 @@ void r31_confirmed_overload_opens_without_learning() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
-  endBrewStartConfirmationForTests();
+  advanceToBrew();
+  endBbwProtectionForTests();
   publishWeight(1500.0f);
   publishWeight(1501.0f, hostMillis + 1);
   runLoopAfter(1);
@@ -2214,7 +2218,7 @@ void r34_suspended_control_recovers_after_three_attributed_samples() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   setScaleConnected(false);
   loop();
   CHECK(session.weightControlState == WeightControlState::SUSPENDED);
@@ -2335,11 +2339,11 @@ void r43_post_tare_baseline_accepts_zero_after_pre_tare_weight() {
   CHECK(session.receivedFreshWeightInCycle);
   CHECK(!session.awaitingPostTareBaseline);
   CHECK(session.hasWeightAnchor);
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
 }
 
-void r54_confirm_waits_for_post_tare_baseline_then_keeps_weight_control() {
+void r54_post_tare_baseline_keeps_weight_control() {
   resetHarness(false, true);
   reachReadyFromBoot();
   currentWeight = 236.0f;
@@ -2349,18 +2353,18 @@ void r54_confirm_waits_for_post_tare_baseline_then_keeps_weight_control() {
   CHECK(executeNextScaleCommand());
   publishWeight(236.0f, hostMillis + 1);
   CHECK(session.awaitingPostTareBaseline);
+  CHECK(stopperState == StopperState::BREW);
   runLoopAfter(runtimeConfig.rinseGestureMs + 1);
-  CHECK(stopperState == StopperState::QUALIFYING_ON);
+  CHECK(stopperState == StopperState::BREW);
   CHECK(session.awaitingPostTareBaseline);
   publishWeight(0.0f, hostMillis + 2);
   CHECK(!session.awaitingPostTareBaseline);
-  runLoopAfter(1);
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.weightControlState == WeightControlState::ACTIVE);
   CHECK(session.automaticEnabled);
 }
 
-void r44_first_shot_after_reconnect_confirms_brew() {
+void r44_first_shot_after_reconnect_enters_brew() {
   resetHarness(false, true);
   reachReadyFromBoot();
   setScaleConnected(false);
@@ -2374,7 +2378,7 @@ void r44_first_shot_after_reconnect_confirms_brew() {
   startCycle();
   CHECK(executeNextScaleCommand());
   publishWeight(0.0f, hostMillis + 1, generation, 10);
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.receivedFreshWeightInCycle);
 }
@@ -2383,8 +2387,8 @@ void rt01_late_cup_triggers_single_retare() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.autoRetare = true;
-  runtimeConfig.confirmationTimeoutMs =
-      minimumConfirmationTimeoutMs(runtimeConfig);
+  runtimeConfig.bbwProtectionMs =
+      minimumBbwProtectionMs(runtimeConfig);
   startCycle();
   CHECK(executeNextScaleCommand());
   establishPostTareBaseline();
@@ -2397,7 +2401,7 @@ void rt01_late_cup_triggers_single_retare() {
   CHECK(commandCount(ScaleCommandType::TARE_ONLY) == 1);
   CHECK(executeNextScaleCommand());
   CHECK(session.retareEnded);
-  CHECK(!session.brewStartConfirmEnded);
+  CHECK(!session.bbwProtectionEnded);
   CHECK(scale.tareCalls == 1);
   CHECK(scale.startTimerCalls == 0);
   const uint32_t timerAnchor = session.startedAtMs;
@@ -2409,8 +2413,8 @@ void rt02_sub_minimum_stable_cup_is_ignored() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.autoRetare = true;
-  runtimeConfig.confirmationTimeoutMs =
-      minimumConfirmationTimeoutMs(runtimeConfig);
+  runtimeConfig.bbwProtectionMs =
+      minimumBbwProtectionMs(runtimeConfig);
   runtimeConfig.minimumCupWeightG = 10.0f;
   startCycle();
   CHECK(executeNextScaleCommand());
@@ -2444,13 +2448,13 @@ void rt04_heavy_cup_does_not_stop_during_retare() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.autoRetare = true;
-  runtimeConfig.confirmationTimeoutMs =
-      minimumConfirmationTimeoutMs(runtimeConfig);
+  runtimeConfig.bbwProtectionMs =
+      minimumBbwProtectionMs(runtimeConfig);
   runtimeConfig.goalWeightG = 36;
   startCycle();
   CHECK(executeNextScaleCommand());
   establishPostTareBaseline();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.bbwProtectionEnabled);
   runLoopAfter(1000);
@@ -2467,7 +2471,7 @@ void rt04_heavy_cup_does_not_stop_during_retare() {
   CHECK(scale.tareCalls >= 1);
 }
 
-void rt05_confirmation_timeout_enables_stop_without_beep() {
+void rt05_bbw_protection_timeout_enables_stop_without_beep() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.autoRetare = true;
@@ -2475,14 +2479,14 @@ void rt05_confirmation_timeout_enables_stop_without_beep() {
   CHECK(executeNextScaleCommand());
   establishPostTareBaseline();
   waitForRetareEnded();
-  waitForBrewStartConfirmationEnded();
+  waitForBbwProtectionEnded();
   reachBrewState();
   CHECK(!scaleBeepPending);
   simulateFirstDrops();
   CHECK(scaleBeepPending);
 }
 
-void rt06_first_drops_beep_after_confirmation_timeout() {
+void rt06_first_drops_beep_after_bbw_protection_timeout() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.autoRetare = true;
@@ -2490,7 +2494,7 @@ void rt06_first_drops_beep_after_confirmation_timeout() {
   CHECK(executeNextScaleCommand());
   establishPostTareBaseline();
   waitForRetareEnded();
-  endBrewStartConfirmationForTests();
+  endBbwProtectionForTests();
   CHECK(stopperState == StopperState::BREW);
   simulateFirstDrops();
   CHECK(session.firstDropMs != 0);
@@ -2505,7 +2509,7 @@ void rt07_auto_retare_off_skips_retare_window() {
   CHECK(executeNextScaleCommand());
   establishPostTareBaseline();
   CHECK(session.retareEnded);
-  CHECK(!session.brewStartConfirmEnded);
+  CHECK(!session.bbwProtectionEnded);
   publishStableCupWeight(150.0f, 10);
   CHECK(!session.retarePerformed);
   CHECK(commandCount(ScaleCommandType::TARE_ONLY) == 0);
@@ -2515,7 +2519,7 @@ void rt09_coffee_during_retare_beep_on_first_drop_not_at_retare_end() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.autoRetare = true;
-  runtimeConfig.brewConfirmationBeep = true;
+  runtimeConfig.firstDropBeep = true;
   startCycle();
   CHECK(executeNextScaleCommand());
   establishPostTareBaseline();
@@ -2528,24 +2532,24 @@ void rt09_coffee_during_retare_beep_on_first_drop_not_at_retare_end() {
   CHECK(!session.retarePerformed);
   CHECK(scaleBeepPending);
   waitForRetareEnded();
-  CHECK(session.brewStartConfirmEnded);
+  CHECK(session.bbwProtectionEnded);
   publishStableCupWeight(150.0f, 20);
   CHECK(commandCount(ScaleCommandType::TARE_ONLY) == 0);
 }
 
-void rt10_first_drops_beep_during_confirmation() {
+void rt10_first_drops_beep_during_bbw_protection() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.autoRetare = true;
-  runtimeConfig.confirmationTimeoutMs =
-      minimumConfirmationTimeoutMs(runtimeConfig);
+  runtimeConfig.bbwProtectionMs =
+      minimumBbwProtectionMs(runtimeConfig);
   startCycle();
   CHECK(executeNextScaleCommand());
   establishPostTareBaseline();
   CHECK(!session.awaitingPostTareBaseline);
   runLoopAfter(runtimeConfig.rinseGestureMs + 1);
   waitForRetareEnded();
-  CHECK(!session.brewStartConfirmEnded);
+  CHECK(!session.bbwProtectionEnded);
   simulateFirstDrops(0.0f, 10);
   CHECK(session.firstDropMs != 0);
   CHECK(scaleBeepPending);
@@ -2555,8 +2559,8 @@ void rs01_fast_samples_wait_for_min_duration() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.autoRetare = true;
-  runtimeConfig.confirmationTimeoutMs =
-      minimumConfirmationTimeoutMs(runtimeConfig);
+  runtimeConfig.bbwProtectionMs =
+      minimumBbwProtectionMs(runtimeConfig);
   runtimeConfig.retareStabilityMinDurationMs = 300;
   runtimeConfig.retareStabilitySamples = 3;
   startCycle();
@@ -2577,8 +2581,8 @@ void rs02_slow_samples_meet_min_duration_at_third_sample() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.autoRetare = true;
-  runtimeConfig.confirmationTimeoutMs =
-      minimumConfirmationTimeoutMs(runtimeConfig);
+  runtimeConfig.bbwProtectionMs =
+      minimumBbwProtectionMs(runtimeConfig);
   runtimeConfig.retareStabilityMinDurationMs = 300;
   runtimeConfig.retareStabilitySamples = 3;
   startCycle();
@@ -2614,8 +2618,8 @@ void rs04_zero_min_duration_retares_on_sample_count_only() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.autoRetare = true;
-  runtimeConfig.confirmationTimeoutMs =
-      minimumConfirmationTimeoutMs(runtimeConfig);
+  runtimeConfig.bbwProtectionMs =
+      minimumBbwProtectionMs(runtimeConfig);
   runtimeConfig.retareStabilityMinDurationMs = 0;
   runtimeConfig.retareStabilitySamples = 3;
   startCycle();
@@ -2706,8 +2710,6 @@ void w39_automatic_stopper_palette_encodes_workflow() {
 
   CHECK(signalFor(StopperState::READY).color == INDICATOR_GREEN);
   CHECK(signalFor(StopperState::READY).pattern == IndicatorPattern::SOLID);
-  CHECK(signalFor(StopperState::QUALIFYING_ON).pattern ==
-        IndicatorPattern::MEDIUM_BLINK);
   CHECK(signalFor(StopperState::BREW).pattern ==
         IndicatorPattern::SLOW_BLINK);
   CHECK(signalFor(StopperState::RINSE).pattern ==
@@ -2722,9 +2724,6 @@ void w40_manual_and_timer_only_palette_is_salmon() {
 
   CHECK(signalFor(StopperState::READY).color == INDICATOR_SALMON);
   CHECK(signalFor(StopperState::READY).pattern == IndicatorPattern::SOLID);
-  CHECK(signalFor(StopperState::QUALIFYING_ON).color == INDICATOR_SALMON);
-  CHECK(signalFor(StopperState::QUALIFYING_ON).pattern ==
-        IndicatorPattern::MEDIUM_BLINK);
   CHECK(signalFor(StopperState::BREW).color == INDICATOR_SALMON);
   CHECK(signalFor(StopperState::BREW).pattern ==
         IndicatorPattern::SLOW_BLINK);
@@ -3156,8 +3155,8 @@ void r51_auto_to_manual_guard_fires_while_scale_lost() {
   runtimeConfig.autoToManualGuardManualLimitMs = 15000;
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
-  endBrewStartConfirmationForTests();
+  advanceToBrew();
+  endBbwProtectionForTests();
   CHECK(session.autoToManualGuardArmed);
   CHECK(!session.autoToManualGuardEnforced);
   setScaleConnected(false);
@@ -3177,7 +3176,7 @@ void r52_auto_to_manual_guard_clears_on_scale_recovery() {
   runtimeConfig.autoToManualGuardManualLimitMs = 20000;
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
+  advanceToBrew();
   const uint32_t deadline = session.autoToManualGuardDeadlineAtMs;
   CHECK(session.autoToManualGuardArmed);
   setScaleConnected(false);
@@ -3202,8 +3201,8 @@ void r53_auto_to_manual_guard_disabled_does_not_cut_early() {
   runtimeConfig.autoToManualGuardManualLimitMs = 10000;
   reachReadyFromBoot();
   startCycle();
-  advanceToBrewFromQualifying();
-  endBrewStartConfirmationForTests();
+  advanceToBrew();
+  endBbwProtectionForTests();
   CHECK(!session.autoToManualGuardArmed);
   setScaleConnected(false);
   loop();
@@ -3217,8 +3216,8 @@ void r48_guard_disabled_stops_at_target_normally() {
   reachReadyFromBoot();
   runtimeConfig.fastExtractionGuardEnabled = false;
   startCycle();
-  advanceToBrewFromQualifying();
-  endBrewStartConfirmationForTests();
+  advanceToBrew();
+  endBbwProtectionForTests();
   const float threshold = effectiveStopThreshold();
   publishWeight(threshold + 0.1f);
   publishWeight(threshold + 0.2f);
@@ -3235,8 +3234,8 @@ void r49_guard_extends_and_stops_at_max_weight() {
   runtimeConfig.minBrewTimeMs = 26000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
-  advanceToBrewFromQualifying();
-  endBrewStartConfirmationForTests();
+  advanceToBrew();
+  endBbwProtectionForTests();
   runLoopAfter(22000);
   const float threshold = effectiveStopThreshold();
   publishWeight(threshold + 0.1f);
@@ -3259,8 +3258,8 @@ void r50_guard_extends_and_stops_at_min_time() {
   runtimeConfig.minBrewTimeMs = 26000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
-  advanceToBrewFromQualifying();
-  endBrewStartConfirmationForTests();
+  advanceToBrew();
+  endBbwProtectionForTests();
   runLoopAfter(22000);
   const float threshold = effectiveStopThreshold();
   publishWeight(threshold + 0.1f);
@@ -3283,7 +3282,7 @@ struct TestCase {
 const TestCase testCases[] = {
     {"T01", t01_boot_with_paddle_off},
     {"T02", t02_boot_with_paddle_on},
-    {"T03", t03_sustained_on_confirms_brew_once},
+    {"T03", t03_sustained_on_enters_brew_once},
     {"T04", t04_exact_rinse_boundary_and_duration},
     {"T05", t05_release_between_rinse_and_brew_is_short_shot},
     {"T06", t06_paddle_off_during_brew},
@@ -3303,9 +3302,9 @@ const TestCase testCases[] = {
     {"T20", t20_rinse_without_scale},
     {"T21", t21_global_limit_without_scale_rearms_after_release},
     {"T22", t22_scale_connection_does_not_promote_manual_cycle},
-    {"T23", t23_prediction_triggers_after_confirmation_ends},
+    {"T23", t23_prediction_triggers_after_bbw_protection_ends},
     {"T24", t24_paddle_off_during_brew_is_immediate},
-    {"T25", t25_ble_loss_while_qualifying_preserves_classification},
+    {"T25", t25_ble_loss_during_rinse_window_preserves_classification},
     {"T26", t26_reconnected_suspended_cycle_sends_one_stop_on_release},
     {"T27", t27_configuration_is_rejected_while_cycle_is_active},
     {"T28", t28_paddle_motion_cannot_cancel_or_extend_rinse},
@@ -3353,18 +3352,18 @@ const TestCase testCases[] = {
     {"R41", r41_negative_weight_in_range_starts_automatic_cycle},
     {"R42", r42_weight_below_automation_min_stays_manual},
     {"R43", r43_post_tare_baseline_accepts_zero_after_pre_tare_weight},
-    {"R54", r54_confirm_waits_for_post_tare_baseline_then_keeps_weight_control},
-    {"R44", r44_first_shot_after_reconnect_confirms_brew},
+    {"R54", r54_post_tare_baseline_keeps_weight_control},
+    {"R44", r44_first_shot_after_reconnect_enters_brew},
     {"R45", r45_slew_rejection_emits_specific_debug_code},
     {"RT01", rt01_late_cup_triggers_single_retare},
     {"RT02", rt02_sub_minimum_stable_cup_is_ignored},
     {"RT03", rt03_spike_without_stable_cup_does_not_retare},
     {"RT04", rt04_heavy_cup_does_not_stop_during_retare},
-    {"RT05", rt05_confirmation_timeout_enables_stop_without_beep},
-    {"RT06", rt06_first_drops_beep_after_confirmation_timeout},
+    {"RT05", rt05_bbw_protection_timeout_enables_stop_without_beep},
+    {"RT06", rt06_first_drops_beep_after_bbw_protection_timeout},
     {"RT07", rt07_auto_retare_off_skips_retare_window},
     {"RT09", rt09_coffee_during_retare_beep_on_first_drop_not_at_retare_end},
-    {"RT10", rt10_first_drops_beep_during_confirmation},
+    {"RT10", rt10_first_drops_beep_during_bbw_protection},
     {"RS01", rs01_fast_samples_wait_for_min_duration},
     {"RS02", rs02_slow_samples_meet_min_duration_at_third_sample},
     {"RS03", rs03_broken_streak_before_min_duration_does_not_retare},
@@ -3376,7 +3375,7 @@ const TestCase testCases[] = {
     {"W02", w02_each_runtime_field_is_validated},
     {"W03", w03_runtime_timing_relations_are_transactional},
     {"W04", w04_wifi_credentials_have_strict_bounds},
-    {"W05", w05_config_is_blocked_while_qualifying},
+    {"W05", w05_config_is_blocked_while_brewing_early},
     {"W06", w06_config_is_blocked_while_brewing},
     {"W07", w07_config_is_blocked_while_rinsing},
     {"W08", w08_config_is_blocked_during_manual_cycle},
@@ -3384,7 +3383,7 @@ const TestCase testCases[] = {
     {"W10", w10_cycle_configuration_snapshot_is_immutable},
     {"W11", w11_operational_timer_opens_without_control_loop},
     {"W12", w12_hard_limit_cannot_be_configured_above_sixty_seconds},
-    {"W45", w45_confirmation_retare_relation_is_validated},
+    {"W45", w45_bbw_protection_retare_relation_is_validated},
     {"W46", w46_status_reports_uptime_since_boot},
     {"W13", w13_virtual_paddle_uses_normal_state_machine},
     {"W14", w14_physical_motion_overrides_web_control},
@@ -3405,8 +3404,8 @@ const TestCase testCases[] = {
     {"W29", w29_operational_wall_of_60001_is_rejected},
     {"W30", w30_last_cycle_weight_must_belong_to_that_cycle},
     {"W31", w31_unsupported_scale_never_uses_tare_as_a_beep},
-    {"W32", w32_full_scale_queue_cannot_block_brew_confirmation},
-    {"W33", w33_brew_confirmation_beep_can_be_disabled},
+    {"W32", w32_full_scale_queue_cannot_block_brew_start},
+    {"W33", w33_first_drop_beep_can_be_disabled},
     {"W34", w34_calibration_reset_restores_default_and_cancels_analysis},
     {"W35", w35_status_reports_the_live_physical_paddle_gpio},
     {"W36", w36_paddle_return_reminder_beeps_at_configured_interval_only_while_open},

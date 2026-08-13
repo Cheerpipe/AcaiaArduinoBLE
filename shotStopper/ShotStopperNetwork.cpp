@@ -175,10 +175,10 @@ const char *configValidationMessage(ConfigValidationError error) {
     case ConfigValidationError::RETARE_STABILITY_RELATION:
       return "Retare min stable time must be ≤ retare window and ≤ "
              "samples × sample gap.";
-    case ConfigValidationError::CONFIRMATION_TIMEOUT:
-      return "Brew start confirmation must be from 0.5 to 30 s.";
-    case ConfigValidationError::CONFIRMATION_RETARE_RELATION:
-      return "Brew start confirmation must be at least effective retare "
+    case ConfigValidationError::BBW_PROTECTION_TIMEOUT:
+      return "BBW protection must be from 0.5 to 30 s.";
+    case ConfigValidationError::BBW_PROTECTION_RETARE_RELATION:
+      return "BBW protection must be at least effective retare "
              "window + 3 s.";
     case ConfigValidationError::OPERATIONAL_WALL:
       return "CN9 limit must be from 5 to 60 s.";
@@ -189,7 +189,7 @@ const char *configValidationMessage(ConfigValidationError error) {
              "the reminder interval.";
     case ConfigValidationError::TIMING_RELATION:
       return "Required: rinse gesture < CN9 limit; rinse duration, retare "
-             "window, and confirmation each ≤ CN9; retare + confirmation ≤ CN9.";
+             "window, and BBW protection each ≤ CN9.";
     case ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE:
       return "The Bookoo combined command requires automatic tare.";
     case ConfigValidationError::TIMEZONE_OFFSET:
@@ -205,7 +205,7 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "Min brew time must be from 5 to 55 s.";
     case ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION:
       return "Fast guard requires max recovery > target, min brew < CN9 "
-             "limit, and min brew ≥ brew confirmation.";
+             "limit, and min brew ≥ BBW protection.";
     case ConfigValidationError::AUTO_TO_MANUAL_GUARD_MODE:
       return "A→M limit mode must be manual or auto.";
     case ConfigValidationError::AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT:
@@ -2065,7 +2065,6 @@ const char *ShotStopperNetwork::stateLabel(StopperState state) {
   switch (state) {
     case StopperState::REQUIRES_OFF: return "Paddle release required";
     case StopperState::READY: return "Ready";
-    case StopperState::QUALIFYING_ON: return "Qualifying gesture";
     case StopperState::BREW: return "Automatic brew";
     case StopperState::RINSE: return "Rinse in progress";
     case StopperState::MANUAL_NO_SCALE:
@@ -2092,7 +2091,7 @@ const char *activeCycleShotTypeLabel(const ControlStatusSnapshot &control) {
   }
   return shotLogTypeName(shotLogTypeFromCycle(
       control.state, control.cycleStartedWithScale, control.cycleTimerOnly,
-      control.cycleConfirmedBrew));
+      control.cycleAutomaticBrew));
 }
 
 const char *ShotStopperNetwork::endReasonName(EndReason reason) {
@@ -2199,7 +2198,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"startedAtMs\":%lu},"
       "\"configMutable\":%s,\"config\":{\"revision\":%lu,"
       "\"goalWeightG\":%u,\"weightOffsetG\":%.2f,\"autoTare\":%s,\"timerOnly\":%s,"
-      "\"canTareStartTimer\":%s,\"brewConfirmationBeep\":%s,"
+      "\"canTareStartTimer\":%s,\"firstDropBeep\":%s,"
       "\"paddleReturnReminderBeep\":%s,"
       "\"paddleReturnReminderIntervalMs\":%lu,"
       "\"paddleReturnReminderMaxDurationMs\":%lu,\"rinseGestureMs\":%lu,"
@@ -2210,7 +2209,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"retareStabilityToleranceG\":%.1f,"
       "\"retareStabilityMaxGapMs\":%lu,"
       "\"retareStabilityMinDurationMs\":%lu,"
-      "\"confirmationTimeoutMs\":%lu,"
+      "\"bbwProtectionMs\":%lu,"
       "\"operationalWallMs\":%lu,"
       "\"fastExtractionGuardEnabled\":%s,"
       "\"maxRecoveryWeightG\":%.1f,"
@@ -2295,7 +2294,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.config.autoTare ? "true" : "false",
       control.config.timerOnly ? "true" : "false",
       control.config.canTareStartTimer ? "true" : "false",
-      control.config.brewConfirmationBeep ? "true" : "false",
+      control.config.firstDropBeep ? "true" : "false",
       control.config.paddleReturnReminderBeep ? "true" : "false",
       static_cast<unsigned long>(
           control.config.paddleReturnReminderIntervalMs),
@@ -2310,7 +2309,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<double>(control.config.retareStabilityToleranceG),
       static_cast<unsigned long>(control.config.retareStabilityMaxGapMs),
       static_cast<unsigned long>(control.config.retareStabilityMinDurationMs),
-      static_cast<unsigned long>(control.config.confirmationTimeoutMs),
+      static_cast<unsigned long>(control.config.bbwProtectionMs),
       static_cast<unsigned long>(control.config.operationalWallMs),
       control.config.fastExtractionGuardEnabled ? "true" : "false",
       static_cast<double>(control.config.maxRecoveryWeightG),
@@ -2742,12 +2741,12 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   static const char *const fields[] = {
       "goalWeightG", "rinseGestureMs", "rinseDurationMs", "operationalWallMs",
       "autoTare", "timerOnly",
-      "canTareStartTimer", "brewConfirmationBeep", "paddleReturnReminderBeep",
+      "canTareStartTimer", "firstDropBeep", "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
       "autoRetare", "retareWindowMs", "minimumCupWeightG",
       "retareStabilitySamples", "retareStabilityToleranceG",
       "retareStabilityMaxGapMs", "retareStabilityMinDurationMs",
-      "confirmationTimeoutMs", "fastExtractionGuardEnabled",
+      "bbwProtectionMs", "fastExtractionGuardEnabled",
       "maxRecoveryWeightG", "minBrewTimeMs",
       "autoToManualGuardEnabled", "autoToManualGuardLimitMode",
       "autoToManualGuardManualLimitMs",
@@ -2772,9 +2771,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (!jsonBoolean(root, "canTareStartTimer",
                           candidate.canTareStartTimer)) {
     parseError = "canTareStartTimer must be a boolean.";
-  } else if (!jsonBoolean(root, "brewConfirmationBeep",
-                          candidate.brewConfirmationBeep)) {
-    parseError = "brewConfirmationBeep must be a boolean.";
+  } else if (!jsonBoolean(root, "firstDropBeep",
+                          candidate.firstDropBeep)) {
+    parseError = "firstDropBeep must be a boolean.";
   } else if (!jsonBoolean(root, "paddleReturnReminderBeep",
                           candidate.paddleReturnReminderBeep)) {
     parseError = "paddleReturnReminderBeep must be a boolean.";
@@ -2806,9 +2805,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
                          candidate.retareStabilityMinDurationMs)) {
     parseError =
         "retareStabilityMinDurationMs must be an integer (milliseconds).";
-  } else if (!jsonUint32(root, "confirmationTimeoutMs",
-                         candidate.confirmationTimeoutMs)) {
-    parseError = "confirmationTimeoutMs must be an integer (milliseconds).";
+  } else if (!jsonUint32(root, "bbwProtectionMs",
+                         candidate.bbwProtectionMs)) {
+    parseError = "bbwProtectionMs must be an integer (milliseconds).";
   } else if (!jsonBoolean(root, "fastExtractionGuardEnabled",
                           candidate.fastExtractionGuardEnabled)) {
     parseError = "fastExtractionGuardEnabled must be a boolean.";

@@ -140,14 +140,14 @@ inline bool shotLogEligible(EndReason reason, uint32_t durationMs) {
 }
 
 inline ShotLogType shotLogTypeFromCycle(StopperState finalState, bool startedWithScale,
-                                        bool timerOnly, bool confirmedBrew) {
+                                        bool timerOnly, bool automaticBrew) {
   if (finalState == StopperState::MANUAL_NO_SCALE || !startedWithScale) {
     return ShotLogType::MANUAL;
   }
   if (timerOnly) {
     return ShotLogType::TIMER_ONLY;
   }
-  if (confirmedBrew) {
+  if (automaticBrew) {
     return ShotLogType::AUTO;
   }
   return ShotLogType::MANUAL;

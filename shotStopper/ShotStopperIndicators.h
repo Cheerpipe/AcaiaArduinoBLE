@@ -95,8 +95,6 @@ inline IndicatorSignal stopperIndicatorSignal(
       return {INDICATOR_AMBER, IndicatorPattern::SLOW_BLINK};
     case StopperState::READY:
       return {operatingColor, IndicatorPattern::SOLID};
-    case StopperState::QUALIFYING_ON:
-      return {operatingColor, IndicatorPattern::MEDIUM_BLINK};
     case StopperState::BREW:
       return {operatingColor, IndicatorPattern::SLOW_BLINK};
     case StopperState::RINSE:

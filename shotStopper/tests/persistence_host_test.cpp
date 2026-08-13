@@ -36,7 +36,7 @@ PersistedSettingsV12 makeSchemaTwelveRecord(const PersistedSettings &source,
   legacy.runtime.autoTare = source.runtime.autoTare;
   legacy.runtime.timerOnly = source.runtime.timerOnly;
   legacy.runtime.canTareStartTimer = source.runtime.canTareStartTimer;
-  legacy.runtime.brewConfirmationBeep = source.runtime.brewConfirmationBeep;
+  legacy.runtime.firstDropBeep = source.runtime.firstDropBeep;
   legacy.runtime.paddleReturnReminderBeep = source.runtime.paddleReturnReminderBeep;
   legacy.runtime.paddleReturnReminderIntervalMs =
       source.runtime.paddleReturnReminderIntervalMs;
@@ -53,7 +53,7 @@ PersistedSettingsV12 makeSchemaTwelveRecord(const PersistedSettings &source,
   legacy.runtime.retareStabilityMaxGapMs = source.runtime.retareStabilityMaxGapMs;
   legacy.runtime.retareStabilityMinDurationMs =
       source.runtime.retareStabilityMinDurationMs;
-  legacy.runtime.confirmationTimeoutMs = source.runtime.confirmationTimeoutMs;
+  legacy.runtime.bbwProtectionMs = source.runtime.bbwProtectionMs;
   legacy.runtime.operationalWallMs = source.runtime.operationalWallMs;
   legacy.runtime.timezoneOffsetMinutes = source.runtime.timezoneOffsetMinutes;
   legacy.runtime.ntpServerPreset = source.runtime.ntpServerPreset;
@@ -246,7 +246,7 @@ void p09_fast_extraction_guard_validation() {
   config.maxRecoveryWeightG = 42.5f;
   config.minBrewTimeMs = 26000;
   config.fastExtractionGuardEnabled = true;
-  config.confirmationTimeoutMs = DEFAULT_CONFIRMATION_TIMEOUT_MS;
+  config.bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
   config.operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
   CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
   config.maxRecoveryWeightG = 36.0f;
@@ -292,7 +292,7 @@ void p11_schema_thirteen_migrates_to_current() {
   legacy.runtime.autoTare = true;
   legacy.runtime.timerOnly = false;
   legacy.runtime.canTareStartTimer = true;
-  legacy.runtime.brewConfirmationBeep = true;
+  legacy.runtime.firstDropBeep = true;
   legacy.runtime.paddleReturnReminderBeep = true;
   legacy.runtime.paddleReturnReminderIntervalMs =
       DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
@@ -309,7 +309,7 @@ void p11_schema_thirteen_migrates_to_current() {
   legacy.runtime.retareStabilityMaxGapMs = DEFAULT_RETARE_STABILITY_MAX_GAP_MS;
   legacy.runtime.retareStabilityMinDurationMs =
       DEFAULT_RETARE_STABILITY_MIN_DURATION_MS;
-  legacy.runtime.confirmationTimeoutMs = DEFAULT_CONFIRMATION_TIMEOUT_MS;
+  legacy.runtime.bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
   legacy.runtime.operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
   legacy.runtime.timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
   legacy.runtime.ntpServerPreset =

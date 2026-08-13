@@ -85,15 +85,15 @@ constexpr uint32_t DEFAULT_OPERATIONAL_WALL_MS = 60000;
 constexpr uint32_t DEFAULT_RINSE_GESTURE_MS = 1500;
 constexpr uint32_t DEFAULT_RINSE_DURATION_MS = 3000;
 constexpr uint32_t DEFAULT_RETARE_WINDOW_MS = 4000;
-constexpr uint32_t DEFAULT_CONFIRMATION_TIMEOUT_MS = 12000;
-constexpr uint32_t MIN_CONFIRMATION_AFTER_RETARE_MS = 3000;
+constexpr uint32_t DEFAULT_BBW_PROTECTION_MS = 12000;
+constexpr uint32_t MIN_BBW_PROTECTION_AFTER_RETARE_MS = 3000;
 constexpr float DEFAULT_MINIMUM_CUP_WEIGHT_G = 10.0f;
 constexpr float MIN_MINIMUM_CUP_WEIGHT_G = 1.0f;
 constexpr float MAX_MINIMUM_CUP_WEIGHT_G = 500.0f;
 constexpr uint32_t MIN_RETARE_WINDOW_MS = 500;
 constexpr uint32_t MAX_RETARE_WINDOW_MS = 10000;
-constexpr uint32_t MIN_CONFIRMATION_TIMEOUT_MS = 500;
-constexpr uint32_t MAX_CONFIRMATION_TIMEOUT_MS = 30000;
+constexpr uint32_t MIN_BBW_PROTECTION_MS = 500;
+constexpr uint32_t MAX_BBW_PROTECTION_MS = 30000;
 constexpr float DEFAULT_RETARE_STABILITY_TOLERANCE_G = 2.0f;
 constexpr uint8_t DEFAULT_RETARE_STABILITY_SAMPLES = 3;
 constexpr uint32_t DEFAULT_RETARE_STABILITY_MAX_GAP_MS = 500;
@@ -153,7 +153,6 @@ static_assert(SHOT_STOPPER_ENABLE_REMOTE_CN9 == 0 ||
 enum class StopperState : uint8_t {
   REQUIRES_OFF,
   READY,
-  QUALIFYING_ON,
   BREW,
   RINSE,
   MANUAL_NO_SCALE
@@ -207,7 +206,6 @@ inline const char *stopperStateName(StopperState state) {
   switch (state) {
     case StopperState::REQUIRES_OFF: return "REQUIRES_OFF";
     case StopperState::READY: return "READY";
-    case StopperState::QUALIFYING_ON: return "QUALIFYING_ON";
     case StopperState::BREW: return "BREW";
     case StopperState::RINSE: return "RINSE";
     case StopperState::MANUAL_NO_SCALE: return "MANUAL_NO_SCALE";
@@ -331,8 +329,8 @@ struct RuntimeConfig {
   bool autoTare = true;
   bool timerOnly = false;
   bool canTareStartTimer = true;
-  // An independent Bookoo beep after Brew confirmation is optional.
-  bool brewConfirmationBeep = true;
+  // Optional beep when the first coffee drop is detected.
+  bool firstDropBeep = true;
   // Remind the user to release the physical paddle after CN9 has opened.
   bool paddleReturnReminderBeep = true;
   uint32_t paddleReturnReminderIntervalMs =
@@ -348,7 +346,7 @@ struct RuntimeConfig {
   float retareStabilityToleranceG = DEFAULT_RETARE_STABILITY_TOLERANCE_G;
   uint32_t retareStabilityMaxGapMs = DEFAULT_RETARE_STABILITY_MAX_GAP_MS;
   uint32_t retareStabilityMinDurationMs = DEFAULT_RETARE_STABILITY_MIN_DURATION_MS;
-  uint32_t confirmationTimeoutMs = DEFAULT_CONFIRMATION_TIMEOUT_MS;
+  uint32_t bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
   uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
   int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
   uint8_t ntpServerPreset = static_cast<uint8_t>(NtpServerPreset::POOL);
@@ -376,7 +374,7 @@ struct CycleConfigSnapshot {
   bool autoTare = true;
   bool timerOnly = false;
   bool canTareStartTimer = true;
-  bool brewConfirmationBeep = true;
+  bool firstDropBeep = true;
   bool paddleReturnReminderBeep = true;
   uint32_t paddleReturnReminderIntervalMs =
       DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
@@ -391,7 +389,7 @@ struct CycleConfigSnapshot {
   float retareStabilityToleranceG = DEFAULT_RETARE_STABILITY_TOLERANCE_G;
   uint32_t retareStabilityMaxGapMs = DEFAULT_RETARE_STABILITY_MAX_GAP_MS;
   uint32_t retareStabilityMinDurationMs = DEFAULT_RETARE_STABILITY_MIN_DURATION_MS;
-  uint32_t confirmationTimeoutMs = DEFAULT_CONFIRMATION_TIMEOUT_MS;
+  uint32_t bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
   uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
   bool fastExtractionGuardEnabled = false;
   float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
@@ -411,7 +409,7 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.autoTare = config.autoTare;
   snapshot.timerOnly = config.timerOnly;
   snapshot.canTareStartTimer = config.canTareStartTimer;
-  snapshot.brewConfirmationBeep = config.brewConfirmationBeep;
+  snapshot.firstDropBeep = config.firstDropBeep;
   snapshot.paddleReturnReminderBeep = config.paddleReturnReminderBeep;
   snapshot.paddleReturnReminderIntervalMs =
       config.paddleReturnReminderIntervalMs;
@@ -426,7 +424,7 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.retareStabilityToleranceG = config.retareStabilityToleranceG;
   snapshot.retareStabilityMaxGapMs = config.retareStabilityMaxGapMs;
   snapshot.retareStabilityMinDurationMs = config.retareStabilityMinDurationMs;
-  snapshot.confirmationTimeoutMs = config.confirmationTimeoutMs;
+  snapshot.bbwProtectionMs = config.bbwProtectionMs;
   snapshot.operationalWallMs = config.operationalWallMs;
   snapshot.fastExtractionGuardEnabled = config.fastExtractionGuardEnabled;
   snapshot.maxRecoveryWeightG = config.maxRecoveryWeightG;
@@ -451,8 +449,8 @@ enum class ConfigValidationError : uint8_t {
   RETARE_STABILITY_MAX_GAP,
   RETARE_STABILITY_MIN_DURATION,
   RETARE_STABILITY_RELATION,
-  CONFIRMATION_TIMEOUT,
-  CONFIRMATION_RETARE_RELATION,
+  BBW_PROTECTION_TIMEOUT,
+  BBW_PROTECTION_RETARE_RELATION,
   OPERATIONAL_WALL,
   PADDLE_REMINDER_INTERVAL,
   PADDLE_REMINDER_MAX_DURATION,
@@ -472,17 +470,17 @@ inline uint32_t effectiveRetareWindowMs(const RuntimeConfig &config) {
   return config.autoRetare ? config.retareWindowMs : 0U;
 }
 
-inline uint32_t minimumConfirmationTimeoutMs(const RuntimeConfig &config) {
-  return effectiveRetareWindowMs(config) + MIN_CONFIRMATION_AFTER_RETARE_MS;
+inline uint32_t minimumBbwProtectionMs(const RuntimeConfig &config) {
+  return effectiveRetareWindowMs(config) + MIN_BBW_PROTECTION_AFTER_RETARE_MS;
 }
 
 inline uint32_t effectiveRetareWindowMs(const CycleConfigSnapshot &config) {
   return config.autoRetare ? config.retareWindowMs : 0U;
 }
 
-inline uint32_t minimumConfirmationTimeoutMs(
+inline uint32_t minimumBbwProtectionMs(
     const CycleConfigSnapshot &config) {
-  return effectiveRetareWindowMs(config) + MIN_CONFIRMATION_AFTER_RETARE_MS;
+  return effectiveRetareWindowMs(config) + MIN_BBW_PROTECTION_AFTER_RETARE_MS;
 }
 
 inline ConfigValidationError validateRuntimeConfig(
@@ -538,13 +536,13 @@ inline ConfigValidationError validateRuntimeConfig(
               config.retareStabilityMaxGapMs) {
     return ConfigValidationError::RETARE_STABILITY_RELATION;
   }
-  if (config.confirmationTimeoutMs < MIN_CONFIRMATION_TIMEOUT_MS ||
-      config.confirmationTimeoutMs > MAX_CONFIRMATION_TIMEOUT_MS) {
-    return ConfigValidationError::CONFIRMATION_TIMEOUT;
+  if (config.bbwProtectionMs < MIN_BBW_PROTECTION_MS ||
+      config.bbwProtectionMs > MAX_BBW_PROTECTION_MS) {
+    return ConfigValidationError::BBW_PROTECTION_TIMEOUT;
   }
-  if (config.confirmationTimeoutMs <
-      minimumConfirmationTimeoutMs(config)) {
-    return ConfigValidationError::CONFIRMATION_RETARE_RELATION;
+  if (config.bbwProtectionMs <
+      minimumBbwProtectionMs(config)) {
+    return ConfigValidationError::BBW_PROTECTION_RETARE_RELATION;
   }
   if (config.operationalWallMs < 5000 ||
       config.operationalWallMs > HARD_MAX_CN9_CLOSED_MS) {
@@ -564,12 +562,12 @@ inline ConfigValidationError validateRuntimeConfig(
           config.paddleReturnReminderIntervalMs) {
     return ConfigValidationError::PADDLE_REMINDER_MAX_DURATION;
   }
+  // Retare and BBW protection run in parallel from paddle ON — each alone
+  // must fit under the CN9 wall (do not sum them).
   if (!(config.rinseGestureMs < config.operationalWallMs) ||
       config.rinseDurationMs > config.operationalWallMs ||
       config.retareWindowMs > config.operationalWallMs ||
-      config.confirmationTimeoutMs > config.operationalWallMs ||
-      config.retareWindowMs + config.confirmationTimeoutMs >
-          config.operationalWallMs) {
+      config.bbwProtectionMs > config.operationalWallMs) {
     return ConfigValidationError::TIMING_RELATION;
   }
   if (config.canTareStartTimer && !config.autoTare) {
@@ -610,7 +608,7 @@ inline ConfigValidationError validateRuntimeConfig(
   }
   if (config.maxRecoveryWeightG <= static_cast<float>(config.goalWeightG) ||
       config.minBrewTimeMs >= config.operationalWallMs ||
-      config.minBrewTimeMs < config.confirmationTimeoutMs) {
+      config.minBrewTimeMs < config.bbwProtectionMs) {
     return ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION;
   }
   return ConfigValidationError::NONE;
@@ -635,10 +633,10 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "retareStabilityMinDurationMs";
     case ConfigValidationError::RETARE_STABILITY_RELATION:
       return "retareStabilityRelation";
-    case ConfigValidationError::CONFIRMATION_TIMEOUT:
-      return "confirmationTimeoutMs";
-    case ConfigValidationError::CONFIRMATION_RETARE_RELATION:
-      return "confirmationRetareRelation";
+    case ConfigValidationError::BBW_PROTECTION_TIMEOUT:
+      return "bbwProtectionMs";
+    case ConfigValidationError::BBW_PROTECTION_RETARE_RELATION:
+      return "bbwProtectionRetareRelation";
     case ConfigValidationError::OPERATIONAL_WALL:
       return "operationalWallMs";
     case ConfigValidationError::PADDLE_REMINDER_INTERVAL:
@@ -986,7 +984,7 @@ struct ControlStatusSnapshot {
   bool cycleFlowDuringRetare = false;
   bool cycleRetarePerformed = false;
   bool cycleStartedWithScale = false;
-  bool cycleConfirmedBrew = false;
+  bool cycleAutomaticBrew = false;
   bool cycleTimerOnly = false;
   uint32_t cycleFirstDropMs = 0;
   uint32_t cycleRetareFlowFirstDetectedAtMs = 0;
@@ -1214,9 +1212,9 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::SCALE_TIMER_STOP_OK: return "scale timer stopped";
     case DebugCode::SCALE_TIMER_STOP_FAILED:
       return "scale timer stop failed";
-    case DebugCode::SCALE_BEEP_OK: return "scale brew-confirmation beep sent";
+    case DebugCode::SCALE_BEEP_OK: return "scale first-drop beep sent";
     case DebugCode::SCALE_BEEP_FAILED:
-      return "scale brew-confirmation beep failed";
+      return "scale first-drop beep failed";
     case DebugCode::SCALE_BEEP_UNSUPPORTED:
       return "scale has no state-safe beep command";
     case DebugCode::SCALE_PADDLE_REMINDER_BEEP_OK:
