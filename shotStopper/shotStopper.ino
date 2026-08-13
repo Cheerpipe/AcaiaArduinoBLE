@@ -49,6 +49,7 @@ using namespace shotstopper;
 constexpr uint32_t PADDLE_DEBOUNCE_MS = 30;
 constexpr uint32_t DRIP_DELAY_MS = 3000;
 constexpr uint32_t SCALE_CONNECT_RETRY_MS = 1000;
+constexpr uint32_t SCALE_CONNECT_RETRY_MAX_MS = 10000;
 constexpr uint32_t SCALE_CONNECT_LOG_MS = 10000;
 constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;
 constexpr uint32_t SCALE_ATT_TIMEOUT_MS = 1000;
@@ -2820,6 +2821,78 @@ void executeScaleCommand(const ScaleCommand &command) {
   }
 }
 
+uint32_t nextScaleConnectRetryMs(uint32_t currentRetryMs) {
+  if (currentRetryMs > SCALE_CONNECT_RETRY_MAX_MS / 2U) {
+    return SCALE_CONNECT_RETRY_MAX_MS;
+  }
+  return currentRetryMs * 2U;
+}
+
+void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
+                                 uint32_t &lastConnectLogMs,
+                                 uint32_t &connectRetryMs,
+                                 bool &connectAttemptSeriesActive) {
+  if (scale.isScanning()) {
+    const bool connected = scale.pollScan();
+    if (connected) {
+      connectAttemptSeriesActive = false;
+      connectRetryMs = SCALE_CONNECT_RETRY_MS;
+      Serial.println("Scale connected");
+      updateWorkerLinkState();
+      setScaleLinkState(ScaleLinkState::CONNECTED);
+      return;
+    }
+    if (scale.isScanning()) {
+      return;
+    }
+
+    lastScanCycleMs = millis();
+    const AcaiaDisconnectReason reason = scale.lastDisconnectReason();
+    if (reason == AcaiaDisconnectReason::SCAN_TIMEOUT ||
+        reason == AcaiaDisconnectReason::SCAN_START_FAILED) {
+      connectRetryMs = nextScaleConnectRetryMs(connectRetryMs);
+    } else {
+      connectRetryMs = SCALE_CONNECT_RETRY_MS;
+    }
+    const bool logAttempt =
+        !connectAttemptSeriesActive ||
+        elapsedMs(lastConnectLogMs) >= SCALE_CONNECT_LOG_MS;
+    if (logAttempt) {
+      lastConnectLogMs = lastScanCycleMs;
+      connectAttemptSeriesActive = true;
+      Serial.println("Scale connection failed");
+    }
+    updateWorkerLinkState();
+    setScaleLinkState(ScaleLinkState::DISCONNECTED);
+    return;
+  }
+
+  if (elapsedMs(lastScanCycleMs) < connectRetryMs) {
+    return;
+  }
+
+  lastScanCycleMs = millis();
+  const bool logAttempt =
+      !connectAttemptSeriesActive ||
+      elapsedMs(lastConnectLogMs) >= SCALE_CONNECT_LOG_MS;
+  if (logAttempt) {
+    lastConnectLogMs = lastScanCycleMs;
+    connectAttemptSeriesActive = true;
+    Serial.println("Scanning for scale...");
+    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_CONNECTING);
+  }
+  if (scale.startScan()) {
+    return;
+  }
+
+  connectRetryMs = nextScaleConnectRetryMs(connectRetryMs);
+  if (logAttempt) {
+    Serial.println("Scale connection failed");
+  }
+  updateWorkerLinkState();
+  setScaleLinkState(ScaleLinkState::DISCONNECTED);
+}
+
 void serviceScaleWorkerLink() {
   if (!scale.isConnected()) {
     updateWorkerLinkState();
@@ -2853,8 +2926,9 @@ void serviceScaleWorkerLink() {
 }
 
 void scaleWorkerTask(void *) {
-  uint32_t lastConnectAttemptMs = 0;
+  uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
+  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t telemetryAtMs = 0;
 
@@ -2888,26 +2962,12 @@ void scaleWorkerTask(void *) {
                                 DebugCode::SCALE_BEEP_UNSUPPORTED);
       } else if (scale.isConnected()) {
         connectAttemptSeriesActive = false;
+        connectRetryMs = SCALE_CONNECT_RETRY_MS;
         serviceScaleWorkerLink();
-      } else if (elapsedMs(lastConnectAttemptMs) >= SCALE_CONNECT_RETRY_MS) {
-        lastConnectAttemptMs = millis();
-        const bool logAttempt =
-            !connectAttemptSeriesActive ||
-            elapsedMs(lastConnectLogMs) >= SCALE_CONNECT_LOG_MS;
-        if (logAttempt) {
-          lastConnectLogMs = lastConnectAttemptMs;
-          connectAttemptSeriesActive = true;
-          Serial.println("Attempting scale connection...");
-          addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_CONNECTING);
-        }
-        const bool connected = scale.init();
-        if (connected || logAttempt) {
-          Serial.println(connected ? "Scale connected"
-                                   : "Scale connection failed");
-        }
-        updateWorkerLinkState();
-        setScaleLinkState(connected ? ScaleLinkState::CONNECTED
-                                    : ScaleLinkState::DISCONNECTED);
+      } else {
+        serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                                    connectRetryMs,
+                                    connectAttemptSeriesActive);
       }
     }
 

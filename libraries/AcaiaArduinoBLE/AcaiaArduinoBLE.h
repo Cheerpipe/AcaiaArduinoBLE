@@ -66,7 +66,19 @@ class AcaiaArduinoBLE {
         AcaiaArduinoBLE(const AcaiaArduinoBLE&) = delete;
         AcaiaArduinoBLE& operator=(const AcaiaArduinoBLE&) = delete;
 
+        // Blocking helper for sketches: reset, scan up to
+        // SCALE_SCAN_TIMEOUT_MS, then connect. Prefer startScan()/pollScan()
+        // on a dedicated BLE owner task so idle scanning does not block.
         bool init(String mac = "");
+
+        // Non-blocking GAP scan. Never calls BLE.begin()/end(). If a scan is
+        // already active, this is a no-op success and does not restart GAP.
+        bool startScan(String mac = "");
+        // Poll an active scan. Performs GATT connect only when a scale
+        // advertisement matches. Returns true if connected after this call.
+        bool pollScan();
+        bool isScanning() const;
+
         void disconnect();
 
         bool tare();
@@ -115,6 +127,9 @@ class AcaiaArduinoBLE {
         bool validWeight(float weight) const;
         bool supportedPacketLength(int length) const;
         bool writeCommand(const byte command[], int length);
+        bool completeConnection(BLEDevice& peripheral);
+        void logVersionOnce();
+        void stopIdleScan(AcaiaDisconnectReason reason);
 
         // These helpers use destruction + copy construction intentionally.
         // ArduinoBLE's BLECharacteristic copy constructor retains ownership;
@@ -148,8 +163,10 @@ class AcaiaArduinoBLE {
         uint32_t            _successfulConnections;
         bool                _hasPeripheral;
         bool                _hasValidPacket;
+        uint32_t            _scanStartedAt;
         bool                _scanning;
         bool                _connected;
+        bool                _loggedVersion;
         scale_type          _type;
         bool                _debug;
         AcaiaDisconnectReason _lastDisconnectReason;

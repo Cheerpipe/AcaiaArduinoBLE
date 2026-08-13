@@ -74,8 +74,10 @@ AcaiaArduinoBLE::AcaiaArduinoBLE(bool debug) :
     _successfulConnections(0),
     _hasPeripheral(false),
     _hasValidPacket(false),
+    _scanStartedAt(0),
     _scanning(false),
     _connected(false),
+    _loggedVersion(false),
     _type(OLD),
     _debug(debug),
     _lastDisconnectReason(AcaiaDisconnectReason::NONE) {
@@ -85,171 +87,242 @@ AcaiaArduinoBLE::~AcaiaArduinoBLE() {
     resetConnection(true, AcaiaDisconnectReason::NONE);
 }
 
-bool AcaiaArduinoBLE::init(String mac) {
-    resetConnection(true, AcaiaDisconnectReason::NONE);
-    BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
-
+void AcaiaArduinoBLE::logVersionOnce() {
+    if (_loggedVersion) {
+        return;
+    }
+    _loggedVersion = true;
     Serial.print("AcaiaArduinoBLE Library v");
     Serial.print(LIBRARY_VERSION);
-    Serial.println(" reinitializing...");
+    Serial.println(" ready");
+}
 
-    const uint32_t scanStartedAt = static_cast<uint32_t>(millis());
+void AcaiaArduinoBLE::stopIdleScan(AcaiaDisconnectReason reason) {
+    if (_scanning) {
+        BLE.stopScan();
+        _scanning = false;
+    }
+    _connected = false;
+    _scanStartedAt = 0;
+    if (reason != AcaiaDisconnectReason::NONE) {
+        _lastDisconnectReason = reason;
+    }
+}
+
+bool AcaiaArduinoBLE::startScan(String mac) {
+    logVersionOnce();
+
+    // An active GAP scan must not be restarted. ArduinoBLE/ESP32 HCI can
+    // drop the scanner if scan() is issued while already enabled.
+    if (_scanning && !_connected && !_hasPeripheral) {
+        return true;
+    }
+
+    if (_connected || _hasPeripheral || _scanning) {
+        resetConnection(true, AcaiaDisconnectReason::NONE);
+    }
+
+    BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
+    if (_debug) {
+        Serial.println("Scanning for scale...");
+    }
+
     const bool scanStarted = (mac.length() == 0)
         ? static_cast<bool>(BLE.scan())
         : static_cast<bool>(BLE.scanForAddress(mac));
     if (!scanStarted) {
         Serial.println("BLE scan failed to start");
-        resetConnection(false, AcaiaDisconnectReason::SCAN_START_FAILED);
+        stopIdleScan(AcaiaDisconnectReason::SCAN_START_FAILED);
         return false;
     }
     _scanning = true;
+    _scanStartedAt = static_cast<uint32_t>(millis());
+    return true;
+}
+
+bool AcaiaArduinoBLE::isScanning() const {
+    return _scanning;
+}
+
+bool AcaiaArduinoBLE::pollScan() {
+    if (_connected) {
+        return true;
+    }
+    if (!_scanning) {
+        return false;
+    }
+
+    BLEDevice peripheral = BLE.available();
+    if (_debug && peripheral) {
+        Serial.print("Found ");
+        Serial.print(peripheral.address());
+        Serial.print(" '");
+        Serial.print(peripheral.localName());
+        Serial.print("' ");
+        Serial.print(peripheral.advertisedServiceUuid());
+        Serial.println();
+    }
+
+    if (peripheral && isScaleName(peripheral.localName())) {
+        BLE.stopScan();
+        _scanning = false;
+        _scanStartedAt = 0;
+        return completeConnection(peripheral);
+    }
+
+    if (elapsedSince(_scanStartedAt) >= SCALE_SCAN_TIMEOUT_MS) {
+        if (_debug) {
+            Serial.println("Scale scan timed out");
+        }
+        stopIdleScan(AcaiaDisconnectReason::SCAN_TIMEOUT);
+        return false;
+    }
+    return false;
+}
+
+bool AcaiaArduinoBLE::completeConnection(BLEDevice& peripheral) {
+    Serial.println("Connecting ...");
+    if (!peripheral.connect()) {
+        Serial.println("Failed to connect!");
+        resetConnection(false, AcaiaDisconnectReason::CONNECT_FAILED);
+        return false;
+    }
+    rememberPeripheral(peripheral);
+    Serial.println("Connected");
+
+    Serial.println("Discovering attributes ...");
+    if (!peripheral.discoverAttributes()) {
+        Serial.println("Attribute discovery failed!");
+        resetConnection(true, AcaiaDisconnectReason::DISCOVERY_FAILED);
+        return false;
+    }
+    Serial.println("Attributes discovered");
+
+    if (_debug) {
+        Serial.println();
+        Serial.print("Device name: ");
+        Serial.println(peripheral.deviceName());
+        Serial.print("Appearance: 0x");
+        Serial.println(peripheral.appearance(), HEX);
+        Serial.println();
+
+        for (int i = 0; i < peripheral.serviceCount(); ++i) {
+            exploreService(peripheral.service(i));
+        }
+    }
+
+    bool configured = false;
+    BLECharacteristic candidate =
+        peripheral.characteristic(READ_CHAR_OLD_VERSION);
+    if (candidate && candidate.canSubscribe()) {
+        Serial.println("Old version Acaia detected");
+        configured = configureCharacteristics(
+            peripheral, OLD, WRITE_CHAR_OLD_VERSION,
+            READ_CHAR_OLD_VERSION);
+    } else {
+        BLECharacteristic newCandidate =
+            peripheral.characteristic(READ_CHAR_NEW_VERSION);
+        if (newCandidate && newCandidate.canSubscribe()) {
+            Serial.println("New version Acaia detected");
+            configured = configureCharacteristics(
+                peripheral, NEW, WRITE_CHAR_NEW_VERSION,
+                READ_CHAR_NEW_VERSION);
+        } else {
+            BLECharacteristic genericCandidate =
+                peripheral.characteristic(READ_CHAR_GENERIC);
+            if (genericCandidate && genericCandidate.canSubscribe()) {
+                Serial.println("Generic scale detected");
+                configured = configureCharacteristics(
+                    peripheral, GENERIC, WRITE_CHAR_GENERIC,
+                    READ_CHAR_GENERIC);
+            } else {
+                BLECharacteristic felicitaCandidate =
+                    peripheral.characteristic(READ_CHAR_FELICITA);
+                if (felicitaCandidate &&
+                    felicitaCandidate.canSubscribe()) {
+                    Serial.println("Felicita Arc detected");
+                    configured = configureCharacteristics(
+                        peripheral, FELICITA, WRITE_CHAR_FELICITA,
+                        READ_CHAR_FELICITA);
+                }
+            }
+        }
+    }
+
+    if (!configured) {
+        Serial.println("Unable to determine scale type or capabilities");
+        resetConnection(true, AcaiaDisconnectReason::UNSUPPORTED_SCALE);
+        return false;
+    }
+
+    if (!_read.subscribe()) {
+        Serial.println("Subscription failed");
+        resetConnection(true, AcaiaDisconnectReason::SUBSCRIBE_FAILED);
+        return false;
+    }
+    Serial.println("Subscribed");
+
+    if (_type == OLD || _type == NEW) {
+        if (!_write.writeValue(IDENTIFY, sizeof(IDENTIFY))) {
+            Serial.println("Identify write failed");
+            resetConnection(
+                true, AcaiaDisconnectReason::INITIALIZATION_WRITE_FAILED);
+            return false;
+        }
+        if (!_write.writeValue(NOTIFICATION_REQUEST,
+                               sizeof(NOTIFICATION_REQUEST))) {
+            Serial.println("Notification request write failed");
+            resetConnection(
+                true, AcaiaDisconnectReason::INITIALIZATION_WRITE_FAILED);
+            return false;
+        }
+    } else if (_type == FELICITA) {
+        if (!_write.writeValue(WEIGHT_TIMER_MODE_FELICITA,
+                               sizeof(WEIGHT_TIMER_MODE_FELICITA))) {
+            Serial.println("Felicita mode write failed");
+            resetConnection(
+                true, AcaiaDisconnectReason::INITIALIZATION_WRITE_FAILED);
+            return false;
+        }
+    }
+
+    const uint32_t now = static_cast<uint32_t>(millis());
+    _connected = true;
+    _connectedAt = now;
+    _lastHeartBeat = now - HEARTBEAT_PERIOD_MS;
+    _lastPacket = 0;
+    _packetPeriod = 0;
+    _hasValidPacket = false;
+    if (_successfulConnections > 0) {
+        ++_reconnects;
+    }
+    ++_successfulConnections;
+    return true;
+}
+
+bool AcaiaArduinoBLE::init(String mac) {
+    logVersionOnce();
+    resetConnection(true, AcaiaDisconnectReason::NONE);
+    if (!startScan(mac)) {
+        return false;
+    }
 
     do {
-        BLEDevice peripheral = BLE.available();
-
-        if (_debug && peripheral) {
-            Serial.print("Found ");
-            Serial.print(peripheral.address());
-            Serial.print(" '");
-            Serial.print(peripheral.localName());
-            Serial.print("' ");
-            Serial.print(peripheral.advertisedServiceUuid());
-            Serial.println();
-        }
-
-        if (peripheral && isScaleName(peripheral.localName())) {
-            BLE.stopScan();
-            _scanning = false;
-
-            Serial.println("Connecting ...");
-            if (!peripheral.connect()) {
-                Serial.println("Failed to connect!");
-                resetConnection(false, AcaiaDisconnectReason::CONNECT_FAILED);
-                return false;
-            }
-            rememberPeripheral(peripheral);
-            Serial.println("Connected");
-
-            Serial.println("Discovering attributes ...");
-            if (!peripheral.discoverAttributes()) {
-                Serial.println("Attribute discovery failed!");
-                resetConnection(true, AcaiaDisconnectReason::DISCOVERY_FAILED);
-                return false;
-            }
-            Serial.println("Attributes discovered");
-
-            if (_debug) {
-                Serial.println();
-                Serial.print("Device name: ");
-                Serial.println(peripheral.deviceName());
-                Serial.print("Appearance: 0x");
-                Serial.println(peripheral.appearance(), HEX);
-                Serial.println();
-
-                for (int i = 0; i < peripheral.serviceCount(); ++i) {
-                    exploreService(peripheral.service(i));
-                }
-            }
-
-            bool configured = false;
-            BLECharacteristic candidate =
-                peripheral.characteristic(READ_CHAR_OLD_VERSION);
-            if (candidate && candidate.canSubscribe()) {
-                Serial.println("Old version Acaia detected");
-                configured = configureCharacteristics(
-                    peripheral, OLD, WRITE_CHAR_OLD_VERSION,
-                    READ_CHAR_OLD_VERSION);
-            } else {
-                BLECharacteristic newCandidate =
-                    peripheral.characteristic(READ_CHAR_NEW_VERSION);
-                if (newCandidate && newCandidate.canSubscribe()) {
-                    Serial.println("New version Acaia detected");
-                    configured = configureCharacteristics(
-                        peripheral, NEW, WRITE_CHAR_NEW_VERSION,
-                        READ_CHAR_NEW_VERSION);
-                } else {
-                    BLECharacteristic genericCandidate =
-                        peripheral.characteristic(READ_CHAR_GENERIC);
-                    if (genericCandidate && genericCandidate.canSubscribe()) {
-                        Serial.println("Generic scale detected");
-                        configured = configureCharacteristics(
-                            peripheral, GENERIC, WRITE_CHAR_GENERIC,
-                            READ_CHAR_GENERIC);
-                    } else {
-                        BLECharacteristic felicitaCandidate =
-                            peripheral.characteristic(READ_CHAR_FELICITA);
-                        if (felicitaCandidate &&
-                            felicitaCandidate.canSubscribe()) {
-                            Serial.println("Felicita Arc detected");
-                            configured = configureCharacteristics(
-                                peripheral, FELICITA, WRITE_CHAR_FELICITA,
-                                READ_CHAR_FELICITA);
-                        }
-                    }
-                }
-            }
-
-            if (!configured) {
-                Serial.println("Unable to determine scale type or capabilities");
-                resetConnection(true,
-                                AcaiaDisconnectReason::UNSUPPORTED_SCALE);
-                return false;
-            }
-
-            if (!_read.subscribe()) {
-                Serial.println("Subscription failed");
-                resetConnection(true, AcaiaDisconnectReason::SUBSCRIBE_FAILED);
-                return false;
-            }
-            Serial.println("Subscribed");
-
-            if (_type == OLD || _type == NEW) {
-                if (!_write.writeValue(IDENTIFY, sizeof(IDENTIFY))) {
-                    Serial.println("Identify write failed");
-                    resetConnection(
-                        true,
-                        AcaiaDisconnectReason::INITIALIZATION_WRITE_FAILED);
-                    return false;
-                }
-                if (!_write.writeValue(NOTIFICATION_REQUEST,
-                                       sizeof(NOTIFICATION_REQUEST))) {
-                    Serial.println("Notification request write failed");
-                    resetConnection(
-                        true,
-                        AcaiaDisconnectReason::INITIALIZATION_WRITE_FAILED);
-                    return false;
-                }
-            } else if (_type == FELICITA) {
-                if (!_write.writeValue(WEIGHT_TIMER_MODE_FELICITA,
-                                       sizeof(WEIGHT_TIMER_MODE_FELICITA))) {
-                    Serial.println("Felicita mode write failed");
-                    resetConnection(
-                        true,
-                        AcaiaDisconnectReason::INITIALIZATION_WRITE_FAILED);
-                    return false;
-                }
-            }
-
-            const uint32_t now = static_cast<uint32_t>(millis());
-            _connected = true;
-            _connectedAt = now;
-            _lastHeartBeat = now - HEARTBEAT_PERIOD_MS;
-            _lastPacket = 0;
-            _packetPeriod = 0;
-            _hasValidPacket = false;
-            if (_successfulConnections > 0) {
-                ++_reconnects;
-            }
-            ++_successfulConnections;
+        if (pollScan()) {
             return true;
         }
-
+        if (!_scanning) {
+            if (_lastDisconnectReason == AcaiaDisconnectReason::SCAN_TIMEOUT) {
+                Serial.println("Scale scan timed out");
+            }
+            return false;
+        }
         // Yield on unicore ESP32 targets while retaining the synchronous API.
         delay(1);
-    } while (elapsedSince(scanStartedAt) < SCALE_SCAN_TIMEOUT_MS);
+    } while (elapsedSince(_scanStartedAt) < SCALE_SCAN_TIMEOUT_MS);
 
     Serial.println("Scale scan timed out");
-    resetConnection(false, AcaiaDisconnectReason::SCAN_TIMEOUT);
+    stopIdleScan(AcaiaDisconnectReason::SCAN_TIMEOUT);
     return false;
 }
 
@@ -665,6 +738,7 @@ void AcaiaArduinoBLE::resetConnection(bool disconnectPeer,
         BLE.stopScan();
         _scanning = false;
     }
+    _scanStartedAt = 0;
 
     // Release retained remote attributes before ArduinoBLE removes the peer's
     // service tree. This ordering also makes repeated cleanup idempotent.

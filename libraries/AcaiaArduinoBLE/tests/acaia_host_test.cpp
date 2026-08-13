@@ -146,6 +146,45 @@ void testScanDiagnostics() {
     CHECK(BLE.stopScanCalls == 1);
 }
 
+void testNonBlockingScanDoesNotRestartOrResetIdle() {
+    resetFake();
+    AcaiaArduinoBLE scale(false);
+    CHECK(scale.startScan());
+    CHECK(scale.isScanning());
+    CHECK(BLE.scanCalls == 1);
+    CHECK(BLE.stopScanCalls == 0);
+
+    CHECK(scale.startScan());
+    CHECK(scale.isScanning());
+    CHECK(BLE.scanCalls == 1);
+
+    CHECK(!scale.pollScan());
+    CHECK(scale.isScanning());
+    fakeMillis = SCALE_SCAN_TIMEOUT_MS;
+    CHECK(!scale.pollScan());
+    CHECK(!scale.isScanning());
+    CHECK(scale.lastDisconnectReason() ==
+          AcaiaDisconnectReason::SCAN_TIMEOUT);
+    CHECK(BLE.stopScanCalls == 1);
+
+    const int stopsAfterTimeout = BLE.stopScanCalls;
+    CHECK(scale.startScan());
+    CHECK(scale.isScanning());
+    CHECK(BLE.scanCalls == 2);
+    CHECK(BLE.stopScanCalls == stopsAfterTimeout);
+}
+
+void testNonBlockingScanConnectsWithoutInit() {
+    resetFake();
+    ScaleFixture fixture = makeScale(NEW);
+    AcaiaArduinoBLE scale(false);
+    CHECK(scale.startScan());
+    CHECK(scale.pollScan());
+    CHECK(scale.isConnected());
+    CHECK(!scale.isScanning());
+    CHECK(fixture.peripheral->connected);
+}
+
 void testCleanupOnInitializationFailures() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
@@ -413,6 +452,8 @@ void testPacketLengthCorpusAndReconnectSoak() {
 
 int main() {
     testScanDiagnostics();
+    testNonBlockingScanDoesNotRestartOrResetIdle();
+    testNonBlockingScanConnectsWithoutInit();
     testCleanupOnInitializationFailures();
     testFirstPacketAndSteadyStateTimeouts();
     testAcaiaValidationAndDebugBounds();

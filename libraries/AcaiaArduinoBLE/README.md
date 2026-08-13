@@ -38,8 +38,12 @@ recoverable disconnect after eight consecutive invalid notifications. It also
 retains the explicit ownership and cleanup for remote characteristics, the
 five-second first-valid-packet deadline, validation before a packet refreshes
 availability, a three-second scan window with distinct failure reasons, and
-connection telemetry. The operation timeout bounds ATT waits supported by the
-public ArduinoBLE API; it cannot bound every internal ESP32 HCI wait.
+connection telemetry. Idle discovery uses `startScan()` / `pollScan()` so the
+owner task can keep calling `BLE.poll()` and feeding its watchdog; `init()`
+remains the blocking helper for sketches. Neither path calls `BLE.begin()` or
+`BLE.end()`, and `startScan()` will not restart an already-active GAP scan.
+The operation timeout bounds ATT waits supported by the public ArduinoBLE API;
+it cannot bound every internal ESP32 HCI wait.
 
 `AcaiaArduinoBLE` is a single-owner object: create it, call it, and destroy it
 from one task only. It is intentionally non-copyable and is not thread-safe.
@@ -47,6 +51,7 @@ Call `disconnect()` before transferring BLE ownership to another component.
 
 Useful diagnostics are available through:
 
+- `isScanning()`
 - `lastDisconnectReason()` / `lastDisconnectReasonName()`
 - `lastValidPacketAgeMs()` (`UINT32_MAX` until the first valid packet)
 - `rejectedPacketCount()`

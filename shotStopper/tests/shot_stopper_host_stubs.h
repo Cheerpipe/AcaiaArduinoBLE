@@ -205,8 +205,33 @@ class AcaiaArduinoBLE {
 
   bool init(String mac = "") {
     (void)mac;
+    scanning = false;
     return connected;
   }
+  bool startScan(String mac = "") {
+    (void)mac;
+    if (connected) {
+      scanning = false;
+      return false;
+    }
+    if (scanning) {
+      return true;
+    }
+    scanning = true;
+    return true;
+  }
+  bool pollScan() {
+    if (connected) {
+      scanning = false;
+      return true;
+    }
+    if (!scanning) {
+      return false;
+    }
+    scanning = false;
+    return false;
+  }
+  bool isScanning() const { return scanning; }
   bool tare() {
     commandLog.push_back("tare");
     ++tareCalls;
@@ -270,6 +295,7 @@ class AcaiaArduinoBLE {
   uint32_t reconnectCount() const { return reconnects; }
 
   bool connected = false;
+  bool scanning = false;
   bool tareSucceeds = true;
   bool startTimerSucceeds = true;
   bool stopTimerSucceeds = true;

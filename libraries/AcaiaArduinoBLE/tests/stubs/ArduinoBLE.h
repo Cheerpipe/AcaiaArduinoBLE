@@ -181,6 +181,7 @@ private:
 class BLEClass {
 public:
     int scan() {
+        ++scanCalls;
         delivered_ = false;
         scanning_ = scanResult;
         return scanResult ? 1 : 0;
@@ -214,12 +215,14 @@ public:
         scanResult = true;
         scanning_ = false;
         delivered_ = false;
+        scanCalls = 0;
         stopScanCalls = 0;
         timeoutMs = 0;
         availableState.reset();
     }
 
     bool scanResult = true;
+    int scanCalls = 0;
     int stopScanCalls = 0;
     unsigned long timeoutMs = 0;
     std::shared_ptr<FakeBLE::PeripheralState> availableState;
