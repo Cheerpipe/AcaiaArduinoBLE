@@ -305,13 +305,17 @@ Watchdog** subscription. `status_indicator` does **not** subscribe to the TWDT
 
 The following items are planned but **not present in the current firmware**:
 
-- **External buzzer** — piezo or speaker on a dedicated GPIO to alert when the
-  scale is unavailable (e.g. paddle-return reminder without a connected scale).
-  Today, audible alerts use the scale’s own beep command when BLE is connected.
 - **OTA (over-the-air firmware updates)** — remote flash of new builds over
   Wi-Fi without USB.
 - **Home Assistant integration** — publish status, sensors, and/or controls to
   Home Assistant (MQTT, REST, or native integration).
+
+## Optional hardware: local piezo buzzer
+
+Compile with `-DSHOT_STOPPER_ENABLE_BUZZER=1` and wire a **passive** piezo
+between `SHOT_STOPPER_BUZZER_GPIO` (board default, or override) and GND. When
+enabled, Alerts exposes checkboxes for scale-lost / ATM-end / manual-without-scale
+triple beeps, and the paddle-off reminder uses the piezo instead of the scale.
 
 ## Repository structure
 
@@ -811,7 +815,7 @@ mkdir -p build/esp32
 arduino-cli compile \
   --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs \
   --warnings all \
-  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1' \
+  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=1' \
   --library libraries/AcaiaArduinoBLE \
   --build-path build/esp32 \
   shotStopper
@@ -820,6 +824,9 @@ arduino-cli compile \
 `-DSHOT_STOPPER_ENABLE_REMOTE_CN9=1` exposes virtual paddle and remote quick
 rinse over the Web UI and API. **Stop** is always available when authenticated,
 even without this flag. Use remote actuation only on a trusted network.
+
+`-DSHOT_STOPPER_ENABLE_BUZZER=1` enables the onboard passive piezo driver and
+buzzer alert settings. Omit it (or set `=0`) for builds without that hardware.
 
 The `min_spiffs` partition scheme gives a **1.9 MB** application slot. The
 default scheme only allows **1.25 MB** (`1310720` bytes); this firmware is
@@ -845,7 +852,7 @@ mkdir -p build/esp32-s3
 arduino-cli compile \
   --fqbn esp32:esp32:esp32s3:PartitionScheme=min_spiffs \
   --warnings all \
-  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1' \
+  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=1' \
   --library libraries/AcaiaArduinoBLE \
   --build-path build/esp32-s3 \
   shotStopper

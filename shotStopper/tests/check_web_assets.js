@@ -29,8 +29,14 @@ if (Buffer.byteLength(html, 'utf8') > 81920) {
 if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
     !html.includes('Paddle State') || !html.includes('firstDropBeep') ||
     !html.includes('paddleReturnReminderBeep') ||
+    !html.includes('buzzerScaleLostBeep') ||
+    !html.includes('buzzerAutoToManualGuardEndBeep') ||
+    !html.includes('buzzerManualNoScaleBeep') ||
+    !html.includes('buzzerSupported') ||
+    !html.includes('Needs buzzer') ||
+    !html.includes('SHOT_STOPPER_ENABLE_BUZZER') ||
     !html.includes('class="fieldHint"')) {
-  throw new Error('Web UI must show the physical paddle state and expose both scale beep options');
+  throw new Error('Web UI must show paddle state, scale beep options, and buzzer alerts');
 }
 if (!html.includes('id="operationalWallS" type="number" min="5" max="60"') ||
     !html.includes('hard-caps at 60 s') ||
@@ -56,6 +62,11 @@ if (!html.includes('function rangeCheck(') ||
 }
 if (!network.includes('"firstDropBeep"') ||
     !network.includes('"paddleReturnReminderBeep"') ||
+    !network.includes('"buzzerScaleLostBeep"') ||
+    !network.includes('"buzzerAutoToManualGuardEndBeep"') ||
+    !network.includes('"buzzerManualNoScaleBeep"') ||
+    !network.includes('\\"buzzerSupported\\"') ||
+    !network.includes('BUZZER_SUPPORT_ENABLED') ||
     !network.includes('"autoRetare"') ||
     !network.includes('"retareWindowMs"') ||
     !network.includes('"minimumCupWeightG"') ||
@@ -101,6 +112,9 @@ if (!network.includes('"firstDropBeep"') ||
     html.includes('Up to 120 shots') ||
     !html.includes('/api/v1/time/sync') ||
     !firmware.includes('session.config.firstDropBeep') ||
+    !firmware.includes('localBuzzer') ||
+    !firmware.includes('BUZZER_SUPPORT_ENABLED') ||
+    !firmware.includes('BUZZER_GPIO') ||
     !firmware.includes('servicePaddleReturnReminder')) {
   throw new Error('Scale beep settings must be configurable end-to-end');
 }
@@ -544,8 +558,8 @@ const cssRoundTrip = zlib.gunzipSync(generated.cssGzip).toString('utf8');
 if (cssRoundTrip !== generated.css) {
   throw new Error('Generated gzip Web CSS does not round-trip to the minified CSS');
 }
-if (generated.gzip.length > 20480) {
-  throw new Error('Compressed Web UI HTML exceeds the 20 KiB gzip budget');
+if (generated.gzip.length > 21504) {
+  throw new Error('Compressed Web UI HTML exceeds the 21 KiB gzip budget');
 }
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');

@@ -2411,7 +2411,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "{\"firmwareVersion\":\"%s\",\"state\":\"%s\",\"stateLabel\":\"%s\","
       "\"relayClosed\":%s,"
       "\"physicalPaddleOn\":%s,\"virtualPaddleOn\":%s,"
-      "\"remoteControlEnabled\":%s,"
+      "\"remoteControlEnabled\":%s,\"buzzerSupported\":%s,"
       "\"controlSource\":\"%s\",\"cn9ElapsedMs\":%lu,"
       "\"safety\":{\"state\":\"%s\",\"fault\":\"%s\","
       "\"generation\":%lu,\"timersReady\":%s,"
@@ -2427,7 +2427,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"canTareStartTimer\":%s,\"shotTimerStartDelayMs\":%lu,\"firstDropBeep\":%s,"
       "\"paddleReturnReminderBeep\":%s,"
       "\"paddleReturnReminderIntervalMs\":%lu,"
-      "\"paddleReturnReminderMaxDurationMs\":%lu,\"rinseGestureMs\":%lu,"
+      "\"paddleReturnReminderMaxDurationMs\":%lu,"
+      "\"buzzerScaleLostBeep\":%s,"
+      "\"buzzerAutoToManualGuardEndBeep\":%s,"
+      "\"buzzerManualNoScaleBeep\":%s,\"rinseGestureMs\":%lu,"
       "\"rinseDurationMs\":%lu,"
       "\"autoRetare\":%s,\"retareWindowMs\":%lu,"
       "\"minimumCupWeightG\":%.1f,"
@@ -2502,6 +2505,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.physicalPaddleOn ? "true" : "false",
       control.virtualPaddleOn ? "true" : "false",
       control.remoteControlEnabled ? "true" : "false",
+      BUZZER_SUPPORT_ENABLED ? "true" : "false",
       controlSourceName(control.source),
       static_cast<unsigned long>(control.cn9ElapsedMs),
       relaySafetyStateName(control.safetyState),
@@ -2533,6 +2537,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
           control.config.paddleReturnReminderIntervalMs),
       static_cast<unsigned long>(
           control.config.paddleReturnReminderMaxDurationMs),
+      control.config.buzzerScaleLostBeep ? "true" : "false",
+      control.config.buzzerAutoToManualGuardEndBeep ? "true" : "false",
+      control.config.buzzerManualNoScaleBeep ? "true" : "false",
       static_cast<unsigned long>(control.config.rinseGestureMs),
       static_cast<unsigned long>(control.config.rinseDurationMs),
       control.config.autoRetare ? "true" : "false",
@@ -2987,6 +2994,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "canTareStartTimer", "shotTimerStartDelayMs", "firstDropBeep",
       "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
+      "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
+      "buzzerManualNoScaleBeep",
       "autoRetare", "retareWindowMs", "minimumCupWeightG",
       "retareStabilitySamples", "retareStabilityToleranceG",
       "retareStabilityMaxGapMs", "retareStabilityMinDurationMs",
@@ -2998,7 +3007,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom",
       "scaleMacCacheMode"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 32)) {
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 35)) {
     parseError =
         "Config must include exactly the expected fields with correct types.";
   } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
@@ -3034,6 +3043,15 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
                          candidate.paddleReturnReminderMaxDurationMs)) {
     parseError =
         "paddleReturnReminderMaxDurationMs must be an integer (milliseconds).";
+  } else if (!jsonBoolean(root, "buzzerScaleLostBeep",
+                          candidate.buzzerScaleLostBeep)) {
+    parseError = "buzzerScaleLostBeep must be a boolean.";
+  } else if (!jsonBoolean(root, "buzzerAutoToManualGuardEndBeep",
+                          candidate.buzzerAutoToManualGuardEndBeep)) {
+    parseError = "buzzerAutoToManualGuardEndBeep must be a boolean.";
+  } else if (!jsonBoolean(root, "buzzerManualNoScaleBeep",
+                          candidate.buzzerManualNoScaleBeep)) {
+    parseError = "buzzerManualNoScaleBeep must be a boolean.";
   } else if (!jsonBoolean(root, "autoRetare", candidate.autoRetare)) {
     parseError = "autoRetare must be a boolean.";
   } else if (!jsonUint32(root, "retareWindowMs", candidate.retareWindowMs)) {

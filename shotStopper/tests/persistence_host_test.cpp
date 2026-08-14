@@ -1049,6 +1049,97 @@ void p27_schema_twenty_migrates_to_twenty_one() {
   CHECK(loaded.preferredScaleName[0] == '\0');
 }
 
+void p28_schema_twenty_one_migrates_to_twenty_two() {
+  persistence_host::reset();
+  PersistedSettings current;
+  CHECK(initializeDefaultSettings(current));
+  ensurePersistedPresetBank(current);
+  finalizePersistedSettings(current);
+
+  PersistedSettingsV21 legacy = {};
+  legacy.magic = PERSISTED_SETTINGS_MAGIC;
+  legacy.schemaVersion = CONFIG_SCHEMA_VERSION_V21;
+  legacy.structureSize = sizeof(PersistedSettingsV21);
+  legacy.storageRevision = 9;
+  RuntimeConfigV21 runtimeV21 = {};
+  runtimeV21.revision = 4;
+  runtimeV21.goalWeightG = 38;
+  runtimeV21.weightOffsetG = current.runtime.weightOffsetG;
+  runtimeV21.weightOffsetBaselineG = current.runtime.weightOffsetBaselineG;
+  runtimeV21.autoTare = current.runtime.autoTare;
+  runtimeV21.timerOnly = current.runtime.timerOnly;
+  runtimeV21.canTareStartTimer = current.runtime.canTareStartTimer;
+  runtimeV21.shotTimerStartDelayMs = current.runtime.shotTimerStartDelayMs;
+  runtimeV21.firstDropBeep = current.runtime.firstDropBeep;
+  runtimeV21.paddleReturnReminderBeep = current.runtime.paddleReturnReminderBeep;
+  runtimeV21.paddleReturnReminderIntervalMs =
+      current.runtime.paddleReturnReminderIntervalMs;
+  runtimeV21.paddleReturnReminderMaxDurationMs =
+      current.runtime.paddleReturnReminderMaxDurationMs;
+  runtimeV21.rinseGestureMs = current.runtime.rinseGestureMs;
+  runtimeV21.rinseDurationMs = current.runtime.rinseDurationMs;
+  runtimeV21.autoRetare = current.runtime.autoRetare;
+  runtimeV21.retareWindowMs = current.runtime.retareWindowMs;
+  runtimeV21.minimumCupWeightG = current.runtime.minimumCupWeightG;
+  runtimeV21.retareStabilitySamples = current.runtime.retareStabilitySamples;
+  runtimeV21.retareStabilityToleranceG =
+      current.runtime.retareStabilityToleranceG;
+  runtimeV21.retareStabilityMaxGapMs = current.runtime.retareStabilityMaxGapMs;
+  runtimeV21.retareStabilityMinDurationMs =
+      current.runtime.retareStabilityMinDurationMs;
+  runtimeV21.bbwProtectionMs = current.runtime.bbwProtectionMs;
+  runtimeV21.operationalWallMs = current.runtime.operationalWallMs;
+  runtimeV21.timezoneOffsetMinutes = current.runtime.timezoneOffsetMinutes;
+  runtimeV21.ntpServerPreset = current.runtime.ntpServerPreset;
+  memcpy(runtimeV21.ntpServerCustom, current.runtime.ntpServerCustom,
+         sizeof(runtimeV21.ntpServerCustom));
+  runtimeV21.fastExtractionGuardEnabled =
+      current.runtime.fastExtractionGuardEnabled;
+  runtimeV21.maxRecoveryWeightG = current.runtime.maxRecoveryWeightG;
+  runtimeV21.minBrewTimeMs = current.runtime.minBrewTimeMs;
+  runtimeV21.autoToManualGuardEnabled = current.runtime.autoToManualGuardEnabled;
+  runtimeV21.autoToManualGuardLimitMode =
+      current.runtime.autoToManualGuardLimitMode;
+  runtimeV21.autoToManualGuardManualLimitMs =
+      current.runtime.autoToManualGuardManualLimitMs;
+  runtimeV21.autoToManualGuardBaselineMs =
+      current.runtime.autoToManualGuardBaselineMs;
+  memcpy(runtimeV21.autoToManualGuardSamplesDs,
+         current.runtime.autoToManualGuardSamplesDs,
+         sizeof(runtimeV21.autoToManualGuardSamplesDs));
+  runtimeV21.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+  legacy.runtime = runtimeV21;
+  legacy.presets = current.presets;
+  legacy.staConfigured = false;
+  legacy.staOpen = false;
+  legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  legacy.staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  legacy.lkgValid = false;
+  memcpy(legacy.apPassword, current.apPassword, sizeof(legacy.apPassword));
+  memcpy(legacy.authSalt, current.authSalt, sizeof(legacy.authSalt));
+  memcpy(legacy.authHash, current.authHash, sizeof(legacy.authHash));
+  strcpy(legacy.preferredScaleMac, "AA:BB:CC:DD:EE:FF");
+  strcpy(legacy.preferredScaleName, "Lunar");
+  legacy.checksum = persistedSettingsV21Checksum(legacy);
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &legacy,
+                           sizeof(legacy));
+
+  PersistedSettings loaded;
+  bool migrated = false;
+  CHECK(loadPersistedSettings(loaded, &migrated));
+  CHECK(migrated);
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.runtime.goalWeightG == 38);
+  CHECK(loaded.runtime.scaleMacCacheMode ==
+        static_cast<uint8_t>(ScaleMacCacheMode::FULL));
+  CHECK(loaded.runtime.buzzerScaleLostBeep);
+  CHECK(loaded.runtime.buzzerAutoToManualGuardEndBeep);
+  CHECK(loaded.runtime.buzzerManualNoScaleBeep);
+  CHECK(strcmp(loaded.preferredScaleMac, "AA:BB:CC:DD:EE:FF") == 0);
+  CHECK(strcmp(loaded.preferredScaleName, "Lunar") == 0);
+}
+
 void p24_preset_bank_size_and_crud_budgets() {
   CHECK(sizeof(ShotPreset) <= 128);
   CHECK(sizeof(ShotPresetBank) <= 1100);
@@ -1231,6 +1322,7 @@ const TestCase tests[] = {
     {"P22", p22_schema_eighteen_migrates_to_nineteen},
     {"P23", p23_schema_nineteen_migrates_to_twenty_with_preset_bank},
     {"P27", p27_schema_twenty_migrates_to_twenty_one},
+    {"P28", p28_schema_twenty_one_migrates_to_twenty_two},
     {"P24", p24_preset_bank_size_and_crud_budgets},
     {"P25", p25_invalid_active_id_keeps_customs},
     {"P26", p26_save_candidate_validation_does_not_require_live_mutation},

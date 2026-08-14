@@ -1,6 +1,7 @@
 #define SHOT_STOPPER_HOST_TEST
 #define ARDUINO_ESP32_DEV
 #define SHOT_STOPPER_ENABLE_REMOTE_CN9 1
+#define SHOT_STOPPER_ENABLE_BUZZER 1
 
 #include <cstdlib>
 #include <cstring>
@@ -220,6 +221,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   hostPinLevel[PADDLE_GPIO] = initialPaddleOn ? PADDLE_ACTIVE_LEVEL
                                               : !PADDLE_ACTIVE_LEVEL;
   initializePaddleInput();
+  localBuzzer.begin(BUZZER_GPIO);
   hostRelayOpenWrites = 0;
   hostRelayClosedWrites = 0;
   seedDefaultShotPresetBank(presetBank);
@@ -1416,6 +1418,9 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.shotTimerStartDelayMs == DEFAULT_SHOT_TIMER_START_DELAY_MS);
   CHECK(config.firstDropBeep);
   CHECK(config.paddleReturnReminderBeep);
+  CHECK(config.buzzerScaleLostBeep);
+  CHECK(config.buzzerAutoToManualGuardEndBeep);
+  CHECK(config.buzzerManualNoScaleBeep);
   CHECK(config.fastExtractionGuardEnabled);
 }
 
@@ -1985,16 +1990,24 @@ void w36_paddle_return_reminder_beeps_at_configured_interval_only_while_open() {
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(!scalePaddleReturnReminderBeepPending);
   const uint32_t interval = runtimeConfig.paddleReturnReminderIntervalMs;
+  const uint32_t before = localBuzzer.acceptedRequests;
   runLoopAfter(interval - 1);
-  CHECK(!scalePaddleReturnReminderBeepPending);
+  CHECK(localBuzzer.acceptedRequests == before);
   runLoopAfter(1);
-  CHECK(scalePaddleReturnReminderBeepPending);
-  CHECK(executePendingScalePaddleReturnReminderBeep());
-  CHECK(scale.beepCalls == 1);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(localBuzzer.busy());
+  CHECK(scale.beepCalls == 0);
+  CHECK(!scalePaddleReturnReminderBeepPending);
+  CHECK(!executePendingScalePaddleReturnReminderBeep());
 
   setRawPaddle(false);
-  CHECK(!scalePaddleReturnReminderBeepPending);
+  // Drain any in-flight pattern without counting a new request.
+  for (uint32_t step = 0; step < 20 && localBuzzer.busy(); ++step) {
+    runLoopAfter(50);
+  }
+  const uint32_t afterOff = localBuzzer.acceptedRequests;
   runLoopAfter(interval);
+  CHECK(localBuzzer.acceptedRequests == afterOff);
   CHECK(!scalePaddleReturnReminderBeepPending);
 }
 
@@ -2002,12 +2015,83 @@ void w44_paddle_return_reminder_stops_after_fifteen_minutes() {
   resetHarness(true, true);
   runLoopAfter(0);
   runLoopAfter(runtimeConfig.paddleReturnReminderIntervalMs);
-  CHECK(executePendingScalePaddleReturnReminderBeep());
+  CHECK(localBuzzer.acceptedRequests >= 1);
+  for (uint32_t step = 0; step < 20 && localBuzzer.busy(); ++step) {
+    runLoopAfter(50);
+  }
   runLoopAfter(runtimeConfig.paddleReturnReminderMaxDurationMs -
                runtimeConfig.paddleReturnReminderIntervalMs);
-  CHECK(!scalePaddleReturnReminderBeepPending);
+  const uint32_t afterLimit = localBuzzer.acceptedRequests;
   runLoopAfter(runtimeConfig.paddleReturnReminderIntervalMs);
+  CHECK(localBuzzer.acceptedRequests == afterLimit);
   CHECK(!scalePaddleReturnReminderBeepPending);
+}
+
+void w50_local_buzzer_plays_triple_pattern_non_blocking() {
+  resetHarness(false, false);
+  CHECK(localBuzzer.ready);
+  CHECK(localBuzzer.request(BuzzerPattern::TRIPLE));
+  CHECK(localBuzzer.busy());
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  // Control loop must keep running while the pattern plays.
+  runLoopAfter(10);
+  CHECK(getRelaySafetySnapshot().closed == false);
+  for (uint32_t step = 0; step < 40 && localBuzzer.busy(); ++step) {
+    runLoopAfter(40);
+  }
+  CHECK(!localBuzzer.busy());
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  CHECK(!localBuzzer.request(BuzzerPattern::NONE));
+}
+
+void w51_local_buzzer_triple_on_scale_lost_during_bbw() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  startCycle();
+  advanceToBrew();
+  CHECK(session.automaticEnabled ||
+        session.weightControlState == WeightControlState::ACTIVE ||
+        session.weightControlState == WeightControlState::VALIDATING);
+  const uint32_t before = localBuzzer.acceptedRequests;
+  setScaleConnected(false);
+  loop();
+  CHECK(session.weightControlState == WeightControlState::SUSPENDED);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+}
+
+void w52_local_buzzer_triple_on_manual_bbw_without_scale() {
+  resetHarness(false, false);
+  CHECK(!runtimeConfig.timerOnly);
+  reachReadyFromBoot();
+  const uint32_t before = localBuzzer.acceptedRequests;
+  startCycle();
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+}
+
+void w53_local_buzzer_silent_when_bbw_off_without_scale() {
+  resetHarness(false, false);
+  runtimeConfig.timerOnly = true;
+  ShotPreset &preset = mutableActiveShotPreset(presetBank);
+  preset.brewByWeight = false;
+  runtimeConfig = composeEffectiveConfig(runtimeConfig, presetBank);
+  CHECK(runtimeConfig.timerOnly);
+  reachReadyFromBoot();
+  const uint32_t before = localBuzzer.acceptedRequests;
+  startCycle();
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(localBuzzer.acceptedRequests == before);
+}
+
+void w54_local_buzzer_triple_on_auto_to_manual_guard_end() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  startCycle();
+  advanceToBrew();
+  const uint32_t before = localBuzzer.acceptedRequests;
+  finalizeCycle(EndReason::AUTO_TO_MANUAL_GUARD, StopperState::REQUIRES_OFF);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(session.endReason == EndReason::AUTO_TO_MANUAL_GUARD);
 }
 
 void w37_factory_reset_is_rejected_while_control_is_active() {
@@ -3733,6 +3817,11 @@ const TestCase testCases[] = {
     {"W42", w42_indicator_blink_periods_are_deterministic},
     {"W43", w43_manual_palette_tracks_timer_only_and_scale_loss},
     {"W44", w44_paddle_return_reminder_stops_after_fifteen_minutes},
+    {"W50", w50_local_buzzer_plays_triple_pattern_non_blocking},
+    {"W51", w51_local_buzzer_triple_on_scale_lost_during_bbw},
+    {"W52", w52_local_buzzer_triple_on_manual_bbw_without_scale},
+    {"W53", w53_local_buzzer_silent_when_bbw_off_without_scale},
+    {"W54", w54_local_buzzer_triple_on_auto_to_manual_guard_end},
     {"S01", s01_shot_log_filters_short_and_rinse},
     {"S02", s02_shot_log_appends_after_drip_delay},
     {"S03", s03_shot_log_clear_empties_records},

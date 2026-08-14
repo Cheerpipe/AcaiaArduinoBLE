@@ -33,6 +33,7 @@
 #endif
 
 #include "ShotStopperDomain.h"
+#include "ShotStopperBuzzer.h"
 #include "ShotStopperPresets.h"
 #include "ShotStopperSerialCli.h"
 #include "ShotStopperVersion.h"
@@ -98,6 +99,9 @@ constexpr uint8_t RELAY_GPIO = 38;
 #ifndef SHOT_STOPPER_STOPPER_LED_GPIO
 #define SHOT_STOPPER_STOPPER_LED_GPIO 47
 #endif
+#ifndef SHOT_STOPPER_BUZZER_GPIO
+#define SHOT_STOPPER_BUZZER_GPIO 14
+#endif
 #elif defined(ARDUINO_NANO_ESP32)
 constexpr uint8_t PADDLE_GPIO = 10;
 constexpr uint8_t RELAY_GPIO = 11;
@@ -106,6 +110,9 @@ constexpr uint8_t RELAY_GPIO = 11;
 #endif
 #ifndef SHOT_STOPPER_STOPPER_LED_GPIO
 #define SHOT_STOPPER_STOPPER_LED_GPIO 3
+#endif
+#ifndef SHOT_STOPPER_BUZZER_GPIO
+#define SHOT_STOPPER_BUZZER_GPIO 5
 #endif
 #elif defined(ARDUINO_ESP32_DEV)
 // GPIO 27 supports INPUT_PULLUP for the paddle; GPIO 26 drives the relay.
@@ -117,6 +124,9 @@ constexpr uint8_t RELAY_GPIO = 26;
 #ifndef SHOT_STOPPER_STOPPER_LED_GPIO
 #define SHOT_STOPPER_STOPPER_LED_GPIO 33
 #endif
+#ifndef SHOT_STOPPER_BUZZER_GPIO
+#define SHOT_STOPPER_BUZZER_GPIO 32
+#endif
 #else
 #error "Unsupported board: configure explicit GPIO and WS2812B pins"
 #endif
@@ -124,6 +134,7 @@ constexpr uint8_t RELAY_GPIO = 26;
 constexpr uint8_t SCALE_STATUS_LED_GPIO = SHOT_STOPPER_SCALE_LED_GPIO;
 constexpr uint8_t STOPPER_STATUS_LED_GPIO =
     SHOT_STOPPER_STOPPER_LED_GPIO;
+constexpr uint8_t BUZZER_GPIO = SHOT_STOPPER_BUZZER_GPIO;
 
 constexpr uint8_t PADDLE_ACTIVE_LEVEL = LOW;
 constexpr uint8_t RELAY_CLOSED_LEVEL = LOW;
@@ -174,11 +185,18 @@ static_assert(SCALE_STATUS_LED_GPIO != RELAY_GPIO &&
                   STOPPER_STATUS_LED_GPIO != RELAY_GPIO &&
                   STOPPER_STATUS_LED_GPIO != PADDLE_GPIO,
               "WS2812B data GPIOs must not share paddle or relay GPIOs");
+static_assert(BUZZER_GPIO != PADDLE_GPIO && BUZZER_GPIO != RELAY_GPIO &&
+                  BUZZER_GPIO != SCALE_STATUS_LED_GPIO &&
+                  BUZZER_GPIO != STOPPER_STATUS_LED_GPIO,
+              "Buzzer GPIO must be distinct from paddle, relay, and LED GPIOs");
 #ifndef SHOT_STOPPER_HOST_TEST
 static_assert(GPIO_IS_VALID_OUTPUT_GPIO(SCALE_STATUS_LED_GPIO),
               "Scale WS2812B must use a valid output-capable GPIO");
 static_assert(GPIO_IS_VALID_OUTPUT_GPIO(STOPPER_STATUS_LED_GPIO),
               "Stopper WS2812B must use a valid output-capable GPIO");
+static_assert(!BUZZER_SUPPORT_ENABLED ||
+                  GPIO_IS_VALID_OUTPUT_GPIO(BUZZER_GPIO),
+              "Buzzer must use a valid output-capable GPIO");
 #endif
 #if defined(SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO)
 static_assert(SAFETY_HEARTBEAT_GPIO != RELAY_GPIO &&
@@ -192,6 +210,9 @@ static_assert(SAFETY_HEARTBEAT_GPIO != SCALE_STATUS_LED_GPIO &&
                   CN9_FEEDBACK_GPIO != SCALE_STATUS_LED_GPIO &&
                   CN9_FEEDBACK_GPIO != STOPPER_STATUS_LED_GPIO,
               "Safety GPIOs must not share a WS2812B data pin");
+static_assert(BUZZER_GPIO != SAFETY_HEARTBEAT_GPIO &&
+                  BUZZER_GPIO != CN9_FEEDBACK_GPIO,
+              "Buzzer GPIO must be distinct from safety GPIOs");
 #ifndef SHOT_STOPPER_HOST_TEST
 static_assert(GPIO_IS_VALID_OUTPUT_GPIO(SAFETY_HEARTBEAT_GPIO),
               "Heartbeat must use a valid output-capable GPIO");
@@ -399,6 +420,7 @@ ShotTrajectory shot;
 CycleSession session;
 PendingShotFinalize pendingFinalize;
 RuntimeConfig runtimeConfig;
+LocalBuzzer localBuzzer;
 ShotPresetBank presetBank;
 LastCycleSummary lastCycle;
 DebugRingBuffer debugLog;
@@ -880,6 +902,12 @@ void setWeightControlState(WeightControlState state) {
                     static_cast<int32_t>(
                         session.autoToManualGuardDeadlineAtMs -
                         session.startedAtMs));
+    }
+    if (BUZZER_SUPPORT_ENABLED && runtimeConfig.buzzerScaleLostBeep &&
+        session.active &&
+        (previous == WeightControlState::ACTIVE ||
+         previous == WeightControlState::VALIDATING)) {
+      localBuzzer.request(BuzzerPattern::TRIPLE);
     }
   } else if (state == WeightControlState::ACTIVE &&
              (previous == WeightControlState::SUSPENDED ||
@@ -2929,9 +2957,10 @@ void servicePaddleReturnReminder() {
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   // Read the GPIO here rather than a debounced state: this reminder describes
   // the physical paddle circuit as it is wired at this instant.
-  const bool shouldRemind = runtimeConfig.paddleReturnReminderBeep &&
-                            readRawPaddleOn() && !relay.closed &&
-                            scaleAvailable();
+  const bool paddleOnCn9Off = readRawPaddleOn() && !relay.closed;
+  const bool shouldRemind =
+      runtimeConfig.paddleReturnReminderBeep && paddleOnCn9Off &&
+      (BUZZER_SUPPORT_ENABLED || scaleAvailable());
   if (!shouldRemind) {
     paddleReturnReminderActive = false;
     paddleReturnReminderLastAtMs = 0;
@@ -2958,7 +2987,11 @@ void servicePaddleReturnReminder() {
   if (elapsedMs(paddleReturnReminderLastAtMs) >=
       runtimeConfig.paddleReturnReminderIntervalMs) {
     paddleReturnReminderLastAtMs = now;
-    requestScalePaddleReturnReminderBeep();
+    if (BUZZER_SUPPORT_ENABLED) {
+      localBuzzer.request(BuzzerPattern::SINGLE);
+    } else {
+      requestScalePaddleReturnReminderBeep();
+    }
   }
 }
 
@@ -3660,6 +3693,10 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   cancelScaleCompletionBeep();
   session.endReason = reason;
   requestRemoteTimerStop();
+  if (reason == EndReason::AUTO_TO_MANUAL_GUARD && BUZZER_SUPPORT_ENABLED &&
+      runtimeConfig.buzzerAutoToManualGuardEndBeep) {
+    localBuzzer.request(BuzzerPattern::TRIPLE);
+  }
   if (shotCompletionGetsDoubleBeep(reason)) {
     scheduleScaleCompletionBeep();
   }
@@ -3754,6 +3791,10 @@ void enterBrewOrManualFromStart() {
   session.bbwProtectionEnded = true;
   addDebugEvent(DebugCategory::STATE, DebugCode::MANUAL_CYCLE_STARTED);
   transitionTo(StopperState::MANUAL_NO_SCALE);
+  if (BUZZER_SUPPORT_ENABLED && runtimeConfig.buzzerManualNoScaleBeep &&
+      !session.config.timerOnly && !session.startedWithScale) {
+    localBuzzer.request(BuzzerPattern::TRIPLE);
+  }
 }
 
 void demoteActiveCycleToRinseOrEnd() {
@@ -4841,6 +4882,8 @@ void setup() {
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
   safetyResetStatus = beginSafetyResetGuard();
 
+  localBuzzer.begin(BUZZER_GPIO);
+
   initializePaddleInput();
   platformClockReady = setCpuFrequencyMhz(80);
   relaySafetyTimersReady = initializeRelaySafetyTimer();
@@ -5151,6 +5194,7 @@ void loop() {
   processScaleWorkerEvents();
   stateMachineTask();
   servicePaddleReturnReminder();
+  localBuzzer.service(millis());
   serviceScaleCompletionBeep();
   serviceShotTimerStart();
   serviceRemoteTimerStopRetry();

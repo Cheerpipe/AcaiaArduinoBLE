@@ -79,6 +79,18 @@ inline void analogWrite(uint8_t pin, int value) {
   (void)value;
 }
 
+inline bool ledcAttach(uint8_t pin, double freq, uint8_t resolution) {
+  (void)freq;
+  (void)resolution;
+  pinMode(pin, OUTPUT);
+  digitalWrite(pin, LOW);
+  return true;
+}
+
+inline void ledcWriteTone(uint8_t pin, double freq) {
+  digitalWrite(pin, freq > 0.0 ? HIGH : LOW);
+}
+
 inline void rgbLedWrite(uint8_t pin, uint8_t red, uint8_t green,
                         uint8_t blue) {
   (void)pin;

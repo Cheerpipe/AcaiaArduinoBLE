@@ -11,8 +11,9 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 21;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 20;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 22;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 21;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V21 = 21;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V20 = 20;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V19 = 19;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V18 = 18;
@@ -208,6 +209,15 @@ constexpr bool REMOTE_CN9_CONTROL_ENABLED =
 static_assert(SHOT_STOPPER_ENABLE_REMOTE_CN9 == 0 ||
                   SHOT_STOPPER_ENABLE_REMOTE_CN9 == 1,
               "SHOT_STOPPER_ENABLE_REMOTE_CN9 must be 0 or 1");
+
+#ifndef SHOT_STOPPER_ENABLE_BUZZER
+#define SHOT_STOPPER_ENABLE_BUZZER 0
+#endif
+
+constexpr bool BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER == 1;
+static_assert(SHOT_STOPPER_ENABLE_BUZZER == 0 ||
+                  SHOT_STOPPER_ENABLE_BUZZER == 1,
+              "SHOT_STOPPER_ENABLE_BUZZER must be 0 or 1");
 
 enum class StopperState : uint8_t {
   REQUIRES_OFF,
@@ -407,6 +417,12 @@ struct RuntimeConfig {
       DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
   uint32_t paddleReturnReminderMaxDurationMs =
       DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
+  // Local piezo alerts (active only when SHOT_STOPPER_ENABLE_BUZZER=1).
+  bool buzzerScaleLostBeep = true;
+  bool buzzerAutoToManualGuardEndBeep = true;
+  bool buzzerManualNoScaleBeep = true;
+  // Keeps schema-22 NVS blob size distinct from schema 21 (bool packing/padding).
+  uint32_t reservedConfig = 0;
   uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
   uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
   bool autoRetare = true;
