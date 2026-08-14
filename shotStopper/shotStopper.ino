@@ -65,7 +65,6 @@ constexpr uint32_t DRIP_DELAY_MS = 3000;
 constexpr uint32_t SCALE_CONNECT_RETRY_MS = 1000;
 constexpr uint32_t SCALE_CONNECT_RETRY_MAX_MS = 10000;
 constexpr uint32_t SCALE_CONNECT_LOG_MS = 10000;
-constexpr uint8_t SCALE_PREFERRED_DIRECTED_ATTEMPTS = 2;
 constexpr uint32_t SCALE_DISCOVERY_TICK_MS = 3000;
 constexpr uint32_t SCALE_SCAN_HCI_RESTART_MS = 60000;
 constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;
@@ -517,7 +516,7 @@ char scaleProtocolName[20] = "none";
 char scalePreferredMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
 char scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY] = {};
 bool scalePreferredMacDirty = false;
-uint32_t scaleCacheWritePausedUntilMs = 0;
+uint32_t scaleDiscoveryPausedUntilMs = 0;
 uint32_t scalePreferredDirectedResetGeneration = 0;
 uint32_t scaleWorkerProgressAtMs = 0;
 uint32_t scaleEventsDropped = 0;
@@ -3482,7 +3481,7 @@ bool hasPreferredScaleMac() {
 
 uint32_t scaleMacCachePauseRemainingMs(uint32_t nowMs) {
   portENTER_CRITICAL(&scalePreferredMacMux);
-  const uint32_t until = scaleCacheWritePausedUntilMs;
+  const uint32_t until = scaleDiscoveryPausedUntilMs;
   portEXIT_CRITICAL(&scalePreferredMacMux);
   if (until == 0) {
     return 0;
@@ -3491,19 +3490,20 @@ uint32_t scaleMacCachePauseRemainingMs(uint32_t nowMs) {
   return remaining > 0 ? static_cast<uint32_t>(remaining) : 0;
 }
 
-bool scaleMacCacheWritePaused(uint32_t nowMs = millis()) {
+bool scaleDiscoveryPaused(uint32_t nowMs = millis()) {
   return scaleMacCachePauseRemainingMs(nowMs) > 0;
 }
 
 ScaleMacCacheMode currentScaleMacCacheMode() {
-  return static_cast<ScaleMacCacheMode>(runtimeConfig.scaleMacCacheMode);
+  return static_cast<ScaleMacCacheMode>(
+      canonicalScaleMacCacheMode(runtimeConfig.scaleMacCacheMode));
 }
 
 void notePreferredScale(const char *mac, const char *name) {
   if (currentScaleMacCacheMode() == ScaleMacCacheMode::OFF) {
     return;
   }
-  if (scaleMacCacheWritePaused()) {
+  if (scaleDiscoveryPaused()) {
     return;
   }
   if (mac == nullptr || !validPreferredScaleMac(mac) || mac[0] == '\0') {
@@ -3539,11 +3539,11 @@ void clearPreferredScaleCache() {
   scalePreferredMac[0] = '\0';
   scalePreferredName[0] = '\0';
   scalePreferredMacDirty = true;
-  scaleCacheWritePausedUntilMs = millis() + SCALE_MAC_CACHE_WRITE_PAUSE_MS;
+  scaleDiscoveryPausedUntilMs = millis() + SCALE_PAIRING_DISCOVERY_PAUSE_MS;
   ++scalePreferredDirectedResetGeneration;
   portEXIT_CRITICAL(&scalePreferredMacMux);
   serialTrace(LogLevel::INFO,
-              "Preferred scale cleared; caching paused for 60 s");
+              "Paired scale forgotten; looking paused for 30 s");
 }
 
 void servicePreferredScaleMacPersistence() {
@@ -3598,33 +3598,29 @@ void logScaleConnectionFailed(bool directed) {
                scale.lastDisconnectReasonName());
 }
 
-bool shouldUseDirectedScaleScan(ScaleMacCacheMode cacheMode, bool hasMac,
-                                uint8_t preferredDirectedFailures) {
-  if (cacheMode == ScaleMacCacheMode::FULL) {
-    return hasMac;
+bool shouldUseDirectedScaleScan(ScaleMacCacheMode cacheMode, bool hasMac) {
+  return cacheMode == ScaleMacCacheMode::FULL && hasMac;
+}
+
+bool applyScaleDiscoveryPause() {
+  if (!scaleDiscoveryPaused()) {
+    return false;
   }
-  if (cacheMode == ScaleMacCacheMode::PARTIAL) {
-    return hasMac &&
-           preferredDirectedFailures < SCALE_PREFERRED_DIRECTED_ATTEMPTS;
+  if (scale.isConnected() || scale.isScanning()) {
+    scale.disconnect();
+    updateWorkerLinkState();
+    setScaleLinkState(ScaleLinkState::DISCONNECTED);
   }
-  return false;
+  return true;
 }
 
 void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
                                  uint32_t &lastConnectLogMs,
                                  uint32_t &connectRetryMs,
                                  bool &connectAttemptSeriesActive,
-                                 uint8_t &preferredDirectedFailures,
-                                 bool &loggedPreferredFallback,
-                                 uint32_t &seenPreferredResetGeneration,
                                  uint32_t &scanSessionAtMs) {
-  portENTER_CRITICAL(&scalePreferredMacMux);
-  const uint32_t resetGeneration = scalePreferredDirectedResetGeneration;
-  portEXIT_CRITICAL(&scalePreferredMacMux);
-  if (resetGeneration != seenPreferredResetGeneration) {
-    seenPreferredResetGeneration = resetGeneration;
-    preferredDirectedFailures = 0;
-    loggedPreferredFallback = false;
+  if (applyScaleDiscoveryPause()) {
+    return;
   }
 
   const ScaleMacCacheMode cacheMode = currentScaleMacCacheMode();
@@ -3634,8 +3630,6 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     if (connected) {
       connectAttemptSeriesActive = false;
       connectRetryMs = SCALE_CONNECT_RETRY_MS;
-      preferredDirectedFailures = 0;
-      loggedPreferredFallback = false;
       const char *address = scale.address();
       const char *name = scale.localName();
       notePreferredScale(address, name);
@@ -3658,30 +3652,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       const bool logAttempt =
           !connectAttemptSeriesActive ||
           elapsedMs(lastConnectLogMs) >= SCALE_CONNECT_LOG_MS;
-      if (directed && cacheMode == ScaleMacCacheMode::PARTIAL &&
-          preferredDirectedFailures < SCALE_PREFERRED_DIRECTED_ATTEMPTS) {
-        ++preferredDirectedFailures;
-        if (logAttempt) {
-          lastConnectLogMs = lastScanCycleMs;
-          connectAttemptSeriesActive = true;
-          serialTracef(LogLevel::WARNING,
-                       "Preferred scale attempt (%u/%u): no advertisement",
-                       preferredDirectedFailures,
-                       SCALE_PREFERRED_DIRECTED_ATTEMPTS);
-        }
-        if (preferredDirectedFailures >= SCALE_PREFERRED_DIRECTED_ATTEMPTS) {
-          if (!loggedPreferredFallback) {
-            loggedPreferredFallback = true;
-            serialTrace(LogLevel::INFO,
-                        "Preferred scale not found; falling back to name scan");
-          }
-          if (scale.startScan(nullptr)) {
-            scanSessionAtMs = lastScanCycleMs;
-          }
-          return;
-        }
-      } else if (directed && cacheMode == ScaleMacCacheMode::FULL &&
-                 logAttempt) {
+      if (directed && logAttempt) {
         lastConnectLogMs = lastScanCycleMs;
         connectAttemptSeriesActive = true;
         serialTrace(LogLevel::WARNING,
@@ -3698,8 +3669,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
         const bool hasMac =
             preferredMac[0] != '\0' && validPreferredScaleMac(preferredMac);
         const bool useDirected =
-            shouldUseDirectedScaleScan(cacheMode, hasMac,
-                                       preferredDirectedFailures);
+            shouldUseDirectedScaleScan(cacheMode, hasMac);
         if (scale.startScan(useDirected ? preferredMac : nullptr, true)) {
           scanSessionAtMs = lastScanCycleMs;
         }
@@ -3710,29 +3680,12 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     lastScanCycleMs = millis();
     const AcaiaDisconnectReason reason = scale.lastDisconnectReason();
     const bool finishedDirectedAttempt =
-        cacheMode != ScaleMacCacheMode::OFF && hasPreferredScaleMac() &&
-        (cacheMode == ScaleMacCacheMode::FULL ||
-         preferredDirectedFailures < SCALE_PREFERRED_DIRECTED_ATTEMPTS);
+        cacheMode == ScaleMacCacheMode::FULL && hasPreferredScaleMac();
 
     if (finishedDirectedAttempt) {
-      if (cacheMode == ScaleMacCacheMode::PARTIAL) {
-        ++preferredDirectedFailures;
-        serialTracef(LogLevel::WARNING,
-                     "Preferred scale attempt (%u/%u): %s",
-                     preferredDirectedFailures,
-                     SCALE_PREFERRED_DIRECTED_ATTEMPTS,
-                     scale.lastDisconnectReasonName());
-        if (preferredDirectedFailures >= SCALE_PREFERRED_DIRECTED_ATTEMPTS &&
-            !loggedPreferredFallback) {
-          loggedPreferredFallback = true;
-          serialTrace(LogLevel::INFO,
-                      "Preferred scale not found; falling back to name scan");
-        }
-      } else {
-        serialTracef(LogLevel::WARNING,
-                     "Preferred scale attempt: %s",
-                     scale.lastDisconnectReasonName());
-      }
+      serialTracef(LogLevel::WARNING,
+                   "Preferred scale attempt: %s",
+                   scale.lastDisconnectReasonName());
     }
 
     if (reason == AcaiaDisconnectReason::SCAN_START_FAILED) {
@@ -3765,8 +3718,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
   copyPreferredScaleMac(preferredMac, sizeof(preferredMac));
   const bool hasMac =
       preferredMac[0] != '\0' && validPreferredScaleMac(preferredMac);
-  const bool useDirected =
-      shouldUseDirectedScaleScan(cacheMode, hasMac, preferredDirectedFailures);
+  const bool useDirected = shouldUseDirectedScaleScan(cacheMode, hasMac);
   const bool logAttempt =
       !connectAttemptSeriesActive ||
       elapsedMs(lastConnectLogMs) >= SCALE_CONNECT_LOG_MS;
@@ -3789,22 +3741,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
 
   connectRetryMs = nextScaleConnectRetryMs(connectRetryMs);
   if (useDirected) {
-    if (cacheMode == ScaleMacCacheMode::PARTIAL) {
-      ++preferredDirectedFailures;
-      serialTracef(LogLevel::WARNING,
-                   "Preferred scale scan failed to start (%u/%u)",
-                   preferredDirectedFailures,
-                   SCALE_PREFERRED_DIRECTED_ATTEMPTS);
-      if (preferredDirectedFailures >= SCALE_PREFERRED_DIRECTED_ATTEMPTS &&
-          !loggedPreferredFallback) {
-        loggedPreferredFallback = true;
-        serialTrace(LogLevel::INFO,
-                    "Preferred scale not found; falling back to name scan");
-      }
-    } else {
-      serialTrace(LogLevel::WARNING,
-                  "Preferred scale scan failed to start");
-    }
+    serialTrace(LogLevel::WARNING, "Preferred scale scan failed to start");
   } else if (logAttempt) {
     logScaleConnectionFailed(false);
   }
@@ -3849,9 +3786,6 @@ void scaleWorkerTask(void *) {
   uint32_t lastConnectLogMs = 0;
   uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
-  uint8_t preferredDirectedFailures = 0;
-  bool loggedPreferredFallback = false;
-  uint32_t seenPreferredResetGeneration = 0;
   uint32_t scanSessionAtMs = 0;
   uint32_t telemetryAtMs = 0;
 
@@ -3888,20 +3822,17 @@ void scaleWorkerTask(void *) {
         uint8_t debugLevel = 0;
         if (takeScaleDebugCommand(debugAction, debugLevel)) {
           executeScaleDebugCommand(debugAction, debugLevel);
-        } else if (scale.isConnected()) {
-          connectAttemptSeriesActive = false;
-          connectRetryMs = SCALE_CONNECT_RETRY_MS;
-          preferredDirectedFailures = 0;
-          loggedPreferredFallback = false;
-          serviceScaleWorkerLink();
-        } else {
-          serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
-                                      connectRetryMs,
-                                      connectAttemptSeriesActive,
-                                      preferredDirectedFailures,
-                                      loggedPreferredFallback,
-                                      seenPreferredResetGeneration,
-                                      scanSessionAtMs);
+        } else if (!applyScaleDiscoveryPause()) {
+          if (scale.isConnected()) {
+            connectAttemptSeriesActive = false;
+            connectRetryMs = SCALE_CONNECT_RETRY_MS;
+            serviceScaleWorkerLink();
+          } else {
+            serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                                        connectRetryMs,
+                                        connectAttemptSeriesActive,
+                                        scanSessionAtMs);
+          }
         }
       }
     }
@@ -4850,7 +4781,7 @@ void processWebCommand(const WebCommand &command) {
       memcpy(candidate.ntpServerCustom, command.config.ntpServerCustom,
              sizeof(candidate.ntpServerCustom));
       if (candidate.scaleMacCacheMode != command.config.scaleMacCacheMode) {
-        serialTracef(LogLevel::INFO, "Scale MAC cache mode: %s",
+                     serialTracef(LogLevel::INFO, "Paired scale lock: %s",
                      scaleMacCacheModeId(command.config.scaleMacCacheMode));
       }
       candidate.scaleMacCacheMode = command.config.scaleMacCacheMode;

@@ -27,7 +27,7 @@ constexpr uint32_t CONFIG_SCHEMA_VERSION_V13 = 13;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V12 = 12;
 constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
 constexpr size_t PREFERRED_SCALE_NAME_CAPACITY = 32;
-constexpr uint32_t SCALE_MAC_CACHE_WRITE_PAUSE_MS = 60000;
+constexpr uint32_t SCALE_PAIRING_DISCOVERY_PAUSE_MS = 30000;
 constexpr size_t NTP_SERVER_HOST_CAPACITY = 64;
 constexpr uint32_t NTP_RESYNC_INTERVAL_MS = 3600UL * 1000UL;
 constexpr uint32_t NTP_UNSYNCED_RETRY_MS = 60UL * 1000UL;
@@ -44,27 +44,32 @@ enum class NtpServerPreset : uint8_t {
   NIST = 3
 };
 
-// How preferred-scale MAC cache affects BLE discovery.
+// Paired-scale lock. PARTIAL is legacy NVS only and canonicalizes to FULL.
 enum class ScaleMacCacheMode : uint8_t {
   // Named OFF (not DISABLED): ESP32 Arduino defines a DISABLED GPIO macro.
-  OFF = 0,      // Never directed; do not write cache on connect.
-  PARTIAL = 1,  // Directed attempts then name-scan fallback (legacy default).
-  FULL = 2      // Directed only while a MAC is cached.
+  OFF = 0,      // Name scan; do not pair on connect.
+  PARTIAL = 1,  // Legacy; treated as FULL.
+  FULL = 2      // Pair first connect; directed scan while a MAC is stored.
 };
+
+inline uint8_t canonicalScaleMacCacheMode(uint8_t mode) {
+  if (mode == static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL)) {
+    return static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+  }
+  return mode;
+}
 
 inline bool validScaleMacCacheMode(uint8_t mode) {
   return mode <= static_cast<uint8_t>(ScaleMacCacheMode::FULL);
 }
 
 inline const char *scaleMacCacheModeId(uint8_t mode) {
-  switch (static_cast<ScaleMacCacheMode>(mode)) {
+  switch (static_cast<ScaleMacCacheMode>(canonicalScaleMacCacheMode(mode))) {
     case ScaleMacCacheMode::OFF:
       return "disabled";
     case ScaleMacCacheMode::FULL:
-      return "full";
-    case ScaleMacCacheMode::PARTIAL:
     default:
-      return "partial";
+      return "full";
   }
 }
 
@@ -76,11 +81,7 @@ inline bool parseScaleMacCacheMode(const char *text, uint8_t &mode) {
     mode = static_cast<uint8_t>(ScaleMacCacheMode::OFF);
     return true;
   }
-  if (strcmp(text, "partial") == 0) {
-    mode = static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL);
-    return true;
-  }
-  if (strcmp(text, "full") == 0) {
+  if (strcmp(text, "partial") == 0 || strcmp(text, "full") == 0) {
     mode = static_cast<uint8_t>(ScaleMacCacheMode::FULL);
     return true;
   }
@@ -607,7 +608,7 @@ struct RuntimeConfig {
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS};
   uint8_t scaleMacCacheMode =
-      static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL);
+      static_cast<uint8_t>(ScaleMacCacheMode::FULL);
   bool bookooMuteOnBuzzerOnly = true;
   uint8_t bookooConnectBeepLevel = DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL;
   // Keeps schema-24 NVS blob size distinct from schema 23.
@@ -1285,7 +1286,7 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::FACTORY_RESET: return "restore factory settings";
     case WebCommandType::CLEAR_SHOT_LOG: return "clear shot history";
     case WebCommandType::CLEAR_PREFERRED_SCALE:
-      return "clear preferred scale cache";
+      return "forget paired scale";
     case WebCommandType::PERSIST_RUNTIME: return "persist workflow";
     case WebCommandType::START_WIFI_SCAN: return "scan Wi-Fi networks";
     case WebCommandType::BUZZER_TEST: return "buzzer test";

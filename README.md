@@ -155,7 +155,7 @@ routed by **Output channel** when a local buzzer is compiled in.
 
 | Setting | What it does |
 | --- | --- |
-| **Output channel** | Shown only with `SHOT_STOPPER_ENABLE_BUZZER`. **Scale priority** (default): scale when connected/able, else buzzer; never both for one event. **Buzzer only**: all alert sound via the local buzzer (for a silent scale). **Scale only**: scale path only; scale-incapable triples are muted. |
+| **Output channel** | Shown only with `SHOT_STOPPER_ENABLE_BUZZER`. Default is **Buzzer only** when a local buzzer is compiled in, and **Scale only** without buzzer support. **Buzzer only**: all alert sound via the local buzzer (for a silent scale). **Scale only**: scale path only; scale-incapable triples are muted. **Scale priority**: scale when connected/able, else buzzer; never both for one event. In Buzzer only (and Scale priority when the scale is not usable), tare/start/stop sounds follow CN9/paddle/retare immediately and do not wait for the BLE round-trip. |
 | **Beep when coffee starts** | One beep on first coffee drops during an automatic shot (default ON; ignored when Brew by weight is off). |
 | **Paddle-off reminder** | Repeat beeps while the **physical paddle stays ON** and **CN9 is open** (default ON). |
 | **Paddle reminder interval (s)** | Time between reminder beeps (5–60 s; default 10 s). |
@@ -334,10 +334,11 @@ is 32 (ESP32 Dev), 14 (ESP32-S3), or 5 (Nano ESP32).
 Identify the part with 3.3 V DC on `+` vs GND: a constant tone is **active**
 (`=2`); a click or silence is **passive** (`=1`). Beep on/gap durations are the
 same catalog for both; only the drive (PWM vs GPIO HIGH/LOW) differs. Omit the
-flag or set `=0` for builds without that hardware.
+flag or set `=0` for builds without that hardware. Output channel then defaults
+to **Scale only**.
 
-When enabled, Alerts shows **Output channel** (Scale priority / Buzzer only /
-Scale only) plus checkboxes for scale-lost / ATM-end / manual-without-scale
+When enabled, Alerts shows **Output channel** (default **Buzzer only**; also
+Scale priority / Scale only) plus checkboxes for scale-lost / ATM-end / manual-without-scale
 triple beeps. All alert events (including tare/start/stop feedback when the
 channel routes to the buzzer) go through that setting. Debug
 short/long/double/triple buttons play the same patterns.
@@ -814,9 +815,9 @@ script is idempotent and also converts a leftover 100/30 patch. Set
 `ARDUINO_BLE_HOME` if ArduinoBLE is not in the default Arduino libraries path.
 
 Idle discovery does not start or stop GAP every 1 s or 3 s. Those timers are
-retry (only when scan is down), a software tick for logs and partial fallback,
-and log throttle. The radio stays in scan; the controller runs the 40/20
-cycle. The only periodic GAP restart is the 60 s HCI watchdog.
+retry (only when scan is down), a software tick for logs, and log throttle.
+The radio stays in scan; the controller runs the 40/20 cycle. The only
+periodic GAP restart is the 60 s HCI watchdog.
 
 Do not install AcaiaArduinoBLE from Library Manager for this application: the
 audited version is included in `libraries/AcaiaArduinoBLE`, and the build

@@ -223,14 +223,29 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !ui.includes('function formatScaleTimer(') ||
     !ui.includes('id="preferredScale"') ||
     !ui.includes('id="preferredScaleSettings"') ||
-    !ui.includes('id="scaleMacCacheMode"') ||
-    !ui.includes('id="clearPreferredScale"') ||
-    !ui.includes('id="scaleMacCacheFullWarn"') ||
+    !ui.includes('id="alwaysUseThisScale"') ||
+    !ui.includes('id="forgetPairedScale"') ||
+    !ui.includes('Always use this scale') ||
+    !ui.includes('Paired scale') ||
+    !ui.includes('Forget this scale') ||
     !ui.includes('scaleMacCacheMode') ||
     !ui.includes('/api/v1/scale/preferred/clear') ||
     !ui.includes('function formatPreferredScale(') ||
+    !ui.includes('function forgetPairedScale(') ||
+    !ui.includes('The stopper will not look for a scale for 30 seconds.') ||
+    !ui.includes(' (not locked)') ||
+    !ui.includes('macCachePauseRemainingMs>0') ||
+    ui.includes('id="scaleMacCacheMode"') ||
+    ui.includes('id="clearPreferredScale"') ||
+    ui.includes('id="scaleMacCacheFullWarn"') ||
+    ui.includes('Use scale MAC cache') ||
+    ui.includes('Preferred scale') ||
     !network.includes('preferredScaleClearHandler') ||
     !network.includes('/api/v1/scale/preferred/clear') ||
+    !network.includes('Always use this scale must be on or off.') ||
+    !network.includes('scaleMacCacheMode must be disabled or full.') ||
+    !network.includes('The paired scale cannot be forgotten while a cycle') ||
+    network.includes('Preferred scale cache cannot be cleared') ||
     !network.includes('\\"timerMs\\"')) {
   throw new Error('Status must use one metric per row and homologate Paddle/CN9 OPEN/OFF and CLOSED/ON labels');
 }
@@ -324,9 +339,11 @@ if (!html.includes('<summary>Tare</summary>') ||
         html.indexOf('<summary>Scales</summary>') ||
     html.indexOf('id="scaleTimerStopExtraDelayMs"') <
         html.indexOf('<summary>Scales</summary>') ||
-    html.indexOf('id="scaleMacCacheMode"') <
+    html.indexOf('id="alwaysUseThisScale"') <
         html.indexOf('<summary>Scales</summary>') ||
     html.indexOf('id="preferredScaleSettings"') <
+        html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('id="forgetPairedScale"') <
         html.indexOf('<summary>Scales</summary>') ||
     html.indexOf('<summary>Bookoo</summary>') <
         html.indexOf('<summary>Scales</summary>') ||

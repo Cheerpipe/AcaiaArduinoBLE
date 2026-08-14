@@ -1330,7 +1330,7 @@ inline void migrateRuntimeConfigV18ToCurrent(const RuntimeConfigV18 &legacy,
   memcpy(runtime.autoToManualGuardSamplesDs, legacy.autoToManualGuardSamplesDs,
          sizeof(runtime.autoToManualGuardSamplesDs));
   runtime.scaleMacCacheMode =
-      static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL);
+      static_cast<uint8_t>(ScaleMacCacheMode::FULL);
 }
 
 inline void migrateRuntimeConfigV19ToCurrent(const RuntimeConfigV19 &legacy,
@@ -1376,7 +1376,7 @@ inline void migrateRuntimeConfigV19ToCurrent(const RuntimeConfigV19 &legacy,
   memcpy(runtime.autoToManualGuardSamplesDs, legacy.autoToManualGuardSamplesDs,
          sizeof(runtime.autoToManualGuardSamplesDs));
   runtime.scaleMacCacheMode =
-      static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL);
+      static_cast<uint8_t>(ScaleMacCacheMode::FULL);
 }
 
 inline void migrateRuntimeConfigV20ToCurrent(const RuntimeConfigV20 &legacy,
@@ -1422,7 +1422,7 @@ inline void migrateRuntimeConfigV20ToCurrent(const RuntimeConfigV20 &legacy,
   memcpy(runtime.autoToManualGuardSamplesDs, legacy.autoToManualGuardSamplesDs,
          sizeof(runtime.autoToManualGuardSamplesDs));
   runtime.scaleMacCacheMode =
-      static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL);
+      static_cast<uint8_t>(ScaleMacCacheMode::FULL);
   runtime.buzzerScaleLostBeep = true;
   runtime.buzzerAutoToManualGuardEndBeep = true;
   runtime.buzzerManualNoScaleBeep = true;
@@ -1472,7 +1472,8 @@ inline void migrateRuntimeConfigV21ToCurrent(const RuntimeConfigV21 &legacy,
   runtime.autoToManualGuardBaselineMs = legacy.autoToManualGuardBaselineMs;
   memcpy(runtime.autoToManualGuardSamplesDs, legacy.autoToManualGuardSamplesDs,
          sizeof(runtime.autoToManualGuardSamplesDs));
-  runtime.scaleMacCacheMode = legacy.scaleMacCacheMode;
+  runtime.scaleMacCacheMode =
+      canonicalScaleMacCacheMode(legacy.scaleMacCacheMode);
   runtime.buzzerScaleLostBeep = true;
   runtime.buzzerAutoToManualGuardEndBeep = true;
   runtime.buzzerManualNoScaleBeep = true;
@@ -1528,7 +1529,8 @@ inline void migrateRuntimeConfigV22ToCurrent(const RuntimeConfigV22 &legacy,
   runtime.autoToManualGuardBaselineMs = legacy.autoToManualGuardBaselineMs;
   memcpy(runtime.autoToManualGuardSamplesDs, legacy.autoToManualGuardSamplesDs,
          sizeof(runtime.autoToManualGuardSamplesDs));
-  runtime.scaleMacCacheMode = legacy.scaleMacCacheMode;
+  runtime.scaleMacCacheMode =
+      canonicalScaleMacCacheMode(legacy.scaleMacCacheMode);
 }
 
 inline void migrateRuntimeConfigV23ToCurrent(const RuntimeConfigV23 &legacy,
@@ -1579,7 +1581,8 @@ inline void migrateRuntimeConfigV23ToCurrent(const RuntimeConfigV23 &legacy,
   runtime.autoToManualGuardBaselineMs = legacy.autoToManualGuardBaselineMs;
   memcpy(runtime.autoToManualGuardSamplesDs, legacy.autoToManualGuardSamplesDs,
          sizeof(runtime.autoToManualGuardSamplesDs));
-  runtime.scaleMacCacheMode = legacy.scaleMacCacheMode;
+  runtime.scaleMacCacheMode =
+      canonicalScaleMacCacheMode(legacy.scaleMacCacheMode);
 }
 
 inline void ensurePersistedPresetBank(PersistedSettings &settings) {

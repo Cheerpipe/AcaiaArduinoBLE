@@ -141,7 +141,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scalePreferredMac[0] = '\0';
   scalePreferredName[0] = '\0';
   scalePreferredMacDirty = false;
-  scaleCacheWritePausedUntilMs = 0;
+  scaleDiscoveryPausedUntilMs = 0;
   scalePreferredDirectedResetGeneration = 0;
   scaleLinkState = ScaleLinkState::DISCONNECTED;
   scaleDisconnectSequence = 0;
@@ -2486,14 +2486,9 @@ void w75_bookoo_discovery_connect_applies_beep_policy() {
   uint32_t lastConnectLogMs = 0;
   uint32_t connectRetryMs = 1000;
   bool connectAttemptSeriesActive = false;
-  uint8_t preferredDirectedFailures = 0;
-  bool loggedPreferredFallback = false;
-  uint32_t seenPreferredResetGeneration = 0;
   uint32_t scanSessionAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive,
-                              preferredDirectedFailures, loggedPreferredFallback,
-                              seenPreferredResetGeneration, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs);
   CHECK(scale.commandLog.size() == 1);
   CHECK(scale.commandLog[0] == "setBeepLevel:0");
 }
@@ -2608,65 +2603,38 @@ void d01_idle_scan_stays_enabled_between_ticks() {
   uint32_t lastConnectLogMs = 0;
   uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
-  uint8_t preferredDirectedFailures = 0;
-  bool loggedPreferredFallback = false;
-  uint32_t seenPreferredResetGeneration = 0;
   uint32_t scanSessionAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive,
-                              preferredDirectedFailures, loggedPreferredFallback,
-                              seenPreferredResetGeneration, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs);
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
   CHECK(scale.startScanCalls == 1);
   const size_t calls = scale.startScanCalls;
   hostMillis += SCALE_DISCOVERY_TICK_MS - 1;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive,
-                              preferredDirectedFailures, loggedPreferredFallback,
-                              seenPreferredResetGeneration, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs);
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
   CHECK(scale.startScanCalls == calls);
 }
 
-void d02_partial_falls_back_to_name_scan_without_backoff() {
+void d02_full_empty_mac_uses_name_scan() {
   resetHarness(false, false);
   reachReadyFromBoot();
   runtimeConfig.scaleMacCacheMode =
-      static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL);
-  setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
+      static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+  scalePreferredMac[0] = '\0';
   hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
   uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
-  uint8_t preferredDirectedFailures = 0;
-  bool loggedPreferredFallback = false;
-  uint32_t seenPreferredResetGeneration = 0;
   uint32_t scanSessionAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive,
-                              preferredDirectedFailures, loggedPreferredFallback,
-                              seenPreferredResetGeneration, scanSessionAtMs);
-  CHECK(scale.directedScan);
-  hostMillis += SCALE_DISCOVERY_TICK_MS;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive,
-                              preferredDirectedFailures, loggedPreferredFallback,
-                              seenPreferredResetGeneration, scanSessionAtMs);
-  CHECK(scale.directedScan);
-  CHECK(preferredDirectedFailures == 1);
-  hostMillis += SCALE_DISCOVERY_TICK_MS;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive,
-                              preferredDirectedFailures, loggedPreferredFallback,
-                              seenPreferredResetGeneration, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs);
   CHECK(scale.scanning);
   CHECK(!scale.directedScan);
   CHECK(scale.lastStartScanMac[0] == '\0');
-  CHECK(connectRetryMs == SCALE_CONNECT_RETRY_MS);
-  CHECK(loggedPreferredFallback);
 }
 
 void d03_scan_start_failed_uses_backoff() {
@@ -2678,28 +2646,19 @@ void d03_scan_start_failed_uses_backoff() {
   uint32_t lastConnectLogMs = 0;
   uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
-  uint8_t preferredDirectedFailures = 0;
-  bool loggedPreferredFallback = false;
-  uint32_t seenPreferredResetGeneration = 0;
   uint32_t scanSessionAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive,
-                              preferredDirectedFailures, loggedPreferredFallback,
-                              seenPreferredResetGeneration, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs);
   CHECK(!scale.scanning);
   CHECK(connectRetryMs == SCALE_CONNECT_RETRY_MS * 2U);
   CHECK(scale.startScanCalls == 1);
   hostMillis += SCALE_CONNECT_RETRY_MS;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive,
-                              preferredDirectedFailures, loggedPreferredFallback,
-                              seenPreferredResetGeneration, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs);
   CHECK(scale.startScanCalls == 1);
   hostMillis += SCALE_CONNECT_RETRY_MS;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive,
-                              preferredDirectedFailures, loggedPreferredFallback,
-                              seenPreferredResetGeneration, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs);
   CHECK(scale.startScanCalls == 2);
   CHECK(connectRetryMs == SCALE_CONNECT_RETRY_MS * 4U);
 }
@@ -2715,25 +2674,17 @@ void d04_full_cache_keeps_directed_scan() {
   uint32_t lastConnectLogMs = 0;
   uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
-  uint8_t preferredDirectedFailures = 0;
-  bool loggedPreferredFallback = false;
-  uint32_t seenPreferredResetGeneration = 0;
   uint32_t scanSessionAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive,
-                              preferredDirectedFailures, loggedPreferredFallback,
-                              seenPreferredResetGeneration, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs);
   for (uint8_t tick = 0; tick < 3; ++tick) {
     hostMillis += SCALE_DISCOVERY_TICK_MS;
     serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                                 connectRetryMs, connectAttemptSeriesActive,
-                                preferredDirectedFailures,
-                                loggedPreferredFallback,
-                                seenPreferredResetGeneration, scanSessionAtMs);
+                                scanSessionAtMs);
   }
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
-  CHECK(!loggedPreferredFallback);
   CHECK(strcmp(scale.lastStartScanMac, "AA:BB:CC:DD:EE:FF") == 0);
 }
 
@@ -2748,14 +2699,9 @@ void d05_hci_watchdog_force_restarts_same_filter() {
   uint32_t lastConnectLogMs = 0;
   uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
-  uint8_t preferredDirectedFailures = 0;
-  bool loggedPreferredFallback = false;
-  uint32_t seenPreferredResetGeneration = 0;
   uint32_t scanSessionAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive,
-                              preferredDirectedFailures, loggedPreferredFallback,
-                              seenPreferredResetGeneration, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs);
   CHECK(scale.startScanCalls == 1);
   CHECK(!scale.lastForceRestart);
   const size_t callsBeforeRestart = scale.startScanCalls;
@@ -2764,9 +2710,7 @@ void d05_hci_watchdog_force_restarts_same_filter() {
     hostMillis += SCALE_DISCOVERY_TICK_MS;
     serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                                 connectRetryMs, connectAttemptSeriesActive,
-                                preferredDirectedFailures,
-                                loggedPreferredFallback,
-                                seenPreferredResetGeneration, scanSessionAtMs);
+                                scanSessionAtMs);
     ++ticks;
     CHECK(ticks < 40);
   }
@@ -2774,6 +2718,43 @@ void d05_hci_watchdog_force_restarts_same_filter() {
   CHECK(scale.directedScan);
   CHECK(scale.lastForceRestart);
   CHECK(scale.startScanCalls == 2);
+}
+
+void d06_forget_pauses_discovery_for_30s() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+  setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
+  hostMillis = SCALE_CONNECT_RETRY_MS;
+  uint32_t lastScanCycleMs = 0;
+  uint32_t lastConnectLogMs = 0;
+  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
+  bool connectAttemptSeriesActive = false;
+  uint32_t scanSessionAtMs = 0;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs);
+  CHECK(scale.scanning);
+  CHECK(scale.directedScan);
+  const size_t callsBeforeForget = scale.startScanCalls;
+  scale.connected = true;
+  clearPreferredScaleCache();
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs);
+  CHECK(!scale.connected);
+  CHECK(!scale.scanning);
+  CHECK(scale.startScanCalls == callsBeforeForget);
+  hostMillis += SCALE_PAIRING_DISCOVERY_PAUSE_MS - 1;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs);
+  CHECK(!scale.scanning);
+  CHECK(scale.startScanCalls == callsBeforeForget);
+  hostMillis += 2;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs);
+  CHECK(scale.scanning);
+  CHECK(!scale.directedScan);
+  CHECK(scale.lastStartScanMac[0] == '\0');
 }
 
 void w62_local_buzzer_drive_matches_compile_flag() {
@@ -4615,10 +4596,11 @@ const TestCase testCases[] = {
     {"W80", w80_buzzer_only_retare_beeps_before_tare_result},
     {"W81", w81_scale_priority_failed_start_falls_back_after_disconnect},
     {"D01", d01_idle_scan_stays_enabled_between_ticks},
-    {"D02", d02_partial_falls_back_to_name_scan_without_backoff},
+    {"D02", d02_full_empty_mac_uses_name_scan},
     {"D03", d03_scan_start_failed_uses_backoff},
     {"D04", d04_full_cache_keeps_directed_scan},
     {"D05", d05_hci_watchdog_force_restarts_same_filter},
+    {"D06", d06_forget_pauses_discovery_for_30s},
     {"S01", s01_shot_log_filters_short_and_rinse},
     {"S02", s02_shot_log_appends_after_drip_delay},
     {"S03", s03_shot_log_clear_empties_records},

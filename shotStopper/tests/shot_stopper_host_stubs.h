@@ -345,6 +345,11 @@ class AcaiaArduinoBLE {
   uint32_t lastTimerAgeMs() const { return timerValid ? timerAgeMs : 0xffffffffUL; }
   bool heartbeatRequired() const { return heartbeatRequiredValue; }
   bool isConnected() const { return connected; }
+  void disconnect() {
+    connected = false;
+    scanning = false;
+    directedScan = false;
+  }
   bool newWeightAvailable() {
     ++newWeightAvailableCalls;
     const bool available = newWeightAvailableValue;

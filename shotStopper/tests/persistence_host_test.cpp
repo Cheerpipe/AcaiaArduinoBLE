@@ -103,7 +103,7 @@ void p01_defaults_are_valid_v16() {
   CHECK(settings.preferredScaleMac[0] == '\0');
   CHECK(settings.preferredScaleName[0] == '\0');
   CHECK(settings.runtime.scaleMacCacheMode ==
-        static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL));
+        static_cast<uint8_t>(ScaleMacCacheMode::FULL));
   CHECK(settings.runtime.alertOutputChannel ==
         static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL));
   CHECK(DEFAULT_ALERT_OUTPUT_CHANNEL ==
@@ -307,7 +307,7 @@ void p08_factory_reset_rebuilds_defaults() {
   CHECK(settings.preferredScaleMac[0] == '\0');
   CHECK(settings.preferredScaleName[0] == '\0');
   CHECK(settings.runtime.scaleMacCacheMode ==
-        static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL));
+        static_cast<uint8_t>(ScaleMacCacheMode::FULL));
 }
 
 void p09_fast_extraction_guard_validation() {
@@ -1086,7 +1086,7 @@ void p27_schema_twenty_migrates_to_twenty_one() {
   CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
   CHECK(loaded.runtime.goalWeightG == 42);
   CHECK(loaded.runtime.scaleMacCacheMode ==
-        static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL));
+        static_cast<uint8_t>(ScaleMacCacheMode::FULL));
   CHECK(strcmp(loaded.preferredScaleMac, "11:22:33:44:55:66") == 0);
   CHECK(loaded.preferredScaleName[0] == '\0');
 }
@@ -1272,6 +1272,8 @@ void p30_schema_twenty_two_migrates_to_twenty_three() {
   CHECK(migrated);
   CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
   CHECK(loaded.runtime.goalWeightG == 37);
+  CHECK(loaded.runtime.scaleMacCacheMode ==
+        static_cast<uint8_t>(ScaleMacCacheMode::FULL));
   CHECK(!loaded.runtime.buzzerScaleLostBeep);
   CHECK(loaded.runtime.buzzerAutoToManualGuardEndBeep);
   CHECK(!loaded.runtime.buzzerManualNoScaleBeep);
