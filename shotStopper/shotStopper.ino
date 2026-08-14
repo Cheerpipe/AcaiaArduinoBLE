@@ -482,6 +482,10 @@ ShotLog shotLog;
 LastShotStore lastShotStore;
 PersistedLastShot persistedLastShot;
 
+bool noScaleShotGuardArmed = true;
+uint32_t noScaleShotGuardActivityAtMs = 0;
+bool noScaleShotGuardScaleWasAvailable = false;
+
 float currentWeight = 0.0f;
 uint32_t currentWeightReceivedAtMs = 0;
 uint32_t currentWeightSequence = 0;
@@ -4089,9 +4093,51 @@ void resetSessionForNewCycle(ControlSource source, uint32_t webSessionId = 0,
 
 void maybeRequestNtpSyncOnActivity();
 
+void armNoScaleShotGuard() {
+  if (noScaleShotGuardArmed) {
+    return;
+  }
+  noScaleShotGuardArmed = true;
+  addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_ARMED);
+}
+
+void consumeNoScaleShotGuard() {
+  noScaleShotGuardArmed = false;
+  noScaleShotGuardActivityAtMs = millis();
+  addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED);
+}
+
+void serviceNoScaleShotGuard() {
+  const bool available = scaleAvailable();
+  if (available && !noScaleShotGuardScaleWasAvailable) {
+    armNoScaleShotGuard();
+  }
+  noScaleShotGuardScaleWasAvailable = available;
+  if (!noScaleShotGuardArmed && !session.active &&
+      noScaleShotGuardActivityAtMs != 0 &&
+      elapsedMs(noScaleShotGuardActivityAtMs) >=
+          runtimeConfig.lastShotCooldownMs) {
+    armNoScaleShotGuard();
+  }
+}
+
 void beginCycle(ControlSource source = ControlSource::PHYSICAL,
                 uint32_t webSessionId = 0,
                 uint32_t controlLeaseId = 0) {
+  const RuntimeConfig effective = effectiveRuntimeConfig();
+  const ScaleLinkSnapshot scaleLinkAtGate = getScaleLinkSnapshot();
+  const bool scaleUsable =
+      scaleLinkAvailable(scaleLinkAtGate) && currentWeightIsFresh();
+  if (runtimeConfig.avoidBbwShotWithoutScale && !effective.timerOnly &&
+      !scaleUsable && noScaleShotGuardArmed) {
+    consumeNoScaleShotGuard();
+    addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED);
+    if (runtimeConfig.buzzerManualNoScaleBeep) {
+      emitAlert(AlertEvent::MANUAL_NO_SCALE);
+    }
+    return;
+  }
+
   flushPendingScaleTimerStopNow();
   if (pendingFinalize.pending) {
     pendingFinalize.pending = false;
@@ -4206,6 +4252,10 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   lastCycle.weightControlState = session.weightControlState;
   lastCycle.calibrationEligible = session.calibrationEligible;
   persistLastShotFromEndedCycle(reason, durationMs);
+  if (reason != EndReason::RINSE_COMPLETE &&
+      stopperState != StopperState::RINSE) {
+    noScaleShotGuardActivityAtMs = millis();
+  }
   session.active = false;
   virtualPaddleOn = false;
   addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_ENDED,
@@ -4820,6 +4870,9 @@ void processWebCommand(const WebCommand &command) {
                      scaleMacCacheModeId(command.config.scaleMacCacheMode));
       }
       candidate.scaleMacCacheMode = command.config.scaleMacCacheMode;
+      candidate.avoidBbwShotWithoutScale =
+          command.config.avoidBbwShotWithoutScale;
+      candidate.lastShotCooldownMs = command.config.lastShotCooldownMs;
       // Session Manual switch may arrive via brewByWeight on Home; keep as timerOnly.
       candidate.timerOnly = command.config.timerOnly;
 #if defined(SHOT_STOPPER_HOST_TEST)
@@ -5205,6 +5258,8 @@ void publishControlStatus() {
     next.autoToManualGuardTrendMs = autoToManualGuardTrendMs(
         active.autoToManualGuardSamplesDs, active.operationalWallMs);
   }
+  next.noScaleShotGuardEnabled = runtimeConfig.avoidBbwShotWithoutScale;
+  next.noScaleShotGuardArmed = noScaleShotGuardArmed;
   portENTER_CRITICAL(&debugLogMux);
   next.debugEventsDropped = debugLog.overwritten();
   portEXIT_CRITICAL(&debugLogMux);
@@ -5745,6 +5800,7 @@ void loop() {
   // decisions. Paddle and relay safety were already sampled first, so their
   // priority is preserved without adding a full event backlog to this loop.
   processScaleWorkerEvents();
+  serviceNoScaleShotGuard();
   stateMachineTask();
   servicePaddleReturnReminder();
   serviceExtendedPulseAlert();

@@ -6,6 +6,7 @@
 #endif
 #define SHOT_STOPPER_ENABLE_ALED 1
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -99,11 +100,15 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   runtimeConfig.autoRetare = false;
   runtimeConfig.bbwProtectionMs = 3000;
   runtimeConfig.fastExtractionGuardEnabled = false;
+  runtimeConfig.avoidBbwShotWithoutScale = false;
   // Host scenarios assert immediate scale timer stop; delayed stop is covered by ST02.
   runtimeConfig.scaleTimerStopExtraDelayMs = 0;
   lastCycle = LastCycleSummary{};
   persistedLastShot = PersistedLastShot{};
   lastShotStore.clear();
+  noScaleShotGuardArmed = true;
+  noScaleShotGuardActivityAtMs = 0;
+  noScaleShotGuardScaleWasAvailable = false;
   debugLog.clear();
   lastReportedLogOverwritten = 0;
   serialLogLevel = LogLevel::INFO;
@@ -1447,6 +1452,8 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.bookooMuteOnBuzzerOnly);
   CHECK(config.bookooConnectBeepLevel == DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL);
   CHECK(config.fastExtractionGuardEnabled);
+  CHECK(config.avoidBbwShotWithoutScale);
+  CHECK(config.lastShotCooldownMs == DEFAULT_LAST_SHOT_COOLDOWN_MS);
 }
 
 void w02_each_runtime_field_is_validated() {
@@ -1506,6 +1513,14 @@ void w03_runtime_timing_relations_are_transactional() {
   config.buzzerExtendedPulseRate = 9;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::EXTENDED_PULSE_RATE);
+  config = RuntimeConfig{};
+  config.lastShotCooldownMs = MIN_LAST_SHOT_COOLDOWN_MS - 1;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::LAST_SHOT_COOLDOWN);
+  config = RuntimeConfig{};
+  config.lastShotCooldownMs = MAX_LAST_SHOT_COOLDOWN_MS + 1;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::LAST_SHOT_COOLDOWN);
 }
 
 void w04_wifi_credentials_have_strict_bounds() {
@@ -2117,6 +2132,128 @@ void w53_local_buzzer_silent_when_bbw_off_without_scale() {
   const uint32_t before = localBuzzer.acceptedRequests;
   startCycle();
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(localBuzzer.acceptedRequests == before);
+}
+
+bool debugEventExists(DebugCode code, int32_t argument1 = INT32_MIN,
+                      int32_t argument2 = INT32_MIN);
+
+void enableNoScaleShotGuardForTest() {
+  runtimeConfig.avoidBbwShotWithoutScale = true;
+  noScaleShotGuardArmed = true;
+  noScaleShotGuardActivityAtMs = 0;
+}
+
+void attemptBlockedNoScaleStart() {
+  CHECK(stopperState == StopperState::READY);
+  CHECK(noScaleShotGuardArmed);
+  const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
+  setRawPaddle(true);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(!session.active);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(!noScaleShotGuardArmed);
+  CHECK(debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED));
+  CHECK(debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED));
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+}
+
+void ns01_armed_blocks_first_bbw_no_scale_shot() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  reachReadyFromBoot();
+  attemptBlockedNoScaleStart();
+}
+
+void ns02_idle_allows_second_bbw_no_scale_shot() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  reachReadyFromBoot();
+  attemptBlockedNoScaleStart();
+  startCycle();
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(!noScaleShotGuardArmed);
+}
+
+void ns03_bbw_off_does_not_block() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  runtimeConfig.timerOnly = true;
+  ShotPreset &preset = mutableActiveShotPreset(presetBank);
+  preset.brewByWeight = false;
+  runtimeConfig = composeEffectiveConfig(runtimeConfig, presetBank);
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(noScaleShotGuardArmed);
+}
+
+void ns04_scale_available_rearms() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  reachReadyFromBoot();
+  attemptBlockedNoScaleStart();
+  CHECK(!noScaleShotGuardArmed);
+  setScaleConnected(true);
+  markScaleWorkerProgress();
+  loop();
+  CHECK(noScaleShotGuardArmed);
+  CHECK(debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_ARMED));
+}
+
+void ns05_cooldown_rearms_from_idle() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  runtimeConfig.lastShotCooldownMs = 1000;
+  reachReadyFromBoot();
+  attemptBlockedNoScaleStart();
+  CHECK(!noScaleShotGuardArmed);
+  runLoopAfter(1000);
+  CHECK(noScaleShotGuardArmed);
+}
+
+void ns06_finished_shot_extends_cooldown() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  runtimeConfig.lastShotCooldownMs = 3000;
+  reachReadyFromBoot();
+  attemptBlockedNoScaleStart();
+  const uint32_t rawOnAt = startCycle();
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs + 50);
+  CHECK(stopperState == StopperState::READY ||
+        stopperState == StopperState::REQUIRES_OFF);
+  CHECK(!noScaleShotGuardArmed);
+  runLoopAfter(2000);
+  CHECK(!noScaleShotGuardArmed);
+  runLoopAfter(1500);
+  CHECK(noScaleShotGuardArmed);
+}
+
+void ns07_web_rinse_does_not_consume_guard() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  reachReadyFromBoot();
+  processWebCommand(webControlCommand(WebCommandType::RINSE));
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(noScaleShotGuardArmed);
+  CHECK(getRelaySafetySnapshot().closed);
+}
+
+void ns08_blocked_beep_respects_alert_checkbox() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  runtimeConfig.buzzerManualNoScaleBeep = false;
+  reachReadyFromBoot();
+  const uint32_t before = localBuzzer.acceptedRequests;
+  setRawPaddle(true);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(!noScaleShotGuardArmed);
   CHECK(localBuzzer.acceptedRequests == before);
 }
 
@@ -3239,8 +3376,8 @@ void r35_connected_without_weight_stream_is_not_available_indicator() {
   CHECK(!status.currentWeightValid);
 }
 
-bool debugEventExists(DebugCode code, int32_t argument1 = INT32_MIN,
-                      int32_t argument2 = INT32_MIN) {
+bool debugEventExists(DebugCode code, int32_t argument1,
+                      int32_t argument2) {
   DebugEvent events[DEBUG_EVENT_CAPACITY] = {};
   const size_t count = copyDebugEvents(0, events, DEBUG_EVENT_CAPACITY);
   for (size_t index = 0; index < count; ++index) {
@@ -4733,6 +4870,14 @@ const TestCase testCases[] = {
     {"W51", w51_local_buzzer_triple_on_scale_lost_during_bbw},
     {"W52", w52_local_buzzer_triple_on_manual_bbw_without_scale},
     {"W53", w53_local_buzzer_silent_when_bbw_off_without_scale},
+    {"NS01", ns01_armed_blocks_first_bbw_no_scale_shot},
+    {"NS02", ns02_idle_allows_second_bbw_no_scale_shot},
+    {"NS03", ns03_bbw_off_does_not_block},
+    {"NS04", ns04_scale_available_rearms},
+    {"NS05", ns05_cooldown_rearms_from_idle},
+    {"NS06", ns06_finished_shot_extends_cooldown},
+    {"NS07", ns07_web_rinse_does_not_consume_guard},
+    {"NS08", ns08_blocked_beep_respects_alert_checkbox},
     {"W54", w54_local_buzzer_triple_on_auto_to_manual_guard_end},
     {"W55", w55_local_buzzer_queues_second_triple_while_busy},
     {"W56", w56_atm_beep_queued_when_scale_lost_after_deadline},

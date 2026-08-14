@@ -113,7 +113,7 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('"alertOutputChannel"') ||
     !network.includes('"bookooMuteOnBuzzerOnly"') ||
     !network.includes('"bookooConnectBeepLevel"') ||
-    !network.includes('fields, 39') ||
+    !network.includes('fields, 41') ||
     !network.includes('allowedCount > 64') ||
     !network.includes('uint64_t seen') ||
     !network.includes('WEB_UI_ASSET_TAG') ||
@@ -307,6 +307,26 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
         html.indexOf('id="resetGuardSamplesButton"') ||
     !ui.includes('Reset A→M samples to baseline') ||
     !ui.includes('id="shotAtmGuard"') ||
+    !ui.includes('id="shotNoScaleGuard"') ||
+    !ui.includes('No-scale guard') ||
+    !ui.includes('id="avoidBbwShotWithoutScale"') ||
+    !ui.includes('id="lastShotCooldownMin"') ||
+    !ui.includes('Avoid BBW shot without scale') ||
+    !ui.includes('Last shot cooldown') ||
+    !ui.includes('function updateNoScaleGuard(') ||
+    html.indexOf('id="shotNoScaleGuard"') <
+        html.indexOf('id="shotAtmGuard"') ||
+    html.indexOf('id="avoidBbwShotWithoutScale"') <
+        html.indexOf('id="brewByWeight"') ||
+    html.indexOf('id="avoidBbwShotWithoutScale"') <
+        html.indexOf('id="bbwProtectionS"') ||
+    html.indexOf('id="avoidBbwShotWithoutScale"') >
+        html.indexOf('<summary>Fast extraction guard</summary>') ||
+    html.indexOf('<summary>No-scale BBW</summary>') >
+        html.indexOf('<legend>Machine and scale</legend>') ||
+    !network.includes('avoidBbwShotWithoutScale') ||
+    !network.includes('lastShotCooldownMs') ||
+    !network.includes('noScaleShotGuard') ||
     !ui.includes('A→M ·') ||
     !ui.includes('actual_weight_source') ||
     !network.includes('autoToManualGuardEnabled') ||

@@ -232,6 +232,8 @@ const char *configValidationMessage(ConfigValidationError error) {
              "rapid.";
     case ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL:
       return "Bookoo scale volume must be disabled (0) or 1 to 5.";
+    case ConfigValidationError::LAST_SHOT_COOLDOWN:
+      return "Last shot cooldown must be from 5 to 240 min.";
   }
   return "Invalid configuration.";
 }
@@ -2609,7 +2611,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"ntpServerPreset\":\"%s\",\"ntpServerCustom\":\"%s\","
       "\"scaleMacCacheMode\":\"%s\","
       "\"bookooMuteOnBuzzerOnly\":%s,"
-      "\"bookooConnectBeepLevel\":%u},"
+      "\"bookooConnectBeepLevel\":%u,"
+      "\"avoidBbwShotWithoutScale\":%s,"
+      "\"lastShotCooldownMs\":%lu},"
       "\"presets\":%s,"
       "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
       "\"nextRetryInMs\":%lu,\"consecutiveFailures\":%u,"
@@ -2669,6 +2673,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"autoToManualGuardArmed\":%s,"
       "\"autoToManualGuardEnforced\":%s,"
       "\"autoToManualGuardRemainingMs\":%lu},"
+      "\"noScaleShotGuard\":{\"enabled\":%s,\"armed\":%s},"
       "\"debugEventsDropped\":%lu}",
       safeFirmwareVersion, stopperStateName(control.state),
       stateLabel(control.state),
@@ -2738,6 +2743,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       scaleMacCacheModeId(control.config.scaleMacCacheMode),
       control.config.bookooMuteOnBuzzerOnly ? "true" : "false",
       static_cast<unsigned>(control.config.bookooConnectBeepLevel),
+      control.config.avoidBbwShotWithoutScale ? "true" : "false",
+      static_cast<unsigned long>(control.config.lastShotCooldownMs),
       g_presetsStatusJson,
       timeSyncStateName(timeStatus.state),
       static_cast<unsigned long>(timeStatus.utcSec),
@@ -2841,6 +2848,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.cycleAutoToManualGuardArmed ? "true" : "false",
       control.cycleAutoToManualGuardEnforced ? "true" : "false",
       static_cast<unsigned long>(control.cycleAutoToManualGuardRemainingMs),
+      control.noScaleShotGuardEnabled ? "true" : "false",
+      control.noScaleShotGuardArmed ? "true" : "false",
       static_cast<unsigned long>(control.debugEventsDropped));
   if (written < 0 ||
       static_cast<size_t>(written) >= sizeof(g_statusResponseBuffer)) {
@@ -3243,9 +3252,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "autoToManualGuardManualLimitMs", "autoToManualGuardBaselineMs",
       "weightOffsetBaselineG",
       "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom",
-      "scaleMacCacheMode", "bookooMuteOnBuzzerOnly", "bookooConnectBeepLevel"};
+      "scaleMacCacheMode", "bookooMuteOnBuzzerOnly", "bookooConnectBeepLevel",
+      "avoidBbwShotWithoutScale", "lastShotCooldownMs"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 39)) {
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 41)) {
     parseError =
         "Config must include exactly the expected fields with correct types.";
   } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
@@ -3367,6 +3377,12 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
                         candidate.bookooConnectBeepLevel) ||
              candidate.bookooConnectBeepLevel > BOOKOO_BEEP_LEVEL_MAX) {
     parseError = "bookooConnectBeepLevel must be an integer from 0 to 5.";
+  } else if (!jsonBoolean(root, "avoidBbwShotWithoutScale",
+                          candidate.avoidBbwShotWithoutScale)) {
+    parseError = "avoidBbwShotWithoutScale must be a boolean.";
+  } else if (!jsonUint32(root, "lastShotCooldownMs",
+                         candidate.lastShotCooldownMs)) {
+    parseError = "lastShotCooldownMs must be an integer (milliseconds).";
   }
   if (root != nullptr) {
     cJSON_Delete(root);

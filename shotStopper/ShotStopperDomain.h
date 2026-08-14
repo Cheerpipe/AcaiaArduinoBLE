@@ -11,8 +11,9 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 25;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 24;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 26;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 25;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V25 = 25;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V24 = 24;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V23 = 23;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V22 = 22;
@@ -138,6 +139,9 @@ constexpr uint32_t DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS =
 constexpr uint32_t MIN_PADDLE_RETURN_REMINDER_MAX_DURATION_MS = 60000UL;
 constexpr uint32_t MAX_PADDLE_RETURN_REMINDER_MAX_DURATION_MS =
     60UL * 60UL * 1000UL;
+constexpr uint32_t DEFAULT_LAST_SHOT_COOLDOWN_MS = 60UL * 60UL * 1000UL;
+constexpr uint32_t MIN_LAST_SHOT_COOLDOWN_MS = 5UL * 60UL * 1000UL;
+constexpr uint32_t MAX_LAST_SHOT_COOLDOWN_MS = 240UL * 60UL * 1000UL;
 constexpr uint32_t HARD_MAX_CN9_CLOSED_MS = 60000;
 constexpr uint32_t DEFAULT_OPERATIONAL_WALL_MS = 60000;
 constexpr uint32_t DEFAULT_RINSE_GESTURE_MS = 1000;
@@ -718,6 +722,8 @@ struct RuntimeConfig {
   uint8_t bookooConnectBeepLevel = DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL;
   // Keeps schema-24 NVS blob size distinct from schema 23.
   uint32_t reservedConfig3 = 0;
+  bool avoidBbwShotWithoutScale = true;
+  uint32_t lastShotCooldownMs = DEFAULT_LAST_SHOT_COOLDOWN_MS;
 };
 
 struct CycleConfigSnapshot {
@@ -833,7 +839,8 @@ enum class ConfigValidationError : uint8_t {
   SCALE_MAC_CACHE_MODE,
   ALERT_OUTPUT_CHANNEL,
   EXTENDED_PULSE_RATE,
-  BOOKOO_CONNECT_BEEP_LEVEL
+  BOOKOO_CONNECT_BEEP_LEVEL,
+  LAST_SHOT_COOLDOWN
 };
 
 constexpr size_t MAX_SHOT_PRESETS = 8;
@@ -1048,6 +1055,10 @@ inline ConfigValidationError validateRuntimeConfig(
   if (config.bookooConnectBeepLevel > BOOKOO_BEEP_LEVEL_MAX) {
     return ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL;
   }
+  if (config.lastShotCooldownMs < MIN_LAST_SHOT_COOLDOWN_MS ||
+      config.lastShotCooldownMs > MAX_LAST_SHOT_COOLDOWN_MS) {
+    return ConfigValidationError::LAST_SHOT_COOLDOWN;
+  }
   if (!config.fastExtractionGuardEnabled) {
     return ConfigValidationError::NONE;
   }
@@ -1130,6 +1141,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "buzzerExtendedPulseRate";
     case ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL:
       return "bookooConnectBeepLevel";
+    case ConfigValidationError::LAST_SHOT_COOLDOWN:
+      return "lastShotCooldownMs";
   }
   return "unknown";
 }
@@ -1614,6 +1627,8 @@ struct ControlStatusSnapshot {
   char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
   char preferredScaleName[PREFERRED_SCALE_NAME_CAPACITY] = {};
   uint32_t scaleMacCachePauseRemainingMs = 0;
+  bool noScaleShotGuardEnabled = true;
+  bool noScaleShotGuardArmed = true;
 };
 
 inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {
@@ -1754,6 +1769,9 @@ enum class DebugCode : uint8_t {
   BREW_STARTED,
   TIMER_ONLY_BREW_STARTED,
   MANUAL_CYCLE_STARTED,
+  NO_SCALE_SHOT_GUARD_BLOCKED,
+  NO_SCALE_SHOT_GUARD_ARMED,
+  NO_SCALE_SHOT_GUARD_CONSUMED,
   RINSE_CLASSIFIED,
   SYSTEM_LOG_OVERRUN,
   AP_PASSWORD_RESET,
@@ -2143,6 +2161,12 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::BREW_STARTED: return "brew started";
     case DebugCode::TIMER_ONLY_BREW_STARTED: return "timer-only brew started";
     case DebugCode::MANUAL_CYCLE_STARTED: return "manual cycle started";
+    case DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED:
+      return "no-scale BBW shot blocked";
+    case DebugCode::NO_SCALE_SHOT_GUARD_ARMED:
+      return "no-scale BBW guard armed";
+    case DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED:
+      return "no-scale BBW guard consumed";
     case DebugCode::RINSE_CLASSIFIED: return "rinse classified";
     case DebugCode::SYSTEM_LOG_OVERRUN: return "diagnostic log overrun";
     case DebugCode::HEALTH_HEAP_LOW: return "health heap low";
@@ -2314,6 +2338,15 @@ inline bool formatLifecycleDebugMessage(const DebugEvent &event, char *message,
       formatWeightCentigrams(event.argument2, offsetText, sizeof(offsetText));
       snprintf(message, capacity, "cycle started; goal=%s offset=%s",
                weightText, offsetText);
+      return true;
+    case DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED:
+      snprintf(message, capacity, "no-scale BBW shot blocked");
+      return true;
+    case DebugCode::NO_SCALE_SHOT_GUARD_ARMED:
+      snprintf(message, capacity, "no-scale BBW guard armed");
+      return true;
+    case DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED:
+      snprintf(message, capacity, "no-scale BBW guard consumed");
       return true;
     case DebugCode::CYCLE_ENDED:
       snprintf(message, capacity, "cycle ended by %s",

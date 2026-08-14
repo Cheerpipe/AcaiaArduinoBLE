@@ -17,6 +17,7 @@ Para detalle técnico completo, consulta el [README principal](../README.md).
 | **¿Por qué el shot no para exactamente en el peso objetivo?** | El firmware usa un **offset de parada aprendido** (por defecto 1,5 g, máx. 5 g) para compensar el goteo post-corte. Además puede parar **por predicción** (regresión sobre muestras recientes) ligeramente antes del umbral directo. En el historial verás `cut_type` y `stop_detail`. |
 | **La balanza se desconectó a mitad del shot. ¿Qué pasa?** | En shots automáticos el control por peso se **suspende** y el firmware **sigue intentando reconectar** durante todo el ciclo (no hay lockout permanente a manual tras N segundos). Si recupera tres muestras coherentes, vuelve el stop por peso (incluido Fast extraction guard si aplica) y el **A→M time guard** deja de enforcearse. Mientras la balanza esté caída y el A→M guard esté **ON**, corre un **deadline absoluto desde el inicio del ciclo** (tendencia Auto o límite Manual) y puede **cerrar CN9** antes del límite CN9 — incluso mientras BLE sigue reintentando. En el panel verás la línea **A→M time guard** con `A→M · …s`. Si el guard está **OFF** y la balanza no vuelve, el shot sigue hasta paddle OFF o el wall CN9 / hard 60 s. |
 | **Apagué “Brew by weight”. ¿Por qué no para por peso?** | Con **Brew by weight** en OFF se mantiene tara/cronómetro pero se **desactivan** el stop por peso, la retarificación automática, la protección BBW y el aprendizaje de offset. El corte depende del paddle, del límite CN9 o de **Stop** remoto. |
+| **Con BBW ON y la balanza apagada, el primer paddle no extrae (triple beep y CN9 abierto).** | Es el **guard anti-extracción BBW sin balanza** (*Avoid BBW shot without scale*, **ON por defecto**). El primer intento consume Armed, pita (si hay buzzer y *Manual without scale* está ON) y **no cierra CN9**. El siguiente paddle sí inicia un shot manual. Vuelve a Armed al boot, cuando la balanza está disponible, o tras **Last shot cooldown** (default 60 min) desde el bloqueo o el último shot terminado (no rinse). Con BBW OFF no aplica. |
 
 ## Configuración, red y acceso
 
@@ -61,3 +62,4 @@ Para detalle técnico completo, consulta el [README principal](../README.md).
 | No para al llegar al peso al inicio | **BBW protection (s)** |
 | Vaso tardío | **Automatic retare**, **Retare window (s)**, **Minimum cup weight (g)** |
 | Sin stop por peso | **Brew by weight** (OFF) |
+| Primer shot BBW sin balanza bloqueado | **Brew → No-scale BBW** (*Avoid BBW shot without scale*, **Last shot cooldown**) |

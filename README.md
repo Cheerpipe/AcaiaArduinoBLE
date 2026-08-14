@@ -130,6 +130,8 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | **Minimum cup weight (g)** | Stable load threshold that qualifies as a cup for retare (default 10 g). |
 | **Retare stability** | Samples (default 3), tolerance (default 2.0 g), max sample gap (default 0.5 s), and min stable time (default 0.3 s) required before retare fires. |
 | **BBW protection (s)** | **Pre-arm / accidental-weight protection window** at shot start for automatic BBW: inhibits automatic weight stop until the timeout expires (default 12 s; minimum retare window + 3 s). Runs in parallel with retare and first-drop detection; first drops do not end this window. Skipped when Brew by weight is off. |
+| **Avoid BBW shot without scale** | **On by default**. Machine/scale setting. With Brew by weight on and no usable scale, the first paddle start plays the existing no-scale triple beep and **does not close CN9**. The next start runs as a manual no-scale shot. Re-arms on boot, when the scale becomes available, or after **Last shot cooldown**. |
+| **Last shot cooldown (min)** | Time after a blocked start or a finished (non-rinse) shot before the no-scale guard re-arms (default 60 min; 5–240). Boot and scale reconnect re-arm immediately. |
 | **Quick rinse gesture (s)** | Maximum paddle ON time that still counts as a quick rinse when released (default 1 s). |
 | **Quick rinse duration (s)** | How long CN9 stays closed after a quick rinse starts (default 4 s). |
 | **Timezone offset (min)** | Wall-clock offset for shot history labels (default UTC+0). |
@@ -217,8 +219,8 @@ name, default passwords, and step-by-step first connection.
   `429 LOGIN_RATE_LIMITED`.
 - **Live shot panel:** current/goal weight, progress bar, elapsed time, first
   drop, retare state, shot type, scale protocol, **extraction guard** state
-  (off / on / extended), and **A→M time guard** state (off / idle / armed /
-  `A→M · Ns` when enforced).
+  (off / on / extended), **A→M time guard** state (off / idle / armed /
+  `A→M · Ns` when enforced), and **no-scale guard** state (off / armed / idle).
 - **REST API** (`/api/v1/…`):
   - Read: `GET /status`, `GET /log`, `GET /shots`
   - Auth: `POST /login`, `POST /logout`, `POST /heartbeat` (UI polls every
