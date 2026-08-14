@@ -26,6 +26,7 @@ constexpr int ESP_TIMER_TASK = 0;
 using String = std::string;
 using TickType_t = uint32_t;
 using TaskHandle_t = void *;
+using BaseType_t = int;
 using portMUX_TYPE = int;
 
 #define portMUX_INITIALIZER_UNLOCKED 0
@@ -182,6 +183,9 @@ class HostBLE {
 
 inline HostBLE BLE;
 
+constexpr size_t ACAIA_MAC_CAPACITY = 18;
+constexpr size_t ACAIA_NAME_CAPACITY = 32;
+
 enum class AcaiaDisconnectReason : uint8_t {
   NONE,
   USER_REQUEST,
@@ -203,14 +207,20 @@ class AcaiaArduinoBLE {
  public:
   explicit AcaiaArduinoBLE(bool debug) { (void)debug; }
 
-  bool init(String mac = "") {
+  bool init(const char *mac = nullptr) {
     (void)mac;
     scanning = false;
     return connected;
   }
-  bool startScan(String mac = "") {
-    lastStartScanMac = mac;
-    directedScan = !mac.empty();
+  bool startScan(const char *mac = nullptr) {
+    if (mac != nullptr && mac[0] != '\0') {
+      strncpy(lastStartScanMac, mac, sizeof(lastStartScanMac) - 1);
+      lastStartScanMac[sizeof(lastStartScanMac) - 1] = '\0';
+      directedScan = true;
+    } else {
+      lastStartScanMac[0] = '\0';
+      directedScan = false;
+    }
     if (connected) {
       scanning = false;
       return false;
@@ -236,8 +246,12 @@ class AcaiaArduinoBLE {
   }
   bool isScanning() const { return scanning; }
   bool isDirectedScan() const { return scanning && directedScan; }
-  String address() const { return connected ? connectedAddress : String(); }
-  String localName() const { return connected ? connectedLocalName : String(); }
+  const char *address() const {
+    return connected ? connectedAddress : "";
+  }
+  const char *localName() const {
+    return connected ? connectedLocalName : "";
+  }
   bool tare() {
     commandLog.push_back("tare");
     ++tareCalls;
@@ -314,9 +328,9 @@ class AcaiaArduinoBLE {
   bool connected = false;
   bool scanning = false;
   bool directedScan = false;
-  String lastStartScanMac;
-  String connectedAddress = "01:02:03:04:05:06";
-  String connectedLocalName = "BOOKOO";
+  char lastStartScanMac[ACAIA_MAC_CAPACITY] = {};
+  char connectedAddress[ACAIA_MAC_CAPACITY] = "01:02:03:04:05:06";
+  char connectedLocalName[ACAIA_NAME_CAPACITY] = "BOOKOO";
   bool tareSucceeds = true;
   bool startTimerSucceeds = true;
   bool stopTimerSucceeds = true;
@@ -419,6 +433,14 @@ inline int xTaskCreate(void (*task)(void *), const char *name,
     *handle = reinterpret_cast<TaskHandle_t>(1);
   }
   return pdPASS;
+}
+
+inline int xTaskCreatePinnedToCore(void (*task)(void *), const char *name,
+                                   uint32_t stackDepth, void *parameter,
+                                   int priority, TaskHandle_t *handle,
+                                   BaseType_t core) {
+  (void)core;
+  return xTaskCreate(task, name, stackDepth, parameter, priority, handle);
 }
 
 struct esp_timer_create_args_t {

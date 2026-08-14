@@ -27,6 +27,8 @@
 #define BLE_OPERATION_TIMEOUT_MS          1000UL
 #define MAX_SUPPORTED_WEIGHT_GRAMS      10000.0f
 #define MAX_CONSECUTIVE_REJECTED_PACKETS 8U
+#define ACAIA_MAC_CAPACITY               18U
+#define ACAIA_NAME_CAPACITY              32U
 
 #include "Arduino.h"
 #include <ArduinoBLE.h>
@@ -69,11 +71,13 @@ class AcaiaArduinoBLE {
         // Blocking helper for sketches: reset, scan up to
         // SCALE_SCAN_TIMEOUT_MS, then connect. Prefer startScan()/pollScan()
         // on a dedicated BLE owner task so idle scanning does not block.
-        bool init(String mac = "");
+        // mac may be nullptr or empty for a name scan.
+        bool init(const char *mac = nullptr);
 
         // Non-blocking GAP scan. Never calls BLE.begin()/end(). If a scan is
         // already active, this is a no-op success and does not restart GAP.
-        bool startScan(String mac = "");
+        // mac may be nullptr or empty for a name scan.
+        bool startScan(const char *mac = nullptr);
         // Poll an active scan. Performs GATT connect only when a scale
         // advertisement matches. Returns true if connected after this call.
         bool pollScan();
@@ -103,9 +107,10 @@ class AcaiaArduinoBLE {
         bool isConnected();
         bool newWeightAvailable();
         const char* connectedProtocolName() const;
-        // Empty when not connected / no remembered peripheral.
-        String address() const;
-        String localName() const;
+        // Empty when not connected / no remembered peripheral. Pointers are
+        // owned by this object and remain valid until the next scan/reset.
+        const char* address() const;
+        const char* localName() const;
         bool isDirectedScan() const;
 
         AcaiaDisconnectReason lastDisconnectReason() const;
@@ -115,7 +120,7 @@ class AcaiaArduinoBLE {
         uint32_t reconnectCount() const;
 
     private:
-        bool isScaleName(const String& name) const;
+        bool isScaleName(const char *name) const;
         bool configureCharacteristics(BLEDevice& peripheral,
                                       scale_type type,
                                       const char* writeUuid,
@@ -181,7 +186,9 @@ class AcaiaArduinoBLE {
         bool                _loggedVersion;
         scale_type          _type;
         bool                _debug;
-        String              _scanMac;
+        char                _scanMac[ACAIA_MAC_CAPACITY];
+        char                _address[ACAIA_MAC_CAPACITY];
+        char                _localName[ACAIA_NAME_CAPACITY];
         AcaiaDisconnectReason _lastDisconnectReason;
 };
 

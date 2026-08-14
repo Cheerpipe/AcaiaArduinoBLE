@@ -26,6 +26,10 @@
 #include <math.h>
 #include "ShotStopperNetwork.h"
 #include "ShotStopperPersistence.h"
+#if __has_include(<esp_coexist.h>)
+#include <esp_coexist.h>
+#define SHOT_STOPPER_HAS_COEX 1
+#endif
 #endif
 
 #include "ShotStopperDomain.h"
@@ -40,6 +44,9 @@
 #include "ShotStopperTime.h"
 #include "ShotStopperWatchdog.h"
 #include "ShotStopperHwmon.h"
+
+#include <stdarg.h>
+#include <stdio.h>
 
 using namespace shotstopper;
 
@@ -65,6 +72,9 @@ constexpr uint32_t MAINTENANCE_LEASE_SETTLE_MS = 100;
 constexpr uint32_t RUNTIME_PERSIST_RETRY_MS = 500;
 constexpr uint32_t HEALTH_TELEMETRY_INTERVAL_MS = 5000;
 constexpr uint32_t STATUS_INDICATOR_TASK_STACK_SIZE = 3072;
+// Pin control/BLE/LED work with Arduino loopTask on APP_CPU (core 1).
+// network_manager is pinned to PRO_CPU (core 0) in ShotStopperNetwork.cpp.
+constexpr BaseType_t CONTROL_TASK_CORE = 1;
 
 #ifndef SHOT_STOPPER_LED_BRIGHTNESS
 #define SHOT_STOPPER_LED_BRIGHTNESS 32
@@ -480,11 +490,15 @@ int32_t runtimePersistReasonBits = 0;
 uint32_t nextInternalRequestId = 0x80000000UL;
 uint32_t lastLoopAtMs = 0;
 uint32_t loopMaxGapMs = 0;
+uint32_t healthIntervalMaxGapMs = 0;
 uint32_t loopStackMinWords = 0;
 uint32_t healthTelemetryAtMs = 0;
 uint32_t freeHeapBytes = 0;
 uint32_t minimumFreeHeapBytes = 0;
 uint32_t largestFreeHeapBlockBytes = 0;
+bool healthHeapAlertLatched = false;
+bool healthStackAlertLatched = false;
+bool healthLoopGapAlertLatched = false;
 Hwmon hwmon;
 HwmonSnapshot hwmonSnapshot = {};
 bool platformClockReady = false;
@@ -618,6 +632,27 @@ void writeSerialLogLine(const DebugEvent &event) {
            static_cast<unsigned long>(wholeSec),
            static_cast<unsigned long>(fracMs),
            debugCategoryName(event.category), message);
+  Serial.println(line);
+}
+
+// Ad-hoc Serial diagnostics honor serialLogLevel. Structured events already go
+// through writeSerialLogLine; prefer addDebugEvent for facts that have a code.
+void serialTrace(LogLevel level, const char *message) {
+  if (message == nullptr || !logLevelAtMost(level, serialLogLevel)) {
+    return;
+  }
+  Serial.println(message);
+}
+
+void serialTracef(LogLevel level, const char *fmt, ...) {
+  if (fmt == nullptr || !logLevelAtMost(level, serialLogLevel)) {
+    return;
+  }
+  char line[192] = {};
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(line, sizeof(line), fmt, args);
+  va_end(args);
   Serial.println(line);
 }
 
@@ -890,7 +925,7 @@ bool enqueueScaleCommand(const ScaleCommand &command) {
   if (xQueueSend(scaleCommandQueue, &command, 0) == pdTRUE) {
     return true;
   }
-  Serial.println("Scale command queue full");
+  serialTrace(LogLevel::WARNING, "Scale command queue full");
   return false;
 }
 
@@ -1023,10 +1058,10 @@ bool initializeStatusIndicators() {
     statusIndicatorQueue = nullptr;
     return false;
   }
-  if (xTaskCreate(statusIndicatorTask, "status_indicator",
-                  STATUS_INDICATOR_TASK_STACK_SIZE, nullptr,
-                  tskIDLE_PRIORITY + 1, &statusIndicatorTaskHandle) !=
-      pdPASS) {
+  if (xTaskCreatePinnedToCore(statusIndicatorTask, "status_indicator",
+                              STATUS_INDICATOR_TASK_STACK_SIZE, nullptr,
+                              tskIDLE_PRIORITY + 1, &statusIndicatorTaskHandle,
+                              CONTROL_TASK_CORE) != pdPASS) {
     vQueueDelete(statusIndicatorQueue);
     statusIndicatorQueue = nullptr;
     statusIndicatorTaskHandle = nullptr;
@@ -1144,6 +1179,14 @@ void IRAM_ATTR openRelayElectricalFromIsr() {
   // register (W1TS or W1TC) is selected at compile time via RELAY_OPEN_LEVEL.
   writeGpioFromIsr(RELAY_GPIO, RELAY_OPEN_LEVEL);
 }
+
+// FreeRTOS calls this before aborting when stack canaries are enabled. Open
+// CN9 first (IRAM GPIO path), then clear the RTC close marker. Avoid heap or
+// Serial here.
+extern "C" void vApplicationStackOverflowHook(TaskHandle_t, char *) {
+  openRelayElectricalFromIsr();
+  recordRelayCommandedClosed(false);
+}
 #else
 void openRelayElectricalFromIsr() {
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
@@ -1220,6 +1263,17 @@ RelaySafetySnapshot getRelaySafetySnapshot() {
   portEXIT_CRITICAL(&relayMux);
   snapshot.feedbackClosed = readCn9FeedbackClosed();
   return snapshot;
+}
+
+void applyBrewRfPreference(bool preferBluetooth) {
+#if defined(SHOT_STOPPER_HAS_COEX)
+  // Prefer BLE airtime while an automatic brew needs a fresh weight stream.
+  // Restore balance as soon as CN9 opens so the Web UI stays responsive.
+  (void)esp_coex_preference_set(preferBluetooth ? ESP_COEX_PREFER_BT
+                                                : ESP_COEX_PREFER_BALANCE);
+#else
+  (void)preferBluetooth;
+#endif
 }
 
 bool setCn9Closed(bool closed,
@@ -1334,6 +1388,9 @@ bool setCn9Closed(bool closed,
     }
     addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_CLOSED,
                   static_cast<int32_t>(operationalLimitMs));
+    if (session.automaticEnabled) {
+      applyBrewRfPreference(true);
+    }
     return true;
   }
 
@@ -1359,6 +1416,7 @@ bool setCn9Closed(bool closed,
   feedbackTransitionStartedAtMs = millis();
   portEXIT_CRITICAL(&relayMux);
   stopRelayDeadlineTimers();
+  applyBrewRfPreference(false);
   if (wasClosed) {
     addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_OPENED);
   }
@@ -1511,8 +1569,6 @@ void updatePaddleInput() {
     paddleTurnedOn = !previous && paddleOn;
     paddleTurnedOff = previous && !paddleOn;
 
-    Serial.print("Paddle ");
-    Serial.println(paddleOn ? "ON" : "OFF");
     addDebugEvent(DebugCategory::PADDLE,
                   paddleOn ? DebugCode::PADDLE_ON : DebugCode::PADDLE_OFF);
   }
@@ -1568,8 +1624,8 @@ bool tryQueueRemoteTimerStop() {
   } else {
     session.timerStopResult = TimerStopResult::PENDING;
     session.stopTimerCommandQueued = true;
-    Serial.print("Remote timer stop queued for cycle ");
-    Serial.println(session.id);
+    serialTracef(LogLevel::DEBUG, "Remote timer stop queued for cycle %lu",
+                 static_cast<unsigned long>(session.id));
     return true;
   }
 }
@@ -1583,8 +1639,8 @@ void requestRemoteTimerStop() {
   session.stopTimerRetryDeadlineMs = millis() + SCALE_STOP_RETRY_WINDOW_MS;
   if (!tryQueueRemoteTimerStop()) {
     session.timerStopResult = TimerStopResult::NOT_ATTEMPTED;
-    Serial.print("Remote timer stop deferred for cycle ");
-    Serial.println(session.id);
+    serialTracef(LogLevel::DEBUG, "Remote timer stop deferred for cycle %lu",
+                 static_cast<unsigned long>(session.id));
   }
 }
 
@@ -2041,7 +2097,8 @@ void considerDirectStopSample(float weight, uint32_t receivedAtMs,
 bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
                                 uint32_t packetSequence) {
   if (shot.datapoints >= MAX_SHOT_DATAPOINTS) {
-    Serial.println("Shot trajectory full; ignoring additional samples");
+    serialTrace(LogLevel::WARNING,
+                "Shot trajectory full; ignoring additional samples");
     return true;
   }
   const size_t index = shot.datapoints++;
@@ -2055,14 +2112,8 @@ bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
   session.lastAcceptedPacketSequence = packetSequence;
   calculateExpectedEndTime();
 
-  if (logLevelAtMost(LogLevel::DEBUG, serialLogLevel)) {
-    Serial.print(weight);
-    Serial.print("g, t=");
-    Serial.print(shot.timeS[index]);
-    Serial.print("s, expected end=");
-    Serial.print(shot.expectedEndS);
-    Serial.println("s");
-  }
+  serialTracef(LogLevel::DEBUG, "%.2fg, t=%.2fs, expected end=%.2fs",
+               weight, shot.timeS[index], shot.expectedEndS);
   return true;
 }
 
@@ -2073,7 +2124,7 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
                                       uint32_t packetSequence,
                                       uint32_t connectionGeneration) {
   if (!isfinite(weight) || fabsf(weight) > MAX_PARSED_WEIGHT_G) {
-    Serial.println("Invalid or out-of-range weight ignored");
+    serialTrace(LogLevel::WARNING, "Invalid or out-of-range weight ignored");
     rejectScaleSample(DebugCode::SCALE_SAMPLE_REJECTED_INVALID, weight);
     return false;
   }
@@ -2163,7 +2214,6 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
   }
 
   if (session.weightControlState == WeightControlState::ACTIVE && !plausible) {
-    Serial.println("Implausible scale slew ignored; validating stream");
     weightStreamState = WeightStreamState::ANOMALOUS;
     session.calibrationEligible = false;
     setWeightControlState(WeightControlState::VALIDATING);
@@ -2449,11 +2499,6 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
                                             : SHOT_LOG_CAPACITY;
     const size_t blobBytes =
         sizeof(ShotLogHeader) + nextCount * sizeof(ShotLogRecord);
-    Serial.print("Shot history NVS persist failed (shotlog/records, bytes=");
-    Serial.print(static_cast<unsigned long>(blobBytes));
-    Serial.print(", count=");
-    Serial.print(static_cast<unsigned long>(shotLog.count()));
-    Serial.println(')');
     addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
                   static_cast<int32_t>(blobBytes),
                   static_cast<int32_t>(shotLog.count()));
@@ -2476,7 +2521,8 @@ void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
       presetBank, snapshot.activePresetId != 0 ? snapshot.activePresetId
                                                : presetBank.activeId);
   if (preset == nullptr) {
-    Serial.println("A->M sample skipped; shot preset no longer exists");
+    serialTrace(LogLevel::WARNING,
+                "A->M sample skipped; shot preset no longer exists");
     return;
   }
   pushAutoToManualGuardSample(preset->autoToManualGuardSamplesDs,
@@ -2496,9 +2542,10 @@ void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
   runtimePersistPending = true;
   runtimePersistRetryAtMs = millis();
   runtimePersistReasonBits |= RUNTIME_PERSIST_REASON_ATM_SAMPLES;
-  Serial.print("A->M guard sample queued; trend ms=");
-  Serial.println(autoToManualGuardTrendMs(
-      preset->autoToManualGuardSamplesDs, preset->operationalWallMs));
+  serialTracef(LogLevel::INFO, "A->M guard sample queued; trend ms=%lu",
+               static_cast<unsigned long>(autoToManualGuardTrendMs(
+                   preset->autoToManualGuardSamplesDs,
+                   preset->operationalWallMs)));
 }
 
 void pendingShotFinalizeTask() {
@@ -2550,24 +2597,21 @@ void pendingShotFinalizeTask() {
           0 ||
       currentWeight <
           (snapshot.goalWeightG - snapshot.weightOffsetG)) {
-    Serial.println("Final weight unavailable or too low; offset unchanged");
+    serialTrace(LogLevel::INFO,
+                "Final weight unavailable or too low; offset unchanged");
     return;
   }
 
   finalWeightG = currentWeight;
 
-  Serial.print("Final weight: ");
-  Serial.print(finalWeightG);
-  Serial.print("g; cycle goal: ");
-  Serial.print(snapshot.goalWeightG);
-  Serial.print("g; cycle offset: ");
-  Serial.print(snapshot.weightOffsetG);
-  Serial.println("g");
+  serialTracef(LogLevel::INFO,
+               "Final weight: %.2fg; cycle goal: %.2fg; cycle offset: %.2fg",
+               finalWeightG, snapshot.goalWeightG, snapshot.weightOffsetG);
 
   const float observedError =
       finalWeightG - snapshot.goalWeightG + snapshot.weightOffsetG;
   if (fabsf(observedError) > MAX_OFFSET_G) {
-    Serial.println("Shot error too large; offset unchanged");
+    serialTrace(LogLevel::INFO, "Shot error too large; offset unchanged");
     return;
   }
 
@@ -2575,7 +2619,8 @@ void pendingShotFinalizeTask() {
       snapshot.weightOffsetG + finalWeightG - snapshot.goalWeightG;
   if (!isfinite(updatedOffset) || updatedOffset < 0.0f ||
       updatedOffset > MAX_OFFSET_G) {
-    Serial.println("Calculated offset outside safe range; offset unchanged");
+    serialTrace(LogLevel::WARNING,
+                "Calculated offset outside safe range; offset unchanged");
     return;
   }
 
@@ -2583,7 +2628,8 @@ void pendingShotFinalizeTask() {
       presetBank, snapshot.activePresetId != 0 ? snapshot.activePresetId
                                                : presetBank.activeId);
   if (preset == nullptr) {
-    Serial.println("Offset learn skipped; shot preset no longer exists");
+    serialTrace(LogLevel::WARNING,
+                "Offset learn skipped; shot preset no longer exists");
     return;
   }
   preset->weightOffsetG = updatedOffset;
@@ -2598,8 +2644,8 @@ void pendingShotFinalizeTask() {
   runtimePersistPending = true;
   runtimePersistRetryAtMs = millis();
   runtimePersistReasonBits |= RUNTIME_PERSIST_REASON_OFFSET;
-  Serial.print("New offset pending durable commit: ");
-  Serial.println(preset->weightOffsetG);
+  serialTracef(LogLevel::INFO, "New offset pending durable commit: %.2f",
+               preset->weightOffsetG);
 }
 
 // ---------------------------------------------------------------------------
@@ -3012,10 +3058,8 @@ void notePreferredScale(const char *mac, const char *name) {
   }
   portEXIT_CRITICAL(&scalePreferredMacMux);
   if (changed && macChanged) {
-    Serial.print("Preferred scale updated: ");
-    Serial.print(safeName[0] != '\0' ? safeName : "(unknown)");
-    Serial.print(" — ");
-    Serial.println(mac);
+    serialTracef(LogLevel::INFO, "Preferred scale updated: %s — %s",
+                 safeName[0] != '\0' ? safeName : "(unknown)", mac);
   }
 }
 
@@ -3027,7 +3071,8 @@ void clearPreferredScaleCache() {
   scaleCacheWritePausedUntilMs = millis() + SCALE_MAC_CACHE_WRITE_PAUSE_MS;
   ++scalePreferredDirectedResetGeneration;
   portEXIT_CRITICAL(&scalePreferredMacMux);
-  Serial.println("Preferred scale cleared; caching paused for 60 s");
+  serialTrace(LogLevel::INFO,
+              "Preferred scale cleared; caching paused for 60 s");
 }
 
 void servicePreferredScaleMacPersistence() {
@@ -3067,20 +3112,19 @@ void servicePreferredScaleMacPersistence() {
   portEXIT_CRITICAL(&scalePreferredMacMux);
   networkManager.syncPreferredScale(mac, name);
   if (mac[0] == '\0') {
-    Serial.println("Preferred scale MAC cleared in NVS");
+    serialTrace(LogLevel::INFO, "Preferred scale MAC cleared in NVS");
   } else {
-    Serial.print("Preferred scale MAC saved: ");
-    Serial.print(name[0] != '\0' ? name : "(unknown)");
-    Serial.print(" — ");
-    Serial.println(mac);
+    serialTracef(LogLevel::INFO, "Preferred scale MAC saved: %s — %s",
+                 name[0] != '\0' ? name : "(unknown)", mac);
   }
 #endif
 }
 
 void logScaleConnectionFailed(bool directed) {
-  Serial.print(directed ? "Preferred scale connection failed: "
-                        : "Scale connection failed: ");
-  Serial.println(scale.lastDisconnectReasonName());
+  serialTracef(LogLevel::WARNING, "%s: %s",
+               directed ? "Preferred scale connection failed"
+                        : "Scale connection failed",
+               scale.lastDisconnectReasonName());
 }
 
 void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
@@ -3108,16 +3152,14 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       connectRetryMs = SCALE_CONNECT_RETRY_MS;
       preferredDirectedFailures = 0;
       loggedPreferredFallback = false;
-      const String address = scale.address();
-      const String name = scale.localName();
-      notePreferredScale(address.c_str(), name.c_str());
-      Serial.print("Scale connected: ");
-      Serial.print(name.length() > 0 ? name : String("(unknown)"));
-      Serial.print(" @ ");
-      Serial.print(address.length() > 0 ? address : String("(no address)"));
-      Serial.print(" (");
-      Serial.print(scale.connectedProtocolName());
-      Serial.println(')');
+      const char *address = scale.address();
+      const char *name = scale.localName();
+      notePreferredScale(address, name);
+      serialTracef(LogLevel::INFO, "Scale connected: %s @ %s (%s)",
+                   name != nullptr && name[0] != '\0' ? name : "(unknown)",
+                   address != nullptr && address[0] != '\0' ? address
+                                                             : "(no address)",
+                   scale.connectedProtocolName());
       updateWorkerLinkState();
       setScaleLinkState(ScaleLinkState::CONNECTED);
       return;
@@ -3136,21 +3178,21 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     if (finishedDirectedAttempt) {
       if (cacheMode == ScaleMacCacheMode::PARTIAL) {
         ++preferredDirectedFailures;
-        Serial.print("Preferred scale attempt failed (");
-        Serial.print(preferredDirectedFailures);
-        Serial.print('/');
-        Serial.print(SCALE_PREFERRED_DIRECTED_ATTEMPTS);
-        Serial.print("): ");
-        Serial.println(scale.lastDisconnectReasonName());
+        serialTracef(LogLevel::WARNING,
+                     "Preferred scale attempt failed (%u/%u): %s",
+                     preferredDirectedFailures,
+                     SCALE_PREFERRED_DIRECTED_ATTEMPTS,
+                     scale.lastDisconnectReasonName());
         if (preferredDirectedFailures >= SCALE_PREFERRED_DIRECTED_ATTEMPTS &&
             !loggedPreferredFallback) {
           loggedPreferredFallback = true;
-          Serial.println(
-              "Preferred scale not found; falling back to name scan");
+          serialTrace(LogLevel::INFO,
+                      "Preferred scale not found; falling back to name scan");
         }
       } else {
-        Serial.print("Preferred scale attempt failed: ");
-        Serial.println(scale.lastDisconnectReasonName());
+        serialTracef(LogLevel::WARNING,
+                     "Preferred scale attempt failed: %s",
+                     scale.lastDisconnectReasonName());
       }
     }
 
@@ -3199,15 +3241,15 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     lastConnectLogMs = lastScanCycleMs;
     connectAttemptSeriesActive = true;
     if (useDirected) {
-      Serial.print("Scanning for preferred scale ");
-      Serial.print(preferredMac);
-      Serial.println("...");
+      serialTracef(LogLevel::DEBUG, "Scanning for preferred scale %s...",
+                   preferredMac);
     } else {
-      Serial.println("Scanning for any compatible scale (name scan)");
+      serialTrace(LogLevel::DEBUG,
+                  "Scanning for any compatible scale (name scan)");
     }
     addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_CONNECTING);
   }
-  if (scale.startScan(useDirected ? String(preferredMac) : String(""))) {
+  if (scale.startScan(useDirected ? preferredMac : nullptr)) {
     return;
   }
 
@@ -3215,19 +3257,19 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
   if (useDirected) {
     if (cacheMode == ScaleMacCacheMode::PARTIAL) {
       ++preferredDirectedFailures;
-      Serial.print("Preferred scale scan failed to start (");
-      Serial.print(preferredDirectedFailures);
-      Serial.print('/');
-      Serial.print(SCALE_PREFERRED_DIRECTED_ATTEMPTS);
-      Serial.println(')');
+      serialTracef(LogLevel::WARNING,
+                   "Preferred scale scan failed to start (%u/%u)",
+                   preferredDirectedFailures,
+                   SCALE_PREFERRED_DIRECTED_ATTEMPTS);
       if (preferredDirectedFailures >= SCALE_PREFERRED_DIRECTED_ATTEMPTS &&
           !loggedPreferredFallback) {
         loggedPreferredFallback = true;
-        Serial.println(
-            "Preferred scale not found; falling back to name scan");
+        serialTrace(LogLevel::INFO,
+                    "Preferred scale not found; falling back to name scan");
       }
     } else {
-      Serial.println("Preferred scale scan failed to start");
+      serialTrace(LogLevel::WARNING,
+                  "Preferred scale scan failed to start");
     }
   } else if (logAttempt) {
     logScaleConnectionFailed(false);
@@ -3351,8 +3393,9 @@ bool initializeScaleWorker() {
     return false;
   }
 
-  if (xTaskCreate(scaleWorkerTask, "scale_worker", 8192, nullptr,
-                  tskIDLE_PRIORITY + 1, &scaleWorkerTaskHandle) != pdPASS) {
+  if (xTaskCreatePinnedToCore(scaleWorkerTask, "scale_worker", 8192, nullptr,
+                              tskIDLE_PRIORITY + 1, &scaleWorkerTaskHandle,
+                              CONTROL_TASK_CORE) != pdPASS) {
     vQueueDelete(scaleCommandQueue);
     vQueueDelete(scaleEventQueue);
     scaleCommandQueue = nullptr;
@@ -3409,7 +3452,8 @@ void processScaleWorkerEvents() {
       case ScaleEventType::WEIGHT:
         if (!isfinite(event.weightG) ||
             fabsf(event.weightG) > MAX_PARSED_WEIGHT_G) {
-          Serial.println("Invalid scale weight event ignored");
+          serialTrace(LogLevel::WARNING,
+                      "Invalid scale weight event ignored");
           rejectScaleSample(DebugCode::SCALE_SAMPLE_REJECTED_INVALID,
                             event.weightG);
           break;
@@ -3456,8 +3500,8 @@ void processScaleWorkerEvents() {
             armPostTareBaselineWindow();
           }
         }
-        Serial.print("Remote timer start write: ");
-        Serial.println(event.writeSucceeded ? "successful" : "failed/skipped");
+        serialTracef(LogLevel::DEBUG, "Remote timer start write: %s",
+                     event.writeSucceeded ? "successful" : "failed/skipped");
         addDebugEvent(DebugCategory::SCALE,
                       event.writeSucceeded ? DebugCode::SCALE_TIMER_START_OK
                                            : DebugCode::SCALE_TIMER_START_FAILED,
@@ -3486,12 +3530,7 @@ void processScaleWorkerEvents() {
                   : (event.writeSucceeded ? TimerStopResult::WRITE_SUCCEEDED
                                           : TimerStopResult::WRITE_FAILED);
         }
-        Serial.print("Remote timer stop write for cycle ");
-        Serial.print(event.cycleId);
-        Serial.print(": ");
-        Serial.println(!event.commandAttempted
-                           ? "not attempted (scale disconnected)"
-                           : (event.writeSucceeded ? "successful" : "failed"));
+        // Structured SCALE_TIMER_STOP_* events cover Serial when enabled.
         addDebugEvent(DebugCategory::SCALE,
                       event.writeSucceeded ? DebugCode::SCALE_TIMER_STOP_OK
                                            : DebugCode::SCALE_TIMER_STOP_FAILED,
@@ -3542,7 +3581,8 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
                 uint32_t controlLeaseId = 0) {
   if (pendingFinalize.pending) {
     pendingFinalize.pending = false;
-    Serial.println("Previous drip analysis cancelled by a new cycle");
+    serialTrace(LogLevel::INFO,
+                "Previous drip analysis cancelled by a new cycle");
   }
 
   resetSessionForNewCycle(source, webSessionId, controlLeaseId);
@@ -3596,7 +3636,8 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
     if (!requestRemoteTimerStart()) {
       session.automaticEnabled = false;
       session.scaleWasLost = true;
-      Serial.println("Scale start command unavailable; cycle marked manual");
+      serialTrace(LogLevel::WARNING,
+                  "Scale start command unavailable; cycle marked manual");
     }
   }
 
@@ -3885,7 +3926,7 @@ void stateMachineTask() {
         suspendWeightControl();
         weightStreamState = WeightStreamState::STALE;
         addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_STREAM_STALE);
-        Serial.println("Scale stream suspended during brew");
+        serialTrace(LogLevel::WARNING, "Scale stream suspended during brew");
       }
 
       if (autoToManualGuardDeadlineDue()) {
@@ -3938,7 +3979,8 @@ bool controlAllowsConfigurationNow() {
 void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
   if (pendingFinalize.pending) {
     pendingFinalize.pending = false;
-    Serial.println("Previous drip analysis cancelled by a web rinse");
+    serialTrace(LogLevel::INFO,
+                "Previous drip analysis cancelled by a web rinse");
   }
   resetSessionForNewCycle(ControlSource::WEB, webSessionId, controlLeaseId);
   session.startedAtMs = millis();
@@ -3964,7 +4006,8 @@ void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
     session.startedWithScale = false;
     session.automaticEnabled = false;
     session.scaleWasLost = true;
-    Serial.println("Scale start command unavailable; web rinse marked manual");
+    serialTrace(LogLevel::WARNING,
+                "Scale start command unavailable; web rinse marked manual");
   }
   transitionTo(StopperState::RINSE);
   maybeRequestNtpSyncOnActivity();
@@ -4106,11 +4149,7 @@ void completeMaintenanceLease(const WebCommand &result) {
         DebugCategory::CONFIG, DebugCode::RUNTIME_PERSIST_FAILED,
         static_cast<int32_t>(maintenanceLease.command.config.revision),
         runtimePersistReasonBits);
-    Serial.print("Workflow NVS persist failed (shotstopper settingsA/B, rev=");
-    Serial.print(maintenanceLease.command.config.revision);
-    Serial.print(", payload=");
-    Serial.print(runtimePersistReasonLabel(runtimePersistReasonBits));
-    Serial.println(')');
+    // RUNTIME_PERSIST_FAILED already formats a detailed Serial line.
     runtimePersistCandidate = maintenanceLease.command.config;
     runtimePersistPending = true;
     runtimePersistRetryAtMs = millis() + RUNTIME_PERSIST_RETRY_MS;
@@ -4233,8 +4272,8 @@ void processWebCommand(const WebCommand &command) {
       memcpy(candidate.ntpServerCustom, command.config.ntpServerCustom,
              sizeof(candidate.ntpServerCustom));
       if (candidate.scaleMacCacheMode != command.config.scaleMacCacheMode) {
-        Serial.print("Scale MAC cache mode: ");
-        Serial.println(scaleMacCacheModeId(command.config.scaleMacCacheMode));
+        serialTracef(LogLevel::INFO, "Scale MAC cache mode: %s",
+                     scaleMacCacheModeId(command.config.scaleMacCacheMode));
       }
       candidate.scaleMacCacheMode = command.config.scaleMacCacheMode;
       // Session Manual switch may arrive via brewByWeight on Home; keep as timerOnly.
@@ -5004,12 +5043,75 @@ void setup() {
   updateStatusIndicators();
 }
 
+void serviceHealthThresholdAlerts(uint32_t intervalMaxGapMs) {
+  const bool heapLow =
+      freeHeapBytes > 0 &&
+      (freeHeapBytes < HEALTH_HEAP_FREE_ALERT_BYTES ||
+       (largestFreeHeapBlockBytes > 0 &&
+        largestFreeHeapBlockBytes < HEALTH_HEAP_LARGEST_ALERT_BYTES));
+  const bool heapClear =
+      freeHeapBytes == 0 ||
+      (freeHeapBytes >= HEALTH_HEAP_FREE_CLEAR_BYTES &&
+       (largestFreeHeapBlockBytes == 0 ||
+        largestFreeHeapBlockBytes >= HEALTH_HEAP_LARGEST_CLEAR_BYTES));
+  if (heapLow && !healthHeapAlertLatched) {
+    healthHeapAlertLatched = true;
+    addDebugEvent(DebugCategory::SYSTEM, DebugCode::HEALTH_HEAP_LOW,
+                  static_cast<int32_t>(freeHeapBytes),
+                  static_cast<int32_t>(largestFreeHeapBlockBytes));
+  } else if (heapClear) {
+    healthHeapAlertLatched = false;
+  }
+
+  uint32_t worstStackWords = UINT32_MAX;
+  if (loopStackMinWords > 0 && loopStackMinWords < worstStackWords) {
+    worstStackWords = loopStackMinWords;
+  }
+  if (scaleWorkerStackMinWords > 0 &&
+      scaleWorkerStackMinWords < worstStackWords) {
+    worstStackWords = scaleWorkerStackMinWords;
+  }
+#ifndef SHOT_STOPPER_HOST_TEST
+  const uint32_t networkStack = networkManager.snapshot().taskStackMinWords;
+  if (networkStack > 0 && networkStack < worstStackWords) {
+    worstStackWords = networkStack;
+  }
+#endif
+  const bool stackLow =
+      worstStackWords != UINT32_MAX &&
+      worstStackWords < HEALTH_STACK_MIN_ALERT_WORDS;
+  const bool stackClear =
+      worstStackWords == UINT32_MAX ||
+      worstStackWords >= HEALTH_STACK_MIN_CLEAR_WORDS;
+  if (stackLow && !healthStackAlertLatched) {
+    healthStackAlertLatched = true;
+    addDebugEvent(DebugCategory::SYSTEM, DebugCode::HEALTH_STACK_LOW,
+                  static_cast<int32_t>(loopStackMinWords),
+                  static_cast<int32_t>(scaleWorkerStackMinWords));
+  } else if (stackClear) {
+    healthStackAlertLatched = false;
+  }
+
+  const bool gapHigh = intervalMaxGapMs >= HEALTH_LOOP_GAP_ALERT_MS;
+  const bool gapClear = intervalMaxGapMs <= HEALTH_LOOP_GAP_CLEAR_MS;
+  if (gapHigh && !healthLoopGapAlertLatched) {
+    healthLoopGapAlertLatched = true;
+    addDebugEvent(DebugCategory::SYSTEM, DebugCode::HEALTH_LOOP_GAP,
+                  static_cast<int32_t>(intervalMaxGapMs), 0);
+  } else if (gapClear) {
+    healthLoopGapAlertLatched = false;
+  }
+}
+
 void loop() {
   const uint32_t loopStartedAtMs = millis();
   if (lastLoopAtMs != 0) {
     const uint32_t gap = loopStartedAtMs - lastLoopAtMs;
     if (gap > loopMaxGapMs) {
       loopMaxGapMs = gap;
+    }
+    if (gap > healthIntervalMaxGapMs) {
+      healthIntervalMaxGapMs = gap;
     }
   }
   lastLoopAtMs = loopStartedAtMs;
@@ -5026,6 +5128,8 @@ void loop() {
 #endif
     hwmonSnapshot = hwmon.sample(intervalMs > 0U ? intervalMs
                                                  : HEALTH_TELEMETRY_INTERVAL_MS);
+    serviceHealthThresholdAlerts(healthIntervalMaxGapMs);
+    healthIntervalMaxGapMs = 0;
   }
   // Relay and paddle control never wait for BLE. The worker owns every scale,
   // heartbeat, packet, timer and connection operation.

@@ -7,6 +7,7 @@
 
 #include <math.h>
 #include <new>
+#include <string.h>
 
 namespace {
 
@@ -108,7 +109,9 @@ AcaiaArduinoBLE::AcaiaArduinoBLE(bool debug) :
     _loggedVersion(false),
     _type(OLD),
     _debug(debug),
-    _scanMac(),
+    _scanMac{},
+    _address{},
+    _localName{},
     _lastDisconnectReason(AcaiaDisconnectReason::NONE) {
 }
 
@@ -133,13 +136,13 @@ void AcaiaArduinoBLE::stopIdleScan(AcaiaDisconnectReason reason) {
     }
     _connected = false;
     _scanStartedAt = 0;
-    _scanMac = "";
+    _scanMac[0] = '\0';
     if (reason != AcaiaDisconnectReason::NONE) {
         _lastDisconnectReason = reason;
     }
 }
 
-bool AcaiaArduinoBLE::startScan(String mac) {
+bool AcaiaArduinoBLE::startScan(const char *mac) {
     logVersionOnce();
 
     // An active GAP scan must not be restarted. ArduinoBLE/ESP32 HCI can
@@ -153,25 +156,32 @@ bool AcaiaArduinoBLE::startScan(String mac) {
     }
 
     BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
+    const bool directed = mac != nullptr && mac[0] != '\0';
+    if (directed) {
+        strncpy(_scanMac, mac, sizeof(_scanMac) - 1);
+        _scanMac[sizeof(_scanMac) - 1] = '\0';
+    } else {
+        _scanMac[0] = '\0';
+    }
     if (_debug) {
-        if (mac.length() == 0) {
+        if (!directed) {
             Serial.println("Scanning for any compatible scale (name scan)...");
         } else {
             Serial.print("Scanning for preferred scale ");
-            Serial.print(mac);
+            Serial.print(_scanMac);
             Serial.println("...");
         }
     }
 
-    const bool scanStarted = (mac.length() == 0)
-        ? static_cast<bool>(BLE.scan())
-        : static_cast<bool>(BLE.scanForAddress(mac));
+    // ArduinoBLE still takes String at the GAP boundary; copy once here.
+    const bool scanStarted = directed
+        ? static_cast<bool>(BLE.scanForAddress(String(_scanMac)))
+        : static_cast<bool>(BLE.scan());
     if (!scanStarted) {
         Serial.println("BLE scan failed to start");
         stopIdleScan(AcaiaDisconnectReason::SCAN_START_FAILED);
         return false;
     }
-    _scanMac = mac;
     _scanning = true;
     _scanStartedAt = static_cast<uint32_t>(millis());
     return true;
@@ -200,17 +210,17 @@ bool AcaiaArduinoBLE::pollScan() {
         Serial.println();
     }
 
-    if (peripheral && isScaleName(peripheral.localName())) {
+    if (peripheral && isScaleName(peripheral.localName().c_str())) {
         BLE.stopScan();
         _scanning = false;
         _scanStartedAt = 0;
-        _scanMac = "";
+        _scanMac[0] = '\0';
         return completeConnection(peripheral);
     }
 
     if (elapsedSince(_scanStartedAt) >= SCALE_SCAN_TIMEOUT_MS) {
         if (_debug) {
-            if (_scanMac.length() == 0) {
+            if (_scanMac[0] == '\0') {
                 Serial.println("Scale name scan timed out");
             } else {
                 Serial.print("Preferred scale scan timed out (");
@@ -347,7 +357,7 @@ bool AcaiaArduinoBLE::completeConnection(BLEDevice& peripheral) {
     return true;
 }
 
-bool AcaiaArduinoBLE::init(String mac) {
+bool AcaiaArduinoBLE::init(const char *mac) {
     logVersionOnce();
     resetConnection(true, AcaiaDisconnectReason::NONE);
     if (!startScan(mac)) {
@@ -558,22 +568,16 @@ const char* AcaiaArduinoBLE::connectedProtocolName() const {
     return "unknown";
 }
 
-String AcaiaArduinoBLE::address() const {
-    if (!_hasPeripheral) {
-        return String("");
-    }
-    return _peripheral.address();
+const char *AcaiaArduinoBLE::address() const {
+    return _hasPeripheral ? _address : "";
 }
 
-String AcaiaArduinoBLE::localName() const {
-    if (!_hasPeripheral) {
-        return String("");
-    }
-    return _peripheral.localName();
+const char *AcaiaArduinoBLE::localName() const {
+    return _hasPeripheral ? _localName : "";
 }
 
 bool AcaiaArduinoBLE::isDirectedScan() const {
-    return _scanning && _scanMac.length() > 0;
+    return _scanning && _scanMac[0] != '\0';
 }
 
 bool AcaiaArduinoBLE::newWeightAvailable() {
@@ -857,12 +861,20 @@ void AcaiaArduinoBLE::rememberPeripheral(const BLEDevice& peripheral) {
     _peripheral.~BLEDevice();
     new (&_peripheral) BLEDevice(peripheral);
     _hasPeripheral = true;
+    const String addr = peripheral.address();
+    const String name = peripheral.localName();
+    strncpy(_address, addr.c_str(), sizeof(_address) - 1);
+    _address[sizeof(_address) - 1] = '\0';
+    strncpy(_localName, name.c_str(), sizeof(_localName) - 1);
+    _localName[sizeof(_localName) - 1] = '\0';
 }
 
 void AcaiaArduinoBLE::clearPeripheral() {
     _peripheral.~BLEDevice();
     new (&_peripheral) BLEDevice();
     _hasPeripheral = false;
+    _address[0] = '\0';
+    _localName[0] = '\0';
 }
 
 void AcaiaArduinoBLE::resetConnection(bool disconnectPeer,
@@ -877,7 +889,7 @@ void AcaiaArduinoBLE::resetConnection(bool disconnectPeer,
         _scanning = false;
     }
     _scanStartedAt = 0;
-    _scanMac = "";
+    _scanMac[0] = '\0';
 
     // Release retained remote attributes before ArduinoBLE removes the peer's
     // service tree. This ordering also makes repeated cleanup idempotent.
@@ -958,11 +970,14 @@ uint32_t AcaiaArduinoBLE::reconnectCount() const {
     return _reconnects;
 }
 
-bool AcaiaArduinoBLE::isScaleName(const String& name) const {
-    const String prefix = name.substring(0, 5);
-    return prefix == "CINCO" || prefix == "ACAIA" || prefix == "PYXIS" ||
-           prefix == "LUNAR" || prefix == "PEARL" || prefix == "PROCH" ||
-           prefix == "BOOKO" || prefix == "FELIC";
+bool AcaiaArduinoBLE::isScaleName(const char *name) const {
+    if (name == nullptr) {
+        return false;
+    }
+    return strncmp(name, "CINCO", 5) == 0 || strncmp(name, "ACAIA", 5) == 0 ||
+           strncmp(name, "PYXIS", 5) == 0 || strncmp(name, "LUNAR", 5) == 0 ||
+           strncmp(name, "PEARL", 5) == 0 || strncmp(name, "PROCH", 5) == 0 ||
+           strncmp(name, "BOOKO", 5) == 0 || strncmp(name, "FELIC", 5) == 0;
 }
 
 void AcaiaArduinoBLE::exploreService(BLEService service) {

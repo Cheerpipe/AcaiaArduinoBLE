@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -183,8 +184,8 @@ void testNonBlockingScanConnectsWithoutInit() {
     CHECK(scale.isConnected());
     CHECK(!scale.isScanning());
     CHECK(fixture.peripheral->connected);
-    CHECK(scale.address() == String("01:02:03:04:05:06"));
-    CHECK(scale.localName() == String("PYXIS"));
+    CHECK(strcmp(scale.address(), "01:02:03:04:05:06") == 0);
+    CHECK(strcmp(scale.localName(), "PYXIS") == 0);
 }
 
 void testDirectedScanUsesAddressFilter() {
@@ -200,7 +201,7 @@ void testDirectedScanUsesAddressFilter() {
     CHECK(scale.pollScan());
     CHECK(scale.isConnected());
     CHECK(!scale.isDirectedScan());
-    CHECK(scale.address() == String("AA:BB:CC:DD:EE:FF"));
+    CHECK(strcmp(scale.address(), "AA:BB:CC:DD:EE:FF") == 0);
 
     resetFake();
     fixture = makeScale(NEW);

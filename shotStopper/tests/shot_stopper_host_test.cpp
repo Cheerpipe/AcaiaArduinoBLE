@@ -141,6 +141,15 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scaleWorkerProgressAtMs = hostMillis;
   scaleEventsDropped = 0;
   scaleWorkerStackMinWords = 0;
+  freeHeapBytes = 0;
+  minimumFreeHeapBytes = 0;
+  largestFreeHeapBlockBytes = 0;
+  loopStackMinWords = 0;
+  loopMaxGapMs = 0;
+  healthIntervalMaxGapMs = 0;
+  healthHeapAlertLatched = false;
+  healthStackAlertLatched = false;
+  healthLoopGapAlertLatched = false;
   scaleCriticalEvent = ScaleEvent{};
   scaleCriticalEventPending = false;
   scaleTimerStartEvent = ScaleEvent{};
@@ -3411,6 +3420,46 @@ void s13_persist_debug_messages_identify_origin() {
   CHECK(strlen(message) < sizeof(message));
 }
 
+void h01_health_threshold_alerts_fire_once_per_crossing() {
+  resetHarness(false, true);
+  freeHeapBytes = HEALTH_HEAP_FREE_ALERT_BYTES - 1;
+  largestFreeHeapBlockBytes = HEALTH_HEAP_LARGEST_CLEAR_BYTES;
+  loopStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  scaleWorkerStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  serviceHealthThresholdAlerts(0);
+  CHECK(debugEventExists(DebugCode::HEALTH_HEAP_LOW,
+                         static_cast<int32_t>(freeHeapBytes),
+                         static_cast<int32_t>(largestFreeHeapBlockBytes)));
+  debugLog.clear();
+  serviceHealthThresholdAlerts(0);
+  CHECK(!debugEventExists(DebugCode::HEALTH_HEAP_LOW));
+
+  freeHeapBytes = HEALTH_HEAP_FREE_CLEAR_BYTES;
+  largestFreeHeapBlockBytes = HEALTH_HEAP_LARGEST_CLEAR_BYTES;
+  serviceHealthThresholdAlerts(0);
+  CHECK(!healthHeapAlertLatched);
+
+  loopStackMinWords = HEALTH_STACK_MIN_ALERT_WORDS - 1;
+  serviceHealthThresholdAlerts(0);
+  CHECK(debugEventExists(DebugCode::HEALTH_STACK_LOW));
+  debugLog.clear();
+  serviceHealthThresholdAlerts(0);
+  CHECK(!debugEventExists(DebugCode::HEALTH_STACK_LOW));
+
+  loopStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  serviceHealthThresholdAlerts(0);
+  CHECK(!healthStackAlertLatched);
+
+  serviceHealthThresholdAlerts(HEALTH_LOOP_GAP_ALERT_MS);
+  CHECK(debugEventExists(DebugCode::HEALTH_LOOP_GAP,
+                         static_cast<int32_t>(HEALTH_LOOP_GAP_ALERT_MS)));
+  debugLog.clear();
+  serviceHealthThresholdAlerts(HEALTH_LOOP_GAP_ALERT_MS);
+  CHECK(!debugEventExists(DebugCode::HEALTH_LOOP_GAP));
+  serviceHealthThresholdAlerts(HEALTH_LOOP_GAP_CLEAR_MS);
+  CHECK(!healthLoopGapAlertLatched);
+}
+
 void r51_auto_to_manual_guard_fires_while_scale_lost() {
   resetHarness(false, true);
   runtimeConfig.autoToManualGuardEnabled = true;
@@ -3697,6 +3746,7 @@ const TestCase testCases[] = {
     {"S11", s11_shot_log_record_stays_v5_size},
     {"S12", s12_shot_log_migrates_schema_v5},
     {"S13", s13_persist_debug_messages_identify_origin},
+    {"H01", h01_health_threshold_alerts_fire_once_per_crossing},
     {"N01", n01_wall_clock_tracks_utc_from_anchor},
     {"N02", n02_ntp_hostname_validation},
     {"N03", n03_unsynced_retry_is_one_minute},

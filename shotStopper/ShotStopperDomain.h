@@ -1390,8 +1390,22 @@ enum class DebugCode : uint8_t {
   MANUAL_CYCLE_STARTED,
   RINSE_CLASSIFIED,
   SYSTEM_LOG_OVERRUN,
-  AP_PASSWORD_RESET
+  AP_PASSWORD_RESET,
+  HEALTH_HEAP_LOW,
+  HEALTH_STACK_LOW,
+  HEALTH_LOOP_GAP
 };
+
+// Health telemetry thresholds (observability only; never act on CN9).
+// Clear values are higher than alert values for hysteresis / rising-edge only.
+constexpr uint32_t HEALTH_HEAP_FREE_ALERT_BYTES = 49152;   // 48 KiB
+constexpr uint32_t HEALTH_HEAP_FREE_CLEAR_BYTES = 65536;   // 64 KiB
+constexpr uint32_t HEALTH_HEAP_LARGEST_ALERT_BYTES = 16384; // 16 KiB
+constexpr uint32_t HEALTH_HEAP_LARGEST_CLEAR_BYTES = 24576; // 24 KiB
+constexpr uint32_t HEALTH_STACK_MIN_ALERT_WORDS = 256;      // 1 KiB remaining
+constexpr uint32_t HEALTH_STACK_MIN_CLEAR_WORDS = 384;
+constexpr uint32_t HEALTH_LOOP_GAP_ALERT_MS = 200;
+constexpr uint32_t HEALTH_LOOP_GAP_CLEAR_MS = 80;
 
 // Bitmask for argument2 on RUNTIME_PERSIST_FAILED (what was pending in NVS).
 constexpr int32_t RUNTIME_PERSIST_REASON_OFFSET = 1;
@@ -1552,6 +1566,9 @@ inline LogLevel debugCodeDefaultLevel(DebugCode code) {
     case DebugCode::OPERATIONAL_LIMIT:
     case DebugCode::SYSTEM_LOG_OVERRUN:
     case DebugCode::FIRST_DROP_DURING_RETARE:
+    case DebugCode::HEALTH_HEAP_LOW:
+    case DebugCode::HEALTH_STACK_LOW:
+    case DebugCode::HEALTH_LOOP_GAP:
       return LogLevel::WARNING;
     case DebugCode::SCALE_CONNECTING:
     case DebugCode::SCALE_TIMER_START_OK:
@@ -1755,6 +1772,9 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::MANUAL_CYCLE_STARTED: return "manual cycle started";
     case DebugCode::RINSE_CLASSIFIED: return "rinse classified";
     case DebugCode::SYSTEM_LOG_OVERRUN: return "diagnostic log overrun";
+    case DebugCode::HEALTH_HEAP_LOW: return "health heap low";
+    case DebugCode::HEALTH_STACK_LOW: return "health stack low";
+    case DebugCode::HEALTH_LOOP_GAP: return "health loop gap high";
   }
   return "unknown";
 }
@@ -1928,6 +1948,22 @@ inline bool formatLifecycleDebugMessage(const DebugEvent &event, char *message,
       return true;
     case DebugCode::SYSTEM_LOG_OVERRUN:
       snprintf(message, capacity, "diagnostic log overrun dropped=%ld",
+               static_cast<long>(event.argument1));
+      return true;
+    case DebugCode::HEALTH_HEAP_LOW:
+      snprintf(message, capacity,
+               "health heap low free=%ld largest=%ld",
+               static_cast<long>(event.argument1),
+               static_cast<long>(event.argument2));
+      return true;
+    case DebugCode::HEALTH_STACK_LOW:
+      snprintf(message, capacity,
+               "health stack low loop=%ld scale=%ld words",
+               static_cast<long>(event.argument1),
+               static_cast<long>(event.argument2));
+      return true;
+    case DebugCode::HEALTH_LOOP_GAP:
+      snprintf(message, capacity, "health loop gap high max=%ld ms",
                static_cast<long>(event.argument1));
       return true;
     default:

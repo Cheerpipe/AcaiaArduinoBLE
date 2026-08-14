@@ -420,8 +420,10 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
   instance_ = this;
   ntpConfigRevision_ = settings_.runtime.revision;
   g_wallClock.reset();
-  if (xTaskCreate(taskEntry, "network_manager", 10240, this,
-                  tskIDLE_PRIORITY + 1, &taskHandle_) != pdPASS) {
+  // Pin beside the Wi-Fi/LwIP stacks on PRO_CPU (core 0).
+  if (xTaskCreatePinnedToCore(taskEntry, "network_manager", 10240, this,
+                              tskIDLE_PRIORITY + 1, &taskHandle_,
+                              0) != pdPASS) {
     instance_ = nullptr;
     vQueueDelete(acceptedCommandQueue_);
     acceptedCommandQueue_ = nullptr;
