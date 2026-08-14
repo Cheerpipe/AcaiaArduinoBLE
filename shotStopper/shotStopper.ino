@@ -2987,9 +2987,11 @@ void servicePaddleReturnReminder() {
   // Read the GPIO here rather than a debounced state: this reminder describes
   // the physical paddle circuit as it is wired at this instant.
   const bool paddleOnCn9Off = readRawPaddleOn() && !relay.closed;
+  const bool piezoUsable =
+      BUZZER_SUPPORT_ENABLED && localBuzzer.ready;
   const bool shouldRemind =
       runtimeConfig.paddleReturnReminderBeep && paddleOnCn9Off &&
-      (BUZZER_SUPPORT_ENABLED || scaleAvailable());
+      (piezoUsable || scaleAvailable());
   if (!shouldRemind) {
     paddleReturnReminderActive = false;
     paddleReturnReminderLastAtMs = 0;
@@ -3015,11 +3017,18 @@ void servicePaddleReturnReminder() {
   }
   if (elapsedMs(paddleReturnReminderLastAtMs) >=
       runtimeConfig.paddleReturnReminderIntervalMs) {
-    paddleReturnReminderLastAtMs = now;
-    if (BUZZER_SUPPORT_ENABLED) {
-      localBuzzer.request(BuzzerPattern::SINGLE);
-    } else {
+    bool sounded = false;
+    if (piezoUsable) {
+      sounded = localBuzzer.request(BuzzerPattern::SINGLE);
+    }
+    // Prefer the piezo when it can accept the pattern; otherwise keep the
+    // historical scale reminder so a failed ledc init cannot mute the alert.
+    if (!sounded && scaleAvailable()) {
       requestScalePaddleReturnReminderBeep();
+      sounded = true;
+    }
+    if (sounded) {
+      paddleReturnReminderLastAtMs = now;
     }
   }
 }

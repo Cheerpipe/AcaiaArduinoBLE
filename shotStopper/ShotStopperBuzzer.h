@@ -23,6 +23,7 @@ struct LocalBuzzer {
   uint8_t pin = 0;
   bool ready = false;
   BuzzerPattern active = BuzzerPattern::NONE;
+  BuzzerPattern pending = BuzzerPattern::NONE;
   uint8_t beepIndex = 0;
   uint8_t beepCount = 0;
   bool toneOn = false;
@@ -32,16 +33,19 @@ struct LocalBuzzer {
   uint32_t acceptedRequests = 0;
 
   void begin(uint8_t gpioPin);
-  // Queues a pattern only when idle. Returns false if unsupported, not ready,
-  // or already playing.
+  // Starts immediately when idle, otherwise keeps one pending slot. TRIPLE
+  // upgrades a pending SINGLE; a second SINGLE is rejected while TRIPLE is
+  // pending. Returns false if unsupported, not ready, or not accepted.
   bool request(BuzzerPattern pattern);
   void service(uint32_t nowMs);
-  bool busy() const { return active != BuzzerPattern::NONE; }
+  bool busy() const {
+    return active != BuzzerPattern::NONE || pending != BuzzerPattern::NONE;
+  }
 
  private:
   void startTone();
   void stopTone();
-  void finish();
+  void finish(uint32_t nowMs);
   bool startPattern(BuzzerPattern pattern, uint32_t nowMs);
 };
 
@@ -49,6 +53,7 @@ inline void LocalBuzzer::begin(uint8_t gpioPin) {
   pin = gpioPin;
   ready = false;
   active = BuzzerPattern::NONE;
+  pending = BuzzerPattern::NONE;
   beepIndex = 0;
   beepCount = 0;
   toneOn = false;
@@ -96,11 +101,17 @@ inline void LocalBuzzer::stopTone() {
   toneOn = false;
 }
 
-inline void LocalBuzzer::finish() {
+inline void LocalBuzzer::finish(uint32_t nowMs) {
   stopTone();
   active = BuzzerPattern::NONE;
   beepIndex = 0;
   beepCount = 0;
+  if (pending == BuzzerPattern::NONE) {
+    return;
+  }
+  const BuzzerPattern next = pending;
+  pending = BuzzerPattern::NONE;
+  startPattern(next, nowMs);
 }
 
 inline bool LocalBuzzer::startPattern(BuzzerPattern pattern, uint32_t nowMs) {
@@ -123,19 +134,31 @@ inline bool LocalBuzzer::startPattern(BuzzerPattern pattern, uint32_t nowMs) {
 }
 
 inline bool LocalBuzzer::request(BuzzerPattern pattern) {
-  if (!BUZZER_SUPPORT_ENABLED || !ready || pattern == BuzzerPattern::NONE ||
-      busy()) {
+  if (!BUZZER_SUPPORT_ENABLED || !ready || pattern == BuzzerPattern::NONE) {
     return false;
   }
-  if (!startPattern(pattern, millis())) {
-    return false;
+  if (active == BuzzerPattern::NONE) {
+    if (!startPattern(pattern, millis())) {
+      return false;
+    }
+    ++acceptedRequests;
+    return true;
   }
-  ++acceptedRequests;
-  return true;
+  if (pending == BuzzerPattern::NONE) {
+    pending = pattern;
+    ++acceptedRequests;
+    return true;
+  }
+  if (pattern == BuzzerPattern::TRIPLE && pending == BuzzerPattern::SINGLE) {
+    pending = BuzzerPattern::TRIPLE;
+    return true;
+  }
+  // Same pattern already queued, or SINGLE while TRIPLE is pending.
+  return pattern == pending;
 }
 
 inline void LocalBuzzer::service(uint32_t nowMs) {
-  if (!BUZZER_SUPPORT_ENABLED || !ready || !busy()) {
+  if (!BUZZER_SUPPORT_ENABLED || !ready || active == BuzzerPattern::NONE) {
     return;
   }
   const uint32_t elapsed =
@@ -147,7 +170,7 @@ inline void LocalBuzzer::service(uint32_t nowMs) {
     stopTone();
     phaseStartedAtMs = nowMs;
     if (beepIndex + 1U >= beepCount) {
-      finish();
+      finish(nowMs);
     }
     return;
   }
@@ -156,7 +179,7 @@ inline void LocalBuzzer::service(uint32_t nowMs) {
   }
   ++beepIndex;
   if (beepIndex >= beepCount) {
-    finish();
+    finish(nowMs);
     return;
   }
   phaseStartedAtMs = nowMs;

@@ -2095,6 +2095,77 @@ void w54_local_buzzer_triple_on_auto_to_manual_guard_end() {
   CHECK(session.endReason == EndReason::AUTO_TO_MANUAL_GUARD);
 }
 
+void w55_local_buzzer_queues_second_triple_while_busy() {
+  resetHarness(false, false);
+  CHECK(localBuzzer.request(BuzzerPattern::TRIPLE));
+  CHECK(localBuzzer.active == BuzzerPattern::TRIPLE);
+  CHECK(localBuzzer.request(BuzzerPattern::TRIPLE));
+  CHECK(localBuzzer.pending == BuzzerPattern::TRIPLE);
+  CHECK(localBuzzer.acceptedRequests == 2);
+  for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
+    runLoopAfter(40);
+  }
+  CHECK(!localBuzzer.busy());
+  CHECK(localBuzzer.active == BuzzerPattern::NONE);
+  CHECK(localBuzzer.pending == BuzzerPattern::NONE);
+}
+
+void w56_atm_beep_queued_when_scale_lost_after_deadline() {
+  resetHarness(false, true);
+  runtimeConfig.autoToManualGuardEnabled = true;
+  runtimeConfig.autoToManualGuardLimitMode =
+      static_cast<uint8_t>(AutoToManualGuardLimitMode::MANUAL);
+  runtimeConfig.autoToManualGuardManualLimitMs = 15000;
+  reachReadyFromBoot();
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  CHECK(session.autoToManualGuardArmed);
+  CHECK(!session.autoToManualGuardEnforced);
+  // Past the ATM deadline while scale is still up: guard is armed but not
+  // enforced, so the cycle continues until weight control suspends.
+  reachSessionElapsed(16000);
+  CHECK(session.active);
+  CHECK(getRelaySafetySnapshot().closed);
+  const uint32_t before = localBuzzer.acceptedRequests;
+  setScaleConnected(false);
+  loop();
+  CHECK(session.endReason == EndReason::AUTO_TO_MANUAL_GUARD);
+  CHECK(localBuzzer.acceptedRequests == before + 2);
+  CHECK(localBuzzer.pending == BuzzerPattern::TRIPLE ||
+        localBuzzer.active == BuzzerPattern::TRIPLE);
+}
+
+void w57_paddle_return_reminder_falls_back_to_scale_when_piezo_not_ready() {
+  resetHarness(true, true);
+  localBuzzer.ready = false;
+  runLoopAfter(0);
+  CHECK(!getRelaySafetySnapshot().closed);
+  const uint32_t interval = runtimeConfig.paddleReturnReminderIntervalMs;
+  const uint32_t beforeBuzzer = localBuzzer.acceptedRequests;
+  runLoopAfter(interval);
+  CHECK(localBuzzer.acceptedRequests == beforeBuzzer);
+  CHECK(scalePaddleReturnReminderBeepPending);
+  CHECK(executePendingScalePaddleReturnReminderBeep());
+}
+
+void w58_paddle_return_reminder_does_not_advance_interval_when_muted() {
+  resetHarness(true, false);
+  runtimeConfig.paddleReturnReminderIntervalMs = 200;
+  runtimeConfig.paddleReturnReminderMaxDurationMs = 60000;
+  runLoopAfter(0);
+  CHECK(localBuzzer.request(BuzzerPattern::TRIPLE));
+  CHECK(localBuzzer.request(BuzzerPattern::TRIPLE));
+  CHECK(localBuzzer.pending == BuzzerPattern::TRIPLE);
+  runLoopAfter(200);
+  CHECK(localBuzzer.acceptedRequests == 2);
+  CHECK(!scalePaddleReturnReminderBeepPending);
+  // Interval must remain due so a later scale fallback can sound immediately.
+  setScaleConnected(true);
+  runLoopAfter(0);
+  CHECK(scalePaddleReturnReminderBeepPending);
+}
+
 void w37_factory_reset_is_rejected_while_control_is_active() {
   resetHarness(false, false);
   reachReadyFromBoot();
@@ -3823,6 +3894,10 @@ const TestCase testCases[] = {
     {"W52", w52_local_buzzer_triple_on_manual_bbw_without_scale},
     {"W53", w53_local_buzzer_silent_when_bbw_off_without_scale},
     {"W54", w54_local_buzzer_triple_on_auto_to_manual_guard_end},
+    {"W55", w55_local_buzzer_queues_second_triple_while_busy},
+    {"W56", w56_atm_beep_queued_when_scale_lost_after_deadline},
+    {"W57", w57_paddle_return_reminder_falls_back_to_scale_when_piezo_not_ready},
+    {"W58", w58_paddle_return_reminder_does_not_advance_interval_when_muted},
     {"S01", s01_shot_log_filters_short_and_rinse},
     {"S02", s02_shot_log_appends_after_drip_delay},
     {"S03", s03_shot_log_clear_empties_records},
