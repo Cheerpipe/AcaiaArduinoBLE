@@ -522,6 +522,19 @@ void ShotStopperNetwork::mergePreferredScaleMac(PersistedSettings &settings) {
   }
 }
 
+void ShotStopperNetwork::overlayLiveShotSettings(PersistedSettings &settings) {
+  RuntimeConfig liveRuntime = settings.runtime;
+  ShotPresetBank livePresets = settings.presets;
+  if (callbacks_.copyRuntimeConfig != nullptr) {
+    callbacks_.copyRuntimeConfig(&liveRuntime);
+  }
+  if (callbacks_.copyPresetBank != nullptr) {
+    callbacks_.copyPresetBank(&livePresets);
+  }
+  overlayLivePersistedSettings(settings, liveRuntime, livePresets);
+  mergePreferredScaleMac(settings);
+}
+
 void ShotStopperNetwork::syncPreferredScaleMac(const char *mac) {
   syncPreferredScale(mac, nullptr);
 }
@@ -541,6 +554,22 @@ void ShotStopperNetwork::syncPreferredScale(const char *mac, const char *name) {
   strncpy(settings_.preferredScaleName, safeName,
           sizeof(settings_.preferredScaleName) - 1);
   settings_.preferredScaleName[sizeof(settings_.preferredScaleName) - 1] = '\0';
+  portEXIT_CRITICAL(&dataMux_);
+}
+
+void ShotStopperNetwork::syncLiveRuntime(const RuntimeConfig &runtime,
+                                         const ShotPresetBank *presets) {
+  portENTER_CRITICAL(&dataMux_);
+  settings_.runtime = runtime;
+  if (presets != nullptr) {
+    settings_.presets = *presets;
+  }
+  portEXIT_CRITICAL(&dataMux_);
+}
+
+void ShotStopperNetwork::syncDurableStorageRevision(uint32_t storageRevision) {
+  portENTER_CRITICAL(&dataMux_);
+  settings_.storageRevision = storageRevision;
   portEXIT_CRITICAL(&dataMux_);
 }
 
@@ -836,7 +865,7 @@ bool ShotStopperNetwork::confirmPendingNetwork(const char *reason) {
   }
   next.staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
   copyActiveStaToLkg(next);
-  mergePreferredScaleMac(next);
+  overlayLiveShotSettings(next);
   if (!savePersistedSettings(next)) {
     return false;
   }
@@ -875,7 +904,7 @@ bool ShotStopperNetwork::revertPendingNetwork(uint32_t now,
   if (!restoreLkgToActive(next)) {
     clearStaNetwork(next);
   }
-  mergePreferredScaleMac(next);
+  overlayLiveShotSettings(next);
   if (!savePersistedSettings(next)) {
     return false;
   }
@@ -1538,7 +1567,8 @@ bool ShotStopperNetwork::enqueueMaintenanceCompletion(
                            command.type == WebCommandType::CHANGE_AP_PASSWORD ||
                            command.type == WebCommandType::RESET_AP_PASSWORD ||
                            command.type == WebCommandType::RESET_NETWORK_UI ||
-                           command.type == WebCommandType::FACTORY_RESET
+                           command.type == WebCommandType::FACTORY_RESET ||
+                           command.type == WebCommandType::RESTART
                        ? CommandResultState::PERSISTED
                        : CommandResultState::APPLIED)
                 : failureState);
@@ -1668,6 +1698,7 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
       break;
 
     case WebCommandType::RESTART:
+      persist = true;
       restartPending_ = true;
       log(DebugCategory::SECURITY, DebugCode::RESTART_REQUESTED);
       break;
@@ -1688,7 +1719,7 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
   }
 
   if (persist) {
-    mergePreferredScaleMac(next);
+    overlayLiveShotSettings(next);
     if (!savePersistedSettings(next)) {
       restartPending_ = false;
       apRestartPending_ = false;
@@ -2576,7 +2607,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"unsafeResetCount\":%lu,\"recoveryRequired\":%s,"
       "\"bootLoopDetected\":%s},"
       "\"maintenance\":{\"active\":%s,\"leaseId\":%lu,"
-      "\"startedAtMs\":%lu},"
+      "\"startedAtMs\":%lu,\"persistPending\":%s,\"persistFailed\":%s},"
       "\"configMutable\":%s,\"config\":{\"revision\":%lu,"
       "\"goalWeightG\":%u,\"weightOffsetG\":%.2f,"
       "\"weightOffsetBaselineG\":%.2f,\"autoTare\":%s,\"brewByWeight\":%s,"
@@ -2698,6 +2729,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.maintenanceLeaseActive ? "true" : "false",
       static_cast<unsigned long>(control.maintenanceLeaseId),
       static_cast<unsigned long>(control.maintenanceStartedAtMs),
+      control.configPersistPending ? "true" : "false",
+      control.configPersistFailed ? "true" : "false",
       controlAllowsConfiguration(control) ? "true" : "false",
       static_cast<unsigned long>(control.config.revision),
       static_cast<unsigned>(control.config.goalWeightG),

@@ -8,6 +8,10 @@
 #else
 #include <Preferences.h>
 #include <esp_random.h>
+#include <esp_task_wdt.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
 #include <mbedtls/sha256.h>
 #endif
 
@@ -3128,13 +3132,82 @@ inline bool loadPersistedSettings(PersistedSettings &settings,
   return true;
 }
 
+#if !defined(SHOT_STOPPER_HOST_TEST) &&                                        \
+    !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
+inline SemaphoreHandle_t settingsNvsMutexHandle() {
+  static SemaphoreHandle_t handle = xSemaphoreCreateMutex();
+  return handle;
+}
+
+inline void lockSettingsNvs() {
+  SemaphoreHandle_t handle = settingsNvsMutexHandle();
+  if (handle != nullptr) {
+    xSemaphoreTake(handle, portMAX_DELAY);
+  }
+}
+
+inline void unlockSettingsNvs() {
+  SemaphoreHandle_t handle = settingsNvsMutexHandle();
+  if (handle != nullptr) {
+    xSemaphoreGive(handle);
+  }
+}
+
+inline void yieldSettingsNvs() { vTaskDelay(pdMS_TO_TICKS(1)); }
+
+inline void feedSettingsNvsWatchdog() { (void)esp_task_wdt_reset(); }
+#else
+inline void lockSettingsNvs() {}
+inline void unlockSettingsNvs() {}
+inline void yieldSettingsNvs() {}
+inline void feedSettingsNvsWatchdog() {}
+#endif
+
+inline void overlayLivePersistedSettings(PersistedSettings &settings,
+                                         const RuntimeConfig &runtime,
+                                         const ShotPresetBank &presets) {
+  settings.runtime = runtime;
+  settings.presets = presets;
+}
+
+inline uint32_t &durableStorageRevision() {
+  static uint32_t revision = 0;
+  return revision;
+}
+
+inline bool &durableStorageRevisionValid() {
+  static bool valid = false;
+  return valid;
+}
+
+inline void noteDurableStorageRevision(uint32_t revision) {
+  lockSettingsNvs();
+  durableStorageRevision() = revision;
+  durableStorageRevisionValid() = revision != 0;
+  unlockSettingsNvs();
+}
+
+inline void resetDurableStorageRevision() {
+  lockSettingsNvs();
+  durableStorageRevision() = 0;
+  durableStorageRevisionValid() = false;
+  unlockSettingsNvs();
+}
+
 inline bool savePersistedSettings(PersistedSettings &settings) {
   PersistedSettings &candidate = persistedSettingsScratch(2);
   PersistedSettings &current = persistedSettingsScratch(0);
   candidate = settings;
-  current = PersistedSettings{};
-  if (loadPersistedSettings(current)) {
-    candidate.storageRevision = current.storageRevision;
+  yieldSettingsNvs();
+  feedSettingsNvsWatchdog();
+  lockSettingsNvs();
+  if (durableStorageRevisionValid()) {
+    candidate.storageRevision = durableStorageRevision();
+  } else if (candidate.storageRevision == 0) {
+    current = PersistedSettings{};
+    if (loadPersistedSettings(current)) {
+      candidate.storageRevision = current.storageRevision;
+    }
   }
   ++candidate.storageRevision;
   if (candidate.storageRevision == 0) {
@@ -3144,6 +3217,8 @@ inline bool savePersistedSettings(PersistedSettings &settings) {
 
   Preferences preferences;
   if (!preferences.begin(SETTINGS_NAMESPACE, false)) {
+    unlockSettingsNvs();
+    feedSettingsNvsWatchdog();
     return false;
   }
   const char *target =
@@ -3159,8 +3234,13 @@ inline bool savePersistedSettings(PersistedSettings &settings) {
                      memcmp(&verified, &candidate, sizeof(candidate)) == 0;
   preferences.end();
   if (saved) {
+    durableStorageRevision() = candidate.storageRevision;
+    durableStorageRevisionValid() = true;
     settings = candidate;
   }
+  unlockSettingsNvs();
+  yieldSettingsNvs();
+  feedSettingsNvsWatchdog();
   return saved;
 }
 
@@ -3186,12 +3266,15 @@ inline bool resetPersistedSettingsToFactory(PersistedSettings &settings) {
   second.storageRevision = 2;
   finalizePersistedSettings(second);
 
+  lockSettingsNvs();
   Preferences preferences;
   if (!preferences.begin(SETTINGS_NAMESPACE, false)) {
+    unlockSettingsNvs();
     return false;
   }
   if (!preferences.clear()) {
     preferences.end();
+    unlockSettingsNvs();
     return false;
   }
   const bool firstSaved =
@@ -3212,11 +3295,13 @@ inline bool resetPersistedSettingsToFactory(PersistedSettings &settings) {
       secondSaved && readSettingsSlot(preferences, SETTINGS_SLOT_B,
                                       verifiedSecond);
   preferences.end();
+  unlockSettingsNvs();
 
   if (!firstVerified && !secondVerified) {
     return false;
   }
   settings = secondVerified ? verifiedSecond : verifiedFirst;
+  noteDurableStorageRevision(settings.storageRevision);
   return true;
 }
 

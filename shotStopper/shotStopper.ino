@@ -77,6 +77,8 @@ constexpr uint32_t SCALE_STOP_RETRY_WINDOW_MS = 5000;
 constexpr uint8_t SCALE_STOP_MAX_ATTEMPTS = 3;
 constexpr uint32_t MAINTENANCE_LEASE_SETTLE_MS = 100;
 constexpr uint32_t RUNTIME_PERSIST_RETRY_MS = 500;
+constexpr uint32_t RUNTIME_PERSIST_DEBOUNCE_MS = 300;
+constexpr uint32_t SETTINGS_PERSIST_IDLE_WAIT_MS = 1000;
 constexpr uint32_t HEALTH_TELEMETRY_INTERVAL_MS = 5000;
 #if SHOT_STOPPER_ENABLE_ALED == 1
 constexpr uint32_t STATUS_INDICATOR_TASK_STACK_SIZE = 3072;
@@ -566,13 +568,33 @@ bool hostForwardAcceptedNetworkCommandSucceeds = true;
 uint32_t hostForwardAcceptedNetworkCommandCalls = 0;
 WebCommand hostLastForwardedNetworkCommand;
 uint32_t hostNtpSyncRequestCount = 0;
+bool hostRuntimePersistSucceeds = true;
+uint32_t hostRuntimePersistAttempts = 0;
+RuntimeConfig hostLastFlushedRuntime;
+ShotPresetBank hostLastFlushedPresets;
+bool hostLastFlushIncludedLive = false;
 #endif
 bool runtimePersistPending = false;
+bool runtimePersistFailed = false;
 RuntimeConfig runtimePersistCandidate;
 uint32_t runtimePersistRequestId = 0;
 uint32_t runtimePersistRetryAtMs = 0;
 int32_t runtimePersistReasonBits = 0;
 uint32_t nextInternalRequestId = 0x80000000UL;
+#ifndef SHOT_STOPPER_HOST_TEST
+struct SettingsPersistRequest {
+  PersistedSettings blob;
+  uint32_t runtimeRevision = 0;
+};
+QueueHandle_t settingsPersistQueue = nullptr;
+TaskHandle_t settingsPersistTaskHandle = nullptr;
+portMUX_TYPE settingsPersistMux = portMUX_INITIALIZER_UNLOCKED;
+bool settingsPersistInFlight = false;
+bool settingsPersistResultReady = false;
+bool settingsPersistResultOk = false;
+uint32_t settingsPersistResultRuntimeRevision = 0;
+uint32_t settingsPersistResultStorageRevision = 0;
+#endif
 uint32_t lastLoopAtMs = 0;
 uint32_t loopMaxGapMs = 0;
 uint32_t healthIntervalMaxGapMs = 0;
@@ -594,6 +616,8 @@ bool firmwareInitializationComplete = false;
 bool beginMaintenanceLease(const WebCommand &networkCommand,
                            bool applyRuntimeOnSuccess);
 void completeMaintenanceLease(const WebCommand &result);
+void queueRuntimePersist(int32_t reasonBits);
+void commitLiveRuntimeConfig(const RuntimeConfig &composed, int32_t reasonBits);
 
 #ifndef SHOT_STOPPER_HOST_TEST
 PersistedSettings persistedSettings;
@@ -917,6 +941,13 @@ void copyPresetBank(ShotPresetBank *out) {
     return;
   }
   *out = presetBank;
+}
+
+void copyRuntimeConfig(RuntimeConfig *out) {
+  if (out == nullptr) {
+    return;
+  }
+  *out = runtimeConfig;
 }
 
 
@@ -2722,8 +2753,7 @@ void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
   }
   pushAutoToManualGuardSample(preset->autoToManualGuardSamplesDs,
                               snapshot.durationDs);
-  RuntimeConfig candidate =
-      runtimePersistPending ? runtimePersistCandidate : runtimeConfig;
+  RuntimeConfig candidate = runtimeConfig;
   applyShotPresetToConfig(activeShotPreset(presetBank), candidate, true);
   if (preset->id == presetBank.activeId) {
     memcpy(candidate.autoToManualGuardSamplesDs, preset->autoToManualGuardSamplesDs,
@@ -2733,10 +2763,7 @@ void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
   if (candidate.revision == 0) {
     candidate.revision = 1;
   }
-  runtimePersistCandidate = candidate;
-  runtimePersistPending = true;
-  runtimePersistRetryAtMs = millis();
-  runtimePersistReasonBits |= RUNTIME_PERSIST_REASON_ATM_SAMPLES;
+  commitLiveRuntimeConfig(candidate, RUNTIME_PERSIST_REASON_ATM_SAMPLES);
   serialTracef(LogLevel::INFO, "A->M guard sample queued; trend ms=%lu",
                static_cast<unsigned long>(autoToManualGuardTrendMs(
                    preset->autoToManualGuardSamplesDs,
@@ -2835,17 +2862,13 @@ void pendingShotFinalizeTask() {
     return;
   }
   preset->weightOffsetG = updatedOffset;
-  RuntimeConfig candidate =
-      runtimePersistPending ? runtimePersistCandidate : runtimeConfig;
+  RuntimeConfig candidate = runtimeConfig;
   applyShotPresetToConfig(activeShotPreset(presetBank), candidate, true);
   ++candidate.revision;
   if (candidate.revision == 0) {
     candidate.revision = 1;
   }
-  runtimePersistCandidate = candidate;
-  runtimePersistPending = true;
-  runtimePersistRetryAtMs = millis();
-  runtimePersistReasonBits |= RUNTIME_PERSIST_REASON_OFFSET;
+  commitLiveRuntimeConfig(candidate, RUNTIME_PERSIST_REASON_OFFSET);
   serialTracef(LogLevel::INFO, "New offset pending durable commit: %.2f",
                preset->weightOffsetG);
 }
@@ -3609,22 +3632,26 @@ void servicePreferredScaleMacPersistence() {
     portEXIT_CRITICAL(&scalePreferredMacMux);
     return;
   }
+  bool persistBusy = false;
+  portENTER_CRITICAL(&settingsPersistMux);
+  persistBusy = settingsPersistInFlight || settingsPersistResultReady;
+  portEXIT_CRITICAL(&settingsPersistMux);
+  if (persistBusy) {
+    return;
+  }
   memcpy(persistedSettings.preferredScaleMac, mac,
          sizeof(persistedSettings.preferredScaleMac));
   memcpy(persistedSettings.preferredScaleName, name,
          sizeof(persistedSettings.preferredScaleName));
-  finalizePersistedSettings(persistedSettings);
-  if (!savePersistedSettings(persistedSettings)) {
-    return;
+  if (!runtimePersistPending ||
+      (runtimePersistReasonBits & RUNTIME_PERSIST_REASON_SCALE_MAC) == 0) {
+    queueRuntimePersist(RUNTIME_PERSIST_REASON_SCALE_MAC);
   }
-  portENTER_CRITICAL(&scalePreferredMacMux);
-  scalePreferredMacDirty = false;
-  portEXIT_CRITICAL(&scalePreferredMacMux);
   networkManager.syncPreferredScale(mac, name);
   if (mac[0] == '\0') {
-    serialTrace(LogLevel::INFO, "Preferred scale MAC cleared in NVS");
+    serialTrace(LogLevel::INFO, "Preferred scale MAC cleared; persist queued");
   } else {
-    serialTracef(LogLevel::INFO, "Preferred scale MAC saved: %s — %s",
+    serialTracef(LogLevel::INFO, "Preferred scale MAC queued: %s — %s",
                  name[0] != '\0' ? name : "(unknown)", mac);
   }
 #endif
@@ -4744,31 +4771,203 @@ void serviceMaintenanceLease() {
     result.maintenanceLeaseId = maintenanceLease.id;
     result.config = maintenanceLease.command.config;
     result.succeeded = true;
+    const WebCommandType forwardedType = maintenanceLease.command.type;
+    if (forwardedType == WebCommandType::SAVE_NETWORK ||
+        forwardedType == WebCommandType::FORGET_NETWORK ||
+        forwardedType == WebCommandType::CHANGE_AP_PASSWORD ||
+        forwardedType == WebCommandType::RESET_AP_PASSWORD ||
+        forwardedType == WebCommandType::RESET_NETWORK_UI ||
+        forwardedType == WebCommandType::RESTART) {
+      hostLastFlushedRuntime = runtimeConfig;
+      hostLastFlushedPresets = presetBank;
+      hostLastFlushIncludedLive = true;
+      ++hostRuntimePersistAttempts;
+      if (!hostRuntimePersistSucceeds) {
+        result.succeeded = false;
+        runtimePersistFailed = true;
+        runtimePersistPending = true;
+        runtimePersistRetryAtMs = millis() + RUNTIME_PERSIST_RETRY_MS;
+      } else {
+        runtimePersistPending = false;
+        runtimePersistReasonBits = 0;
+        runtimePersistFailed = false;
+      }
+    }
     completeMaintenanceLease(result);
 #endif
   }
 }
 
+void queueRuntimePersist(int32_t reasonBits) {
+  runtimePersistPending = true;
+  runtimePersistReasonBits |= reasonBits;
+  runtimePersistRetryAtMs = millis() + RUNTIME_PERSIST_DEBOUNCE_MS;
+}
+
+void commitLiveRuntimeConfig(const RuntimeConfig &composed, int32_t reasonBits) {
+  runtimeConfig = composed;
+  addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED,
+                static_cast<int32_t>(runtimeConfig.revision));
+  requestBookooSilenceIfConfigured();
+  queueRuntimePersist(reasonBits);
+#ifndef SHOT_STOPPER_HOST_TEST
+  networkManager.syncLiveRuntime(runtimeConfig, &presetBank);
+#endif
+}
+
+#ifndef SHOT_STOPPER_HOST_TEST
+void settingsPersistTask(void *parameter) {
+  (void)parameter;
+  if (!subscribeCurrentTaskToWatchdog()) {
+    reportTaskWatchdogFault();
+  }
+  SettingsPersistRequest request;
+  for (;;) {
+    // Must not block forever: this task is subscribed to the TWDT.
+    if (xQueueReceive(settingsPersistQueue, &request,
+                      pdMS_TO_TICKS(SETTINGS_PERSIST_IDLE_WAIT_MS)) !=
+        pdTRUE) {
+      (void)feedCurrentTaskWatchdog();
+      continue;
+    }
+    yieldSettingsNvs();
+    (void)feedCurrentTaskWatchdog();
+    const bool ok = savePersistedSettings(request.blob);
+    (void)feedCurrentTaskWatchdog();
+    portENTER_CRITICAL(&settingsPersistMux);
+    settingsPersistResultReady = true;
+    settingsPersistResultOk = ok;
+    settingsPersistResultRuntimeRevision = request.runtimeRevision;
+    settingsPersistResultStorageRevision =
+        ok ? request.blob.storageRevision : 0;
+    portEXIT_CRITICAL(&settingsPersistMux);
+  }
+}
+
+void serviceSettingsPersistResult() {
+  bool ready = false;
+  bool ok = false;
+  uint32_t runtimeRevision = 0;
+  uint32_t storageRevision = 0;
+  portENTER_CRITICAL(&settingsPersistMux);
+  ready = settingsPersistResultReady;
+  if (ready) {
+    settingsPersistResultReady = false;
+    ok = settingsPersistResultOk;
+    runtimeRevision = settingsPersistResultRuntimeRevision;
+    storageRevision = settingsPersistResultStorageRevision;
+    settingsPersistInFlight = false;
+  }
+  portEXIT_CRITICAL(&settingsPersistMux);
+  if (!ready) {
+    return;
+  }
+  if (ok) {
+    persistedSettings.storageRevision = storageRevision;
+    networkManager.syncDurableStorageRevision(storageRevision);
+    runtimePersistFailed = false;
+    addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_PERSISTED,
+                  static_cast<int32_t>(runtimeRevision));
+    char liveMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+    char liveName[PREFERRED_SCALE_NAME_CAPACITY] = {};
+    copyPreferredScaleMac(liveMac, sizeof(liveMac));
+    copyPreferredScaleName(liveName, sizeof(liveName));
+    if (strncmp(persistedSettings.preferredScaleMac, liveMac,
+                PREFERRED_SCALE_MAC_CAPACITY) == 0 &&
+        strncmp(persistedSettings.preferredScaleName, liveName,
+                PREFERRED_SCALE_NAME_CAPACITY) == 0) {
+      portENTER_CRITICAL(&scalePreferredMacMux);
+      scalePreferredMacDirty = false;
+      portEXIT_CRITICAL(&scalePreferredMacMux);
+    } else {
+      runtimePersistPending = true;
+      runtimePersistReasonBits |= RUNTIME_PERSIST_REASON_SCALE_MAC;
+    }
+    if (runtimeConfig.revision != runtimeRevision) {
+      runtimePersistPending = true;
+      runtimePersistRetryAtMs = millis();
+    } else if (!runtimePersistPending) {
+      runtimePersistReasonBits = 0;
+    }
+  } else {
+    addDebugEvent(DebugCategory::CONFIG, DebugCode::RUNTIME_PERSIST_FAILED,
+                  static_cast<int32_t>(runtimeRevision),
+                  runtimePersistReasonBits);
+    runtimePersistFailed = true;
+    runtimePersistPending = true;
+    runtimePersistRetryAtMs = millis() + RUNTIME_PERSIST_RETRY_MS;
+  }
+}
+
+bool dispatchSettingsPersist() {
+  if (settingsPersistQueue == nullptr || settingsPersistInFlight) {
+    if (settingsPersistQueue == nullptr) {
+      runtimePersistFailed = true;
+    }
+    return false;
+  }
+  SettingsPersistRequest request;
+  request.blob = networkManager.settingsCopy();
+  request.blob.runtime = runtimeConfig;
+  request.blob.presets = presetBank;
+  copyPreferredScaleMac(request.blob.preferredScaleMac,
+                        sizeof(request.blob.preferredScaleMac));
+  copyPreferredScaleName(request.blob.preferredScaleName,
+                         sizeof(request.blob.preferredScaleName));
+  memcpy(persistedSettings.preferredScaleMac, request.blob.preferredScaleMac,
+         sizeof(persistedSettings.preferredScaleMac));
+  memcpy(persistedSettings.preferredScaleName, request.blob.preferredScaleName,
+         sizeof(persistedSettings.preferredScaleName));
+  request.runtimeRevision = runtimeConfig.revision;
+  if (xQueueSend(settingsPersistQueue, &request, 0) != pdTRUE) {
+    return false;
+  }
+  portENTER_CRITICAL(&settingsPersistMux);
+  settingsPersistInFlight = true;
+  portEXIT_CRITICAL(&settingsPersistMux);
+  runtimePersistPending = false;
+  return true;
+}
+#endif
+
 void serviceRuntimePersistence() {
+#ifndef SHOT_STOPPER_HOST_TEST
+  serviceSettingsPersistResult();
+  bool inFlight = false;
+  portENTER_CRITICAL(&settingsPersistMux);
+  inFlight = settingsPersistInFlight;
+  portEXIT_CRITICAL(&settingsPersistMux);
+  if (!runtimePersistPending || inFlight || maintenanceLease.active ||
+      static_cast<int32_t>(millis() - runtimePersistRetryAtMs) < 0 ||
+      !controlAllowsConfigurationNow()) {
+    return;
+  }
+  if (!dispatchSettingsPersist()) {
+    runtimePersistRetryAtMs = millis() + RUNTIME_PERSIST_RETRY_MS;
+  }
+#else
   if (!runtimePersistPending || maintenanceLease.active ||
       static_cast<int32_t>(millis() - runtimePersistRetryAtMs) < 0 ||
       !controlAllowsConfigurationNow()) {
     return;
   }
-  WebCommand persist;
-  persist.type = WebCommandType::PERSIST_RUNTIME;
-  persist.requestId = nextInternalRequestId++;
-  if (nextInternalRequestId < 0x80000000UL) {
-    nextInternalRequestId = 0x80000000UL;
-  }
-  persist.config = runtimePersistCandidate;
-  persist.persistPresets = true;
-  if (beginMaintenanceLease(persist, true)) {
-    runtimePersistPending = false;
-    runtimePersistRequestId = persist.requestId;
-  } else {
+  ++hostRuntimePersistAttempts;
+  if (!hostRuntimePersistSucceeds) {
+    addDebugEvent(DebugCategory::CONFIG, DebugCode::RUNTIME_PERSIST_FAILED,
+                  static_cast<int32_t>(runtimeConfig.revision),
+                  runtimePersistReasonBits);
+    runtimePersistFailed = true;
+    runtimePersistPending = true;
     runtimePersistRetryAtMs = millis() + RUNTIME_PERSIST_RETRY_MS;
+    return;
   }
+  hostLastFlushedRuntime = runtimeConfig;
+  hostLastFlushedPresets = presetBank;
+  hostLastFlushIncludedLive = true;
+  runtimePersistPending = false;
+  runtimePersistReasonBits = 0;
+  runtimePersistFailed = false;
+#endif
 }
 
 void completeMaintenanceLease(const WebCommand &result) {
@@ -4779,7 +4978,7 @@ void completeMaintenanceLease(const WebCommand &result) {
     return;
   }
   if (result.succeeded && maintenanceLease.applyRuntimeOnSuccess) {
-    runtimeConfig = result.config;
+    // Live runtime is apply-first. Never copy persist results over RAM.
     addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED,
                   static_cast<int32_t>(runtimeConfig.revision));
     if (maintenanceLease.command.type == WebCommandType::PERSIST_RUNTIME) {
@@ -4947,6 +5146,7 @@ void processWebCommand(const WebCommand &command) {
       RuntimeConfig composed = composeEffectiveConfig(candidate, presetBank);
       if (validateRuntimeConfig(composed) != ConfigValidationError::NONE) {
         addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
+        rejectWebCommand(command);
         return;
       }
       composed.revision = runtimeConfig.revision + 1;
@@ -4955,14 +5155,8 @@ void processWebCommand(const WebCommand &command) {
       }
       ensureShotPresetBank(presetBank, composed.retareWindowMs,
                            composed.autoRetare);
-      WebCommand persist;
-      persist.type = WebCommandType::PERSIST_RUNTIME;
-      persist.requestId = command.requestId;
-      persist.config = composed;
-      persist.persistPresets = true;
-      if (!beginMaintenanceLease(persist, true)) {
-        rejectWebCommand(command);
-      }
+      commitLiveRuntimeConfig(composed, RUNTIME_PERSIST_REASON_USER);
+      reportControlCommandResult(command, CommandResultState::APPLIED);
       return;
     }
 
@@ -4980,14 +5174,8 @@ void processWebCommand(const WebCommand &command) {
       if (candidate.revision == 0) {
         candidate.revision = 1;
       }
-      WebCommand persist;
-      persist.type = WebCommandType::PERSIST_RUNTIME;
-      persist.requestId = command.requestId;
-      persist.config = candidate;
-      persist.persistPresets = true;
-      if (!beginMaintenanceLease(persist, true)) {
-        rejectWebCommand(command);
-      }
+      commitLiveRuntimeConfig(candidate, RUNTIME_PERSIST_REASON_USER);
+      reportControlCommandResult(command, CommandResultState::APPLIED);
       return;
     }
 
@@ -5008,14 +5196,8 @@ void processWebCommand(const WebCommand &command) {
       }
       addDebugEvent(DebugCategory::CONFIG,
                     DebugCode::AUTO_TO_MANUAL_GUARD_SAMPLES_RESET);
-      WebCommand persist;
-      persist.type = WebCommandType::PERSIST_RUNTIME;
-      persist.requestId = command.requestId;
-      persist.config = candidate;
-      persist.persistPresets = true;
-      if (!beginMaintenanceLease(persist, true)) {
-        rejectWebCommand(command);
-      }
+      commitLiveRuntimeConfig(candidate, RUNTIME_PERSIST_REASON_USER);
+      reportControlCommandResult(command, CommandResultState::APPLIED);
       return;
     }
 
@@ -5084,14 +5266,8 @@ void processWebCommand(const WebCommand &command) {
       if (candidate.revision == 0) {
         candidate.revision = 1;
       }
-      WebCommand persist;
-      persist.type = WebCommandType::PERSIST_RUNTIME;
-      persist.requestId = command.requestId;
-      persist.config = candidate;
-      persist.persistPresets = true;
-      if (!beginMaintenanceLease(persist, true)) {
-        rejectWebCommand(command);
-      }
+      commitLiveRuntimeConfig(candidate, RUNTIME_PERSIST_REASON_USER);
+      reportControlCommandResult(command, CommandResultState::APPLIED);
       return;
     }
 
@@ -5320,6 +5496,15 @@ void publishControlStatus() {
   }
   next.noScaleShotGuardEnabled = runtimeConfig.avoidBbwShotWithoutScale;
   next.noScaleShotGuardArmed = noScaleShotGuardArmed;
+  next.configPersistPending = runtimePersistPending;
+  next.configPersistFailed = runtimePersistFailed;
+#ifndef SHOT_STOPPER_HOST_TEST
+  portENTER_CRITICAL(&settingsPersistMux);
+  next.configPersistPending =
+      runtimePersistPending || settingsPersistInFlight ||
+      settingsPersistResultReady;
+  portEXIT_CRITICAL(&settingsPersistMux);
+#endif
   portENTER_CRITICAL(&debugLogMux);
   next.debugEventsDropped = debugLog.overwritten();
   portEXIT_CRITICAL(&debugLogMux);
@@ -5611,6 +5796,7 @@ void setup() {
   if (persistenceReady &&
       loadPersistedSettings(persistedSettings, &configMigrated)) {
     settingsLoaded = true;
+    noteDurableStorageRevision(persistedSettings.storageRevision);
     if (configMigrated) {
       if (savePersistedSettings(persistedSettings)) {
         addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_MIGRATED);
@@ -5716,6 +5902,20 @@ void setup() {
             BOOT_SUBSYSTEM_WEB_QUEUE, 1);
   }
 
+#ifndef SHOT_STOPPER_HOST_TEST
+  settingsPersistQueue =
+      xQueueCreate(1, sizeof(SettingsPersistRequest));
+  if (settingsPersistQueue == nullptr ||
+      xTaskCreatePinnedToCore(
+          settingsPersistTask, "settings_persist", 8192, nullptr,
+          tskIDLE_PRIORITY, &settingsPersistTaskHandle,
+          CONTROL_TASK_CORE) != pdPASS) {
+    settingsPersistTaskHandle = nullptr;
+    logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_SETTINGS_SAVE, 0);
+  }
+#endif
+
   hwmonSnapshot = hwmon.sample(1);
   publishControlStatus();
 #ifndef SHOT_STOPPER_HOST_TEST
@@ -5734,6 +5934,7 @@ void setup() {
     callbacks.copyPreferredScaleMac = copyPreferredScaleMac;
     callbacks.copyPreferredScaleName = copyPreferredScaleName;
     callbacks.copyPresetBank = copyPresetBank;
+    callbacks.copyRuntimeConfig = copyRuntimeConfig;
     if (!networkManager.begin(persistedSettings, callbacks)) {
       logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
               BOOT_SUBSYSTEM_NETWORK, 0);

@@ -24,6 +24,11 @@ int testsRun = 0;
     }                                                                         \
   } while (false)
 
+void resetHostPersistence() {
+  persistence_host::reset();
+  resetDurableStorageRevision();
+}
+
 PersistedSettingsV12 makeSchemaTwelveRecord(const PersistedSettings &source,
                                             uint32_t storageRevision) {
   PersistedSettingsV12 legacy = {};
@@ -72,7 +77,7 @@ PersistedSettingsV12 makeSchemaTwelveRecord(const PersistedSettings &source,
 }
 
 void p01_defaults_are_valid_v16() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings settings;
   CHECK(initializeDefaultSettings(settings));
   CHECK(settings.schemaVersion == CONFIG_SCHEMA_VERSION);
@@ -127,7 +132,7 @@ void p01_defaults_are_valid_v16() {
 }
 
 void p02_newest_valid_slot_is_loaded() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings settings;
   CHECK(initializeDefaultSettings(settings));
   CHECK(savePersistedSettings(settings));
@@ -142,8 +147,45 @@ void p02_newest_valid_slot_is_loaded() {
   CHECK(loaded.runtime.goalWeightG == 47);
 }
 
+void p02b_save_uses_ram_revision_when_slots_unreadable() {
+  resetHostPersistence();
+  PersistedSettings settings;
+  CHECK(initializeDefaultSettings(settings));
+  CHECK(savePersistedSettings(settings));
+  CHECK(settings.storageRevision != 0);
+  persistence_host::records.clear();
+  settings.runtime.goalWeightG = 41;
+  settings.runtime.maxRecoveryWeightG = 50.0f;
+  CHECK(savePersistedSettings(settings));
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(loaded.runtime.goalWeightG == 41);
+  CHECK(loaded.storageRevision == settings.storageRevision);
+}
+
+void p02c_overlay_live_runtime_is_saved_not_stale_blob() {
+  resetHostPersistence();
+  PersistedSettings stale;
+  CHECK(initializeDefaultSettings(stale));
+  stale.runtime.goalWeightG = 36;
+  CHECK(savePersistedSettings(stale));
+
+  RuntimeConfig live = stale.runtime;
+  live.goalWeightG = 44;
+  live.maxRecoveryWeightG = 53.0f;
+  ShotPresetBank livePresets = stale.presets;
+  overlayLivePersistedSettings(stale, live, livePresets);
+  CHECK(stale.runtime.goalWeightG == 44);
+  CHECK(savePersistedSettings(stale));
+
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(loaded.runtime.goalWeightG == 44);
+  CHECK(loaded.storageRevision == stale.storageRevision);
+}
+
 void p03_corrupt_newest_slot_falls_back() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings settings;
   CHECK(initializeDefaultSettings(settings));
   settings.runtime.goalWeightG = 40;
@@ -160,7 +202,7 @@ void p03_corrupt_newest_slot_falls_back() {
 }
 
 void p04_crc_and_semantic_validation_reject_corruption() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings settings;
   CHECK(initializeDefaultSettings(settings));
   settings.runtime.goalWeightG = 50;
@@ -171,7 +213,7 @@ void p04_crc_and_semantic_validation_reject_corruption() {
 }
 
 void p05_password_change_updates_hash() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings settings;
   CHECK(initializeDefaultSettings(settings));
   CHECK(!refreshAuthentication(settings, DEFAULT_AP_PASSWORD));
@@ -183,7 +225,7 @@ void p05_password_change_updates_hash() {
 }
 
 void p17_legacy_password_hash_still_verifies() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings settings;
   CHECK(initializeDefaultSettings(settings));
   CHECK(calculatePasswordHashLegacy(settings.authSalt, settings.apPassword,
@@ -194,7 +236,7 @@ void p17_legacy_password_hash_still_verifies() {
 }
 
 void p18_shot_log_keeps_history_when_inactive_slot_write_fails() {
-  persistence_host::reset();
+  resetHostPersistence();
   ShotLog log;
   CHECK(log.load());
   ShotLogRecord record = {};
@@ -225,7 +267,7 @@ void p19_shot_log_weight_sentinel_allows_int16_max() {
 }
 
 void p29_last_shot_persists_and_clears() {
-  persistence_host::reset();
+  resetHostPersistence();
   LastShotStore store;
   CHECK(store.load());
   CHECK(!store.get().valid);
@@ -257,7 +299,7 @@ void p29_last_shot_persists_and_clears() {
 }
 
 void p06_schema_twelve_migrates_to_thirteen() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings previous;
   CHECK(initializeDefaultSettings(previous));
   previous.runtime.goalWeightG = 52;
@@ -286,13 +328,13 @@ void p06_schema_twelve_migrates_to_thirteen() {
 }
 
 void p07_invalid_schema_uses_factory_on_missing_slots() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings loaded;
   CHECK(!loadPersistedSettings(loaded));
 }
 
 void p08_factory_reset_rebuilds_defaults() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings settings;
   CHECK(initializeDefaultSettings(settings));
   settings.runtime.goalWeightG = 63;
@@ -372,7 +414,7 @@ void p10_auto_to_manual_guard_trend_and_validation() {
 }
 
 void p11_schema_thirteen_migrates_to_current() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
   PersistedSettingsV13 legacy = {};
@@ -437,7 +479,7 @@ void p11_schema_thirteen_migrates_to_current() {
 }
 
 void p12_shot_log_persists_compact_blob() {
-  persistence_host::reset();
+  resetHostPersistence();
   ShotLog log;
   CHECK(log.load());
   ShotLogRecord record = {};
@@ -469,7 +511,7 @@ void p12_shot_log_persists_compact_blob() {
 }
 
 void p13_shot_log_migrates_v5_full_blob_to_compact() {
-  persistence_host::reset();
+  resetHostPersistence();
   ShotLogStoreV5 legacy = {};
   legacy.header.bootId = 9;
   legacy.header.nextRecordId = 2;
@@ -500,7 +542,7 @@ void p13_shot_log_migrates_v5_full_blob_to_compact() {
 }
 
 void p14_schema_fourteen_migrates_to_current() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
   PersistedSettingsV14 legacy = {};
@@ -578,7 +620,7 @@ void p14_schema_fourteen_migrates_to_current() {
 }
 
 void p15_schema_fifteen_migrates_to_sixteen() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
   PersistedSettingsV15 legacy = {};
@@ -656,7 +698,7 @@ void p15_schema_fifteen_migrates_to_sixteen() {
 }
 
 void p20_schema_sixteen_migrates_to_seventeen() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
   PersistedSettingsV16 legacy = {};
@@ -734,7 +776,7 @@ void p20_schema_sixteen_migrates_to_seventeen() {
 }
 
 void p21_schema_seventeen_migrates_to_current() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
   PersistedSettingsV17 legacy = {};
@@ -825,7 +867,7 @@ void p21_schema_seventeen_migrates_to_current() {
 }
 
 void p22_schema_eighteen_migrates_to_nineteen() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
   PersistedSettingsV18 legacy = {};
@@ -914,7 +956,7 @@ void p22_schema_eighteen_migrates_to_nineteen() {
 
 
 void p23_schema_nineteen_migrates_to_twenty_with_preset_bank() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
   PersistedSettingsV19 legacy = {};
@@ -1011,7 +1053,7 @@ void p23_schema_nineteen_migrates_to_twenty_with_preset_bank() {
 }
 
 void p27_schema_twenty_migrates_to_twenty_one() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
   ensurePersistedPresetBank(current);
@@ -1096,7 +1138,7 @@ void p27_schema_twenty_migrates_to_twenty_one() {
 }
 
 void p28_schema_twenty_one_migrates_to_twenty_two() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
   ensurePersistedPresetBank(current);
@@ -1189,7 +1231,7 @@ void p28_schema_twenty_one_migrates_to_twenty_two() {
 }
 
 void p30_schema_twenty_two_migrates_to_twenty_three() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
   ensurePersistedPresetBank(current);
@@ -1339,7 +1381,7 @@ void fillRuntimeConfigV23FromCurrent(const RuntimeConfig &source,
 }
 
 void p31_schema_twenty_three_migrates_to_twenty_four() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
   ensurePersistedPresetBank(current);
@@ -1443,7 +1485,7 @@ void fillRuntimeConfigV24FromCurrent(const RuntimeConfig &source,
 }
 
 void p32_schema_twenty_four_migrates_to_twenty_five() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
   ensurePersistedPresetBank(current);
@@ -1545,7 +1587,7 @@ void fillRuntimeConfigV25FromCurrent(const RuntimeConfig &source,
 }
 
 void p33_schema_twenty_five_migrates_to_twenty_six() {
-  persistence_host::reset();
+  resetHostPersistence();
   PersistedSettings current;
   CHECK(initializeDefaultSettings(current));
   ensurePersistedPresetBank(current);
@@ -1752,6 +1794,8 @@ struct TestCase {
 const TestCase tests[] = {
     {"P01", p01_defaults_are_valid_v16},
     {"P02", p02_newest_valid_slot_is_loaded},
+    {"P02B", p02b_save_uses_ram_revision_when_slots_unreadable},
+    {"P02C", p02c_overlay_live_runtime_is_saved_not_stale_blob},
     {"P03", p03_corrupt_newest_slot_falls_back},
     {"P04", p04_crc_and_semantic_validation_reject_corruption},
     {"P05", p05_password_change_updates_hash},

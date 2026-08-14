@@ -1629,6 +1629,8 @@ struct ControlStatusSnapshot {
   uint32_t scaleMacCachePauseRemainingMs = 0;
   bool noScaleShotGuardEnabled = true;
   bool noScaleShotGuardArmed = true;
+  bool configPersistPending = false;
+  bool configPersistFailed = false;
 };
 
 inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {
@@ -1794,6 +1796,8 @@ constexpr uint32_t HEALTH_LOOP_GAP_CLEAR_MS = 80;
 // Bitmask for argument2 on RUNTIME_PERSIST_FAILED (what was pending in NVS).
 constexpr int32_t RUNTIME_PERSIST_REASON_OFFSET = 1;
 constexpr int32_t RUNTIME_PERSIST_REASON_ATM_SAMPLES = 2;
+constexpr int32_t RUNTIME_PERSIST_REASON_USER = 4;
+constexpr int32_t RUNTIME_PERSIST_REASON_SCALE_MAC = 8;
 
 // argument1 values for BOOT_SUBSYSTEM / INITIALIZATION_FAILED.
 constexpr int32_t BOOT_SUBSYSTEM_CPU = 1;

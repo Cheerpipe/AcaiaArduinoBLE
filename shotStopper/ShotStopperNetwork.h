@@ -112,6 +112,7 @@ struct NetworkBridgeCallbacks {
   void (*copyPreferredScaleMac)(char *out, size_t capacity) = nullptr;
   void (*copyPreferredScaleName)(char *out, size_t capacity) = nullptr;
   void (*copyPresetBank)(ShotPresetBank *out) = nullptr;
+  void (*copyRuntimeConfig)(RuntimeConfig *out) = nullptr;
 };
 
 class ShotStopperNetwork {
@@ -127,9 +128,14 @@ class ShotStopperNetwork {
   void requestNtpSyncIfNeeded();
   void syncPreferredScaleMac(const char *mac);
   void syncPreferredScale(const char *mac, const char *name);
+  void syncLiveRuntime(const RuntimeConfig &runtime,
+                       const ShotPresetBank *presets);
+  void syncDurableStorageRevision(uint32_t storageRevision);
+  PersistedSettings settingsCopy();
 
   private:
   void mergePreferredScaleMac(PersistedSettings &settings);
+  void overlayLiveShotSettings(PersistedSettings &settings);
   static constexpr uint32_t AP_WINDOW_MS = 180000;
   static constexpr uint32_t UI_GRACE_MS = 180000;
   static constexpr uint32_t SESSION_REMEMBER_MS = 7UL * 24UL * 60UL * 60UL * 1000UL;
@@ -250,7 +256,6 @@ class ShotStopperNetwork {
   void log(DebugCategory category, DebugCode code, int32_t argument1 = 0,
            int32_t argument2 = 0);
 
-  PersistedSettings settingsCopy();
   bool authenticate(httpd_req_t *request, bool requireCsrf,
                     size_t *sessionIndex = nullptr);
   bool createSession(char token[TOKEN_HEX_CAPACITY],

@@ -125,8 +125,14 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   hostForwardAcceptedNetworkCommandCalls = 0;
   hostLastForwardedNetworkCommand = WebCommand{};
   hostNtpSyncRequestCount = 0;
+  hostRuntimePersistSucceeds = true;
+  hostRuntimePersistAttempts = 0;
+  hostLastFlushedRuntime = RuntimeConfig{};
+  hostLastFlushedPresets = ShotPresetBank{};
+  hostLastFlushIncludedLive = false;
   g_wallClock.reset();
   runtimePersistPending = false;
+  runtimePersistFailed = false;
   runtimePersistCandidate = RuntimeConfig{};
   runtimePersistRequestId = 0;
   runtimePersistRetryAtMs = 0;
@@ -951,7 +957,6 @@ void t27_configuration_is_rejected_while_cycle_is_active() {
   CHECK(stopperState == StopperState::READY);
   CHECK(enqueueWebCommand(update));
   loop();
-  finishHostMaintenance();
   CHECK(runtimeConfig.goalWeightG == DEFAULT_GOAL_WEIGHT_G + 6);
   startCycle();
   CHECK(session.config.goalWeightG == DEFAULT_GOAL_WEIGHT_G + 6);
@@ -1312,6 +1317,7 @@ void r14_invalid_runtime_configuration_is_transactionally_rejected() {
   const RuntimeConfig original = runtimeConfig;
   WebCommand update;
   update.type = WebCommandType::APPLY_CONFIG;
+  update.requestId = 14;
   update.config = runtimeConfig;
   update.config.goalWeightG = MIN_GOAL_WEIGHT_G - 1;
   CHECK(validateRuntimeConfig(update.config) ==
@@ -1320,6 +1326,9 @@ void r14_invalid_runtime_configuration_is_transactionally_rejected() {
   loop();
   CHECK(runtimeConfig.goalWeightG == original.goalWeightG);
   CHECK(runtimeConfig.revision == original.revision);
+  CHECK(hostLastForwardedNetworkCommand.requestId == 14);
+  CHECK(hostLastForwardedNetworkCommand.resultState ==
+        CommandResultState::FAILED);
 
   update.config = runtimeConfig;
   update.config.operationalWallMs = HARD_MAX_CN9_CLOSED_MS + 1;
@@ -1605,10 +1614,10 @@ void w09_valid_config_applies_only_from_ready() {
   update.config.weightOffsetG = 4.5f;  // Not a Web-editable field.
   const uint32_t oldRevision = runtimeConfig.revision;
   processWebCommand(update);
-  finishHostMaintenance();
   CHECK(runtimeConfig.goalWeightG == 42);
   CHECK(fabsf(runtimeConfig.weightOffsetG - 2.25f) < 0.001f);
   CHECK(runtimeConfig.revision == oldRevision + 1);
+  CHECK(!maintenanceLease.active);
 }
 
 void w10_cycle_configuration_snapshot_is_immutable() {
@@ -2016,11 +2025,11 @@ void w34_calibration_reset_restores_baseline_and_cancels_analysis() {
   WebCommand reset;
   reset.type = WebCommandType::RESET_WEIGHT_OFFSET;
   processWebCommand(reset);
-  finishHostMaintenance();
   CHECK(fabsf(runtimeConfig.weightOffsetG - 2.0f) < 0.001f);
   CHECK(fabsf(runtimeConfig.weightOffsetBaselineG - 2.0f) < 0.001f);
   CHECK(runtimeConfig.revision == previousRevision + 1);
   CHECK(!pendingFinalize.pending);
+  CHECK(!maintenanceLease.active);
 }
 
 void w35_status_reports_the_live_physical_paddle_gpio() {
@@ -2736,7 +2745,6 @@ void w73_apply_config_buzzer_only_sends_bookoo_silence() {
   update.config.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
   processWebCommand(update);
-  finishHostMaintenance();
   CHECK(scaleDebugPending);
   CHECK(executePendingScaleDebugCommand());
   CHECK(scale.commandLog.size() == 1);
@@ -2755,7 +2763,6 @@ void w74_apply_config_enabling_mute_sends_silence_only_in_buzzer_only() {
   update.config = runtimeConfig;
   update.config.bookooMuteOnBuzzerOnly = true;
   processWebCommand(update);
-  finishHostMaintenance();
   CHECK(scaleDebugPending);
   CHECK(executePendingScaleDebugCommand());
   CHECK(scale.commandLog.size() == 1);
@@ -2772,7 +2779,6 @@ void w74_apply_config_enabling_mute_sends_silence_only_in_buzzer_only() {
   update.config = runtimeConfig;
   update.config.bookooMuteOnBuzzerOnly = true;
   processWebCommand(update);
-  finishHostMaintenance();
   CHECK(!scaleDebugPending);
   CHECK(scale.commandLog.empty());
 }
@@ -3155,12 +3161,9 @@ void r22_confirmed_implausible_weight_stops_fail_safe() {
 void r23_maintenance_is_canceled_fail_open_by_physical_paddle() {
   resetHarness(false, false);
   reachReadyFromBoot();
-  const RuntimeConfig original = runtimeConfig;
   WebCommand command;
-  command.type = WebCommandType::APPLY_CONFIG;
+  command.type = WebCommandType::RESTART;
   command.requestId = 77;
-  command.config = runtimeConfig;
-  command.config.goalWeightG = runtimeConfig.goalWeightG + 1;
   processWebCommand(command);
   CHECK(maintenanceLease.active);
   CHECK(!maintenanceLease.forwarded);
@@ -3170,8 +3173,125 @@ void r23_maintenance_is_canceled_fail_open_by_physical_paddle() {
   CHECK(!maintenanceLease.active);
   CHECK(!maintenanceCancellationPending);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
-  CHECK(runtimeConfig.goalWeightG == original.goalWeightG);
   CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void w86_config_applies_to_ram_immediately_and_coalesces() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  const uint32_t firstRevision = runtimeConfig.revision;
+  const bool originalAvoid = runtimeConfig.avoidBbwShotWithoutScale;
+  WebCommand first;
+  first.type = WebCommandType::APPLY_CONFIG;
+  first.config = runtimeConfig;
+  first.config.avoidBbwShotWithoutScale = !originalAvoid;
+  processWebCommand(first);
+  CHECK(!maintenanceLease.active);
+  CHECK(runtimeConfig.avoidBbwShotWithoutScale == !originalAvoid);
+  CHECK(runtimeConfig.revision == firstRevision + 1);
+  CHECK(runtimePersistPending);
+
+  WebCommand second;
+  second.type = WebCommandType::APPLY_CONFIG;
+  second.config = runtimeConfig;
+  second.config.lastShotCooldownMs = runtimeConfig.lastShotCooldownMs;
+  second.config.avoidBbwShotWithoutScale = originalAvoid;
+  processWebCommand(second);
+  CHECK(runtimeConfig.avoidBbwShotWithoutScale == originalAvoid);
+  CHECK(runtimeConfig.revision == firstRevision + 2);
+  CHECK(runtimePersistPending);
+  CHECK(!maintenanceLease.active);
+
+  setRawPaddle(true);
+  CHECK(runtimeConfig.avoidBbwShotWithoutScale == originalAvoid);
+  CHECK(runtimeConfig.revision == firstRevision + 2);
+}
+
+void w87_nvs_fail_keeps_ram_and_requeues() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  const uint32_t firstRevision = runtimeConfig.revision;
+  const bool originalAvoid = runtimeConfig.avoidBbwShotWithoutScale;
+  WebCommand update;
+  update.type = WebCommandType::APPLY_CONFIG;
+  update.config = runtimeConfig;
+  update.config.avoidBbwShotWithoutScale = !originalAvoid;
+  processWebCommand(update);
+  CHECK(runtimeConfig.avoidBbwShotWithoutScale == !originalAvoid);
+  CHECK(runtimeConfig.revision == firstRevision + 1);
+  CHECK(runtimePersistPending);
+
+  hostRuntimePersistSucceeds = false;
+  runLoopAfter(RUNTIME_PERSIST_DEBOUNCE_MS + 1);
+  CHECK(runtimeConfig.avoidBbwShotWithoutScale == !originalAvoid);
+  CHECK(runtimeConfig.revision == firstRevision + 1);
+  CHECK(runtimePersistPending);
+  CHECK(runtimePersistFailed);
+  CHECK(hostRuntimePersistAttempts >= 1);
+  CHECK(publishedControlStatus.configPersistFailed);
+
+  hostRuntimePersistSucceeds = true;
+  runLoopAfter(RUNTIME_PERSIST_RETRY_MS + 1);
+  CHECK(!runtimePersistPending);
+  CHECK(!runtimePersistFailed);
+  CHECK(hostLastFlushIncludedLive);
+  CHECK(hostLastFlushedRuntime.revision == runtimeConfig.revision);
+  CHECK(hostLastFlushedRuntime.avoidBbwShotWithoutScale == !originalAvoid);
+}
+
+void w88_save_network_flush_includes_live_runtime() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  const uint32_t firstRevision = runtimeConfig.revision;
+  WebCommand apply;
+  apply.type = WebCommandType::APPLY_CONFIG;
+  apply.config = runtimeConfig;
+  apply.config.avoidBbwShotWithoutScale = !runtimeConfig.avoidBbwShotWithoutScale;
+  processWebCommand(apply);
+  CHECK(runtimePersistPending);
+  CHECK(runtimeConfig.revision == firstRevision + 1);
+
+  WebCommand network;
+  network.type = WebCommandType::SAVE_NETWORK;
+  strcpy(network.ssid, "CafeLAN");
+  strcpy(network.password, "CafePass1");
+  processWebCommand(network);
+  finishHostMaintenance();
+  CHECK(hostLastFlushIncludedLive);
+  CHECK(hostLastFlushedRuntime.revision == runtimeConfig.revision);
+  CHECK(hostLastFlushedRuntime.avoidBbwShotWithoutScale ==
+        runtimeConfig.avoidBbwShotWithoutScale);
+  CHECK(!runtimePersistPending);
+}
+
+void w89_restart_flush_includes_live_and_aborts_on_fail() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  WebCommand apply;
+  apply.type = WebCommandType::APPLY_CONFIG;
+  apply.config = runtimeConfig;
+  apply.config.lastShotCooldownMs = runtimeConfig.lastShotCooldownMs + 1000;
+  processWebCommand(apply);
+  const uint32_t liveRevision = runtimeConfig.revision;
+  CHECK(runtimePersistPending);
+
+  hostRuntimePersistSucceeds = false;
+  WebCommand restart;
+  restart.type = WebCommandType::RESTART;
+  processWebCommand(restart);
+  finishHostMaintenance();
+  CHECK(runtimeConfig.revision == liveRevision);
+  CHECK(runtimeConfig.lastShotCooldownMs == apply.config.lastShotCooldownMs);
+  CHECK(runtimePersistPending);
+  CHECK(runtimePersistFailed);
+  CHECK(hostLastFlushedRuntime.revision == liveRevision);
+
+  hostRuntimePersistSucceeds = true;
+  processWebCommand(restart);
+  finishHostMaintenance();
+  CHECK(!runtimePersistPending);
+  CHECK(!runtimePersistFailed);
+  CHECK(hostLastFlushedRuntime.revision == liveRevision);
 }
 
 void r24_web_control_lease_owner_is_enforced() {
@@ -4964,6 +5084,10 @@ const TestCase testCases[] = {
     {"W83", w83_web_buzzer_test_pulse_uses_same_train_for_3s},
     {"W84", w84_pulse_train_yields_to_triple},
     {"W85", w85_debug_pulse_rates_use_same_on_ms_and_3s},
+    {"W86", w86_config_applies_to_ram_immediately_and_coalesces},
+    {"W87", w87_nvs_fail_keeps_ram_and_requeues},
+    {"W88", w88_save_network_flush_includes_live_runtime},
+    {"W89", w89_restart_flush_includes_live_and_aborts_on_fail},
     {"D01", d01_idle_scan_stays_enabled_between_ticks},
     {"D02", d02_full_empty_mac_uses_name_scan},
     {"D03", d03_scan_start_failed_uses_backoff},

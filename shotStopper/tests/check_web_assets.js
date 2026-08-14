@@ -285,6 +285,10 @@ if (!ui.includes('id="shotPanel"') ||
     !network.includes('\\"remoteControlEnabled\\"') ||
     !network.includes('\\"lastCommand\\"') ||
     !network.includes('\\"maintenance\\"') ||
+    !network.includes('\\"persistPending\\"') ||
+    !network.includes('\\"persistFailed\\"') ||
+    !ui.includes('persistFailed') ||
+    !ui.includes('Saving...') ||
     !network.includes('\\"cycle\\"') ||
     !network.includes('flowDuringRetare') ||
     !ui.includes('updateShot(s)')) {
@@ -316,14 +320,18 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !ui.includes('function updateNoScaleGuard(') ||
     html.indexOf('id="shotNoScaleGuard"') <
         html.indexOf('id="shotAtmGuard"') ||
-    html.indexOf('id="avoidBbwShotWithoutScale"') <
-        html.indexOf('id="brewByWeight"') ||
-    html.indexOf('id="avoidBbwShotWithoutScale"') <
-        html.indexOf('id="bbwProtectionS"') ||
-    html.indexOf('id="avoidBbwShotWithoutScale"') >
-        html.indexOf('<summary>Fast extraction guard</summary>') ||
+    html.indexOf('<legend>Machine and scale</legend>') >
+        html.indexOf('<summary>No-scale BBW</summary>') ||
     html.indexOf('<summary>No-scale BBW</summary>') >
+        html.indexOf('<summary>Quick rinse</summary>') ||
+    html.indexOf('id="avoidBbwShotWithoutScale"') <
         html.indexOf('<legend>Machine and scale</legend>') ||
+    html.indexOf('id="avoidBbwShotWithoutScale"') >
+        html.indexOf('id="lastShotCooldownMin"') ||
+    html.indexOf('id="lastShotCooldownMin"') >
+        html.indexOf('<summary>Quick rinse</summary>') ||
+    html.indexOf('id="avoidBbwShotWithoutScale"') <
+        html.indexOf('id="saveBrewPresetButton"') ||
     !network.includes('avoidBbwShotWithoutScale') ||
     !network.includes('lastShotCooldownMs') ||
     !network.includes('noScaleShotGuard') ||
