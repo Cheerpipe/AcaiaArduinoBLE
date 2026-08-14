@@ -6,19 +6,15 @@
 
 namespace shotstopper {
 
-enum class BuzzerPattern : uint8_t {
-  NONE = 0,
-  SINGLE = 1,
-  TRIPLE = 2
-};
-
 constexpr uint32_t BUZZER_TONE_HZ = 2700;
 constexpr uint32_t BUZZER_BEEP_ON_MS = 80;
 constexpr uint32_t BUZZER_BEEP_GAP_MS = 70;
 constexpr uint32_t BUZZER_SINGLE_ON_MS = 120;
+constexpr uint32_t BUZZER_LONG_ON_MS = 400;
 
-// Non-blocking passive-piezo driver. Hardware PWM (ledc) on device; host tests
-// stub tone as a digital level so patterns can be asserted without LEDC.
+// Non-blocking local-buzzer driver. Passive (ENABLE=1) uses hardware PWM
+// (ledc); active (ENABLE=2) uses GPIO HIGH/LOW. Host stubs map both to a
+// digital level so patterns can be asserted without LEDC.
 struct LocalBuzzer {
   uint8_t pin = 0;
   bool ready = false;
@@ -34,8 +30,9 @@ struct LocalBuzzer {
 
   void begin(uint8_t gpioPin);
   // Starts immediately when idle, otherwise keeps one pending slot. TRIPLE
-  // upgrades a pending SINGLE; a second SINGLE is rejected while TRIPLE is
-  // pending. Returns false if unsupported, not ready, or not accepted.
+  // upgrades any non-TRIPLE pending pattern; a weaker pattern is rejected
+  // while TRIPLE is pending. Returns false if unsupported, not ready, or not
+  // accepted.
   bool request(BuzzerPattern pattern);
   void service(uint32_t nowMs);
   bool busy() const {
@@ -62,29 +59,29 @@ inline void LocalBuzzer::begin(uint8_t gpioPin) {
   if (!BUZZER_SUPPORT_ENABLED || pin == 0) {
     return;
   }
-#if defined(SHOT_STOPPER_HOST_TEST)
-  pinMode(pin, OUTPUT);
-  digitalWrite(pin, LOW);
-  ready = true;
-#else
-  // Arduino-ESP32 3.x API: attach pin then drive with writeTone.
+  if (BUZZER_ACTIVE_DRIVE) {
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, LOW);
+    ready = true;
+    return;
+  }
+  // Passive piezo: Arduino-ESP32 3.x API attach then writeTone.
   if (!ledcAttach(pin, BUZZER_TONE_HZ, 10)) {
     return;
   }
   ledcWriteTone(pin, 0);
   ready = true;
-#endif
 }
 
 inline void LocalBuzzer::startTone() {
   if (!ready || toneOn) {
     return;
   }
-#if defined(SHOT_STOPPER_HOST_TEST)
-  digitalWrite(pin, HIGH);
-#else
-  ledcWriteTone(pin, BUZZER_TONE_HZ);
-#endif
+  if (BUZZER_ACTIVE_DRIVE) {
+    digitalWrite(pin, HIGH);
+  } else {
+    ledcWriteTone(pin, BUZZER_TONE_HZ);
+  }
   toneOn = true;
 }
 
@@ -93,11 +90,11 @@ inline void LocalBuzzer::stopTone() {
     toneOn = false;
     return;
   }
-#if defined(SHOT_STOPPER_HOST_TEST)
-  digitalWrite(pin, LOW);
-#else
-  ledcWriteTone(pin, 0);
-#endif
+  if (BUZZER_ACTIVE_DRIVE) {
+    digitalWrite(pin, LOW);
+  } else {
+    ledcWriteTone(pin, 0);
+  }
   toneOn = false;
 }
 
@@ -119,6 +116,14 @@ inline bool LocalBuzzer::startPattern(BuzzerPattern pattern, uint32_t nowMs) {
     beepCount = 1;
     onMs = BUZZER_SINGLE_ON_MS;
     gapMs = 0;
+  } else if (pattern == BuzzerPattern::LONG) {
+    beepCount = 1;
+    onMs = BUZZER_LONG_ON_MS;
+    gapMs = 0;
+  } else if (pattern == BuzzerPattern::DOUBLE) {
+    beepCount = 2;
+    onMs = BUZZER_BEEP_ON_MS;
+    gapMs = BUZZER_BEEP_GAP_MS;
   } else if (pattern == BuzzerPattern::TRIPLE) {
     beepCount = 3;
     onMs = BUZZER_BEEP_ON_MS;
@@ -149,11 +154,11 @@ inline bool LocalBuzzer::request(BuzzerPattern pattern) {
     ++acceptedRequests;
     return true;
   }
-  if (pattern == BuzzerPattern::TRIPLE && pending == BuzzerPattern::SINGLE) {
+  if (pattern == BuzzerPattern::TRIPLE && pending != BuzzerPattern::TRIPLE) {
     pending = BuzzerPattern::TRIPLE;
     return true;
   }
-  // Same pattern already queued, or SINGLE while TRIPLE is pending.
+  // Same pattern already queued, or a weaker pattern while TRIPLE is pending.
   return pattern == pending;
 }
 

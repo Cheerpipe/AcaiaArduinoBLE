@@ -124,7 +124,9 @@ class ShotStopperNetwork {
   static constexpr size_t SESSION_COUNT = 2;
   static constexpr size_t TOKEN_BYTES = 16;
   static constexpr size_t TOKEN_HEX_CAPACITY = TOKEN_BYTES * 2 + 1;
-  static constexpr size_t REQUEST_BODY_CAPACITY = 1025;
+  // Machine config JSON is ~1 KiB and grows with NTP custom / bool false
+  // literals; keep headroom above the wire payload.
+  static constexpr size_t REQUEST_BODY_CAPACITY = 2048;
   static constexpr size_t LOG_BATCH_SIZE = 48;
 
   struct WebSession {
@@ -267,6 +269,7 @@ class ShotStopperNetwork {
   static esp_err_t rinseHandler(httpd_req_t *request);
   static esp_err_t stopHandler(httpd_req_t *request);
   static esp_err_t restartHandler(httpd_req_t *request);
+  static esp_err_t buzzerHandler(httpd_req_t *request);
   static esp_err_t factoryResetHandler(httpd_req_t *request);
   static esp_err_t networkHandler(httpd_req_t *request);
   static esp_err_t wifiScanStartHandler(httpd_req_t *request);

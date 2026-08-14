@@ -9,6 +9,8 @@ const sketchDir = path.resolve(__dirname, '..');
 const asset = fs.readFileSync(path.join(sketchDir, 'ShotStopperWebAssets.h'), 'utf8');
 const network = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.cpp'), 'utf8');
 const firmware = fs.readFileSync(path.join(sketchDir, 'shotStopper.ino'), 'utf8');
+const domain = fs.readFileSync(path.join(sketchDir, 'ShotStopperDomain.h'), 'utf8');
+const buzzer = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzer.h'), 'utf8');
 const bleLibrary = fs.readFileSync(
   path.resolve(sketchDir, '..', 'libraries', 'AcaiaArduinoBLE', 'AcaiaArduinoBLE.cpp'),
   'utf8'
@@ -45,8 +47,8 @@ if (htmlBytes > 40960) {
 if (jsBytes > 61440) {
   throw new Error('Web UI JS source exceeds the 60 KiB authoring budget');
 }
-if (htmlBytes + jsBytes > 81920) {
-  throw new Error('Web UI HTML+JS source exceeds the 80 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 86016) {
+  throw new Error('Web UI HTML+JS source exceeds the 84 KiB combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -54,9 +56,11 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('buzzerScaleLostBeep') ||
     !ui.includes('buzzerAutoToManualGuardEndBeep') ||
     !ui.includes('buzzerManualNoScaleBeep') ||
+    !ui.includes('alertOutputChannel') ||
     !ui.includes('buzzerSupported') ||
-    !ui.includes('Needs buzzer') ||
-    !ui.includes('SHOT_STOPPER_ENABLE_BUZZER') ||
+    !ui.includes('Output channel') ||
+    !ui.includes('scale_priority') ||
+    !ui.includes('Buzzer only') ||
     !ui.includes('class="fieldHint"')) {
   throw new Error('Web UI must show paddle state, scale beep options, and buzzer alerts');
 }
@@ -87,6 +91,10 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('"buzzerScaleLostBeep"') ||
     !network.includes('"buzzerAutoToManualGuardEndBeep"') ||
     !network.includes('"buzzerManualNoScaleBeep"') ||
+    !network.includes('"alertOutputChannel"') ||
+    !network.includes('allowedCount > 64') ||
+    !network.includes('uint64_t seen') ||
+    !network.includes('WEB_UI_ASSET_TAG') ||
     !network.includes('\\"buzzerSupported\\"') ||
     !network.includes('BUZZER_SUPPORT_ENABLED') ||
     !network.includes('"autoRetare"') ||
@@ -139,6 +147,15 @@ if (!network.includes('"firstDropBeep"') ||
     !firmware.includes('BUZZER_GPIO') ||
     !firmware.includes('servicePaddleReturnReminder')) {
   throw new Error('Scale beep settings must be configurable end-to-end');
+}
+if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0') ||
+    !domain.includes('BUZZER_ACTIVE_DRIVE = SHOT_STOPPER_ENABLE_BUZZER == 2') ||
+    !domain.includes('SHOT_STOPPER_ENABLE_BUZZER must be 0, 1, or 2') ||
+    !buzzer.includes('BUZZER_ACTIVE_DRIVE') ||
+    !buzzer.includes('ledcAttach') ||
+    !buzzer.includes('digitalWrite(pin, HIGH)') ||
+    !firmware.includes('localBuzzer.request(command.buzzerPattern)')) {
+  throw new Error('Local buzzer must support compile-time passive (1) and active (2) drives');
 }
 if (!ui.includes('authenticatedOnly') ||
     !ui.includes('sessionStorage.setItem') || !ui.includes('window.location.reload()') ||
@@ -380,6 +397,29 @@ if (!ui.includes('id="factoryResetButton"') ||
         .includes('restartButton')) {
   throw new Error('Factory reset must require UI and server-side confirmation');
 }
+if (!ui.includes('id="debugPanel"') ||
+    !html.includes('id="debugPanel" class="buzzerOpt hidden"') ||
+    !ui.includes('id="beepShortButton"') ||
+    !ui.includes('id="beepLongButton"') ||
+    !ui.includes('id="beepDoubleButton"') ||
+    !ui.includes('id="beepTripleButton"') ||
+    !ui.includes('/api/v1/control/buzzer') ||
+    !ui.includes("['beepShortButton','short']") ||
+    !ui.includes("['beepLongButton','long']") ||
+    !ui.includes("['beepDoubleButton','double']") ||
+    !ui.includes("['beepTripleButton','triple']") ||
+    !ui.includes('function debugBuzzer(') ||
+    !ui.includes('Shown with SHOT_STOPPER_ENABLE_BUZZER') ||
+    html.indexOf('id="saveDateTimeButton"') > html.indexOf('id="debugPanel"') ||
+    html.indexOf('id="debugPanel"') > html.indexOf('id="restartPanel"') ||
+    !network.includes('buzzerHandler') ||
+    !network.includes('BUZZER_UNSUPPORTED') ||
+    !network.includes('WebCommandType::BUZZER_TEST') ||
+    !network.includes('parseBuzzerPatternId') ||
+    !firmware.includes('WebCommandType::BUZZER_TEST') ||
+    !firmware.includes('localBuzzer.request(command.buzzerPattern)')) {
+  throw new Error('Admin debug must expose buzzer test buttons only when firmware has buzzer support');
+}
 if (!ui.includes('id="staIpMode"') ||
     !ui.includes('id="staStaticIp"') ||
     !ui.includes('id="staNetmask"') ||
@@ -443,6 +483,7 @@ const expected = new Map([
   ['POST /api/v1/control/rinse', 'rinseHandler'],
   ['POST /api/v1/control/stop', 'stopHandler'],
   ['POST /api/v1/control/restart', 'restartHandler'],
+  ['POST /api/v1/control/buzzer', 'buzzerHandler'],
   ['POST /api/v1/factory-reset', 'factoryResetHandler'],
   ['GET /api/v1/shots', 'shotsHandler'],
   ['POST /api/v1/shots/clear', 'shotsClearHandler'],
@@ -582,7 +623,8 @@ if (!safeBeep.includes('BEEP_LEVEL_1_BOOKOO') ||
     safeBeep.includes('_connected = false')) {
   throw new Error('First-drop beep must not tare or mutate scale connection state');
 }
-if (!firmware.includes('requestScaleBrewBeep(session.id)') ||
+if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
+    !firmware.includes('requestScaleBrewBeep(') ||
     !firmware.includes('cancelScaleBrewBeep(session.id)') ||
     !firmware.includes('onFirstDropsDetected') ||
     !firmware.includes('notifyRetareFlowDetected') ||
@@ -590,6 +632,8 @@ if (!firmware.includes('requestScaleBrewBeep(session.id)') ||
     !firmware.includes('bbwProtectionActive') ||
     !firmware.includes('retareWindowOpen') ||
     !firmware.includes('scale.supportsTareStartTimer()') ||
+    !firmware.includes('alertOutputChannel') ||
+    !firmware.includes('emitCommandAlert') ||
     /enum class ScaleCommandType[\s\S]*BEEP/.test(
       firmware.slice(firmware.indexOf('enum class ScaleCommandType'),
                      firmware.indexOf('enum class ScaleEventType')))) {
@@ -598,6 +642,12 @@ if (!firmware.includes('requestScaleBrewBeep(session.id)') ||
 
 (async () => {
 const generated = await webUi.generate();
+if (!generated.assetTag || !generated.cacheVersion ||
+    !generated.html.includes(`v=${generated.cacheVersion}`) ||
+    !fs.readFileSync(path.join(sketchDir, 'ShotStopperWebAssetsGzip.h'), 'utf8')
+         .includes(`WEB_UI_ASSET_TAG[] = "${generated.assetTag}"`)) {
+  throw new Error('Web UI cache-buster must embed FW version + asset content tag');
+}
 const roundTrip = zlib.gunzipSync(generated.gzip).toString('utf8');
 if (roundTrip !== generated.html) {
   throw new Error('Generated gzip Web UI does not round-trip to the minified HTML');

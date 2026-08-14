@@ -79,9 +79,12 @@ inline void analogWrite(uint8_t pin, int value) {
   (void)value;
 }
 
+inline size_t hostLedcAttachCalls = 0;
+
 inline bool ledcAttach(uint8_t pin, double freq, uint8_t resolution) {
   (void)freq;
   (void)resolution;
+  ++hostLedcAttachCalls;
   pinMode(pin, OUTPUT);
   digitalWrite(pin, LOW);
   return true;

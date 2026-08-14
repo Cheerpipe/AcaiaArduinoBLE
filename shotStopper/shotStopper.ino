@@ -285,6 +285,23 @@ enum class ScaleEventType : uint8_t {
   TIMER_STOP_RESULT
 };
 
+enum class AlertEvent : uint8_t {
+  TARE = 0,
+  START_TIMER,
+  STOP_TIMER,
+  TARE_START,
+  FIRST_DROP,
+  PADDLE_REMINDER,
+  COMPLETION_EXTRA,
+  SCALE_LOST,
+  ATM_END,
+  MANUAL_NO_SCALE
+};
+
+bool emitAlert(AlertEvent event, uint32_t cycleId = 0);
+void emitCommandAlert(AlertEvent event, bool commandAttempted,
+                      bool writeSucceeded);
+
 enum class TimerStopResult : uint8_t {
   NOT_REQUIRED,
   NOT_ATTEMPTED,
@@ -425,6 +442,7 @@ struct ScaleEvent {
   float weightG = 0.0f;
   bool commandAttempted = false;
   bool writeSucceeded = false;
+  bool usedCombinedTareStart = false;
 };
 
 struct MaintenanceLease {
@@ -1001,11 +1019,10 @@ void setWeightControlState(WeightControlState state) {
                         session.autoToManualGuardDeadlineAtMs -
                         session.startedAtMs));
     }
-    if (BUZZER_SUPPORT_ENABLED && runtimeConfig.buzzerScaleLostBeep &&
-        session.active &&
+    if (runtimeConfig.buzzerScaleLostBeep && session.active &&
         (previous == WeightControlState::ACTIVE ||
          previous == WeightControlState::VALIDATING)) {
-      localBuzzer.request(BuzzerPattern::TRIPLE);
+      emitAlert(AlertEvent::SCALE_LOST);
     }
   } else if (state == WeightControlState::ACTIVE &&
              (previous == WeightControlState::SUSPENDED ||
@@ -1955,7 +1972,7 @@ void recordFirstDropTimestamp(uint32_t receivedAtMs) {
 
 void requestFirstDropBeep() {
   if (!session.firstDropsBeepSent && session.config.firstDropBeep) {
-    requestScaleBrewBeep(session.id);
+    emitAlert(AlertEvent::FIRST_DROP, session.id);
     session.firstDropsBeepSent = true;
   }
 }
@@ -2038,7 +2055,7 @@ void endBbwProtection(uint32_t receivedAtMs, bool allowBeep) {
   resetDirectStopConfirmation();
   if (allowBeep && !session.firstDropsBeepSent &&
       session.config.firstDropBeep && retareHasEnded()) {
-    requestScaleBrewBeep(session.id);
+    emitAlert(AlertEvent::FIRST_DROP, session.id);
     session.firstDropsBeepSent = true;
   }
 }
@@ -2945,6 +2962,7 @@ void executeScaleStartCommand(const ScaleCommand &command) {
     if (command.canTareStartTimer && command.autoTare &&
         scale.supportsTareStartTimer()) {
       event.commandAttempted = true;
+      event.usedCombinedTareStart = true;
       event.writeSucceeded = scale.tareStartTimer();
     } else {
       const bool resetSucceeded = scale.resetTimer();
@@ -3005,6 +3023,101 @@ void executeScaleBeepCommand(DebugCode successCode, DebugCode failureCode,
   const bool succeeded = scale.beepWithoutStateChange();
   addDebugEvent(DebugCategory::SCALE, succeeded ? successCode : failureCode);
   updateWorkerLinkState();
+}
+
+void requestScaleBrewBeep(uint32_t cycleId);
+void requestScalePaddleReturnReminderBeep();
+void requestScaleCompletionBeep();
+void cancelScalePaddleReturnReminderBeep();
+
+AlertOutputChannel currentAlertOutputChannel() {
+  return effectiveAlertOutputChannel(runtimeConfig.alertOutputChannel);
+}
+
+bool alertEventScaleCapable(AlertEvent event) {
+  switch (event) {
+    case AlertEvent::SCALE_LOST:
+    case AlertEvent::ATM_END:
+    case AlertEvent::MANUAL_NO_SCALE:
+      return false;
+    default:
+      return true;
+  }
+}
+
+bool emitLocalAlertBuzzer(BuzzerPattern pattern) {
+  if (!BUZZER_SUPPORT_ENABLED || !localBuzzer.ready) {
+    return false;
+  }
+  return localBuzzer.request(pattern);
+}
+
+bool queueScaleIndependentAlert(AlertEvent event, uint32_t cycleId) {
+  if (!scaleAvailable()) {
+    return false;
+  }
+  switch (event) {
+    case AlertEvent::FIRST_DROP:
+      requestScaleBrewBeep(cycleId);
+      return true;
+    case AlertEvent::PADDLE_REMINDER:
+      requestScalePaddleReturnReminderBeep();
+      return true;
+    case AlertEvent::COMPLETION_EXTRA:
+      requestScaleCompletionBeep();
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Independent / multi-tone alerts: first drop, paddle, completion, triples.
+bool emitAlert(AlertEvent event, uint32_t cycleId) {
+  const AlertOutputChannel channel = currentAlertOutputChannel();
+  const bool scaleCapable = alertEventScaleCapable(event);
+  BuzzerPattern buzzerPattern = BuzzerPattern::SINGLE;
+  if (event == AlertEvent::SCALE_LOST || event == AlertEvent::ATM_END ||
+      event == AlertEvent::MANUAL_NO_SCALE) {
+    buzzerPattern = BuzzerPattern::TRIPLE;
+  }
+
+  if (!scaleCapable) {
+    if (channel == AlertOutputChannel::SCALE_ONLY) {
+      return false;
+    }
+    return emitLocalAlertBuzzer(buzzerPattern);
+  }
+
+  if (channel == AlertOutputChannel::BUZZER_ONLY) {
+    return emitLocalAlertBuzzer(buzzerPattern);
+  }
+  if (channel == AlertOutputChannel::SCALE_ONLY) {
+    return queueScaleIndependentAlert(event, cycleId);
+  }
+  // SCALE_PRIORITY: scale if available, else buzzer. Never both.
+  if (queueScaleIndependentAlert(event, cycleId)) {
+    return true;
+  }
+  return emitLocalAlertBuzzer(buzzerPattern);
+}
+
+// Command-side events (tare/start/stop): scale path uses native Bookoo beep;
+// buzzer path emits SINGLE when routing says the buzzer replaces the scale.
+void emitCommandAlert(AlertEvent event, bool commandAttempted,
+                      bool writeSucceeded) {
+  const AlertOutputChannel channel = currentAlertOutputChannel();
+  if (channel == AlertOutputChannel::BUZZER_ONLY) {
+    emitLocalAlertBuzzer(BuzzerPattern::SINGLE);
+    return;
+  }
+  if (channel == AlertOutputChannel::SCALE_ONLY) {
+    (void)event;
+    return;
+  }
+  // SCALE_PRIORITY: native beep when the scale write landed; otherwise buzzer.
+  if (!commandAttempted || !writeSucceeded) {
+    emitLocalAlertBuzzer(BuzzerPattern::SINGLE);
+  }
 }
 
 void requestScaleBrewBeep(uint32_t cycleId) {
@@ -3115,8 +3228,15 @@ void serviceScaleCompletionBeep() {
   if (static_cast<int32_t>(millis() - scaleCompletionBeepDueAtMs) < 0) {
     return;
   }
+  if (!emitAlert(AlertEvent::COMPLETION_EXTRA)) {
+    // Local buzzer may still be playing ATM TRIPLE; retry briefly.
+    const AlertOutputChannel channel = currentAlertOutputChannel();
+    if (channel != AlertOutputChannel::SCALE_ONLY && BUZZER_SUPPORT_ENABLED) {
+      scaleCompletionBeepDueAtMs = millis() + 50;
+      return;
+    }
+  }
   scaleCompletionBeepScheduled = false;
-  requestScaleCompletionBeep();
 }
 
 void servicePaddleReturnReminder() {
@@ -3124,11 +3244,24 @@ void servicePaddleReturnReminder() {
   // Read the GPIO here rather than a debounced state: this reminder describes
   // the physical paddle circuit as it is wired at this instant.
   const bool paddleOnCn9Off = readRawPaddleOn() && !relay.closed;
-  const bool piezoUsable =
+  const AlertOutputChannel channel = currentAlertOutputChannel();
+  const bool localBuzzerUsable =
       BUZZER_SUPPORT_ENABLED && localBuzzer.ready;
+  const bool scaleUsable = scaleAvailable();
+  bool outputUsable = false;
+  switch (channel) {
+    case AlertOutputChannel::SCALE_ONLY:
+      outputUsable = scaleUsable;
+      break;
+    case AlertOutputChannel::BUZZER_ONLY:
+      outputUsable = localBuzzerUsable;
+      break;
+    case AlertOutputChannel::SCALE_PRIORITY:
+      outputUsable = scaleUsable || localBuzzerUsable;
+      break;
+  }
   const bool shouldRemind =
-      runtimeConfig.paddleReturnReminderBeep && paddleOnCn9Off &&
-      (piezoUsable || scaleAvailable());
+      runtimeConfig.paddleReturnReminderBeep && paddleOnCn9Off && outputUsable;
   if (!shouldRemind) {
     paddleReturnReminderActive = false;
     paddleReturnReminderLastAtMs = 0;
@@ -3154,17 +3287,7 @@ void servicePaddleReturnReminder() {
   }
   if (elapsedMs(paddleReturnReminderLastAtMs) >=
       runtimeConfig.paddleReturnReminderIntervalMs) {
-    bool sounded = false;
-    if (piezoUsable) {
-      sounded = localBuzzer.request(BuzzerPattern::SINGLE);
-    }
-    // Prefer the piezo when it can accept the pattern; otherwise keep the
-    // historical scale reminder so a failed ledc init cannot mute the alert.
-    if (!sounded && scaleAvailable()) {
-      requestScalePaddleReturnReminderBeep();
-      sounded = true;
-    }
-    if (sounded) {
+    if (emitAlert(AlertEvent::PADDLE_REMINDER)) {
       paddleReturnReminderLastAtMs = now;
     }
   }
@@ -3387,7 +3510,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       if (cacheMode == ScaleMacCacheMode::PARTIAL) {
         ++preferredDirectedFailures;
         serialTracef(LogLevel::WARNING,
-                     "Preferred scale attempt failed (%u/%u): %s",
+                     "Preferred scale attempt (%u/%u): %s",
                      preferredDirectedFailures,
                      SCALE_PREFERRED_DIRECTED_ATTEMPTS,
                      scale.lastDisconnectReasonName());
@@ -3399,7 +3522,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
         }
       } else {
         serialTracef(LogLevel::WARNING,
-                     "Preferred scale attempt failed: %s",
+                     "Preferred scale attempt: %s",
                      scale.lastDisconnectReasonName());
       }
     }
@@ -3708,6 +3831,9 @@ void processScaleWorkerEvents() {
             armPostTareBaselineWindow();
           }
         }
+        emitCommandAlert(event.usedCombinedTareStart ? AlertEvent::TARE_START
+                                                     : AlertEvent::START_TIMER,
+                         event.commandAttempted, event.writeSucceeded);
         serialTracef(LogLevel::DEBUG, "Remote timer start write: %s",
                      event.writeSucceeded ? "successful" : "failed/skipped");
         addDebugEvent(DebugCategory::SCALE,
@@ -3727,6 +3853,8 @@ void processScaleWorkerEvents() {
           session.firstDropLastPacketSequence = 0;
           resetDirectStopConfirmation();
         }
+        emitCommandAlert(AlertEvent::TARE, event.commandAttempted,
+                         event.writeSucceeded);
         break;
 
       case ScaleEventType::TIMER_STOP_RESULT:
@@ -3738,6 +3866,8 @@ void processScaleWorkerEvents() {
                   : (event.writeSucceeded ? TimerStopResult::WRITE_SUCCEEDED
                                           : TimerStopResult::WRITE_FAILED);
         }
+        emitCommandAlert(AlertEvent::STOP_TIMER, event.commandAttempted,
+                         event.writeSucceeded);
         // Structured SCALE_TIMER_STOP_* events cover Serial when enabled.
         addDebugEvent(DebugCategory::SCALE,
                       event.writeSucceeded ? DebugCode::SCALE_TIMER_STOP_OK
@@ -3871,9 +4001,9 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   cancelScaleCompletionBeep();
   session.endReason = reason;
   scheduleScaleTimerStopAfterCycle();
-  if (reason == EndReason::AUTO_TO_MANUAL_GUARD && BUZZER_SUPPORT_ENABLED &&
+  if (reason == EndReason::AUTO_TO_MANUAL_GUARD &&
       runtimeConfig.buzzerAutoToManualGuardEndBeep) {
-    localBuzzer.request(BuzzerPattern::TRIPLE);
+    emitAlert(AlertEvent::ATM_END);
   }
   if (shotCompletionGetsDoubleBeep(reason)) {
     scheduleScaleCompletionBeep();
@@ -3970,9 +4100,9 @@ void enterBrewOrManualFromStart() {
   session.bbwProtectionEnded = true;
   addDebugEvent(DebugCategory::STATE, DebugCode::MANUAL_CYCLE_STARTED);
   transitionTo(StopperState::MANUAL_NO_SCALE);
-  if (BUZZER_SUPPORT_ENABLED && runtimeConfig.buzzerManualNoScaleBeep &&
-      !session.config.timerOnly && !session.startedWithScale) {
-    localBuzzer.request(BuzzerPattern::TRIPLE);
+  if (runtimeConfig.buzzerManualNoScaleBeep && !session.config.timerOnly &&
+      !session.startedWithScale) {
+    emitAlert(AlertEvent::MANUAL_NO_SCALE);
   }
 }
 
@@ -4481,6 +4611,11 @@ void processWebCommand(const WebCommand &command) {
           command.config.paddleReturnReminderIntervalMs;
       candidate.paddleReturnReminderMaxDurationMs =
           command.config.paddleReturnReminderMaxDurationMs;
+      candidate.buzzerScaleLostBeep = command.config.buzzerScaleLostBeep;
+      candidate.buzzerAutoToManualGuardEndBeep =
+          command.config.buzzerAutoToManualGuardEndBeep;
+      candidate.buzzerManualNoScaleBeep = command.config.buzzerManualNoScaleBeep;
+      candidate.alertOutputChannel = command.config.alertOutputChannel;
       candidate.rinseGestureMs = command.config.rinseGestureMs;
       candidate.rinseDurationMs = command.config.rinseDurationMs;
       candidate.autoRetare = command.config.autoRetare;
@@ -4702,6 +4837,21 @@ void processWebCommand(const WebCommand &command) {
         rejectWebCommand(command);
       }
       return;
+
+    case WebCommandType::BUZZER_TEST: {
+      if (!controlAllowsConfigurationNow()) {
+        rejectWebCommand(command);
+        return;
+      }
+      if (!localBuzzer.request(command.buzzerPattern)) {
+        rejectWebCommand(command);
+        return;
+      }
+      addDebugEvent(DebugCategory::WEB, DebugCode::WEB_COMMAND_ACCEPTED,
+                    static_cast<int32_t>(command.type));
+      reportControlCommandResult(command, CommandResultState::APPLIED);
+      return;
+    }
 
     case WebCommandType::MAINTENANCE_COMPLETE:
       completeMaintenanceLease(command);

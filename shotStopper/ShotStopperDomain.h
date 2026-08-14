@@ -11,8 +11,9 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 22;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 21;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 23;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 22;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V22 = 22;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V21 = 21;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V20 = 20;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V19 = 19;
@@ -219,10 +220,96 @@ static_assert(SHOT_STOPPER_ENABLE_REMOTE_CN9 == 0 ||
 #define SHOT_STOPPER_ENABLE_BUZZER 0
 #endif
 
-constexpr bool BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER == 1;
+constexpr bool BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0;
+constexpr bool BUZZER_ACTIVE_DRIVE = SHOT_STOPPER_ENABLE_BUZZER == 2;
 static_assert(SHOT_STOPPER_ENABLE_BUZZER == 0 ||
-                  SHOT_STOPPER_ENABLE_BUZZER == 1,
-              "SHOT_STOPPER_ENABLE_BUZZER must be 0 or 1");
+                  SHOT_STOPPER_ENABLE_BUZZER == 1 ||
+                  SHOT_STOPPER_ENABLE_BUZZER == 2,
+              "SHOT_STOPPER_ENABLE_BUZZER must be 0, 1, or 2");
+
+enum class BuzzerPattern : uint8_t {
+  NONE = 0,
+  SINGLE = 1,
+  TRIPLE = 2,
+  DOUBLE = 3,
+  LONG = 4
+};
+
+inline bool parseBuzzerPatternId(const char *id, BuzzerPattern &out) {
+  if (id == nullptr || id[0] == '\0') {
+    return false;
+  }
+  if (strcmp(id, "short") == 0) {
+    out = BuzzerPattern::SINGLE;
+    return true;
+  }
+  if (strcmp(id, "long") == 0) {
+    out = BuzzerPattern::LONG;
+    return true;
+  }
+  if (strcmp(id, "double") == 0) {
+    out = BuzzerPattern::DOUBLE;
+    return true;
+  }
+  if (strcmp(id, "triple") == 0) {
+    out = BuzzerPattern::TRIPLE;
+    return true;
+  }
+  return false;
+}
+
+// Where alert sounds are routed when local buzzer support is compiled in.
+enum class AlertOutputChannel : uint8_t {
+  SCALE_ONLY = 0,
+  BUZZER_ONLY = 1,
+  SCALE_PRIORITY = 2
+};
+
+inline bool validAlertOutputChannel(uint8_t channel) {
+  return channel <= static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+}
+
+inline const char *alertOutputChannelId(uint8_t channel) {
+  switch (static_cast<AlertOutputChannel>(channel)) {
+    case AlertOutputChannel::SCALE_ONLY:
+      return "scale_only";
+    case AlertOutputChannel::BUZZER_ONLY:
+      return "buzzer_only";
+    case AlertOutputChannel::SCALE_PRIORITY:
+      return "scale_priority";
+  }
+  return "scale_priority";
+}
+
+inline bool parseAlertOutputChannel(const char *text, uint8_t &channel) {
+  if (text == nullptr) {
+    return false;
+  }
+  if (strcmp(text, "scale_only") == 0) {
+    channel = static_cast<uint8_t>(AlertOutputChannel::SCALE_ONLY);
+    return true;
+  }
+  if (strcmp(text, "buzzer_only") == 0) {
+    channel = static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+    return true;
+  }
+  if (strcmp(text, "scale_priority") == 0) {
+    channel = static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+    return true;
+  }
+  return false;
+}
+
+// Builds without buzzer always behave as scale-only regardless of stored value.
+inline AlertOutputChannel effectiveAlertOutputChannel(uint8_t stored) {
+  if (!BUZZER_SUPPORT_ENABLED) {
+    return AlertOutputChannel::SCALE_ONLY;
+  }
+  if (!validAlertOutputChannel(stored)) {
+    return AlertOutputChannel::SCALE_PRIORITY;
+  }
+  return static_cast<AlertOutputChannel>(stored);
+}
 
 #ifndef SHOT_STOPPER_ENABLE_ALED
 #define SHOT_STOPPER_ENABLE_ALED 0
@@ -430,12 +517,16 @@ struct RuntimeConfig {
       DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
   uint32_t paddleReturnReminderMaxDurationMs =
       DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
-  // Local piezo alerts (active only when SHOT_STOPPER_ENABLE_BUZZER=1).
+  // Local buzzer alerts (active when SHOT_STOPPER_ENABLE_BUZZER is 1 or 2).
   bool buzzerScaleLostBeep = true;
   bool buzzerAutoToManualGuardEndBeep = true;
   bool buzzerManualNoScaleBeep = true;
-  // Keeps schema-22 NVS blob size distinct from schema 21 (bool packing/padding).
+  // scale_only | buzzer_only | scale_priority (ignored when buzzer not compiled).
+  uint8_t alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+  // Keeps schema-23 NVS blob size distinct from schema 22.
   uint32_t reservedConfig = 0;
+  uint32_t reservedConfig2 = 0;
   uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
   uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
   bool autoRetare = true;
@@ -580,7 +671,8 @@ enum class ConfigValidationError : uint8_t {
   AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT,
   AUTO_TO_MANUAL_GUARD_BASELINE,
   WEIGHT_OFFSET_BASELINE,
-  SCALE_MAC_CACHE_MODE
+  SCALE_MAC_CACHE_MODE,
+  ALERT_OUTPUT_CHANNEL
 };
 
 constexpr size_t MAX_SHOT_PRESETS = 8;
@@ -786,6 +878,9 @@ inline ConfigValidationError validateRuntimeConfig(
   if (!validScaleMacCacheMode(config.scaleMacCacheMode)) {
     return ConfigValidationError::SCALE_MAC_CACHE_MODE;
   }
+  if (!validAlertOutputChannel(config.alertOutputChannel)) {
+    return ConfigValidationError::ALERT_OUTPUT_CHANNEL;
+  }
   if (!config.fastExtractionGuardEnabled) {
     return ConfigValidationError::NONE;
   }
@@ -862,6 +957,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "weightOffsetBaselineG";
     case ConfigValidationError::SCALE_MAC_CACHE_MODE:
       return "scaleMacCacheMode";
+    case ConfigValidationError::ALERT_OUTPUT_CHANNEL:
+      return "alertOutputChannel";
   }
   return "unknown";
 }
@@ -1100,6 +1197,7 @@ enum class WebCommandType : uint8_t {
   CLEAR_PREFERRED_SCALE,
   PERSIST_RUNTIME,
   START_WIFI_SCAN,
+  BUZZER_TEST,
   MAINTENANCE_COMPLETE
 };
 
@@ -1130,6 +1228,7 @@ inline const char *webCommandTypeName(WebCommandType type) {
       return "clear preferred scale cache";
     case WebCommandType::PERSIST_RUNTIME: return "persist workflow";
     case WebCommandType::START_WIFI_SCAN: return "scan Wi-Fi networks";
+    case WebCommandType::BUZZER_TEST: return "buzzer test";
     case WebCommandType::MAINTENANCE_COMPLETE:
       return "maintenance result";
   }
@@ -1158,6 +1257,7 @@ struct WebCommand {
   uint8_t presetId = 0;
   char presetName[24] = {};
   bool persistPresets = false;
+  BuzzerPattern buzzerPattern = BuzzerPattern::NONE;
   char ssid[WIFI_SSID_CAPACITY] = {};
   char password[WIFI_PASSWORD_CAPACITY] = {};
   bool openNetwork = false;

@@ -131,10 +131,13 @@ bool jsonString(cJSON *object, const char *name, char *output,
 
 bool jsonHasOnlyUniqueFields(cJSON *object, const char *const *allowed,
                              size_t allowedCount) {
-  if (!cJSON_IsObject(object) || allowed == nullptr || allowedCount > 32) {
+  // uint64_t bitmask: config payloads can exceed 32 fields (e.g. alerts +
+  // output channel). Keep the ceiling explicit so callers fail loudly if they
+  // outgrow the mask again.
+  if (!cJSON_IsObject(object) || allowed == nullptr || allowedCount > 64) {
     return false;
   }
-  uint32_t seen = 0;
+  uint64_t seen = 0;
   for (cJSON *item = object->child; item != nullptr; item = item->next) {
     if (item->string == nullptr) {
       return false;
@@ -143,10 +146,10 @@ bool jsonHasOnlyUniqueFields(cJSON *object, const char *const *allowed,
     while (index < allowedCount && strcmp(item->string, allowed[index]) != 0) {
       ++index;
     }
-    if (index == allowedCount || (seen & (1UL << index)) != 0) {
+    if (index == allowedCount || (seen & (uint64_t{1} << index)) != 0) {
       return false;
     }
-    seen |= 1UL << index;
+    seen |= uint64_t{1} << index;
   }
   return true;
 }
@@ -221,6 +224,9 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "Offset baseline must be from 0 to 5.0 g.";
     case ConfigValidationError::SCALE_MAC_CACHE_MODE:
       return "Scale MAC cache mode must be disabled, partial, or full.";
+    case ConfigValidationError::ALERT_OUTPUT_CHANNEL:
+      return "Alert output channel must be scale_only, buzzer_only, or "
+             "scale_priority.";
   }
   return "Invalid configuration.";
 }
@@ -278,6 +284,18 @@ bool jsonScaleMacCacheMode(cJSON *object, const char *name, uint8_t &output) {
     return false;
   }
   return parseScaleMacCacheMode(item->valuestring, output);
+}
+
+bool jsonAlertOutputChannel(cJSON *object, const char *name, uint8_t &output,
+                            bool optional) {
+  cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+  if (item == nullptr) {
+    return optional;
+  }
+  if (!cJSON_IsString(item) || item->valuestring == nullptr) {
+    return false;
+  }
+  return parseAlertOutputChannel(item->valuestring, output);
 }
 
 const char *ntpPresetId(uint8_t preset) {
@@ -1788,7 +1806,7 @@ bool ShotStopperNetwork::startHttpServer() {
   // connection failures ("Device unreachable") while the UI still partially
   // works. ESP-IDF uses (max_open_sockets + 3) LWIP sockets total.
   config.max_open_sockets = 10;
-  config.max_uri_handlers = 32;
+  config.max_uri_handlers = 36;
   config.max_resp_headers = 12;
   config.backlog_conn = 10;
   config.lru_purge_enable = true;
@@ -1839,6 +1857,8 @@ bool ShotStopperNetwork::startHttpServer() {
                       stopHandler) &&
       registerHandler(server_, "/api/v1/control/restart", HTTP_POST,
                       restartHandler) &&
+      registerHandler(server_, "/api/v1/control/buzzer", HTTP_POST,
+                      buzzerHandler) &&
       registerHandler(server_, "/api/v1/factory-reset", HTTP_POST,
                       factoryResetHandler) &&
       registerHandler(server_, "/api/v1/network", HTTP_POST, networkHandler) &&
@@ -2088,7 +2108,11 @@ bool ShotStopperNetwork::readJsonBody(
 }
 
 static void formatWebUiEtag(char etag[WEB_UI_ETAG_CAPACITY]) {
-  snprintf(etag, WEB_UI_ETAG_CAPACITY, "\"%s\"", FW_VERSION);
+  // Asset tag changes when embedded HTML/JS/CSS/logo change, even if the git
+  // version string is unchanged (dirty rebuilds). Required so immutable
+  // /app.js?v=… cache busts after reflashes.
+  snprintf(etag, WEB_UI_ETAG_CAPACITY, "\"%s.%s\"", FW_VERSION,
+           WEB_UI_ASSET_TAG);
 }
 
 static bool ifNoneMatchEquals(httpd_req_t *request, const char *etag) {
@@ -2489,7 +2513,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"paddleReturnReminderMaxDurationMs\":%lu,"
       "\"buzzerScaleLostBeep\":%s,"
       "\"buzzerAutoToManualGuardEndBeep\":%s,"
-      "\"buzzerManualNoScaleBeep\":%s,\"rinseGestureMs\":%lu,"
+      "\"buzzerManualNoScaleBeep\":%s,"
+      "\"alertOutputChannel\":\"%s\","
+      "\"rinseGestureMs\":%lu,"
       "\"rinseDurationMs\":%lu,"
       "\"autoRetare\":%s,\"retareWindowMs\":%lu,"
       "\"minimumCupWeightG\":%.1f,"
@@ -2610,6 +2636,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.config.buzzerScaleLostBeep ? "true" : "false",
       control.config.buzzerAutoToManualGuardEndBeep ? "true" : "false",
       control.config.buzzerManualNoScaleBeep ? "true" : "false",
+      alertOutputChannelId(control.config.alertOutputChannel),
       static_cast<unsigned long>(control.config.rinseGestureMs),
       static_cast<unsigned long>(control.config.rinseDurationMs),
       control.config.autoRetare ? "true" : "false",
@@ -3126,7 +3153,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
       "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
-      "buzzerManualNoScaleBeep",
+      "buzzerManualNoScaleBeep", "alertOutputChannel",
       "autoRetare", "retareWindowMs", "minimumCupWeightG",
       "retareStabilitySamples", "retareStabilityToleranceG",
       "retareStabilityMaxGapMs", "retareStabilityMinDurationMs",
@@ -3138,7 +3165,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom",
       "scaleMacCacheMode"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 35)) {
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 36)) {
     parseError =
         "Config must include exactly the expected fields with correct types.";
   } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
@@ -3183,6 +3210,11 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (!jsonBoolean(root, "buzzerManualNoScaleBeep",
                           candidate.buzzerManualNoScaleBeep)) {
     parseError = "buzzerManualNoScaleBeep must be a boolean.";
+  } else if (!jsonAlertOutputChannel(root, "alertOutputChannel",
+                                     candidate.alertOutputChannel,
+                                     /*optional=*/true)) {
+    parseError =
+        "alertOutputChannel must be scale_only, buzzer_only, or scale_priority.";
   } else if (!jsonBoolean(root, "autoRetare", candidate.autoRetare)) {
     parseError = "autoRetare must be a boolean.";
   } else if (!jsonUint32(root, "retareWindowMs", candidate.retareWindowMs)) {
@@ -3626,6 +3658,54 @@ esp_err_t ShotStopperNetwork::restartHandler(httpd_req_t *request) {
   WebCommand command;
   command.type = WebCommandType::RESTART;
   command.requestId = self.allocateRequestId();
+  if (!self.callbacks_.enqueueWebCommand(command)) {
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
+                     "Control queue is full.");
+  }
+  return self.sendAccepted(request, command.requestId);
+}
+
+esp_err_t ShotStopperNetwork::buzzerHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authenticate(request, true)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
+                     "Invalid session or CSRF token.");
+  }
+  if (!BUZZER_SUPPORT_ENABLED) {
+    return sendError(request, "403 Forbidden", "BUZZER_UNSUPPORTED",
+                     "Local buzzer is disabled in this firmware build.");
+  }
+  ControlStatusSnapshot status;
+  self.callbacks_.copyControlStatus(status);
+  if (!controlAllowsConfiguration(status)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "Stop the cycle and wait for Ready before testing the buzzer.");
+  }
+  char body[REQUEST_BODY_CAPACITY] = {};
+  char patternName[12] = {};
+  if (!readJsonBody(request, body)) {
+    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
+                     "A JSON body is required.");
+  }
+  cJSON *root = cJSON_Parse(body);
+  static const char *const fields[] = {"pattern"};
+  BuzzerPattern pattern = BuzzerPattern::NONE;
+  const bool parsed =
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
+      jsonString(root, "pattern", patternName, sizeof(patternName), false) &&
+      parseBuzzerPatternId(patternName, pattern);
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  if (!parsed) {
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
+                     "pattern must be short, long, double, or triple.");
+  }
+  WebCommand command;
+  command.type = WebCommandType::BUZZER_TEST;
+  command.requestId = self.allocateRequestId();
+  command.buzzerPattern = pattern;
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control queue is full.");

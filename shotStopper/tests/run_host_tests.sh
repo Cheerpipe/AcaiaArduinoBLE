@@ -11,6 +11,7 @@ persistence_sanitized=${TMPDIR:-/tmp}/shot_stopper_persistence_host_test_sanitiz
 external_safety_binary=${TMPDIR:-/tmp}/shot_stopper_external_safety_host_test
 external_safety_sanitized=${TMPDIR:-/tmp}/shot_stopper_external_safety_host_test_sanitized
 remote_policy_binary=${TMPDIR:-/tmp}/shot_stopper_remote_policy_host_test
+active_buzzer_binary=${TMPDIR:-/tmp}/shot_stopper_host_test_active_buzzer
 firmware_file="$test_dir/../shotStopper.ino"
 cxx=${CXX:-c++}
 
@@ -27,6 +28,13 @@ cxx=${CXX:-c++}
 
 ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
   "$sanitized_binary"
+
+"$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+  -DSHOT_STOPPER_ENABLE_BUZZER=2 \
+  "$test_dir/shot_stopper_host_test.cpp" \
+  -o "$active_buzzer_binary"
+"$active_buzzer_binary"
+echo "Active buzzer drive: enabled"
 
 "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
   "$test_dir/persistence_host_test.cpp" \

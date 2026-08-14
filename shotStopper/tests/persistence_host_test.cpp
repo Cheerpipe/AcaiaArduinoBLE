@@ -1170,8 +1170,106 @@ void p28_schema_twenty_one_migrates_to_twenty_two() {
   CHECK(loaded.runtime.buzzerScaleLostBeep);
   CHECK(loaded.runtime.buzzerAutoToManualGuardEndBeep);
   CHECK(loaded.runtime.buzzerManualNoScaleBeep);
+  CHECK(loaded.runtime.alertOutputChannel ==
+        static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY));
   CHECK(strcmp(loaded.preferredScaleMac, "AA:BB:CC:DD:EE:FF") == 0);
   CHECK(strcmp(loaded.preferredScaleName, "Lunar") == 0);
+}
+
+void p30_schema_twenty_two_migrates_to_twenty_three() {
+  persistence_host::reset();
+  PersistedSettings current;
+  CHECK(initializeDefaultSettings(current));
+  ensurePersistedPresetBank(current);
+  finalizePersistedSettings(current);
+
+  PersistedSettingsV22 legacy = {};
+  legacy.magic = PERSISTED_SETTINGS_MAGIC;
+  legacy.schemaVersion = CONFIG_SCHEMA_VERSION_V22;
+  legacy.structureSize = sizeof(PersistedSettingsV22);
+  legacy.storageRevision = 11;
+  RuntimeConfigV22 runtimeV22 = {};
+  runtimeV22.revision = 5;
+  runtimeV22.goalWeightG = 37;
+  runtimeV22.weightOffsetG = current.runtime.weightOffsetG;
+  runtimeV22.weightOffsetBaselineG = current.runtime.weightOffsetBaselineG;
+  runtimeV22.autoTare = current.runtime.autoTare;
+  runtimeV22.timerOnly = current.runtime.timerOnly;
+  runtimeV22.canTareStartTimer = current.runtime.canTareStartTimer;
+  runtimeV22.scaleTimerStopExtraDelayMs =
+      current.runtime.scaleTimerStopExtraDelayMs;
+  runtimeV22.firstDropBeep = current.runtime.firstDropBeep;
+  runtimeV22.paddleReturnReminderBeep =
+      current.runtime.paddleReturnReminderBeep;
+  runtimeV22.paddleReturnReminderIntervalMs =
+      current.runtime.paddleReturnReminderIntervalMs;
+  runtimeV22.paddleReturnReminderMaxDurationMs =
+      current.runtime.paddleReturnReminderMaxDurationMs;
+  runtimeV22.buzzerScaleLostBeep = false;
+  runtimeV22.buzzerAutoToManualGuardEndBeep = true;
+  runtimeV22.buzzerManualNoScaleBeep = false;
+  runtimeV22.reservedConfig = 0;
+  runtimeV22.rinseGestureMs = current.runtime.rinseGestureMs;
+  runtimeV22.rinseDurationMs = current.runtime.rinseDurationMs;
+  runtimeV22.autoRetare = current.runtime.autoRetare;
+  runtimeV22.retareWindowMs = current.runtime.retareWindowMs;
+  runtimeV22.minimumCupWeightG = current.runtime.minimumCupWeightG;
+  runtimeV22.retareStabilitySamples = current.runtime.retareStabilitySamples;
+  runtimeV22.retareStabilityToleranceG =
+      current.runtime.retareStabilityToleranceG;
+  runtimeV22.retareStabilityMaxGapMs = current.runtime.retareStabilityMaxGapMs;
+  runtimeV22.retareStabilityMinDurationMs =
+      current.runtime.retareStabilityMinDurationMs;
+  runtimeV22.bbwProtectionMs = current.runtime.bbwProtectionMs;
+  runtimeV22.operationalWallMs = current.runtime.operationalWallMs;
+  runtimeV22.timezoneOffsetMinutes = current.runtime.timezoneOffsetMinutes;
+  runtimeV22.ntpServerPreset = current.runtime.ntpServerPreset;
+  memcpy(runtimeV22.ntpServerCustom, current.runtime.ntpServerCustom,
+         sizeof(runtimeV22.ntpServerCustom));
+  runtimeV22.fastExtractionGuardEnabled =
+      current.runtime.fastExtractionGuardEnabled;
+  runtimeV22.maxRecoveryWeightG = current.runtime.maxRecoveryWeightG;
+  runtimeV22.minBrewTimeMs = current.runtime.minBrewTimeMs;
+  runtimeV22.autoToManualGuardEnabled = current.runtime.autoToManualGuardEnabled;
+  runtimeV22.autoToManualGuardLimitMode =
+      current.runtime.autoToManualGuardLimitMode;
+  runtimeV22.autoToManualGuardManualLimitMs =
+      current.runtime.autoToManualGuardManualLimitMs;
+  runtimeV22.autoToManualGuardBaselineMs =
+      current.runtime.autoToManualGuardBaselineMs;
+  memcpy(runtimeV22.autoToManualGuardSamplesDs,
+         current.runtime.autoToManualGuardSamplesDs,
+         sizeof(runtimeV22.autoToManualGuardSamplesDs));
+  runtimeV22.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL);
+  legacy.runtime = runtimeV22;
+  legacy.presets = current.presets;
+  legacy.staConfigured = false;
+  legacy.staOpen = false;
+  legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  legacy.staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  legacy.lkgValid = false;
+  memcpy(legacy.apPassword, current.apPassword, sizeof(legacy.apPassword));
+  memcpy(legacy.authSalt, current.authSalt, sizeof(legacy.authSalt));
+  memcpy(legacy.authHash, current.authHash, sizeof(legacy.authHash));
+  strcpy(legacy.preferredScaleMac, "01:23:45:67:89:AB");
+  strcpy(legacy.preferredScaleName, "Bookoo");
+  legacy.checksum = persistedSettingsV22Checksum(legacy);
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &legacy,
+                           sizeof(legacy));
+
+  PersistedSettings loaded;
+  bool migrated = false;
+  CHECK(loadPersistedSettings(loaded, &migrated));
+  CHECK(migrated);
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.runtime.goalWeightG == 37);
+  CHECK(!loaded.runtime.buzzerScaleLostBeep);
+  CHECK(loaded.runtime.buzzerAutoToManualGuardEndBeep);
+  CHECK(!loaded.runtime.buzzerManualNoScaleBeep);
+  CHECK(loaded.runtime.alertOutputChannel ==
+        static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY));
+  CHECK(strcmp(loaded.preferredScaleMac, "01:23:45:67:89:AB") == 0);
 }
 
 void p24_preset_bank_size_and_crud_budgets() {
@@ -1357,6 +1455,7 @@ const TestCase tests[] = {
     {"P23", p23_schema_nineteen_migrates_to_twenty_with_preset_bank},
     {"P27", p27_schema_twenty_migrates_to_twenty_one},
     {"P28", p28_schema_twenty_one_migrates_to_twenty_two},
+    {"P30", p30_schema_twenty_two_migrates_to_twenty_three},
     {"P24", p24_preset_bank_size_and_crud_budgets},
     {"P25", p25_invalid_active_id_keeps_customs},
     {"P26", p26_save_candidate_validation_does_not_require_live_mutation},

@@ -1,7 +1,9 @@
 #define SHOT_STOPPER_HOST_TEST
 #define ARDUINO_ESP32_DEV
 #define SHOT_STOPPER_ENABLE_REMOTE_CN9 1
+#ifndef SHOT_STOPPER_ENABLE_BUZZER
 #define SHOT_STOPPER_ENABLE_BUZZER 1
+#endif
 #define SHOT_STOPPER_ENABLE_ALED 1
 
 #include <cstdlib>
@@ -70,6 +72,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   hostTrackedRelayClosedLevel = RELAY_CLOSED_LEVEL;
   hostRelayOpenWrites = 0;
   hostRelayClosedWrites = 0;
+  hostLedcAttachCalls = 0;
   hostEspTimerCreateSucceeds = true;
   hostEspTimerStartSucceeds = true;
   hostGptimerCreateSucceeds = true;
@@ -1426,6 +1429,8 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.buzzerScaleLostBeep);
   CHECK(config.buzzerAutoToManualGuardEndBeep);
   CHECK(config.buzzerManualNoScaleBeep);
+  CHECK(config.alertOutputChannel ==
+        static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY));
   CHECK(config.fastExtractionGuardEnabled);
 }
 
@@ -1991,6 +1996,8 @@ void w35_status_reports_the_live_physical_paddle_gpio() {
 
 void w36_paddle_return_reminder_beeps_at_configured_interval_only_while_open() {
   resetHarness(true, true);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
   runLoopAfter(0);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(!scalePaddleReturnReminderBeepPending);
@@ -2018,6 +2025,8 @@ void w36_paddle_return_reminder_beeps_at_configured_interval_only_while_open() {
 
 void w44_paddle_return_reminder_stops_after_fifteen_minutes() {
   resetHarness(true, true);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
   runLoopAfter(0);
   runLoopAfter(runtimeConfig.paddleReturnReminderIntervalMs);
   CHECK(localBuzzer.acceptedRequests >= 1);
@@ -2135,9 +2144,57 @@ void w56_atm_beep_queued_when_scale_lost_after_deadline() {
   setScaleConnected(false);
   loop();
   CHECK(session.endReason == EndReason::AUTO_TO_MANUAL_GUARD);
+  // Scale-lost TRIPLE + ATM TRIPLE (completion SINGLE is delayed ~200 ms).
   CHECK(localBuzzer.acceptedRequests == before + 2);
-  CHECK(localBuzzer.pending == BuzzerPattern::TRIPLE ||
-        localBuzzer.active == BuzzerPattern::TRIPLE);
+  // Drain ATM/scale-lost triples so the delayed completion SINGLE can start.
+  for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
+    runLoopAfter(40);
+  }
+  runLoopAfter(SCALE_COMPLETION_BEEP_DELAY_MS + 60);
+  CHECK(localBuzzer.acceptedRequests >= before + 3);
+}
+
+void w63_scale_priority_paddle_uses_scale_when_connected() {
+  resetHarness(true, true);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+  runLoopAfter(0);
+  const uint32_t interval = runtimeConfig.paddleReturnReminderIntervalMs;
+  const uint32_t before = localBuzzer.acceptedRequests;
+  runLoopAfter(interval);
+  CHECK(localBuzzer.acceptedRequests == before);
+  CHECK(scalePaddleReturnReminderBeepPending);
+  CHECK(executePendingScalePaddleReturnReminderBeep());
+}
+
+void w64_buzzer_only_first_drop_uses_local_buzzer() {
+  resetHarness(false, true);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  runtimeConfig.firstDropBeep = true;
+  reachReadyFromBoot();
+  startCycle();
+  advanceToBrew();
+  const uint32_t before = localBuzzer.acceptedRequests;
+  const uint32_t beforeScaleBeeps = scale.beepCalls;
+  requestFirstDropBeep();
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(scale.beepCalls == beforeScaleBeeps);
+  CHECK(!scaleBeepPending);
+}
+
+void w65_scale_only_mutes_scale_lost_triple() {
+  resetHarness(false, true);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_ONLY);
+  reachReadyFromBoot();
+  startCycle();
+  advanceToBrew();
+  const uint32_t before = localBuzzer.acceptedRequests;
+  setScaleConnected(false);
+  loop();
+  CHECK(session.weightControlState == WeightControlState::SUSPENDED);
+  CHECK(localBuzzer.acceptedRequests == before);
 }
 
 void w57_paddle_return_reminder_falls_back_to_scale_when_piezo_not_ready() {
@@ -2168,6 +2225,73 @@ void w58_paddle_return_reminder_does_not_advance_interval_when_muted() {
   setScaleConnected(true);
   runLoopAfter(0);
   CHECK(scalePaddleReturnReminderBeepPending);
+}
+
+void drainLocalBuzzer() {
+  for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
+    runLoopAfter(40);
+  }
+  CHECK(!localBuzzer.busy());
+}
+
+void w59_local_buzzer_plays_short_long_and_double_patterns() {
+  resetHarness(false, false);
+  CHECK(localBuzzer.ready);
+  CHECK(localBuzzer.request(BuzzerPattern::SINGLE));
+  CHECK(localBuzzer.active == BuzzerPattern::SINGLE);
+  CHECK(localBuzzer.beepCount == 1);
+  CHECK(localBuzzer.onMs == BUZZER_SINGLE_ON_MS);
+  drainLocalBuzzer();
+  CHECK(localBuzzer.request(BuzzerPattern::LONG));
+  CHECK(localBuzzer.active == BuzzerPattern::LONG);
+  CHECK(localBuzzer.beepCount == 1);
+  CHECK(localBuzzer.onMs == BUZZER_LONG_ON_MS);
+  drainLocalBuzzer();
+  CHECK(localBuzzer.request(BuzzerPattern::DOUBLE));
+  CHECK(localBuzzer.active == BuzzerPattern::DOUBLE);
+  CHECK(localBuzzer.beepCount == 2);
+  CHECK(localBuzzer.onMs == BUZZER_BEEP_ON_MS);
+  drainLocalBuzzer();
+}
+
+void w60_web_buzzer_test_plays_requested_pattern() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  BuzzerPattern parsed = BuzzerPattern::NONE;
+  CHECK(parseBuzzerPatternId("triple", parsed));
+  CHECK(parsed == BuzzerPattern::TRIPLE);
+  WebCommand command = webControlCommand(WebCommandType::BUZZER_TEST);
+  command.buzzerPattern = BuzzerPattern::TRIPLE;
+  const uint32_t before = localBuzzer.acceptedRequests;
+  processWebCommand(command);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(localBuzzer.active == BuzzerPattern::TRIPLE);
+}
+
+void w61_web_buzzer_test_rejected_while_active() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  startCycle();
+  WebCommand command = webControlCommand(WebCommandType::BUZZER_TEST);
+  command.buzzerPattern = BuzzerPattern::SINGLE;
+  const uint32_t before = localBuzzer.acceptedRequests;
+  processWebCommand(command);
+  CHECK(localBuzzer.acceptedRequests == before);
+  CHECK(session.active);
+}
+
+void w62_local_buzzer_drive_matches_compile_flag() {
+  resetHarness(false, false);
+  CHECK(localBuzzer.ready);
+  CHECK(hostPinMode[BUZZER_GPIO] == OUTPUT);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+#if SHOT_STOPPER_ENABLE_BUZZER == 2
+  CHECK(BUZZER_ACTIVE_DRIVE);
+  CHECK(hostLedcAttachCalls == 0);
+#else
+  CHECK(!BUZZER_ACTIVE_DRIVE);
+  CHECK(hostLedcAttachCalls == 1);
+#endif
 }
 
 void w37_factory_reset_is_rejected_while_control_is_active() {
@@ -3971,6 +4095,13 @@ const TestCase testCases[] = {
     {"W56", w56_atm_beep_queued_when_scale_lost_after_deadline},
     {"W57", w57_paddle_return_reminder_falls_back_to_scale_when_piezo_not_ready},
     {"W58", w58_paddle_return_reminder_does_not_advance_interval_when_muted},
+    {"W59", w59_local_buzzer_plays_short_long_and_double_patterns},
+    {"W60", w60_web_buzzer_test_plays_requested_pattern},
+    {"W61", w61_web_buzzer_test_rejected_while_active},
+    {"W62", w62_local_buzzer_drive_matches_compile_flag},
+    {"W63", w63_scale_priority_paddle_uses_scale_when_connected},
+    {"W64", w64_buzzer_only_first_drop_uses_local_buzzer},
+    {"W65", w65_scale_only_mutes_scale_lost_triple},
     {"S01", s01_shot_log_filters_short_and_rinse},
     {"S02", s02_shot_log_appends_after_drip_delay},
     {"S03", s03_shot_log_clear_empties_records},

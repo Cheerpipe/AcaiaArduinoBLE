@@ -147,12 +147,21 @@ Additional fixed protections (not separately configurable):
 
 ### Alerts and reminders
 
+Machine-level (not per-preset). Sounds are **event-first**: tare/start/stop,
+first drop, paddle reminder, completion extra, and the triple alerts are
+routed by **Output channel** when a local buzzer is compiled in.
+
 | Setting | What it does |
 | --- | --- |
-| **Beep when coffee starts** | One scale beep on first coffee drops during an automatic shot (default ON; ignored when Brew by weight is off). |
-| **Paddle-off reminder** | Repeat scale beeps while the **physical paddle stays ON**, **CN9 is open**, and the scale is connected — i.e. after the brew circuit opened but the paddle was left ON (default ON). |
+| **Output channel** | Shown only with `SHOT_STOPPER_ENABLE_BUZZER`. **Scale priority** (default): scale when connected/able, else buzzer; never both for one event. **Buzzer only**: all alert sound via the local buzzer (for a silent scale). **Scale only**: scale path only; scale-incapable triples are muted. |
+| **Beep when coffee starts** | One beep on first coffee drops during an automatic shot (default ON; ignored when Brew by weight is off). |
+| **Paddle-off reminder** | Repeat beeps while the **physical paddle stays ON** and **CN9 is open** (default ON). |
 | **Paddle reminder interval (s)** | Time between reminder beeps (5–60 s; default 10 s). |
 | **Paddle reminder limit (min)** | Stop beeping after this duration even if the paddle remains ON (1–60 min; default 15 min). |
+| **Scale lost / ATM / manual-no-scale** | Triple beeps on the local buzzer (shown with buzzer support; disabled when Output channel is Scale only). |
+
+Shot completion still adds one extra beep after stop (not configurable). Without
+buzzer support, Output channel and the triple checkboxes are hidden.
 
 ### Shot history
 
@@ -313,12 +322,23 @@ The following items are planned but **not present in the current firmware**:
 - **Home Assistant integration** — publish status, sensors, and/or controls to
   Home Assistant (MQTT, REST, or native integration).
 
-## Optional hardware: local piezo buzzer
+## Optional hardware: local buzzer
 
-Compile with `-DSHOT_STOPPER_ENABLE_BUZZER=1` and wire a **passive** piezo
-between `SHOT_STOPPER_BUZZER_GPIO` (board default, or override) and GND. When
-enabled, Alerts exposes checkboxes for scale-lost / ATM-end / manual-without-scale
-triple beeps, and the paddle-off reminder uses the piezo instead of the scale.
+Compile with `-DSHOT_STOPPER_ENABLE_BUZZER=1` (passive piezo) or `=2` (active
+buzzer) and wire the buzzer between `SHOT_STOPPER_BUZZER_GPIO` (board default, or
+override) and GND: marked **+** to the GPIO, unmarked pin to GND. Default GPIO
+is 32 (ESP32 Dev), 14 (ESP32-S3), or 5 (Nano ESP32).
+
+Identify the part with 3.3 V DC on `+` vs GND: a constant tone is **active**
+(`=2`); a click or silence is **passive** (`=1`). Beep on/gap durations are the
+same catalog for both; only the drive (PWM vs GPIO HIGH/LOW) differs. Omit the
+flag or set `=0` for builds without that hardware.
+
+When enabled, Alerts shows **Output channel** (Scale priority / Buzzer only /
+Scale only) plus checkboxes for scale-lost / ATM-end / manual-without-scale
+triple beeps. All alert events (including tare/start/stop feedback when the
+channel routes to the buzzer) go through that setting. Debug
+short/long/double/triple buttons play the same patterns.
 
 ## Optional hardware: WS2812B status LEDs (ALED)
 
@@ -844,8 +864,9 @@ arduino-cli compile \
 rinse over the Web UI and API. **Stop** is always available when authenticated,
 even without this flag. Use remote actuation only on a trusted network.
 
-`-DSHOT_STOPPER_ENABLE_BUZZER=1` enables the onboard passive piezo driver and
-buzzer alert settings. Omit it (or set `=0`) for builds without that hardware.
+`-DSHOT_STOPPER_ENABLE_BUZZER=1` enables a **passive** piezo (LEDC 2700 Hz).
+Use `=2` for an **active** buzzer (GPIO HIGH/LOW). Alerts and debug beeps are
+the same either way. Omit the flag or set `=0` for builds without that hardware.
 
 `-DSHOT_STOPPER_ENABLE_ALED=1` enables the two WS2812B status pixels and the
 `status_indicator` task. Omit it (or set `=0`) for builds without addressable
