@@ -18,7 +18,9 @@
 #include <AcaiaArduinoBLE.h>
 #include <EEPROM.h>
 #include <driver/gpio.h>
+#if SHOT_STOPPER_ENABLE_ALED == 1
 #include <esp32-hal-rgb-led.h>
+#endif
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <soc/gpio_reg.h>
@@ -38,7 +40,9 @@
 #include "ShotStopperSerialCli.h"
 #include "ShotStopperVersion.h"
 #include "ShotStopperHardwareTimer.h"
+#if SHOT_STOPPER_ENABLE_ALED == 1
 #include "ShotStopperIndicators.h"
+#endif
 #include "ShotStopperResetGuard.h"
 #include "ShotStopperSafety.h"
 #include "ShotStopperShotLog.h"
@@ -72,17 +76,21 @@ constexpr uint8_t SCALE_STOP_MAX_ATTEMPTS = 3;
 constexpr uint32_t MAINTENANCE_LEASE_SETTLE_MS = 100;
 constexpr uint32_t RUNTIME_PERSIST_RETRY_MS = 500;
 constexpr uint32_t HEALTH_TELEMETRY_INTERVAL_MS = 5000;
+#if SHOT_STOPPER_ENABLE_ALED == 1
 constexpr uint32_t STATUS_INDICATOR_TASK_STACK_SIZE = 3072;
+#endif
 // Pin control/BLE/LED work with Arduino loopTask on APP_CPU (core 1).
 // network_manager is pinned to PRO_CPU (core 0) in ShotStopperNetwork.cpp.
 constexpr BaseType_t CONTROL_TASK_CORE = 1;
 
+#if SHOT_STOPPER_ENABLE_ALED == 1
 #ifndef SHOT_STOPPER_LED_BRIGHTNESS
 #define SHOT_STOPPER_LED_BRIGHTNESS 32
 #endif
 
 constexpr uint8_t STATUS_INDICATOR_BRIGHTNESS =
     SHOT_STOPPER_LED_BRIGHTNESS;
+#endif
 
 constexpr bool DEBUG = false;
 
@@ -93,11 +101,13 @@ constexpr bool DEBUG = false;
 #if defined(ARDUINO_ESP32S3_DEV)
 constexpr uint8_t PADDLE_GPIO = 21;
 constexpr uint8_t RELAY_GPIO = 38;
+#if SHOT_STOPPER_ENABLE_ALED == 1
 #ifndef SHOT_STOPPER_SCALE_LED_GPIO
 #define SHOT_STOPPER_SCALE_LED_GPIO 48
 #endif
 #ifndef SHOT_STOPPER_STOPPER_LED_GPIO
 #define SHOT_STOPPER_STOPPER_LED_GPIO 47
+#endif
 #endif
 #ifndef SHOT_STOPPER_BUZZER_GPIO
 #define SHOT_STOPPER_BUZZER_GPIO 14
@@ -105,11 +115,13 @@ constexpr uint8_t RELAY_GPIO = 38;
 #elif defined(ARDUINO_NANO_ESP32)
 constexpr uint8_t PADDLE_GPIO = 10;
 constexpr uint8_t RELAY_GPIO = 11;
+#if SHOT_STOPPER_ENABLE_ALED == 1
 #ifndef SHOT_STOPPER_SCALE_LED_GPIO
 #define SHOT_STOPPER_SCALE_LED_GPIO 2
 #endif
 #ifndef SHOT_STOPPER_STOPPER_LED_GPIO
 #define SHOT_STOPPER_STOPPER_LED_GPIO 3
+#endif
 #endif
 #ifndef SHOT_STOPPER_BUZZER_GPIO
 #define SHOT_STOPPER_BUZZER_GPIO 5
@@ -118,22 +130,26 @@ constexpr uint8_t RELAY_GPIO = 11;
 // GPIO 27 supports INPUT_PULLUP for the paddle; GPIO 26 drives the relay.
 constexpr uint8_t PADDLE_GPIO = 27;
 constexpr uint8_t RELAY_GPIO = 26;
+#if SHOT_STOPPER_ENABLE_ALED == 1
 #ifndef SHOT_STOPPER_SCALE_LED_GPIO
 #define SHOT_STOPPER_SCALE_LED_GPIO 25
 #endif
 #ifndef SHOT_STOPPER_STOPPER_LED_GPIO
 #define SHOT_STOPPER_STOPPER_LED_GPIO 33
 #endif
+#endif
 #ifndef SHOT_STOPPER_BUZZER_GPIO
 #define SHOT_STOPPER_BUZZER_GPIO 32
 #endif
 #else
-#error "Unsupported board: configure explicit GPIO and WS2812B pins"
+#error "Unsupported board: configure explicit GPIO pins"
 #endif
 
+#if SHOT_STOPPER_ENABLE_ALED == 1
 constexpr uint8_t SCALE_STATUS_LED_GPIO = SHOT_STOPPER_SCALE_LED_GPIO;
 constexpr uint8_t STOPPER_STATUS_LED_GPIO =
     SHOT_STOPPER_STOPPER_LED_GPIO;
+#endif
 constexpr uint8_t BUZZER_GPIO = SHOT_STOPPER_BUZZER_GPIO;
 
 constexpr uint8_t PADDLE_ACTIVE_LEVEL = LOW;
@@ -175,6 +191,7 @@ static_assert(RELAY_CLOSED_LEVEL != RELAY_OPEN_LEVEL,
 static_assert((RELAY_OPEN_LEVEL == LOW || RELAY_OPEN_LEVEL == HIGH) &&
                   (RELAY_CLOSED_LEVEL == LOW || RELAY_CLOSED_LEVEL == HIGH),
               "Relay levels must be LOW or HIGH");
+#if SHOT_STOPPER_ENABLE_ALED == 1
 static_assert(SHOT_STOPPER_LED_BRIGHTNESS > 0 &&
                   SHOT_STOPPER_LED_BRIGHTNESS <= 255,
               "WS2812B brightness must be between 1 and 255");
@@ -189,11 +206,17 @@ static_assert(BUZZER_GPIO != PADDLE_GPIO && BUZZER_GPIO != RELAY_GPIO &&
                   BUZZER_GPIO != SCALE_STATUS_LED_GPIO &&
                   BUZZER_GPIO != STOPPER_STATUS_LED_GPIO,
               "Buzzer GPIO must be distinct from paddle, relay, and LED GPIOs");
+#else
+static_assert(BUZZER_GPIO != PADDLE_GPIO && BUZZER_GPIO != RELAY_GPIO,
+              "Buzzer GPIO must be distinct from paddle and relay GPIOs");
+#endif
 #ifndef SHOT_STOPPER_HOST_TEST
+#if SHOT_STOPPER_ENABLE_ALED == 1
 static_assert(GPIO_IS_VALID_OUTPUT_GPIO(SCALE_STATUS_LED_GPIO),
               "Scale WS2812B must use a valid output-capable GPIO");
 static_assert(GPIO_IS_VALID_OUTPUT_GPIO(STOPPER_STATUS_LED_GPIO),
               "Stopper WS2812B must use a valid output-capable GPIO");
+#endif
 static_assert(!BUZZER_SUPPORT_ENABLED ||
                   GPIO_IS_VALID_OUTPUT_GPIO(BUZZER_GPIO),
               "Buzzer must use a valid output-capable GPIO");
@@ -205,11 +228,13 @@ static_assert(SAFETY_HEARTBEAT_GPIO != RELAY_GPIO &&
                   CN9_FEEDBACK_GPIO != PADDLE_GPIO &&
                   CN9_FEEDBACK_GPIO != SAFETY_HEARTBEAT_GPIO,
               "Safety GPIOs must be unique");
+#if SHOT_STOPPER_ENABLE_ALED == 1
 static_assert(SAFETY_HEARTBEAT_GPIO != SCALE_STATUS_LED_GPIO &&
                   SAFETY_HEARTBEAT_GPIO != STOPPER_STATUS_LED_GPIO &&
                   CN9_FEEDBACK_GPIO != SCALE_STATUS_LED_GPIO &&
                   CN9_FEEDBACK_GPIO != STOPPER_STATUS_LED_GPIO,
               "Safety GPIOs must not share a WS2812B data pin");
+#endif
 static_assert(BUZZER_GPIO != SAFETY_HEARTBEAT_GPIO &&
                   BUZZER_GPIO != CN9_FEEDBACK_GPIO,
               "Buzzer GPIO must be distinct from safety GPIOs");
@@ -581,6 +606,7 @@ struct ScaleLinkSnapshot {
   char protocolName[20];
 };
 
+#if SHOT_STOPPER_ENABLE_ALED == 1
 struct StatusIndicatorFrame {
   IndicatorColor scale;
   IndicatorColor stopper;
@@ -591,6 +617,7 @@ TaskHandle_t statusIndicatorTaskHandle = nullptr;
 bool statusIndicatorsReady = false;
 StatusIndicatorFrame lastPublishedIndicatorFrame;
 bool indicatorFramePublished = false;
+#endif
 
 // ---------------------------------------------------------------------------
 // Utility helpers
@@ -1039,6 +1066,7 @@ void transitionTo(StopperState nextState) {
                 static_cast<int32_t>(nextState));
 }
 
+#if SHOT_STOPPER_ENABLE_ALED == 1
 IndicatorColor applyIndicatorBrightness(const IndicatorColor &color) {
   const auto scaleChannel = [](uint8_t channel) {
     return static_cast<uint8_t>(
@@ -1099,6 +1127,7 @@ bool initializeStatusIndicators() {
   indicatorFramePublished = true;
   return true;
 }
+#endif
 
 // ---------------------------------------------------------------------------
 // Relay and independent hard limit
@@ -4807,6 +4836,7 @@ void serviceSerialCli() {
 // Status indication
 // ---------------------------------------------------------------------------
 
+#if SHOT_STOPPER_ENABLE_ALED == 1
 ScaleIndicatorCondition currentScaleIndicatorCondition() {
   if (!firmwareInitializationComplete) {
     return ScaleIndicatorCondition::STARTING;
@@ -4862,6 +4892,7 @@ void updateStatusIndicators() {
     indicatorFramePublished = true;
   }
 }
+#endif
 
 // ---------------------------------------------------------------------------
 // Arduino entry points
@@ -4914,8 +4945,10 @@ void setup() {
   }
 
   Serial.begin(9600);
+#if SHOT_STOPPER_ENABLE_ALED == 1
   statusIndicatorsReady = initializeStatusIndicators();
   updateStatusIndicators();
+#endif
 
   logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_RESET_REASON,
           static_cast<int32_t>(safetyResetStatus.reasonCode));
@@ -4932,6 +4965,7 @@ void setup() {
   logEmit(taskWatchdogReady ? LogLevel::INFO : LogLevel::CRITICAL,
           DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
           BOOT_SUBSYSTEM_TASK_WDT, taskWatchdogReady ? 1 : 0);
+#if SHOT_STOPPER_ENABLE_ALED == 1
   if (!statusIndicatorsReady) {
     logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
             BOOT_SUBSYSTEM_INDICATORS, 0);
@@ -4939,6 +4973,7 @@ void setup() {
     logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
             BOOT_SUBSYSTEM_INDICATORS, 1);
   }
+#endif
   if (safetyResetStatus.recoveryRequired) {
     addDebugEvent(DebugCategory::SECURITY, DebugCode::SAFETY_LOCKOUT_ACTIVE);
   }
@@ -5083,7 +5118,9 @@ void setup() {
 
   addDebugEvent(DebugCategory::BOOT, DebugCode::BOOT_READY);
   firmwareInitializationComplete = true;
+#if SHOT_STOPPER_ENABLE_ALED == 1
   updateStatusIndicators();
+#endif
 }
 
 void serviceHealthThresholdAlerts(uint32_t intervalMaxGapMs) {
@@ -5208,7 +5245,9 @@ void loop() {
   servicePreferredScaleMacPersistence();
   serviceMaintenanceLease();
   publishControlStatus();
+#if SHOT_STOPPER_ENABLE_ALED == 1
   updateStatusIndicators();
+#endif
   hwmon.noteLoopBusyMs(elapsedMs(loopStartedAtMs));
   if (!feedCurrentTaskWatchdog()) {
     reportTaskWatchdogFault();

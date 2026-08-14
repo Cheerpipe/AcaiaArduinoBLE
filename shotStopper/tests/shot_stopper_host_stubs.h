@@ -91,6 +91,7 @@ inline void ledcWriteTone(uint8_t pin, double freq) {
   digitalWrite(pin, freq > 0.0 ? HIGH : LOW);
 }
 
+#if SHOT_STOPPER_ENABLE_ALED == 1
 inline void rgbLedWrite(uint8_t pin, uint8_t red, uint8_t green,
                         uint8_t blue) {
   (void)pin;
@@ -98,6 +99,7 @@ inline void rgbLedWrite(uint8_t pin, uint8_t red, uint8_t green,
   (void)green;
   (void)blue;
 }
+#endif
 
 inline bool hostCpuFrequencySetSucceeds = true;
 

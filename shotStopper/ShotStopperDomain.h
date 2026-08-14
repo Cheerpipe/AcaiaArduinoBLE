@@ -219,6 +219,14 @@ static_assert(SHOT_STOPPER_ENABLE_BUZZER == 0 ||
                   SHOT_STOPPER_ENABLE_BUZZER == 1,
               "SHOT_STOPPER_ENABLE_BUZZER must be 0 or 1");
 
+#ifndef SHOT_STOPPER_ENABLE_ALED
+#define SHOT_STOPPER_ENABLE_ALED 0
+#endif
+
+constexpr bool ALED_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_ALED == 1;
+static_assert(SHOT_STOPPER_ENABLE_ALED == 0 || SHOT_STOPPER_ENABLE_ALED == 1,
+              "SHOT_STOPPER_ENABLE_ALED must be 0 or 1");
+
 enum class StopperState : uint8_t {
   REQUIRES_OFF,
   READY,

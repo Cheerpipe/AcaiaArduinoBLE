@@ -282,7 +282,7 @@ Work is split so paddle/CN9 timing never waits on BLE or HTTP:
 | **`loopTask` (Arduino `loop`)** | Paddle debounce, state machine, CN9 arm/open, weight-stop logic, shot logging, web command dispatch, safety supervisor feed. |
 | **`scale_worker`** | BLE connection, weight stream, scale commands and beeps. |
 | **`network_manager`** | Wi-Fi STA/AP, HTTP server, NTP, NVS writes for config/network. |
-| **`status_indicator`** | WS2812B LED updates via a one-slot mailbox (never blocks control). |
+| **`status_indicator`** | WS2812B LED updates via a one-slot mailbox (never blocks control). Only built when `SHOT_STOPPER_ENABLE_ALED=1`. |
 
 `loopTask`, `scale_worker`, and `network_manager` each register a **5 s Task
 Watchdog** subscription. `status_indicator` does **not** subscribe to the TWDT
@@ -296,8 +296,9 @@ Watchdog** subscription. `status_indicator` does **not** subscribe to the TWDT
   (compile-time GPIO pins).
 - Redundant RTC relay-command log; unsafe reset during CLOSE or repeated boot
   loops require **local paddle recovery** (ON then stable OFF).
-- Two independent **WS2812B** pixels: scale/BLE health and stopper workflow /
-  safety state (diagnostic only, not part of CN9 decisions).
+- Optional two independent **WS2812B** pixels (`SHOT_STOPPER_ENABLE_ALED=1`):
+  scale/BLE health and stopper workflow / safety state (diagnostic only, not
+  part of CN9 decisions).
 - **Host tests** for workflow, persistence, safety, remote policy, BLE library,
   and embedded Web UI asset validation.
 
@@ -316,6 +317,12 @@ Compile with `-DSHOT_STOPPER_ENABLE_BUZZER=1` and wire a **passive** piezo
 between `SHOT_STOPPER_BUZZER_GPIO` (board default, or override) and GND. When
 enabled, Alerts exposes checkboxes for scale-lost / ATM-end / manual-without-scale
 triple beeps, and the paddle-off reminder uses the piezo instead of the scale.
+
+## Optional hardware: WS2812B status LEDs (ALED)
+
+Compile with `-DSHOT_STOPPER_ENABLE_ALED=1` to include the addressable-LED
+driver, GPIOs, and `status_indicator` task. Default builds (`=0` or omit the
+flag) compile without LED support. See [WS2812B status indicators](#ws2812b-status-indicators).
 
 ## Repository structure
 
@@ -631,8 +638,8 @@ stuck LOW, absent, or out of frequency; a second relay controlled directly by
 the same GPIO does not provide this barrier.
 
 The selected FQBN automatically defines the matching pin block in
-`shotStopper.ino`. The two status LEDs are independent one-pixel WS2812B
-devices, each with its own data GPIO:
+`shotStopper.ino`. With `-DSHOT_STOPPER_ENABLE_ALED=1`, the two status LEDs are
+independent one-pixel WS2812B devices, each with its own data GPIO:
 
 | Board | FQBN | Paddle | Relay | Scale LED | Stopper LED |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -640,11 +647,14 @@ devices, each with its own data GPIO:
 | ESP32-S3 Dev Module | `esp32:esp32:esp32s3` | GPIO 21 | GPIO 38 | GPIO 48 | GPIO 47 |
 
 The code also maps Arduino Nano ESP32 D10/D11 to paddle/relay and D2/D3 to
-external WS2812B data inputs. Its built-in common-anode RGB LED is not a
-WS2812B and is no longer used. Before energizing CN9, verify every pin for the
-specific board and the active polarity of the relay module.
+external WS2812B data inputs when ALED is enabled. Its built-in common-anode RGB
+LED is not a WS2812B and is no longer used. Before energizing CN9, verify every
+pin for the specific board and the active polarity of the relay module.
 
 ### WS2812B status indicators
+
+Requires `-DSHOT_STOPPER_ENABLE_ALED=1`. Without that flag the driver, LED
+GPIOs, and `status_indicator` task are not compiled.
 
 A WS2812B is a digital addressable RGB LED controlled through one data line;
 it is not an analog LED. This firmware uses two separately wired pixels:
@@ -694,15 +704,15 @@ pin map; use two external pixels on verified free pins instead. The original
 Mazer V3 firmware's GPIO 46/45/47 common-anode RGB mapping describes that
 specific Shot Stopper hardware, not every ESP32-S3 board.
 
-Override the status data pins and brightness at compile time. The pins must be
-distinct, output-capable, and different from paddle, relay, heartbeat, and
-feedback GPIOs:
+Override the status data pins and brightness at compile time (ALED must be
+enabled). The pins must be distinct, output-capable, and different from paddle,
+relay, heartbeat, and feedback GPIOs:
 
 ```sh
 mkdir -p build/esp32-s3-custom-leds
 arduino-cli compile --fqbn esp32:esp32:esp32s3 --warnings all \
   --build-property \
-  'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_SCALE_LED_GPIO=4 -DSHOT_STOPPER_STOPPER_LED_GPIO=5 -DSHOT_STOPPER_LED_BRIGHTNESS=32' \
+  'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_ALED=1 -DSHOT_STOPPER_SCALE_LED_GPIO=4 -DSHOT_STOPPER_STOPPER_LED_GPIO=5 -DSHOT_STOPPER_LED_BRIGHTNESS=32' \
   --library libraries/AcaiaArduinoBLE \
   --build-path build/esp32-s3-custom-leds \
   shotStopper
@@ -815,7 +825,7 @@ mkdir -p build/esp32
 arduino-cli compile \
   --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs \
   --warnings all \
-  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=1' \
+  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=1 -DSHOT_STOPPER_ENABLE_ALED=1' \
   --library libraries/AcaiaArduinoBLE \
   --build-path build/esp32 \
   shotStopper
@@ -827,6 +837,10 @@ even without this flag. Use remote actuation only on a trusted network.
 
 `-DSHOT_STOPPER_ENABLE_BUZZER=1` enables the onboard passive piezo driver and
 buzzer alert settings. Omit it (or set `=0`) for builds without that hardware.
+
+`-DSHOT_STOPPER_ENABLE_ALED=1` enables the two WS2812B status pixels and the
+`status_indicator` task. Omit it (or set `=0`) for builds without addressable
+LEDs.
 
 The `min_spiffs` partition scheme gives a **1.9 MB** application slot. The
 default scheme only allows **1.25 MB** (`1310720` bytes); this firmware is
@@ -852,7 +866,7 @@ mkdir -p build/esp32-s3
 arduino-cli compile \
   --fqbn esp32:esp32:esp32s3:PartitionScheme=min_spiffs \
   --warnings all \
-  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=1' \
+  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=1 -DSHOT_STOPPER_ENABLE_ALED=1' \
   --library libraries/AcaiaArduinoBLE \
   --build-path build/esp32-s3 \
   shotStopper

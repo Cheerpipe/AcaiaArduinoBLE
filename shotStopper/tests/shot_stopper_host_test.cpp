@@ -2,6 +2,7 @@
 #define ARDUINO_ESP32_DEV
 #define SHOT_STOPPER_ENABLE_REMOTE_CN9 1
 #define SHOT_STOPPER_ENABLE_BUZZER 1
+#define SHOT_STOPPER_ENABLE_ALED 1
 
 #include <cstdlib>
 #include <cstring>
