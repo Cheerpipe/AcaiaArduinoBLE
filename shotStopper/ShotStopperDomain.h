@@ -390,7 +390,8 @@ inline AlertOutputChannel effectiveAlertOutputChannel(uint8_t stored) {
 
 // Local-buzzer pulse rate while Fast extraction guard is in extended mode.
 enum class ExtendedPulseRate : uint8_t {
-  DISABLED = 0,
+  // Named OFF (not DISABLED): ESP32 Arduino defines a DISABLED GPIO macro.
+  OFF = 0,
   SLOW = 1,
   MEDIUM = 2,
   FAST = 3,
@@ -405,7 +406,7 @@ inline bool validExtendedPulseRate(uint8_t rate) {
 
 inline const char *extendedPulseRateId(uint8_t rate) {
   switch (static_cast<ExtendedPulseRate>(rate)) {
-    case ExtendedPulseRate::DISABLED:
+    case ExtendedPulseRate::OFF:
       return "disabled";
     case ExtendedPulseRate::SLOW:
       return "slow";
@@ -424,7 +425,7 @@ inline bool parseExtendedPulseRate(const char *text, uint8_t &rate) {
     return false;
   }
   if (strcmp(text, "disabled") == 0) {
-    rate = static_cast<uint8_t>(ExtendedPulseRate::DISABLED);
+    rate = static_cast<uint8_t>(ExtendedPulseRate::OFF);
     return true;
   }
   if (strcmp(text, "slow") == 0) {
@@ -456,7 +457,7 @@ inline BuzzerPattern buzzerPatternForExtendedPulseRate(uint8_t rate) {
       return BuzzerPattern::PULSE_4HZ;
     case ExtendedPulseRate::RAPID:
       return BuzzerPattern::PULSE_5HZ;
-    case ExtendedPulseRate::DISABLED:
+    case ExtendedPulseRate::OFF:
       break;
   }
   return BuzzerPattern::NONE;

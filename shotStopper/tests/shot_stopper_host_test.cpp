@@ -2351,7 +2351,7 @@ void w85_debug_pulse_rates_use_same_on_ms_and_3s() {
   CHECK(parseBuzzerPatternId("pulse5", parsed));
   CHECK(parsed == BuzzerPattern::PULSE_5HZ);
   CHECK(buzzerPatternForExtendedPulseRate(
-            static_cast<uint8_t>(ExtendedPulseRate::DISABLED)) ==
+            static_cast<uint8_t>(ExtendedPulseRate::OFF)) ==
         BuzzerPattern::NONE);
   CHECK(buzzerPatternForExtendedPulseRate(
             static_cast<uint8_t>(ExtendedPulseRate::SLOW)) ==
@@ -4520,7 +4520,7 @@ void r51_extended_pulse_respects_alert_flag_and_scale_only() {
   reachReadyFromBoot();
   runtimeConfig.fastExtractionGuardEnabled = true;
   runtimeConfig.buzzerExtendedPulseRate =
-      static_cast<uint8_t>(ExtendedPulseRate::DISABLED);
+      static_cast<uint8_t>(ExtendedPulseRate::OFF);
   runtimeConfig.maxRecoveryWeightG = 42.5f;
   runtimeConfig.minBrewTimeMs = 26000;
   runtimeConfig.goalWeightG = 36;
