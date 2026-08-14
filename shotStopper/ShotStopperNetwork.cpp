@@ -1785,7 +1785,7 @@ bool ShotStopperNetwork::startHttpServer() {
   // connection failures ("Device unreachable") while the UI still partially
   // works. ESP-IDF uses (max_open_sockets + 3) LWIP sockets total.
   config.max_open_sockets = 10;
-  config.max_uri_handlers = 30;
+  config.max_uri_handlers = 32;
   config.max_resp_headers = 12;
   config.backlog_conn = 10;
   config.lru_purge_enable = true;
@@ -1802,6 +1802,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/history", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/admin", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/settings", HTTP_GET, rootHandler) &&
+      registerHandler(server_, "/app.js", HTTP_GET, jsHandler) &&
       registerHandler(server_, "/app.css", HTTP_GET, cssHandler) &&
       registerHandler(server_, "/logo.svg", HTTP_GET, logoHandler) &&
       registerHandler(server_, "/api/v1/login", HTTP_POST, loginHandler) &&
@@ -2115,11 +2116,33 @@ esp_err_t ShotStopperNetwork::rootHandler(httpd_req_t *request) {
   httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
   httpd_resp_set_hdr(
       request, "Content-Security-Policy",
-      "default-src 'self'; script-src 'unsafe-inline'; style-src 'self'; "
+      "default-src 'self'; script-src 'self'; style-src 'self'; "
       "connect-src 'self'; frame-ancestors 'none'");
   return httpd_resp_send(
       request, reinterpret_cast<const char *>(SHOT_STOPPER_WEB_UI_GZIP),
       SHOT_STOPPER_WEB_UI_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::jsHandler(httpd_req_t *request) {
+  char etag[WEB_UI_ETAG_CAPACITY] = {};
+  formatWebUiEtag(etag);
+  if (ifNoneMatchEquals(request, etag)) {
+    httpd_resp_set_status(request, STATUS_NOT_MODIFIED);
+    httpd_resp_set_hdr(request, "Cache-Control",
+                       "public, max-age=31536000, immutable");
+    httpd_resp_set_hdr(request, "ETag", etag);
+    return httpd_resp_send(request, nullptr, 0);
+  }
+  httpd_resp_set_type(request, "application/javascript; charset=utf-8");
+  httpd_resp_set_hdr(request, "Content-Encoding", "gzip");
+  httpd_resp_set_hdr(request, "Cache-Control",
+                     "public, max-age=31536000, immutable");
+  httpd_resp_set_hdr(request, "ETag", etag);
+  httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
+  httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
+  return httpd_resp_send(
+      request, reinterpret_cast<const char *>(SHOT_STOPPER_WEB_JS_GZIP),
+      SHOT_STOPPER_WEB_JS_GZIP_LEN);
 }
 
 esp_err_t ShotStopperNetwork::cssHandler(httpd_req_t *request) {

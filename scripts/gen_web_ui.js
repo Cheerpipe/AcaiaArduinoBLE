@@ -4,9 +4,11 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const {minify: terserMinify} = require('terser');
 
 const repoRoot = path.resolve(__dirname, '..');
 const sourcePath = path.join(repoRoot, 'shotStopper', 'ShotStopperWebAssets.h');
+const jsSourcePath = path.join(repoRoot, 'shotStopper', 'web', 'app.js');
 const cssSourcePath = path.join(repoRoot, 'shotStopper', 'web', 'app.css');
 const logoSourcePath = path.join(repoRoot, 'shotStopper', 'web', 'logo.svg');
 const versionPath = path.join(repoRoot, 'shotStopper', 'ShotStopperVersion.h');
@@ -73,6 +75,19 @@ function minifySvg(svg) {
       .trim();
 }
 
+async function minifyJs(js) {
+  const result = await terserMinify(js, {
+    compress: true,
+    mangle: true,
+    format: {comments: false},
+    ecma: 2018,
+  });
+  if (!result || !result.code) {
+    throw new Error('Terser failed to minify Web UI JavaScript');
+  }
+  return result.code;
+}
+
 function formatByteArray(buffer) {
   const lines = [];
   for (let offset = 0; offset < buffer.length; offset += 12) {
@@ -86,16 +101,19 @@ function formatByteArray(buffer) {
   return lines.join('\n');
 }
 
-function generate() {
+async function generate() {
   const source = fs.readFileSync(sourcePath, 'utf8');
+  const jsSource = fs.readFileSync(jsSourcePath, 'utf8');
   const cssSource = fs.readFileSync(cssSourcePath, 'utf8');
   const logoSource = fs.readFileSync(logoSourcePath, 'utf8');
   const version = readFirmwareVersion();
   const html = minifyHtml(
       extractHtml(source).split('__FW_VERSION__').join(version));
+  const js = await minifyJs(jsSource);
   const css = minifyCss(cssSource);
   const logo = minifySvg(logoSource);
   const htmlGzip = zlib.gzipSync(Buffer.from(html, 'utf8'), {level: 9});
+  const jsGzip = zlib.gzipSync(Buffer.from(js, 'utf8'), {level: 9});
   const cssGzip = zlib.gzipSync(Buffer.from(css, 'utf8'), {level: 9});
   const logoGzip = zlib.gzipSync(Buffer.from(logo, 'utf8'), {level: 9});
   const header =
@@ -116,6 +134,14 @@ ${formatByteArray(htmlGzip)}
 
 static_assert(sizeof(SHOT_STOPPER_WEB_UI_GZIP) == SHOT_STOPPER_WEB_UI_GZIP_LEN,
               "gzip Web UI length mismatch");
+
+constexpr size_t SHOT_STOPPER_WEB_JS_GZIP_LEN = ${jsGzip.length};
+const uint8_t SHOT_STOPPER_WEB_JS_GZIP[] PROGMEM = {
+${formatByteArray(jsGzip)}
+};
+
+static_assert(sizeof(SHOT_STOPPER_WEB_JS_GZIP) == SHOT_STOPPER_WEB_JS_GZIP_LEN,
+              "gzip Web JS length mismatch");
 
 constexpr size_t SHOT_STOPPER_WEB_CSS_GZIP_LEN = ${cssGzip.length};
 const uint8_t SHOT_STOPPER_WEB_CSS_GZIP[] PROGMEM = {
@@ -138,13 +164,16 @@ static_assert(sizeof(SHOT_STOPPER_WEB_LOGO_GZIP) == SHOT_STOPPER_WEB_LOGO_GZIP_L
   fs.writeFileSync(outputPath, header);
   return {
     html,
+    js,
     css,
     logo,
     gzip: htmlGzip,
+    jsGzip,
     cssGzip,
     logoGzip,
     outputPath,
     sourcePath,
+    jsSourcePath,
     cssSourcePath,
     logoSourcePath,
     version,
@@ -154,25 +183,37 @@ static_assert(sizeof(SHOT_STOPPER_WEB_LOGO_GZIP) == SHOT_STOPPER_WEB_LOGO_GZIP_L
 module.exports = {
   extractHtml,
   minifyHtml,
+  minifyJs,
   minifyCss,
   minifySvg,
   generate,
   sourcePath,
+  jsSourcePath,
   cssSourcePath,
   logoSourcePath,
   outputPath,
 };
 
 if (require.main === module) {
-  const result = generate();
-  const htmlBytes = Buffer.byteLength(result.html, 'utf8');
-  const cssBytes = Buffer.byteLength(result.css, 'utf8');
-  const logoBytes = Buffer.byteLength(result.logo, 'utf8');
-  console.log(
-      `Generated ${result.outputPath} ` +
-          `(HTML ${result.gzip.length} B gzip / ${htmlBytes} B, ` +
-          `CSS ${result.cssGzip.length} B gzip / ${cssBytes} B, ` +
-          `logo ${result.logoGzip.length} B gzip / ${logoBytes} B, ` +
-          `v=${result.version})`
-  );
+  generate()
+      .then((result) => {
+        const htmlBytes = Buffer.byteLength(result.html, 'utf8');
+        const jsBytes = Buffer.byteLength(result.js, 'utf8');
+        const cssBytes = Buffer.byteLength(result.css, 'utf8');
+        const logoBytes = Buffer.byteLength(result.logo, 'utf8');
+        const combined = result.gzip.length + result.jsGzip.length +
+            result.cssGzip.length + result.logoGzip.length;
+        console.log(
+            `Generated ${result.outputPath} ` +
+                `(HTML ${result.gzip.length} B gzip / ${htmlBytes} B, ` +
+                `JS ${result.jsGzip.length} B gzip / ${jsBytes} B, ` +
+                `CSS ${result.cssGzip.length} B gzip / ${cssBytes} B, ` +
+                `logo ${result.logoGzip.length} B gzip / ${logoBytes} B, ` +
+                `combined ${combined} B gzip, v=${result.version})`
+        );
+      })
+      .catch((error) => {
+        console.error(error);
+        process.exitCode = 1;
+      });
 }

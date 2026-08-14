@@ -243,6 +243,7 @@ class ShotStopperNetwork {
   static void randomHex(char output[TOKEN_HEX_CAPACITY]);
 
   static esp_err_t rootHandler(httpd_req_t *request);
+  static esp_err_t jsHandler(httpd_req_t *request);
   static esp_err_t cssHandler(httpd_req_t *request);
   static esp_err_t logoHandler(httpd_req_t *request);
   static esp_err_t notFoundHandler(httpd_req_t *request, httpd_err_code_t error);

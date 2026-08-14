@@ -16,8 +16,10 @@ const bleLibrary = fs.readFileSync(
 const htmlMatch = asset.match(/R"HTML\(([\s\S]*?)\)HTML"/);
 if (!htmlMatch) throw new Error('Embedded HTML raw string not found');
 const html = htmlMatch[1];
+const js = fs.readFileSync(path.join(sketchDir, 'web', 'app.js'), 'utf8');
 const css = fs.readFileSync(path.join(sketchDir, 'web', 'app.css'), 'utf8');
 const logo = fs.readFileSync(path.join(sketchDir, 'web', 'logo.svg'), 'utf8');
+const ui = html + '\n' + js;
 if (!logo.includes('<svg') || !logo.includes('viewBox=')) {
   throw new Error('Web UI logo.svg must be a valid SVG asset');
 }
@@ -27,42 +29,52 @@ if (!css.includes('.brandLogo') ||
     !css.includes('.brandLogo{filter:invert(1)}')) {
   throw new Error('Brand logo must match heading height and invert in dark mode');
 }
-const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
-if (!scriptMatch) throw new Error('Embedded script not found');
-
-// Parse the exact JavaScript delivered by the controller.
-new Function(scriptMatch[1]);
-
-if (Buffer.byteLength(html, 'utf8') > 81920) {
-  throw new Error('Web UI source exceeds the 80 KiB authoring budget');
+if (!html.includes('src="/app.js?v=__FW_VERSION__"') ||
+    /<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(html)) {
+  throw new Error('Web UI must load same-origin /app.js (no inline script body)');
 }
-if (!/lang="en"/.test(html) || !html.includes('role="switch"') ||
-    !html.includes('Paddle State') || !html.includes('firstDropBeep') ||
-    !html.includes('paddleReturnReminderBeep') ||
-    !html.includes('buzzerScaleLostBeep') ||
-    !html.includes('buzzerAutoToManualGuardEndBeep') ||
-    !html.includes('buzzerManualNoScaleBeep') ||
-    !html.includes('buzzerSupported') ||
-    !html.includes('Needs buzzer') ||
-    !html.includes('SHOT_STOPPER_ENABLE_BUZZER') ||
-    !html.includes('class="fieldHint"')) {
+
+// Parse the authored JavaScript source (pre-minify).
+new Function(js);
+
+const htmlBytes = Buffer.byteLength(html, 'utf8');
+const jsBytes = Buffer.byteLength(js, 'utf8');
+if (htmlBytes > 40960) {
+  throw new Error('Web UI HTML source exceeds the 40 KiB authoring budget');
+}
+if (jsBytes > 61440) {
+  throw new Error('Web UI JS source exceeds the 60 KiB authoring budget');
+}
+if (htmlBytes + jsBytes > 81920) {
+  throw new Error('Web UI HTML+JS source exceeds the 80 KiB combined authoring budget');
+}
+if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
+    !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
+    !ui.includes('paddleReturnReminderBeep') ||
+    !ui.includes('buzzerScaleLostBeep') ||
+    !ui.includes('buzzerAutoToManualGuardEndBeep') ||
+    !ui.includes('buzzerManualNoScaleBeep') ||
+    !ui.includes('buzzerSupported') ||
+    !ui.includes('Needs buzzer') ||
+    !ui.includes('SHOT_STOPPER_ENABLE_BUZZER') ||
+    !ui.includes('class="fieldHint"')) {
   throw new Error('Web UI must show paddle state, scale beep options, and buzzer alerts');
 }
-if (!html.includes('id="operationalWallS" type="number" min="5" max="60"') ||
-    !html.includes('hard-caps at 60 s') ||
-    !html.includes('sToMs(') ||
-    !html.includes('rinseGestureMs:sToMs') ||
+if (!ui.includes('id="operationalWallS" type="number" min="5" max="60"') ||
+    !ui.includes('hard-caps at 60 s') ||
+    !ui.includes('sToMs(') ||
+    !ui.includes('rinseGestureMs:sToMs') ||
     !network.includes('CN9 limit must be from 5 to 60 s.')) {
   throw new Error('CN9 operational limit must be capped at 60 s in the UI and API messages');
 }
-if (!html.includes('function rangeCheck(') ||
-    !html.includes('function showFieldError(') ||
-    !html.includes('samples × sample gap') ||
-    !html.includes('aria-live') ||
-    !html.includes('fieldError') ||
-    !html.includes('id="goalWeightG" type="number" min="10" max="200" step="1"') ||
-    !html.includes('validateNetworkClient') ||
-    !html.includes('validateApClient') ||
+if (!ui.includes('function rangeCheck(') ||
+    !ui.includes('function showFieldError(') ||
+    !ui.includes('samples × sample gap') ||
+    !ui.includes('aria-live') ||
+    !ui.includes('fieldError') ||
+    !ui.includes('id="goalWeightG" type="number" min="10" max="200" step="1"') ||
+    !ui.includes('validateNetworkClient') ||
+    !ui.includes('validateApClient') ||
     !network.includes('Max recovery must be from 10 to 200 g.') ||
     !network.includes('Fast guard requires max recovery') ||
     !network.includes('SSID must be 1–32 characters.') ||
@@ -96,31 +108,31 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('"ntpServerPreset"') ||
     !network.includes('"ntpServerCustom"') ||
     !network.includes('\\"time\\":{') ||
-    !html.includes('id="currentTime"') ||
-    !html.includes('id="ntpStatus"') ||
-    !html.includes('id="ntpServerPreset"') ||
-    !html.includes('id="ntpServerCustom"') ||
-    !html.includes('id="syncTimeButton"') ||
-    !html.includes('id="autoRetare"') ||
-    !html.includes('id="fastExtractionGuardEnabled"') ||
-    !html.includes('id="maxRecoveryWeightG"') ||
-    !html.includes('id="minBrewTimeS"') ||
-    !html.includes('Fast extraction guard') ||
-    !html.includes('id="retareWindowS"') ||
-    !html.includes('id="minimumCupWeightG"') ||
-    !html.includes('id="retareStabilitySamples"') ||
-    !html.includes('id="retareStabilityToleranceG"') ||
-    !html.includes('id="retareStabilityMaxGapS"') ||
-    !html.includes('id="retareStabilityMinDurationS"') ||
-    !html.includes('BBW protection (s)') ||
-    !html.includes('id="bbwProtectionS"') ||
-    !html.includes('Paddle reminder limit (min)') ||
-    !html.includes('id="paddleReturnReminderMaxDurationMin"') ||
-    !html.includes("number('paddleReturnReminderMaxDurationMin')*60000") ||
-    !html.includes('id="sessionBar"') ||
-    !html.includes('id="logoutButton"') ||
-    html.includes('Up to 120 shots') ||
-    !html.includes('/api/v1/time/sync') ||
+    !ui.includes('id="currentTime"') ||
+    !ui.includes('id="ntpStatus"') ||
+    !ui.includes('id="ntpServerPreset"') ||
+    !ui.includes('id="ntpServerCustom"') ||
+    !ui.includes('id="syncTimeButton"') ||
+    !ui.includes('id="autoRetare"') ||
+    !ui.includes('id="fastExtractionGuardEnabled"') ||
+    !ui.includes('id="maxRecoveryWeightG"') ||
+    !ui.includes('id="minBrewTimeS"') ||
+    !ui.includes('Fast extraction guard') ||
+    !ui.includes('id="retareWindowS"') ||
+    !ui.includes('id="minimumCupWeightG"') ||
+    !ui.includes('id="retareStabilitySamples"') ||
+    !ui.includes('id="retareStabilityToleranceG"') ||
+    !ui.includes('id="retareStabilityMaxGapS"') ||
+    !ui.includes('id="retareStabilityMinDurationS"') ||
+    !ui.includes('BBW protection (s)') ||
+    !ui.includes('id="bbwProtectionS"') ||
+    !ui.includes('Paddle reminder limit (min)') ||
+    !ui.includes('id="paddleReturnReminderMaxDurationMin"') ||
+    !ui.includes("number('paddleReturnReminderMaxDurationMin')*60000") ||
+    !ui.includes('id="sessionBar"') ||
+    !ui.includes('id="logoutButton"') ||
+    ui.includes('Up to 120 shots') ||
+    !ui.includes('/api/v1/time/sync') ||
     !firmware.includes('session.config.firstDropBeep') ||
     !firmware.includes('localBuzzer') ||
     !firmware.includes('BUZZER_SUPPORT_ENABLED') ||
@@ -128,17 +140,17 @@ if (!network.includes('"firstDropBeep"') ||
     !firmware.includes('servicePaddleReturnReminder')) {
   throw new Error('Scale beep settings must be configurable end-to-end');
 }
-if (!html.includes('authenticatedOnly') ||
-    !html.includes('sessionStorage.setItem') || !html.includes('window.location.reload()') ||
-    !html.includes('pageNav authenticatedOnly') ||
-    !html.includes('function knownPath(') ||
-    !html.includes("authenticated()&&known") ||
-    !html.includes('class="brand"') ||
-    !html.includes('class="brandLogo"') ||
-    !html.includes('src="/logo.svg?v=__FW_VERSION__"') ||
-    !html.includes('>Micra Shot Stopper</a>') ||
-    !html.includes('href="/" data-route="/"') ||
-    !html.includes("querySelectorAll('a[data-route]')") ||
+if (!ui.includes('authenticatedOnly') ||
+    !ui.includes('sessionStorage.setItem') || !ui.includes('window.location.reload()') ||
+    !ui.includes('pageNav authenticatedOnly') ||
+    !ui.includes('function knownPath(') ||
+    !ui.includes("authenticated()&&known") ||
+    !ui.includes('class="brand"') ||
+    !ui.includes('class="brandLogo"') ||
+    !ui.includes('src="/logo.svg?v=__FW_VERSION__"') ||
+    !ui.includes('>Micra Shot Stopper</a>') ||
+    !ui.includes('href="/" data-route="/"') ||
+    !ui.includes("querySelectorAll('a[data-route]')") ||
     !network.includes('Status intentionally has no authentication requirement') ||
     !network.includes('HTTPD_404_NOT_FOUND') ||
     !network.includes('notFoundHandler')) {
@@ -148,58 +160,58 @@ const statusSection = html.match(/<fieldset[^>]*><legend>Status<\/legend>([\s\S]
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     statusSection[1].includes('class="row"') ||
     (statusSection[1].match(/class="metric"/g) || []).length !== 22 ||
-    !html.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'") ||
-    !html.includes('id="scaleWeight"') ||
-    !html.includes('id="scaleTimer"') ||
-    !html.includes('Weight (scale)') ||
-    !html.includes('Timer (scale)') ||
-    !html.includes('function formatScaleWeight(') ||
-    !html.includes('function formatScaleTimer(') ||
-    !html.includes('id="preferredScale"') ||
-    !html.includes('id="preferredScaleSettings"') ||
-    !html.includes('id="scaleMacCacheMode"') ||
-    !html.includes('id="clearPreferredScale"') ||
-    !html.includes('id="scaleMacCacheFullWarn"') ||
-    !html.includes('scaleMacCacheMode') ||
-    !html.includes('/api/v1/scale/preferred/clear') ||
-    !html.includes('function formatPreferredScale(') ||
+    !ui.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'") ||
+    !ui.includes('id="scaleWeight"') ||
+    !ui.includes('id="scaleTimer"') ||
+    !ui.includes('Weight (scale)') ||
+    !ui.includes('Timer (scale)') ||
+    !ui.includes('function formatScaleWeight(') ||
+    !ui.includes('function formatScaleTimer(') ||
+    !ui.includes('id="preferredScale"') ||
+    !ui.includes('id="preferredScaleSettings"') ||
+    !ui.includes('id="scaleMacCacheMode"') ||
+    !ui.includes('id="clearPreferredScale"') ||
+    !ui.includes('id="scaleMacCacheFullWarn"') ||
+    !ui.includes('scaleMacCacheMode') ||
+    !ui.includes('/api/v1/scale/preferred/clear') ||
+    !ui.includes('function formatPreferredScale(') ||
     !network.includes('preferredScaleClearHandler') ||
     !network.includes('/api/v1/scale/preferred/clear') ||
     !network.includes('\\"timerMs\\"')) {
   throw new Error('Status must use one metric per row and homologate Paddle/CN9 OPEN/OFF and CLOSED/ON labels');
 }
-if (!html.includes('id="shotPanel"') ||
-    !html.includes('id="shotBar"') ||
-    !html.includes('id="shotElapsed"') ||
-    !html.includes('id="shotFirstDrop"') ||
-    !html.includes('id="shotRetare"') ||
-    !html.includes('id="shotCurrentWeight"') ||
-    !html.includes('id="shotGoalWeight"') ||
-    !html.includes('id="shotType"') ||
-    !html.includes('id="shotScale"') ||
-    !html.includes('function updateShot(') ||
+if (!ui.includes('id="shotPanel"') ||
+    !ui.includes('id="shotBar"') ||
+    !ui.includes('id="shotElapsed"') ||
+    !ui.includes('id="shotFirstDrop"') ||
+    !ui.includes('id="shotRetare"') ||
+    !ui.includes('id="shotCurrentWeight"') ||
+    !ui.includes('id="shotGoalWeight"') ||
+    !ui.includes('id="shotType"') ||
+    !ui.includes('id="shotScale"') ||
+    !ui.includes('function updateShot(') ||
     !network.includes('elapsedMs') ||
     !network.includes('retarePerformed') ||
     !network.includes('shotType') ||
     !network.includes('scaleProtocol') ||
     !network.includes('safeScaleProtocol') ||
-    !html.includes('remoteReady&&authenticated()') ||
-    !html.includes('Remote CN9 disabled by policy') ||
+    !ui.includes('remoteReady&&authenticated()') ||
+    !ui.includes('Remote CN9 disabled by policy') ||
     !network.includes('\\"remoteControlEnabled\\"') ||
     !network.includes('\\"lastCommand\\"') ||
     !network.includes('\\"maintenance\\"') ||
     !network.includes('\\"cycle\\"') ||
     !network.includes('flowDuringRetare') ||
-    !html.includes('updateShot(s)')) {
+    !ui.includes('updateShot(s)')) {
   throw new Error('Web UI must enforce remote policy, maintenance, durable command state, and live shot status');
 }
-if (!html.includes('id="autoToManualGuardEnabled"') ||
-    !html.includes('id="autoToManualGuardLimitMode"') ||
-    !html.includes('id="autoToManualGuardBaselineS"') ||
-    !html.includes('id="shotTimerStartDelayMs"') ||
-    !html.includes('id="autoToManualGuardManualLimitS"') ||
-    !html.includes('id="autoToManualGuardTrendS"') ||
-    !html.includes('id="resetGuardSamplesButton"') ||
+if (!ui.includes('id="autoToManualGuardEnabled"') ||
+    !ui.includes('id="autoToManualGuardLimitMode"') ||
+    !ui.includes('id="autoToManualGuardBaselineS"') ||
+    !ui.includes('id="shotTimerStartDelayMs"') ||
+    !ui.includes('id="autoToManualGuardManualLimitS"') ||
+    !ui.includes('id="autoToManualGuardTrendS"') ||
+    !ui.includes('id="resetGuardSamplesButton"') ||
     html.indexOf('id="autoToManualGuardLimitMode"') >
         html.indexOf('id="autoToManualGuardManualLimitS"') ||
     html.indexOf('id="autoToManualGuardManualLimitS"') >
@@ -208,10 +220,10 @@ if (!html.includes('id="autoToManualGuardEnabled"') ||
         html.indexOf('id="autoToManualGuardBaselineS"') ||
     html.indexOf('id="autoToManualGuardBaselineS"') >
         html.indexOf('id="resetGuardSamplesButton"') ||
-    !html.includes('Reset A→M samples to baseline') ||
-    !html.includes('id="shotAtmGuard"') ||
-    !html.includes('A→M ·') ||
-    !html.includes('actual_weight_source') ||
+    !ui.includes('Reset A→M samples to baseline') ||
+    !ui.includes('id="shotAtmGuard"') ||
+    !ui.includes('A→M ·') ||
+    !ui.includes('actual_weight_source') ||
     !network.includes('autoToManualGuardEnabled') ||
     !network.includes('autoToManualGuardBaselineMs') ||
     !network.includes('shotTimerStartDelayMs') ||
@@ -223,32 +235,32 @@ if (!html.includes('id="autoToManualGuardEnabled"') ||
     !network.includes('AUTO_TO_MANUAL_GUARD')) {
   throw new Error('Auto-to-manual time guard must be wired in config UI, live panel, shots API, and routes');
 }
-if (!html.includes('id="learnedOffsetG"') ||
-    !html.includes('id="weightOffsetBaselineG"') ||
-    !html.includes('id="resetCalibrationButton"') ||
+if (!ui.includes('id="learnedOffsetG"') ||
+    !ui.includes('id="weightOffsetBaselineG"') ||
+    !ui.includes('id="resetCalibrationButton"') ||
     html.indexOf('id="learnedOffsetG"') >
         html.indexOf('id="weightOffsetBaselineG"') ||
     html.indexOf('id="weightOffsetBaselineG"') >
         html.indexOf('id="resetCalibrationButton"') ||
-    !html.includes('Reset learned stop offset to baseline') ||
-    !html.includes('Seed for Reset learned stop offset') ||
+    !ui.includes('Reset learned stop offset to baseline') ||
+    !ui.includes('Seed for Reset learned stop offset') ||
     !network.includes('weightOffsetBaselineG') ||
-    !html.includes('weightOffsetBaselineG')) {
+    !ui.includes('weightOffsetBaselineG')) {
   throw new Error('Learned stop offset baseline must be wired like A→M baseline reset');
 }
-if (!html.includes('<legend>Brew</legend>') ||
-    !html.includes('<legend>Machine and scale</legend>') ||
-    !html.includes('<legend>Security and connectivity</legend>') ||
-    !html.includes('id="presetCards"') ||
-    !html.includes('id="presetNewBtn"') ||
-    !html.includes('id="presetDupBtn"') ||
-    html.includes('id="presetLoadBtn"') ||
-    html.includes('id="presetSaveBtn"') ||
-    !html.includes('id="saveBrewPresetButton"') ||
-    !html.includes('Save brew settings') ||
-    !html.includes('id="activeBrewProfileHint"') ||
-    !html.includes('Current profile: ') ||
-    !html.includes('function updateActiveBrewProfileHint(') ||
+if (!ui.includes('<legend>Brew</legend>') ||
+    !ui.includes('<legend>Machine and scale</legend>') ||
+    !ui.includes('<legend>Security and connectivity</legend>') ||
+    !ui.includes('id="presetCards"') ||
+    !ui.includes('id="presetNewBtn"') ||
+    !ui.includes('id="presetDupBtn"') ||
+    ui.includes('id="presetLoadBtn"') ||
+    ui.includes('id="presetSaveBtn"') ||
+    !ui.includes('id="saveBrewPresetButton"') ||
+    !ui.includes('Save brew settings') ||
+    !ui.includes('id="activeBrewProfileHint"') ||
+    !ui.includes('Current profile: ') ||
+    !ui.includes('function updateActiveBrewProfileHint(') ||
     html.indexOf('id="activeBrewProfileHint"') <
         html.indexOf('id="saveBrewPresetButton"') ||
     html.indexOf('id="saveBrewPresetButton"') <
@@ -259,25 +271,25 @@ if (!html.includes('<legend>Brew</legend>') ||
         html.indexOf('<summary>Alerts</summary>') ||
     html.indexOf('id="saveConfigButton"') >
         html.indexOf('<legend>Security and connectivity</legend>') ||
-    !html.includes('id="presetResetBtn"') ||
-    !html.includes('id="presetDeleteBtn"') ||
-    !html.includes('id="presetRenameDialog"') ||
-    !html.includes('id="homePresetCards"') ||
-    !html.includes('id="homeBrewByWeight"') ||
-    html.includes('id="view-presets"') ||
-    html.includes('data-route="/presets"') ||
-    html.includes('id="presetsPageCards"') ||
-    html.includes('id="homePresetChips"') ||
-    !html.includes("action:'new'") ||
-    !html.includes("action:'duplicate'") ||
-    !html.includes("action:'rename'") ||
-    !html.includes("action:'restore_factory_values'") ||
-    !html.includes('function startRenamePreset(') ||
-    !html.includes('function updatePresetActionButtons(') ||
-    !html.includes('Discard them and switch presets') ||
-    !html.includes('saveBrewPreset') ||
-    !html.includes('/api/v1/presets') ||
-    html.includes('id="presetNameInput"') ||
+    !ui.includes('id="presetResetBtn"') ||
+    !ui.includes('id="presetDeleteBtn"') ||
+    !ui.includes('id="presetRenameDialog"') ||
+    !ui.includes('id="homePresetCards"') ||
+    !ui.includes('id="homeBrewByWeight"') ||
+    ui.includes('id="view-presets"') ||
+    ui.includes('data-route="/presets"') ||
+    ui.includes('id="presetsPageCards"') ||
+    ui.includes('id="homePresetChips"') ||
+    !ui.includes("action:'new'") ||
+    !ui.includes("action:'duplicate'") ||
+    !ui.includes("action:'rename'") ||
+    !ui.includes("action:'restore_factory_values'") ||
+    !ui.includes('function startRenamePreset(') ||
+    !ui.includes('function updatePresetActionButtons(') ||
+    !ui.includes('Discard them and switch presets') ||
+    !ui.includes('saveBrewPreset') ||
+    !ui.includes('/api/v1/presets') ||
+    ui.includes('id="presetNameInput"') ||
     !network.includes('/api/v1/presets') ||
     !network.includes('presetsHandler') ||
     !network.includes('restore_factory_values') ||
@@ -290,19 +302,19 @@ if (!html.includes('<legend>Brew</legend>') ||
     !css.includes('.btnGlyph .t')) {
   throw new Error('Brew presets CRUD UI must block factory delete, support reset, click-to-load, and unsaved switch confirm');
 }
-if (!html.includes('id="hCpu"') ||
-    !html.includes('id="hUptime"') ||
-    !html.includes('id="hResetReason"') ||
-    !html.includes('id="hTemp"') ||
-    !html.includes('id="hTPeak"') ||
-    !html.includes('id="hRamT"') ||
-    !html.includes('id="hRamU"') ||
-    !html.includes('id="hRamF"') ||
-    !html.includes('function updH(') ||
-    !html.includes('updH(s.health,s.safety)') ||
-    !html.includes('h.uptimeMs') ||
-    !html.includes('resetReasonCode') ||
-    !html.includes("RR[s.resetReasonCode]") ||
+if (!ui.includes('id="hCpu"') ||
+    !ui.includes('id="hUptime"') ||
+    !ui.includes('id="hResetReason"') ||
+    !ui.includes('id="hTemp"') ||
+    !ui.includes('id="hTPeak"') ||
+    !ui.includes('id="hRamT"') ||
+    !ui.includes('id="hRamU"') ||
+    !ui.includes('id="hRamF"') ||
+    !ui.includes('function updH(') ||
+    !ui.includes('updH(s.health,s.safety)') ||
+    !ui.includes('h.uptimeMs') ||
+    !ui.includes('resetReasonCode') ||
+    !ui.includes("RR[s.resetReasonCode]") ||
     !network.includes('\\"hwmon\\"') ||
     !network.includes('cpuUsagePct') ||
     !network.includes('tempPeakC') ||
@@ -311,57 +323,57 @@ if (!html.includes('id="hCpu"') ||
     !network.includes('\\"resetReasonCode\\"')) {
   throw new Error('Diagnostics must expose basic hwmon metrics in UI and status API');
 }
-if (!html.includes('id="shotTable"') ||
-    !html.includes('id="exportShotsButton"') ||
-    !html.includes('id="clearShotsButton"') ||
-    !html.includes("confirm:'CLEAR_SHOT_LOG'") ||
-    !html.includes('refreshShots()') ||
-    !html.includes('formatShotTime(r)') ||
-    !html.includes('no time') ||
-    !html.includes('id="timezoneOffsetMinutes"') ||
+if (!ui.includes('id="shotTable"') ||
+    !ui.includes('id="exportShotsButton"') ||
+    !ui.includes('id="clearShotsButton"') ||
+    !ui.includes("confirm:'CLEAR_SHOT_LOG'") ||
+    !ui.includes('refreshShots()') ||
+    !ui.includes('formatShotTime(r)') ||
+    !ui.includes('no time') ||
+    !ui.includes('id="timezoneOffsetMinutes"') ||
     !network.includes('hasWallTime') ||
     !network.includes('endedAtLocalSec') ||
     !network.includes('SHOT_LOG_CLEAR_NOT_CONFIRMED')) {
   throw new Error('Shot history UI/API must expose table, CSV export, clear confirmation, and timezone setting');
 }
-if (!html.includes('id="firmwareFooter"') ||
-    !html.includes('firmwareVersion') ||
-    !html.includes('updateFirmwareFooter()') ||
+if (!ui.includes('id="firmwareFooter"') ||
+    !ui.includes('firmwareVersion') ||
+    !ui.includes('updateFirmwareFooter()') ||
     !network.includes('\\"firmwareVersion\\"') ||
     !network.includes('FW_VERSION')) {
   throw new Error('Firmware version must be exposed in status API and web footer');
 }
 if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
-    !html.includes('loadLog()') ||
-    !html.includes('setInterval(()=>refreshLog(),2500)') ||
-    !html.includes('id="view-log"') ||
-    !html.includes("name==='log'") ||
-    !html.includes('id="logLevelFilter"') ||
-    !html.includes('e.level') ||
-    !html.includes('value="boot"')) {
+    !ui.includes('loadLog()') ||
+    !ui.includes('setInterval(()=>refreshLog(),2500)') ||
+    !ui.includes('id="view-log"') ||
+    !ui.includes("name==='log'") ||
+    !ui.includes('id="logLevelFilter"') ||
+    !ui.includes('e.level') ||
+    !ui.includes('value="boot"')) {
   throw new Error('Diagnostic log must remain a public view with view-scoped refresh');
 }
-if (!html.includes('id="factoryResetButton"') ||
-    !html.includes("confirm('Restore all factory settings?") ||
-    !html.includes("confirm:'ERASE_ALL_SETTINGS'") ||
+if (!ui.includes('id="factoryResetButton"') ||
+    !ui.includes("confirm('Restore all factory settings?") ||
+    !ui.includes("confirm:'ERASE_ALL_SETTINGS'") ||
     !network.includes('FACTORY_RESET_NOT_CONFIRMED') ||
     !network.includes('resetPersistedSettingsToFactory(next)')) {
   throw new Error('Factory reset must require UI and server-side confirmation');
 }
-if (!html.includes('id="staIpMode"') ||
-    !html.includes('id="staStaticIp"') ||
-    !html.includes('id="staNetmask"') ||
-    !html.includes('id="staGateway"') ||
-    !html.includes('id="staDns1"') ||
-    !html.includes('function networkSavePayload(') ||
-    !html.includes("ipMode:$('staIpMode').value") ||
-    !html.includes('staticIpOpt') ||
-    !html.includes('pending confirm') ||
-    !html.includes('savedStaSsid') ||
-    !html.includes('Leave empty to keep the saved password') ||
-    !html.includes('keep=!!savedStaSsid') ||
-    !html.includes("savedStaSsid=n.wifiConfigured&&n.ssid?n.ssid:''") ||
+if (!ui.includes('id="staIpMode"') ||
+    !ui.includes('id="staStaticIp"') ||
+    !ui.includes('id="staNetmask"') ||
+    !ui.includes('id="staGateway"') ||
+    !ui.includes('id="staDns1"') ||
+    !ui.includes('function networkSavePayload(') ||
+    !ui.includes("ipMode:$('staIpMode').value") ||
+    !ui.includes('staticIpOpt') ||
+    !ui.includes('pending confirm') ||
+    !ui.includes('savedStaSsid') ||
+    !ui.includes('Leave empty to keep the saved password') ||
+    !ui.includes('keep=!!savedStaSsid') ||
+    !ui.includes("savedStaSsid=n.wifiConfigured&&n.ssid?n.ssid:''") ||
     !network.includes('WiFi.config(') ||
     !network.includes('confirmPendingNetwork') ||
     !network.includes('revertPendingNetwork') ||
@@ -376,8 +388,9 @@ if (!html.includes('id="staIpMode"') ||
     !network.includes('No pending network configuration to confirm.')) {
   throw new Error('DHCP/static IP mode must be wired in UI, status, WiFi.config, and confirm/revert path');
 }
-if (/<script\s+src=/i.test(html)) {
-  throw new Error('Web UI must keep JavaScript embedded (no external script src)');
+if (!/<script\s+src="\/app\.js\?v=/.test(html) &&
+    !html.includes('src="/app.js?v=__FW_VERSION__"')) {
+  throw new Error('Web UI must load same-origin /app.js with a firmware version query');
 }
 if (!/<link\s+rel="stylesheet"\s+href="\/app\.css\?v=/.test(html) &&
     !html.includes('href="/app.css?v=__FW_VERSION__"')) {
@@ -394,6 +407,7 @@ const expected = new Map([
   ['GET /history', 'rootHandler'],
   ['GET /admin', 'rootHandler'],
   ['GET /settings', 'rootHandler'],
+  ['GET /app.js', 'jsHandler'],
   ['GET /app.css', 'cssHandler'],
   ['GET /logo.svg', 'logoHandler'],
   ['POST /api/v1/login', 'loginHandler'],
@@ -429,36 +443,36 @@ const maxRespHeadersMatch = network.match(/max_resp_headers\s*=\s*(\d+)/);
 if (!maxRespHeadersMatch || Number(maxRespHeadersMatch[1]) < 12) {
   throw new Error('HTTP server must allow at least 12 response headers for gzip and ETag');
 }
-if (!html.includes('function withPollGate(') ||
-    !html.includes('noteReachFail(') ||
-    !html.includes('function startView(') ||
-    !html.includes('function stopViewPolls(') ||
-    !html.includes('function renderRoute(') ||
-    !html.includes('setInterval(()=>refreshStatus(),2500)')) {
+if (!ui.includes('function withPollGate(') ||
+    !ui.includes('noteReachFail(') ||
+    !ui.includes('function startView(') ||
+    !ui.includes('function stopViewPolls(') ||
+    !ui.includes('function renderRoute(') ||
+    !ui.includes('setInterval(()=>refreshStatus(),2500)')) {
   throw new Error('Web UI must serialize view-scoped polls and soft-fail unreachable bursts');
 }
-if (!html.includes('async function loadStatus(){') ||
-    !html.includes('async function loadShots(){') ||
-    !html.includes('async function loadLog(){') ||
-    !html.includes('function refreshStatus(){return withPollGate(loadStatus)}') ||
-    !html.includes('function refreshShots(){return withPollGate(loadShots)}') ||
-    !html.includes('function refreshLog(){return withPollGate(loadLog)}') ||
-    !html.includes("name==='home'||name==='settings'||name==='admin'") ||
-    html.includes("name==='presets'") ||
-    !html.includes("name==='history'") ||
-    !html.includes('renderRoute(location.pathname)') ||
-    html.includes('Promise.all([loadShots(),loadLog()])')) {
+if (!ui.includes('async function loadStatus(){') ||
+    !ui.includes('async function loadShots(){') ||
+    !ui.includes('async function loadLog(){') ||
+    !ui.includes('function refreshStatus(){return withPollGate(loadStatus)}') ||
+    !ui.includes('function refreshShots(){return withPollGate(loadShots)}') ||
+    !ui.includes('function refreshLog(){return withPollGate(loadLog)}') ||
+    !ui.includes("name==='home'||name==='settings'||name==='admin'") ||
+    ui.includes("name==='presets'") ||
+    !ui.includes("name==='history'") ||
+    !ui.includes('renderRoute(location.pathname)') ||
+    ui.includes('Promise.all([loadShots(),loadLog()])')) {
   throw new Error('Web UI must lazy-load status/shots/log per active SPA view; background polls stay gated');
 }
-if (!html.includes('id="view-home"') ||
-    !html.includes('id="view-history"') ||
-    !html.includes('id="view-settings"') ||
-    html.includes('id="view-presets"') ||
-    !html.includes('id="view-admin"') ||
-    !html.includes('data-route="/settings"') ||
-    html.includes('data-route="/presets"') ||
-    !html.includes('data-route="/admin"') ||
-    !html.includes('history.pushState')) {
+if (!ui.includes('id="view-home"') ||
+    !ui.includes('id="view-history"') ||
+    !ui.includes('id="view-settings"') ||
+    ui.includes('id="view-presets"') ||
+    !ui.includes('id="view-admin"') ||
+    !ui.includes('data-route="/settings"') ||
+    ui.includes('data-route="/presets"') ||
+    !ui.includes('data-route="/admin"') ||
+    !ui.includes('history.pushState')) {
   throw new Error('Web UI must expose Home/History/Admin/Log/Settings routes as an SPA');
 }
 const maxHandlersMatch = network.match(/max_uri_handlers\s*=\s*(\d+)/);
@@ -481,7 +495,7 @@ for (const [route, handler] of expected) {
   if (!registration.test(network)) {
     throw new Error(`Missing HTTP registration: ${route} -> ${handler}`);
   }
-  if (uri !== '/' && !html.includes(uri.split('?')[0])) {
+  if (uri !== '/' && !ui.includes(uri.split('?')[0])) {
     throw new Error(`Registered API is not referenced by the UI: ${uri}`);
   }
 }
@@ -531,9 +545,9 @@ if (!network.includes('if (!network.apActive)')) {
 }
 if (network.includes('\\"passwordChangeRequired\\"') ||
     network.includes('PASSWORD_CHANGE_REQUIRED') ||
-    html.includes('passwordChangeRequired') ||
-    html.includes('factory AP/UI password') ||
-    html.includes('Change the factory AP/UI password')) {
+    ui.includes('passwordChangeRequired') ||
+    ui.includes('factory AP/UI password') ||
+    ui.includes('Change the factory AP/UI password')) {
   throw new Error('Factory password change gate must remain removed from status/UI/API');
 }
 
@@ -562,11 +576,17 @@ if (!firmware.includes('requestScaleBrewBeep(session.id)') ||
   throw new Error('Best-effort beep must stay outside the critical BLE command queue');
 }
 
-const generated = webUi.generate();
+(async () => {
+const generated = await webUi.generate();
 const roundTrip = zlib.gunzipSync(generated.gzip).toString('utf8');
 if (roundTrip !== generated.html) {
   throw new Error('Generated gzip Web UI does not round-trip to the minified HTML');
 }
+const jsRoundTrip = zlib.gunzipSync(generated.jsGzip).toString('utf8');
+if (jsRoundTrip !== generated.js) {
+  throw new Error('Generated gzip Web JS does not round-trip to the minified JS');
+}
+new Function(generated.js);
 const cssRoundTrip = zlib.gunzipSync(generated.cssGzip).toString('utf8');
 if (cssRoundTrip !== generated.css) {
   throw new Error('Generated gzip Web CSS does not round-trip to the minified CSS');
@@ -575,8 +595,11 @@ const logoRoundTrip = zlib.gunzipSync(generated.logoGzip).toString('utf8');
 if (logoRoundTrip !== generated.logo) {
   throw new Error('Generated gzip Web logo does not round-trip to the minified SVG');
 }
-if (generated.gzip.length > 21504) {
-  throw new Error('Compressed Web UI HTML exceeds the 21 KiB gzip budget');
+if (generated.gzip.length > 8192) {
+  throw new Error('Compressed Web UI HTML exceeds the 8 KiB gzip budget');
+}
+if (generated.jsGzip.length > 16384) {
+  throw new Error('Compressed Web UI JS exceeds the 16 KiB gzip budget');
 }
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
@@ -584,9 +607,10 @@ if (generated.cssGzip.length > 6144) {
 if (generated.logoGzip.length > 4096) {
   throw new Error('Compressed Web logo exceeds the 4 KiB gzip budget');
 }
-if (generated.gzip.length + generated.cssGzip.length + generated.logoGzip.length >
+if (generated.gzip.length + generated.jsGzip.length + generated.cssGzip.length +
+        generated.logoGzip.length >
     28672) {
-  throw new Error('Combined HTML+CSS+logo gzip exceeds the 28 KiB flash budget');
+  throw new Error('Combined HTML+JS+CSS+logo gzip exceeds the 28 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
@@ -594,13 +618,15 @@ if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
 }
 if (!network.includes('SHOT_STOPPER_WEB_UI_GZIP') ||
     !network.includes('SHOT_STOPPER_WEB_UI_GZIP_LEN') ||
+    !network.includes('SHOT_STOPPER_WEB_JS_GZIP') ||
+    !network.includes('SHOT_STOPPER_WEB_JS_GZIP_LEN') ||
     !network.includes('SHOT_STOPPER_WEB_CSS_GZIP') ||
     !network.includes('SHOT_STOPPER_WEB_CSS_GZIP_LEN') ||
     !network.includes('SHOT_STOPPER_WEB_LOGO_GZIP') ||
     !network.includes('SHOT_STOPPER_WEB_LOGO_GZIP_LEN') ||
     !network.includes('"Content-Encoding"') ||
     !network.includes('"gzip"')) {
-  throw new Error('GET /, GET /app.css, and GET /logo.svg must send precompressed gzip bodies');
+  throw new Error('GET /, GET /app.js, GET /app.css, and GET /logo.svg must send precompressed gzip bodies');
 }
 if (network.includes('zlib.h') || network.includes('miniz.h') ||
     /mz_compress|deflateInit|gzipCompress/.test(network)) {
@@ -610,18 +636,21 @@ if (!network.includes('If-None-Match')) {
   throw new Error('GET / must honor If-None-Match for cached Web UI revalidation');
 }
 const rootHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::rootHandler');
+const jsHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::jsHandler');
 const cssHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::cssHandler');
 const logoHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::logoHandler');
 const notFoundHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::notFoundHandler');
 const loginHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::loginHandler');
-if (rootHandlerStart < 0 || cssHandlerStart < 0 || logoHandlerStart < 0 ||
-    notFoundHandlerStart < 0 || loginHandlerStart < 0 ||
-    !(rootHandlerStart < cssHandlerStart && cssHandlerStart < logoHandlerStart &&
+if (rootHandlerStart < 0 || jsHandlerStart < 0 || cssHandlerStart < 0 ||
+    logoHandlerStart < 0 || notFoundHandlerStart < 0 || loginHandlerStart < 0 ||
+    !(rootHandlerStart < jsHandlerStart && jsHandlerStart < cssHandlerStart &&
+      cssHandlerStart < logoHandlerStart &&
       logoHandlerStart < notFoundHandlerStart &&
       notFoundHandlerStart < loginHandlerStart)) {
-  throw new Error('rootHandler/cssHandler/logoHandler/notFoundHandler order not found');
+  throw new Error('rootHandler/jsHandler/cssHandler/logoHandler/notFoundHandler order not found');
 }
-const rootHandler = network.slice(rootHandlerStart, cssHandlerStart);
+const rootHandler = network.slice(rootHandlerStart, jsHandlerStart);
+const jsHandler = network.slice(jsHandlerStart, cssHandlerStart);
 const cssHandler = network.slice(cssHandlerStart, logoHandlerStart);
 const logoHandler = network.slice(logoHandlerStart, notFoundHandlerStart);
 const notFoundHandler = network.slice(notFoundHandlerStart, loginHandlerStart);
@@ -630,8 +659,18 @@ if (rootHandler.includes('no-store') || !rootHandler.includes('no-cache') ||
     !rootHandler.includes('ifNoneMatchEquals') ||
     !rootHandler.includes('ETag') ||
     !rootHandler.includes("style-src 'self'") ||
+    !rootHandler.includes("script-src 'self'") ||
+    rootHandler.includes("script-src 'unsafe-inline'") ||
     rootHandler.includes('HTTPD_RESP_USE_STRLEN')) {
-  throw new Error('GET / must revalidate with ETag/304, CSP style-src self, and gzip by length');
+  throw new Error('GET / must revalidate with ETag/304, CSP script/style self, and gzip by length');
+}
+if (jsHandler.includes('no-store') ||
+    !jsHandler.includes('max-age=31536000') ||
+    !jsHandler.includes('immutable') ||
+    !jsHandler.includes('STATUS_NOT_MODIFIED') ||
+    !jsHandler.includes('SHOT_STOPPER_WEB_JS_GZIP') ||
+    !jsHandler.includes('application/javascript')) {
+  throw new Error('GET /app.js must serve immutable gzip JS with ETag/304');
 }
 if (cssHandler.includes('no-store') ||
     !cssHandler.includes('max-age=31536000') ||
@@ -664,7 +703,12 @@ if (network.includes('sendJson') &&
 }
 
 console.log(
-  `Embedded Web UI: JavaScript valid, ${Buffer.byteLength(html, 'utf8')} bytes HTML source, ` +
-  `${generated.gzip.length} bytes HTML gzip, ${generated.cssGzip.length} bytes CSS gzip, ` +
-  `${generated.logoGzip.length} bytes logo gzip, ${expected.size} routes checked`
+  `Embedded Web UI: JavaScript valid, ${htmlBytes} bytes HTML / ${jsBytes} bytes JS source, ` +
+  `${generated.gzip.length} bytes HTML gzip, ${generated.jsGzip.length} bytes JS gzip, ` +
+  `${generated.cssGzip.length} bytes CSS gzip, ${generated.logoGzip.length} bytes logo gzip, ` +
+  `${expected.size} routes checked`
 );
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

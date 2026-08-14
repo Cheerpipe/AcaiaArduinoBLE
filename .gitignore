@@ -59,6 +59,9 @@ sdkconfig.old
 .pioenvs/
 .piolibdeps/
 
+# Node.js tooling (Web UI minify)
+node_modules/
+
 # Host-test and coverage outputs
 coverage/
 *.gcda

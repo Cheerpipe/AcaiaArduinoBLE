@@ -88,6 +88,9 @@ done
 echo "BLE configuration peripheral: absent"
 
 if command -v node >/dev/null 2>&1; then
+  if [ ! -d "$repo_root/node_modules/terser" ]; then
+    (CDPATH= cd -- "$repo_root" && npm install --no-fund --no-audit)
+  fi
   node "$test_dir/check_web_assets.js"
 else
   echo "Node.js not found: embedded Web UI syntax check skipped" >&2
