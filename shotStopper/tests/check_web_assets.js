@@ -185,7 +185,7 @@ if (!ui.includes('authenticatedOnly') ||
 const statusSection = html.match(/<fieldset[^>]*><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     statusSection[1].includes('class="row"') ||
-    (statusSection[1].match(/class="metric"/g) || []).length !== 22 ||
+    (statusSection[1].match(/class="metric"/g) || []).length !== 25 ||
     !ui.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'") ||
     !ui.includes('id="scaleWeight"') ||
     !ui.includes('id="scaleTimer"') ||
@@ -392,6 +392,9 @@ if (!ui.includes('<legend>Brew</legend>') ||
   throw new Error('Brew presets CRUD UI must block factory delete, support reset, click-to-load, and unsaved switch confirm');
 }
 if (!ui.includes('id="hCpu"') ||
+    !ui.includes('id="hWifi"') ||
+    !ui.includes('id="hSsid"') ||
+    !ui.includes('id="hAp"') ||
     !ui.includes('id="hUptime"') ||
     !ui.includes('id="hResetReason"') ||
     !ui.includes('id="hTemp"') ||
@@ -514,6 +517,12 @@ if (!ui.includes('id="staIpMode"') ||
     !ui.includes("n.rssi") ||
     !ui.includes('signal ') ||
     !ui.includes(' dBm)') ||
+    !ui.includes("$('hWifi').textContent=$('networkStatus').textContent") ||
+    !ui.includes("$('hSsid').textContent=s.network.ssid||'—'") ||
+    !ui.includes("$('hAp').textContent=$('apStatus').textContent") ||
+    !html.includes('<strong>WiFi</strong><div id="hWifi">') ||
+    !html.includes('<strong>SSID</strong><div id="hSsid">') ||
+    !html.includes('<strong>AP</strong><div id="hAp">') ||
     !network.includes('WiFi.config(') ||
     !network.includes('confirmPendingNetwork') ||
     !network.includes('revertPendingNetwork') ||
