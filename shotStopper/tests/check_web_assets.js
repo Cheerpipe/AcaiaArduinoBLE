@@ -48,8 +48,8 @@ if (htmlBytes > 40960) {
 if (jsBytes > 61440) {
   throw new Error('Web UI JS source exceeds the 60 KiB authoring budget');
 }
-if (htmlBytes + jsBytes > 88064) {
-  throw new Error('Web UI HTML+JS source exceeds the 86 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 92160) {
+  throw new Error('Web UI HTML+JS source exceeds the 90 KiB combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -445,8 +445,35 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('id="homePresetCards"') ||
     !ui.includes('id="homeBrewByWeight"') ||
     !ui.includes('id="quickSettingsPanel"') ||
+    !ui.includes('id="homeAvoidBbwShotWithoutScale"') ||
+    !ui.includes('id="homeFastExtractionGuardEnabled"') ||
+    !ui.includes('id="homeAutoToManualGuardEnabled"') ||
     html.indexOf('id="quickSettingsPanel"') > html.indexOf('id="shotPanel"') ||
-    html.indexOf('id="homeBrewByWeight"') > html.indexOf('id="shotPanel"') ||
+    html.indexOf('id="homeBrewByWeight"') > html.indexOf('id="homeAvoidBbwShotWithoutScale"') ||
+    html.indexOf('id="homeAvoidBbwShotWithoutScale"') >
+        html.indexOf('id="homeFastExtractionGuardEnabled"') ||
+    html.indexOf('id="homeFastExtractionGuardEnabled"') >
+        html.indexOf('id="homeAutoToManualGuardEnabled"') ||
+    html.indexOf('id="homeAutoToManualGuardEnabled"') >
+        html.indexOf('id="homePresetBlock"') ||
+    html.indexOf('id="homeAutoToManualGuardEnabled"') > html.indexOf('id="shotPanel"') ||
+    !html.includes('>No-scale BBW</span>') ||
+    !html.includes('>Fast extraction guard</span>') ||
+    !html.includes('>A→M time guard</span>') ||
+    html.indexOf('<summary>No-scale BBW</summary>') < 0 ||
+    html.indexOf('<summary>Fast extraction guard</summary>') < 0 ||
+    html.indexOf('<summary>A→M time guard</summary>') < 0 ||
+    !ui.includes('function updateHomeGuardSwitchesLock(') ||
+    !ui.includes('function persistHomeGuard(') ||
+    !ui.includes("persistHomeGuard('homeAvoidBbwShotWithoutScale'") ||
+    !ui.includes("persistHomeGuard('homeFastExtractionGuardEnabled'") ||
+    !ui.includes("persistHomeGuard('homeAutoToManualGuardEnabled'") ||
+    !ui.includes("'avoidBbwShotWithoutScale',0)") ||
+    !ui.includes("'fastExtractionGuardEnabled',1)") ||
+    !ui.includes("'autoToManualGuardEnabled',1)") ||
+    !ui.includes('el.disabled=!controlsMutable||!on') ||
+    !ui.includes("classList.toggle('fieldOff',!on)") ||
+    !ui.includes('$(\'homeBrewByWeight\').disabled=!controlsMutable') ||
     !ui.includes('id="clearLastShotButton"') ||
     html.indexOf('id="shotPanel"') > html.indexOf('id="clearLastShotButton"') ||
     html.includes('id="lastCycle"') ||

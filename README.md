@@ -105,7 +105,7 @@ In short: **hard to build, easy to live with.**
 
 ### Shot presets
 
-Brew settings live in **named presets** (factory **Single** / **Double**, plus customs). The active preset supplies goal weight, BBW/guards, learned stop offset and its baseline, and A→M samples. Changing preset persists only the active id (no copy-on-select). Manage presets under **Settings → Brew** (dense cards: New · Duplicate · Load · Save · Delete; rename on the card). **New** seeds firmware Double defaults (not the saved Double in NVS). **Home** has Brew-by-weight / Manual plus a preset selector; **`/presets`** is operational select + shot status. Machine/scale, alerts, Wi‑Fi, and password stay outside the recipe.
+Brew settings live in **named presets** (factory **Single** / **Double**, plus customs). The active preset supplies goal weight, BBW/guards, learned stop offset and its baseline, and A→M samples. Changing preset persists only the active id (no copy-on-select). Manage presets under **Settings → Brew** (dense cards: New · Duplicate · Load · Save · Delete; rename on the card). **New** seeds firmware Double defaults (not the saved Double in NVS). **Home → Quick Settings** has **Brew by weight** (session Manual), plus **No-scale BBW**, **Fast extraction guard**, and **A→M time guard** (same names as Settings → Brew). Guard switches persist immediately (machine config for No-scale; active preset for the other two) and become read-only when Brew by weight is off. Machine/scale, alerts, Wi‑Fi, and password stay outside the recipe.
 
 ### Brew and weight settings
 
