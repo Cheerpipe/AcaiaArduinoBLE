@@ -68,7 +68,9 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !html.includes('id="bookooMuteOnBuzzerOnly" type="checkbox" checked') ||
     !html.includes('option value="4" selected') ||
     !ui.includes('when Buzzer only is saved') ||
-    !html.includes('Volume on connect/reconnect. Scale only or Scale priority.')) {
+    !html.includes('Volume on connect/reconnect. <strong>Scale only or Scale priority.</strong>') ||
+    !html.includes('<strong>Requires automatic tare.</strong>') ||
+    !html.includes('when this option is enabled. <strong>Buzzer only.</strong>')) {
   throw new Error('Web UI must show paddle state, scale beep options, and buzzer alerts');
 }
 if (!ui.includes('id="operationalWallS" type="number" min="5" max="60"') ||
@@ -185,7 +187,7 @@ if (!ui.includes('authenticatedOnly') ||
 }
 if (!html.includes('id="rememberMe"') ||
     /id="rememberMe"[^>]*\bchecked\b/.test(html) ||
-    !html.includes('Stay signed in for 7 days on this browser.') ||
+    html.includes('Stay signed in for 7 days on this browser.') ||
     !js.includes('rememberMe:r') ||
     !js.includes('r?localStorage:sessionStorage') ||
     !js.includes("s.setItem('shotStopperToken'") ||
@@ -335,6 +337,18 @@ if (!html.includes('<summary>Tare</summary>') ||
     html.indexOf('id="bookooConnectBeepLevel"') <
         html.indexOf('<summary>Bookoo</summary>') ||
     html.indexOf('id="bookooConnectBeepLevel"') >
+        html.indexOf('<summary>Acaia</summary>') ||
+    html.indexOf('<strong>Requires automatic tare.</strong>') <
+        html.indexOf('<summary>Bookoo</summary>') ||
+    html.indexOf('<strong>Requires automatic tare.</strong>') >
+        html.indexOf('<summary>Acaia</summary>') ||
+    html.indexOf('when this option is enabled. <strong>Buzzer only.</strong>') <
+        html.indexOf('<summary>Bookoo</summary>') ||
+    html.indexOf('when this option is enabled. <strong>Buzzer only.</strong>') >
+        html.indexOf('<summary>Acaia</summary>') ||
+    html.indexOf('<strong>Scale only or Scale priority.</strong>') <
+        html.indexOf('<summary>Bookoo</summary>') ||
+    html.indexOf('<strong>Scale only or Scale priority.</strong>') >
         html.indexOf('<summary>Acaia</summary>') ||
     html.indexOf('<summary>Acaia</summary>') <
         html.indexOf('<summary>Bookoo</summary>') ||
