@@ -1060,6 +1060,31 @@ void p24_preset_bank_size_and_crud_budgets() {
   seedDefaultShotPresetBank(bank);
   CHECK(bank.count == 2);
   CHECK(bank.activeId == FACTORY_PRESET_ID_DOUBLE);
+  CHECK(bank.presets[0].id == FACTORY_PRESET_ID_DOUBLE);
+  CHECK(bank.presets[1].id == FACTORY_PRESET_ID_SINGLE);
+
+  // Legacy Single-then-Double banks reorder on ensure.
+  ShotPresetBank legacy;
+  memset(&legacy, 0, sizeof(legacy));
+  legacy.count = 2;
+  legacy.activeId = FACTORY_PRESET_ID_DOUBLE;
+  legacy.nextId = 3;
+  fillFactorySinglePreset(legacy.presets[0]);
+  fillFactoryDoublePreset(legacy.presets[1]);
+  ensureShotPresetBank(legacy, DEFAULT_RETARE_WINDOW_MS, true);
+  CHECK(legacy.presets[0].id == FACTORY_PRESET_ID_DOUBLE);
+  CHECK(legacy.presets[1].id == FACTORY_PRESET_ID_SINGLE);
+
+  CHECK(!deleteShotPreset(bank, FACTORY_PRESET_ID_DOUBLE));
+  CHECK(!deleteShotPreset(bank, FACTORY_PRESET_ID_SINGLE));
+  CHECK(bank.count == 2);
+
+  ShotPreset *dbl = mutableShotPreset(bank, FACTORY_PRESET_ID_DOUBLE);
+  CHECK(dbl != nullptr);
+  dbl->goalWeightG = 40;
+  CHECK(restoreFactoryShotPresetValues(bank, FACTORY_PRESET_ID_DOUBLE));
+  CHECK(findShotPreset(bank, FACTORY_PRESET_ID_DOUBLE)->goalWeightG ==
+        DEFAULT_GOAL_WEIGHT_G);
 
   uint8_t newId = 0;
   CHECK(createUntitledShotPreset(bank, newId));

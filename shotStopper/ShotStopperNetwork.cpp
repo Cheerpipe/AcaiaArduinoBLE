@@ -1800,7 +1800,6 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/history", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/admin", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/settings", HTTP_GET, rootHandler) &&
-      registerHandler(server_, "/presets", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/app.css", HTTP_GET, cssHandler) &&
       registerHandler(server_, "/api/v1/login", HTTP_POST, loginHandler) &&
       registerHandler(server_, "/api/v1/logout", HTTP_POST, logoutHandler) &&

@@ -54,8 +54,9 @@ inline void seedDefaultShotPresetBank(ShotPresetBank &bank) {
   bank.count = 2;
   bank.activeId = FACTORY_PRESET_ID_DOUBLE;
   bank.nextId = 3;
-  fillFactorySinglePreset(bank.presets[0]);
-  fillFactoryDoublePreset(bank.presets[1]);
+  // Double first: primary / default recipe most users run.
+  fillFactoryDoublePreset(bank.presets[0]);
+  fillFactorySinglePreset(bank.presets[1]);
 }
 
 inline int findShotPresetIndex(const ShotPresetBank &bank, uint8_t id) {
@@ -65,6 +66,17 @@ inline int findShotPresetIndex(const ShotPresetBank &bank, uint8_t id) {
     }
   }
   return -1;
+}
+
+inline void preferDoubleBeforeSingle(ShotPresetBank &bank) {
+  const int singleIdx = findShotPresetIndex(bank, FACTORY_PRESET_ID_SINGLE);
+  const int doubleIdx = findShotPresetIndex(bank, FACTORY_PRESET_ID_DOUBLE);
+  if (singleIdx < 0 || doubleIdx < 0 || doubleIdx < singleIdx) {
+    return;
+  }
+  const ShotPreset tmp = bank.presets[singleIdx];
+  bank.presets[singleIdx] = bank.presets[doubleIdx];
+  bank.presets[doubleIdx] = tmp;
 }
 
 inline ShotPreset *mutableShotPreset(ShotPresetBank &bank, uint8_t id) {
@@ -160,6 +172,7 @@ inline void ensureShotPresetBank(ShotPresetBank &bank,
     seedDefaultShotPresetBank(bank);
     return;
   }
+  preferDoubleBeforeSingle(bank);
   // Invalid activeId: keep customs; retarget to the first slot.
   if (findShotPresetIndex(bank, bank.activeId) < 0) {
     bank.activeId = bank.presets[0].id;
@@ -461,6 +474,11 @@ inline bool deleteShotPreset(ShotPresetBank &bank, uint8_t id) {
   }
   const int index = findShotPresetIndex(bank, id);
   if (index < 0) {
+    return false;
+  }
+  // Factory Single/Double are permanent slots — edit or restore only.
+  if (bank.presets[index].isFactory || id == FACTORY_PRESET_ID_SINGLE ||
+      id == FACTORY_PRESET_ID_DOUBLE) {
     return false;
   }
   for (uint8_t i = static_cast<uint8_t>(index); i + 1 < bank.count; ++i) {

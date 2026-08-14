@@ -216,28 +216,53 @@ if (!html.includes('<legend>Brew</legend>') ||
     !html.includes('id="presetCards"') ||
     !html.includes('id="presetNewBtn"') ||
     !html.includes('id="presetDupBtn"') ||
-    !html.includes('id="presetLoadBtn"') ||
-    !html.includes('id="presetSaveBtn"') ||
+    html.includes('id="presetLoadBtn"') ||
+    html.includes('id="presetSaveBtn"') ||
+    !html.includes('id="saveBrewPresetButton"') ||
+    !html.includes('Save brew settings') ||
+    !html.includes('id="activeBrewProfileHint"') ||
+    !html.includes('Current profile: ') ||
+    !html.includes('function updateActiveBrewProfileHint(') ||
+    html.indexOf('id="activeBrewProfileHint"') <
+        html.indexOf('id="saveBrewPresetButton"') ||
+    html.indexOf('id="saveBrewPresetButton"') <
+        html.indexOf('id="resetGuardSamplesButton"') ||
+    html.indexOf('id="saveBrewPresetButton"') >
+        html.indexOf('<legend>Machine and scale</legend>') ||
+    html.indexOf('id="saveConfigButton"') <
+        html.indexOf('<summary>Alerts</summary>') ||
+    html.indexOf('id="saveConfigButton"') >
+        html.indexOf('<legend>Security and connectivity</legend>') ||
+    !html.includes('id="presetResetBtn"') ||
     !html.includes('id="presetDeleteBtn"') ||
     !html.includes('id="presetRenameDialog"') ||
-    !html.includes('id="homePresetChips"') ||
+    !html.includes('id="homePresetCards"') ||
     !html.includes('id="homeBrewByWeight"') ||
-    !html.includes('id="view-presets"') ||
-    !html.includes('data-route="/presets"') ||
+    html.includes('id="view-presets"') ||
+    html.includes('data-route="/presets"') ||
+    html.includes('id="presetsPageCards"') ||
+    html.includes('id="homePresetChips"') ||
     !html.includes("action:'new'") ||
     !html.includes("action:'duplicate'") ||
     !html.includes("action:'rename'") ||
+    !html.includes("action:'restore_factory_values'") ||
     !html.includes('function startRenamePreset(') ||
+    !html.includes('function updatePresetActionButtons(') ||
+    !html.includes('Discard them and switch presets') ||
     !html.includes('saveBrewPreset') ||
     !html.includes('/api/v1/presets') ||
     html.includes('id="presetNameInput"') ||
     !network.includes('/api/v1/presets') ||
     !network.includes('presetsHandler') ||
+    !network.includes('restore_factory_values') ||
     !network.includes('\\"presets\\"') ||
+    network.includes('"/presets"') ||
     !css.includes('.presetCard') ||
-    !css.includes('.presetChips') ||
-    !css.includes('.btnCompact')) {
-  throw new Error('Brew presets CRUD UI, Home selector, /presets route, and API must be wired');
+    !css.includes('#homePresetCards') ||
+    !css.includes('.btnGlyph') ||
+    !css.includes('.btnGlyph .g') ||
+    !css.includes('.btnGlyph .t')) {
+  throw new Error('Brew presets CRUD UI must block factory delete, support reset, click-to-load, and unsaved switch confirm');
 }
 if (!html.includes('id="hCpu"') ||
     !html.includes('id="hUptime"') ||
@@ -343,7 +368,6 @@ const expected = new Map([
   ['GET /history', 'rootHandler'],
   ['GET /admin', 'rootHandler'],
   ['GET /settings', 'rootHandler'],
-  ['GET /presets', 'rootHandler'],
   ['GET /app.css', 'cssHandler'],
   ['POST /api/v1/login', 'loginHandler'],
   ['POST /api/v1/logout', 'logoutHandler'],
@@ -392,7 +416,8 @@ if (!html.includes('async function loadStatus(){') ||
     !html.includes('function refreshStatus(){return withPollGate(loadStatus)}') ||
     !html.includes('function refreshShots(){return withPollGate(loadShots)}') ||
     !html.includes('function refreshLog(){return withPollGate(loadLog)}') ||
-    !html.includes("name==='home'||name==='settings'||name==='admin'||name==='presets'") ||
+    !html.includes("name==='home'||name==='settings'||name==='admin'") ||
+    html.includes("name==='presets'") ||
     !html.includes("name==='history'") ||
     !html.includes('renderRoute(location.pathname)') ||
     html.includes('Promise.all([loadShots(),loadLog()])')) {
@@ -401,13 +426,13 @@ if (!html.includes('async function loadStatus(){') ||
 if (!html.includes('id="view-home"') ||
     !html.includes('id="view-history"') ||
     !html.includes('id="view-settings"') ||
-    !html.includes('id="view-presets"') ||
+    html.includes('id="view-presets"') ||
     !html.includes('id="view-admin"') ||
     !html.includes('data-route="/settings"') ||
-    !html.includes('data-route="/presets"') ||
+    html.includes('data-route="/presets"') ||
     !html.includes('data-route="/admin"') ||
     !html.includes('history.pushState')) {
-  throw new Error('Web UI must expose Home/Presets/History/Admin/Log/Settings routes as an SPA');
+  throw new Error('Web UI must expose Home/History/Admin/Log/Settings routes as an SPA');
 }
 const maxHandlersMatch = network.match(/max_uri_handlers\s*=\s*(\d+)/);
 if (!maxHandlersMatch) {
