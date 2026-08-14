@@ -485,6 +485,8 @@ PersistedLastShot persistedLastShot;
 bool noScaleShotGuardArmed = true;
 uint32_t noScaleShotGuardActivityAtMs = 0;
 bool noScaleShotGuardScaleWasAvailable = false;
+bool noScaleShotGuardHold = false;
+uint32_t noScaleShotGuardHoldAtMs = 0;
 
 float currentWeight = 0.0f;
 uint32_t currentWeightReceivedAtMs = 0;
@@ -4092,6 +4094,9 @@ void resetSessionForNewCycle(ControlSource source, uint32_t webSessionId = 0,
 }
 
 void maybeRequestNtpSyncOnActivity();
+bool beginRinseCycle(ControlSource source, uint32_t webSessionId = 0,
+                     uint32_t controlLeaseId = 0);
+void enterRinse();
 
 void armNoScaleShotGuard() {
   if (noScaleShotGuardArmed) {
@@ -4107,12 +4112,39 @@ void consumeNoScaleShotGuard() {
   addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED);
 }
 
+bool noScaleShotGuardWouldBlock() {
+  const RuntimeConfig effective = effectiveRuntimeConfig();
+  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
+  const bool scaleUsable =
+      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
+  return runtimeConfig.avoidBbwShotWithoutScale && !effective.timerOnly &&
+         !scaleUsable && noScaleShotGuardArmed;
+}
+
+void blockNoScaleShotGuard() {
+  noScaleShotGuardHold = false;
+  consumeNoScaleShotGuard();
+  addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED);
+  if (runtimeConfig.buzzerManualNoScaleBeep) {
+    emitAlert(AlertEvent::MANUAL_NO_SCALE);
+  }
+}
+
 void serviceNoScaleShotGuard() {
   const bool available = scaleAvailable();
   if (available && !noScaleShotGuardScaleWasAvailable) {
     armNoScaleShotGuard();
   }
   noScaleShotGuardScaleWasAvailable = available;
+  if (noScaleShotGuardHold) {
+    if (!noScaleShotGuardWouldBlock()) {
+      noScaleShotGuardHold = false;
+    } else if (rawPaddleOn &&
+               elapsedMs(noScaleShotGuardHoldAtMs) >
+                   runtimeConfig.rinseGestureMs) {
+      blockNoScaleShotGuard();
+    }
+  }
   if (!noScaleShotGuardArmed && !session.active &&
       noScaleShotGuardActivityAtMs != 0 &&
       elapsedMs(noScaleShotGuardActivityAtMs) >=
@@ -4124,19 +4156,16 @@ void serviceNoScaleShotGuard() {
 void beginCycle(ControlSource source = ControlSource::PHYSICAL,
                 uint32_t webSessionId = 0,
                 uint32_t controlLeaseId = 0) {
-  const RuntimeConfig effective = effectiveRuntimeConfig();
-  const ScaleLinkSnapshot scaleLinkAtGate = getScaleLinkSnapshot();
-  const bool scaleUsable =
-      scaleLinkAvailable(scaleLinkAtGate) && currentWeightIsFresh();
-  if (runtimeConfig.avoidBbwShotWithoutScale && !effective.timerOnly &&
-      !scaleUsable && noScaleShotGuardArmed) {
-    consumeNoScaleShotGuard();
-    addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED);
-    if (runtimeConfig.buzzerManualNoScaleBeep) {
-      emitAlert(AlertEvent::MANUAL_NO_SCALE);
+  if (noScaleShotGuardWouldBlock()) {
+    if (source == ControlSource::PHYSICAL) {
+      noScaleShotGuardHold = true;
+      noScaleShotGuardHoldAtMs = millis();
+      return;
     }
+    blockNoScaleShotGuard();
     return;
   }
+  noScaleShotGuardHold = false;
 
   flushPendingScaleTimerStopNow();
   if (pendingFinalize.pending) {
@@ -4261,6 +4290,50 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_ENDED,
                 static_cast<int32_t>(reason));
   transitionTo(nextState);
+}
+
+bool beginRinseCycle(ControlSource source, uint32_t webSessionId,
+                     uint32_t controlLeaseId) {
+  flushPendingScaleTimerStopNow();
+  if (pendingFinalize.pending) {
+    pendingFinalize.pending = false;
+    serialTrace(LogLevel::INFO,
+                source == ControlSource::WEB
+                    ? "Previous drip analysis cancelled by a web rinse"
+                    : "Previous drip analysis cancelled by a rinse");
+  }
+  resetSessionForNewCycle(source, webSessionId, controlLeaseId);
+  session.startedAtMs = millis();
+  session.cn9ClosedAtMs = 0;
+  session.scaleStartLagCaptured = false;
+  session.scaleStartLagMs = 0;
+  session.firstDropMs = 0;
+  session.retareFlowFirstDetectedAtMs = 0;
+  session.scaleBaselineReady = false;
+  session.scaleBaselineG = 0.0f;
+  session.weightSequenceAtStart = currentWeightSequence;
+  session.startedWithScale = scaleAvailable();
+  session.automaticEnabled = false;
+  virtualPaddleOn = false;
+  resetShotTrajectory(session.startedAtMs);
+  if (!setCn9Closed(true, session.config.operationalWallMs)) {
+    session.active = false;
+    session.endReason = EndReason::RELAY_SAFETY_FAILURE;
+    transitionTo(StopperState::REQUIRES_OFF);
+    return false;
+  }
+  session.cn9ClosedAtMs = getRelaySafetySnapshot().closedAtMs;
+  if (session.startedWithScale) {
+    emitImmediateCommandAlertIfBuzzer();
+    if (!requestRemoteTimerStart()) {
+      session.startedWithScale = false;
+      session.automaticEnabled = false;
+      session.scaleWasLost = true;
+      serialTrace(LogLevel::WARNING,
+                  "Scale start command unavailable; rinse marked manual");
+    }
+  }
+  return true;
 }
 
 void enterRinse() {
@@ -4475,6 +4548,16 @@ void stateMachineTask() {
       if (paddleTurnedOn) {
         beginCycle(ControlSource::PHYSICAL);
       }
+      if (paddleTurnedOff && noScaleShotGuardHold &&
+          elapsedMs(noScaleShotGuardHoldAtMs) <=
+              runtimeConfig.rinseGestureMs) {
+        noScaleShotGuardHold = false;
+        armNoScaleShotGuard();
+        if (!beginRinseCycle(ControlSource::PHYSICAL)) {
+          return;
+        }
+        enterRinse();
+      }
       return;
 
     case StopperState::RINSE:
@@ -4555,44 +4638,10 @@ bool controlAllowsConfigurationNow() {
 }
 
 void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
-  flushPendingScaleTimerStopNow();
-  if (pendingFinalize.pending) {
-    pendingFinalize.pending = false;
-    serialTrace(LogLevel::INFO,
-                "Previous drip analysis cancelled by a web rinse");
-  }
-  resetSessionForNewCycle(ControlSource::WEB, webSessionId, controlLeaseId);
-  session.startedAtMs = millis();
-  session.cn9ClosedAtMs = 0;
-  session.scaleStartLagCaptured = false;
-  session.scaleStartLagMs = 0;
-  session.firstDropMs = 0;
-  session.retareFlowFirstDetectedAtMs = 0;
-  session.scaleBaselineReady = false;
-  session.scaleBaselineG = 0.0f;
-  session.weightSequenceAtStart = currentWeightSequence;
-  session.startedWithScale = scaleAvailable();
-  session.rinseStartedAtMs = session.startedAtMs;
-  session.automaticEnabled = false;
-  virtualPaddleOn = false;
-  resetShotTrajectory(session.startedAtMs);
-  if (!setCn9Closed(true, session.config.operationalWallMs)) {
-    session.active = false;
-    session.endReason = EndReason::RELAY_SAFETY_FAILURE;
-    transitionTo(StopperState::REQUIRES_OFF);
+  if (!beginRinseCycle(ControlSource::WEB, webSessionId, controlLeaseId)) {
     return;
   }
-  session.cn9ClosedAtMs = getRelaySafetySnapshot().closedAtMs;
-  if (session.startedWithScale) {
-    emitImmediateCommandAlertIfBuzzer();
-    if (!requestRemoteTimerStart()) {
-      session.startedWithScale = false;
-      session.automaticEnabled = false;
-      session.scaleWasLost = true;
-      serialTrace(LogLevel::WARNING,
-                  "Scale start command unavailable; web rinse marked manual");
-    }
-  }
+  session.rinseStartedAtMs = session.startedAtMs;
   transitionTo(StopperState::RINSE);
   maybeRequestNtpSyncOnActivity();
 }

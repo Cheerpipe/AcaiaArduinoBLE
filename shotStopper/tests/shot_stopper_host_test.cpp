@@ -109,6 +109,8 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   noScaleShotGuardArmed = true;
   noScaleShotGuardActivityAtMs = 0;
   noScaleShotGuardScaleWasAvailable = false;
+  noScaleShotGuardHold = false;
+  noScaleShotGuardHoldAtMs = 0;
   debugLog.clear();
   lastReportedLogOverwritten = 0;
   serialLogLevel = LogLevel::INFO;
@@ -2142,6 +2144,8 @@ void enableNoScaleShotGuardForTest() {
   runtimeConfig.avoidBbwShotWithoutScale = true;
   noScaleShotGuardArmed = true;
   noScaleShotGuardActivityAtMs = 0;
+  noScaleShotGuardHold = false;
+  noScaleShotGuardHoldAtMs = 0;
 }
 
 void attemptBlockedNoScaleStart() {
@@ -2153,7 +2157,14 @@ void attemptBlockedNoScaleStart() {
   CHECK(stopperState == StopperState::READY);
   CHECK(!session.active);
   CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(noScaleShotGuardArmed);
+  CHECK(noScaleShotGuardHold);
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(!session.active);
+  CHECK(!getRelaySafetySnapshot().closed);
   CHECK(!noScaleShotGuardArmed);
+  CHECK(!noScaleShotGuardHold);
   CHECK(debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED));
   CHECK(debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED));
   CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
@@ -2252,9 +2263,44 @@ void ns08_blocked_beep_respects_alert_checkbox() {
   const uint32_t before = localBuzzer.acceptedRequests;
   setRawPaddle(true);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
   CHECK(stopperState == StopperState::READY);
   CHECK(!noScaleShotGuardArmed);
   CHECK(localBuzzer.acceptedRequests == before);
+}
+
+void ns09_armed_rinse_gesture_runs_and_stays_armed() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  reachReadyFromBoot();
+  CHECK(noScaleShotGuardArmed);
+  const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
+  const uint32_t rawOnAt = hostMillis;
+  setRawPaddle(true);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(noScaleShotGuardArmed);
+  CHECK(!getRelaySafetySnapshot().closed);
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(noScaleShotGuardArmed);
+  CHECK(debugEventExists(DebugCode::RINSE_CLASSIFIED));
+  CHECK(!debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED));
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps);
+}
+
+void ns10_idle_rinse_gesture_does_not_rearm() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  reachReadyFromBoot();
+  attemptBlockedNoScaleStart();
+  CHECK(!noScaleShotGuardArmed);
+  const uint32_t rawOnAt = startCycle();
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(!noScaleShotGuardArmed);
 }
 
 void w54_local_buzzer_triple_on_auto_to_manual_guard_end() {
@@ -4878,6 +4924,8 @@ const TestCase testCases[] = {
     {"NS06", ns06_finished_shot_extends_cooldown},
     {"NS07", ns07_web_rinse_does_not_consume_guard},
     {"NS08", ns08_blocked_beep_respects_alert_checkbox},
+    {"NS09", ns09_armed_rinse_gesture_runs_and_stays_armed},
+    {"NS10", ns10_idle_rinse_gesture_does_not_rearm},
     {"W54", w54_local_buzzer_triple_on_auto_to_manual_guard_end},
     {"W55", w55_local_buzzer_queues_second_triple_while_busy},
     {"W56", w56_atm_beep_queued_when_scale_lost_after_deadline},
