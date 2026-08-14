@@ -1,0 +1,21 @@
+--- a/src/utility/GAP.cpp
++++ b/src/utility/GAP.cpp
+@@ -88,14 +88,16 @@ int GAPClass::scan(bool withDuplicates)
+ {
+   HCI.leSetScanEnable(false, true);
+ 
+-  // active scan, 20 ms scan interval (N * 0.625), 20 ms scan window (N * 0.625), public own address type, no filter
++  // Active scan, 40 ms interval / 20 ms window (N * 0.625). Duty 50%. Active is
++  // required: scale names usually live in SCAN_RSP, and ArduinoBLE only reports
++  // a device as discovered after type 0x03/0x04.
+   /*
+     Warning (from BLUETOOTH SPECIFICATION 5.x):
+     - scan interval: mandatory range from 0x0012 to 0x1000; only even values are valid
+     - scan window: mandatory range from 0x0011 to 0x1000
+     - The scan window can only be less than or equal to the scan interval
+   */
+-  if (HCI.leSetScanParameters(0x01, 0x0020, 0x0020, 0x00, 0x00) != 0) {
++  if (HCI.leSetScanParameters(0x01, 0x0040, 0x0020, 0x00, 0x00) != 0) {
+     return false;
+   }
+ 

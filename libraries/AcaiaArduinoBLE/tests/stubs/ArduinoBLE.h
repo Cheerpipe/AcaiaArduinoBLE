@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <strings.h>
 #include <vector>
 
 namespace FakeBLE {
@@ -180,16 +181,18 @@ private:
 
 class BLEClass {
 public:
-    int scan() {
+    int scan(bool withDuplicates = false) {
         ++scanCalls;
         lastScanAddress.clear();
+        lastWithDuplicates = withDuplicates;
         delivered_ = false;
         scanning_ = scanResult;
         return scanResult ? 1 : 0;
     }
-    int scanForAddress(String address) {
+    int scanForAddress(String address, bool withDuplicates = false) {
         ++scanForAddressCalls;
         lastScanAddress = address.c_str() ? std::string(address.c_str()) : "";
+        lastWithDuplicates = withDuplicates;
         delivered_ = false;
         scanning_ = scanResult;
         return scanResult ? 1 : 0;
@@ -199,11 +202,13 @@ public:
         ++stopScanCalls;
     }
     BLEDevice available() {
-        if (!scanning_ || delivered_ || !availableState) {
+        if (!scanning_ || (!lastWithDuplicates && delivered_) ||
+            !availableState) {
             return BLEDevice();
         }
         if (!lastScanAddress.empty() &&
-            availableState->address != lastScanAddress) {
+            strcasecmp(availableState->address.c_str(),
+                       lastScanAddress.c_str()) != 0) {
             return BLEDevice();
         }
         delivered_ = true;
@@ -231,6 +236,7 @@ public:
         stopScanCalls = 0;
         timeoutMs = 0;
         lastScanAddress.clear();
+        lastWithDuplicates = false;
         availableState.reset();
     }
 
@@ -240,6 +246,7 @@ public:
     int stopScanCalls = 0;
     unsigned long timeoutMs = 0;
     std::string lastScanAddress;
+    bool lastWithDuplicates = false;
     std::shared_ptr<FakeBLE::PeripheralState> availableState;
 
 private:

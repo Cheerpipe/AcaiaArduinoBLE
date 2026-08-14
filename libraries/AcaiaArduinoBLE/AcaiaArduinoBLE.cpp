@@ -64,6 +64,30 @@ uint32_t elapsedSince(uint32_t timestamp) {
     return static_cast<uint32_t>(millis()) - timestamp;
 }
 
+bool macAddressEqual(const char *left, const char *right) {
+    if (left == nullptr || right == nullptr) {
+        return false;
+    }
+    for (;;) {
+        unsigned char a = static_cast<unsigned char>(*left);
+        unsigned char b = static_cast<unsigned char>(*right);
+        if (a >= 'a' && a <= 'z') {
+            a = static_cast<unsigned char>(a - 'a' + 'A');
+        }
+        if (b >= 'a' && b <= 'z') {
+            b = static_cast<unsigned char>(b - 'a' + 'A');
+        }
+        if (a != b) {
+            return false;
+        }
+        if (a == '\0') {
+            return true;
+        }
+        ++left;
+        ++right;
+    }
+}
+
 float decimalDivisor(byte exponent) {
     static const float divisors[] = {1.0f, 10.0f, 100.0f, 1000.0f, 10000.0f};
     return divisors[exponent];
@@ -153,13 +177,21 @@ void AcaiaArduinoBLE::stopIdleScan(AcaiaDisconnectReason reason) {
     }
 }
 
-bool AcaiaArduinoBLE::startScan(const char *mac) {
+bool AcaiaArduinoBLE::startScan(const char *mac, bool forceRestart) {
     logVersionOnce();
 
-    // An active GAP scan must not be restarted. ArduinoBLE/ESP32 HCI can
-    // drop the scanner if scan() is issued while already enabled.
+    const bool directed = mac != nullptr && mac[0] != '\0';
+    // An active GAP scan must not be restarted with the same filter.
+    // ArduinoBLE/ESP32 HCI can drop the scanner if scan() is issued while
+    // already enabled. A filter change (or forceRestart) stops first.
     if (_scanning && !_connected && !_hasPeripheral) {
-        return true;
+        const bool sameFilter = directed
+            ? macAddressEqual(_scanMac, mac)
+            : _scanMac[0] == '\0';
+        if (sameFilter && !forceRestart) {
+            return true;
+        }
+        stopIdleScan(AcaiaDisconnectReason::NONE);
     }
 
     if (_connected || _hasPeripheral || _scanning) {
@@ -167,7 +199,6 @@ bool AcaiaArduinoBLE::startScan(const char *mac) {
     }
 
     BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
-    const bool directed = mac != nullptr && mac[0] != '\0';
     if (directed) {
         strncpy(_scanMac, mac, sizeof(_scanMac) - 1);
         _scanMac[sizeof(_scanMac) - 1] = '\0';
@@ -184,10 +215,11 @@ bool AcaiaArduinoBLE::startScan(const char *mac) {
         }
     }
 
-    // ArduinoBLE still takes String at the GAP boundary; copy once here.
+    // withDuplicates=true so a missed first advertisement is not fatal while
+    // the idle scan stays enabled. ArduinoBLE still takes String at GAP.
     const bool scanStarted = directed
-        ? static_cast<bool>(BLE.scanForAddress(String(_scanMac)))
-        : static_cast<bool>(BLE.scan());
+        ? static_cast<bool>(BLE.scanForAddress(String(_scanMac), true))
+        : static_cast<bool>(BLE.scan(true));
     if (!scanStarted) {
         Serial.println("BLE scan failed to start");
         stopIdleScan(AcaiaDisconnectReason::SCAN_START_FAILED);
@@ -221,27 +253,21 @@ bool AcaiaArduinoBLE::pollScan() {
         Serial.println();
     }
 
-    if (peripheral && isScaleName(peripheral.localName().c_str())) {
-        BLE.stopScan();
-        _scanning = false;
-        _scanStartedAt = 0;
-        _scanMac[0] = '\0';
-        return completeConnection(peripheral);
+    if (peripheral) {
+        const bool directed = _scanMac[0] != '\0';
+        const bool nameOk = isScaleName(peripheral.localName().c_str());
+        const bool macOk =
+            directed &&
+            macAddressEqual(peripheral.address().c_str(), _scanMac);
+        if ((directed && macOk) || (!directed && nameOk)) {
+            BLE.stopScan();
+            _scanning = false;
+            _scanStartedAt = 0;
+            _scanMac[0] = '\0';
+            return completeConnection(peripheral);
+        }
     }
 
-    if (elapsedSince(_scanStartedAt) >= SCALE_SCAN_TIMEOUT_MS) {
-        if (_debug) {
-            if (_scanMac[0] == '\0') {
-                Serial.println("Scale name scan timed out");
-            } else {
-                Serial.print("Preferred scale scan timed out (");
-                Serial.print(_scanMac);
-                Serial.println(")");
-            }
-        }
-        stopIdleScan(AcaiaDisconnectReason::SCAN_TIMEOUT);
-        return false;
-    }
     return false;
 }
 

@@ -37,11 +37,26 @@ Version 3.5.0 adds a one-second ArduinoBLE operation timeout and forces a
 recoverable disconnect after eight consecutive invalid notifications. It also
 retains the explicit ownership and cleanup for remote characteristics, the
 five-second first-valid-packet deadline, validation before a packet refreshes
-availability, a three-second scan window with distinct failure reasons, and
-connection telemetry. Idle discovery uses `startScan()` / `pollScan()` so the
-owner task can keep calling `BLE.poll()` and feeding its watchdog; `init()`
-remains the blocking helper for sketches. Neither path calls `BLE.begin()` or
-`BLE.end()`, and `startScan()` will not restart an already-active GAP scan.
+availability, a three-second blocking `init()` scan deadline with distinct
+failure reasons, and connection telemetry. Idle discovery uses `startScan()` /
+`pollScan()` so the owner task can keep calling `BLE.poll()` and feeding its
+watchdog; the idle GAP scan stays enabled until a match or a filter change.
+`init()` remains the blocking helper for sketches and still stops at
+`SCALE_SCAN_TIMEOUT_MS`. Neither path calls `BLE.begin()` or `BLE.end()`.
+`startScan()` does not restart an already-active GAP scan with the same filter;
+it does stop and restart when the MAC/name filter changes or `forceRestart` is
+set. Idle scans request `withDuplicates=true` so a missed first advertisement
+is not dropped for the rest of the session. Directed scans match by MAC even
+when the advertisement has no local name; name scans still require a known
+scale prefix.
+
+Stock ArduinoBLE 2.1.0 scans active at 20/20 ms. Shot Stopper patches GAP to
+active 40/20 ms (50% duty) via `scripts/patch_arduinoble.sh` so SCAN_RSP names
+stay visible while leaving airtime for Wi-Fi. Idle discovery keeps that scan
+enabled until a match or filter change; `startScan()` / `pollScan()` do not
+cycle GAP every 1 s or 3 s. Migrating to ESP-IDF NimBLE is out of scope: this
+library stays on the pinned ArduinoBLE lifecycle.
+
 The operation timeout bounds ATT waits supported by the public ArduinoBLE API;
 it cannot bound every internal ESP32 HCI wait.
 

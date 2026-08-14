@@ -230,8 +230,21 @@ class AcaiaArduinoBLE {
     scanning = false;
     return connected;
   }
-  bool startScan(const char *mac = nullptr) {
-    if (mac != nullptr && mac[0] != '\0') {
+  bool startScan(const char *mac = nullptr, bool forceRestart = false) {
+    lastForceRestart = forceRestart;
+    const bool directed = mac != nullptr && mac[0] != '\0';
+    if (scanning && !connected) {
+      const bool sameFilter =
+          directed ? (directedScan &&
+                      strncmp(lastStartScanMac, mac,
+                              sizeof(lastStartScanMac)) == 0)
+                   : !directedScan;
+      if (sameFilter && !forceRestart) {
+        return true;
+      }
+    }
+    ++startScanCalls;
+    if (directed) {
       strncpy(lastStartScanMac, mac, sizeof(lastStartScanMac) - 1);
       lastStartScanMac[sizeof(lastStartScanMac) - 1] = '\0';
       directedScan = true;
@@ -239,12 +252,16 @@ class AcaiaArduinoBLE {
       lastStartScanMac[0] = '\0';
       directedScan = false;
     }
-    if (connected) {
+    if (!startScanSucceeds) {
       scanning = false;
+      directedScan = false;
+      disconnectReason = AcaiaDisconnectReason::SCAN_START_FAILED;
       return false;
     }
-    if (scanning) {
-      return true;
+    if (connected) {
+      scanning = false;
+      directedScan = false;
+      return false;
     }
     scanning = true;
     return true;
@@ -258,8 +275,12 @@ class AcaiaArduinoBLE {
     if (!scanning) {
       return false;
     }
-    scanning = false;
-    directedScan = false;
+    if (pollScanConnects) {
+      connected = true;
+      scanning = false;
+      directedScan = false;
+      return true;
+    }
     return false;
   }
   bool isScanning() const { return scanning; }
@@ -353,6 +374,10 @@ class AcaiaArduinoBLE {
   bool connected = false;
   bool scanning = false;
   bool directedScan = false;
+  bool startScanSucceeds = true;
+  bool pollScanConnects = false;
+  bool lastForceRestart = false;
+  size_t startScanCalls = 0;
   char lastStartScanMac[ACAIA_MAC_CAPACITY] = {};
   char connectedAddress[ACAIA_MAC_CAPACITY] = "01:02:03:04:05:06";
   char connectedLocalName[ACAIA_NAME_CAPACITY] = "BOOKOO";

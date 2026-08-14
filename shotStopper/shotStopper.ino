@@ -66,6 +66,8 @@ constexpr uint32_t SCALE_CONNECT_RETRY_MS = 1000;
 constexpr uint32_t SCALE_CONNECT_RETRY_MAX_MS = 10000;
 constexpr uint32_t SCALE_CONNECT_LOG_MS = 10000;
 constexpr uint8_t SCALE_PREFERRED_DIRECTED_ATTEMPTS = 2;
+constexpr uint32_t SCALE_DISCOVERY_TICK_MS = 3000;
+constexpr uint32_t SCALE_SCAN_HCI_RESTART_MS = 60000;
 constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;
 constexpr uint32_t SCALE_ATT_TIMEOUT_MS = 1000;
 constexpr uint32_t SCALE_COMPLETION_BEEP_DELAY_MS = 200;
@@ -3572,13 +3574,26 @@ void logScaleConnectionFailed(bool directed) {
                scale.lastDisconnectReasonName());
 }
 
+bool shouldUseDirectedScaleScan(ScaleMacCacheMode cacheMode, bool hasMac,
+                                uint8_t preferredDirectedFailures) {
+  if (cacheMode == ScaleMacCacheMode::FULL) {
+    return hasMac;
+  }
+  if (cacheMode == ScaleMacCacheMode::PARTIAL) {
+    return hasMac &&
+           preferredDirectedFailures < SCALE_PREFERRED_DIRECTED_ATTEMPTS;
+  }
+  return false;
+}
+
 void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
                                  uint32_t &lastConnectLogMs,
                                  uint32_t &connectRetryMs,
                                  bool &connectAttemptSeriesActive,
                                  uint8_t &preferredDirectedFailures,
                                  bool &loggedPreferredFallback,
-                                 uint32_t &seenPreferredResetGeneration) {
+                                 uint32_t &seenPreferredResetGeneration,
+                                 uint32_t &scanSessionAtMs) {
   portENTER_CRITICAL(&scalePreferredMacMux);
   const uint32_t resetGeneration = scalePreferredDirectedResetGeneration;
   portEXIT_CRITICAL(&scalePreferredMacMux);
@@ -3611,6 +3626,60 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       return;
     }
     if (scale.isScanning()) {
+      if (elapsedMs(lastScanCycleMs) < SCALE_DISCOVERY_TICK_MS) {
+        return;
+      }
+      lastScanCycleMs = millis();
+      const bool directed = scale.isDirectedScan();
+      const bool logAttempt =
+          !connectAttemptSeriesActive ||
+          elapsedMs(lastConnectLogMs) >= SCALE_CONNECT_LOG_MS;
+      if (directed && cacheMode == ScaleMacCacheMode::PARTIAL &&
+          preferredDirectedFailures < SCALE_PREFERRED_DIRECTED_ATTEMPTS) {
+        ++preferredDirectedFailures;
+        if (logAttempt) {
+          lastConnectLogMs = lastScanCycleMs;
+          connectAttemptSeriesActive = true;
+          serialTracef(LogLevel::WARNING,
+                       "Preferred scale attempt (%u/%u): no advertisement",
+                       preferredDirectedFailures,
+                       SCALE_PREFERRED_DIRECTED_ATTEMPTS);
+        }
+        if (preferredDirectedFailures >= SCALE_PREFERRED_DIRECTED_ATTEMPTS) {
+          if (!loggedPreferredFallback) {
+            loggedPreferredFallback = true;
+            serialTrace(LogLevel::INFO,
+                        "Preferred scale not found; falling back to name scan");
+          }
+          if (scale.startScan(nullptr)) {
+            scanSessionAtMs = lastScanCycleMs;
+          }
+          return;
+        }
+      } else if (directed && cacheMode == ScaleMacCacheMode::FULL &&
+                 logAttempt) {
+        lastConnectLogMs = lastScanCycleMs;
+        connectAttemptSeriesActive = true;
+        serialTrace(LogLevel::WARNING,
+                    "Preferred scale attempt: no advertisement");
+      } else if (!directed && logAttempt) {
+        lastConnectLogMs = lastScanCycleMs;
+        connectAttemptSeriesActive = true;
+        serialTrace(LogLevel::WARNING,
+                    "Scale name scan: no advertisement");
+      }
+      if (elapsedMs(scanSessionAtMs) >= SCALE_SCAN_HCI_RESTART_MS) {
+        char preferredMac[PREFERRED_SCALE_MAC_CAPACITY];
+        copyPreferredScaleMac(preferredMac, sizeof(preferredMac));
+        const bool hasMac =
+            preferredMac[0] != '\0' && validPreferredScaleMac(preferredMac);
+        const bool useDirected =
+            shouldUseDirectedScaleScan(cacheMode, hasMac,
+                                       preferredDirectedFailures);
+        if (scale.startScan(useDirected ? preferredMac : nullptr, true)) {
+          scanSessionAtMs = lastScanCycleMs;
+        }
+      }
       return;
     }
 
@@ -3642,8 +3711,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       }
     }
 
-    if (reason == AcaiaDisconnectReason::SCAN_TIMEOUT ||
-        reason == AcaiaDisconnectReason::SCAN_START_FAILED) {
+    if (reason == AcaiaDisconnectReason::SCAN_START_FAILED) {
       connectRetryMs = nextScaleConnectRetryMs(connectRetryMs);
     } else {
       connectRetryMs = SCALE_CONNECT_RETRY_MS;
@@ -3673,13 +3741,8 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
   copyPreferredScaleMac(preferredMac, sizeof(preferredMac));
   const bool hasMac =
       preferredMac[0] != '\0' && validPreferredScaleMac(preferredMac);
-  bool useDirected = false;
-  if (cacheMode == ScaleMacCacheMode::FULL) {
-    useDirected = hasMac;
-  } else if (cacheMode == ScaleMacCacheMode::PARTIAL) {
-    useDirected =
-        hasMac && preferredDirectedFailures < SCALE_PREFERRED_DIRECTED_ATTEMPTS;
-  }
+  const bool useDirected =
+      shouldUseDirectedScaleScan(cacheMode, hasMac, preferredDirectedFailures);
   const bool logAttempt =
       !connectAttemptSeriesActive ||
       elapsedMs(lastConnectLogMs) >= SCALE_CONNECT_LOG_MS;
@@ -3687,15 +3750,16 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     lastConnectLogMs = lastScanCycleMs;
     connectAttemptSeriesActive = true;
     if (useDirected) {
-      serialTracef(LogLevel::DEBUG, "Scanning for preferred scale %s...",
+      serialTracef(LogLevel::INFO, "Scanning for preferred scale %s...",
                    preferredMac);
     } else {
-      serialTrace(LogLevel::DEBUG,
+      serialTrace(LogLevel::INFO,
                   "Scanning for any compatible scale (name scan)");
     }
     addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_CONNECTING);
   }
   if (scale.startScan(useDirected ? preferredMac : nullptr)) {
+    scanSessionAtMs = lastScanCycleMs;
     return;
   }
 
@@ -3764,6 +3828,7 @@ void scaleWorkerTask(void *) {
   uint8_t preferredDirectedFailures = 0;
   bool loggedPreferredFallback = false;
   uint32_t seenPreferredResetGeneration = 0;
+  uint32_t scanSessionAtMs = 0;
   uint32_t telemetryAtMs = 0;
 
   if (!subscribeCurrentTaskToWatchdog()) {
@@ -3811,7 +3876,8 @@ void scaleWorkerTask(void *) {
                                       connectAttemptSeriesActive,
                                       preferredDirectedFailures,
                                       loggedPreferredFallback,
-                                      seenPreferredResetGeneration);
+                                      seenPreferredResetGeneration,
+                                      scanSessionAtMs);
         }
       }
     }

@@ -804,7 +804,19 @@ Install the toolchain and dependency versions validated by this project:
 arduino-cli core update-index
 arduino-cli core install esp32:esp32@3.3.3
 arduino-cli lib install ArduinoBLE@2.1.0
+./scripts/patch_arduinoble.sh
 ```
+
+`./scripts/patch_arduinoble.sh` is required: stock ArduinoBLE 2.1.0 scans
+active at 20/20 ms (100% duty). The patch sets active 40/20 ms (50% duty) so
+SCAN_RSP names stay visible while leaving airtime for the Wi-Fi AP. The
+script is idempotent and also converts a leftover 100/30 patch. Set
+`ARDUINO_BLE_HOME` if ArduinoBLE is not in the default Arduino libraries path.
+
+Idle discovery does not start or stop GAP every 1 s or 3 s. Those timers are
+retry (only when scan is down), a software tick for logs and partial fallback,
+and log throttle. The radio stays in scan; the controller runs the 40/20
+cycle. The only periodic GAP restart is the 60 s HCI watchdog.
 
 Do not install AcaiaArduinoBLE from Library Manager for this application: the
 audited version is included in `libraries/AcaiaArduinoBLE`, and the build

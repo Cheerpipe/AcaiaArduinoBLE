@@ -153,6 +153,7 @@ void testNonBlockingScanDoesNotRestartOrResetIdle() {
     CHECK(scale.startScan());
     CHECK(scale.isScanning());
     CHECK(BLE.scanCalls == 1);
+    CHECK(BLE.lastWithDuplicates);
     CHECK(BLE.stopScanCalls == 0);
 
     CHECK(scale.startScan());
@@ -163,16 +164,18 @@ void testNonBlockingScanDoesNotRestartOrResetIdle() {
     CHECK(scale.isScanning());
     fakeMillis = SCALE_SCAN_TIMEOUT_MS;
     CHECK(!scale.pollScan());
-    CHECK(!scale.isScanning());
-    CHECK(scale.lastDisconnectReason() ==
-          AcaiaDisconnectReason::SCAN_TIMEOUT);
-    CHECK(BLE.stopScanCalls == 1);
+    CHECK(scale.isScanning());
+    CHECK(BLE.stopScanCalls == 0);
 
-    const int stopsAfterTimeout = BLE.stopScanCalls;
     CHECK(scale.startScan());
     CHECK(scale.isScanning());
+    CHECK(BLE.scanCalls == 1);
+    CHECK(BLE.stopScanCalls == 0);
+
+    CHECK(scale.startScan(nullptr, true));
+    CHECK(scale.isScanning());
     CHECK(BLE.scanCalls == 2);
-    CHECK(BLE.stopScanCalls == stopsAfterTimeout);
+    CHECK(BLE.stopScanCalls == 1);
 }
 
 void testNonBlockingScanConnectsWithoutInit() {
@@ -197,6 +200,7 @@ void testDirectedScanUsesAddressFilter() {
     CHECK(scale.isDirectedScan());
     CHECK(BLE.scanCalls == 0);
     CHECK(BLE.scanForAddressCalls == 1);
+    CHECK(BLE.lastWithDuplicates);
     CHECK(BLE.lastScanAddress == "AA:BB:CC:DD:EE:FF");
     CHECK(scale.pollScan());
     CHECK(scale.isConnected());
@@ -212,9 +216,45 @@ void testDirectedScanUsesAddressFilter() {
     CHECK(mismatch.isScanning());
     fakeMillis = SCALE_SCAN_TIMEOUT_MS;
     CHECK(!mismatch.pollScan());
-    CHECK(!mismatch.isScanning());
-    CHECK(mismatch.lastDisconnectReason() ==
-          AcaiaDisconnectReason::SCAN_TIMEOUT);
+    CHECK(mismatch.isScanning());
+    CHECK(BLE.stopScanCalls == 0);
+}
+
+void testDirectedScanConnectsWithoutLocalName() {
+    resetFake();
+    ScaleFixture fixture = makeScale(NEW);
+    fixture.peripheral->address = "aa:bb:cc:dd:ee:ff";
+    fixture.peripheral->localName.clear();
+    AcaiaArduinoBLE scale(false);
+    CHECK(scale.startScan("AA:BB:CC:DD:EE:FF"));
+    CHECK(scale.pollScan());
+    CHECK(scale.isConnected());
+    CHECK(strcmp(scale.address(), "aa:bb:cc:dd:ee:ff") == 0);
+}
+
+void testNameScanIgnoresEmptyLocalName() {
+    resetFake();
+    ScaleFixture fixture = makeScale(NEW);
+    fixture.peripheral->localName.clear();
+    AcaiaArduinoBLE scale(false);
+    CHECK(scale.startScan());
+    CHECK(!scale.pollScan());
+    CHECK(scale.isScanning());
+    CHECK(!scale.isConnected());
+}
+
+void testStartScanRestartsOnFilterChange() {
+    resetFake();
+    AcaiaArduinoBLE scale(false);
+    CHECK(scale.startScan("AA:BB:CC:DD:EE:FF"));
+    CHECK(BLE.scanForAddressCalls == 1);
+    CHECK(BLE.scanCalls == 0);
+    CHECK(scale.startScan(nullptr));
+    CHECK(scale.isScanning());
+    CHECK(!scale.isDirectedScan());
+    CHECK(BLE.stopScanCalls == 1);
+    CHECK(BLE.scanCalls == 1);
+    CHECK(BLE.scanForAddressCalls == 1);
 }
 
 void testCleanupOnInitializationFailures() {
@@ -579,6 +619,9 @@ int main() {
     testNonBlockingScanDoesNotRestartOrResetIdle();
     testNonBlockingScanConnectsWithoutInit();
     testDirectedScanUsesAddressFilter();
+    testDirectedScanConnectsWithoutLocalName();
+    testNameScanIgnoresEmptyLocalName();
+    testStartScanRestartsOnFilterChange();
     testCleanupOnInitializationFailures();
     testFirstPacketAndSteadyStateTimeouts();
     testAcaiaValidationAndDebugBounds();

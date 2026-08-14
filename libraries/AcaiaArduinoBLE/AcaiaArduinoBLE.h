@@ -75,11 +75,14 @@ class AcaiaArduinoBLE {
         bool init(const char *mac = nullptr);
 
         // Non-blocking GAP scan. Never calls BLE.begin()/end(). If a scan is
-        // already active, this is a no-op success and does not restart GAP.
+        // already active with the same filter, this is a no-op success.
+        // A different MAC/name filter (or forceRestart) stops and restarts GAP.
         // mac may be nullptr or empty for a name scan.
-        bool startScan(const char *mac = nullptr);
+        bool startScan(const char *mac = nullptr, bool forceRestart = false);
         // Poll an active scan. Performs GATT connect only when a scale
-        // advertisement matches. Returns true if connected after this call.
+        // advertisement matches. Idle scans stay enabled until a match,
+        // filter change, or init()'s SCALE_SCAN_TIMEOUT_MS deadline.
+        // Returns true if connected after this call.
         bool pollScan();
         bool isScanning() const;
 
