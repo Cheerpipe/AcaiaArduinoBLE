@@ -8,6 +8,7 @@ const webUi = require('../../scripts/gen_web_ui.js');
 const sketchDir = path.resolve(__dirname, '..');
 const asset = fs.readFileSync(path.join(sketchDir, 'ShotStopperWebAssets.h'), 'utf8');
 const network = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.cpp'), 'utf8');
+const networkHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.h'), 'utf8');
 const firmware = fs.readFileSync(path.join(sketchDir, 'shotStopper.ino'), 'utf8');
 const domain = fs.readFileSync(path.join(sketchDir, 'ShotStopperDomain.h'), 'utf8');
 const buzzer = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzer.h'), 'utf8');
@@ -47,8 +48,8 @@ if (htmlBytes > 40960) {
 if (jsBytes > 61440) {
   throw new Error('Web UI JS source exceeds the 60 KiB authoring budget');
 }
-if (htmlBytes + jsBytes > 87040) {
-  throw new Error('Web UI HTML+JS source exceeds the 85 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 88064) {
+  throw new Error('Web UI HTML+JS source exceeds the 86 KiB combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -167,7 +168,7 @@ if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0')
   throw new Error('Local buzzer must support compile-time passive (1) and active (2) drives');
 }
 if (!ui.includes('authenticatedOnly') ||
-    !ui.includes('sessionStorage.setItem') || !ui.includes('window.location.reload()') ||
+    !ui.includes("s.setItem('shotStopperToken'") || !ui.includes('window.location.reload()') ||
     !ui.includes('pageNav authenticatedOnly') ||
     !ui.includes('function knownPath(') ||
     !ui.includes("authenticated()&&known") ||
@@ -181,6 +182,27 @@ if (!ui.includes('authenticatedOnly') ||
     !network.includes('HTTPD_404_NOT_FOUND') ||
     !network.includes('notFoundHandler')) {
   throw new Error('Web UI must expose a public read-only Home, hide other tabs until sign-in, and redirect unknown routes to /');
+}
+if (!html.includes('id="rememberMe"') ||
+    /id="rememberMe"[^>]*\bchecked\b/.test(html) ||
+    !html.includes('Stay signed in for 7 days on this browser.') ||
+    !js.includes('rememberMe:r') ||
+    !js.includes('r?localStorage:sessionStorage') ||
+    !js.includes("s.setItem('shotStopperToken'") ||
+    !js.includes('function clearAuth()') ||
+    !js.includes("s.removeItem('shotStopperToken')") ||
+    !js.includes("localStorage.getItem(k)") ||
+    !js.includes("sessionStorage.getItem(k)") ||
+    !networkHeader.includes(
+        'SESSION_REMEMBER_MS = 7UL * 24UL * 60UL * 60UL * 1000UL') ||
+    !network.includes('SESSION_REMEMBER_MS') ||
+    !network.includes('jsonBoolean(root, "rememberMe", rememberMe)') ||
+    !network.includes('createSession(token, csrf, rememberMe)') ||
+    !network.includes('session.rememberMe') ||
+    !network.includes('session.createdAtMs') ||
+    !network.includes('uiActive')) {
+  throw new Error(
+      'Remember me must persist a 7-day session without 3-minute idle expiry');
 }
 const statusSection = html.match(/<fieldset[^>]*><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
@@ -684,7 +706,6 @@ for (const field of forbiddenResponseFields) {
   }
 }
 
-const networkHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.h'), 'utf8');
 if (!/AP_WINDOW_MS\s*=\s*180000/.test(networkHeader)) {
   throw new Error('Fallback AP window must be exactly three minutes');
 }

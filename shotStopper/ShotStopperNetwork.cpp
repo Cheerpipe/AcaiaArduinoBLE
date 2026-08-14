@@ -1306,6 +1306,7 @@ void ShotStopperNetwork::serviceSessions(uint32_t now) {
   ControlStatusSnapshot control;
   callbacks_.copyControlStatus(control);
   bool anyAuthenticated = false;
+  bool uiActive = false;
   uint32_t newestHeartbeat = 0;
   bool ownerAuthenticated = false;
   uint32_t ownerHeartbeat = 0;
@@ -1315,7 +1316,16 @@ void ShotStopperNetwork::serviceSessions(uint32_t now) {
     if (!session.active) {
       continue;
     }
-    if (static_cast<uint32_t>(now - session.lastHeartbeatMs) >= UI_GRACE_MS) {
+    // Remember-me sessions keep the token for SESSION_REMEMBER_MS from login
+    // and must not be dropped by the 3-minute idle grace. SoftAP keep-alive
+    // still requires a fresh heartbeat below.
+    const bool expired =
+        session.rememberMe
+            ? static_cast<uint32_t>(now - session.createdAtMs) >=
+                  SESSION_REMEMBER_MS
+            : static_cast<uint32_t>(now - session.lastHeartbeatMs) >=
+                  UI_GRACE_MS;
+    if (expired) {
       session.active = false;
       memset(session.token, 0, sizeof(session.token));
       memset(session.csrf, 0, sizeof(session.csrf));
@@ -1328,8 +1338,12 @@ void ShotStopperNetwork::serviceSessions(uint32_t now) {
       ownerAuthenticated = true;
       ownerHeartbeat = session.lastHeartbeatMs;
     }
-    if (static_cast<int32_t>(session.lastHeartbeatMs - newestHeartbeat) > 0) {
-      newestHeartbeat = session.lastHeartbeatMs;
+    if (static_cast<uint32_t>(now - session.lastHeartbeatMs) < UI_GRACE_MS) {
+      uiActive = true;
+      if (static_cast<int32_t>(session.lastHeartbeatMs - newestHeartbeat) >
+          0) {
+        newestHeartbeat = session.lastHeartbeatMs;
+      }
     }
   }
   status_.uiAuthenticated = anyAuthenticated;
@@ -1367,7 +1381,7 @@ void ShotStopperNetwork::serviceSessions(uint32_t now) {
     return;
   }
 
-  if (anyAuthenticated) {
+  if (uiActive) {
     networkShutdownPending_ = false;
     const uint32_t age = static_cast<uint32_t>(now - newestHeartbeat);
     portENTER_CRITICAL(&dataMux_);
@@ -1926,7 +1940,8 @@ void ShotStopperNetwork::randomHex(char output[TOKEN_HEX_CAPACITY]) {
 }
 
 bool ShotStopperNetwork::createSession(char token[TOKEN_HEX_CAPACITY],
-                                       char csrf[TOKEN_HEX_CAPACITY]) {
+                                       char csrf[TOKEN_HEX_CAPACITY],
+                                       bool rememberMe) {
   randomHex(token);
   randomHex(csrf);
   const uint32_t now = millis();
@@ -1955,7 +1970,9 @@ bool ShotStopperNetwork::createSession(char token[TOKEN_HEX_CAPACITY],
     WebSession &session = sessions_[sessionIndex];
     session = WebSession{};
     session.active = true;
+    session.rememberMe = rememberMe;
     session.id = newSessionId;
+    session.createdAtMs = now;
     session.lastHeartbeatMs = now;
     memcpy(session.token, token, sizeof(session.token));
     memcpy(session.csrf, csrf, sizeof(session.csrf));
@@ -2275,11 +2292,16 @@ esp_err_t ShotStopperNetwork::loginHandler(httpd_req_t *request) {
   }
   cJSON *root = cJSON_Parse(body);
   char password[WIFI_PASSWORD_CAPACITY] = {};
-  static const char *const fields[] = {"password"};
-  const bool parsed = root != nullptr &&
-                      jsonHasOnlyUniqueFields(root, fields, 1) &&
-                      jsonString(root, "password", password,
-                                 sizeof(password), false);
+  bool rememberMe = false;
+  static const char *const fields[] = {"password", "rememberMe"};
+  bool parsed = root != nullptr &&
+                jsonHasOnlyUniqueFields(root, fields, 2) &&
+                jsonString(root, "password", password, sizeof(password),
+                           false);
+  if (parsed &&
+      cJSON_GetObjectItemCaseSensitive(root, "rememberMe") != nullptr) {
+    parsed = jsonBoolean(root, "rememberMe", rememberMe);
+  }
   if (root != nullptr) {
     cJSON_Delete(root);
   }
@@ -2294,7 +2316,7 @@ esp_err_t ShotStopperNetwork::loginHandler(httpd_req_t *request) {
 
   char token[TOKEN_HEX_CAPACITY] = {};
   char csrf[TOKEN_HEX_CAPACITY] = {};
-  if (!self.createSession(token, csrf)) {
+  if (!self.createSession(token, csrf, rememberMe)) {
     return sendError(request, STATUS_UNAVAILABLE, "SESSION_LIMIT",
                      "Could not create the session.");
   }

@@ -132,6 +132,7 @@ class ShotStopperNetwork {
   void mergePreferredScaleMac(PersistedSettings &settings);
   static constexpr uint32_t AP_WINDOW_MS = 180000;
   static constexpr uint32_t UI_GRACE_MS = 180000;
+  static constexpr uint32_t SESSION_REMEMBER_MS = 7UL * 24UL * 60UL * 60UL * 1000UL;
   static constexpr uint32_t WEB_PADDLE_HEARTBEAT_TIMEOUT_MS = 15000;
   static constexpr uint32_t STA_CONNECT_TIMEOUT_MS = 15000;
   static constexpr uint32_t STA_CONFIRM_TIMEOUT_MS = 180000;
@@ -154,7 +155,9 @@ class ShotStopperNetwork {
 
   struct WebSession {
     bool active = false;
+    bool rememberMe = false;
     uint32_t id = 0;
+    uint32_t createdAtMs = 0;
     uint32_t lastHeartbeatMs = 0;
     char token[TOKEN_HEX_CAPACITY] = {};
     char csrf[TOKEN_HEX_CAPACITY] = {};
@@ -251,7 +254,7 @@ class ShotStopperNetwork {
   bool authenticate(httpd_req_t *request, bool requireCsrf,
                     size_t *sessionIndex = nullptr);
   bool createSession(char token[TOKEN_HEX_CAPACITY],
-                     char csrf[TOKEN_HEX_CAPACITY]);
+                     char csrf[TOKEN_HEX_CAPACITY], bool rememberMe);
   void invalidateSession(size_t index, DebugCode code);
   void invalidateAllSessions();
   void requestStopForSession(uint32_t webSessionId);
