@@ -8,6 +8,7 @@
 #include <cstring>
 #include <deque>
 #include <sstream>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -305,6 +306,13 @@ class AcaiaArduinoBLE {
     ++beepCalls;
     return connected && independentBeepSupported && beepSucceeds;
   }
+  bool setBeepLevel(uint8_t level) {
+    commandLog.push_back(std::string("setBeepLevel:") + std::to_string(level));
+    lastBeepLevel = level;
+    ++setBeepLevelCalls;
+    return connected && independentBeepSupported && beepSucceeds &&
+           level <= 5;
+  }
   bool heartbeat() {
     commandLog.push_back("heartbeat");
     ++heartbeatCalls;
@@ -326,7 +334,7 @@ class AcaiaArduinoBLE {
     return available;
   }
   const char* connectedProtocolName() const {
-    return connected ? "bookoo_generic" : "none";
+    return connected ? connectedProtocol : "none";
   }
   AcaiaDisconnectReason lastDisconnectReason() const {
     return disconnectReason;
@@ -348,6 +356,7 @@ class AcaiaArduinoBLE {
   char lastStartScanMac[ACAIA_MAC_CAPACITY] = {};
   char connectedAddress[ACAIA_MAC_CAPACITY] = "01:02:03:04:05:06";
   char connectedLocalName[ACAIA_NAME_CAPACITY] = "BOOKOO";
+  char connectedProtocol[20] = "bookoo_generic";
   bool tareSucceeds = true;
   bool startTimerSucceeds = true;
   bool stopTimerSucceeds = true;
@@ -373,6 +382,8 @@ class AcaiaArduinoBLE {
   size_t resetTimerCalls = 0;
   size_t tareStartTimerCalls = 0;
   size_t beepCalls = 0;
+  size_t setBeepLevelCalls = 0;
+  uint8_t lastBeepLevel = 0;
   size_t heartbeatCalls = 0;
   size_t newWeightAvailableCalls = 0;
   std::vector<std::string> commandLog;

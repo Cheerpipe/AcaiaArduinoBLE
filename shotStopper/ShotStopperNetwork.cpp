@@ -227,6 +227,8 @@ const char *configValidationMessage(ConfigValidationError error) {
     case ConfigValidationError::ALERT_OUTPUT_CHANNEL:
       return "Alert output channel must be scale_only, buzzer_only, or "
              "scale_priority.";
+    case ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL:
+      return "Bookoo scale volume must be disabled (0) or 1 to 5.";
   }
   return "Invalid configuration.";
 }
@@ -896,6 +898,9 @@ void ShotStopperNetwork::startStation(const PersistedSettings &settings,
   status_.apClients = 0;
   status_.staState = StaState::CONNECTING;
   status_.staIp[0] = '\0';
+  status_.staLinkMetricsValid = false;
+  status_.staRssi = 0;
+  status_.staSignalQualityPct = 0;
   status_.windowRemainingMs = 0;
   status_.confirmRemainingMs = 0;
   portEXIT_CRITICAL(&dataMux_);
@@ -950,6 +955,9 @@ bool ShotStopperNetwork::startFallbackAccessPoint(uint32_t now) {
     status_.staState = StaState::NOT_CONFIGURED;
   }
   status_.staIp[0] = '\0';
+  status_.staLinkMetricsValid = false;
+  status_.staRssi = 0;
+  status_.staSignalQualityPct = 0;
   status_.windowRemainingMs = AP_WINDOW_MS;
   portEXIT_CRITICAL(&dataMux_);
   log(DebugCategory::NETWORK, DebugCode::AP_STARTED, apReady, httpReady);
@@ -982,6 +990,9 @@ void ShotStopperNetwork::stopNetwork() {
   status_.staState = status_.wifiConfigured ? StaState::DISCONNECTED
                                             : StaState::NOT_CONFIGURED;
   status_.staIp[0] = '\0';
+  status_.staLinkMetricsValid = false;
+  status_.staRssi = 0;
+  status_.staSignalQualityPct = 0;
   status_.windowRemainingMs = 0;
   portEXIT_CRITICAL(&dataMux_);
   networkShutdownPending_ = false;
@@ -1000,6 +1011,9 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       status_.staState = StaState::DISCONNECTED;
       status_.networkActive = false;
       status_.staIp[0] = '\0';
+      status_.staLinkMetricsValid = false;
+      status_.staRssi = 0;
+      status_.staSignalQualityPct = 0;
       portEXIT_CRITICAL(&dataMux_);
       log(DebugCategory::NETWORK, DebugCode::STA_FAILED,
           static_cast<int32_t>(WiFi.status()));
@@ -1009,6 +1023,14 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       staReconnectAttemptAtMs_ = now;
       Serial.println("WiFi STA disconnected; Web server waiting for reconnect");
       return;
+    }
+    {
+      const int32_t rssi = WiFi.RSSI();
+      portENTER_CRITICAL(&dataMux_);
+      status_.staLinkMetricsValid = true;
+      status_.staRssi = clampWifiRssi(rssi);
+      status_.staSignalQualityPct = wifiRssiToSignalQualityPct(rssi);
+      portEXIT_CRITICAL(&dataMux_);
     }
     if (server_ == nullptr && static_cast<int32_t>(now - httpRetryAtMs_) >= 0) {
       const bool httpReady = startHttpServer();
@@ -1051,12 +1073,18 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
     httpRetryAtMs_ = httpReady ? 0 : now + HTTP_RETRY_MS;
     staEverConnected_ = true;
     networkShutdownPending_ = false;
-    portENTER_CRITICAL(&dataMux_);
-    status_.staState = StaState::CONNECTED;
-    status_.networkActive = httpReady;
-    strncpy(status_.staIp, address, sizeof(status_.staIp) - 1);
-    status_.windowRemainingMs = 0;
-    portEXIT_CRITICAL(&dataMux_);
+    {
+      const int32_t rssi = WiFi.RSSI();
+      portENTER_CRITICAL(&dataMux_);
+      status_.staState = StaState::CONNECTED;
+      status_.networkActive = httpReady;
+      strncpy(status_.staIp, address, sizeof(status_.staIp) - 1);
+      status_.staLinkMetricsValid = true;
+      status_.staRssi = clampWifiRssi(rssi);
+      status_.staSignalQualityPct = wifiRssiToSignalQualityPct(rssi);
+      status_.windowRemainingMs = 0;
+      portEXIT_CRITICAL(&dataMux_);
+    }
     log(DebugCategory::NETWORK, DebugCode::STA_CONNECTED);
     Serial.print("WiFi STA connected; IP: ");
     Serial.println(address);
@@ -1859,6 +1887,8 @@ bool ShotStopperNetwork::startHttpServer() {
                       restartHandler) &&
       registerHandler(server_, "/api/v1/control/buzzer", HTTP_POST,
                       buzzerHandler) &&
+      registerHandler(server_, "/api/v1/control/bookoo", HTTP_POST,
+                      bookooHandler) &&
       registerHandler(server_, "/api/v1/factory-reset", HTTP_POST,
                       factoryResetHandler) &&
       registerHandler(server_, "/api/v1/network", HTTP_POST, networkHandler) &&
@@ -2398,6 +2428,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   char lastWeight[32] = "null";
   char lastShotWeight[32] = "null";
   char scaleTimer[32] = "null";
+  char staRssiJson[16] = "null";
+  char staSignalQualityJson[16] = "null";
   if (control.currentWeightValid) {
     snprintf(currentWeight, sizeof(currentWeight), "%.2f",
              static_cast<double>(control.currentWeightG));
@@ -2417,6 +2449,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   if (control.lastShot.valid && control.lastShot.weightValid) {
     snprintf(lastShotWeight, sizeof(lastShotWeight), "%.2f",
              static_cast<double>(control.lastShot.currentWeightG));
+  }
+  if (network.staLinkMetricsValid) {
+    snprintf(staRssiJson, sizeof(staRssiJson), "%d",
+             static_cast<int>(network.staRssi));
+    snprintf(staSignalQualityJson, sizeof(staSignalQualityJson), "%u",
+             static_cast<unsigned>(network.staSignalQualityPct));
   }
 
   const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(millis());
@@ -2535,7 +2573,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"autoToManualGuardTrendMs\":%lu,"
       "\"timezoneOffsetMinutes\":%d,"
       "\"ntpServerPreset\":\"%s\",\"ntpServerCustom\":\"%s\","
-      "\"scaleMacCacheMode\":\"%s\"},"
+      "\"scaleMacCacheMode\":\"%s\","
+      "\"bookooMuteOnBuzzerOnly\":%s,"
+      "\"bookooConnectBeepLevel\":%u},"
       "\"presets\":%s,"
       "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
       "\"nextRetryInMs\":%lu,\"consecutiveFailures\":%u,"
@@ -2571,6 +2611,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"wifiConfigured\":%s,\"ssid\":\"%s\",\"open\":%s,\"staState\":\"%s\","
       "\"staIp\":\"%s\",\"ipMode\":\"%s\",\"configState\":\"%s\","
       "\"confirmRemainingMs\":%lu,"
+      "\"rssi\":%s,\"signalQualityPct\":%s,"
       "\"configuredIp\":\"%s\",\"configuredNetmask\":\"%s\","
       "\"configuredGateway\":\"%s\",\"configuredDns1\":\"%s\","
       "\"configuredDns2\":\"%s\",\"windowRemainingMs\":%lu,"
@@ -2660,6 +2701,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       ntpPresetId(control.config.ntpServerPreset),
       safeNtpCustom,
       scaleMacCacheModeId(control.config.scaleMacCacheMode),
+      control.config.bookooMuteOnBuzzerOnly ? "true" : "false",
+      static_cast<unsigned>(control.config.bookooConnectBeepLevel),
       g_presetsStatusJson,
       timeSyncStateName(timeStatus.state),
       static_cast<unsigned long>(timeStatus.utcSec),
@@ -2716,6 +2759,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       staIpModeName(network.staIpMode),
       staConfigStateName(network.staConfigState),
       static_cast<unsigned long>(network.confirmRemainingMs),
+      staRssiJson, staSignalQualityJson,
       network.configuredIp, network.configuredNetmask,
       network.configuredGateway, network.configuredDns1,
       network.configuredDns2,
@@ -3163,9 +3207,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "autoToManualGuardManualLimitMs", "autoToManualGuardBaselineMs",
       "weightOffsetBaselineG",
       "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom",
-      "scaleMacCacheMode"};
+      "scaleMacCacheMode", "bookooMuteOnBuzzerOnly", "bookooConnectBeepLevel"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 36)) {
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 38)) {
     parseError =
         "Config must include exactly the expected fields with correct types.";
   } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
@@ -3276,6 +3320,13 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (!jsonScaleMacCacheMode(root, "scaleMacCacheMode",
                                     candidate.scaleMacCacheMode)) {
     parseError = "scaleMacCacheMode must be disabled, partial, or full.";
+  } else if (!jsonBoolean(root, "bookooMuteOnBuzzerOnly",
+                          candidate.bookooMuteOnBuzzerOnly)) {
+    parseError = "bookooMuteOnBuzzerOnly must be a boolean.";
+  } else if (!jsonUint8(root, "bookooConnectBeepLevel",
+                        candidate.bookooConnectBeepLevel) ||
+             candidate.bookooConnectBeepLevel > BOOKOO_BEEP_LEVEL_MAX) {
+    parseError = "bookooConnectBeepLevel must be an integer from 0 to 5.";
   }
   if (root != nullptr) {
     cJSON_Delete(root);
@@ -3706,6 +3757,66 @@ esp_err_t ShotStopperNetwork::buzzerHandler(httpd_req_t *request) {
   command.type = WebCommandType::BUZZER_TEST;
   command.requestId = self.allocateRequestId();
   command.buzzerPattern = pattern;
+  if (!self.callbacks_.enqueueWebCommand(command)) {
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
+                     "Control queue is full.");
+  }
+  return self.sendAccepted(request, command.requestId);
+}
+
+esp_err_t ShotStopperNetwork::bookooHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authenticate(request, true)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
+                     "Invalid session or CSRF token.");
+  }
+  ControlStatusSnapshot status;
+  self.callbacks_.copyControlStatus(status);
+  if (!controlAllowsConfiguration(status)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "Stop the cycle and wait for Ready before sending Bookoo commands.");
+  }
+  if (!status.scaleAvailable ||
+      strcmp(status.scaleProtocol, "bookoo_generic") != 0) {
+    return sendError(request, STATUS_CONFLICT, "BOOKOO_SCALE_UNAVAILABLE",
+                     "Connect a Bookoo scale before sending debug commands.");
+  }
+  char body[REQUEST_BODY_CAPACITY] = {};
+  if (!readJsonBody(request, body)) {
+    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
+                     "A JSON body is required.");
+  }
+  cJSON *root = cJSON_Parse(body);
+  char actionName[12] = {};
+  BookooDebugAction action = BookooDebugAction::START;
+  uint8_t beepLevel = 0;
+  bool parsed = false;
+  if (root != nullptr &&
+      jsonString(root, "action", actionName, sizeof(actionName), false) &&
+      parseBookooDebugActionId(actionName, action)) {
+    if (action == BookooDebugAction::VOLUME) {
+      static const char *const volumeFields[] = {"action", "level"};
+      parsed = jsonHasOnlyUniqueFields(root, volumeFields, 2) &&
+               jsonUint8(root, "level", beepLevel) &&
+               beepLevel <= BOOKOO_BEEP_LEVEL_MAX;
+    } else {
+      static const char *const actionFields[] = {"action"};
+      parsed = jsonHasOnlyUniqueFields(root, actionFields, 1);
+    }
+  }
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  if (!parsed) {
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
+                     "action must be start, stop, tare, combined, beep, or volume with level 0-5.");
+  }
+  WebCommand command;
+  command.type = WebCommandType::BOOKOO_DEBUG;
+  command.requestId = self.allocateRequestId();
+  command.bookooDebugAction = action;
+  command.bookooBeepLevel = beepLevel;
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control queue is full.");

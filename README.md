@@ -123,6 +123,8 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | **Automatic tare** | Send an initial tare when an automatic shot starts (default ON). |
 | **Brew by weight** | **On by default**. Stop the shot by scale weight. Off keeps tare/timer but disables weight stop, BBW protection, automatic retare, and offset learning (same as the former Timer only setting). |
 | **Bookoo combined command** | Use the scale’s combined tare + start-timer command (requires auto tare; default ON). |
+| **Mute scale in Buzzer only** | Bookoo/generic: when enabled (default ON), send silence (volume 0) on connect/reconnect, when Output channel is saved as Buzzer only, and when this option is turned on. Applies only in **Buzzer only**. |
+| **Scale volume** | Bookoo/generic: on connect/reconnect, set scale volume 1–5 (default 4) or Disabled. Applies only in **Scale only** and **Scale priority**. |
 | **Automatic retare** | Allow one late-cup retare during the retare window (default ON). |
 | **Retare window (s)** | Time after shot start to detect and retare a late-placed cup (default 4 s). |
 | **Minimum cup weight (g)** | Stable load threshold that qualifies as a cup for retare (default 10 g). |

@@ -51,10 +51,13 @@ struct NetworkStatusSnapshot {
   bool uiAuthenticated = false;
   bool wifiConfigured = false;
   bool staOpen = false;
+  bool staLinkMetricsValid = false;
   uint8_t apClients = 0;
   StaState staState = StaState::NOT_CONFIGURED;
   uint8_t staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
   uint8_t staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  int8_t staRssi = 0;
+  uint8_t staSignalQualityPct = 0;
   uint32_t windowRemainingMs = 0;
   uint32_t confirmRemainingMs = 0;
   uint32_t taskAgeMs = 0;
@@ -71,6 +74,26 @@ struct NetworkStatusSnapshot {
   char configuredDns1[16] = {};
   char configuredDns2[16] = {};
 };
+
+inline uint8_t wifiRssiToSignalQualityPct(int32_t rssi) {
+  if (rssi <= -100) {
+    return 0;
+  }
+  if (rssi >= -50) {
+    return 100;
+  }
+  return static_cast<uint8_t>(2 * (rssi + 100));
+}
+
+inline int8_t clampWifiRssi(int32_t rssi) {
+  if (rssi < -128) {
+    return -128;
+  }
+  if (rssi > 127) {
+    return 127;
+  }
+  return static_cast<int8_t>(rssi);
+}
 
 struct NetworkBridgeCallbacks {
   void (*copyControlStatus)(ControlStatusSnapshot &output) = nullptr;
@@ -270,6 +293,7 @@ class ShotStopperNetwork {
   static esp_err_t stopHandler(httpd_req_t *request);
   static esp_err_t restartHandler(httpd_req_t *request);
   static esp_err_t buzzerHandler(httpd_req_t *request);
+  static esp_err_t bookooHandler(httpd_req_t *request);
   static esp_err_t factoryResetHandler(httpd_req_t *request);
   static esp_err_t networkHandler(httpd_req_t *request);
   static esp_err_t wifiScanStartHandler(httpd_req_t *request);

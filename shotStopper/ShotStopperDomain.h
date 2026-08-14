@@ -11,8 +11,9 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 23;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 22;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 24;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 23;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V23 = 23;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V22 = 22;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V21 = 21;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V20 = 20;
@@ -253,6 +254,49 @@ inline bool parseBuzzerPatternId(const char *id, BuzzerPattern &out) {
   }
   if (strcmp(id, "triple") == 0) {
     out = BuzzerPattern::TRIPLE;
+    return true;
+  }
+  return false;
+}
+
+constexpr uint8_t BOOKOO_BEEP_LEVEL_MAX = 5;
+constexpr uint8_t DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL = 4;
+
+enum class BookooDebugAction : uint8_t {
+  START = 0,
+  STOP,
+  TARE,
+  COMBINED,
+  BEEP,
+  VOLUME
+};
+
+inline bool parseBookooDebugActionId(const char *id, BookooDebugAction &out) {
+  if (id == nullptr || id[0] == '\0') {
+    return false;
+  }
+  if (strcmp(id, "start") == 0) {
+    out = BookooDebugAction::START;
+    return true;
+  }
+  if (strcmp(id, "stop") == 0) {
+    out = BookooDebugAction::STOP;
+    return true;
+  }
+  if (strcmp(id, "tare") == 0) {
+    out = BookooDebugAction::TARE;
+    return true;
+  }
+  if (strcmp(id, "combined") == 0) {
+    out = BookooDebugAction::COMBINED;
+    return true;
+  }
+  if (strcmp(id, "beep") == 0) {
+    out = BookooDebugAction::BEEP;
+    return true;
+  }
+  if (strcmp(id, "volume") == 0) {
+    out = BookooDebugAction::VOLUME;
     return true;
   }
   return false;
@@ -559,6 +603,10 @@ struct RuntimeConfig {
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS};
   uint8_t scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL);
+  bool bookooMuteOnBuzzerOnly = true;
+  uint8_t bookooConnectBeepLevel = DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL;
+  // Keeps schema-24 NVS blob size distinct from schema 23.
+  uint32_t reservedConfig3 = 0;
 };
 
 struct CycleConfigSnapshot {
@@ -672,7 +720,8 @@ enum class ConfigValidationError : uint8_t {
   AUTO_TO_MANUAL_GUARD_BASELINE,
   WEIGHT_OFFSET_BASELINE,
   SCALE_MAC_CACHE_MODE,
-  ALERT_OUTPUT_CHANNEL
+  ALERT_OUTPUT_CHANNEL,
+  BOOKOO_CONNECT_BEEP_LEVEL
 };
 
 constexpr size_t MAX_SHOT_PRESETS = 8;
@@ -881,6 +930,9 @@ inline ConfigValidationError validateRuntimeConfig(
   if (!validAlertOutputChannel(config.alertOutputChannel)) {
     return ConfigValidationError::ALERT_OUTPUT_CHANNEL;
   }
+  if (config.bookooConnectBeepLevel > BOOKOO_BEEP_LEVEL_MAX) {
+    return ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL;
+  }
   if (!config.fastExtractionGuardEnabled) {
     return ConfigValidationError::NONE;
   }
@@ -959,6 +1011,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "scaleMacCacheMode";
     case ConfigValidationError::ALERT_OUTPUT_CHANNEL:
       return "alertOutputChannel";
+    case ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL:
+      return "bookooConnectBeepLevel";
   }
   return "unknown";
 }
@@ -1198,6 +1252,7 @@ enum class WebCommandType : uint8_t {
   PERSIST_RUNTIME,
   START_WIFI_SCAN,
   BUZZER_TEST,
+  BOOKOO_DEBUG,
   MAINTENANCE_COMPLETE
 };
 
@@ -1229,6 +1284,7 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::PERSIST_RUNTIME: return "persist workflow";
     case WebCommandType::START_WIFI_SCAN: return "scan Wi-Fi networks";
     case WebCommandType::BUZZER_TEST: return "buzzer test";
+    case WebCommandType::BOOKOO_DEBUG: return "bookoo debug";
     case WebCommandType::MAINTENANCE_COMPLETE:
       return "maintenance result";
   }
@@ -1258,6 +1314,8 @@ struct WebCommand {
   char presetName[24] = {};
   bool persistPresets = false;
   BuzzerPattern buzzerPattern = BuzzerPattern::NONE;
+  BookooDebugAction bookooDebugAction = BookooDebugAction::START;
+  uint8_t bookooBeepLevel = 0;
   char ssid[WIFI_SSID_CAPACITY] = {};
   char password[WIFI_PASSWORD_CAPACITY] = {};
   bool openNetwork = false;
@@ -1503,6 +1561,9 @@ enum class DebugCode : uint8_t {
   SCALE_PADDLE_REMINDER_BEEP_OK,
   SCALE_PADDLE_REMINDER_BEEP_FAILED,
   SCALE_PADDLE_REMINDER_BEEP_UNSUPPORTED,
+  SCALE_DEBUG_OK,
+  SCALE_DEBUG_FAILED,
+  SCALE_DEBUG_UNSUPPORTED,
   CONFIG_ACCEPTED,
   CONFIG_REJECTED,
   WEIGHT_OFFSET_RESET,
@@ -1724,6 +1785,7 @@ inline LogLevel debugCodeDefaultLevel(DebugCode code) {
     case DebugCode::SCALE_TIMER_STOP_FAILED:
     case DebugCode::SCALE_BEEP_FAILED:
     case DebugCode::SCALE_PADDLE_REMINDER_BEEP_FAILED:
+    case DebugCode::SCALE_DEBUG_FAILED:
     case DebugCode::STA_FAILED:
     case DebugCode::COMMAND_FAILED:
     case DebugCode::SHOT_LOG_PERSIST_FAILED:
@@ -1732,6 +1794,7 @@ inline LogLevel debugCodeDefaultLevel(DebugCode code) {
     case DebugCode::SCALE_CONTROL_SUSPENDED:
     case DebugCode::SCALE_BEEP_UNSUPPORTED:
     case DebugCode::SCALE_PADDLE_REMINDER_BEEP_UNSUPPORTED:
+    case DebugCode::SCALE_DEBUG_UNSUPPORTED:
       return LogLevel::ERROR;
     case DebugCode::SCALE_SAMPLE_REJECTED_INVALID:
     case DebugCode::SCALE_SAMPLE_REJECTED_RANGE:
@@ -1763,6 +1826,7 @@ inline LogLevel debugCodeDefaultLevel(DebugCode code) {
     case DebugCode::SCALE_TIMER_STOP_OK:
     case DebugCode::SCALE_BEEP_OK:
     case DebugCode::SCALE_PADDLE_REMINDER_BEEP_OK:
+    case DebugCode::SCALE_DEBUG_OK:
     case DebugCode::STA_CONNECTING:
     case DebugCode::WIFI_SCAN_STARTED:
     case DebugCode::WIFI_SCAN_COMPLETE:
@@ -1856,6 +1920,10 @@ inline const char *debugCodeName(DebugCode code) {
       return "scale paddle-return reminder beep failed";
     case DebugCode::SCALE_PADDLE_REMINDER_BEEP_UNSUPPORTED:
       return "scale has no state-safe paddle-return reminder beep command";
+    case DebugCode::SCALE_DEBUG_OK: return "scale debug command sent";
+    case DebugCode::SCALE_DEBUG_FAILED: return "scale debug command failed";
+    case DebugCode::SCALE_DEBUG_UNSUPPORTED:
+      return "scale debug command unsupported";
     case DebugCode::CONFIG_ACCEPTED: return "configuration accepted";
     case DebugCode::CONFIG_REJECTED: return "configuration rejected";
     case DebugCode::WEIGHT_OFFSET_RESET:

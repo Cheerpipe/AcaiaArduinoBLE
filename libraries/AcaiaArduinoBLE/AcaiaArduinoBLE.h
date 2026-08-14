@@ -97,6 +97,8 @@ class AcaiaArduinoBLE {
         bool beep();
         bool supportsIndependentBeep() const;
         bool beepWithoutStateChange();
+        // Bookoo/generic only. Opcode 0x02; level 0 mutes, 1–5 set volume.
+        bool setBeepLevel(uint8_t level);
 
         bool heartbeat();
         float getWeight() const;

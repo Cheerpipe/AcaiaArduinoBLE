@@ -125,9 +125,10 @@ The following variables at the top of the shotStopper.ino file can be configured
 `TIMER_ONLY`
 * false by default. disables brew-by-weight functionality and enables only automatic timer and tare
 
-Bookoo/generic scales also expose `beepWithoutStateChange()`. It sends the
-independent buzzer command only when that protocol is detected; it never uses
-tare as a substitute on Acaia or Felicita scales.
+Bookoo/generic scales also expose `setBeepLevel(0–5)` (0 mutes) and
+`beepWithoutStateChange()`, which sends level 1. Both succeed only when that
+protocol is detected; they never use tare as a substitute on Acaia or Felicita
+scales.
 
 ## Demo
 

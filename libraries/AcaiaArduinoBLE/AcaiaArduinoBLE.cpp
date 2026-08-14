@@ -39,8 +39,6 @@ static const byte RESET_TIMER_GENERIC[6] =
     {0x03, 0x0a, 0x06, 0x00, 0x00, 0x0c};
 static const byte TARE_START_TIMER_BOOKOO[6] =
     {0x03, 0x0a, 0x07, 0x00, 0x00, 0x00};
-static const byte BEEP_LEVEL_1_BOOKOO[6] =
-    {0x03, 0x0a, 0x02, 0x00, 0x01, 0x0a};
 static const byte TARE_FELICITA[1] = {0x54};
 static const byte START_TIMER_FELICITA[1] = {0x52};
 static const byte STOP_TIMER_FELICITA[1] = {0x53};
@@ -48,6 +46,19 @@ static const byte RESET_TIMER_FELICITA[1] = {0x43};
 static const byte WEIGHT_TIMER_MODE_FELICITA[1] = {0x32};
 
 static const int MAX_BLE_PACKET_LENGTH = 20;
+static const byte GENERIC_PRODUCT = 0x03;
+static const byte GENERIC_TYPE = 0x0a;
+static const byte GENERIC_BEEP_LEVEL_CMD = 0x02;
+static const uint8_t GENERIC_BEEP_LEVEL_MAX = 5;
+
+void fillGenericCommand(byte out[6], byte data1, byte data2, byte data3) {
+    out[0] = GENERIC_PRODUCT;
+    out[1] = GENERIC_TYPE;
+    out[2] = data1;
+    out[3] = data2;
+    out[4] = data3;
+    out[5] = static_cast<byte>(out[0] ^ out[1] ^ out[2] ^ out[3] ^ out[4]);
+}
 
 uint32_t elapsedSince(uint32_t timestamp) {
     return static_cast<uint32_t>(millis()) - timestamp;
@@ -501,14 +512,23 @@ bool AcaiaArduinoBLE::supportsIndependentBeep() const {
 }
 
 bool AcaiaArduinoBLE::beepWithoutStateChange() {
+    return setBeepLevel(1);
+}
+
+bool AcaiaArduinoBLE::setBeepLevel(uint8_t level) {
     if (!supportsIndependentBeep()) {
-        Serial.println("Independent beep unsupported for this scale");
+        Serial.println("Beep level unsupported for this scale");
         return false;
     }
-    const bool ok = writeCommand(BEEP_LEVEL_1_BOOKOO,
-                                 sizeof(BEEP_LEVEL_1_BOOKOO));
-    Serial.println(ok ? "Independent beep write successful"
-                      : "Independent beep write failed");
+    if (level > GENERIC_BEEP_LEVEL_MAX) {
+        Serial.println("Beep level out of range");
+        return false;
+    }
+    byte command[6];
+    fillGenericCommand(command, GENERIC_BEEP_LEVEL_CMD, 0x00, level);
+    const bool ok = writeCommand(command, sizeof(command));
+    Serial.println(ok ? "Beep level write successful"
+                      : "Beep level write failed");
     return ok;
 }
 

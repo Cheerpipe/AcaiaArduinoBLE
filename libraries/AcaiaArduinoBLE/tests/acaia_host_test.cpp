@@ -355,6 +355,7 @@ void testCapabilitiesAndWriteCleanup() {
     const size_t initializationWrites = acaia.write->writes.size();
     CHECK(!scale.tareStartTimer());
     CHECK(!scale.beep());
+    CHECK(!scale.setBeepLevel(0));
     CHECK(acaia.write->writes.size() == initializationWrites);
 
     acaia.write->writeResult = false;
@@ -375,6 +376,28 @@ void testCapabilitiesAndWriteCleanup() {
     CHECK(generic.write->writes.size() == 2);
     CHECK(generic.write->writes[0][2] == 0x07);
     CHECK(generic.write->writes[1][2] == 0x02);
+    CHECK(generic.write->writes[1][4] == 0x01);
+    CHECK(generic.write->writes[1][5] == 0x0a);
+
+    const size_t beforeLevels = generic.write->writes.size();
+    for (uint8_t level = 0; level <= 5; ++level) {
+        CHECK(genericScale.setBeepLevel(level));
+        const std::vector<byte> &packet =
+            generic.write->writes[beforeLevels + level];
+        CHECK(packet.size() == 6);
+        CHECK(packet[0] == 0x03);
+        CHECK(packet[1] == 0x0a);
+        CHECK(packet[2] == 0x02);
+        CHECK(packet[3] == 0x00);
+        CHECK(packet[4] == level);
+        CHECK(packet[5] == static_cast<byte>(0x03 ^ 0x0a ^ 0x02 ^ 0x00 ^ level));
+    }
+    CHECK(genericScale.beepWithoutStateChange());
+    const std::vector<byte> &beepPacket = generic.write->writes.back();
+    CHECK(beepPacket == generic.write->writes[beforeLevels + 1]);
+    const size_t afterValid = generic.write->writes.size();
+    CHECK(!genericScale.setBeepLevel(6));
+    CHECK(generic.write->writes.size() == afterValid);
 }
 
 void testOldAndGenericPacketValidation() {

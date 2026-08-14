@@ -493,6 +493,7 @@ QueueHandle_t webCommandQueue = nullptr;
 portMUX_TYPE scaleLinkMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE scalePreferredMacMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE scaleBeepMux = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE scaleDebugMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE scaleCriticalEventMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE scaleWeightEventMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE webStatusMux = portMUX_INITIALIZER_UNLOCKED;
@@ -525,6 +526,9 @@ ScaleEvent scaleWeightEvent;
 bool scaleWeightEventPending = false;
 bool scaleBeepPending = false;
 uint32_t scaleBeepCycleId = 0;
+bool scaleDebugPending = false;
+BookooDebugAction scaleDebugAction = BookooDebugAction::START;
+uint8_t scaleDebugBeepLevel = 0;
 bool scalePaddleReturnReminderBeepPending = false;
 bool paddleReturnReminderActive = false;
 uint32_t paddleReturnReminderLastAtMs = 0;
@@ -3025,6 +3029,88 @@ void executeScaleBeepCommand(DebugCode successCode, DebugCode failureCode,
   updateWorkerLinkState();
 }
 
+bool scaleIsBookooGeneric() {
+  return scale.isConnected() &&
+         strcmp(scale.connectedProtocolName(), "bookoo_generic") == 0;
+}
+
+bool enqueueScaleDebugCommand(BookooDebugAction action, uint8_t beepLevel) {
+  if (!scaleIsBookooGeneric()) {
+    return false;
+  }
+  if (action == BookooDebugAction::VOLUME && beepLevel > BOOKOO_BEEP_LEVEL_MAX) {
+    return false;
+  }
+  portENTER_CRITICAL(&scaleDebugMux);
+  const bool busy = scaleDebugPending;
+  if (!busy) {
+    scaleDebugPending = true;
+    scaleDebugAction = action;
+    scaleDebugBeepLevel = beepLevel;
+  }
+  portEXIT_CRITICAL(&scaleDebugMux);
+  return !busy;
+}
+
+bool takeScaleDebugCommand(BookooDebugAction &action, uint8_t &beepLevel) {
+  bool pending = false;
+  portENTER_CRITICAL(&scaleDebugMux);
+  if (scaleDebugPending) {
+    pending = true;
+    action = scaleDebugAction;
+    beepLevel = scaleDebugBeepLevel;
+    scaleDebugPending = false;
+    scaleDebugAction = BookooDebugAction::START;
+    scaleDebugBeepLevel = 0;
+  }
+  portEXIT_CRITICAL(&scaleDebugMux);
+  return pending;
+}
+
+void executeScaleDebugCommand(BookooDebugAction action, uint8_t beepLevel) {
+  if (!scaleIsBookooGeneric()) {
+    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_DEBUG_UNSUPPORTED);
+    return;
+  }
+  bool succeeded = false;
+  switch (action) {
+    case BookooDebugAction::START:
+      succeeded = scale.startTimer();
+      break;
+    case BookooDebugAction::STOP:
+      succeeded = scale.stopTimer();
+      break;
+    case BookooDebugAction::TARE:
+      succeeded = scale.tare();
+      break;
+    case BookooDebugAction::COMBINED:
+      if (!scale.supportsTareStartTimer()) {
+        addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_DEBUG_UNSUPPORTED);
+        return;
+      }
+      succeeded = scale.tareStartTimer();
+      break;
+    case BookooDebugAction::BEEP:
+      if (!scale.supportsIndependentBeep()) {
+        addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_DEBUG_UNSUPPORTED);
+        return;
+      }
+      succeeded = scale.beepWithoutStateChange();
+      break;
+    case BookooDebugAction::VOLUME:
+      if (!scale.supportsIndependentBeep()) {
+        addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_DEBUG_UNSUPPORTED);
+        return;
+      }
+      succeeded = scale.setBeepLevel(beepLevel);
+      break;
+  }
+  addDebugEvent(DebugCategory::SCALE,
+                succeeded ? DebugCode::SCALE_DEBUG_OK
+                          : DebugCode::SCALE_DEBUG_FAILED);
+  updateWorkerLinkState();
+}
+
 void requestScaleBrewBeep(uint32_t cycleId);
 void requestScalePaddleReturnReminderBeep();
 void requestScaleCompletionBeep();
@@ -3032,6 +3118,34 @@ void cancelScalePaddleReturnReminderBeep();
 
 AlertOutputChannel currentAlertOutputChannel() {
   return effectiveAlertOutputChannel(runtimeConfig.alertOutputChannel);
+}
+
+void applyBookooConnectBeepPolicy() {
+  if (!scaleIsBookooGeneric() || !scale.supportsIndependentBeep()) {
+    return;
+  }
+  const AlertOutputChannel channel = currentAlertOutputChannel();
+  if (runtimeConfig.bookooMuteOnBuzzerOnly &&
+      channel == AlertOutputChannel::BUZZER_ONLY) {
+    (void)scale.setBeepLevel(0);
+    return;
+  }
+  if (runtimeConfig.bookooConnectBeepLevel >= 1 &&
+      runtimeConfig.bookooConnectBeepLevel <= BOOKOO_BEEP_LEVEL_MAX &&
+      (channel == AlertOutputChannel::SCALE_ONLY ||
+       channel == AlertOutputChannel::SCALE_PRIORITY)) {
+    (void)scale.setBeepLevel(runtimeConfig.bookooConnectBeepLevel);
+  }
+}
+
+void requestBookooSilenceIfConfigured() {
+  if (!runtimeConfig.bookooMuteOnBuzzerOnly) {
+    return;
+  }
+  if (currentAlertOutputChannel() != AlertOutputChannel::BUZZER_ONLY) {
+    return;
+  }
+  (void)enqueueScaleDebugCommand(BookooDebugAction::VOLUME, 0);
 }
 
 bool alertEventScaleCapable(AlertEvent event) {
@@ -3493,6 +3607,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
                    scale.connectedProtocolName());
       updateWorkerLinkState();
       setScaleLinkState(ScaleLinkState::CONNECTED);
+      applyBookooConnectBeepPolicy();
       return;
     }
     if (scale.isScanning()) {
@@ -3679,19 +3794,25 @@ void scaleWorkerTask(void *) {
         executeScaleBeepCommand(DebugCode::SCALE_BEEP_OK,
                                 DebugCode::SCALE_BEEP_FAILED,
                                 DebugCode::SCALE_BEEP_UNSUPPORTED);
-      } else if (scale.isConnected()) {
-        connectAttemptSeriesActive = false;
-        connectRetryMs = SCALE_CONNECT_RETRY_MS;
-        preferredDirectedFailures = 0;
-        loggedPreferredFallback = false;
-        serviceScaleWorkerLink();
       } else {
-        serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
-                                    connectRetryMs,
-                                    connectAttemptSeriesActive,
-                                    preferredDirectedFailures,
-                                    loggedPreferredFallback,
-                                    seenPreferredResetGeneration);
+        BookooDebugAction debugAction = BookooDebugAction::START;
+        uint8_t debugLevel = 0;
+        if (takeScaleDebugCommand(debugAction, debugLevel)) {
+          executeScaleDebugCommand(debugAction, debugLevel);
+        } else if (scale.isConnected()) {
+          connectAttemptSeriesActive = false;
+          connectRetryMs = SCALE_CONNECT_RETRY_MS;
+          preferredDirectedFailures = 0;
+          loggedPreferredFallback = false;
+          serviceScaleWorkerLink();
+        } else {
+          serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                                      connectRetryMs,
+                                      connectAttemptSeriesActive,
+                                      preferredDirectedFailures,
+                                      loggedPreferredFallback,
+                                      seenPreferredResetGeneration);
+        }
       }
     }
 
@@ -4495,6 +4616,7 @@ void completeMaintenanceLease(const WebCommand &result) {
     if (maintenanceLease.command.type == WebCommandType::PERSIST_RUNTIME) {
       runtimePersistReasonBits = 0;
     }
+    requestBookooSilenceIfConfigured();
   }
   if (!result.succeeded &&
       maintenanceLease.command.type == WebCommandType::PERSIST_RUNTIME &&
@@ -4616,6 +4738,8 @@ void processWebCommand(const WebCommand &command) {
           command.config.buzzerAutoToManualGuardEndBeep;
       candidate.buzzerManualNoScaleBeep = command.config.buzzerManualNoScaleBeep;
       candidate.alertOutputChannel = command.config.alertOutputChannel;
+      candidate.bookooMuteOnBuzzerOnly = command.config.bookooMuteOnBuzzerOnly;
+      candidate.bookooConnectBeepLevel = command.config.bookooConnectBeepLevel;
       candidate.rinseGestureMs = command.config.rinseGestureMs;
       candidate.rinseDurationMs = command.config.rinseDurationMs;
       candidate.autoRetare = command.config.autoRetare;
@@ -4844,6 +4968,22 @@ void processWebCommand(const WebCommand &command) {
         return;
       }
       if (!localBuzzer.request(command.buzzerPattern)) {
+        rejectWebCommand(command);
+        return;
+      }
+      addDebugEvent(DebugCategory::WEB, DebugCode::WEB_COMMAND_ACCEPTED,
+                    static_cast<int32_t>(command.type));
+      reportControlCommandResult(command, CommandResultState::APPLIED);
+      return;
+    }
+
+    case WebCommandType::BOOKOO_DEBUG: {
+      if (!controlAllowsConfigurationNow()) {
+        rejectWebCommand(command);
+        return;
+      }
+      if (!enqueueScaleDebugCommand(command.bookooDebugAction,
+                                    command.bookooBeepLevel)) {
         rejectWebCommand(command);
         return;
       }

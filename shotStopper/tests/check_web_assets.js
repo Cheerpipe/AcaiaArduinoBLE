@@ -47,8 +47,8 @@ if (htmlBytes > 40960) {
 if (jsBytes > 61440) {
   throw new Error('Web UI JS source exceeds the 60 KiB authoring budget');
 }
-if (htmlBytes + jsBytes > 86016) {
-  throw new Error('Web UI HTML+JS source exceeds the 84 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 87040) {
+  throw new Error('Web UI HTML+JS source exceeds the 85 KiB combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -61,7 +61,13 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Output channel') ||
     !ui.includes('scale_priority') ||
     !ui.includes('Buzzer only') ||
-    !ui.includes('class="fieldHint"')) {
+    !ui.includes('class="fieldHint"') ||
+    !ui.includes('id="bookooMuteOnBuzzerOnly"') ||
+    !ui.includes('id="bookooConnectBeepLevel"') ||
+    !html.includes('id="bookooMuteOnBuzzerOnly" type="checkbox" checked') ||
+    !html.includes('option value="4" selected') ||
+    !ui.includes('when Buzzer only is saved') ||
+    !html.includes('Volume on connect/reconnect. Scale only or Scale priority.')) {
   throw new Error('Web UI must show paddle state, scale beep options, and buzzer alerts');
 }
 if (!ui.includes('id="operationalWallS" type="number" min="5" max="60"') ||
@@ -92,6 +98,9 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('"buzzerAutoToManualGuardEndBeep"') ||
     !network.includes('"buzzerManualNoScaleBeep"') ||
     !network.includes('"alertOutputChannel"') ||
+    !network.includes('"bookooMuteOnBuzzerOnly"') ||
+    !network.includes('"bookooConnectBeepLevel"') ||
+    !network.includes('fields, 38') ||
     !network.includes('allowedCount > 64') ||
     !network.includes('uint64_t seen') ||
     !network.includes('WEB_UI_ASSET_TAG') ||
@@ -265,6 +274,55 @@ if (!ui.includes('id="learnedOffsetG"') ||
     !ui.includes('weightOffsetBaselineG')) {
   throw new Error('Learned stop offset baseline must be wired like A→M baseline reset');
 }
+if (!html.includes('<summary>Tare</summary>') ||
+    !html.includes('<summary>Scales</summary>') ||
+    html.includes('<summary>Scale & retare</summary>') ||
+    html.indexOf('<summary>Tare</summary>') >
+        html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('<summary>Scales</summary>') >
+        html.indexOf('<summary>Alerts</summary>') ||
+    html.indexOf('id="autoTare"') > html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('id="autoRetare"') > html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('id="retareWindowS"') > html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('id="minimumCupWeightG"') >
+        html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('id="retareStabilitySamples"') >
+        html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('id="retareStabilityToleranceG"') >
+        html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('id="retareStabilityMaxGapS"') >
+        html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('id="retareStabilityMinDurationS"') >
+        html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('id="scaleTimerStopExtraDelayMs"') <
+        html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('id="scaleMacCacheMode"') <
+        html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('id="preferredScaleSettings"') <
+        html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('<summary>Bookoo</summary>') <
+        html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('id="canTareStartTimer"') <
+        html.indexOf('<summary>Bookoo</summary>') ||
+    html.indexOf('id="canTareStartTimer"') >
+        html.indexOf('<summary>Acaia</summary>') ||
+    html.indexOf('id="bookooMuteOnBuzzerOnly"') <
+        html.indexOf('<summary>Bookoo</summary>') ||
+    html.indexOf('id="bookooMuteOnBuzzerOnly"') >
+        html.indexOf('<summary>Acaia</summary>') ||
+    html.indexOf('id="bookooConnectBeepLevel"') <
+        html.indexOf('<summary>Bookoo</summary>') ||
+    html.indexOf('id="bookooConnectBeepLevel"') >
+        html.indexOf('<summary>Acaia</summary>') ||
+    html.indexOf('<summary>Acaia</summary>') <
+        html.indexOf('<summary>Bookoo</summary>') ||
+    html.indexOf('<summary>Felicita</summary>') <
+        html.indexOf('<summary>Acaia</summary>') ||
+    html.indexOf('<summary>Felicita</summary>') >
+        html.indexOf('<summary>Alerts</summary>') ||
+    !ui.includes("d.parentElement.closest('details')")) {
+  throw new Error('Machine settings must split Tare and Scales, with Bookoo/Acaia/Felicita subgroups');
+}
 if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('<legend>Machine and scale</legend>') ||
     !ui.includes('<legend>Security and connectivity</legend>') ||
@@ -398,7 +456,18 @@ if (!ui.includes('id="factoryResetButton"') ||
   throw new Error('Factory reset must require UI and server-side confirmation');
 }
 if (!ui.includes('id="debugPanel"') ||
-    !html.includes('id="debugPanel" class="buzzerOpt hidden"') ||
+    !html.includes('id="debugPanel" class="authenticatedOnly hidden"') ||
+    !ui.includes('id="bookooStartButton"') ||
+    !ui.includes('id="bookooStopButton"') ||
+    !ui.includes('id="bookooTareButton"') ||
+    !ui.includes('id="bookooCombinedButton"') ||
+    !ui.includes('id="bookooBeepButton"') ||
+    !ui.includes('id="bookooVol0Button"') ||
+    !ui.includes('id="bookooVol5Button"') ||
+    !ui.includes('/api/v1/control/bookoo') ||
+    !ui.includes('function debugBookoo(') ||
+    !ui.includes("['bookooStartButton','start']") ||
+    !ui.includes("debugBookoo('volume',{level:n})") ||
     !ui.includes('id="beepShortButton"') ||
     !ui.includes('id="beepLongButton"') ||
     !ui.includes('id="beepDoubleButton"') ||
@@ -413,12 +482,19 @@ if (!ui.includes('id="debugPanel"') ||
     html.indexOf('id="saveDateTimeButton"') > html.indexOf('id="debugPanel"') ||
     html.indexOf('id="debugPanel"') > html.indexOf('id="restartPanel"') ||
     !network.includes('buzzerHandler') ||
+    !network.includes('bookooHandler') ||
     !network.includes('BUZZER_UNSUPPORTED') ||
+    !network.includes('BOOKOO_SCALE_UNAVAILABLE') ||
     !network.includes('WebCommandType::BUZZER_TEST') ||
+    !network.includes('WebCommandType::BOOKOO_DEBUG') ||
     !network.includes('parseBuzzerPatternId') ||
+    !network.includes('parseBookooDebugActionId') ||
     !firmware.includes('WebCommandType::BUZZER_TEST') ||
-    !firmware.includes('localBuzzer.request(command.buzzerPattern)')) {
-  throw new Error('Admin debug must expose buzzer test buttons only when firmware has buzzer support');
+    !firmware.includes('WebCommandType::BOOKOO_DEBUG') ||
+    !firmware.includes('localBuzzer.request(command.buzzerPattern)') ||
+    !firmware.includes('enqueueScaleDebugCommand') ||
+    !firmware.includes('executeScaleDebugCommand')) {
+  throw new Error('Admin debug must expose Bookoo BLE commands and buzzer tests');
 }
 if (!ui.includes('id="staIpMode"') ||
     !ui.includes('id="staStaticIp"') ||
@@ -433,12 +509,22 @@ if (!ui.includes('id="staIpMode"') ||
     !ui.includes('Leave empty to keep the saved password') ||
     !ui.includes('keep=!!savedStaSsid') ||
     !ui.includes("savedStaSsid=n.wifiConfigured&&n.ssid?n.ssid:''") ||
+    !ui.includes('function formatNetworkStatus(n)') ||
+    !ui.includes("signalQualityPct") ||
+    !ui.includes("n.rssi") ||
+    !ui.includes('signal ') ||
+    !ui.includes(' dBm)') ||
     !network.includes('WiFi.config(') ||
     !network.includes('confirmPendingNetwork') ||
     !network.includes('revertPendingNetwork') ||
     !network.includes('\\"ipMode\\"') ||
     !network.includes('\\"configState\\"') ||
     !network.includes('\\"ssid\\"') ||
+    !network.includes('\\"rssi\\"') ||
+    !network.includes('\\"signalQualityPct\\"') ||
+    !network.includes('wifiRssiToSignalQualityPct') ||
+    !network.includes('staLinkMetricsValid') ||
+    !network.includes('WiFi.RSSI()') ||
     !network.includes('shouldReuseSavedWifiCredentials') ||
     !network.includes('or empty to keep the saved password.') ||
     !network.includes('StaIpMode::STATIC') ||
@@ -484,6 +570,7 @@ const expected = new Map([
   ['POST /api/v1/control/stop', 'stopHandler'],
   ['POST /api/v1/control/restart', 'restartHandler'],
   ['POST /api/v1/control/buzzer', 'buzzerHandler'],
+  ['POST /api/v1/control/bookoo', 'bookooHandler'],
   ['POST /api/v1/factory-reset', 'factoryResetHandler'],
   ['GET /api/v1/shots', 'shotsHandler'],
   ['POST /api/v1/shots/clear', 'shotsClearHandler'],
@@ -618,7 +705,10 @@ if (safeBeepStart < 0 || safeBeepEnd < 0) {
   throw new Error('State-safe BLE beep implementation not found');
 }
 const safeBeep = bleLibrary.slice(safeBeepStart, safeBeepEnd);
-if (!safeBeep.includes('BEEP_LEVEL_1_BOOKOO') ||
+if (!safeBeep.includes('return setBeepLevel(1)') ||
+    !safeBeep.includes('GENERIC_BEEP_LEVEL_CMD') ||
+    !safeBeep.includes('fillGenericCommand') ||
+    safeBeep.includes('BEEP_LEVEL_1_BOOKOO') ||
     safeBeep.includes('TARE_ACAIA') || safeBeep.includes('TARE_GENERIC') ||
     safeBeep.includes('_connected = false')) {
   throw new Error('First-drop beep must not tare or mutate scale connection state');
@@ -633,6 +723,8 @@ if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
     !firmware.includes('retareWindowOpen') ||
     !firmware.includes('scale.supportsTareStartTimer()') ||
     !firmware.includes('alertOutputChannel') ||
+    !firmware.includes('applyBookooConnectBeepPolicy') ||
+    !firmware.includes('requestBookooSilenceIfConfigured') ||
     !firmware.includes('emitCommandAlert') ||
     /enum class ScaleCommandType[\s\S]*BEEP/.test(
       firmware.slice(firmware.indexOf('enum class ScaleCommandType'),

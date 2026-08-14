@@ -104,6 +104,9 @@ void p01_defaults_are_valid_v16() {
   CHECK(settings.preferredScaleName[0] == '\0');
   CHECK(settings.runtime.scaleMacCacheMode ==
         static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL));
+  CHECK(settings.runtime.bookooMuteOnBuzzerOnly);
+  CHECK(settings.runtime.bookooConnectBeepLevel ==
+        DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL);
   CHECK(validPreferredScaleMac(settings.preferredScaleMac));
   CHECK(validPreferredScaleName(settings.preferredScaleName));
   CHECK(validPreferredScaleName("Pearl-S"));
@@ -1269,7 +1272,111 @@ void p30_schema_twenty_two_migrates_to_twenty_three() {
   CHECK(!loaded.runtime.buzzerManualNoScaleBeep);
   CHECK(loaded.runtime.alertOutputChannel ==
         static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY));
+  CHECK(loaded.runtime.bookooMuteOnBuzzerOnly);
+  CHECK(loaded.runtime.bookooConnectBeepLevel ==
+        DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL);
   CHECK(strcmp(loaded.preferredScaleMac, "01:23:45:67:89:AB") == 0);
+}
+
+void fillRuntimeConfigV23FromCurrent(const RuntimeConfig &source,
+                                     RuntimeConfigV23 &out) {
+  out = RuntimeConfigV23{};
+  out.revision = source.revision;
+  out.goalWeightG = source.goalWeightG;
+  out.weightOffsetG = source.weightOffsetG;
+  out.weightOffsetBaselineG = source.weightOffsetBaselineG;
+  out.autoTare = source.autoTare;
+  out.timerOnly = source.timerOnly;
+  out.canTareStartTimer = source.canTareStartTimer;
+  out.scaleTimerStopExtraDelayMs = source.scaleTimerStopExtraDelayMs;
+  out.firstDropBeep = source.firstDropBeep;
+  out.paddleReturnReminderBeep = source.paddleReturnReminderBeep;
+  out.paddleReturnReminderIntervalMs = source.paddleReturnReminderIntervalMs;
+  out.paddleReturnReminderMaxDurationMs =
+      source.paddleReturnReminderMaxDurationMs;
+  out.buzzerScaleLostBeep = source.buzzerScaleLostBeep;
+  out.buzzerAutoToManualGuardEndBeep = source.buzzerAutoToManualGuardEndBeep;
+  out.buzzerManualNoScaleBeep = source.buzzerManualNoScaleBeep;
+  out.alertOutputChannel = source.alertOutputChannel;
+  out.reservedConfig = source.reservedConfig;
+  out.reservedConfig2 = source.reservedConfig2;
+  out.rinseGestureMs = source.rinseGestureMs;
+  out.rinseDurationMs = source.rinseDurationMs;
+  out.autoRetare = source.autoRetare;
+  out.retareWindowMs = source.retareWindowMs;
+  out.minimumCupWeightG = source.minimumCupWeightG;
+  out.retareStabilitySamples = source.retareStabilitySamples;
+  out.retareStabilityToleranceG = source.retareStabilityToleranceG;
+  out.retareStabilityMaxGapMs = source.retareStabilityMaxGapMs;
+  out.retareStabilityMinDurationMs = source.retareStabilityMinDurationMs;
+  out.bbwProtectionMs = source.bbwProtectionMs;
+  out.operationalWallMs = source.operationalWallMs;
+  out.timezoneOffsetMinutes = source.timezoneOffsetMinutes;
+  out.ntpServerPreset = source.ntpServerPreset;
+  memcpy(out.ntpServerCustom, source.ntpServerCustom,
+         sizeof(out.ntpServerCustom));
+  out.fastExtractionGuardEnabled = source.fastExtractionGuardEnabled;
+  out.maxRecoveryWeightG = source.maxRecoveryWeightG;
+  out.minBrewTimeMs = source.minBrewTimeMs;
+  out.autoToManualGuardEnabled = source.autoToManualGuardEnabled;
+  out.autoToManualGuardLimitMode = source.autoToManualGuardLimitMode;
+  out.autoToManualGuardManualLimitMs = source.autoToManualGuardManualLimitMs;
+  out.autoToManualGuardBaselineMs = source.autoToManualGuardBaselineMs;
+  memcpy(out.autoToManualGuardSamplesDs, source.autoToManualGuardSamplesDs,
+         sizeof(out.autoToManualGuardSamplesDs));
+  out.scaleMacCacheMode = source.scaleMacCacheMode;
+}
+
+void p31_schema_twenty_three_migrates_to_twenty_four() {
+  persistence_host::reset();
+  PersistedSettings current;
+  CHECK(initializeDefaultSettings(current));
+  ensurePersistedPresetBank(current);
+  finalizePersistedSettings(current);
+
+  PersistedSettingsV23 legacy = {};
+  legacy.magic = PERSISTED_SETTINGS_MAGIC;
+  legacy.schemaVersion = CONFIG_SCHEMA_VERSION_V23;
+  legacy.structureSize = sizeof(PersistedSettingsV23);
+  legacy.storageRevision = 12;
+  RuntimeConfigV23 runtimeV23 = {};
+  fillRuntimeConfigV23FromCurrent(current.runtime, runtimeV23);
+  runtimeV23.revision = 6;
+  runtimeV23.goalWeightG = 41;
+  runtimeV23.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  runtimeV23.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+  legacy.runtime = runtimeV23;
+  legacy.presets = current.presets;
+  legacy.staConfigured = false;
+  legacy.staOpen = false;
+  legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  legacy.staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  legacy.lkgValid = false;
+  memcpy(legacy.apPassword, current.apPassword, sizeof(legacy.apPassword));
+  memcpy(legacy.authSalt, current.authSalt, sizeof(legacy.authSalt));
+  memcpy(legacy.authHash, current.authHash, sizeof(legacy.authHash));
+  strcpy(legacy.preferredScaleMac, "AA:BB:CC:DD:EE:11");
+  strcpy(legacy.preferredScaleName, "Themis");
+  legacy.checksum = persistedSettingsV23Checksum(legacy);
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &legacy,
+                           sizeof(legacy));
+
+  PersistedSettings loaded;
+  bool migrated = false;
+  CHECK(loadPersistedSettings(loaded, &migrated));
+  CHECK(migrated);
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.runtime.goalWeightG == 41);
+  CHECK(loaded.runtime.alertOutputChannel ==
+        static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY));
+  CHECK(loaded.runtime.scaleMacCacheMode ==
+        static_cast<uint8_t>(ScaleMacCacheMode::FULL));
+  CHECK(loaded.runtime.bookooMuteOnBuzzerOnly);
+  CHECK(loaded.runtime.bookooConnectBeepLevel ==
+        DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL);
+  CHECK(strcmp(loaded.preferredScaleMac, "AA:BB:CC:DD:EE:11") == 0);
 }
 
 void p24_preset_bank_size_and_crud_budgets() {
@@ -1456,6 +1563,7 @@ const TestCase tests[] = {
     {"P27", p27_schema_twenty_migrates_to_twenty_one},
     {"P28", p28_schema_twenty_one_migrates_to_twenty_two},
     {"P30", p30_schema_twenty_two_migrates_to_twenty_three},
+    {"P31", p31_schema_twenty_three_migrates_to_twenty_four},
     {"P24", p24_preset_bank_size_and_crud_budgets},
     {"P25", p25_invalid_active_id_keeps_customs},
     {"P26", p26_save_candidate_validation_does_not_require_live_mutation},

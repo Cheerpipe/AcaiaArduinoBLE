@@ -166,6 +166,9 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scaleWeightEventPending = false;
   scaleBeepPending = false;
   scaleBeepCycleId = 0;
+  scaleDebugPending = false;
+  scaleDebugAction = BookooDebugAction::START;
+  scaleDebugBeepLevel = 0;
   scalePaddleReturnReminderBeepPending = false;
   paddleReturnReminderActive = false;
   paddleReturnReminderLastAtMs = 0;
@@ -1431,6 +1434,8 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.buzzerManualNoScaleBeep);
   CHECK(config.alertOutputChannel ==
         static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY));
+  CHECK(config.bookooMuteOnBuzzerOnly);
+  CHECK(config.bookooConnectBeepLevel == DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL);
   CHECK(config.fastExtractionGuardEnabled);
 }
 
@@ -1483,6 +1488,10 @@ void w03_runtime_timing_relations_are_transactional() {
   config.scaleTimerStopExtraDelayMs = MAX_SCALE_TIMER_STOP_EXTRA_DELAY_MS + 1;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::SCALE_TIMER_STOP_EXTRA_DELAY);
+  config = RuntimeConfig{};
+  config.bookooConnectBeepLevel = BOOKOO_BEEP_LEVEL_MAX + 1;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL);
 }
 
 void w04_wifi_credentials_have_strict_bounds() {
@@ -2278,6 +2287,203 @@ void w61_web_buzzer_test_rejected_while_active() {
   processWebCommand(command);
   CHECK(localBuzzer.acceptedRequests == before);
   CHECK(session.active);
+}
+
+bool executePendingScaleDebugCommand() {
+  BookooDebugAction action = BookooDebugAction::START;
+  uint8_t level = 0;
+  if (!takeScaleDebugCommand(action, level)) {
+    return false;
+  }
+  executeScaleDebugCommand(action, level);
+  return true;
+}
+
+void w66_web_bookoo_debug_dispatches_actions() {
+  static const struct {
+    const char *id;
+    BookooDebugAction action;
+    uint8_t level;
+    const char *expected;
+  } cases[] = {
+      {"start", BookooDebugAction::START, 0, "startTimer"},
+      {"stop", BookooDebugAction::STOP, 0, "stopTimer"},
+      {"tare", BookooDebugAction::TARE, 0, "tare"},
+      {"combined", BookooDebugAction::COMBINED, 0, "tareStartTimer"},
+      {"beep", BookooDebugAction::BEEP, 0, "beepWithoutStateChange"},
+      {"volume", BookooDebugAction::VOLUME, 0, "setBeepLevel:0"},
+      {"volume", BookooDebugAction::VOLUME, 3, "setBeepLevel:3"},
+      {"volume", BookooDebugAction::VOLUME, 5, "setBeepLevel:5"},
+  };
+  for (const auto &entry : cases) {
+    BookooDebugAction parsed = BookooDebugAction::START;
+    CHECK(parseBookooDebugActionId(entry.id, parsed));
+    CHECK(parsed == entry.action);
+    resetHarness(false, true);
+    reachReadyFromBoot();
+    scale.commandLog.clear();
+    WebCommand command = webControlCommand(WebCommandType::BOOKOO_DEBUG);
+    command.bookooDebugAction = entry.action;
+    command.bookooBeepLevel = entry.level;
+    processWebCommand(command);
+    CHECK(scaleDebugPending);
+    CHECK(executePendingScaleDebugCommand());
+    CHECK(scale.commandLog.size() == 1);
+    CHECK(scale.commandLog[0] == entry.expected);
+  }
+}
+
+void w67_web_bookoo_debug_rejected_while_active() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  startCycle();
+  WebCommand command = webControlCommand(WebCommandType::BOOKOO_DEBUG);
+  command.bookooDebugAction = BookooDebugAction::TARE;
+  processWebCommand(command);
+  CHECK(!scaleDebugPending);
+  CHECK(session.active);
+}
+
+void w68_web_bookoo_debug_rejected_when_disconnected() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  WebCommand command = webControlCommand(WebCommandType::BOOKOO_DEBUG);
+  command.bookooDebugAction = BookooDebugAction::START;
+  processWebCommand(command);
+  CHECK(!scaleDebugPending);
+  CHECK(scale.commandLog.empty());
+}
+
+void w69_web_bookoo_debug_rejected_when_not_generic() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  std::strncpy(scale.connectedProtocol, "acaia_new",
+               sizeof(scale.connectedProtocol) - 1);
+  WebCommand command = webControlCommand(WebCommandType::BOOKOO_DEBUG);
+  command.bookooDebugAction = BookooDebugAction::TARE;
+  processWebCommand(command);
+  CHECK(!scaleDebugPending);
+  CHECK(scale.commandLog.empty());
+}
+
+void w70_bookoo_connect_mutes_in_buzzer_only() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.bookooMuteOnBuzzerOnly = true;
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  scale.commandLog.clear();
+  applyBookooConnectBeepPolicy();
+  CHECK(scale.commandLog.size() == 1);
+  CHECK(scale.commandLog[0] == "setBeepLevel:0");
+}
+
+void w71_bookoo_connect_sets_volume_in_scale_priority() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.bookooMuteOnBuzzerOnly = true;
+  runtimeConfig.bookooConnectBeepLevel = DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL;
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+  scale.commandLog.clear();
+  applyBookooConnectBeepPolicy();
+  CHECK(scale.commandLog.size() == 1);
+  CHECK(scale.commandLog[0] == "setBeepLevel:4");
+}
+
+void w72_bookoo_connect_skips_disabled_volume_and_non_bookoo() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.bookooConnectBeepLevel = 0;
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+  scale.commandLog.clear();
+  applyBookooConnectBeepPolicy();
+  CHECK(scale.commandLog.empty());
+
+  runtimeConfig.bookooConnectBeepLevel = 4;
+  std::strncpy(scale.connectedProtocol, "acaia_new",
+               sizeof(scale.connectedProtocol) - 1);
+  applyBookooConnectBeepPolicy();
+  CHECK(scale.commandLog.empty());
+}
+
+void w73_apply_config_buzzer_only_sends_bookoo_silence() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.bookooMuteOnBuzzerOnly = true;
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+  scale.commandLog.clear();
+  WebCommand update;
+  update.type = WebCommandType::APPLY_CONFIG;
+  update.config = runtimeConfig;
+  update.config.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  processWebCommand(update);
+  finishHostMaintenance();
+  CHECK(scaleDebugPending);
+  CHECK(executePendingScaleDebugCommand());
+  CHECK(scale.commandLog.size() == 1);
+  CHECK(scale.commandLog[0] == "setBeepLevel:0");
+}
+
+void w74_apply_config_enabling_mute_sends_silence_only_in_buzzer_only() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.bookooMuteOnBuzzerOnly = false;
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  scale.commandLog.clear();
+  WebCommand update;
+  update.type = WebCommandType::APPLY_CONFIG;
+  update.config = runtimeConfig;
+  update.config.bookooMuteOnBuzzerOnly = true;
+  processWebCommand(update);
+  finishHostMaintenance();
+  CHECK(scaleDebugPending);
+  CHECK(executePendingScaleDebugCommand());
+  CHECK(scale.commandLog.size() == 1);
+  CHECK(scale.commandLog[0] == "setBeepLevel:0");
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.bookooMuteOnBuzzerOnly = false;
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+  scale.commandLog.clear();
+  update = WebCommand{};
+  update.type = WebCommandType::APPLY_CONFIG;
+  update.config = runtimeConfig;
+  update.config.bookooMuteOnBuzzerOnly = true;
+  processWebCommand(update);
+  finishHostMaintenance();
+  CHECK(!scaleDebugPending);
+  CHECK(scale.commandLog.empty());
+}
+
+void w75_bookoo_discovery_connect_applies_beep_policy() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.bookooMuteOnBuzzerOnly = true;
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  scale.scanning = true;
+  scale.connected = true;
+  scale.commandLog.clear();
+  uint32_t lastScanCycleMs = 0;
+  uint32_t lastConnectLogMs = 0;
+  uint32_t connectRetryMs = 1000;
+  bool connectAttemptSeriesActive = false;
+  uint8_t preferredDirectedFailures = 0;
+  bool loggedPreferredFallback = false;
+  uint32_t seenPreferredResetGeneration = 0;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive,
+                              preferredDirectedFailures, loggedPreferredFallback,
+                              seenPreferredResetGeneration);
+  CHECK(scale.commandLog.size() == 1);
+  CHECK(scale.commandLog[0] == "setBeepLevel:0");
 }
 
 void w62_local_buzzer_drive_matches_compile_flag() {
@@ -4102,6 +4308,16 @@ const TestCase testCases[] = {
     {"W63", w63_scale_priority_paddle_uses_scale_when_connected},
     {"W64", w64_buzzer_only_first_drop_uses_local_buzzer},
     {"W65", w65_scale_only_mutes_scale_lost_triple},
+    {"W66", w66_web_bookoo_debug_dispatches_actions},
+    {"W67", w67_web_bookoo_debug_rejected_while_active},
+    {"W68", w68_web_bookoo_debug_rejected_when_disconnected},
+    {"W69", w69_web_bookoo_debug_rejected_when_not_generic},
+    {"W70", w70_bookoo_connect_mutes_in_buzzer_only},
+    {"W71", w71_bookoo_connect_sets_volume_in_scale_priority},
+    {"W72", w72_bookoo_connect_skips_disabled_volume_and_non_bookoo},
+    {"W73", w73_apply_config_buzzer_only_sends_bookoo_silence},
+    {"W74", w74_apply_config_enabling_mute_sends_silence_only_in_buzzer_only},
+    {"W75", w75_bookoo_discovery_connect_applies_beep_policy},
     {"S01", s01_shot_log_filters_short_and_rinse},
     {"S02", s02_shot_log_appends_after_drip_delay},
     {"S03", s03_shot_log_clear_empties_records},
