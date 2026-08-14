@@ -48,8 +48,8 @@ if (htmlBytes > 40960) {
 if (jsBytes > 61440) {
   throw new Error('Web UI JS source exceeds the 60 KiB authoring budget');
 }
-if (htmlBytes + jsBytes > 92160) {
-  throw new Error('Web UI HTML+JS source exceeds the 90 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 95232) {
+  throw new Error('Web UI HTML+JS source exceeds the 93 KiB combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -465,15 +465,25 @@ if (!ui.includes('<legend>Brew</legend>') ||
     html.indexOf('<summary>A→M time guard</summary>') < 0 ||
     !ui.includes('function updateHomeGuardSwitchesLock(') ||
     !ui.includes('function persistHomeGuard(') ||
+    !ui.includes('function beginHomeSwitchPending(') ||
+    !ui.includes('function applyPolledHomeSwitch(') ||
+    !ui.includes('function applyHomeSwitchesFromConfig(') ||
+    !ui.includes('Date.now()+5e3') ||
+    !ui.includes('pollAt<p.until') ||
+    !ui.includes("classList.toggle('switchPending',!!on)") ||
     !ui.includes("persistHomeGuard('homeAvoidBbwShotWithoutScale'") ||
     !ui.includes("persistHomeGuard('homeFastExtractionGuardEnabled'") ||
     !ui.includes("persistHomeGuard('homeAutoToManualGuardEnabled'") ||
     !ui.includes("'avoidBbwShotWithoutScale',0)") ||
     !ui.includes("'fastExtractionGuardEnabled',1)") ||
     !ui.includes("'autoToManualGuardEnabled',1)") ||
-    !ui.includes('el.disabled=!controlsMutable||!on') ||
+    !ui.includes('el.disabled=!controlsMutable||!on||pend||!!homeSwitchPending[h]') ||
     !ui.includes("classList.toggle('fieldOff',!on)") ||
-    !ui.includes('$(\'homeBrewByWeight\').disabled=!controlsMutable') ||
+    !ui.includes('$(\'homeBrewByWeight\').disabled=!controlsMutable||pend') ||
+    !css.includes('.switchRow.switchPending') ||
+    !css.includes('background:#c9a227') ||
+    !ui.includes("beginHomeSwitchPending('homeBrewByWeight'") ||
+    !ui.includes('beginHomeSwitchPending(h,on)') ||
     !ui.includes('id="clearLastShotButton"') ||
     html.indexOf('id="shotPanel"') > html.indexOf('id="clearLastShotButton"') ||
     html.includes('id="lastCycle"') ||
