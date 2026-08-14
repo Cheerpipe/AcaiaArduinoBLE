@@ -46,6 +46,7 @@
 #include "ShotStopperResetGuard.h"
 #include "ShotStopperSafety.h"
 #include "ShotStopperShotLog.h"
+#include "ShotStopperLastShot.h"
 #include "ShotStopperTime.h"
 #include "ShotStopperWatchdog.h"
 #include "ShotStopperHwmon.h"
@@ -331,9 +332,9 @@ struct CycleSession {
   uint32_t connectionGenerationAtStart = 0;
   uint32_t ownedConnectionGeneration = 0;
   uint32_t startedAtMs = 0;
-  bool shotTimerArmed = false;
-  uint32_t shotTimerDueAtMs = 0;
-  uint32_t shotTimerStartedAtMs = 0;
+  uint32_t cn9ClosedAtMs = 0;
+  bool scaleStartLagCaptured = false;
+  uint32_t scaleStartLagMs = 0;
   uint32_t rinseStartedAtMs = 0;
   uint32_t postTareBaselineDeadlineMs = 0;
   uint32_t stopTimerRetryDeadlineMs = 0;
@@ -405,6 +406,7 @@ struct PendingShotFinalize {
   bool lastKnownWeightValid = false;
   float lastKnownWeightG = 0.0f;
   uint8_t activePresetId = 0;
+  uint32_t cycleId = 0;
 };
 
 struct ScaleCommand {
@@ -453,6 +455,8 @@ LogLevel serialLogLevel = LogLevel::INFO;
 LogLevel ringRetainLogLevel = LogLevel::INFO;
 uint32_t lastReportedLogOverwritten = 0;
 ShotLog shotLog;
+LastShotStore lastShotStore;
+PersistedLastShot persistedLastShot;
 
 float currentWeight = 0.0f;
 uint32_t currentWeightReceivedAtMs = 0;
@@ -572,6 +576,11 @@ bool cn9Closed = false;
 bool relaySafetyTripped = false;
 bool operationalLimitTripped = false;
 uint32_t cn9ClosedAtMs = 0;
+struct PendingScaleTimerStop {
+  bool pending = false;
+  uint32_t dueAtMs = 0;
+};
+PendingScaleTimerStop pendingScaleTimerStop;
 uint32_t operationalLimitAtArmMs = HARD_MAX_CN9_CLOSED_MS;
 RelaySafetyState relaySafetyState = RelaySafetyState::BOOT_SAFE;
 RelaySafetyFault relaySafetyFault = RelaySafetyFault::NONE;
@@ -798,6 +807,68 @@ bool clearShotLog() {
   return shotLog.clear();
 }
 
+bool clearLastShot() {
+  persistedLastShot = PersistedLastShot{};
+  return lastShotStore.clear();
+}
+
+void persistLastShotSnapshot(const PersistedLastShot &snapshot) {
+  persistedLastShot = snapshot;
+  (void)lastShotStore.persist(snapshot);
+}
+
+void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
+  PersistedLastShot last = {};
+  last.valid = true;
+  last.cycleId = session.id;
+  last.durationMs = durationMs;
+  last.endReason = reason;
+  last.weightValid =
+      currentWeightSequence != session.weightSequenceAtStart &&
+      isfinite(currentWeight) &&
+      static_cast<int32_t>(currentWeightReceivedAtMs - session.startedAtMs) >=
+          0;
+  last.currentWeightG = last.weightValid ? currentWeight : 0.0f;
+  last.goalWeightG = session.config.goalWeightG;
+  last.extractionExtended =
+      session.extractionExtended && session.config.fastExtractionGuardEnabled;
+  last.activeStopWeightG =
+      last.extractionExtended ? session.config.maxRecoveryWeightG
+                              : static_cast<float>(session.config.goalWeightG);
+  const uint32_t startMs =
+      session.cn9ClosedAtMs != 0U ? session.cn9ClosedAtMs : session.startedAtMs;
+  if (session.firstDropMs != 0 &&
+      static_cast<int32_t>(session.firstDropMs - startMs) >= 0) {
+    last.firstDropElapsedMs = session.firstDropMs - startMs;
+  }
+  last.retarePerformed = session.retarePerformed;
+  last.shotType = static_cast<uint8_t>(lastShotTypeFromCycle(
+      stopperState, session.startedWithScale, session.config.timerOnly,
+      shot.automaticBrew));
+  last.scaleAvailable = session.startedWithScale;
+  last.fastExtractionGuardEnabled = session.config.fastExtractionGuardEnabled;
+  last.autoToManualGuardEnabled = session.config.autoToManualGuardEnabled;
+  last.autoToManualGuardEnforced = session.autoToManualGuardEnforced;
+  last.autoToManualGuardArmed = session.autoToManualGuardArmed;
+  if (session.autoToManualGuardEnforced) {
+    const uint32_t nowMs = millis();
+    last.autoToManualGuardRemainingMs =
+        static_cast<int32_t>(session.autoToManualGuardDeadlineAtMs - nowMs) <=
+                0
+            ? 0U
+            : session.autoToManualGuardDeadlineAtMs - nowMs;
+  }
+  if (last.extractionExtended) {
+    last.minBrewTimeRemainingMs =
+        durationMs >= session.config.minBrewTimeMs
+            ? 0U
+            : session.config.minBrewTimeMs - durationMs;
+  }
+  strncpy(last.scaleProtocol, scaleProtocolName, sizeof(last.scaleProtocol) - 1);
+  last.scaleProtocol[sizeof(last.scaleProtocol) - 1] = '\0';
+  persistLastShotSnapshot(last);
+}
+
 bool enqueueWebCommand(const WebCommand &command) {
   return webCommandQueue != nullptr &&
          xQueueSend(webCommandQueue, &command, 0) == pdTRUE;
@@ -984,44 +1055,96 @@ bool enqueueScaleCommand(const ScaleCommand &command) {
   return false;
 }
 
+RelaySafetySnapshot getRelaySafetySnapshot();
+void requestRemoteTimerStop();
+uint32_t cycleShotElapsedMs();
+
 float cycleElapsedSeconds() {
-  if (!session.active || !session.shotTimerArmed) {
-    return 0.0f;
-  }
-  return elapsedMs(session.shotTimerStartedAtMs) / 1000.0f;
+  return cycleShotElapsedMs() / 1000.0f;
 }
 
 uint32_t cycleShotElapsedMs() {
-  if (!session.active || !session.shotTimerArmed) {
+  if (!session.active) {
     return 0U;
   }
-  return elapsedMs(session.shotTimerStartedAtMs);
+  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
+  return relay.closed ? elapsedMs(relay.closedAtMs) : 0U;
 }
 
-void armShotTimerNow(uint32_t atMs) {
-  session.shotTimerArmed = true;
-  session.shotTimerDueAtMs = 0;
-  session.shotTimerStartedAtMs = atMs;
+void flushPendingScaleTimerStopNow() {
+  if (!pendingScaleTimerStop.pending) {
+    return;
+  }
+  pendingScaleTimerStop.pending = false;
+  requestRemoteTimerStop();
 }
 
-void scheduleShotTimerArm(uint32_t armedAtMs, uint32_t delayMs) {
+uint32_t scaleTimerStopDelayMsForCycle() {
+  uint32_t delayMs = session.config.scaleTimerStopExtraDelayMs;
+  if (session.scaleStartLagCaptured) {
+    delayMs += session.scaleStartLagMs;
+  }
+  if (delayMs > MAX_SCALE_TIMER_STOP_CATCHUP_MS) {
+    delayMs = MAX_SCALE_TIMER_STOP_CATCHUP_MS;
+  }
+  return delayMs;
+}
+
+void scheduleScaleTimerStopAfterCycle() {
+  if (!session.timerStartCommandQueued || session.stopTimerRequested) {
+    return;
+  }
+  const uint32_t delayMs = scaleTimerStopDelayMsForCycle();
   if (delayMs == 0U) {
-    armShotTimerNow(armedAtMs);
+    requestRemoteTimerStop();
     return;
   }
-  session.shotTimerArmed = false;
-  session.shotTimerStartedAtMs = 0;
-  session.shotTimerDueAtMs = armedAtMs + delayMs;
+  pendingScaleTimerStop.pending = true;
+  pendingScaleTimerStop.dueAtMs = millis() + delayMs;
+  // #region agent log
+  serialTracef(LogLevel::DEBUG,
+               "agent scaleTimerStopScheduled extra=%lu lag=%lu delay=%lu dueIn=%lu",
+               static_cast<unsigned long>(
+                   session.config.scaleTimerStopExtraDelayMs),
+               static_cast<unsigned long>(session.scaleStartLagCaptured
+                                              ? session.scaleStartLagMs
+                                              : 0U),
+               static_cast<unsigned long>(delayMs),
+               static_cast<unsigned long>(delayMs));
+  // #endregion
 }
 
-void serviceShotTimerStart() {
-  if (!session.active || session.shotTimerArmed) {
+void servicePendingScaleTimerStop() {
+  if (!pendingScaleTimerStop.pending) {
     return;
   }
-  if (static_cast<int32_t>(millis() - session.shotTimerDueAtMs) < 0) {
+  if (static_cast<int32_t>(millis() - pendingScaleTimerStop.dueAtMs) < 0) {
     return;
   }
-  armShotTimerNow(session.shotTimerDueAtMs);
+  pendingScaleTimerStop.pending = false;
+  requestRemoteTimerStop();
+}
+
+void maybeCaptureScaleStartLag() {
+  if (!session.active || session.scaleStartLagCaptured ||
+      !session.remoteTimerStarted) {
+    return;
+  }
+  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+  if (!link.timerValid || link.timerMs == 0U) {
+    return;
+  }
+  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
+  if (!relay.closed) {
+    return;
+  }
+  session.scaleStartLagMs = elapsedMs(relay.closedAtMs);
+  session.scaleStartLagCaptured = true;
+  // #region agent log
+  serialTracef(LogLevel::DEBUG,
+               "agent scaleStartLagMs=%lu",
+               static_cast<unsigned long>(session.scaleStartLagMs));
+  // #endregion
 }
 
 const char *stateName(StopperState state) {
@@ -1640,6 +1763,11 @@ bool paddleIsStablyOff() {
 // Scale timer session
 // ---------------------------------------------------------------------------
 
+void requestRemoteTimerStop();
+void flushPendingScaleTimerStopNow();
+void scheduleScaleTimerStopAfterCycle();
+void servicePendingScaleTimerStop();
+
 bool requestRemoteTimerStart() {
   ScaleCommand command;
   command.type = ScaleCommandType::START_TIMER_AND_TARE;
@@ -1804,9 +1932,11 @@ bool fastExtractionGuardSession() {
 }
 
 bool minBrewTimeReached() {
-  return session.shotTimerArmed &&
-         elapsedMs(session.shotTimerStartedAtMs) >=
-             session.config.minBrewTimeMs;
+  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
+  if (!relay.closed) {
+    return false;
+  }
+  return elapsedMs(relay.closedAtMs) >= session.config.minBrewTimeMs;
 }
 
 bool targetWeightReached(float weight) {
@@ -2441,8 +2571,7 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   pendingFinalize.endedAtMs = millis();
   pendingFinalize.endedWeightSequence = currentWeightSequence;
   pendingFinalize.cycleStartedAtMs =
-      session.shotTimerArmed ? session.shotTimerStartedAtMs
-                             : session.startedAtMs;
+      session.cn9ClosedAtMs != 0U ? session.cn9ClosedAtMs : session.startedAtMs;
   pendingFinalize.bootId = shotLog.bootId();
   pendingFinalize.durationDs =
       static_cast<uint16_t>(durationMs / 100U);
@@ -2478,6 +2607,7 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   pendingFinalize.activePresetId = session.activePresetId != 0
                                        ? session.activePresetId
                                        : presetBank.activeId;
+  pendingFinalize.cycleId = session.id;
 }
 
 void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeightG,
@@ -2639,6 +2769,13 @@ void pendingShotFinalizeTask() {
 
   if (snapshot.logEligible) {
     commitPendingShotLog(snapshot, logWeightG, logWeightValid, weightSource);
+  }
+
+  if (logWeightValid && persistedLastShot.valid &&
+      persistedLastShot.cycleId == snapshot.cycleId) {
+    persistedLastShot.weightValid = true;
+    persistedLastShot.currentWeightG = logWeightG;
+    persistLastShotSnapshot(persistedLastShot);
   }
 
   maybeQueueAutoToManualGuardSample(snapshot, finalWeightG, postDripWeightValid);
@@ -3650,6 +3787,7 @@ void maybeRequestNtpSyncOnActivity();
 void beginCycle(ControlSource source = ControlSource::PHYSICAL,
                 uint32_t webSessionId = 0,
                 uint32_t controlLeaseId = 0) {
+  flushPendingScaleTimerStopNow();
   if (pendingFinalize.pending) {
     pendingFinalize.pending = false;
     serialTrace(LogLevel::INFO,
@@ -3658,8 +3796,9 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
 
   resetSessionForNewCycle(source, webSessionId, controlLeaseId);
   session.startedAtMs = millis();
-  scheduleShotTimerArm(session.startedAtMs,
-                       session.config.shotTimerStartDelayMs);
+  session.cn9ClosedAtMs = 0;
+  session.scaleStartLagCaptured = false;
+  session.scaleStartLagMs = 0;
   session.firstDropMs = 0;
   session.retareFlowFirstDetectedAtMs = 0;
   session.scaleBaselineReady = false;
@@ -3702,6 +3841,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
     transitionTo(StopperState::REQUIRES_OFF);
     return;
   }
+  session.cn9ClosedAtMs = getRelaySafetySnapshot().closedAtMs;
 
   if (session.startedWithScale) {
     if (!requestRemoteTimerStart()) {
@@ -3730,7 +3870,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   cancelScaleBrewBeep(session.id);
   cancelScaleCompletionBeep();
   session.endReason = reason;
-  requestRemoteTimerStop();
+  scheduleScaleTimerStopAfterCycle();
   if (reason == EndReason::AUTO_TO_MANUAL_GUARD && BUZZER_SUPPORT_ENABLED &&
       runtimeConfig.buzzerAutoToManualGuardEndBeep) {
     localBuzzer.request(BuzzerPattern::TRIPLE);
@@ -3757,6 +3897,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
       lastCycle.weightValid ? elapsedMs(currentWeightReceivedAtMs) : 0;
   lastCycle.weightControlState = session.weightControlState;
   lastCycle.calibrationEligible = session.calibrationEligible;
+  persistLastShotFromEndedCycle(reason, durationMs);
   session.active = false;
   virtualPaddleOn = false;
   addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_ENDED,
@@ -4056,6 +4197,7 @@ bool controlAllowsConfigurationNow() {
 }
 
 void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
+  flushPendingScaleTimerStopNow();
   if (pendingFinalize.pending) {
     pendingFinalize.pending = false;
     serialTrace(LogLevel::INFO,
@@ -4063,7 +4205,9 @@ void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
   }
   resetSessionForNewCycle(ControlSource::WEB, webSessionId, controlLeaseId);
   session.startedAtMs = millis();
-  armShotTimerNow(session.startedAtMs);
+  session.cn9ClosedAtMs = 0;
+  session.scaleStartLagCaptured = false;
+  session.scaleStartLagMs = 0;
   session.firstDropMs = 0;
   session.retareFlowFirstDetectedAtMs = 0;
   session.scaleBaselineReady = false;
@@ -4080,6 +4224,7 @@ void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
     transitionTo(StopperState::REQUIRES_OFF);
     return;
   }
+  session.cn9ClosedAtMs = getRelaySafetySnapshot().closedAtMs;
   if (session.startedWithScale &&
       !requestRemoteTimerStart()) {
     session.startedWithScale = false;
@@ -4328,7 +4473,8 @@ void processWebCommand(const WebCommand &command) {
       RuntimeConfig candidate = runtimeConfig;
       candidate.autoTare = command.config.autoTare;
       candidate.canTareStartTimer = command.config.canTareStartTimer;
-      candidate.shotTimerStartDelayMs = command.config.shotTimerStartDelayMs;
+      candidate.scaleTimerStopExtraDelayMs =
+          command.config.scaleTimerStopExtraDelayMs;
       candidate.firstDropBeep = command.config.firstDropBeep;
       candidate.paddleReturnReminderBeep = command.config.paddleReturnReminderBeep;
       candidate.paddleReturnReminderIntervalMs =
@@ -4653,6 +4799,7 @@ void publishControlStatus() {
   next.config = effectiveRuntimeConfig();
   next.presets = presetBank;
   next.lastCycle = lastCycle;
+  next.lastShot = persistedLastShot;
   strncpy(next.scaleProtocol, scaleLink.protocolName,
           sizeof(next.scaleProtocol) - 1);
   next.scaleProtocol[sizeof(next.scaleProtocol) - 1] = '\0';
@@ -4670,7 +4817,7 @@ void publishControlStatus() {
     next.cycleRetareFlowFirstDetectedAtMs =
         session.retareFlowFirstDetectedAtMs;
     next.cycleStartedAtMs =
-        session.shotTimerArmed ? session.shotTimerStartedAtMs : 0U;
+        relay.closed ? relay.closedAtMs : 0U;
     next.cycleElapsedMs = cycleShotElapsedMs();
     next.cycleExtractionExtended =
         session.extractionExtended && fastExtractionGuardSession();
@@ -5036,9 +5183,13 @@ void setup() {
   shotLog.load();
   shotLog.onBoot();
   shotLog.save();
+  lastShotStore.load();
+  persistedLastShot = lastShotStore.get();
 #else
   shotLog.load();
   shotLog.onBoot();
+  lastShotStore.load();
+  persistedLastShot = lastShotStore.get();
 #endif
 
   addDebugEvent(DebugCategory::BOOT, DebugCode::BOOT_BANNER,
@@ -5109,6 +5260,7 @@ void setup() {
     callbacks.copyShotRecords = copyShotRecords;
     callbacks.deleteShotRecord = deleteShotRecord;
     callbacks.clearShotLog = clearShotLog;
+    callbacks.clearLastShot = clearLastShot;
     callbacks.copyPreferredScaleMac = copyPreferredScaleMac;
     callbacks.copyPreferredScaleName = copyPreferredScaleName;
     callbacks.copyPresetBank = copyPresetBank;
@@ -5242,7 +5394,8 @@ void loop() {
   servicePaddleReturnReminder();
   localBuzzer.service(millis());
   serviceScaleCompletionBeep();
-  serviceShotTimerStart();
+  maybeCaptureScaleStartLag();
+  servicePendingScaleTimerStop();
   serviceRemoteTimerStopRetry();
   pendingShotFinalizeTask();
   serviceSerialCli();

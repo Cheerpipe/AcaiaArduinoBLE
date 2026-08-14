@@ -1094,7 +1094,7 @@ inline void migrateRuntimeConfigV18ToCurrent(const RuntimeConfigV18 &legacy,
   runtime.autoTare = legacy.autoTare;
   runtime.timerOnly = legacy.timerOnly;
   runtime.canTareStartTimer = legacy.canTareStartTimer;
-  runtime.shotTimerStartDelayMs = legacy.shotTimerStartDelayMs;
+  runtime.scaleTimerStopExtraDelayMs = DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS;
   runtime.firstDropBeep = legacy.firstDropBeep;
   runtime.paddleReturnReminderBeep = legacy.paddleReturnReminderBeep;
   runtime.paddleReturnReminderIntervalMs =
@@ -1140,7 +1140,7 @@ inline void migrateRuntimeConfigV19ToCurrent(const RuntimeConfigV19 &legacy,
   runtime.autoTare = legacy.autoTare;
   runtime.timerOnly = legacy.timerOnly;
   runtime.canTareStartTimer = legacy.canTareStartTimer;
-  runtime.shotTimerStartDelayMs = legacy.shotTimerStartDelayMs;
+  runtime.scaleTimerStopExtraDelayMs = DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS;
   runtime.firstDropBeep = legacy.firstDropBeep;
   runtime.paddleReturnReminderBeep = legacy.paddleReturnReminderBeep;
   runtime.paddleReturnReminderIntervalMs =
@@ -1186,7 +1186,7 @@ inline void migrateRuntimeConfigV20ToCurrent(const RuntimeConfigV20 &legacy,
   runtime.autoTare = legacy.autoTare;
   runtime.timerOnly = legacy.timerOnly;
   runtime.canTareStartTimer = legacy.canTareStartTimer;
-  runtime.shotTimerStartDelayMs = legacy.shotTimerStartDelayMs;
+  runtime.scaleTimerStopExtraDelayMs = DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS;
   runtime.firstDropBeep = legacy.firstDropBeep;
   runtime.paddleReturnReminderBeep = legacy.paddleReturnReminderBeep;
   runtime.paddleReturnReminderIntervalMs =
@@ -1235,7 +1235,7 @@ inline void migrateRuntimeConfigV21ToCurrent(const RuntimeConfigV21 &legacy,
   runtime.autoTare = legacy.autoTare;
   runtime.timerOnly = legacy.timerOnly;
   runtime.canTareStartTimer = legacy.canTareStartTimer;
-  runtime.shotTimerStartDelayMs = legacy.shotTimerStartDelayMs;
+  runtime.scaleTimerStopExtraDelayMs = DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS;
   runtime.firstDropBeep = legacy.firstDropBeep;
   runtime.paddleReturnReminderBeep = legacy.paddleReturnReminderBeep;
   runtime.paddleReturnReminderIntervalMs =

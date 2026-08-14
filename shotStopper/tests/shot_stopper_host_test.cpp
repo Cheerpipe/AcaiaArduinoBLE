@@ -88,13 +88,16 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   shot = ShotTrajectory{};
   session = CycleSession{};
   pendingFinalize = PendingShotFinalize{};
+  pendingScaleTimerStop = PendingScaleTimerStop{};
   runtimeConfig = RuntimeConfig{};
   runtimeConfig.autoRetare = false;
   runtimeConfig.bbwProtectionMs = 3000;
   runtimeConfig.fastExtractionGuardEnabled = false;
-  // Host scenarios assert immediate FW elapsed; delay is covered by dedicated tests.
-  runtimeConfig.shotTimerStartDelayMs = 0;
+  // Host scenarios assert immediate scale timer stop; delayed stop is covered by ST02.
+  runtimeConfig.scaleTimerStopExtraDelayMs = 0;
   lastCycle = LastCycleSummary{};
+  persistedLastShot = PersistedLastShot{};
+  lastShotStore.clear();
   debugLog.clear();
   lastReportedLogOverwritten = 0;
   serialLogLevel = LogLevel::INFO;
@@ -1416,7 +1419,8 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.rinseGestureMs == 1000);
   CHECK(config.minBrewTimeMs == 28000);
   CHECK(config.canTareStartTimer);
-  CHECK(config.shotTimerStartDelayMs == DEFAULT_SHOT_TIMER_START_DELAY_MS);
+  CHECK(config.scaleTimerStopExtraDelayMs ==
+        DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS);
   CHECK(config.firstDropBeep);
   CHECK(config.paddleReturnReminderBeep);
   CHECK(config.buzzerScaleLostBeep);
@@ -1471,9 +1475,9 @@ void w03_runtime_timing_relations_are_transactional() {
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE);
   config = RuntimeConfig{};
-  config.shotTimerStartDelayMs = MAX_SHOT_TIMER_START_DELAY_MS + 1;
+  config.scaleTimerStopExtraDelayMs = MAX_SCALE_TIMER_STOP_EXTRA_DELAY_MS + 1;
   CHECK(validateRuntimeConfig(config) ==
-        ConfigValidationError::SHOT_TIMER_START_DELAY);
+        ConfigValidationError::SCALE_TIMER_STOP_EXTRA_DELAY);
 }
 
 void w04_wifi_credentials_have_strict_bounds() {
@@ -2654,26 +2658,44 @@ void r44_first_shot_after_reconnect_enters_brew() {
   CHECK(session.receivedFreshWeightInCycle);
 }
 
-void st01_shot_timer_start_delay_defers_fw_elapsed() {
+void st01_cycle_elapsed_follows_cn9_immediately() {
   resetHarness(false, true);
   reachReadyFromBoot();
-  runtimeConfig.shotTimerStartDelayMs = 200;
   startCycle();
-  CHECK(session.active);
-  CHECK(getRelaySafetySnapshot().closed);
-  CHECK(session.timerStartCommandQueued);
-  CHECK(!session.shotTimerArmed);
+  CHECK(executeNextScaleCommand());
   CHECK(cycleShotElapsedMs() == 0U);
-  const uint32_t armedAt = session.startedAtMs;
-  runLoopAfter(199);
-  CHECK(!session.shotTimerArmed);
-  CHECK(cycleShotElapsedMs() == 0U);
-  runLoopAfter(1);
-  CHECK(session.shotTimerArmed);
-  CHECK(session.shotTimerStartedAtMs == armedAt + 200U);
-  CHECK(cycleShotElapsedMs() == 0U);
+  runLoopAfter(200);
+  CHECK(cycleShotElapsedMs() >= 200U);
   runLoopAfter(50);
-  CHECK(cycleShotElapsedMs() == 50U);
+  CHECK(cycleShotElapsedMs() >= 250U);
+}
+
+void st02_scale_timer_stop_waits_for_lag_plus_extra() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.scaleTimerStopExtraDelayMs = 100;
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  CHECK(session.remoteTimerStarted);
+  runLoopAfter(200);
+  scaleTimerValid = true;
+  scaleTimerMs = 500;
+  runLoopAfter(0);
+  CHECK(session.scaleStartLagCaptured);
+  CHECK(session.scaleStartLagMs >= 200U);
+
+  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  CHECK(pendingScaleTimerStop.pending);
+  CHECK(!session.stopTimerRequested);
+
+  const uint32_t dueAt = pendingScaleTimerStop.dueAtMs;
+  runLoopAfter(dueAt - hostMillis - 1);
+  CHECK(pendingScaleTimerStop.pending);
+  CHECK(!session.stopTimerRequested);
+
+  runLoopAfter(1);
+  CHECK(!pendingScaleTimerStop.pending);
+  CHECK(session.stopTimerRequested);
 }
 
 void rt01_late_cup_triggers_single_retare() {
@@ -3154,6 +3176,56 @@ void s03_shot_log_clear_empties_records() {
   CHECK(shotLog.count() == 1);
   CHECK(shotLog.clear());
   CHECK(shotLog.count() == 0);
+}
+
+void s14_last_shot_persists_every_cycle() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  CHECK(!persistedLastShot.valid);
+  const uint32_t rawOnAt = startCycle();
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs + 100);
+  CHECK(persistedLastShot.valid);
+  CHECK(persistedLastShot.cycleId == lastCycle.cycleId);
+  CHECK(persistedLastShot.durationMs == lastCycle.durationMs);
+  CHECK(persistedLastShot.shotType ==
+        static_cast<uint8_t>(LastShotType::MANUAL));
+}
+
+void s15_last_shot_updates_weight_after_drip() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  persistedLastShot = PersistedLastShot{};
+  persistedLastShot.valid = true;
+  persistedLastShot.cycleId = 7;
+  persistedLastShot.weightValid = true;
+  persistedLastShot.currentWeightG = 10.0f;
+  persistLastShotSnapshot(persistedLastShot);
+
+  currentWeight = 36.4f;
+  currentWeightSequence = 5;
+  currentWeightReceivedAtMs = hostMillis + 1;
+  pendingFinalize = PendingShotFinalize{};
+  pendingFinalize.pending = true;
+  pendingFinalize.cycleId = 7;
+  pendingFinalize.logEligible = false;
+  pendingFinalize.startedWithScale = true;
+  pendingFinalize.lastKnownWeightValid = true;
+  pendingFinalize.lastKnownWeightG = 10.0f;
+  pendingFinalize.endedAtMs = hostMillis;
+  pendingFinalize.endedWeightSequence = 4;
+  runLoopAfter(DRIP_DELAY_MS);
+  CHECK(!pendingFinalize.pending);
+  CHECK(persistedLastShot.valid);
+  CHECK(fabsf(persistedLastShot.currentWeightG - 36.4f) < 0.001f);
+}
+
+void s16_last_shot_clear_empties_snapshot() {
+  resetHarness(false, false);
+  persistedLastShot.valid = true;
+  persistLastShotSnapshot(persistedLastShot);
+  CHECK(clearLastShot());
+  CHECK(!persistedLastShot.valid);
+  CHECK(!lastShotStore.get().valid);
 }
 
 void n01_wall_clock_tracks_utc_from_anchor() {
@@ -3824,7 +3896,8 @@ const TestCase testCases[] = {
     {"R54", r54_post_tare_baseline_keeps_weight_control},
     {"R44", r44_first_shot_after_reconnect_enters_brew},
     {"R45", r45_slew_rejection_emits_specific_debug_code},
-    {"ST01", st01_shot_timer_start_delay_defers_fw_elapsed},
+    {"ST01", st01_cycle_elapsed_follows_cn9_immediately},
+    {"ST02", st02_scale_timer_stop_waits_for_lag_plus_extra},
     {"RT01", rt01_late_cup_triggers_single_retare},
     {"RT02", rt02_sub_minimum_stable_cup_is_ignored},
     {"RT03", rt03_spike_without_stable_cup_does_not_retare},
@@ -3901,6 +3974,9 @@ const TestCase testCases[] = {
     {"S01", s01_shot_log_filters_short_and_rinse},
     {"S02", s02_shot_log_appends_after_drip_delay},
     {"S03", s03_shot_log_clear_empties_records},
+    {"S14", s14_last_shot_persists_every_cycle},
+    {"S15", s15_last_shot_updates_weight_after_drip},
+    {"S16", s16_last_shot_clear_empties_snapshot},
     {"S04", s04_shot_log_remove_by_id},
     {"S05", s05_shot_log_migrates_schema_v2},
     {"S06", s06_shot_log_local_sec_from_utc},

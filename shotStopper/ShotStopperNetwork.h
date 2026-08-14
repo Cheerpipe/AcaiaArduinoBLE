@@ -84,6 +84,7 @@ struct NetworkBridgeCallbacks {
   size_t (*copyShotRecords)(ShotLogRecord *output, size_t capacity) = nullptr;
   bool (*deleteShotRecord)(uint32_t id) = nullptr;
   bool (*clearShotLog)() = nullptr;
+  bool (*clearLastShot)() = nullptr;
   // Keeps NVS Wi-Fi/runtime saves from overwriting a newer preferred scale MAC.
   void (*copyPreferredScaleMac)(char *out, size_t capacity) = nullptr;
   void (*copyPreferredScaleName)(char *out, size_t capacity) = nullptr;
@@ -255,6 +256,7 @@ class ShotStopperNetwork {
   static esp_err_t shotsHandler(httpd_req_t *request);
   static esp_err_t shotsClearHandler(httpd_req_t *request);
   static esp_err_t shotsDeleteHandler(httpd_req_t *request);
+  static esp_err_t lastShotClearHandler(httpd_req_t *request);
   static esp_err_t timeSyncHandler(httpd_req_t *request);
   static esp_err_t configHandler(httpd_req_t *request);
   static esp_err_t preferredScaleClearHandler(httpd_req_t *request);

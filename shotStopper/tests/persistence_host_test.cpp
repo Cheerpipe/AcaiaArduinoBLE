@@ -1,6 +1,7 @@
 #define SHOT_STOPPER_PERSISTENCE_HOST_TEST
 #include "../ShotStopperPersistence.h"
 #include "../ShotStopperShotLog.h"
+#include "../ShotStopperLastShot.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -209,6 +210,38 @@ void p19_shot_log_weight_sentinel_allows_int16_max() {
   CHECK(shotLogWeightIsMissing(SHOT_LOG_WEIGHT_MISSING_LEGACY));
   CHECK(!shotLogWeightIsMissing(3600));
   CHECK(shotLogWeightToCentigrams(400.0f) == SHOT_LOG_WEIGHT_MISSING);
+}
+
+void p29_last_shot_persists_and_clears() {
+  persistence_host::reset();
+  LastShotStore store;
+  CHECK(store.load());
+  CHECK(!store.get().valid);
+
+  PersistedLastShot shot = {};
+  shot.valid = true;
+  shot.cycleId = 42;
+  shot.durationMs = 28500;
+  shot.goalWeightG = 36;
+  shot.weightValid = true;
+  shot.currentWeightG = 36.2f;
+  shot.shotType = static_cast<uint8_t>(LastShotType::AUTO);
+  strcpy(shot.scaleProtocol, "acaia");
+  CHECK(store.persist(shot));
+  CHECK(persistence_host::records.count("lastshot/record") == 1);
+
+  LastShotStore reloaded;
+  CHECK(reloaded.load());
+  CHECK(reloaded.get().valid);
+  CHECK(reloaded.get().cycleId == 42);
+  CHECK(reloaded.get().goalWeightG == 36);
+  CHECK(fabs(reloaded.get().currentWeightG - 36.2f) < 0.001f);
+  CHECK(strcmp(reloaded.get().scaleProtocol, "acaia") == 0);
+
+  CHECK(reloaded.clear());
+  LastShotStore emptied;
+  CHECK(emptied.load());
+  CHECK(!emptied.get().valid);
 }
 
 void p06_schema_twelve_migrates_to_thirteen() {
@@ -605,8 +638,8 @@ void p15_schema_fifteen_migrates_to_sixteen() {
   CHECK(loaded.runtime.autoToManualGuardManualLimitMs == 27000);
   CHECK(loaded.runtime.autoToManualGuardBaselineMs == 27000);
   CHECK(loaded.runtime.autoToManualGuardSamplesDs[4] == 250);
-  CHECK(loaded.runtime.shotTimerStartDelayMs ==
-        DEFAULT_SHOT_TIMER_START_DELAY_MS);
+  CHECK(loaded.runtime.scaleTimerStopExtraDelayMs ==
+        DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS);
   CHECK(strcmp(loaded.staSsid, "ShopWiFi") == 0);
 }
 
@@ -682,8 +715,8 @@ void p20_schema_sixteen_migrates_to_seventeen() {
   CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
   CHECK(loaded.runtime.goalWeightG == 40);
   CHECK(loaded.runtime.autoToManualGuardBaselineMs == 31000);
-  CHECK(loaded.runtime.shotTimerStartDelayMs ==
-        DEFAULT_SHOT_TIMER_START_DELAY_MS);
+  CHECK(loaded.runtime.scaleTimerStopExtraDelayMs ==
+        DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS);
   CHECK(strcmp(loaded.staSsid, "CafeWiFi") == 0);
   CHECK(loaded.preferredScaleMac[0] == '\0');
 }
@@ -703,7 +736,7 @@ void p21_schema_seventeen_migrates_to_current() {
   legacy.runtime.autoTare = current.runtime.autoTare;
   legacy.runtime.timerOnly = current.runtime.timerOnly;
   legacy.runtime.canTareStartTimer = current.runtime.canTareStartTimer;
-  legacy.runtime.shotTimerStartDelayMs = current.runtime.shotTimerStartDelayMs;
+  legacy.runtime.shotTimerStartDelayMs = 250;
   legacy.runtime.firstDropBeep = current.runtime.firstDropBeep;
   legacy.runtime.paddleReturnReminderBeep =
       current.runtime.paddleReturnReminderBeep;
@@ -861,7 +894,8 @@ void p22_schema_eighteen_migrates_to_nineteen() {
   CHECK(std::fabs(loaded.runtime.weightOffsetG - 2.75f) < 0.001f);
   CHECK(std::fabs(loaded.runtime.weightOffsetBaselineG -
                   DEFAULT_WEIGHT_OFFSET_G) < 0.001f);
-  CHECK(loaded.runtime.shotTimerStartDelayMs == 250);
+  CHECK(loaded.runtime.scaleTimerStopExtraDelayMs ==
+        DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS);
   CHECK(strcmp(loaded.staSsid, "CafeWiFi18") == 0);
   CHECK(strcmp(loaded.preferredScaleMac, "AA:BB:CC:DD:EE:FF") == 0);
 }
@@ -883,7 +917,7 @@ void p23_schema_nineteen_migrates_to_twenty_with_preset_bank() {
   legacy.runtime.autoTare = current.runtime.autoTare;
   legacy.runtime.timerOnly = false;
   legacy.runtime.canTareStartTimer = current.runtime.canTareStartTimer;
-  legacy.runtime.shotTimerStartDelayMs = current.runtime.shotTimerStartDelayMs;
+  legacy.runtime.shotTimerStartDelayMs = 250;
   legacy.runtime.firstDropBeep = current.runtime.firstDropBeep;
   legacy.runtime.paddleReturnReminderBeep =
       current.runtime.paddleReturnReminderBeep;
@@ -984,7 +1018,7 @@ void p27_schema_twenty_migrates_to_twenty_one() {
   runtimeV20.autoTare = current.runtime.autoTare;
   runtimeV20.timerOnly = current.runtime.timerOnly;
   runtimeV20.canTareStartTimer = current.runtime.canTareStartTimer;
-  runtimeV20.shotTimerStartDelayMs = current.runtime.shotTimerStartDelayMs;
+  runtimeV20.shotTimerStartDelayMs = 250;
   runtimeV20.firstDropBeep = current.runtime.firstDropBeep;
   runtimeV20.paddleReturnReminderBeep = current.runtime.paddleReturnReminderBeep;
   runtimeV20.paddleReturnReminderIntervalMs =
@@ -1069,7 +1103,7 @@ void p28_schema_twenty_one_migrates_to_twenty_two() {
   runtimeV21.autoTare = current.runtime.autoTare;
   runtimeV21.timerOnly = current.runtime.timerOnly;
   runtimeV21.canTareStartTimer = current.runtime.canTareStartTimer;
-  runtimeV21.shotTimerStartDelayMs = current.runtime.shotTimerStartDelayMs;
+  runtimeV21.shotTimerStartDelayMs = 250;
   runtimeV21.firstDropBeep = current.runtime.firstDropBeep;
   runtimeV21.paddleReturnReminderBeep = current.runtime.paddleReturnReminderBeep;
   runtimeV21.paddleReturnReminderIntervalMs =
@@ -1330,6 +1364,7 @@ const TestCase tests[] = {
     {"P17", p17_legacy_password_hash_still_verifies},
     {"P18", p18_shot_log_keeps_history_when_inactive_slot_write_fails},
     {"P19", p19_shot_log_weight_sentinel_allows_int16_max},
+    {"P29", p29_last_shot_persists_and_clears},
 };
 
 }  // namespace

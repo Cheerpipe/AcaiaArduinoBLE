@@ -208,7 +208,7 @@ if (!ui.includes('id="shotPanel"') ||
 if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !ui.includes('id="autoToManualGuardLimitMode"') ||
     !ui.includes('id="autoToManualGuardBaselineS"') ||
-    !ui.includes('id="shotTimerStartDelayMs"') ||
+    !ui.includes('id="scaleTimerStopExtraDelayMs"') ||
     !ui.includes('id="autoToManualGuardManualLimitS"') ||
     !ui.includes('id="autoToManualGuardTrendS"') ||
     !ui.includes('id="resetGuardSamplesButton"') ||
@@ -226,7 +226,7 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !ui.includes('actual_weight_source') ||
     !network.includes('autoToManualGuardEnabled') ||
     !network.includes('autoToManualGuardBaselineMs') ||
-    !network.includes('shotTimerStartDelayMs') ||
+    !network.includes('scaleTimerStopExtraDelayMs') ||
     !network.includes('autoToManualGuardTrendMs') ||
     !network.includes('autoToManualGuardEnforced') ||
     !network.includes('autoToManualGuardArmed') ||
@@ -276,6 +276,20 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('id="presetRenameDialog"') ||
     !ui.includes('id="homePresetCards"') ||
     !ui.includes('id="homeBrewByWeight"') ||
+    !ui.includes('id="quickSettingsPanel"') ||
+    html.indexOf('id="quickSettingsPanel"') > html.indexOf('id="shotPanel"') ||
+    html.indexOf('id="homeBrewByWeight"') > html.indexOf('id="shotPanel"') ||
+    !ui.includes('id="clearLastShotButton"') ||
+    html.indexOf('id="shotPanel"') > html.indexOf('id="clearLastShotButton"') ||
+    html.includes('id="lastCycle"') ||
+    !ui.includes('function renderShotPanel(') ||
+    !ui.includes("confirm:'CLEAR_LAST_SHOT'") ||
+    !ui.includes('/api/v1/last-shot/clear') ||
+    !network.includes('\\"lastShot\\"') ||
+    !network.includes('lastShotClearHandler') ||
+    !network.includes('LAST_SHOT_CLEAR_NOT_CONFIRMED') ||
+    !firmware.includes('persistLastShotFromEndedCycle') ||
+    !firmware.includes('clearLastShot') ||
     ui.includes('id="view-presets"') ||
     ui.includes('data-route="/presets"') ||
     ui.includes('id="presetsPageCards"') ||
@@ -358,7 +372,12 @@ if (!ui.includes('id="factoryResetButton"') ||
     !ui.includes("confirm('Restore all factory settings?") ||
     !ui.includes("confirm:'ERASE_ALL_SETTINGS'") ||
     !network.includes('FACTORY_RESET_NOT_CONFIRMED') ||
-    !network.includes('resetPersistedSettingsToFactory(next)')) {
+    !network.includes('resetPersistedSettingsToFactory(next)') ||
+    !ui.includes('id="restartPanel"') ||
+    html.indexOf('id="saveDateTimeButton"') > html.indexOf('id="restartPanel"') ||
+    html.indexOf('id="restartPanel"') > html.indexOf('id="factoryResetButton"') ||
+    html.slice(html.indexOf('id="actionsPanel"'), html.indexOf('id="view-history"'))
+        .includes('restartButton')) {
   throw new Error('Factory reset must require UI and server-side confirmation');
 }
 if (!ui.includes('id="staIpMode"') ||
@@ -428,6 +447,7 @@ const expected = new Map([
   ['GET /api/v1/shots', 'shotsHandler'],
   ['POST /api/v1/shots/clear', 'shotsClearHandler'],
   ['POST /api/v1/shots/delete', 'shotsDeleteHandler'],
+  ['POST /api/v1/last-shot/clear', 'lastShotClearHandler'],
   ['POST /api/v1/time/sync', 'timeSyncHandler'],
   ['POST /api/v1/network', 'networkHandler'],
   ['POST /api/v1/network/scan', 'wifiScanStartHandler'],

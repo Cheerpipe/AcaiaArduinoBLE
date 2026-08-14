@@ -195,8 +195,8 @@ const char *configValidationMessage(ConfigValidationError error) {
              "window, and BBW protection each ≤ CN9.";
     case ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE:
       return "The Bookoo combined command requires automatic tare.";
-    case ConfigValidationError::SHOT_TIMER_START_DELAY:
-      return "Shot timer start delay must be from 0 to 1000 ms.";
+    case ConfigValidationError::SCALE_TIMER_STOP_EXTRA_DELAY:
+      return "Scale timer stop extra delay must be from 0 to 1000 ms.";
     case ConfigValidationError::TIMEZONE_OFFSET:
       return "Timezone offset must be from -720 to +840 minutes.";
     case ConfigValidationError::NTP_SERVER_PRESET:
@@ -1585,6 +1585,9 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
       if (callbacks_.clearShotLog != nullptr) {
         callbacks_.clearShotLog();
       }
+      if (callbacks_.clearLastShot != nullptr) {
+        callbacks_.clearLastShot();
+      }
       factoryReset = true;
       authenticationChanged = true;
       restartPending_ = true;
@@ -1816,6 +1819,8 @@ bool ShotStopperNetwork::startHttpServer() {
                       shotsClearHandler) &&
       registerHandler(server_, "/api/v1/shots/delete", HTTP_POST,
                       shotsDeleteHandler) &&
+      registerHandler(server_, "/api/v1/last-shot/clear", HTTP_POST,
+                      lastShotClearHandler) &&
       registerHandler(server_, "/api/v1/time/sync", HTTP_POST,
                       timeSyncHandler) &&
       registerHandler(server_, "/api/v1/config", HTTP_POST, configHandler) &&
@@ -2367,6 +2372,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   char currentWeight[32] = "null";
   char observedWeight[32] = "null";
   char lastWeight[32] = "null";
+  char lastShotWeight[32] = "null";
   char scaleTimer[32] = "null";
   if (control.currentWeightValid) {
     snprintf(currentWeight, sizeof(currentWeight), "%.2f",
@@ -2384,6 +2390,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
     snprintf(lastWeight, sizeof(lastWeight), "%.2f",
              static_cast<double>(control.lastCycle.lastWeightG));
   }
+  if (control.lastShot.valid && control.lastShot.weightValid) {
+    snprintf(lastShotWeight, sizeof(lastShotWeight), "%.2f",
+             static_cast<double>(control.lastShot.currentWeightG));
+  }
 
   const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(millis());
   char safeNtpCustom[NTP_SERVER_HOST_CAPACITY] = {};
@@ -2395,6 +2405,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   char safeScaleProtocol[24] = {};
   sanitizeJsonEmbed(control.scaleProtocol, safeScaleProtocol,
                     sizeof(safeScaleProtocol));
+  char safeLastShotProtocol[24] = {};
+  sanitizeJsonEmbed(control.lastShot.scaleProtocol, safeLastShotProtocol,
+                    sizeof(safeLastShotProtocol));
   char safePreferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY * 2] = {};
   sanitizeJsonEmbed(control.preferredScaleMac, safePreferredScaleMac,
                     sizeof(safePreferredScaleMac));
@@ -2470,7 +2483,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"configMutable\":%s,\"config\":{\"revision\":%lu,"
       "\"goalWeightG\":%u,\"weightOffsetG\":%.2f,"
       "\"weightOffsetBaselineG\":%.2f,\"autoTare\":%s,\"brewByWeight\":%s,"
-      "\"canTareStartTimer\":%s,\"shotTimerStartDelayMs\":%lu,\"firstDropBeep\":%s,"
+      "\"canTareStartTimer\":%s,\"scaleTimerStopExtraDelayMs\":%lu,\"firstDropBeep\":%s,"
       "\"paddleReturnReminderBeep\":%s,"
       "\"paddleReturnReminderIntervalMs\":%lu,"
       "\"paddleReturnReminderMaxDurationMs\":%lu,"
@@ -2516,6 +2529,17 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"lastCycle\":{\"valid\":%s,"
       "\"durationMs\":%lu,\"endReason\":\"%s\","
       "\"lastWeightG\":%s,\"weightAgeMs\":%lu},"
+      "\"lastShot\":{\"valid\":%s,\"currentWeightG\":%s,"
+      "\"goalWeightG\":%u,\"extractionExtended\":%s,"
+      "\"activeStopWeightG\":%.1f,\"durationMs\":%lu,"
+      "\"firstDropElapsedMs\":%lu,\"retarePerformed\":%s,"
+      "\"shotType\":\"%s\",\"scaleProtocol\":\"%s\","
+      "\"scaleAvailable\":%s,\"fastExtractionGuardEnabled\":%s,"
+      "\"minBrewTimeRemainingMs\":%lu,"
+      "\"autoToManualGuardEnabled\":%s,"
+      "\"autoToManualGuardArmed\":%s,"
+      "\"autoToManualGuardEnforced\":%s,"
+      "\"autoToManualGuardRemainingMs\":%lu},"
       "\"network\":{\"networkActive\":%s,\"uiActive\":%s,"
       "\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
       "\"wifiConfigured\":%s,\"ssid\":\"%s\",\"open\":%s,\"staState\":\"%s\","
@@ -2576,7 +2600,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.config.autoTare ? "true" : "false",
       control.config.timerOnly ? "false" : "true",
       control.config.canTareStartTimer ? "true" : "false",
-      static_cast<unsigned long>(control.config.shotTimerStartDelayMs),
+      static_cast<unsigned long>(control.config.scaleTimerStopExtraDelayMs),
       control.config.firstDropBeep ? "true" : "false",
       control.config.paddleReturnReminderBeep ? "true" : "false",
       static_cast<unsigned long>(
@@ -2639,6 +2663,22 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(control.lastCycle.durationMs),
       endReasonName(control.lastCycle.endReason), lastWeight,
       static_cast<unsigned long>(control.lastCycle.weightAgeAtEndMs),
+      control.lastShot.valid ? "true" : "false", lastShotWeight,
+      static_cast<unsigned>(control.lastShot.goalWeightG),
+      control.lastShot.extractionExtended ? "true" : "false",
+      static_cast<double>(control.lastShot.activeStopWeightG),
+      static_cast<unsigned long>(control.lastShot.durationMs),
+      static_cast<unsigned long>(control.lastShot.firstDropElapsedMs),
+      control.lastShot.retarePerformed ? "true" : "false",
+      lastShotTypeName(static_cast<LastShotType>(control.lastShot.shotType)),
+      safeLastShotProtocol,
+      control.lastShot.scaleAvailable ? "true" : "false",
+      control.lastShot.fastExtractionGuardEnabled ? "true" : "false",
+      static_cast<unsigned long>(control.lastShot.minBrewTimeRemainingMs),
+      control.lastShot.autoToManualGuardEnabled ? "true" : "false",
+      control.lastShot.autoToManualGuardArmed ? "true" : "false",
+      control.lastShot.autoToManualGuardEnforced ? "true" : "false",
+      static_cast<unsigned long>(control.lastShot.autoToManualGuardRemainingMs),
       network.networkActive ? "true" : "false",
       network.uiAuthenticated ? "true" : "false",
       network.apActive ? "true" : "false", network.apIp,
@@ -2953,6 +2993,51 @@ esp_err_t ShotStopperNetwork::shotsClearHandler(httpd_req_t *request) {
   return sendJson(request, STATUS_OK, "{\"cleared\":true}");
 }
 
+esp_err_t ShotStopperNetwork::lastShotClearHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authenticate(request, true)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
+                     "Invalid session or CSRF token.");
+  }
+  ControlStatusSnapshot status;
+  self.callbacks_.copyControlStatus(status);
+  if (!controlAllowsConfiguration(status)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "Stop the cycle, switch the physical paddle OFF, and wait for Ready before clearing the last shot.");
+  }
+
+  char body[REQUEST_BODY_CAPACITY] = {};
+  char confirmation[32] = {};
+  if (!readJsonBody(request, body)) {
+    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
+                     "An explicit confirmation is required.");
+  }
+  cJSON *root = cJSON_Parse(body);
+  static const char *const fields[] = {"confirm"};
+  const bool parsed =
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
+      jsonString(root, "confirm", confirmation, sizeof(confirmation), false) &&
+      strcmp(confirmation, "CLEAR_LAST_SHOT") == 0;
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  memset(body, 0, sizeof(body));
+  memset(confirmation, 0, sizeof(confirmation));
+  if (!parsed) {
+    return sendError(request, STATUS_UNPROCESSABLE,
+                     "LAST_SHOT_CLEAR_NOT_CONFIRMED",
+                     "The last-shot clear was not explicitly confirmed.");
+  }
+
+  if (self.callbacks_.clearLastShot == nullptr ||
+      !self.callbacks_.clearLastShot()) {
+    return sendError(request, STATUS_UNAVAILABLE, "LAST_SHOT_CLEAR_FAILED",
+                     "Last shot could not be cleared.");
+  }
+  return sendJson(request, STATUS_OK, "{\"cleared\":true}");
+}
+
 esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   if (!self.authenticate(request, true)) {
@@ -3037,7 +3122,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   static const char *const fields[] = {
       "goalWeightG", "rinseGestureMs", "rinseDurationMs", "operationalWallMs",
       "autoTare", "brewByWeight",
-      "canTareStartTimer", "shotTimerStartDelayMs", "firstDropBeep",
+      "canTareStartTimer", "scaleTimerStopExtraDelayMs", "firstDropBeep",
       "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
       "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
@@ -3072,9 +3157,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (!jsonBoolean(root, "canTareStartTimer",
                           candidate.canTareStartTimer)) {
     parseError = "canTareStartTimer must be a boolean.";
-  } else if (!jsonUint32(root, "shotTimerStartDelayMs",
-                         candidate.shotTimerStartDelayMs)) {
-    parseError = "shotTimerStartDelayMs must be an integer (milliseconds).";
+  } else if (!jsonUint32(root, "scaleTimerStopExtraDelayMs",
+                         candidate.scaleTimerStopExtraDelayMs)) {
+    parseError = "scaleTimerStopExtraDelayMs must be an integer (milliseconds).";
   } else if (!jsonBoolean(root, "firstDropBeep",
                           candidate.firstDropBeep)) {
     parseError = "firstDropBeep must be a boolean.";
