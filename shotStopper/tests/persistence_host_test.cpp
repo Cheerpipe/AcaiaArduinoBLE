@@ -104,6 +104,11 @@ void p01_defaults_are_valid_v16() {
   CHECK(settings.preferredScaleName[0] == '\0');
   CHECK(settings.runtime.scaleMacCacheMode ==
         static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL));
+  CHECK(settings.runtime.alertOutputChannel ==
+        static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL));
+  CHECK(DEFAULT_ALERT_OUTPUT_CHANNEL ==
+        (BUZZER_SUPPORT_ENABLED ? AlertOutputChannel::BUZZER_ONLY
+                                : AlertOutputChannel::SCALE_ONLY));
   CHECK(settings.runtime.bookooMuteOnBuzzerOnly);
   CHECK(settings.runtime.bookooConnectBeepLevel ==
         DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL);
@@ -1174,7 +1179,7 @@ void p28_schema_twenty_one_migrates_to_twenty_two() {
   CHECK(loaded.runtime.buzzerAutoToManualGuardEndBeep);
   CHECK(loaded.runtime.buzzerManualNoScaleBeep);
   CHECK(loaded.runtime.alertOutputChannel ==
-        static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY));
+        static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL));
   CHECK(strcmp(loaded.preferredScaleMac, "AA:BB:CC:DD:EE:FF") == 0);
   CHECK(strcmp(loaded.preferredScaleName, "Lunar") == 0);
 }
@@ -1271,7 +1276,7 @@ void p30_schema_twenty_two_migrates_to_twenty_three() {
   CHECK(loaded.runtime.buzzerAutoToManualGuardEndBeep);
   CHECK(!loaded.runtime.buzzerManualNoScaleBeep);
   CHECK(loaded.runtime.alertOutputChannel ==
-        static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY));
+        static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL));
   CHECK(loaded.runtime.bookooMuteOnBuzzerOnly);
   CHECK(loaded.runtime.bookooConnectBeepLevel ==
         DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL);

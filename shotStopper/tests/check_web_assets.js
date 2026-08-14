@@ -163,6 +163,10 @@ if (!network.includes('"firstDropBeep"') ||
 if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0') ||
     !domain.includes('BUZZER_ACTIVE_DRIVE = SHOT_STOPPER_ENABLE_BUZZER == 2') ||
     !domain.includes('SHOT_STOPPER_ENABLE_BUZZER must be 0, 1, or 2') ||
+    !domain.includes('DEFAULT_ALERT_OUTPUT_CHANNEL') ||
+    !domain.includes(
+        'BUZZER_SUPPORT_ENABLED ? AlertOutputChannel::BUZZER_ONLY') ||
+    !domain.includes('static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL)') ||
     !buzzer.includes('BUZZER_ACTIVE_DRIVE') ||
     !buzzer.includes('ledcAttach') ||
     !buzzer.includes('digitalWrite(pin, HIGH)') ||
@@ -770,10 +774,34 @@ if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
     !firmware.includes('applyBookooConnectBeepPolicy') ||
     !firmware.includes('requestBookooSilenceIfConfigured') ||
     !firmware.includes('emitCommandAlert') ||
+    !firmware.includes('emitImmediateCommandAlertIfBuzzer') ||
+    !firmware.includes('commandAlertUsesBuzzer') ||
     /enum class ScaleCommandType[\s\S]*BEEP/.test(
       firmware.slice(firmware.indexOf('enum class ScaleCommandType'),
                      firmware.indexOf('enum class ScaleEventType')))) {
   throw new Error('Best-effort beep must stay outside the critical BLE command queue');
+}
+
+const emitCommandImplStart = firmware.indexOf(
+    '// BLE-result fallback only');
+const emitCommandImplEnd = firmware.indexOf(
+    'void requestScaleBrewBeep(uint32_t cycleId) {', emitCommandImplStart);
+const emitCommandImpl = emitCommandImplStart < 0 || emitCommandImplEnd < 0
+    ? ''
+    : firmware.slice(emitCommandImplStart, emitCommandImplEnd);
+if (!emitCommandImpl.includes('AlertOutputChannel::BUZZER_ONLY') ||
+    emitCommandImpl.includes('if (commandAlertUsesBuzzer())') ||
+    /if \(channel == AlertOutputChannel::BUZZER_ONLY\) \{\s*emitLocalAlertBuzzer/.test(
+        emitCommandImpl)) {
+  throw new Error('Buzzer-routed command alerts must not wait for BLE results');
+}
+const immediateCommandAlertCalls =
+    firmware.split('emitImmediateCommandAlertIfBuzzer();').length - 1;
+if (immediateCommandAlertCalls < 4 ||
+    !firmware.includes('emitImmediateCommandAlertIfBuzzer();\n    if (!requestRemoteTimerStart())') ||
+    !firmware.includes('emitImmediateCommandAlertIfBuzzer();\n  if (shotCompletionGetsDoubleBeep') ||
+    !firmware.includes('emitImmediateCommandAlertIfBuzzer();\n  markRetareEnded')) {
+  throw new Error('Command alerts must fire at CN9/paddle/retare, not after BLE');
 }
 
 (async () => {

@@ -93,6 +93,9 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   pendingFinalize = PendingShotFinalize{};
   pendingScaleTimerStop = PendingScaleTimerStop{};
   runtimeConfig = RuntimeConfig{};
+  // Host scenarios cover scale-path alerts unless a test sets the channel.
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
   runtimeConfig.autoRetare = false;
   runtimeConfig.bbwProtectionMs = 3000;
   runtimeConfig.fastExtractionGuardEnabled = false;
@@ -1438,7 +1441,10 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.buzzerAutoToManualGuardEndBeep);
   CHECK(config.buzzerManualNoScaleBeep);
   CHECK(config.alertOutputChannel ==
-        static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY));
+        static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL));
+  CHECK(DEFAULT_ALERT_OUTPUT_CHANNEL ==
+        (BUZZER_SUPPORT_ENABLED ? AlertOutputChannel::BUZZER_ONLY
+                                : AlertOutputChannel::SCALE_ONLY));
   CHECK(config.bookooMuteOnBuzzerOnly);
   CHECK(config.bookooConnectBeepLevel == DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL);
   CHECK(config.fastExtractionGuardEnabled);
@@ -2490,6 +2496,102 @@ void w75_bookoo_discovery_connect_applies_beep_policy() {
                               seenPreferredResetGeneration, scanSessionAtMs);
   CHECK(scale.commandLog.size() == 1);
   CHECK(scale.commandLog[0] == "setBeepLevel:0");
+}
+
+void w76_buzzer_only_start_beeps_at_cn9_not_ble_result() {
+  resetHarness(false, true);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  reachReadyFromBoot();
+  const uint32_t before = localBuzzer.acceptedRequests;
+  startCycle();
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
+  CHECK(executeNextScaleCommand());
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+}
+
+void w77_scale_priority_disconnected_beeps_on_cn9_without_ble() {
+  resetHarness(false, false);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+  reachReadyFromBoot();
+  const uint32_t before = localBuzzer.acceptedRequests;
+  startCycle();
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 0);
+  const uint32_t afterStart = localBuzzer.acceptedRequests;
+  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(localBuzzer.acceptedRequests == afterStart + 1);
+  CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
+}
+
+void w78_scale_priority_connected_start_does_not_use_buzzer() {
+  resetHarness(false, true);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+  reachReadyFromBoot();
+  const uint32_t before = localBuzzer.acceptedRequests;
+  startCycle();
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(localBuzzer.acceptedRequests == before);
+  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
+  CHECK(executeNextScaleCommand());
+  CHECK(localBuzzer.acceptedRequests == before);
+}
+
+void w79_buzzer_only_stop_beeps_before_timer_stop_result() {
+  resetHarness(false, true);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  const uint32_t before = localBuzzer.acceptedRequests;
+  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
+  CHECK(executeNextScaleCommand());
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+}
+
+void w80_buzzer_only_retare_beeps_before_tare_result() {
+  resetHarness(false, true);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  runtimeConfig.autoRetare = true;
+  runtimeConfig.bbwProtectionMs = minimumBbwProtectionMs(runtimeConfig);
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+  CHECK(retareWindowOpen());
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  const uint32_t before = localBuzzer.acceptedRequests;
+  publishStableCupWeight(150.0f, 10);
+  CHECK(session.retarePerformed);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(commandCount(ScaleCommandType::TARE_ONLY) == 1);
+  CHECK(executeNextScaleCommand());
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+}
+
+void w81_scale_priority_failed_start_falls_back_after_disconnect() {
+  resetHarness(false, true);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
+  const uint32_t before = localBuzzer.acceptedRequests;
+  setScaleConnected(false);
+  CHECK(executeNextScaleCommand());
+  CHECK(localBuzzer.acceptedRequests == before + 1);
 }
 
 void setHostPreferredScaleMac(const char *mac) {
@@ -4506,6 +4608,12 @@ const TestCase testCases[] = {
     {"W73", w73_apply_config_buzzer_only_sends_bookoo_silence},
     {"W74", w74_apply_config_enabling_mute_sends_silence_only_in_buzzer_only},
     {"W75", w75_bookoo_discovery_connect_applies_beep_policy},
+    {"W76", w76_buzzer_only_start_beeps_at_cn9_not_ble_result},
+    {"W77", w77_scale_priority_disconnected_beeps_on_cn9_without_ble},
+    {"W78", w78_scale_priority_connected_start_does_not_use_buzzer},
+    {"W79", w79_buzzer_only_stop_beeps_before_timer_stop_result},
+    {"W80", w80_buzzer_only_retare_beeps_before_tare_result},
+    {"W81", w81_scale_priority_failed_start_falls_back_after_disconnect},
     {"D01", d01_idle_scan_stays_enabled_between_ticks},
     {"D02", d02_partial_falls_back_to_name_scan_without_backoff},
     {"D03", d03_scan_start_failed_uses_backoff},

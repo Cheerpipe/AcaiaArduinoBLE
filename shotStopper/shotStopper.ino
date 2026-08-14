@@ -301,6 +301,8 @@ enum class AlertEvent : uint8_t {
 };
 
 bool emitAlert(AlertEvent event, uint32_t cycleId = 0);
+bool commandAlertUsesBuzzer();
+void emitImmediateCommandAlertIfBuzzer();
 void emitCommandAlert(AlertEvent event, bool commandAttempted,
                       bool writeSucceeded);
 
@@ -2104,6 +2106,7 @@ void performAutomaticRetare() {
   session.retarePerformed = true;
   resetRetareStabilityStreak();
   (void)requestRemoteRetare();
+  emitImmediateCommandAlertIfBuzzer();
   markRetareEnded(millis());
 }
 
@@ -3217,20 +3220,41 @@ bool emitAlert(AlertEvent event, uint32_t cycleId) {
   return emitLocalAlertBuzzer(buzzerPattern);
 }
 
-// Command-side events (tare/start/stop): scale path uses native Bookoo beep;
-// buzzer path emits SINGLE when routing says the buzzer replaces the scale.
+bool commandAlertUsesBuzzer() {
+  if (!BUZZER_SUPPORT_ENABLED || !localBuzzer.ready) {
+    return false;
+  }
+  const AlertOutputChannel channel = currentAlertOutputChannel();
+  if (channel == AlertOutputChannel::BUZZER_ONLY) {
+    return true;
+  }
+  if (channel == AlertOutputChannel::SCALE_PRIORITY) {
+    return !scaleAvailable();
+  }
+  return false;
+}
+
+// Tare/start/stop replacement sounds: fire at the local CN9/paddle/retare
+// moment when the buzzer is the routed output. Never wait for BLE.
+void emitImmediateCommandAlertIfBuzzer() {
+  if (commandAlertUsesBuzzer()) {
+    emitLocalAlertBuzzer(BuzzerPattern::SINGLE);
+  }
+}
+
+// BLE-result fallback only. Buzzer only already played at the local event.
+// SCALE_PRIORITY still falls back here if the write missed, even if the
+// scale dropped while the ATT write was in flight.
 void emitCommandAlert(AlertEvent event, bool commandAttempted,
                       bool writeSucceeded) {
   const AlertOutputChannel channel = currentAlertOutputChannel();
   if (channel == AlertOutputChannel::BUZZER_ONLY) {
-    emitLocalAlertBuzzer(BuzzerPattern::SINGLE);
     return;
   }
   if (channel == AlertOutputChannel::SCALE_ONLY) {
     (void)event;
     return;
   }
-  // SCALE_PRIORITY: native beep when the scale write landed; otherwise buzzer.
   if (!commandAttempted || !writeSucceeded) {
     emitLocalAlertBuzzer(BuzzerPattern::SINGLE);
   }
@@ -4161,6 +4185,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
   session.cn9ClosedAtMs = getRelaySafetySnapshot().closedAtMs;
 
   if (session.startedWithScale) {
+    emitImmediateCommandAlertIfBuzzer();
     if (!requestRemoteTimerStart()) {
       session.automaticEnabled = false;
       session.scaleWasLost = true;
@@ -4192,6 +4217,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
       runtimeConfig.buzzerAutoToManualGuardEndBeep) {
     emitAlert(AlertEvent::ATM_END);
   }
+  emitImmediateCommandAlertIfBuzzer();
   if (shotCompletionGetsDoubleBeep(reason)) {
     scheduleScaleCompletionBeep();
   }
@@ -4542,13 +4568,15 @@ void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
     return;
   }
   session.cn9ClosedAtMs = getRelaySafetySnapshot().closedAtMs;
-  if (session.startedWithScale &&
-      !requestRemoteTimerStart()) {
-    session.startedWithScale = false;
-    session.automaticEnabled = false;
-    session.scaleWasLost = true;
-    serialTrace(LogLevel::WARNING,
-                "Scale start command unavailable; web rinse marked manual");
+  if (session.startedWithScale) {
+    emitImmediateCommandAlertIfBuzzer();
+    if (!requestRemoteTimerStart()) {
+      session.startedWithScale = false;
+      session.automaticEnabled = false;
+      session.scaleWasLost = true;
+      serialTrace(LogLevel::WARNING,
+                  "Scale start command unavailable; web rinse marked manual");
+    }
   }
   transitionTo(StopperState::RINSE);
   maybeRequestNtpSyncOnActivity();

@@ -1427,7 +1427,7 @@ inline void migrateRuntimeConfigV20ToCurrent(const RuntimeConfigV20 &legacy,
   runtime.buzzerAutoToManualGuardEndBeep = true;
   runtime.buzzerManualNoScaleBeep = true;
   runtime.alertOutputChannel =
-      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+      static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL);
 }
 
 inline void migrateRuntimeConfigV21ToCurrent(const RuntimeConfigV21 &legacy,
@@ -1477,7 +1477,7 @@ inline void migrateRuntimeConfigV21ToCurrent(const RuntimeConfigV21 &legacy,
   runtime.buzzerAutoToManualGuardEndBeep = true;
   runtime.buzzerManualNoScaleBeep = true;
   runtime.alertOutputChannel =
-      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+      static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL);
 }
 
 inline void migrateRuntimeConfigV22ToCurrent(const RuntimeConfigV22 &legacy,
@@ -1501,7 +1501,7 @@ inline void migrateRuntimeConfigV22ToCurrent(const RuntimeConfigV22 &legacy,
   runtime.buzzerAutoToManualGuardEndBeep = legacy.buzzerAutoToManualGuardEndBeep;
   runtime.buzzerManualNoScaleBeep = legacy.buzzerManualNoScaleBeep;
   runtime.alertOutputChannel =
-      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+      static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL);
   runtime.reservedConfig = legacy.reservedConfig;
   runtime.rinseGestureMs = legacy.rinseGestureMs;
   runtime.rinseDurationMs = legacy.rinseDurationMs;

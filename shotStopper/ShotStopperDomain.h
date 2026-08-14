@@ -313,6 +313,10 @@ inline bool validAlertOutputChannel(uint8_t channel) {
   return channel <= static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
 }
 
+constexpr AlertOutputChannel DEFAULT_ALERT_OUTPUT_CHANNEL =
+    BUZZER_SUPPORT_ENABLED ? AlertOutputChannel::BUZZER_ONLY
+                           : AlertOutputChannel::SCALE_ONLY;
+
 inline const char *alertOutputChannelId(uint8_t channel) {
   switch (static_cast<AlertOutputChannel>(channel)) {
     case AlertOutputChannel::SCALE_ONLY:
@@ -322,7 +326,7 @@ inline const char *alertOutputChannelId(uint8_t channel) {
     case AlertOutputChannel::SCALE_PRIORITY:
       return "scale_priority";
   }
-  return "scale_priority";
+  return BUZZER_SUPPORT_ENABLED ? "buzzer_only" : "scale_only";
 }
 
 inline bool parseAlertOutputChannel(const char *text, uint8_t &channel) {
@@ -350,7 +354,7 @@ inline AlertOutputChannel effectiveAlertOutputChannel(uint8_t stored) {
     return AlertOutputChannel::SCALE_ONLY;
   }
   if (!validAlertOutputChannel(stored)) {
-    return AlertOutputChannel::SCALE_PRIORITY;
+    return DEFAULT_ALERT_OUTPUT_CHANNEL;
   }
   return static_cast<AlertOutputChannel>(stored);
 }
@@ -566,8 +570,9 @@ struct RuntimeConfig {
   bool buzzerAutoToManualGuardEndBeep = true;
   bool buzzerManualNoScaleBeep = true;
   // scale_only | buzzer_only | scale_priority (ignored when buzzer not compiled).
+  // Default: buzzer_only with SHOT_STOPPER_ENABLE_BUZZER, else scale_only.
   uint8_t alertOutputChannel =
-      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+      static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL);
   // Keeps schema-23 NVS blob size distinct from schema 22.
   uint32_t reservedConfig = 0;
   uint32_t reservedConfig2 = 0;
