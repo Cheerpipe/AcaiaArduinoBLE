@@ -129,7 +129,7 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | **Retare window (s)** | Time after shot start to detect and retare a late-placed cup (default 4 s). |
 | **Minimum cup weight (g)** | Stable load threshold that qualifies as a cup for retare (default 10 g). |
 | **Retare stability** | Samples (default 3), tolerance (default 2.0 g), max sample gap (default 0.5 s), and min stable time (default 0.3 s) required before retare fires. |
-| **BBW protection (s)** | **Pre-arm / accidental-weight protection window** at shot start for automatic BBW: inhibits automatic weight stop until first drops are detected or the timeout expires (default 12 s; minimum retare window + 3 s). Runs in parallel with retare. Skipped when Brew by weight is off. |
+| **BBW protection (s)** | **Pre-arm / accidental-weight protection window** at shot start for automatic BBW: inhibits automatic weight stop until the timeout expires (default 12 s; minimum retare window + 3 s). Runs in parallel with retare and first-drop detection; first drops do not end this window. Skipped when Brew by weight is off. |
 | **Quick rinse gesture (s)** | Maximum paddle ON time that still counts as a quick rinse when released (default 1 s). |
 | **Quick rinse duration (s)** | How long CN9 stays closed after a quick rinse starts (default 4 s). |
 | **Timezone offset (min)** | Wall-clock offset for shot history labels (default UTC+0). |
@@ -430,9 +430,10 @@ BBW protection run in parallel from shot start and do not delay that entry.
 
 1. **Automatic retare** (if enabled): stable cup load after shot start triggers
    a second tare without restarting the shot timer.
-2. **BBW protection / pre-arm** (always active for automatic BBW): waits for
-   reliable first drops or times out. Automatic stop by weight is inhibited
-   while retare or BBW protection still blocks.
+2. **BBW protection / pre-arm** (always active for automatic BBW): runs for the
+   configured timeout from shot start. Automatic stop by weight is inhibited
+   while retare or BBW protection still blocks. First drops beep and log but
+   do not end this window.
 3. **Brew by weight**: after both windows end, direct threshold and predictive
    stop are armed immediately.
 

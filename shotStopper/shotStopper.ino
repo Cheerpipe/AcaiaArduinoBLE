@@ -2021,13 +2021,6 @@ bool retareWindowOpen() {
   return elapsedMs(session.startedAtMs) < session.config.retareWindowMs;
 }
 
-bool retareHasEnded() {
-  if (!bbwAutomaticScaleSession() || !session.config.autoRetare) {
-    return true;
-  }
-  return session.retareEnded;
-}
-
 bool bbwProtectionActive() {
   if (!bbwAutomaticScaleSession()) {
     return false;
@@ -2035,39 +2028,16 @@ bool bbwProtectionActive() {
   return !session.bbwProtectionEnded;
 }
 
-void endBbwProtectionDueToRetareFlow(uint32_t receivedAtMs) {
-  session.bbwProtectionEnded = true;
-  resetDirectStopConfirmation();
-  if (session.firstDropMs == 0) {
-    session.firstDropMs = session.retareFlowFirstDetectedAtMs != 0
-                              ? session.retareFlowFirstDetectedAtMs
-                              : receivedAtMs;
-  }
-}
-
 void resetRetareStabilityStreak();
 
 void markRetareEnded(uint32_t endedAtMs) {
+  (void)endedAtMs;
   if (session.retareEnded) {
     return;
   }
   session.retareEnded = true;
   session.retareDisabled = true;
   resetRetareStabilityStreak();
-  if (session.flowDuringRetare && !session.retarePerformed) {
-    endBbwProtectionDueToRetareFlow(endedAtMs);
-  }
-}
-
-void endBbwProtection(uint32_t receivedAtMs, bool allowBeep) {
-  (void)receivedAtMs;
-  session.bbwProtectionEnded = true;
-  resetDirectStopConfirmation();
-  if (allowBeep && !session.firstDropsBeepSent &&
-      session.config.firstDropBeep && retareHasEnded()) {
-    emitAlert(AlertEvent::FIRST_DROP, session.id);
-    session.firstDropsBeepSent = true;
-  }
 }
 
 bool bbwWeightStopInhibited() {
@@ -2098,7 +2068,7 @@ void onFirstDropsDetected(uint32_t receivedAtMs) {
     return;
   }
   recordFirstDropTimestamp(receivedAtMs);
-  endBbwProtection(receivedAtMs, true);
+  requestFirstDropBeep();
 }
 
 void performAutomaticRetare() {

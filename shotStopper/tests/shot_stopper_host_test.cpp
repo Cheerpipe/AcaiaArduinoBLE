@@ -417,18 +417,12 @@ void endBbwProtectionForTests() {
   if (session.bbwProtectionEnded) {
     return;
   }
-  if (session.automaticEnabled && scale.connected && !runtimeConfig.timerOnly &&
-      session.weightControlState != WeightControlState::SUSPENDED) {
-    simulateFirstDrops();
-  }
-  if (!session.bbwProtectionEnded) {
-    const uint32_t target = session.config.bbwProtectionMs;
-    const uint32_t current = elapsedMs(session.startedAtMs);
-    if (current < target) {
-      runLoopAfter(target - current);
-    } else {
-      loop();
-    }
+  const uint32_t target = session.config.bbwProtectionMs;
+  const uint32_t current = elapsedMs(session.startedAtMs);
+  if (current < target) {
+    runLoopAfter(target - current);
+  } else {
+    loop();
   }
   waitForBbwProtectionEnded();
 }
@@ -3556,6 +3550,8 @@ void rt09_coffee_during_retare_beep_on_first_drop_not_at_retare_end() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.autoRetare = true;
+  runtimeConfig.bbwProtectionMs =
+      minimumBbwProtectionMs(runtimeConfig);
   runtimeConfig.firstDropBeep = true;
   startCycle();
   CHECK(executeNextScaleCommand());
@@ -3569,7 +3565,8 @@ void rt09_coffee_during_retare_beep_on_first_drop_not_at_retare_end() {
   CHECK(!session.retarePerformed);
   CHECK(scaleBeepPending);
   waitForRetareEnded();
-  CHECK(session.bbwProtectionEnded);
+  CHECK(!session.bbwProtectionEnded);
+  CHECK(bbwWeightStopInhibited());
   publishStableCupWeight(150.0f, 20);
   CHECK(commandCount(ScaleCommandType::TARE_ONLY) == 0);
 }
@@ -3590,6 +3587,11 @@ void rt10_first_drops_beep_during_bbw_protection() {
   simulateFirstDrops(0.0f, 10);
   CHECK(session.firstDropMs != 0);
   CHECK(scaleBeepPending);
+  CHECK(!session.bbwProtectionEnded);
+  CHECK(bbwWeightStopInhibited());
+  waitForBbwProtectionEnded();
+  CHECK(session.bbwProtectionEnded);
+  CHECK(!bbwWeightStopInhibited());
 }
 
 void rs01_fast_samples_wait_for_min_duration() {
