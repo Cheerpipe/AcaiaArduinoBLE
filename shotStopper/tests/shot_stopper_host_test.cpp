@@ -2159,6 +2159,7 @@ void attemptBlockedNoScaleStart() {
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(noScaleShotGuardArmed);
   CHECK(noScaleShotGuardHold);
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
   runLoopAfter(runtimeConfig.rinseGestureMs + 1);
   CHECK(stopperState == StopperState::READY);
   CHECK(!session.active);
@@ -2263,6 +2264,7 @@ void ns08_blocked_beep_respects_alert_checkbox() {
   const uint32_t before = localBuzzer.acceptedRequests;
   setRawPaddle(true);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(localBuzzer.acceptedRequests == before);
   runLoopAfter(runtimeConfig.rinseGestureMs + 1);
   CHECK(stopperState == StopperState::READY);
   CHECK(!noScaleShotGuardArmed);
@@ -2281,13 +2283,14 @@ void ns09_armed_rinse_gesture_runs_and_stays_armed() {
   CHECK(stopperState == StopperState::READY);
   CHECK(noScaleShotGuardArmed);
   CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
   releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
   CHECK(stopperState == StopperState::RINSE);
   CHECK(getRelaySafetySnapshot().closed);
   CHECK(noScaleShotGuardArmed);
   CHECK(debugEventExists(DebugCode::RINSE_CLASSIFIED));
   CHECK(!debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED));
-  CHECK(localBuzzer.acceptedRequests == beforeBeeps);
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
 }
 
 void ns10_idle_rinse_gesture_does_not_rearm() {
@@ -2296,11 +2299,14 @@ void ns10_idle_rinse_gesture_does_not_rearm() {
   reachReadyFromBoot();
   attemptBlockedNoScaleStart();
   CHECK(!noScaleShotGuardArmed);
+  const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
   const uint32_t rawOnAt = startCycle();
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
   releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
   CHECK(stopperState == StopperState::RINSE);
   CHECK(!noScaleShotGuardArmed);
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
 }
 
 void w54_local_buzzer_triple_on_auto_to_manual_guard_end() {

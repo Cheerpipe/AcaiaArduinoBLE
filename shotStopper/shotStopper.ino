@@ -4121,13 +4121,27 @@ bool noScaleShotGuardWouldBlock() {
          !scaleUsable && noScaleShotGuardArmed;
 }
 
+void maybeEmitManualNoScaleBeep() {
+  if (!runtimeConfig.buzzerManualNoScaleBeep) {
+    return;
+  }
+  const RuntimeConfig effective = effectiveRuntimeConfig();
+  if (effective.timerOnly) {
+    return;
+  }
+  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
+  const bool scaleUsable =
+      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
+  if (scaleUsable) {
+    return;
+  }
+  emitAlert(AlertEvent::MANUAL_NO_SCALE);
+}
+
 void blockNoScaleShotGuard() {
   noScaleShotGuardHold = false;
   consumeNoScaleShotGuard();
   addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED);
-  if (runtimeConfig.buzzerManualNoScaleBeep) {
-    emitAlert(AlertEvent::MANUAL_NO_SCALE);
-  }
 }
 
 void serviceNoScaleShotGuard() {
@@ -4156,6 +4170,7 @@ void serviceNoScaleShotGuard() {
 void beginCycle(ControlSource source = ControlSource::PHYSICAL,
                 uint32_t webSessionId = 0,
                 uint32_t controlLeaseId = 0) {
+  maybeEmitManualNoScaleBeep();
   if (noScaleShotGuardWouldBlock()) {
     if (source == ControlSource::PHYSICAL) {
       noScaleShotGuardHold = true;
@@ -4401,10 +4416,6 @@ void enterBrewOrManualFromStart() {
   session.bbwProtectionEnded = true;
   addDebugEvent(DebugCategory::STATE, DebugCode::MANUAL_CYCLE_STARTED);
   transitionTo(StopperState::MANUAL_NO_SCALE);
-  if (runtimeConfig.buzzerManualNoScaleBeep && !session.config.timerOnly &&
-      !session.startedWithScale) {
-    emitAlert(AlertEvent::MANUAL_NO_SCALE);
-  }
 }
 
 void demoteActiveCycleToRinseOrEnd() {
