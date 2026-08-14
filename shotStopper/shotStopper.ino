@@ -296,9 +296,12 @@ enum class AlertEvent : uint8_t {
   COMPLETION_EXTRA,
   SCALE_LOST,
   ATM_END,
-  MANUAL_NO_SCALE
+  MANUAL_NO_SCALE,
+  EXTENDED_PULSE
 };
 
+bool startExtendedPulseTrain(uint32_t durationMs);
+bool startPulseTrain(BuzzerPattern pattern, uint32_t durationMs);
 bool emitAlert(AlertEvent event, uint32_t cycleId = 0);
 bool commandAlertUsesBuzzer();
 void emitImmediateCommandAlertIfBuzzer();
@@ -2295,6 +2298,10 @@ void considerDirectStopSample(float weight, uint32_t receivedAtMs,
       addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_ENTERED,
                     static_cast<int32_t>(weight * 100.0f),
                     static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+      if (buzzerPatternForExtendedPulseRate(
+              runtimeConfig.buzzerExtendedPulseRate) != BuzzerPattern::NONE) {
+        emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
+      }
     }
     resetDirectStopConfirmation();
     return;
@@ -3157,15 +3164,42 @@ bool alertEventScaleCapable(AlertEvent event) {
     case AlertEvent::SCALE_LOST:
     case AlertEvent::ATM_END:
     case AlertEvent::MANUAL_NO_SCALE:
+    case AlertEvent::EXTENDED_PULSE:
       return false;
     default:
       return true;
   }
 }
 
+bool startPulseTrain(BuzzerPattern pattern, uint32_t durationMs) {
+  if (!BUZZER_SUPPORT_ENABLED || !localBuzzer.ready ||
+      !buzzerPatternIsPulseTrain(pattern)) {
+    return false;
+  }
+  return localBuzzer.request(pattern, durationMs);
+}
+
+bool startExtendedPulseTrain(uint32_t durationMs) {
+  return startPulseTrain(
+      buzzerPatternForExtendedPulseRate(runtimeConfig.buzzerExtendedPulseRate),
+      durationMs);
+}
+
+void stopPulseTrains() {
+  if (buzzerPatternIsPulseTrain(localBuzzer.pending)) {
+    localBuzzer.stopIf(localBuzzer.pending);
+  }
+  if (buzzerPatternIsPulseTrain(localBuzzer.active)) {
+    localBuzzer.stopIf(localBuzzer.active);
+  }
+}
+
 bool emitLocalAlertBuzzer(BuzzerPattern pattern) {
   if (!BUZZER_SUPPORT_ENABLED || !localBuzzer.ready) {
     return false;
+  }
+  if (buzzerPatternIsPulseTrain(pattern)) {
+    return startPulseTrain(pattern, 0);
   }
   return localBuzzer.request(pattern);
 }
@@ -3197,6 +3231,12 @@ bool emitAlert(AlertEvent event, uint32_t cycleId) {
   if (event == AlertEvent::SCALE_LOST || event == AlertEvent::ATM_END ||
       event == AlertEvent::MANUAL_NO_SCALE) {
     buzzerPattern = BuzzerPattern::TRIPLE;
+  } else if (event == AlertEvent::EXTENDED_PULSE) {
+    buzzerPattern =
+        buzzerPatternForExtendedPulseRate(runtimeConfig.buzzerExtendedPulseRate);
+    if (buzzerPattern == BuzzerPattern::NONE) {
+      return false;
+    }
   }
 
   if (!scaleCapable) {
@@ -3358,6 +3398,29 @@ void cancelScaleCompletionBeep() {
   portENTER_CRITICAL(&scaleBeepMux);
   scaleCompletionBeepPending = false;
   portEXIT_CRITICAL(&scaleBeepMux);
+}
+
+void serviceExtendedPulseAlert() {
+  const BuzzerPattern pattern =
+      buzzerPatternForExtendedPulseRate(runtimeConfig.buzzerExtendedPulseRate);
+  const bool want =
+      BUZZER_SUPPORT_ENABLED && localBuzzer.ready && session.active &&
+      session.extractionExtended && pattern != BuzzerPattern::NONE &&
+      currentAlertOutputChannel() != AlertOutputChannel::SCALE_ONLY;
+  if (!want) {
+    if (buzzerPatternIsPulseTrain(localBuzzer.active) &&
+        localBuzzer.deadlineAtMs == 0) {
+      localBuzzer.stopIf(localBuzzer.active);
+    }
+    return;
+  }
+  if (localBuzzer.active == pattern || localBuzzer.pending == pattern) {
+    return;
+  }
+  if (localBuzzer.busy()) {
+    return;
+  }
+  emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
 }
 
 void serviceScaleCompletionBeep() {
@@ -4140,6 +4203,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
 
   // Physical flow always stops before the non-blocking BLE command is queued.
   setCn9Closed(false);
+  stopPulseTrains();
   cancelScaleBrewBeep(session.id);
   cancelScaleCompletionBeep();
   session.endReason = reason;
@@ -4762,6 +4826,7 @@ void processWebCommand(const WebCommand &command) {
       candidate.buzzerAutoToManualGuardEndBeep =
           command.config.buzzerAutoToManualGuardEndBeep;
       candidate.buzzerManualNoScaleBeep = command.config.buzzerManualNoScaleBeep;
+      candidate.buzzerExtendedPulseRate = command.config.buzzerExtendedPulseRate;
       candidate.alertOutputChannel = command.config.alertOutputChannel;
       candidate.bookooMuteOnBuzzerOnly = command.config.bookooMuteOnBuzzerOnly;
       candidate.bookooConnectBeepLevel = command.config.bookooConnectBeepLevel;
@@ -4992,7 +5057,12 @@ void processWebCommand(const WebCommand &command) {
         rejectWebCommand(command);
         return;
       }
-      if (!localBuzzer.request(command.buzzerPattern)) {
+      const bool accepted =
+          buzzerPatternIsPulseTrain(command.buzzerPattern)
+              ? startPulseTrain(command.buzzerPattern,
+                                BUZZER_PULSE_TRAIN_DEBUG_MS)
+              : localBuzzer.request(command.buzzerPattern);
+      if (!accepted) {
         rejectWebCommand(command);
         return;
       }
@@ -5707,6 +5777,7 @@ void loop() {
   processScaleWorkerEvents();
   stateMachineTask();
   servicePaddleReturnReminder();
+  serviceExtendedPulseAlert();
   localBuzzer.service(millis());
   serviceScaleCompletionBeep();
   maybeCaptureScaleStartLag();

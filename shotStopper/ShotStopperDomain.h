@@ -11,8 +11,9 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 24;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 23;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 25;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 24;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V24 = 24;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V23 = 23;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V22 = 22;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V21 = 21;
@@ -234,8 +235,19 @@ enum class BuzzerPattern : uint8_t {
   SINGLE = 1,
   TRIPLE = 2,
   DOUBLE = 3,
-  LONG = 4
+  LONG = 4,
+  PULSE_TRAIN = 5,
+  PULSE_3HZ = 6,
+  PULSE_4HZ = 7,
+  PULSE_5HZ = 8
 };
+
+inline bool buzzerPatternIsPulseTrain(BuzzerPattern pattern) {
+  return pattern == BuzzerPattern::PULSE_TRAIN ||
+         pattern == BuzzerPattern::PULSE_3HZ ||
+         pattern == BuzzerPattern::PULSE_4HZ ||
+         pattern == BuzzerPattern::PULSE_5HZ;
+}
 
 inline bool parseBuzzerPatternId(const char *id, BuzzerPattern &out) {
   if (id == nullptr || id[0] == '\0') {
@@ -255,6 +267,22 @@ inline bool parseBuzzerPatternId(const char *id, BuzzerPattern &out) {
   }
   if (strcmp(id, "triple") == 0) {
     out = BuzzerPattern::TRIPLE;
+    return true;
+  }
+  if (strcmp(id, "pulse") == 0 || strcmp(id, "pulse2") == 0) {
+    out = BuzzerPattern::PULSE_TRAIN;
+    return true;
+  }
+  if (strcmp(id, "pulse3") == 0) {
+    out = BuzzerPattern::PULSE_3HZ;
+    return true;
+  }
+  if (strcmp(id, "pulse4") == 0) {
+    out = BuzzerPattern::PULSE_4HZ;
+    return true;
+  }
+  if (strcmp(id, "pulse5") == 0) {
+    out = BuzzerPattern::PULSE_5HZ;
     return true;
   }
   return false;
@@ -358,6 +386,80 @@ inline AlertOutputChannel effectiveAlertOutputChannel(uint8_t stored) {
     return DEFAULT_ALERT_OUTPUT_CHANNEL;
   }
   return static_cast<AlertOutputChannel>(stored);
+}
+
+// Local-buzzer pulse rate while Fast extraction guard is in extended mode.
+enum class ExtendedPulseRate : uint8_t {
+  DISABLED = 0,
+  SLOW = 1,
+  MEDIUM = 2,
+  FAST = 3,
+  RAPID = 4
+};
+
+constexpr ExtendedPulseRate DEFAULT_EXTENDED_PULSE_RATE = ExtendedPulseRate::FAST;
+
+inline bool validExtendedPulseRate(uint8_t rate) {
+  return rate <= static_cast<uint8_t>(ExtendedPulseRate::RAPID);
+}
+
+inline const char *extendedPulseRateId(uint8_t rate) {
+  switch (static_cast<ExtendedPulseRate>(rate)) {
+    case ExtendedPulseRate::DISABLED:
+      return "disabled";
+    case ExtendedPulseRate::SLOW:
+      return "slow";
+    case ExtendedPulseRate::MEDIUM:
+      return "medium";
+    case ExtendedPulseRate::FAST:
+      return "fast";
+    case ExtendedPulseRate::RAPID:
+      return "rapid";
+  }
+  return "fast";
+}
+
+inline bool parseExtendedPulseRate(const char *text, uint8_t &rate) {
+  if (text == nullptr) {
+    return false;
+  }
+  if (strcmp(text, "disabled") == 0) {
+    rate = static_cast<uint8_t>(ExtendedPulseRate::DISABLED);
+    return true;
+  }
+  if (strcmp(text, "slow") == 0) {
+    rate = static_cast<uint8_t>(ExtendedPulseRate::SLOW);
+    return true;
+  }
+  if (strcmp(text, "medium") == 0) {
+    rate = static_cast<uint8_t>(ExtendedPulseRate::MEDIUM);
+    return true;
+  }
+  if (strcmp(text, "fast") == 0) {
+    rate = static_cast<uint8_t>(ExtendedPulseRate::FAST);
+    return true;
+  }
+  if (strcmp(text, "rapid") == 0) {
+    rate = static_cast<uint8_t>(ExtendedPulseRate::RAPID);
+    return true;
+  }
+  return false;
+}
+
+inline BuzzerPattern buzzerPatternForExtendedPulseRate(uint8_t rate) {
+  switch (static_cast<ExtendedPulseRate>(rate)) {
+    case ExtendedPulseRate::SLOW:
+      return BuzzerPattern::PULSE_TRAIN;
+    case ExtendedPulseRate::MEDIUM:
+      return BuzzerPattern::PULSE_3HZ;
+    case ExtendedPulseRate::FAST:
+      return BuzzerPattern::PULSE_4HZ;
+    case ExtendedPulseRate::RAPID:
+      return BuzzerPattern::PULSE_5HZ;
+    case ExtendedPulseRate::DISABLED:
+      break;
+  }
+  return BuzzerPattern::NONE;
 }
 
 #ifndef SHOT_STOPPER_ENABLE_ALED
@@ -570,6 +672,8 @@ struct RuntimeConfig {
   bool buzzerScaleLostBeep = true;
   bool buzzerAutoToManualGuardEndBeep = true;
   bool buzzerManualNoScaleBeep = true;
+  uint8_t buzzerExtendedPulseRate =
+      static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE);
   // scale_only | buzzer_only | scale_priority (ignored when buzzer not compiled).
   // Default: buzzer_only with SHOT_STOPPER_ENABLE_BUZZER, else scale_only.
   uint8_t alertOutputChannel =
@@ -727,6 +831,7 @@ enum class ConfigValidationError : uint8_t {
   WEIGHT_OFFSET_BASELINE,
   SCALE_MAC_CACHE_MODE,
   ALERT_OUTPUT_CHANNEL,
+  EXTENDED_PULSE_RATE,
   BOOKOO_CONNECT_BEEP_LEVEL
 };
 
@@ -936,6 +1041,9 @@ inline ConfigValidationError validateRuntimeConfig(
   if (!validAlertOutputChannel(config.alertOutputChannel)) {
     return ConfigValidationError::ALERT_OUTPUT_CHANNEL;
   }
+  if (!validExtendedPulseRate(config.buzzerExtendedPulseRate)) {
+    return ConfigValidationError::EXTENDED_PULSE_RATE;
+  }
   if (config.bookooConnectBeepLevel > BOOKOO_BEEP_LEVEL_MAX) {
     return ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL;
   }
@@ -1017,6 +1125,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "scaleMacCacheMode";
     case ConfigValidationError::ALERT_OUTPUT_CHANNEL:
       return "alertOutputChannel";
+    case ConfigValidationError::EXTENDED_PULSE_RATE:
+      return "buzzerExtendedPulseRate";
     case ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL:
       return "bookooConnectBeepLevel";
   }

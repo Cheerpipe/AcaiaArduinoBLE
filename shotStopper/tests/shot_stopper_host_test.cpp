@@ -1440,6 +1440,11 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.buzzerScaleLostBeep);
   CHECK(config.buzzerAutoToManualGuardEndBeep);
   CHECK(config.buzzerManualNoScaleBeep);
+  CHECK(config.buzzerExtendedPulseRate ==
+        static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE));
+  CHECK(DEFAULT_EXTENDED_PULSE_RATE == ExtendedPulseRate::FAST);
+  CHECK(buzzerPatternForExtendedPulseRate(config.buzzerExtendedPulseRate) ==
+        BuzzerPattern::PULSE_4HZ);
   CHECK(config.alertOutputChannel ==
         static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL));
   CHECK(DEFAULT_ALERT_OUTPUT_CHANNEL ==
@@ -1503,6 +1508,10 @@ void w03_runtime_timing_relations_are_transactional() {
   config.bookooConnectBeepLevel = BOOKOO_BEEP_LEVEL_MAX + 1;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL);
+  config = RuntimeConfig{};
+  config.buzzerExtendedPulseRate = 9;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::EXTENDED_PULSE_RATE);
 }
 
 void w04_wifi_credentials_have_strict_bounds() {
@@ -2272,6 +2281,118 @@ void w59_local_buzzer_plays_short_long_and_double_patterns() {
   CHECK(localBuzzer.beepCount == 2);
   CHECK(localBuzzer.onMs == BUZZER_BEEP_ON_MS);
   drainLocalBuzzer();
+}
+
+void w82_pulse_train_loops_until_deadline_or_stopIf() {
+  resetHarness(false, false);
+  CHECK(localBuzzer.ready);
+  CHECK(startPulseTrain(BuzzerPattern::PULSE_TRAIN, 0));
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_TRAIN);
+  CHECK(localBuzzer.looping);
+  CHECK(localBuzzer.onMs == BUZZER_PULSE_TRAIN_ON_MS);
+  CHECK(localBuzzer.gapMs == BUZZER_PULSE_TRAIN_GAP_MS);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  hostMillis += BUZZER_PULSE_TRAIN_ON_MS;
+  localBuzzer.service(hostMillis);
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_TRAIN);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  hostMillis += BUZZER_PULSE_TRAIN_GAP_MS;
+  localBuzzer.service(hostMillis);
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_TRAIN);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  localBuzzer.stopIf(BuzzerPattern::PULSE_TRAIN);
+  CHECK(!localBuzzer.busy());
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+}
+
+void w83_web_buzzer_test_pulse_uses_same_train_for_3s() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  BuzzerPattern parsed = BuzzerPattern::NONE;
+  CHECK(parseBuzzerPatternId("pulse2", parsed));
+  CHECK(parsed == BuzzerPattern::PULSE_TRAIN);
+  CHECK(parseBuzzerPatternId("pulse", parsed));
+  CHECK(parsed == BuzzerPattern::PULSE_TRAIN);
+  WebCommand command = webControlCommand(WebCommandType::BUZZER_TEST);
+  command.buzzerPattern = BuzzerPattern::PULSE_TRAIN;
+  const uint32_t before = localBuzzer.acceptedRequests;
+  processWebCommand(command);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_TRAIN);
+  CHECK(localBuzzer.looping);
+  CHECK(localBuzzer.onMs == BUZZER_PULSE_TRAIN_ON_MS);
+  CHECK(localBuzzer.gapMs == BUZZER_PULSE_TRAIN_GAP_MS);
+  runLoopAfter(BUZZER_PULSE_TRAIN_DEBUG_MS - 20);
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_TRAIN);
+  runLoopAfter(40);
+  CHECK(!localBuzzer.busy());
+}
+
+void w84_pulse_train_yields_to_triple() {
+  resetHarness(false, false);
+  CHECK(startExtendedPulseTrain(0));
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_4HZ);
+  CHECK(localBuzzer.request(BuzzerPattern::TRIPLE));
+  CHECK(localBuzzer.active == BuzzerPattern::TRIPLE);
+  CHECK(!buzzerPatternIsPulseTrain(localBuzzer.pending));
+  drainLocalBuzzer();
+}
+
+void w85_debug_pulse_rates_use_same_on_ms_and_3s() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  BuzzerPattern parsed = BuzzerPattern::NONE;
+  CHECK(parseBuzzerPatternId("pulse2", parsed));
+  CHECK(parsed == BuzzerPattern::PULSE_TRAIN);
+  CHECK(parseBuzzerPatternId("pulse3", parsed));
+  CHECK(parsed == BuzzerPattern::PULSE_3HZ);
+  CHECK(parseBuzzerPatternId("pulse4", parsed));
+  CHECK(parsed == BuzzerPattern::PULSE_4HZ);
+  CHECK(parseBuzzerPatternId("pulse5", parsed));
+  CHECK(parsed == BuzzerPattern::PULSE_5HZ);
+  CHECK(buzzerPatternForExtendedPulseRate(
+            static_cast<uint8_t>(ExtendedPulseRate::DISABLED)) ==
+        BuzzerPattern::NONE);
+  CHECK(buzzerPatternForExtendedPulseRate(
+            static_cast<uint8_t>(ExtendedPulseRate::SLOW)) ==
+        BuzzerPattern::PULSE_TRAIN);
+  CHECK(buzzerPatternForExtendedPulseRate(
+            static_cast<uint8_t>(ExtendedPulseRate::MEDIUM)) ==
+        BuzzerPattern::PULSE_3HZ);
+  CHECK(buzzerPatternForExtendedPulseRate(
+            static_cast<uint8_t>(ExtendedPulseRate::FAST)) ==
+        BuzzerPattern::PULSE_4HZ);
+  CHECK(buzzerPatternForExtendedPulseRate(
+            static_cast<uint8_t>(ExtendedPulseRate::RAPID)) ==
+        BuzzerPattern::PULSE_5HZ);
+
+  WebCommand command = webControlCommand(WebCommandType::BUZZER_TEST);
+  command.buzzerPattern = BuzzerPattern::PULSE_3HZ;
+  processWebCommand(command);
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_3HZ);
+  CHECK(localBuzzer.looping);
+  CHECK(localBuzzer.onMs == BUZZER_PULSE_TRAIN_ON_MS);
+  CHECK(localBuzzer.gapMs == BUZZER_PULSE_TRAIN_3HZ_GAP_MS);
+  runLoopAfter(BUZZER_PULSE_TRAIN_DEBUG_MS - 20);
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_3HZ);
+  runLoopAfter(40);
+  CHECK(!localBuzzer.busy());
+
+  command.buzzerPattern = BuzzerPattern::PULSE_4HZ;
+  processWebCommand(command);
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_4HZ);
+  CHECK(localBuzzer.onMs == BUZZER_PULSE_TRAIN_ON_MS);
+  CHECK(localBuzzer.gapMs == BUZZER_PULSE_TRAIN_4HZ_GAP_MS);
+  runLoopAfter(BUZZER_PULSE_TRAIN_DEBUG_MS + 20);
+  CHECK(!localBuzzer.busy());
+
+  command.buzzerPattern = BuzzerPattern::PULSE_5HZ;
+  processWebCommand(command);
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_5HZ);
+  CHECK(localBuzzer.onMs == BUZZER_PULSE_TRAIN_ON_MS);
+  CHECK(localBuzzer.gapMs == BUZZER_PULSE_TRAIN_5HZ_GAP_MS);
+  runLoopAfter(BUZZER_PULSE_TRAIN_DEBUG_MS + 20);
+  CHECK(!localBuzzer.busy());
 }
 
 void w60_web_buzzer_test_plays_requested_pattern() {
@@ -4384,12 +4505,54 @@ void r49_guard_extends_and_stops_at_max_weight() {
   publishWeight(threshold + 0.2f);
   CHECK(session.extractionExtended);
   CHECK(getRelaySafetySnapshot().closed);
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_4HZ);
   const float maxThreshold = effectiveMaxStopThreshold();
   publishWeight(maxThreshold + 0.1f);
   publishWeight(maxThreshold + 0.2f);
   loop();
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(session.endReason == EndReason::FAST_EXTRACTION_MAX_WEIGHT);
+  CHECK(localBuzzer.active != BuzzerPattern::PULSE_4HZ);
+}
+
+void r51_extended_pulse_respects_alert_flag_and_scale_only() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.fastExtractionGuardEnabled = true;
+  runtimeConfig.buzzerExtendedPulseRate =
+      static_cast<uint8_t>(ExtendedPulseRate::DISABLED);
+  runtimeConfig.maxRecoveryWeightG = 42.5f;
+  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  runLoopAfter(22000);
+  const float threshold = effectiveStopThreshold();
+  publishWeight(threshold + 0.1f);
+  publishWeight(threshold + 0.2f);
+  CHECK(session.extractionExtended);
+  CHECK(!buzzerPatternIsPulseTrain(localBuzzer.active));
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.fastExtractionGuardEnabled = true;
+  runtimeConfig.buzzerExtendedPulseRate =
+      static_cast<uint8_t>(ExtendedPulseRate::FAST);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_ONLY);
+  runtimeConfig.maxRecoveryWeightG = 42.5f;
+  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  runLoopAfter(22000);
+  const float scaleOnlyThreshold = effectiveStopThreshold();
+  publishWeight(scaleOnlyThreshold + 0.1f);
+  publishWeight(scaleOnlyThreshold + 0.2f);
+  CHECK(session.extractionExtended);
+  CHECK(!buzzerPatternIsPulseTrain(localBuzzer.active));
 }
 
 void r50_guard_extends_and_stops_at_min_time() {
@@ -4484,6 +4647,7 @@ const TestCase testCases[] = {
     {"R48", r48_guard_disabled_stops_at_target_normally},
     {"R49", r49_guard_extends_and_stops_at_max_weight},
     {"R50", r50_guard_extends_and_stops_at_min_time},
+    {"R51", r51_extended_pulse_respects_alert_flag_and_scale_only},
     {"R51", r51_auto_to_manual_guard_fires_while_scale_lost},
     {"R52", r52_auto_to_manual_guard_clears_on_scale_recovery},
     {"R53", r53_auto_to_manual_guard_disabled_does_not_cut_early},
@@ -4595,6 +4759,10 @@ const TestCase testCases[] = {
     {"W79", w79_buzzer_only_stop_beeps_before_timer_stop_result},
     {"W80", w80_buzzer_only_retare_beeps_before_tare_result},
     {"W81", w81_scale_priority_failed_start_falls_back_after_disconnect},
+    {"W82", w82_pulse_train_loops_until_deadline_or_stopIf},
+    {"W83", w83_web_buzzer_test_pulse_uses_same_train_for_3s},
+    {"W84", w84_pulse_train_yields_to_triple},
+    {"W85", w85_debug_pulse_rates_use_same_on_ms_and_3s},
     {"D01", d01_idle_scan_stays_enabled_between_ticks},
     {"D02", d02_full_empty_mac_uses_name_scan},
     {"D03", d03_scan_start_failed_uses_backoff},

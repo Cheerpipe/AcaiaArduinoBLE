@@ -57,6 +57,15 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('buzzerScaleLostBeep') ||
     !ui.includes('buzzerAutoToManualGuardEndBeep') ||
     !ui.includes('buzzerManualNoScaleBeep') ||
+    !ui.includes('buzzerExtendedPulseRate') ||
+    !html.includes('id="buzzerExtendedPulseRate"') ||
+    !html.includes('class="buzzerOpt scaleIncapableOpt">Extended shot pulse<select id="buzzerExtendedPulseRate"') ||
+    !html.includes('option value="fast" selected') ||
+    !html.includes('option value="rapid">Rapid') ||
+    html.includes('id="buzzerExtendedPulseBeep"') ||
+    html.includes('20ms') ||
+    html.includes('x segundo') ||
+    ui.includes('querySelectorAll(\'.scaleIncapableOpt\').forEach(e=>{e.classList.toggle(\'fieldOff\',scaleOnly);e.querySelectorAll(\'input\').forEach') ||
     !ui.includes('alertOutputChannel') ||
     !ui.includes('buzzerSupported') ||
     !ui.includes('Output channel') ||
@@ -100,10 +109,11 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('"buzzerScaleLostBeep"') ||
     !network.includes('"buzzerAutoToManualGuardEndBeep"') ||
     !network.includes('"buzzerManualNoScaleBeep"') ||
+    !network.includes('"buzzerExtendedPulseRate"') ||
     !network.includes('"alertOutputChannel"') ||
     !network.includes('"bookooMuteOnBuzzerOnly"') ||
     !network.includes('"bookooConnectBeepLevel"') ||
-    !network.includes('fields, 38') ||
+    !network.includes('fields, 39') ||
     !network.includes('allowedCount > 64') ||
     !network.includes('uint64_t seen') ||
     !network.includes('WEB_UI_ASSET_TAG') ||
@@ -170,6 +180,12 @@ if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0')
     !buzzer.includes('BUZZER_ACTIVE_DRIVE') ||
     !buzzer.includes('ledcAttach') ||
     !buzzer.includes('digitalWrite(pin, HIGH)') ||
+    !firmware.includes('startExtendedPulseTrain') ||
+    !firmware.includes('startPulseTrain') ||
+    !firmware.includes('stopPulseTrains') ||
+    !firmware.includes('serviceExtendedPulseAlert') ||
+    !firmware.includes('buzzerPatternForExtendedPulseRate') ||
+    !domain.includes('DEFAULT_EXTENDED_PULSE_RATE') ||
     !firmware.includes('localBuzzer.request(command.buzzerPattern)')) {
   throw new Error('Local buzzer must support compile-time passive (1) and active (2) drives');
 }
@@ -532,11 +548,19 @@ if (!ui.includes('id="debugPanel"') ||
     !ui.includes('id="beepLongButton"') ||
     !ui.includes('id="beepDoubleButton"') ||
     !ui.includes('id="beepTripleButton"') ||
+    !ui.includes('id="beepPulse2Button"') ||
+    !ui.includes('id="beepPulse3Button"') ||
+    !ui.includes('id="beepPulse4Button"') ||
+    !ui.includes('id="beepPulse5Button"') ||
     !ui.includes('/api/v1/control/buzzer') ||
     !ui.includes("['beepShortButton','short']") ||
     !ui.includes("['beepLongButton','long']") ||
     !ui.includes("['beepDoubleButton','double']") ||
     !ui.includes("['beepTripleButton','triple']") ||
+    !ui.includes("['beepPulse2Button','pulse2']") ||
+    !ui.includes("['beepPulse3Button','pulse3']") ||
+    !ui.includes("['beepPulse4Button','pulse4']") ||
+    !ui.includes("['beepPulse5Button','pulse5']") ||
     !ui.includes('function debugBuzzer(') ||
     !ui.includes('Shown with SHOT_STOPPER_ENABLE_BUZZER') ||
     html.indexOf('id="saveDateTimeButton"') > html.indexOf('id="debugPanel"') ||

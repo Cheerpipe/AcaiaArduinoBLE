@@ -227,6 +227,9 @@ const char *configValidationMessage(ConfigValidationError error) {
     case ConfigValidationError::ALERT_OUTPUT_CHANNEL:
       return "Alert output channel must be scale_only, buzzer_only, or "
              "scale_priority.";
+    case ConfigValidationError::EXTENDED_PULSE_RATE:
+      return "Extended shot pulse must be disabled, slow, medium, fast, or "
+             "rapid.";
     case ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL:
       return "Bookoo scale volume must be disabled (0) or 1 to 5.";
   }
@@ -298,6 +301,14 @@ bool jsonAlertOutputChannel(cJSON *object, const char *name, uint8_t &output,
     return false;
   }
   return parseAlertOutputChannel(item->valuestring, output);
+}
+
+bool jsonExtendedPulseRate(cJSON *object, const char *name, uint8_t &output) {
+  cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+  if (!cJSON_IsString(item) || item->valuestring == nullptr) {
+    return false;
+  }
+  return parseExtendedPulseRate(item->valuestring, output);
 }
 
 const char *ntpPresetId(uint8_t preset) {
@@ -2574,6 +2585,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"buzzerScaleLostBeep\":%s,"
       "\"buzzerAutoToManualGuardEndBeep\":%s,"
       "\"buzzerManualNoScaleBeep\":%s,"
+      "\"buzzerExtendedPulseRate\":\"%s\","
       "\"alertOutputChannel\":\"%s\","
       "\"rinseGestureMs\":%lu,"
       "\"rinseDurationMs\":%lu,"
@@ -2699,6 +2711,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.config.buzzerScaleLostBeep ? "true" : "false",
       control.config.buzzerAutoToManualGuardEndBeep ? "true" : "false",
       control.config.buzzerManualNoScaleBeep ? "true" : "false",
+      extendedPulseRateId(control.config.buzzerExtendedPulseRate),
       alertOutputChannelId(control.config.alertOutputChannel),
       static_cast<unsigned long>(control.config.rinseGestureMs),
       static_cast<unsigned long>(control.config.rinseDurationMs),
@@ -3219,7 +3232,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
       "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
-      "buzzerManualNoScaleBeep", "alertOutputChannel",
+      "buzzerManualNoScaleBeep", "buzzerExtendedPulseRate",
+      "alertOutputChannel",
       "autoRetare", "retareWindowMs", "minimumCupWeightG",
       "retareStabilitySamples", "retareStabilityToleranceG",
       "retareStabilityMaxGapMs", "retareStabilityMinDurationMs",
@@ -3231,7 +3245,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom",
       "scaleMacCacheMode", "bookooMuteOnBuzzerOnly", "bookooConnectBeepLevel"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 38)) {
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 39)) {
     parseError =
         "Config must include exactly the expected fields with correct types.";
   } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
@@ -3276,6 +3290,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (!jsonBoolean(root, "buzzerManualNoScaleBeep",
                           candidate.buzzerManualNoScaleBeep)) {
     parseError = "buzzerManualNoScaleBeep must be a boolean.";
+  } else if (!jsonExtendedPulseRate(root, "buzzerExtendedPulseRate",
+                                    candidate.buzzerExtendedPulseRate)) {
+    parseError =
+        "buzzerExtendedPulseRate must be disabled, slow, medium, fast, or rapid.";
   } else if (!jsonAlertOutputChannel(root, "alertOutputChannel",
                                      candidate.alertOutputChannel,
                                      /*optional=*/true)) {
@@ -3773,7 +3791,7 @@ esp_err_t ShotStopperNetwork::buzzerHandler(httpd_req_t *request) {
   }
   if (!parsed) {
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
-                     "pattern must be short, long, double, or triple.");
+                     "pattern must be short, long, double, triple, pulse2, pulse3, pulse4, or pulse5.");
   }
   WebCommand command;
   command.type = WebCommandType::BUZZER_TEST;
