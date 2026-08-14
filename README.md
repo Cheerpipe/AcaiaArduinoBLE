@@ -180,11 +180,12 @@ name, default passwords, and step-by-step first connection.
 
 - Fully **embedded Web UI** SPA with routes (`/`, `/presets`, `/settings`,
   `/history`, `/admin`, `/log`): same-origin assets only (no CDN). HTML source
-  budget **80 KiB**; gzip HTML ≤ **20 KiB**, gzip CSS ≤ **6 KiB**, combined ≤
-  **24 KiB**. Reloads
+  budget **80 KiB**; gzip HTML ≤ **21 KiB**, gzip CSS ≤ **6 KiB**, gzip logo ≤
+  **4 KiB**, combined ≤ **28 KiB**. Reloads
   revalidate HTML with `ETag` (`Cache-Control: no-cache`) so unchanged firmware
-  returns **304**. Shared stylesheet is `GET /app.css` (gzip, versioned query,
-  long-lived `immutable` cache). Inactive views do not poll their APIs.
+  returns **304**. Shared stylesheet is `GET /app.css` and brand mark is
+  `GET /logo.svg` (both gzip, versioned query, long-lived `immutable` cache).
+  Inactive views do not poll their APIs.
 - **STA** mode when credentials are saved; **fallback AP**
   (`MicraShotStopperAP` at `192.168.4.1`) when STA is unavailable. Modes are
   **exclusive** (STA or AP, not concurrent AP+STA). STA addressing is **DHCP**
@@ -330,8 +331,9 @@ flag) compile without LED support. See [WS2812B status indicators](#ws2812b-stat
 .
 ├── VERSION                         # Release version (SemVer)
 ├── scripts/gen_version.sh          # Build-time version header generator
-├── scripts/gen_web_ui.js           # Gzip-precompressed Web UI/CSS header generator
+├── scripts/gen_web_ui.js           # Gzip-precompressed Web UI/CSS/logo header generator
 ├── shotStopper/web/app.css         # Authored Web UI stylesheet (embedded via generator)
+├── shotStopper/web/logo.svg        # Authored Web UI brand mark (embedded via generator)
 ├── shotStopper/                    # Main firmware sketch and host tests
 │   ├── shotStopper.ino
 │   ├── ShotStopperSerialCli.h      # USB serial command parser
@@ -800,12 +802,14 @@ node ./scripts/gen_web_ui.js
 
 This writes `shotStopper/ShotStopperVersion.h` and
 `shotStopper/ShotStopperWebAssetsGzip.h` (both gitignored). The generator reads
-`shotStopper/ShotStopperWebAssets.h` and `shotStopper/web/app.css`. The installed
+`shotStopper/ShotStopperWebAssets.h`, `shotStopper/web/app.css`, and
+`shotStopper/web/logo.svg`. The installed
 firmware reports the version on Serial boot, in `GET /api/v1/status` as
 `firmwareVersion`, and in the Web UI footer. `GET /` (and `/history`, `/log`,
 `/settings`) serves the SPA HTML as gzip with an `ETag` derived from that
-version. `GET /app.css` is gzip with a long-lived cache and the same ETag
-family. Use `curl --compressed` if you fetch HTML/CSS from the command line.
+version. `GET /app.css` and `GET /logo.svg` are gzip with a long-lived cache and
+the same ETag family. Use `curl --compressed` if you fetch HTML/CSS/SVG from the
+command line.
 
 To verify a compiled binary without flashing:
 

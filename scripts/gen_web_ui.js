@@ -8,6 +8,7 @@ const zlib = require('zlib');
 const repoRoot = path.resolve(__dirname, '..');
 const sourcePath = path.join(repoRoot, 'shotStopper', 'ShotStopperWebAssets.h');
 const cssSourcePath = path.join(repoRoot, 'shotStopper', 'web', 'app.css');
+const logoSourcePath = path.join(repoRoot, 'shotStopper', 'web', 'logo.svg');
 const versionPath = path.join(repoRoot, 'shotStopper', 'ShotStopperVersion.h');
 const outputPath =
     path.join(repoRoot, 'shotStopper', 'ShotStopperWebAssetsGzip.h');
@@ -62,6 +63,16 @@ function minifyCss(css) {
       .trim();
 }
 
+function minifySvg(svg) {
+  return svg
+      .replace(/<\?xml[^?]*\?>/gi, '')
+      .replace(/<!DOCTYPE[^>]*>/gi, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/\s+/g, ' ')
+      .replace(/> </g, '><')
+      .trim();
+}
+
 function formatByteArray(buffer) {
   const lines = [];
   for (let offset = 0; offset < buffer.length; offset += 12) {
@@ -78,12 +89,15 @@ function formatByteArray(buffer) {
 function generate() {
   const source = fs.readFileSync(sourcePath, 'utf8');
   const cssSource = fs.readFileSync(cssSourcePath, 'utf8');
+  const logoSource = fs.readFileSync(logoSourcePath, 'utf8');
   const version = readFirmwareVersion();
   const html = minifyHtml(
       extractHtml(source).split('__FW_VERSION__').join(version));
   const css = minifyCss(cssSource);
+  const logo = minifySvg(logoSource);
   const htmlGzip = zlib.gzipSync(Buffer.from(html, 'utf8'), {level: 9});
   const cssGzip = zlib.gzipSync(Buffer.from(css, 'utf8'), {level: 9});
+  const logoGzip = zlib.gzipSync(Buffer.from(logo, 'utf8'), {level: 9});
   const header =
       `#pragma once
 
@@ -111,17 +125,28 @@ ${formatByteArray(cssGzip)}
 static_assert(sizeof(SHOT_STOPPER_WEB_CSS_GZIP) == SHOT_STOPPER_WEB_CSS_GZIP_LEN,
               "gzip Web CSS length mismatch");
 
+constexpr size_t SHOT_STOPPER_WEB_LOGO_GZIP_LEN = ${logoGzip.length};
+const uint8_t SHOT_STOPPER_WEB_LOGO_GZIP[] PROGMEM = {
+${formatByteArray(logoGzip)}
+};
+
+static_assert(sizeof(SHOT_STOPPER_WEB_LOGO_GZIP) == SHOT_STOPPER_WEB_LOGO_GZIP_LEN,
+              "gzip Web logo length mismatch");
+
 }  // namespace shotstopper
 `;
   fs.writeFileSync(outputPath, header);
   return {
     html,
     css,
+    logo,
     gzip: htmlGzip,
     cssGzip,
+    logoGzip,
     outputPath,
     sourcePath,
     cssSourcePath,
+    logoSourcePath,
     version,
   };
 }
@@ -130,9 +155,11 @@ module.exports = {
   extractHtml,
   minifyHtml,
   minifyCss,
+  minifySvg,
   generate,
   sourcePath,
   cssSourcePath,
+  logoSourcePath,
   outputPath,
 };
 
@@ -140,9 +167,12 @@ if (require.main === module) {
   const result = generate();
   const htmlBytes = Buffer.byteLength(result.html, 'utf8');
   const cssBytes = Buffer.byteLength(result.css, 'utf8');
+  const logoBytes = Buffer.byteLength(result.logo, 'utf8');
   console.log(
       `Generated ${result.outputPath} ` +
           `(HTML ${result.gzip.length} B gzip / ${htmlBytes} B, ` +
-          `CSS ${result.cssGzip.length} B gzip / ${cssBytes} B, v=${result.version})`
+          `CSS ${result.cssGzip.length} B gzip / ${cssBytes} B, ` +
+          `logo ${result.logoGzip.length} B gzip / ${logoBytes} B, ` +
+          `v=${result.version})`
   );
 }

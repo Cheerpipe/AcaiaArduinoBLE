@@ -1803,6 +1803,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/admin", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/settings", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/app.css", HTTP_GET, cssHandler) &&
+      registerHandler(server_, "/logo.svg", HTTP_GET, logoHandler) &&
       registerHandler(server_, "/api/v1/login", HTTP_POST, loginHandler) &&
       registerHandler(server_, "/api/v1/logout", HTTP_POST, logoutHandler) &&
       registerHandler(server_, "/api/v1/heartbeat", HTTP_POST,
@@ -2141,6 +2142,28 @@ esp_err_t ShotStopperNetwork::cssHandler(httpd_req_t *request) {
   return httpd_resp_send(
       request, reinterpret_cast<const char *>(SHOT_STOPPER_WEB_CSS_GZIP),
       SHOT_STOPPER_WEB_CSS_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::logoHandler(httpd_req_t *request) {
+  char etag[WEB_UI_ETAG_CAPACITY] = {};
+  formatWebUiEtag(etag);
+  if (ifNoneMatchEquals(request, etag)) {
+    httpd_resp_set_status(request, STATUS_NOT_MODIFIED);
+    httpd_resp_set_hdr(request, "Cache-Control",
+                       "public, max-age=31536000, immutable");
+    httpd_resp_set_hdr(request, "ETag", etag);
+    return httpd_resp_send(request, nullptr, 0);
+  }
+  httpd_resp_set_type(request, "image/svg+xml");
+  httpd_resp_set_hdr(request, "Content-Encoding", "gzip");
+  httpd_resp_set_hdr(request, "Cache-Control",
+                     "public, max-age=31536000, immutable");
+  httpd_resp_set_hdr(request, "ETag", etag);
+  httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
+  httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
+  return httpd_resp_send(
+      request, reinterpret_cast<const char *>(SHOT_STOPPER_WEB_LOGO_GZIP),
+      SHOT_STOPPER_WEB_LOGO_GZIP_LEN);
 }
 
 esp_err_t ShotStopperNetwork::notFoundHandler(httpd_req_t *request,

@@ -17,6 +17,16 @@ const htmlMatch = asset.match(/R"HTML\(([\s\S]*?)\)HTML"/);
 if (!htmlMatch) throw new Error('Embedded HTML raw string not found');
 const html = htmlMatch[1];
 const css = fs.readFileSync(path.join(sketchDir, 'web', 'app.css'), 'utf8');
+const logo = fs.readFileSync(path.join(sketchDir, 'web', 'logo.svg'), 'utf8');
+if (!logo.includes('<svg') || !logo.includes('viewBox=')) {
+  throw new Error('Web UI logo.svg must be a valid SVG asset');
+}
+if (!css.includes('.brandLogo') ||
+    !css.includes('height:1em') ||
+    !css.includes('inline-flex') ||
+    !css.includes('.brandLogo{filter:invert(1)}')) {
+  throw new Error('Brand logo must match heading height and invert in dark mode');
+}
 const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
 if (!scriptMatch) throw new Error('Embedded script not found');
 
@@ -124,6 +134,8 @@ if (!html.includes('authenticatedOnly') ||
     !html.includes('function knownPath(') ||
     !html.includes("authenticated()&&known") ||
     !html.includes('class="brand"') ||
+    !html.includes('class="brandLogo"') ||
+    !html.includes('src="/logo.svg?v=__FW_VERSION__"') ||
     !html.includes('>Micra Shot Stopper</a>') ||
     !html.includes('href="/" data-route="/"') ||
     !html.includes("querySelectorAll('a[data-route]')") ||
@@ -383,6 +395,7 @@ const expected = new Map([
   ['GET /admin', 'rootHandler'],
   ['GET /settings', 'rootHandler'],
   ['GET /app.css', 'cssHandler'],
+  ['GET /logo.svg', 'logoHandler'],
   ['POST /api/v1/login', 'loginHandler'],
   ['POST /api/v1/logout', 'logoutHandler'],
   ['POST /api/v1/heartbeat', 'heartbeatHandler'],
@@ -558,14 +571,22 @@ const cssRoundTrip = zlib.gunzipSync(generated.cssGzip).toString('utf8');
 if (cssRoundTrip !== generated.css) {
   throw new Error('Generated gzip Web CSS does not round-trip to the minified CSS');
 }
+const logoRoundTrip = zlib.gunzipSync(generated.logoGzip).toString('utf8');
+if (logoRoundTrip !== generated.logo) {
+  throw new Error('Generated gzip Web logo does not round-trip to the minified SVG');
+}
 if (generated.gzip.length > 21504) {
   throw new Error('Compressed Web UI HTML exceeds the 21 KiB gzip budget');
 }
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
 }
-if (generated.gzip.length + generated.cssGzip.length > 24576) {
-  throw new Error('Combined HTML+CSS gzip exceeds the 24 KiB flash budget');
+if (generated.logoGzip.length > 4096) {
+  throw new Error('Compressed Web logo exceeds the 4 KiB gzip budget');
+}
+if (generated.gzip.length + generated.cssGzip.length + generated.logoGzip.length >
+    28672) {
+  throw new Error('Combined HTML+CSS+logo gzip exceeds the 28 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
@@ -575,9 +596,11 @@ if (!network.includes('SHOT_STOPPER_WEB_UI_GZIP') ||
     !network.includes('SHOT_STOPPER_WEB_UI_GZIP_LEN') ||
     !network.includes('SHOT_STOPPER_WEB_CSS_GZIP') ||
     !network.includes('SHOT_STOPPER_WEB_CSS_GZIP_LEN') ||
+    !network.includes('SHOT_STOPPER_WEB_LOGO_GZIP') ||
+    !network.includes('SHOT_STOPPER_WEB_LOGO_GZIP_LEN') ||
     !network.includes('"Content-Encoding"') ||
     !network.includes('"gzip"')) {
-  throw new Error('GET / and GET /app.css must send precompressed gzip bodies');
+  throw new Error('GET /, GET /app.css, and GET /logo.svg must send precompressed gzip bodies');
 }
 if (network.includes('zlib.h') || network.includes('miniz.h') ||
     /mz_compress|deflateInit|gzipCompress/.test(network)) {
@@ -588,16 +611,19 @@ if (!network.includes('If-None-Match')) {
 }
 const rootHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::rootHandler');
 const cssHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::cssHandler');
+const logoHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::logoHandler');
 const notFoundHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::notFoundHandler');
 const loginHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::loginHandler');
-if (rootHandlerStart < 0 || cssHandlerStart < 0 || notFoundHandlerStart < 0 ||
-    loginHandlerStart < 0 ||
-    !(rootHandlerStart < cssHandlerStart && cssHandlerStart < notFoundHandlerStart &&
+if (rootHandlerStart < 0 || cssHandlerStart < 0 || logoHandlerStart < 0 ||
+    notFoundHandlerStart < 0 || loginHandlerStart < 0 ||
+    !(rootHandlerStart < cssHandlerStart && cssHandlerStart < logoHandlerStart &&
+      logoHandlerStart < notFoundHandlerStart &&
       notFoundHandlerStart < loginHandlerStart)) {
-  throw new Error('rootHandler/cssHandler/notFoundHandler order not found');
+  throw new Error('rootHandler/cssHandler/logoHandler/notFoundHandler order not found');
 }
 const rootHandler = network.slice(rootHandlerStart, cssHandlerStart);
-const cssHandler = network.slice(cssHandlerStart, notFoundHandlerStart);
+const cssHandler = network.slice(cssHandlerStart, logoHandlerStart);
+const logoHandler = network.slice(logoHandlerStart, notFoundHandlerStart);
 const notFoundHandler = network.slice(notFoundHandlerStart, loginHandlerStart);
 if (rootHandler.includes('no-store') || !rootHandler.includes('no-cache') ||
     !rootHandler.includes('STATUS_NOT_MODIFIED') ||
@@ -614,6 +640,14 @@ if (cssHandler.includes('no-store') ||
     !cssHandler.includes('SHOT_STOPPER_WEB_CSS_GZIP') ||
     !cssHandler.includes('text/css')) {
   throw new Error('GET /app.css must serve immutable gzip CSS with ETag/304');
+}
+if (logoHandler.includes('no-store') ||
+    !logoHandler.includes('max-age=31536000') ||
+    !logoHandler.includes('immutable') ||
+    !logoHandler.includes('STATUS_NOT_MODIFIED') ||
+    !logoHandler.includes('SHOT_STOPPER_WEB_LOGO_GZIP') ||
+    !logoHandler.includes('image/svg+xml')) {
+  throw new Error('GET /logo.svg must serve immutable gzip SVG with ETag/304');
 }
 if (!notFoundHandler.includes('302 Found') ||
     !notFoundHandler.includes('Location') ||
@@ -632,5 +666,5 @@ if (network.includes('sendJson') &&
 console.log(
   `Embedded Web UI: JavaScript valid, ${Buffer.byteLength(html, 'utf8')} bytes HTML source, ` +
   `${generated.gzip.length} bytes HTML gzip, ${generated.cssGzip.length} bytes CSS gzip, ` +
-  `${expected.size} routes checked`
+  `${generated.logoGzip.length} bytes logo gzip, ${expected.size} routes checked`
 );
