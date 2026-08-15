@@ -199,6 +199,8 @@ if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0')
     !buzzer.includes('BUZZER_ACTIVE_DRIVE') ||
     !buzzer.includes('ledcAttach') ||
     !buzzer.includes('digitalWrite(pin, HIGH)') ||
+    !buzzer.includes('BUZZER_ECHO_INVERTED_NOTES') ||
+    !domain.includes('ECHO_INVERTED') ||
     !firmware.includes('startExtendedPulseTrain') ||
     !firmware.includes('startPulseTrain') ||
     !firmware.includes('stopPulseTrains') ||
@@ -259,7 +261,10 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !statusSection[1].includes('id="statusAtmGuard"') ||
     !statusSection[1].includes('id="statusNoScaleGuard"') ||
     !ui.includes('function formatScaleWeight(') ||
+    !ui.includes('function formatScaleLink(') ||
     !ui.includes('function formatScaleTimer(') ||
+    !ui.includes("BLE up (no weight)") ||
+    !ui.includes('formatScaleLink(s)') ||
     !ui.includes('id="preferredScale"') ||
     !ui.includes('id="preferredScaleSelect"') ||
     !ui.includes('id="preferredScalePauseHint"') ||
@@ -738,6 +743,8 @@ if (!ui.includes('id="debugPanel"') ||
     !ui.includes('id="beepChimeButton"') ||
     !ui.includes('id="beepSwingButton"') ||
     !ui.includes('id="beepEchoButton"') ||
+    !ui.includes('id="beepEchoInvertedButton"') ||
+    !html.includes('Echo inverted') ||
     !ui.includes('id="beepMorseButton"') ||
     !ui.includes('id="beepSnapButton"') ||
     !ui.includes('/api/v1/control/buzzer') ||
@@ -752,6 +759,7 @@ if (!ui.includes('id="debugPanel"') ||
     !ui.includes("['beepChimeButton','chime']") ||
     !ui.includes("['beepSwingButton','swing']") ||
     !ui.includes("['beepEchoButton','echo']") ||
+    !ui.includes("['beepEchoInvertedButton','echoinv']") ||
     !ui.includes("['beepMorseButton','morse']") ||
     !ui.includes("['beepSnapButton','snap']") ||
     !ui.includes('function debugBuzzer(') ||
@@ -824,6 +832,7 @@ if (!ui.includes('id="debugPanel"') ||
     !network.includes('WebCommandType::BUZZER_TEST') ||
     !network.includes('WebCommandType::BOOKOO_DEBUG') ||
     !network.includes('parseBuzzerPatternId') ||
+    !network.includes('echoinv') ||
     !network.includes('parseBookooDebugActionId') ||
     !firmware.includes('WebCommandType::BUZZER_TEST') ||
     !firmware.includes('WebCommandType::BOOKOO_DEBUG') ||

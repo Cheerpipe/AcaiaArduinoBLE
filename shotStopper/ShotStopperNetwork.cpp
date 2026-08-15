@@ -4237,7 +4237,7 @@ esp_err_t ShotStopperNetwork::buzzerHandler(httpd_req_t *request) {
   }
   if (!parsed) {
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
-                     "pattern must be short, long, double, triple, pulse2, pulse3, pulse4, pulse5, chime, swing, echo, morse, or snap.");
+                     "pattern must be short, long, double, triple, pulse2, pulse3, pulse4, pulse5, chime, swing, echo, echoinv, morse, or snap.");
   }
   WebCommand command;
   command.type = WebCommandType::BUZZER_TEST;

@@ -40,6 +40,9 @@ constexpr BuzzerNote BUZZER_CHIME_NOTES[] = {{60, 50}, {60, 80}, {220, 0}};
 constexpr BuzzerNote BUZZER_SWING_NOTES[] = {{180, 40}, {50, 40}, {50, 0}};
 constexpr BuzzerNote BUZZER_ECHO_NOTES[] = {
     {50, 50}, {50, 220}, {50, 50}, {50, 0}};
+// Echo inverted: long bookends with short middle ticks (trailing gap 0).
+constexpr BuzzerNote BUZZER_ECHO_INVERTED_NOTES[] = {
+    {220, 50}, {50, 50}, {50, 50}, {220, 0}};
 constexpr BuzzerNote BUZZER_MORSE_NOTES[] = {{250, 80}, {50, 80}, {250, 0}};
 constexpr BuzzerNote BUZZER_SNAP_NOTES[] = {
     {70, 30}, {200, 50}, {70, 30}, {200, 0}};
@@ -59,6 +62,10 @@ inline const BuzzerNote *buzzerSequenceNotes(BuzzerPattern pattern,
       count = static_cast<uint8_t>(sizeof(BUZZER_ECHO_NOTES) /
                                    sizeof(BUZZER_ECHO_NOTES[0]));
       return BUZZER_ECHO_NOTES;
+    case BuzzerPattern::ECHO_INVERTED:
+      count = static_cast<uint8_t>(sizeof(BUZZER_ECHO_INVERTED_NOTES) /
+                                   sizeof(BUZZER_ECHO_INVERTED_NOTES[0]));
+      return BUZZER_ECHO_INVERTED_NOTES;
     case BuzzerPattern::MORSE:
       count = static_cast<uint8_t>(sizeof(BUZZER_MORSE_NOTES) /
                                    sizeof(BUZZER_MORSE_NOTES[0]));

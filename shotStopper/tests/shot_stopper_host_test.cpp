@@ -1382,6 +1382,29 @@ void r12_scale_worker_service_publishes_weight_and_detects_failure() {
   CHECK(getScaleLinkSnapshot().disconnectSequence == 1);
 }
 
+void r12b_discovery_clears_stale_connected_link_snapshot() {
+  resetHarness(false, true);
+  setScaleLinkState(ScaleLinkState::CONNECTED);
+  markScaleWorkerProgress();
+  CHECK(getScaleLinkSnapshot().state == ScaleLinkState::CONNECTED);
+  CHECK(scaleAvailable());
+
+  // Library already dropped (e.g. beep path called isConnected()), but the
+  // snapshot was left CONNECTED. Discovery must clear it immediately even
+  // while an indefinite idle scan is in progress.
+  scale.connected = false;
+  scale.scanning = true;
+  uint32_t lastScanCycleMs = hostMillis;
+  uint32_t lastConnectLogMs = 0;
+  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
+  bool connectAttemptSeriesActive = false;
+  uint32_t scanSessionAtMs = hostMillis;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs);
+  CHECK(getScaleLinkSnapshot().state == ScaleLinkState::DISCONNECTED);
+  CHECK(!scaleAvailable());
+}
+
 void r13_full_queue_prevents_stop_without_delaying_relay_open() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -2902,11 +2925,49 @@ void w96_echo_inverted_uses_long_bookend_tones() {
   CHECK(BUZZER_ECHO_INVERTED_NOTES[3].onMs == 220);
   CHECK(BUZZER_ECHO_INVERTED_NOTES[1].onMs == 50);
   CHECK(BUZZER_ECHO_INVERTED_NOTES[2].onMs == 50);
+  CHECK(BUZZER_ECHO_INVERTED_NOTES[3].gapMs == 0);
   CHECK(localBuzzer.request(BuzzerPattern::ECHO_INVERTED));
   CHECK(localBuzzer.active == BuzzerPattern::ECHO_INVERTED);
   CHECK(localBuzzer.beepCount == 4);
   CHECK(localBuzzer.onMs == BUZZER_ECHO_INVERTED_NOTES[0].onMs);
   CHECK(localBuzzer.gapMs == BUZZER_ECHO_INVERTED_NOTES[0].gapMs);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  hostMillis += BUZZER_ECHO_INVERTED_NOTES[0].onMs;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  hostMillis += BUZZER_ECHO_INVERTED_NOTES[0].gapMs;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  CHECK(localBuzzer.onMs == BUZZER_ECHO_INVERTED_NOTES[1].onMs);
+  hostMillis += BUZZER_ECHO_INVERTED_NOTES[1].onMs;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  hostMillis += BUZZER_ECHO_INVERTED_NOTES[1].gapMs;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  CHECK(localBuzzer.onMs == BUZZER_ECHO_INVERTED_NOTES[2].onMs);
+  hostMillis += BUZZER_ECHO_INVERTED_NOTES[2].onMs;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  hostMillis += BUZZER_ECHO_INVERTED_NOTES[2].gapMs;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  CHECK(localBuzzer.onMs == BUZZER_ECHO_INVERTED_NOTES[3].onMs);
+  hostMillis += BUZZER_ECHO_INVERTED_NOTES[3].onMs;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  CHECK(!localBuzzer.busy());
+
+  reachReadyFromBoot();
+  BuzzerPattern parsed = BuzzerPattern::NONE;
+  CHECK(parseBuzzerPatternId("echoinv", parsed));
+  CHECK(parsed == BuzzerPattern::ECHO_INVERTED);
+  WebCommand command = webControlCommand(WebCommandType::BUZZER_TEST);
+  command.buzzerPattern = BuzzerPattern::ECHO_INVERTED;
+  const uint32_t before = localBuzzer.acceptedRequests;
+  processWebCommand(command);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(localBuzzer.active == BuzzerPattern::ECHO_INVERTED);
 }
 
 void w60_web_buzzer_test_plays_requested_pattern() {
@@ -5532,6 +5593,7 @@ const TestCase testCases[] = {
     {"R10", r10_relay_cannot_close_when_hard_timer_cannot_arm},
     {"R11", r11_final_shot_analysis_updates_only_valid_offset},
     {"R12", r12_scale_worker_service_publishes_weight_and_detects_failure},
+    {"R12b", r12b_discovery_clears_stale_connected_link_snapshot},
     {"R13", r13_full_queue_prevents_stop_without_delaying_relay_open},
     {"R14", r14_invalid_runtime_configuration_is_transactionally_rejected},
     {"R15", r15_gptimer_opens_cn9_without_arduino_or_esp_timer_tasks},
