@@ -2668,6 +2668,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"buzzerScaleLostBeep\":%s,"
       "\"buzzerAutoToManualGuardEndBeep\":%s,"
       "\"buzzerManualNoScaleBeep\":%s,"
+      "\"buzzerScaleConnectedBeep\":%s,"
       "\"buzzerExtendedPulseRate\":\"%s\","
       "\"alertOutputChannel\":\"%s\","
       "\"rinseGestureMs\":%lu,"
@@ -2802,6 +2803,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.config.buzzerScaleLostBeep ? "true" : "false",
       control.config.buzzerAutoToManualGuardEndBeep ? "true" : "false",
       control.config.buzzerManualNoScaleBeep ? "true" : "false",
+      control.config.buzzerScaleConnectedBeep ? "true" : "false",
       extendedPulseRateId(control.config.buzzerExtendedPulseRate),
       alertOutputChannelId(control.config.alertOutputChannel),
       static_cast<unsigned long>(control.config.rinseGestureMs),
@@ -3330,7 +3332,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
       "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
-      "buzzerManualNoScaleBeep", "buzzerExtendedPulseRate",
+      "buzzerManualNoScaleBeep", "buzzerScaleConnectedBeep",
+      "buzzerExtendedPulseRate",
       "alertOutputChannel",
       "autoRetare", "retareWindowMs", "minimumCupWeightG",
       "retareStabilitySamples", "retareStabilityToleranceG",
@@ -3344,7 +3347,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "scaleMacCacheMode", "bookooMuteOnBuzzerOnly", "bookooConnectBeepLevel",
       "avoidBbwShotWithoutScale", "lastShotCooldownMs", "serialDebugOutput"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 42)) {
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 43)) {
     parseError =
         "Config must include exactly the expected fields with correct types.";
   } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
@@ -3389,6 +3392,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (!jsonBoolean(root, "buzzerManualNoScaleBeep",
                           candidate.buzzerManualNoScaleBeep)) {
     parseError = "buzzerManualNoScaleBeep must be a boolean.";
+  } else if (!jsonBoolean(root, "buzzerScaleConnectedBeep",
+                          candidate.buzzerScaleConnectedBeep)) {
+    parseError = "buzzerScaleConnectedBeep must be a boolean.";
   } else if (!jsonExtendedPulseRate(root, "buzzerExtendedPulseRate",
                                     candidate.buzzerExtendedPulseRate)) {
     parseError =
@@ -3899,7 +3905,7 @@ esp_err_t ShotStopperNetwork::buzzerHandler(httpd_req_t *request) {
   }
   if (!parsed) {
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
-                     "pattern must be short, long, double, triple, pulse2, pulse3, pulse4, or pulse5.");
+                     "pattern must be short, long, double, triple, pulse2, pulse3, pulse4, pulse5, chime, swing, echo, morse, or snap.");
   }
   WebCommand command;
   command.type = WebCommandType::BUZZER_TEST;

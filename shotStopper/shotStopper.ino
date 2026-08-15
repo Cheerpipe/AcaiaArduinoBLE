@@ -299,7 +299,8 @@ enum class AlertEvent : uint8_t {
   SCALE_LOST,
   ATM_END,
   MANUAL_NO_SCALE,
-  EXTENDED_PULSE
+  EXTENDED_PULSE,
+  SCALE_CONNECTED
 };
 
 bool startExtendedPulseTrain(uint32_t durationMs);
@@ -1003,6 +1004,10 @@ void setScaleLinkState(ScaleLinkState state) {
                   state == ScaleLinkState::CONNECTED
                       ? DebugCode::SCALE_CONNECTED
                       : DebugCode::SCALE_DISCONNECTED);
+    if (state == ScaleLinkState::CONNECTED &&
+        runtimeConfig.buzzerScaleConnectedBeep) {
+      emitAlert(AlertEvent::SCALE_CONNECTED);
+    }
   }
 }
 
@@ -3230,6 +3235,7 @@ bool alertEventScaleCapable(AlertEvent event) {
     case AlertEvent::ATM_END:
     case AlertEvent::MANUAL_NO_SCALE:
     case AlertEvent::EXTENDED_PULSE:
+    case AlertEvent::SCALE_CONNECTED:
       return false;
     default:
       return true;
@@ -3291,6 +3297,12 @@ bool queueScaleIndependentAlert(AlertEvent event, uint32_t cycleId) {
 // Independent / multi-tone alerts: first drop, paddle, completion, triples.
 bool emitAlert(AlertEvent event, uint32_t cycleId) {
   const AlertOutputChannel channel = currentAlertOutputChannel();
+  if (event == AlertEvent::SCALE_CONNECTED) {
+    if (channel != AlertOutputChannel::BUZZER_ONLY) {
+      return false;
+    }
+    return emitLocalAlertBuzzer(BuzzerPattern::CHIME);
+  }
   const bool scaleCapable = alertEventScaleCapable(event);
   BuzzerPattern buzzerPattern = BuzzerPattern::SINGLE;
   if (event == AlertEvent::SCALE_LOST || event == AlertEvent::ATM_END ||
@@ -5171,6 +5183,8 @@ void processWebCommand(const WebCommand &command) {
       candidate.buzzerAutoToManualGuardEndBeep =
           command.config.buzzerAutoToManualGuardEndBeep;
       candidate.buzzerManualNoScaleBeep = command.config.buzzerManualNoScaleBeep;
+      candidate.buzzerScaleConnectedBeep =
+          command.config.buzzerScaleConnectedBeep;
       candidate.buzzerExtendedPulseRate = command.config.buzzerExtendedPulseRate;
       candidate.alertOutputChannel = command.config.alertOutputChannel;
       candidate.bookooMuteOnBuzzerOnly = command.config.bookooMuteOnBuzzerOnly;

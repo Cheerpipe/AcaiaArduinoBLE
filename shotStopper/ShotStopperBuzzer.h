@@ -30,6 +30,49 @@ constexpr uint32_t BUZZER_PULSE_TRAIN_5HZ_GAP_MS =
     BUZZER_PULSE_TRAIN_5HZ_PERIOD_MS - BUZZER_PULSE_TRAIN_ON_MS;
 constexpr uint32_t BUZZER_PULSE_TRAIN_DEBUG_MS = 3000;
 
+struct BuzzerNote {
+  uint16_t onMs;
+  uint16_t gapMs;
+};
+
+// Irregular finite motifs (not equal beeps, not a metronome).
+constexpr BuzzerNote BUZZER_CHIME_NOTES[] = {{60, 50}, {60, 80}, {220, 0}};
+constexpr BuzzerNote BUZZER_SWING_NOTES[] = {{180, 40}, {50, 40}, {50, 0}};
+constexpr BuzzerNote BUZZER_ECHO_NOTES[] = {
+    {50, 50}, {50, 220}, {50, 50}, {50, 0}};
+constexpr BuzzerNote BUZZER_MORSE_NOTES[] = {{250, 80}, {50, 80}, {250, 0}};
+constexpr BuzzerNote BUZZER_SNAP_NOTES[] = {
+    {70, 30}, {200, 50}, {70, 30}, {200, 0}};
+
+inline const BuzzerNote *buzzerSequenceNotes(BuzzerPattern pattern,
+                                             uint8_t &count) {
+  switch (pattern) {
+    case BuzzerPattern::CHIME:
+      count = static_cast<uint8_t>(sizeof(BUZZER_CHIME_NOTES) /
+                                   sizeof(BUZZER_CHIME_NOTES[0]));
+      return BUZZER_CHIME_NOTES;
+    case BuzzerPattern::SWING:
+      count = static_cast<uint8_t>(sizeof(BUZZER_SWING_NOTES) /
+                                   sizeof(BUZZER_SWING_NOTES[0]));
+      return BUZZER_SWING_NOTES;
+    case BuzzerPattern::ECHO:
+      count = static_cast<uint8_t>(sizeof(BUZZER_ECHO_NOTES) /
+                                   sizeof(BUZZER_ECHO_NOTES[0]));
+      return BUZZER_ECHO_NOTES;
+    case BuzzerPattern::MORSE:
+      count = static_cast<uint8_t>(sizeof(BUZZER_MORSE_NOTES) /
+                                   sizeof(BUZZER_MORSE_NOTES[0]));
+      return BUZZER_MORSE_NOTES;
+    case BuzzerPattern::SNAP:
+      count = static_cast<uint8_t>(sizeof(BUZZER_SNAP_NOTES) /
+                                   sizeof(BUZZER_SNAP_NOTES[0]));
+      return BUZZER_SNAP_NOTES;
+    default:
+      count = 0;
+      return nullptr;
+  }
+}
+
 // Non-blocking local-buzzer driver. Passive (ENABLE=1) uses hardware PWM
 // (ledc); active (ENABLE=2) uses GPIO HIGH/LOW. Host stubs map both to a
 // digital level so patterns can be asserted without LEDC. Phase edges are
@@ -49,6 +92,7 @@ struct LocalBuzzer {
   uint32_t deadlineAtMs = 0;
   uint32_t pendingDurationMs = 0;
   uint32_t acceptedRequests = 0;
+  const BuzzerNote *sequenceNotes = nullptr;
   esp_timer_handle_t phaseTimer = nullptr;
   portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -75,6 +119,7 @@ struct LocalBuzzer {
   void armPhaseTimer(uint32_t delayMs);
   void finish(uint32_t nowMs);
   bool startPattern(BuzzerPattern pattern, uint32_t nowMs);
+  void applySequenceNote(uint8_t index);
   static void phaseTimerCallback(void *arg);
 };
 
@@ -115,6 +160,7 @@ inline void LocalBuzzer::begin(uint8_t gpioPin) {
   deadlineAtMs = 0;
   pendingDurationMs = 0;
   acceptedRequests = 0;
+  sequenceNotes = nullptr;
   cancelPhaseTimer();
   if (!BUZZER_SUPPORT_ENABLED || pin == 0) {
     return;
@@ -184,6 +230,7 @@ inline void LocalBuzzer::finish(uint32_t nowMs) {
   beepCount = 0;
   looping = false;
   deadlineAtMs = 0;
+  sequenceNotes = nullptr;
   if (pending == BuzzerPattern::NONE) {
     cancelPhaseTimer();
     return;
@@ -199,9 +246,18 @@ inline void LocalBuzzer::finish(uint32_t nowMs) {
   applyDeadline(nextDurationMs, nowMs);
 }
 
+inline void LocalBuzzer::applySequenceNote(uint8_t index) {
+  if (sequenceNotes == nullptr) {
+    return;
+  }
+  onMs = sequenceNotes[index].onMs;
+  gapMs = sequenceNotes[index].gapMs;
+}
+
 inline bool LocalBuzzer::startPattern(BuzzerPattern pattern, uint32_t nowMs) {
   looping = false;
   deadlineAtMs = 0;
+  sequenceNotes = nullptr;
   if (pattern == BuzzerPattern::SINGLE) {
     beepCount = 1;
     onMs = BUZZER_SINGLE_ON_MS;
@@ -231,6 +287,14 @@ inline bool LocalBuzzer::startPattern(BuzzerPattern pattern, uint32_t nowMs) {
     } else {
       gapMs = BUZZER_PULSE_TRAIN_GAP_MS;
     }
+  } else if (buzzerPatternIsSequence(pattern)) {
+    uint8_t count = 0;
+    sequenceNotes = buzzerSequenceNotes(pattern, count);
+    if (sequenceNotes == nullptr || count == 0) {
+      return false;
+    }
+    beepCount = count;
+    applySequenceNote(0);
   } else {
     return false;
   }
@@ -306,6 +370,7 @@ inline void LocalBuzzer::stopIf(BuzzerPattern pattern) {
   beepCount = 0;
   looping = false;
   deadlineAtMs = 0;
+  sequenceNotes = nullptr;
   if (pending == BuzzerPattern::NONE) {
     cancelPhaseTimer();
     portEXIT_CRITICAL(&mux);
@@ -386,6 +451,7 @@ inline void LocalBuzzer::service(uint32_t nowMs) {
     portEXIT_CRITICAL(&mux);
     return;
   }
+  applySequenceNote(beepIndex);
   phaseStartedAtMs = nowMs;
   startTone();
   armPhaseTimer(onMs);

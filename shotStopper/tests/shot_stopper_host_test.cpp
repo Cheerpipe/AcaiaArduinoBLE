@@ -1514,6 +1514,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.buzzerScaleLostBeep);
   CHECK(config.buzzerAutoToManualGuardEndBeep);
   CHECK(config.buzzerManualNoScaleBeep);
+  CHECK(config.buzzerScaleConnectedBeep);
   CHECK(config.buzzerExtendedPulseRate ==
         static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE));
   CHECK(DEFAULT_EXTENDED_PULSE_RATE == ExtendedPulseRate::FAST);
@@ -2683,6 +2684,107 @@ void w85_debug_pulse_rates_use_same_on_ms_and_3s() {
   CHECK(localBuzzer.gapMs == BUZZER_PULSE_TRAIN_5HZ_GAP_MS);
   runLoopAfter(BUZZER_PULSE_TRAIN_DEBUG_MS + 20);
   CHECK(!localBuzzer.busy());
+}
+
+void w91_chime_sequence_uses_irregular_note_timings() {
+  resetHarness(false, false);
+  CHECK(localBuzzer.request(BuzzerPattern::CHIME));
+  CHECK(localBuzzer.active == BuzzerPattern::CHIME);
+  CHECK(localBuzzer.beepCount == 3);
+  CHECK(localBuzzer.onMs == BUZZER_CHIME_NOTES[0].onMs);
+  CHECK(localBuzzer.gapMs == BUZZER_CHIME_NOTES[0].gapMs);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  hostMillis += BUZZER_CHIME_NOTES[0].onMs;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  hostMillis += BUZZER_CHIME_NOTES[0].gapMs;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  CHECK(localBuzzer.onMs == BUZZER_CHIME_NOTES[1].onMs);
+  CHECK(localBuzzer.gapMs == BUZZER_CHIME_NOTES[1].gapMs);
+  hostMillis += BUZZER_CHIME_NOTES[1].onMs;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  hostMillis += BUZZER_CHIME_NOTES[1].gapMs;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  CHECK(localBuzzer.onMs == BUZZER_CHIME_NOTES[2].onMs);
+  hostMillis += BUZZER_CHIME_NOTES[2].onMs;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  CHECK(!localBuzzer.busy());
+}
+
+void w92_parse_sequence_pattern_ids() {
+  BuzzerPattern parsed = BuzzerPattern::NONE;
+  CHECK(parseBuzzerPatternId("chime", parsed));
+  CHECK(parsed == BuzzerPattern::CHIME);
+  CHECK(parseBuzzerPatternId("swing", parsed));
+  CHECK(parsed == BuzzerPattern::SWING);
+  CHECK(parseBuzzerPatternId("echo", parsed));
+  CHECK(parsed == BuzzerPattern::ECHO);
+  CHECK(parseBuzzerPatternId("morse", parsed));
+  CHECK(parsed == BuzzerPattern::MORSE);
+  CHECK(parseBuzzerPatternId("snap", parsed));
+  CHECK(parsed == BuzzerPattern::SNAP);
+}
+
+void w93_scale_connected_chime_on_buzzer_only_rising_edge() {
+  resetHarness(false, false);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  CHECK(runtimeConfig.buzzerScaleConnectedBeep);
+  const uint32_t before = localBuzzer.acceptedRequests;
+  setScaleConnected(true);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(localBuzzer.active == BuzzerPattern::CHIME);
+  const uint32_t afterConnect = localBuzzer.acceptedRequests;
+  setScaleConnected(true);
+  CHECK(localBuzzer.acceptedRequests == afterConnect);
+  setScaleConnected(false);
+  setScaleConnected(true);
+  CHECK(localBuzzer.acceptedRequests == afterConnect + 1);
+}
+
+void w94_scale_connected_silent_when_flag_off_or_not_buzzer_only() {
+  resetHarness(false, false);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  runtimeConfig.buzzerScaleConnectedBeep = false;
+  const uint32_t before = localBuzzer.acceptedRequests;
+  setScaleConnected(true);
+  CHECK(localBuzzer.acceptedRequests == before);
+
+  resetHarness(false, false);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+  runtimeConfig.buzzerScaleConnectedBeep = true;
+  const uint32_t beforePriority = localBuzzer.acceptedRequests;
+  setScaleConnected(true);
+  CHECK(localBuzzer.acceptedRequests == beforePriority);
+
+  resetHarness(false, false);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_ONLY);
+  const uint32_t beforeScaleOnly = localBuzzer.acceptedRequests;
+  setScaleConnected(true);
+  CHECK(localBuzzer.acceptedRequests == beforeScaleOnly);
+}
+
+void w95_web_buzzer_test_plays_chime_sequence() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  BuzzerPattern parsed = BuzzerPattern::NONE;
+  CHECK(parseBuzzerPatternId("chime", parsed));
+  CHECK(parsed == BuzzerPattern::CHIME);
+  WebCommand command = webControlCommand(WebCommandType::BUZZER_TEST);
+  command.buzzerPattern = BuzzerPattern::CHIME;
+  const uint32_t before = localBuzzer.acceptedRequests;
+  processWebCommand(command);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(localBuzzer.active == BuzzerPattern::CHIME);
+  CHECK(localBuzzer.beepCount == 3);
+  CHECK(localBuzzer.onMs == BUZZER_CHIME_NOTES[0].onMs);
 }
 
 void w60_web_buzzer_test_plays_requested_pattern() {
@@ -5305,6 +5407,11 @@ const TestCase testCases[] = {
     {"W87", w87_nvs_fail_keeps_ram_and_requeues},
     {"W88", w88_save_network_flush_includes_live_runtime},
     {"W89", w89_restart_flush_includes_live_and_aborts_on_fail},
+    {"W91", w91_chime_sequence_uses_irregular_note_timings},
+    {"W92", w92_parse_sequence_pattern_ids},
+    {"W93", w93_scale_connected_chime_on_buzzer_only_rising_edge},
+    {"W94", w94_scale_connected_silent_when_flag_off_or_not_buzzer_only},
+    {"W95", w95_web_buzzer_test_plays_chime_sequence},
     {"D01", d01_idle_scan_stays_enabled_between_ticks},
     {"D02", d02_full_empty_mac_uses_name_scan},
     {"D03", d03_scan_start_failed_uses_backoff},

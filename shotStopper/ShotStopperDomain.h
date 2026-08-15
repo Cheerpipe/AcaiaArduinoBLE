@@ -12,8 +12,9 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 27;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 26;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 28;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 27;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V27 = 27;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V26 = 26;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V25 = 25;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V24 = 24;
@@ -245,7 +246,12 @@ enum class BuzzerPattern : uint8_t {
   PULSE_TRAIN = 5,
   PULSE_3HZ = 6,
   PULSE_4HZ = 7,
-  PULSE_5HZ = 8
+  PULSE_5HZ = 8,
+  CHIME = 9,
+  SWING = 10,
+  ECHO = 11,
+  MORSE = 12,
+  SNAP = 13
 };
 
 inline bool buzzerPatternIsPulseTrain(BuzzerPattern pattern) {
@@ -253,6 +259,14 @@ inline bool buzzerPatternIsPulseTrain(BuzzerPattern pattern) {
          pattern == BuzzerPattern::PULSE_3HZ ||
          pattern == BuzzerPattern::PULSE_4HZ ||
          pattern == BuzzerPattern::PULSE_5HZ;
+}
+
+inline bool buzzerPatternIsSequence(BuzzerPattern pattern) {
+  return pattern == BuzzerPattern::CHIME ||
+         pattern == BuzzerPattern::SWING ||
+         pattern == BuzzerPattern::ECHO ||
+         pattern == BuzzerPattern::MORSE ||
+         pattern == BuzzerPattern::SNAP;
 }
 
 inline bool parseBuzzerPatternId(const char *id, BuzzerPattern &out) {
@@ -289,6 +303,26 @@ inline bool parseBuzzerPatternId(const char *id, BuzzerPattern &out) {
   }
   if (strcmp(id, "pulse5") == 0) {
     out = BuzzerPattern::PULSE_5HZ;
+    return true;
+  }
+  if (strcmp(id, "chime") == 0) {
+    out = BuzzerPattern::CHIME;
+    return true;
+  }
+  if (strcmp(id, "swing") == 0) {
+    out = BuzzerPattern::SWING;
+    return true;
+  }
+  if (strcmp(id, "echo") == 0) {
+    out = BuzzerPattern::ECHO;
+    return true;
+  }
+  if (strcmp(id, "morse") == 0) {
+    out = BuzzerPattern::MORSE;
+    return true;
+  }
+  if (strcmp(id, "snap") == 0) {
+    out = BuzzerPattern::SNAP;
     return true;
   }
   return false;
@@ -679,6 +713,7 @@ struct RuntimeConfig {
   bool buzzerScaleLostBeep = true;
   bool buzzerAutoToManualGuardEndBeep = true;
   bool buzzerManualNoScaleBeep = true;
+  bool buzzerScaleConnectedBeep = true;
   uint8_t buzzerExtendedPulseRate =
       static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE);
   // scale_only | buzzer_only | scale_priority (ignored when buzzer not compiled).
@@ -728,6 +763,8 @@ struct RuntimeConfig {
   uint32_t lastShotCooldownMs = DEFAULT_LAST_SHOT_COOLDOWN_MS;
   // USB debug spew (paddle/CN9/Wi-Fi traces). CLI replies stay independent.
   bool serialDebugOutput = false;
+  // Keeps schema-28 NVS blob size distinct from schema 27.
+  uint32_t reservedConfig4 = 0;
 };
 
 struct CycleConfigSnapshot {

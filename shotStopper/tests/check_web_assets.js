@@ -57,6 +57,7 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('buzzerScaleLostBeep') ||
     !ui.includes('buzzerAutoToManualGuardEndBeep') ||
     !ui.includes('buzzerManualNoScaleBeep') ||
+    !ui.includes('buzzerScaleConnectedBeep') ||
     !ui.includes('buzzerExtendedPulseRate') ||
     !html.includes('id="buzzerExtendedPulseRate"') ||
     !html.includes('class="buzzerOpt scaleIncapableOpt">Extended shot pulse<select id="buzzerExtendedPulseRate"') ||
@@ -75,6 +76,11 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('id="bookooMuteOnBuzzerOnly"') ||
     !ui.includes('id="bookooConnectBeepLevel"') ||
     !html.includes('id="bookooMuteOnBuzzerOnly" type="checkbox" checked') ||
+    !html.includes('id="buzzerScaleConnectedBeep" type="checkbox" checked') ||
+    !html.includes('class="buzzerOpt buzzerOnlyOpt hidden"') ||
+    !ui.includes('function updateBuzzerOnlyAlertControls(') ||
+    !ui.includes("el.value==='buzzer_only'") ||
+    !ui.includes('querySelectorAll(\'.buzzerOnlyOpt\')') ||
     !html.includes('option value="4" selected') ||
     !ui.includes('when Buzzer only is saved') ||
     !html.includes('Volume on connect/reconnect. <strong>Scale only or Scale priority.</strong>') ||
@@ -109,11 +115,12 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('"buzzerScaleLostBeep"') ||
     !network.includes('"buzzerAutoToManualGuardEndBeep"') ||
     !network.includes('"buzzerManualNoScaleBeep"') ||
+    !network.includes('"buzzerScaleConnectedBeep"') ||
     !network.includes('"buzzerExtendedPulseRate"') ||
     !network.includes('"alertOutputChannel"') ||
     !network.includes('"bookooMuteOnBuzzerOnly"') ||
     !network.includes('"bookooConnectBeepLevel"') ||
-    !network.includes('fields, 42') ||
+    !network.includes('fields, 43') ||
     !network.includes('allowedCount > 64') ||
     !network.includes('uint64_t seen') ||
     !network.includes('WEB_UI_ASSET_TAG') ||
@@ -164,6 +171,7 @@ if (!network.includes('"firstDropBeep"') ||
     ui.includes('Up to 120 shots') ||
     !ui.includes('/api/v1/time/sync') ||
     !firmware.includes('session.config.firstDropBeep') ||
+    !firmware.includes('candidate.buzzerScaleConnectedBeep') ||
     !firmware.includes('localBuzzer') ||
     !firmware.includes('BUZZER_SUPPORT_ENABLED') ||
     !firmware.includes('BUZZER_GPIO') ||
@@ -643,6 +651,11 @@ if (!ui.includes('id="debugPanel"') ||
     !ui.includes('id="beepPulse3Button"') ||
     !ui.includes('id="beepPulse4Button"') ||
     !ui.includes('id="beepPulse5Button"') ||
+    !ui.includes('id="beepChimeButton"') ||
+    !ui.includes('id="beepSwingButton"') ||
+    !ui.includes('id="beepEchoButton"') ||
+    !ui.includes('id="beepMorseButton"') ||
+    !ui.includes('id="beepSnapButton"') ||
     !ui.includes('/api/v1/control/buzzer') ||
     !ui.includes("['beepShortButton','short']") ||
     !ui.includes("['beepLongButton','long']") ||
@@ -652,6 +665,11 @@ if (!ui.includes('id="debugPanel"') ||
     !ui.includes("['beepPulse3Button','pulse3']") ||
     !ui.includes("['beepPulse4Button','pulse4']") ||
     !ui.includes("['beepPulse5Button','pulse5']") ||
+    !ui.includes("['beepChimeButton','chime']") ||
+    !ui.includes("['beepSwingButton','swing']") ||
+    !ui.includes("['beepEchoButton','echo']") ||
+    !ui.includes("['beepMorseButton','morse']") ||
+    !ui.includes("['beepSnapButton','snap']") ||
     !ui.includes('function debugBuzzer(') ||
     !ui.includes('Shown with SHOT_STOPPER_ENABLE_BUZZER') ||
     html.indexOf('id="saveDateTimeButton"') > html.indexOf('id="debugPanel"') ||
@@ -943,6 +961,8 @@ if (!safeBeep.includes('return setBeepLevel(1)') ||
   throw new Error('First-drop beep must not tare or mutate scale connection state');
 }
 if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
+    !firmware.includes('emitAlert(AlertEvent::SCALE_CONNECTED') ||
+    !firmware.includes('BuzzerPattern::CHIME') ||
     !firmware.includes('requestScaleBrewBeep(') ||
     !firmware.includes('cancelScaleBrewBeep(session.id)') ||
     !firmware.includes('onFirstDropsDetected') ||
