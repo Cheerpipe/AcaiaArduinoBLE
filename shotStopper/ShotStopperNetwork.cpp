@@ -936,6 +936,10 @@ bool ShotStopperNetwork::revertPendingNetwork(uint32_t now,
   staNtpEligibleAtMs_ = 0;
   g_wallClock.markDisabled();
   staEverConnected_ = false;
+  if (next.staConfigured) {
+    startStation(next, now);
+    return true;
+  }
   return startFallbackAccessPoint(now);
 }
 
@@ -2161,11 +2165,20 @@ bool ShotStopperNetwork::loginRateLimited(uint32_t now) {
     loginAttemptsInWindow_ = 0;
   }
   const bool limited = loginAttemptsInWindow_ >= 5;
-  if (!limited) {
+  portEXIT_CRITICAL(&dataMux_);
+  return limited;
+}
+
+void ShotStopperNetwork::recordFailedLoginAttempt(uint32_t now) {
+  portENTER_CRITICAL(&dataMux_);
+  if (static_cast<uint32_t>(now - loginWindowStartedAtMs_) >= 60000) {
+    loginWindowStartedAtMs_ = now;
+    loginAttemptsInWindow_ = 0;
+  }
+  if (loginAttemptsInWindow_ < 255) {
     ++loginAttemptsInWindow_;
   }
   portEXIT_CRITICAL(&dataMux_);
-  return limited;
 }
 
 esp_err_t ShotStopperNetwork::sendJson(httpd_req_t *request,
@@ -2354,10 +2367,6 @@ esp_err_t ShotStopperNetwork::notFoundHandler(httpd_req_t *request,
 esp_err_t ShotStopperNetwork::loginHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   const uint32_t now = millis();
-  if (self.loginRateLimited(now)) {
-    return sendError(request, STATUS_TOO_MANY, "LOGIN_RATE_LIMITED",
-                     "Too many attempts; wait one minute.");
-  }
   char body[REQUEST_BODY_CAPACITY] = {};
   if (!readJsonBody(request, body)) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
@@ -2379,8 +2388,20 @@ esp_err_t ShotStopperNetwork::loginHandler(httpd_req_t *request) {
     cJSON_Delete(root);
   }
   memset(body, 0, sizeof(body));
-  if (!parsed || !verifyAdminPassword(self.settingsCopy(), password)) {
+  if (!parsed) {
     memset(password, 0, sizeof(password));
+    self.log(DebugCategory::WEB, DebugCode::WEB_COMMAND_REJECTED);
+    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
+                     "A bounded JSON body is required.");
+  }
+  if (self.loginRateLimited(now)) {
+    memset(password, 0, sizeof(password));
+    return sendError(request, STATUS_TOO_MANY, "LOGIN_RATE_LIMITED",
+                     "Too many attempts; wait one minute.");
+  }
+  if (!verifyAdminPassword(self.settingsCopy(), password)) {
+    memset(password, 0, sizeof(password));
+    self.recordFailedLoginAttempt(now);
     self.log(DebugCategory::WEB, DebugCode::WEB_COMMAND_REJECTED);
     return sendError(request, STATUS_UNAUTHORIZED, "INVALID_CREDENTIALS",
                      "Incorrect password.");

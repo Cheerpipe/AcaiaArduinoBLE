@@ -1642,7 +1642,8 @@ struct ControlStatusSnapshot {
 inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {
   return status.state == StopperState::READY && !status.activeCycle &&
          !status.relayClosed && !status.physicalPaddleOn &&
-         !status.maintenanceLeaseActive;
+         !status.maintenanceLeaseActive && !status.resetRecoveryRequired &&
+         status.safetyState != RelaySafetyState::LOCKOUT;
 }
 
 inline bool controlAllowsNetworkBringup(const ControlStatusSnapshot &) {

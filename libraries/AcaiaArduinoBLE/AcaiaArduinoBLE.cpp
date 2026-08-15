@@ -801,6 +801,9 @@ bool AcaiaArduinoBLE::parseAcaiaOldPacket(const byte data[], int length,
     if ((length != 10 && length != 14) || data[6] < 1 || data[6] > 4) {
         return false;
     }
+    if (length == 14 && !validAcaiaChecksum(data, length)) {
+        return false;
+    }
 
     const uint32_t raw =
         (static_cast<uint32_t>(data[3]) << 8) | data[2];

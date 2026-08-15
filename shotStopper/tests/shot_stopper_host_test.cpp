@@ -222,6 +222,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   feedbackTransitionPending = false;
   feedbackExpectedClosed = false;
   feedbackTransitionStartedAtMs = 0;
+  feedbackTransitionStampPending = false;
   safetyHeartbeatLevel = false;
   safetyHeartbeatToggledAtMs = 0;
   safeRestartRequested = false;
@@ -1092,12 +1093,11 @@ void r04_scale_commands_execute_once_and_report_results() {
   scale.tareStartTimerSucceeds = false;
   CHECK(executeNextScaleCommand());
   CHECK(scale.tareStartTimerCalls == 1);
-  CHECK(scale.resetTimerCalls == 0);
-  CHECK(scale.startTimerCalls == 0);
-  CHECK(scale.tareCalls == 0);
-  CHECK(!session.remoteTimerStarted);
+  CHECK(scale.resetTimerCalls == 1);
+  CHECK(scale.startTimerCalls == 1);
+  CHECK(scale.tareCalls == 1);
   loop();
-  CHECK(!session.automaticEnabled);
+  CHECK(session.remoteTimerStarted);
 
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -1270,6 +1270,19 @@ void r11_final_shot_analysis_updates_only_valid_offset() {
   currentWeightReceivedAtMs = hostMillis + 1;
   runLoopAfter(DRIP_DELAY_MS);
   CHECK(runtimeConfig.weightOffsetG == validOffset);
+
+  pendingFinalize.pending = true;
+  pendingFinalize.offsetAnalysis = true;
+  pendingFinalize.endedAtMs = hostMillis;
+  pendingFinalize.endedWeightSequence = currentWeightSequence;
+  pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  pendingFinalize.weightOffsetG = 3.0f;
+  currentWeight = 32.0f;
+  ++currentWeightSequence;
+  currentWeightReceivedAtMs = hostMillis + 1;
+  runLoopAfter(DRIP_DELAY_MS);
+  finishHostMaintenance();
+  CHECK(fabsf(runtimeConfig.weightOffsetG) < 0.001f);
 }
 
 void r12_scale_worker_service_publishes_weight_and_detects_failure() {
@@ -1421,6 +1434,56 @@ void r19_reset_during_close_requires_local_on_off_recovery() {
   CHECK(relaySafetyFault == RelaySafetyFault::NONE);
   CHECK(!safetyResetStatus.recoveryRequired);
   CHECK(safetyResetStatus.unsafeResetCount == 0);
+}
+
+void r19b_restart_rejected_until_local_lockout_recovery() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  ControlStatusSnapshot gated = {};
+  gated.state = StopperState::READY;
+  gated.resetRecoveryRequired = true;
+  CHECK(!controlAllowsConfiguration(gated));
+  gated.resetRecoveryRequired = false;
+  gated.safetyState = RelaySafetyState::LOCKOUT;
+  CHECK(!controlAllowsConfiguration(gated));
+
+  recordRelayCommandedClosed(true);
+  digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
+  safetyResetStatus = beginSafetyResetGuard();
+  relaySafetyState = RelaySafetyState::LOCKOUT;
+  relaySafetyFault = RelaySafetyFault::RESET_DURING_CLOSE;
+  CHECK(safetyResetStatus.recoveryRequired);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(!controlAllowsConfigurationNow());
+
+  WebCommand restart;
+  restart.type = WebCommandType::RESTART;
+  restart.requestId = 81;
+  processWebCommand(restart);
+  CHECK(!maintenanceLease.active);
+  CHECK(hostLastForwardedNetworkCommand.requestId == 81);
+  CHECK(hostLastForwardedNetworkCommand.resultState ==
+        CommandResultState::FAILED);
+
+  WebCommand factory;
+  factory.type = WebCommandType::FACTORY_RESET;
+  factory.requestId = 82;
+  processWebCommand(factory);
+  CHECK(!maintenanceLease.active);
+  CHECK(hostLastForwardedNetworkCommand.requestId == 82);
+  CHECK(hostLastForwardedNetworkCommand.resultState ==
+        CommandResultState::FAILED);
+
+  hostPinLevel[PADDLE_GPIO] = PADDLE_ACTIVE_LEVEL;
+  serviceRelaySafety();
+  hostPinLevel[PADDLE_GPIO] = !PADDLE_ACTIVE_LEVEL;
+  ++hostMillis;
+  serviceRelaySafety();
+  hostMillis += RESET_RECOVERY_OFF_DWELL_MS;
+  serviceRelaySafety();
+  CHECK(relaySafetyState == RelaySafetyState::OPEN);
+  CHECK(!safetyResetStatus.recoveryRequired);
+  CHECK(controlAllowsConfigurationNow());
 }
 
 void r20_three_unsafe_resets_are_latched_as_a_boot_loop() {
@@ -3171,7 +3234,7 @@ void r21_automatic_control_requires_fresh_weight() {
   CHECK(getRelaySafetySnapshot().closed);
 }
 
-void r22_confirmed_implausible_weight_stops_fail_safe() {
+void r22_confirmed_implausible_weight_does_not_stop() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
@@ -3186,11 +3249,10 @@ void r22_confirmed_implausible_weight_stops_fail_safe() {
   CHECK(getRelaySafetySnapshot().closed);
   publishWeight(900.0f, hostMillis, 1, 11);
   publishWeight(900.0f, hostMillis, 1, 12);
-  CHECK(session.directStopPending);
+  CHECK(!session.directStopPending);
   loop();
-  CHECK(stopperState == StopperState::REQUIRES_OFF);
-  CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
-  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(getRelaySafetySnapshot().closed);
 }
 
 void r23_maintenance_is_canceled_fail_open_by_physical_paddle() {
@@ -4240,6 +4302,58 @@ void s02_shot_log_appends_after_drip_delay() {
         static_cast<uint8_t>(ShotLogType::MANUAL));
 }
 
+void s17_new_cycle_commits_pending_log_as_last_known() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  shotLog.clear();
+  pendingFinalize = PendingShotFinalize{};
+  pendingFinalize.pending = true;
+  pendingFinalize.logEligible = true;
+  pendingFinalize.lastKnownWeightValid = true;
+  pendingFinalize.lastKnownWeightG = 34.2f;
+  pendingFinalize.startedWithScale = true;
+  pendingFinalize.finalState = StopperState::BREW;
+  pendingFinalize.endReason = EndReason::SCALE_THRESHOLD;
+  pendingFinalize.bootId = shotLog.bootId();
+  pendingFinalize.durationDs = 120;
+  pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  pendingFinalize.weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
+  pendingFinalize.endedAtMs = hostMillis;
+  startCycle();
+  CHECK(!pendingFinalize.pending);
+  CHECK(shotLog.count() == 1);
+  ShotLogRecord records[1] = {};
+  CHECK(shotLog.copyNewestFirst(records, 1) == 1);
+  CHECK(records[0].actualWeightSource ==
+        static_cast<uint8_t>(ActualWeightSource::LAST_KNOWN));
+  CHECK(records[0].actualWeightCg == shotLogWeightToCentigrams(34.2f));
+}
+
+void w90_save_unknown_preset_id_does_not_overwrite_active() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  const ShotPreset *dbl =
+      findShotPreset(presetBank, FACTORY_PRESET_ID_DOUBLE);
+  CHECK(dbl != nullptr);
+  const uint8_t originalGoal = dbl->goalWeightG;
+  WebCommand save;
+  save.type = WebCommandType::PRESET_OP;
+  save.requestId = 90;
+  save.presetAction = static_cast<uint8_t>(PresetAction::SAVE);
+  save.presetId = 99;
+  save.config = runtimeConfig;
+  save.config.goalWeightG = 40;
+  processWebCommand(save);
+  CHECK(hostLastForwardedNetworkCommand.requestId == 90);
+  CHECK(hostLastForwardedNetworkCommand.resultState ==
+        CommandResultState::FAILED);
+  const ShotPreset *after =
+      findShotPreset(presetBank, FACTORY_PRESET_ID_DOUBLE);
+  CHECK(after != nullptr);
+  CHECK(after->goalWeightG == originalGoal);
+  CHECK(presetBank.activeId == FACTORY_PRESET_ID_DOUBLE);
+}
+
 void s03_shot_log_clear_empties_records() {
   resetHarness(false, true);
   shotLog.clear();
@@ -5043,9 +5157,10 @@ const TestCase testCases[] = {
     {"R17", r17_gptimer_arm_failure_prevents_relay_energization},
     {"R18", r18_watchdog_fault_opens_cn9_and_requests_safe_restart},
     {"R19", r19_reset_during_close_requires_local_on_off_recovery},
+    {"R19b", r19b_restart_rejected_until_local_lockout_recovery},
     {"R20", r20_three_unsafe_resets_are_latched_as_a_boot_loop},
     {"R21", r21_automatic_control_requires_fresh_weight},
-    {"R22", r22_confirmed_implausible_weight_stops_fail_safe},
+    {"R22", r22_confirmed_implausible_weight_does_not_stop},
     {"R23", r23_maintenance_is_canceled_fail_open_by_physical_paddle},
     {"R24", r24_web_control_lease_owner_is_enforced},
     {"R25", r25_critical_scale_mailbox_never_blocks_and_keeps_latest},
@@ -5198,6 +5313,8 @@ const TestCase testCases[] = {
     {"D06", d06_forget_pauses_discovery_for_30s},
     {"S01", s01_shot_log_filters_short_and_rinse},
     {"S02", s02_shot_log_appends_after_drip_delay},
+    {"S17", s17_new_cycle_commits_pending_log_as_last_known},
+    {"W90", w90_save_unknown_preset_id_does_not_overwrite_active},
     {"S03", s03_shot_log_clear_empties_records},
     {"S14", s14_last_shot_persists_every_cycle},
     {"S15", s15_last_shot_updates_weight_after_drip},

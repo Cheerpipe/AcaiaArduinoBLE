@@ -275,6 +275,7 @@ class ShotStopperNetwork {
   uint32_t allocateSessionId();
   uint32_t allocateControlLeaseId();
   bool loginRateLimited(uint32_t now);
+  void recordFailedLoginAttempt(uint32_t now);
   static void randomHex(char output[TOKEN_HEX_CAPACITY]);
 
   static esp_err_t rootHandler(httpd_req_t *request);

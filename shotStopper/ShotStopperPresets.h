@@ -138,9 +138,7 @@ inline bool validateShotPresetRecipe(const ShotPreset &preset,
   return validateRuntimeConfig(probe) == ConfigValidationError::NONE;
 }
 
-inline bool validateShotPresetBank(const ShotPresetBank &bank,
-                                   uint32_t machineRetareWindowMs,
-                                   bool machineAutoRetare) {
+inline bool shotPresetBankStructurallyValid(const ShotPresetBank &bank) {
   if (bank.count == 0 || bank.count > MAX_SHOT_PRESETS) {
     return false;
   }
@@ -157,7 +155,18 @@ inline bool validateShotPresetBank(const ShotPresetBank &bank,
         return false;
       }
     }
-    if (!validateShotPresetRecipe(preset, machineRetareWindowMs,
+  }
+  return true;
+}
+
+inline bool validateShotPresetBank(const ShotPresetBank &bank,
+                                   uint32_t machineRetareWindowMs,
+                                   bool machineAutoRetare) {
+  if (!shotPresetBankStructurallyValid(bank)) {
+    return false;
+  }
+  for (uint8_t i = 0; i < bank.count; ++i) {
+    if (!validateShotPresetRecipe(bank.presets[i], machineRetareWindowMs,
                                   machineAutoRetare)) {
       return false;
     }
@@ -214,8 +223,30 @@ inline void ensureShotPresetBank(ShotPresetBank &bank,
         preset.weightOffsetG > MAX_OFFSET_G) {
       preset.weightOffsetG = preset.weightOffsetBaselineG;
     }
+    if (preset.fastExtractionGuardEnabled) {
+      if (!isfinite(preset.maxRecoveryWeightG) ||
+          preset.maxRecoveryWeightG < MIN_MAX_RECOVERY_WEIGHT_G ||
+          preset.maxRecoveryWeightG > MAX_MAX_RECOVERY_WEIGHT_G ||
+          preset.maxRecoveryWeightG <=
+              static_cast<float>(preset.goalWeightG)) {
+        const float repaired =
+            static_cast<float>(preset.goalWeightG) + 1.0f;
+        if (repaired >= MIN_MAX_RECOVERY_WEIGHT_G &&
+            repaired <= MAX_MAX_RECOVERY_WEIGHT_G &&
+            repaired > static_cast<float>(preset.goalWeightG)) {
+          preset.maxRecoveryWeightG = repaired;
+        } else {
+          preset.fastExtractionGuardEnabled = false;
+        }
+      }
+      if (preset.fastExtractionGuardEnabled &&
+          !validateShotPresetRecipe(preset, machineRetareWindowMs,
+                                    machineAutoRetare)) {
+        preset.fastExtractionGuardEnabled = false;
+      }
+    }
   }
-  if (!validateShotPresetBank(bank, machineRetareWindowMs, machineAutoRetare)) {
+  if (!shotPresetBankStructurallyValid(bank)) {
     // Last resort only when structurally irreparable.
     seedDefaultShotPresetBank(bank);
   }

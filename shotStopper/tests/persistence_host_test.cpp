@@ -1858,6 +1858,25 @@ void p26_save_candidate_validation_does_not_require_live_mutation() {
   CHECK(preset->goalWeightG == originalGoal);
 }
 
+void p35_invalid_fast_extraction_recipe_keeps_custom() {
+  ShotPresetBank bank;
+  seedDefaultShotPresetBank(bank);
+  uint8_t customId = 0;
+  CHECK(createUntitledShotPreset(bank, customId));
+  CHECK(bank.count == 3);
+  ShotPreset *custom = mutableShotPreset(bank, customId);
+  CHECK(custom != nullptr);
+  custom->fastExtractionGuardEnabled = true;
+  custom->goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  custom->maxRecoveryWeightG = 30.0f;
+  ensureShotPresetBank(bank, DEFAULT_RETARE_WINDOW_MS, true);
+  CHECK(bank.count == 3);
+  const ShotPreset *kept = findShotPreset(bank, customId);
+  CHECK(kept != nullptr);
+  CHECK(!kept->fastExtractionGuardEnabled ||
+        kept->maxRecoveryWeightG > static_cast<float>(kept->goalWeightG));
+}
+
 void p16_static_ip_address_validation() {
   uint8_t ip[4] = {192, 168, 1, 50};
   uint8_t mask[4] = {255, 255, 255, 0};
@@ -1931,6 +1950,7 @@ const TestCase tests[] = {
     {"P24", p24_preset_bank_size_and_crud_budgets},
     {"P25", p25_invalid_active_id_keeps_customs},
     {"P26", p26_save_candidate_validation_does_not_require_live_mutation},
+    {"P35", p35_invalid_fast_extraction_recipe_keeps_custom},
     {"P16", p16_static_ip_address_validation},
     {"P17", p17_legacy_password_hash_still_verifies},
     {"P18", p18_shot_log_keeps_history_when_inactive_slot_write_fails},

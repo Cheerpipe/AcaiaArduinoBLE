@@ -63,6 +63,7 @@ void resetSafety() {
   feedbackTransitionPending = false;
   feedbackExpectedClosed = false;
   feedbackTransitionStartedAtMs = 0;
+  feedbackTransitionStampPending = false;
   safetyHeartbeatLevel = false;
   safetyHeartbeatToggledAtMs = 0;
   safeRestartRequested = false;
@@ -135,6 +136,30 @@ void heartbeat_is_emitted_only_after_healthy_loop_epochs() {
   CHECK(hostPinLevel[SAFETY_HEARTBEAT_GPIO] == LOW);
 }
 
+void gptimer_open_does_not_false_stuck_closed_before_settle() {
+  resetSafety();
+  CHECK(setCn9Closed(true, 5000));
+  hostPinLevel[CN9_FEEDBACK_GPIO] = CN9_FEEDBACK_CLOSED_LEVEL;
+  hostMillis += CN9_FEEDBACK_SETTLE_MS;
+  serviceRelaySafety();
+  CHECK(getRelaySafetySnapshot().state == RelaySafetyState::CLOSED);
+
+  hostMillis += 5000;
+  independentSafetyTimer.serviceForHost();
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(getRelaySafetySnapshot().state == RelaySafetyState::TRIPPED);
+
+  serviceRelaySafety();
+  CHECK(getRelaySafetySnapshot().fault !=
+        RelaySafetyFault::FEEDBACK_STUCK_CLOSED);
+
+  hostMillis += CN9_FEEDBACK_SETTLE_MS;
+  serviceRelaySafety();
+  const RelaySafetySnapshot afterSettle = getRelaySafetySnapshot();
+  CHECK(afterSettle.state == RelaySafetyState::LOCKOUT);
+  CHECK(afterSettle.fault == RelaySafetyFault::FEEDBACK_STUCK_CLOSED);
+}
+
 }  // namespace
 
 int main() {
@@ -142,8 +167,9 @@ int main() {
   stuck_closed_feedback_blocks_every_close_attempt();
   missing_close_feedback_opens_and_locks_out();
   heartbeat_is_emitted_only_after_healthy_loop_epochs();
+  gptimer_open_does_not_false_stuck_closed_before_settle();
   releaseResources();
-  std::cout << "External CN9 safety: 4 tests, " << failures
+  std::cout << "External CN9 safety: 5 tests, " << failures
             << " failures\n";
   return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

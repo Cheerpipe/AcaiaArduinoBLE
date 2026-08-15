@@ -584,6 +584,9 @@ if (!ui.includes('id="shotTable"') ||
     !ui.includes('formatShotTime(r)') ||
     !ui.includes('no time') ||
     !ui.includes('id="timezoneOffsetMinutes"') ||
+    !js.includes('m+=15') ||
+    js.includes('Request accepted.') ||
+    !js.includes('Request queued.') ||
     !network.includes('hasWallTime') ||
     !network.includes('endedAtLocalSec') ||
     !network.includes('SHOT_LOG_CLEAR_NOT_CONFIRMED')) {
@@ -723,6 +726,42 @@ if (!ui.includes('id="staIpMode"') ||
     !network.includes('action must be \\"save\\", \\"forget\\", or \\"confirm\\".') ||
     !network.includes('No pending network configuration to confirm.')) {
   throw new Error('DHCP/static IP mode must be wired in UI, status, WiFi.config, and confirm/revert path');
+}
+if (!network.includes('startStation(next, now)')) {
+  throw new Error('STA confirm timeout must reassociate last-known-good before SoftAP fallback');
+}
+{
+  const loginFnStart = network.indexOf('ShotStopperNetwork::loginHandler');
+  const loginFnEnd = network.indexOf('ShotStopperNetwork::logoutHandler', loginFnStart);
+  const loginFn = loginFnStart >= 0 && loginFnEnd > loginFnStart
+      ? network.slice(loginFnStart, loginFnEnd)
+      : '';
+  if (!loginFn.includes('cJSON_Parse') ||
+      loginFn.indexOf('loginRateLimited') < loginFn.indexOf('cJSON_Parse') ||
+      !loginFn.includes('recordFailedLoginAttempt')) {
+    throw new Error('Login rate limit must apply only after a parseable password verify failure');
+  }
+}
+{
+  const oldParseStart = bleLibrary.indexOf('AcaiaArduinoBLE::parseAcaiaOldPacket');
+  const oldParseEnd = bleLibrary.indexOf('AcaiaArduinoBLE::parseGenericPacket', oldParseStart);
+  const oldParse = oldParseStart >= 0 && oldParseEnd > oldParseStart
+      ? bleLibrary.slice(oldParseStart, oldParseEnd)
+      : '';
+  if (!oldParse.includes('length == 14') ||
+      !oldParse.includes('validAcaiaChecksum')) {
+    throw new Error('OLD 14-byte Acaia frames must validate checksum');
+  }
+}
+{
+  const startCmd = firmware.slice(
+      firmware.indexOf('void executeScaleStartCommand'),
+      firmware.indexOf('void executeScaleStopCommand'));
+  if (!startCmd.includes('tareStartTimer()') ||
+      !startCmd.includes('resetTimer()') ||
+      !startCmd.includes('if (!event.writeSucceeded)')) {
+    throw new Error('Combined tare/start must fall back to reset/start/tare');
+  }
 }
 if (!/<script\s+src="\/app\.js\?v=/.test(html) &&
     !html.includes('src="/app.js?v=__FW_VERSION__"')) {

@@ -457,6 +457,18 @@ void testOldAndGenericPacketValidation() {
     notify(old, oldPacket);
     CHECK(!oldScale.newWeightAvailable());
 
+    std::vector<byte> old14(14, 0);
+    old14[2] = 0xd2;
+    old14[3] = 0x04;
+    old14[6] = 1;
+    setAcaiaChecksum(old14);
+    notify(old, old14);
+    CHECK(oldScale.newWeightAvailable());
+    CHECK(std::fabs(oldScale.getWeight() - 123.4f) < 0.01f);
+    old14[old14.size() - 1] ^= 0xff;
+    notify(old, old14);
+    CHECK(!oldScale.newWeightAvailable());
+
     resetFake();
     ScaleFixture generic = makeScale(GENERIC);
     AcaiaArduinoBLE genericScale(false);

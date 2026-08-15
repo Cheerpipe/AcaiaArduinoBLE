@@ -314,7 +314,13 @@ class AcaiaArduinoBLE {
   bool tareStartTimer() {
     commandLog.push_back("tareStartTimer");
     ++tareStartTimerCalls;
-    return runCommand(tareStartTimerSucceeds);
+    if (!connected) {
+      return false;
+    }
+    if (!tareStartTimerSucceeds) {
+      return false;
+    }
+    return runCommand(true);
   }
   bool supportsTareStartTimer() const {
     return connected && tareStartTimerSupported;

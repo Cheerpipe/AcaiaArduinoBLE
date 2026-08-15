@@ -646,9 +646,10 @@ uint32_t relaySafetyGeneration = 0;
 bool relaySafetyTimersReady = false;
 bool taskWatchdogReady = false;
 volatile bool criticalTaskWatchdogFault = false;
-bool feedbackTransitionPending = false;
-bool feedbackExpectedClosed = false;
-uint32_t feedbackTransitionStartedAtMs = 0;
+volatile bool feedbackTransitionPending = false;
+volatile bool feedbackExpectedClosed = false;
+volatile uint32_t feedbackTransitionStartedAtMs = 0;
+volatile bool feedbackTransitionStampPending = false;
 bool safetyHeartbeatLevel = false;
 uint32_t safetyHeartbeatToggledAtMs = 0;
 volatile bool safeRestartRequested = false;
@@ -1354,6 +1355,7 @@ void tripRelaySafetyLocked(RelaySafetyFault fault, bool hardLimit,
   feedbackExpectedClosed = false;
   feedbackTransitionPending = EXTERNAL_SAFETY_HARDWARE_PRESENT;
   feedbackTransitionStartedAtMs = millis();
+  feedbackTransitionStampPending = false;
 }
 
 void tripRelaySafety(RelaySafetyFault fault, bool hardLimit = false,
@@ -1459,6 +1461,7 @@ void IRAM_ATTR independentSafetyTimerCallback(void *) {
     operationalLimitTripped = operational;
     feedbackExpectedClosed = false;
     feedbackTransitionPending = EXTERNAL_SAFETY_HARDWARE_PRESENT;
+    feedbackTransitionStampPending = EXTERNAL_SAFETY_HARDWARE_PRESENT;
   }
   portEXIT_CRITICAL_ISR(&relayMux);
 }
@@ -1623,6 +1626,7 @@ bool setCn9Closed(bool closed,
       feedbackExpectedClosed = true;
       feedbackTransitionPending = EXTERNAL_SAFETY_HARDWARE_PRESENT;
       feedbackTransitionStartedAtMs = millis();
+      feedbackTransitionStampPending = false;
       committed = true;
     }
     portEXIT_CRITICAL(&relayMux);
@@ -1660,6 +1664,7 @@ bool setCn9Closed(bool closed,
   feedbackExpectedClosed = false;
   feedbackTransitionPending = EXTERNAL_SAFETY_HARDWARE_PRESENT;
   feedbackTransitionStartedAtMs = millis();
+  feedbackTransitionStampPending = false;
   portEXIT_CRITICAL(&relayMux);
   stopRelayDeadlineTimers();
   applyBrewRfPreference(false);
@@ -1739,14 +1744,33 @@ void serviceRelaySafety() {
   }
 
   const bool feedbackClosed = readCn9FeedbackClosed();
-  if (feedbackTransitionPending) {
-    if (elapsedMs(feedbackTransitionStartedAtMs) <
-        CN9_FEEDBACK_SETTLE_MS) {
+  bool pending = false;
+  bool expectedClosed = false;
+  uint32_t settleStartedAtMs = 0;
+  portENTER_CRITICAL(&relayMux);
+  if (feedbackTransitionStampPending) {
+    feedbackTransitionStartedAtMs = millis();
+    feedbackTransitionStampPending = false;
+  }
+  pending = feedbackTransitionPending;
+  expectedClosed = feedbackExpectedClosed;
+  settleStartedAtMs = feedbackTransitionStartedAtMs;
+  portEXIT_CRITICAL(&relayMux);
+
+  if (pending) {
+    if (elapsedMs(settleStartedAtMs) < CN9_FEEDBACK_SETTLE_MS) {
       return;
     }
-    feedbackTransitionPending = false;
-    if (feedbackClosed != feedbackExpectedClosed) {
-      tripRelaySafety(feedbackExpectedClosed
+    portENTER_CRITICAL(&relayMux);
+    const bool stillPending = feedbackTransitionPending &&
+        elapsedMs(feedbackTransitionStartedAtMs) >= CN9_FEEDBACK_SETTLE_MS;
+    expectedClosed = feedbackExpectedClosed;
+    if (stillPending) {
+      feedbackTransitionPending = false;
+    }
+    portEXIT_CRITICAL(&relayMux);
+    if (stillPending && feedbackClosed != expectedClosed) {
+      tripRelaySafety(expectedClosed
                           ? RelaySafetyFault::FEEDBACK_FAILED_TO_CLOSE
                           : RelaySafetyFault::FEEDBACK_STUCK_CLOSED);
     }
@@ -2253,6 +2277,16 @@ void considerDirectStopSample(float weight, uint32_t receivedAtMs,
   }
 
   const bool overload = fabsf(weight) > MAX_AUTOMATION_WEIGHT_G;
+  const bool active =
+      session.weightControlState == WeightControlState::ACTIVE;
+  const bool validating =
+      session.weightControlState == WeightControlState::VALIDATING;
+  if (!overload && !active) {
+    return;
+  }
+  if (overload && !active && !validating) {
+    return;
+  }
   const bool overMax =
       fastExtractionGuardSession() && session.extractionExtended &&
       weight >= effectiveMaxStopThreshold();
@@ -2390,11 +2424,12 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
     suspendWeightControl();
   }
 
-  considerDirectStopSample(weight, receivedAtMs, packetSequence,
-                           connectionGeneration);
-
   if (weight < MIN_AUTOMATION_WEIGHT_G ||
       weight > MAX_AUTOMATION_WEIGHT_G) {
+    if (fabsf(weight) > MAX_AUTOMATION_WEIGHT_G) {
+      considerDirectStopSample(weight, receivedAtMs, packetSequence,
+                               connectionGeneration);
+    }
     weightStreamState = WeightStreamState::OVERLOAD;
     session.calibrationEligible = false;
     if (session.weightControlState == WeightControlState::ACTIVE) {
@@ -2506,6 +2541,8 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
     setWeightControlState(WeightControlState::ACTIVE);
   }
 
+  considerDirectStopSample(weight, receivedAtMs, packetSequence,
+                           connectionGeneration);
   weightStreamState = WeightStreamState::FRESH;
   return acceptWeightIntoTrajectory(weight, receivedAtMs, packetSequence);
 }
@@ -2733,6 +2770,29 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
   }
 }
 
+void cancelPendingFinalize(const char *reason) {
+  if (!pendingFinalize.pending) {
+    return;
+  }
+  const PendingShotFinalize snapshot = pendingFinalize;
+  pendingFinalize.pending = false;
+  serialTrace(LogLevel::INFO, reason != nullptr
+                                  ? reason
+                                  : "Previous drip analysis cancelled");
+  if (!snapshot.logEligible) {
+    return;
+  }
+  ActualWeightSource source = ActualWeightSource::NONE;
+  float weightG = 0.0f;
+  bool valid = false;
+  if (snapshot.lastKnownWeightValid && isfinite(snapshot.lastKnownWeightG)) {
+    source = ActualWeightSource::LAST_KNOWN;
+    weightG = snapshot.lastKnownWeightG;
+    valid = true;
+  }
+  commitPendingShotLog(snapshot, weightG, valid, source);
+}
+
 void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
                                        float finalWeightG,
                                        bool postDripWeightValid) {
@@ -2825,11 +2885,9 @@ void pendingShotFinalizeTask() {
       !isfinite(snapshot.weightOffsetG) ||
       currentWeightSequence == snapshot.endedWeightSequence ||
       static_cast<int32_t>(currentWeightReceivedAtMs - snapshot.endedAtMs) <=
-          0 ||
-      currentWeight <
-          (snapshot.goalWeightG - snapshot.weightOffsetG)) {
+          0) {
     serialTrace(LogLevel::INFO,
-                "Final weight unavailable or too low; offset unchanged");
+                "Final weight unavailable; offset unchanged");
     return;
   }
 
@@ -2846,13 +2904,17 @@ void pendingShotFinalizeTask() {
     return;
   }
 
-  const float updatedOffset =
+  float updatedOffset =
       snapshot.weightOffsetG + finalWeightG - snapshot.goalWeightG;
-  if (!isfinite(updatedOffset) || updatedOffset < 0.0f ||
-      updatedOffset > MAX_OFFSET_G) {
+  if (!isfinite(updatedOffset)) {
     serialTrace(LogLevel::WARNING,
                 "Calculated offset outside safe range; offset unchanged");
     return;
+  }
+  if (updatedOffset < 0.0f) {
+    updatedOffset = 0.0f;
+  } else if (updatedOffset > MAX_OFFSET_G) {
+    updatedOffset = MAX_OFFSET_G;
   }
 
   ShotPreset *preset = mutableShotPreset(
@@ -2980,7 +3042,9 @@ void executeScaleStartCommand(const ScaleCommand &command) {
       event.commandAttempted = true;
       event.usedCombinedTareStart = true;
       event.writeSucceeded = scale.tareStartTimer();
-    } else {
+    }
+    if (!event.writeSucceeded) {
+      event.usedCombinedTareStart = false;
       const bool resetSucceeded = scale.resetTimer();
       if (resetSucceeded) {
         event.commandAttempted = true;
@@ -4212,11 +4276,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
   noScaleShotGuardHold = false;
 
   flushPendingScaleTimerStopNow();
-  if (pendingFinalize.pending) {
-    pendingFinalize.pending = false;
-    serialTrace(LogLevel::INFO,
-                "Previous drip analysis cancelled by a new cycle");
-  }
+  cancelPendingFinalize("Previous drip analysis cancelled by a new cycle");
 
   resetSessionForNewCycle(source, webSessionId, controlLeaseId);
   session.startedAtMs = millis();
@@ -4339,13 +4399,9 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
 bool beginRinseCycle(ControlSource source, uint32_t webSessionId,
                      uint32_t controlLeaseId) {
   flushPendingScaleTimerStopNow();
-  if (pendingFinalize.pending) {
-    pendingFinalize.pending = false;
-    serialTrace(LogLevel::INFO,
-                source == ControlSource::WEB
-                    ? "Previous drip analysis cancelled by a web rinse"
-                    : "Previous drip analysis cancelled by a rinse");
-  }
+  cancelPendingFinalize(source == ControlSource::WEB
+                            ? "Previous drip analysis cancelled by a web rinse"
+                            : "Previous drip analysis cancelled by a rinse");
   resetSessionForNewCycle(source, webSessionId, controlLeaseId);
   session.startedAtMs = millis();
   session.cn9ClosedAtMs = 0;
@@ -4468,7 +4524,11 @@ bool automaticScaleStopDue() {
       session.thresholdConfirmations >= DIRECT_STOP_CONFIRMATION_SAMPLES &&
       static_cast<int32_t>(millis() - session.lastThresholdAtMs) >= 0 &&
       elapsedMs(session.lastThresholdAtMs) <= MAX_AUTOMATION_WEIGHT_AGE_MS;
-  if (directStopFresh) {
+  const bool directStopHonored =
+      directStopFresh &&
+      (session.directStopReason == EndReason::WEIGHT_ANOMALY ||
+       session.weightControlState == WeightControlState::ACTIVE);
+  if (directStopHonored) {
     return true;
   }
 
@@ -4672,9 +4732,11 @@ void maybeRequestNtpSyncOnActivity() {
 }
 
 bool controlAllowsConfigurationNow() {
+  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   return stopperState == StopperState::READY && !session.active &&
-         !getRelaySafetySnapshot().closed && !paddleOn && !rawPaddleOn &&
-         !maintenanceLease.active;
+         !relay.closed && !paddleOn && !rawPaddleOn &&
+         !maintenanceLease.active && !safetyResetStatus.recoveryRequired &&
+         relay.state != RelaySafetyState::LOCKOUT;
 }
 
 void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
@@ -5221,7 +5283,8 @@ void processWebCommand(const WebCommand &command) {
         case PresetAction::SAVE: {
           ShotPreset *preset = mutableShotPreset(presetBank, command.presetId);
           if (preset == nullptr) {
-            preset = &mutableActiveShotPreset(presetBank);
+            ok = false;
+            break;
           }
           ShotPreset candidateRecipe = *preset;
           copyUserRecipeFromConfig(command.config, candidateRecipe);
