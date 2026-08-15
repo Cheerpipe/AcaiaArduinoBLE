@@ -229,12 +229,15 @@ if (!html.includes('id="rememberMe"') ||
 const statusSection = html.match(/<fieldset[^>]*><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     statusSection[1].includes('class="row"') ||
-    (statusSection[1].match(/class="metric"/g) || []).length !== 25 ||
+    (statusSection[1].match(/class="metric"/g) || []).length !== 28 ||
     !ui.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'") ||
     !ui.includes('id="scaleWeight"') ||
     !ui.includes('id="scaleTimer"') ||
     !ui.includes('Weight (scale)') ||
     !ui.includes('Timer (scale)') ||
+    !statusSection[1].includes('id="statusExtractionGuard"') ||
+    !statusSection[1].includes('id="statusAtmGuard"') ||
+    !statusSection[1].includes('id="statusNoScaleGuard"') ||
     !ui.includes('function formatScaleWeight(') ||
     !ui.includes('function formatScaleTimer(') ||
     !ui.includes('id="preferredScale"') ||
@@ -312,14 +315,29 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !ui.includes('Reset A→M samples to baseline') ||
     !ui.includes('id="shotAtmGuard"') ||
     !ui.includes('id="shotNoScaleGuard"') ||
+    !ui.includes('id="statusExtractionGuard"') ||
+    !ui.includes('id="statusAtmGuard"') ||
+    !ui.includes('id="statusNoScaleGuard"') ||
     !ui.includes('No-scale guard') ||
     !ui.includes('id="avoidBbwShotWithoutScale"') ||
     !ui.includes('id="lastShotCooldownMin"') ||
     !ui.includes('Avoid BBW shot without scale') ||
     !ui.includes('Last shot cooldown') ||
-    !ui.includes('function updateNoScaleGuard(') ||
+    !ui.includes('function formatNoScaleGuard(') ||
+    !ui.includes('function updateStatusGuards(') ||
+    ui.includes('function updateNoScaleGuard(') ||
     html.indexOf('id="shotNoScaleGuard"') <
         html.indexOf('id="shotAtmGuard"') ||
+    html.indexOf('id="scaleTimer"') >
+        html.indexOf('id="statusExtractionGuard"') ||
+    html.indexOf('id="statusExtractionGuard"') >
+        html.indexOf('id="statusAtmGuard"') ||
+    html.indexOf('id="statusAtmGuard"') >
+        html.indexOf('id="statusNoScaleGuard"') ||
+    html.indexOf('id="statusNoScaleGuard"') >
+        html.indexOf('<summary>Diagnostics</summary>') ||
+    html.indexOf('id="shotNoScaleGuard"') >
+        html.indexOf('id="statusExtractionGuard"') ||
     html.indexOf('<legend>Machine and scale</legend>') >
         html.indexOf('<summary>No-scale BBW</summary>') ||
     html.indexOf('<summary>No-scale BBW</summary>') >
@@ -336,6 +354,10 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !network.includes('lastShotCooldownMs') ||
     !network.includes('serialDebugOutput') ||
     !network.includes('noScaleShotGuard') ||
+    !network.includes('noScaleShotGuardEnabled') ||
+    !network.includes('noScaleShotGuardArmed') ||
+    !firmware.includes('last.noScaleShotGuardEnabled') ||
+    !firmware.includes('last.noScaleShotGuardArmed') ||
     !ui.includes('A→M ·') ||
     !ui.includes('actual_weight_source') ||
     !network.includes('autoToManualGuardEnabled') ||

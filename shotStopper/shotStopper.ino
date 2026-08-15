@@ -908,6 +908,8 @@ void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
   last.autoToManualGuardEnabled = session.config.autoToManualGuardEnabled;
   last.autoToManualGuardEnforced = session.autoToManualGuardEnforced;
   last.autoToManualGuardArmed = session.autoToManualGuardArmed;
+  last.noScaleShotGuardEnabled = runtimeConfig.avoidBbwShotWithoutScale;
+  last.noScaleShotGuardArmed = noScaleShotGuardArmed;
   if (session.autoToManualGuardEnforced) {
     const uint32_t nowMs = millis();
     last.autoToManualGuardRemainingMs =

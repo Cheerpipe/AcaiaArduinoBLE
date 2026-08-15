@@ -218,9 +218,11 @@ name, default passwords, and step-by-step first connection.
   (`X-CSRF-Token` on mutating requests); repeated failed logins return
   `429 LOGIN_RATE_LIMITED`.
 - **Live shot panel:** current/goal weight, progress bar, elapsed time, first
-  drop, retare state, shot type, scale protocol, **extraction guard** state
-  (off / on / extended), **A→M time guard** state (off / idle / armed /
-  `A→M · Ns` when enforced), and **no-scale guard** state (off / armed / idle).
+  drop, retare state, shot type, scale protocol, and **last-shot** guard state
+  for extraction (`Off` / `On` / extended), A→M (`Off` / `Idle` / `Armed` /
+  `A→M · Ns`), and no-scale (`Off` / `Armed` / `Idle`). **Status** shows the
+  same three guards as **current** machine state (`Off` / `Idle` / `Armed`,
+  plus in-shot detail).
 - **REST API** (`/api/v1/…`):
   - Read: `GET /status`, `GET /log`, `GET /shots`
   - Auth: `POST /login`, `POST /logout`, `POST /heartbeat` (UI polls every
@@ -245,6 +247,8 @@ name, default passwords, and step-by-step first connection.
 
 - Paddle state, CN9 relay state, CN9 safety supervisor (state, fault, watchdog,
   external hardware present, recovery required).
+- Live **extraction**, **A→M**, and **no-scale** guard state (Off / Idle / Armed
+  or in-shot detail). The Shot panel keeps the values from the last cycle.
 - Control source (physical vs web), maintenance lease, last command result.
 - Scale link: BLE availability, protocol, stream/control state, observed vs
   accepted weight, packet gaps, rejected packets, reconnects, disconnect reason.
@@ -528,7 +532,8 @@ absolute deadline from cycle start.
 Deadline = cycle start + limit. Limit is computed once when an automatic brew
 is confirmed. Enforcement starts on the first scale-loss suspend after arming;
 the live shot panel has a dedicated **A→M time guard** line (`Off` / `Idle` /
-`Armed` / `A→M · Ns` while enforced).
+`Armed` / `A→M · Ns` while enforced). **Status** shows the current A→M state;
+**Shot** keeps the last-shot value after the cycle ends.
 
 ### Duration samples
 

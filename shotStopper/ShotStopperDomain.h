@@ -1548,6 +1548,8 @@ struct PersistedLastShot {
   bool autoToManualGuardArmed = false;
   uint32_t autoToManualGuardRemainingMs = 0;
   uint32_t minBrewTimeRemainingMs = 0;
+  bool noScaleShotGuardEnabled = false;
+  bool noScaleShotGuardArmed = false;
   char scaleProtocol[20] = "none";
 };
 

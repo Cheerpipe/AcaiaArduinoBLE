@@ -4262,6 +4262,7 @@ void s14_last_shot_persists_every_cycle() {
   CHECK(persistedLastShot.durationMs == lastCycle.durationMs);
   CHECK(persistedLastShot.shotType ==
         static_cast<uint8_t>(LastShotType::MANUAL));
+  CHECK(!persistedLastShot.noScaleShotGuardEnabled);
 }
 
 void s15_last_shot_updates_weight_after_drip() {
@@ -4299,6 +4300,26 @@ void s16_last_shot_clear_empties_snapshot() {
   CHECK(clearLastShot());
   CHECK(!persistedLastShot.valid);
   CHECK(!lastShotStore.get().valid);
+}
+
+void s18_last_shot_keeps_no_scale_guard_from_cycle() {
+  resetHarness(false, true);
+  enableNoScaleShotGuardForTest();
+  reachReadyFromBoot();
+  const uint32_t rawOnAt = startCycle();
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs + 100);
+  CHECK(persistedLastShot.valid);
+  CHECK(persistedLastShot.noScaleShotGuardEnabled);
+  CHECK(persistedLastShot.noScaleShotGuardArmed);
+  CHECK(noScaleShotGuardArmed);
+  consumeNoScaleShotGuard();
+  CHECK(!noScaleShotGuardArmed);
+  CHECK(persistedLastShot.noScaleShotGuardArmed);
+  publishControlStatus();
+  ControlStatusSnapshot status;
+  copyControlStatus(status);
+  CHECK(!status.noScaleShotGuardArmed);
+  CHECK(status.lastShot.noScaleShotGuardArmed);
 }
 
 void n01_wall_clock_tracks_utc_from_anchor() {
@@ -5181,6 +5202,7 @@ const TestCase testCases[] = {
     {"S14", s14_last_shot_persists_every_cycle},
     {"S15", s15_last_shot_updates_weight_after_drip},
     {"S16", s16_last_shot_clear_empties_snapshot},
+    {"S18", s18_last_shot_keeps_no_scale_guard_from_cycle},
     {"S04", s04_shot_log_remove_by_id},
     {"S05", s05_shot_log_migrates_schema_v2},
     {"S06", s06_shot_log_local_sec_from_utc},

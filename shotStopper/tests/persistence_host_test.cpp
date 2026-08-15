@@ -281,6 +281,8 @@ void p29_last_shot_persists_and_clears() {
   shot.weightValid = true;
   shot.currentWeightG = 36.2f;
   shot.shotType = static_cast<uint8_t>(LastShotType::AUTO);
+  shot.noScaleShotGuardEnabled = true;
+  shot.noScaleShotGuardArmed = true;
   strcpy(shot.scaleProtocol, "acaia");
   CHECK(store.persist(shot));
   CHECK(persistence_host::records.count("lastshot/record") == 1);
@@ -291,6 +293,8 @@ void p29_last_shot_persists_and_clears() {
   CHECK(reloaded.get().cycleId == 42);
   CHECK(reloaded.get().goalWeightG == 36);
   CHECK(fabs(reloaded.get().currentWeightG - 36.2f) < 0.001f);
+  CHECK(reloaded.get().noScaleShotGuardEnabled);
+  CHECK(reloaded.get().noScaleShotGuardArmed);
   CHECK(strcmp(reloaded.get().scaleProtocol, "acaia") == 0);
 
   CHECK(reloaded.clear());

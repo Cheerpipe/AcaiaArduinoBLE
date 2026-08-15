@@ -2704,7 +2704,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"autoToManualGuardEnabled\":%s,"
       "\"autoToManualGuardArmed\":%s,"
       "\"autoToManualGuardEnforced\":%s,"
-      "\"autoToManualGuardRemainingMs\":%lu},"
+      "\"autoToManualGuardRemainingMs\":%lu,"
+      "\"noScaleShotGuardEnabled\":%s,"
+      "\"noScaleShotGuardArmed\":%s},"
       "\"network\":{\"networkActive\":%s,\"uiActive\":%s,"
       "\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
       "\"wifiConfigured\":%s,\"ssid\":\"%s\",\"open\":%s,\"staState\":\"%s\","
@@ -2855,6 +2857,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.lastShot.autoToManualGuardArmed ? "true" : "false",
       control.lastShot.autoToManualGuardEnforced ? "true" : "false",
       static_cast<unsigned long>(control.lastShot.autoToManualGuardRemainingMs),
+      control.lastShot.noScaleShotGuardEnabled ? "true" : "false",
+      control.lastShot.noScaleShotGuardArmed ? "true" : "false",
       network.networkActive ? "true" : "false",
       network.uiAuthenticated ? "true" : "false",
       network.apActive ? "true" : "false", network.apIp,
