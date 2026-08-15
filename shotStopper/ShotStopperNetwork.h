@@ -132,6 +132,9 @@ class ShotStopperNetwork {
   void syncLiveRuntime(const RuntimeConfig &runtime,
                        const ShotPresetBank *presets);
   void syncDurableStorageRevision(uint32_t storageRevision);
+  // Recycles httpd and, if STA looks associated without an IP, reconnects
+  // Wi-Fi only. Never pauses or changes BLE discovery/coex.
+  void recoverFromResourcePressure();
   PersistedSettings settingsCopy();
 
   private:
@@ -145,12 +148,15 @@ class ShotStopperNetwork {
   static constexpr uint32_t STA_RECOVERY_ATTEMPT_MS = 60000;
   static constexpr uint32_t STA_CONFIRM_TIMEOUT_MS = 180000;
   static constexpr uint32_t STA_RECONNECT_INTERVAL_MS = 10000;
+  static constexpr uint32_t WIFI_SCAN_TIMEOUT_MS = 20000;
   static constexpr uint32_t RESTART_DELAY_MS = 750;
   static constexpr uint32_t NETWORK_RETRY_MIN_MS = 1000;
   static constexpr uint32_t NETWORK_RETRY_MAX_MS = 30000;
   static constexpr uint32_t COMMAND_RETRY_MIN_MS = 250;
   static constexpr uint32_t MAINTENANCE_PUBLICATION_TIMEOUT_MS = 2000;
   static constexpr uint32_t HTTP_RETRY_MS = 1000;
+  static constexpr uint32_t HTTP_STICKY_RECYCLE_FAILS = 8;
+  static constexpr uint32_t STA_NO_IP_GRACE_MS = 8000;
   static constexpr uint32_t HEALTH_TELEMETRY_INTERVAL_MS = 5000;
   static constexpr uint8_t COMMAND_MAX_ATTEMPTS = 5;
   static constexpr size_t SESSION_COUNT = 2;
@@ -201,6 +207,9 @@ class ShotStopperNetwork {
   uint32_t acceptedCommandRetryAtMs_ = 0;
   uint32_t networkRetryAtMs_ = 0;
   uint32_t httpRetryAtMs_ = 0;
+  uint8_t httpServeFailStreak_ = 0;
+  bool httpRecyclePending_ = false;
+  uint32_t staNoIpSinceMs_ = 0;
   uint32_t lastTaskProgressAtMs_ = 0;
   uint32_t taskStackMinWords_ = 0;
   uint32_t nextRequestId_ = 1;
@@ -242,9 +251,13 @@ class ShotStopperNetwork {
   bool ensureAccessPoint(uint32_t now, bool force = false);
   void stopSoftApKeepStation();
   bool wifiScanInProgress();
+  void abortWifiScan(uint32_t now, bool logTimeout);
   void stopNetwork();
   bool startHttpServer();
   void stopHttpServer();
+  void recycleHttpServer();
+  void requestHttpRecycle();
+  void noteHttpServeResult(bool ok);
   void serviceStaState(uint32_t now);
   void serviceWifiScan(uint32_t now);
   void finishWifiScan(int16_t resultCount, uint32_t now);

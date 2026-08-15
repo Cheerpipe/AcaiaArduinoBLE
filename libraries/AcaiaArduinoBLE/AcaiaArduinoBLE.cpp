@@ -265,29 +265,37 @@ bool AcaiaArduinoBLE::pollScan() {
     }
 
     BLEDevice peripheral = BLE.available();
-    if (_debug && peripheral) {
-        Serial.print("Found ");
-        Serial.print(peripheral.address());
-        Serial.print(" '");
-        Serial.print(peripheral.localName());
-        Serial.print("' ");
-        Serial.print(peripheral.advertisedServiceUuid());
-        Serial.println();
-    }
-
     if (peripheral) {
+        // Copy once per advertisement to avoid repeated Arduino String
+        // temporaries from address()/localName() (same scan semantics).
+        char addressBuf[18] = {};
+        char nameBuf[64] = {};
+        {
+            const String address = peripheral.address();
+            strncpy(addressBuf, address.c_str(), sizeof(addressBuf) - 1);
+        }
+        {
+            const String name = peripheral.localName();
+            strncpy(nameBuf, name.c_str(), sizeof(nameBuf) - 1);
+        }
+        if (_debug) {
+            Serial.print("Found ");
+            Serial.print(addressBuf);
+            Serial.print(" '");
+            Serial.print(nameBuf);
+            Serial.print("' ");
+            Serial.print(peripheral.advertisedServiceUuid());
+            Serial.println();
+        }
         const bool filtered = _scanMac[0] != '\0';
-        const bool nameOk = isScaleName(peripheral.localName().c_str());
+        const bool nameOk = isScaleName(nameBuf);
         const bool macOk =
-            filtered &&
-            macAddressEqual(peripheral.address().c_str(), _scanMac);
+            filtered && macAddressEqual(addressBuf, _scanMac);
 
         if (nameOk) {
-            strncpy(_seenMac, peripheral.address().c_str(),
-                    sizeof(_seenMac) - 1);
+            strncpy(_seenMac, addressBuf, sizeof(_seenMac) - 1);
             _seenMac[sizeof(_seenMac) - 1] = '\0';
-            strncpy(_seenName, peripheral.localName().c_str(),
-                    sizeof(_seenName) - 1);
+            strncpy(_seenName, nameBuf, sizeof(_seenName) - 1);
             _seenName[sizeof(_seenName) - 1] = '\0';
             _seenPending = true;
         }

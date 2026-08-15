@@ -610,6 +610,7 @@ uint32_t freeHeapBytes = 0;
 uint32_t minimumFreeHeapBytes = 0;
 uint32_t largestFreeHeapBlockBytes = 0;
 bool healthHeapAlertLatched = false;
+uint32_t healthHeapRecoveryAtMs = 0;
 bool healthStackAlertLatched = false;
 bool healthLoopGapAlertLatched = false;
 Hwmon hwmon;
@@ -6335,6 +6336,17 @@ void serviceHealthThresholdAlerts(uint32_t intervalMaxGapMs) {
     addDebugEvent(DebugCategory::SYSTEM, DebugCode::HEALTH_HEAP_LOW,
                   static_cast<int32_t>(freeHeapBytes),
                   static_cast<int32_t>(largestFreeHeapBlockBytes));
+#ifndef SHOT_STOPPER_HOST_TEST
+    // Recycle httpd on the network task only — never pause BLE / alter coex.
+    // Skip the first minute after boot so bring-up heap dips do not restart HTTP.
+    constexpr uint32_t HEAP_RECOVERY_MIN_UPTIME_MS = 60000;
+    constexpr uint32_t HEAP_RECOVERY_COOLDOWN_MS = 30000;
+    if (elapsedMs(bootStartedAtMs) >= HEAP_RECOVERY_MIN_UPTIME_MS &&
+        elapsedMs(healthHeapRecoveryAtMs) >= HEAP_RECOVERY_COOLDOWN_MS) {
+      healthHeapRecoveryAtMs = millis();
+      networkManager.recoverFromResourcePressure();
+    }
+#endif
   } else if (heapClear) {
     healthHeapAlertLatched = false;
   }

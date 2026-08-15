@@ -706,6 +706,12 @@ void ShotStopperNetwork::service() {
     return;
   }
 
+  // Never httpd_stop from inside a URI handler; only recycle on this task.
+  if (httpRecyclePending_) {
+    httpRecyclePending_ = false;
+    recycleHttpServer();
+  }
+
   processAcceptedCommands();
   bool confirmRequested = false;
   portENTER_CRITICAL(&dataMux_);
@@ -997,13 +1003,22 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   if (serialDebugEnabled()) {
     if (apActive) {
       Serial.println(settings.staIpMode == static_cast<uint8_t>(StaIpMode::STATIC)
-                         ? "WiFi STA retrying with static IP; SoftAP stays up"
-                         : "WiFi STA retrying; SoftAP stays up");
+                         ? "WiFi STA soft-retry with static IP; SoftAP stays up"
+                         : "WiFi STA soft-retry; SoftAP stays up");
     } else if (settings.staIpMode == static_cast<uint8_t>(StaIpMode::STATIC)) {
       Serial.println("WiFi STA connecting with static IP; AP disabled");
     } else {
       Serial.println("WiFi STA connecting; AP disabled");
     }
+  }
+  // Under SoftAP, avoid full disconnect+begin churn that resets SoftAP
+  // clients/sockets. Soft reconnect keeps the AP interface stable.
+  if (apActive && staEverConnected_) {
+    if (!WiFi.reconnect()) {
+      WiFi.begin(settings.staSsid,
+                 settings.staOpen ? nullptr : settings.staPassword);
+    }
+    return;
   }
   WiFi.disconnect(false, false);
   WiFi.begin(settings.staSsid,
@@ -1012,6 +1027,7 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
 
 void ShotStopperNetwork::startStation(const PersistedSettings &settings,
                                       uint32_t now) {
+  abortWifiScan(now, false);
   stopHttpServer();
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
@@ -1063,6 +1079,43 @@ bool ShotStopperNetwork::wifiScanInProgress() {
   return busy;
 }
 
+void ShotStopperNetwork::abortWifiScan(uint32_t now, bool logTimeout) {
+  bool wasRunning = false;
+  bool wasQueuedOrRequested = false;
+  portENTER_CRITICAL(&dataMux_);
+  wasRunning = scan_.state == WifiScanState::RUNNING;
+  wasQueuedOrRequested =
+      scanRequested_ || scan_.state == WifiScanState::QUEUED || wasRunning;
+  if (wasQueuedOrRequested) {
+    scanRequested_ = false;
+    scan_.state = logTimeout ? WifiScanState::FAILED : WifiScanState::CANCELED;
+    scan_.updatedAtMs = now;
+    scan_.count = 0;
+  }
+  portEXIT_CRITICAL(&dataMux_);
+  if (wasRunning) {
+    esp_wifi_scan_stop();
+    WiFi.scanDelete();
+  }
+  if (!wasQueuedOrRequested) {
+    return;
+  }
+  log(DebugCategory::NETWORK,
+      logTimeout ? DebugCode::WIFI_SCAN_ERROR : DebugCode::WIFI_SCAN_CANCELED,
+      logTimeout ? -1 : 0);
+  if (scanMaintenanceLeaseId_ != 0) {
+    WebCommand command;
+    command.type = WebCommandType::START_WIFI_SCAN;
+    command.requestId = scanRequestId_;
+    command.maintenanceLeaseId = scanMaintenanceLeaseId_;
+    (void)enqueueMaintenanceCompletion(command, false,
+                                       logTimeout ? CommandResultState::FAILED
+                                                  : CommandResultState::CANCELED);
+    scanMaintenanceLeaseId_ = 0;
+    scanRequestId_ = 0;
+  }
+}
+
 bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
   const PersistedSettings settings = settingsCopy();
   NetworkStatusSnapshot status = snapshot();
@@ -1070,6 +1123,7 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
     return true;
   }
 
+  abortWifiScan(now, false);
   const bool keepStation = settings.staConfigured;
   stopHttpServer();
   if (!keepStation) {
@@ -1195,6 +1249,37 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       status_.staRssi = clampWifiRssi(rssi);
       status_.staSignalQualityPct = wifiRssiToSignalQualityPct(rssi);
       portEXIT_CRITICAL(&dataMux_);
+    }
+    // Sticky association without an IP: only reconnect after a grace window so
+    // DHCP settle does not thrash STA (and drop ping) right after boot.
+    const IPAddress localIp = WiFi.localIP();
+    const bool hasIp = !(localIp[0] == 0 && localIp[1] == 0 && localIp[2] == 0 &&
+                         localIp[3] == 0);
+    if (!hasIp) {
+      if (staNoIpSinceMs_ == 0) {
+        staNoIpSinceMs_ = now;
+      } else if (static_cast<uint32_t>(now - staNoIpSinceMs_) >=
+                 STA_NO_IP_GRACE_MS) {
+        if (serialDebugEnabled()) {
+          Serial.println(
+              "WiFi STA associated without IP; forcing station reconnect");
+        }
+        log(DebugCategory::NETWORK, DebugCode::STA_FAILED, -2);
+        stopHttpServer();
+        portENTER_CRITICAL(&dataMux_);
+        status_.networkActive = false;
+        status_.staState = StaState::DISCONNECTED;
+        status_.staIp[0] = '\0';
+        status_.staLinkMetricsValid = false;
+        portEXIT_CRITICAL(&dataMux_);
+        staNoIpSinceMs_ = 0;
+        if (!wifiScanInProgress()) {
+          beginStationConnect(settingsCopy(), now);
+        }
+        return;
+      }
+    } else {
+      staNoIpSinceMs_ = 0;
     }
     if (server_ == nullptr && static_cast<int32_t>(now - httpRetryAtMs_) >= 0) {
       const bool httpReady = startHttpServer();
@@ -1402,28 +1487,8 @@ void ShotStopperNetwork::serviceWifiScan(uint32_t now) {
   if (!safe) {
     const bool canceled = requested || state == WifiScanState::RUNNING ||
                           state == WifiScanState::QUEUED;
-    if (state == WifiScanState::RUNNING) {
-      esp_wifi_scan_stop();
-      WiFi.scanDelete();
-    }
     if (canceled) {
-      portENTER_CRITICAL(&dataMux_);
-      scanRequested_ = false;
-      scan_.state = WifiScanState::CANCELED;
-      scan_.updatedAtMs = now;
-      scan_.count = 0;
-      portEXIT_CRITICAL(&dataMux_);
-      log(DebugCategory::NETWORK, DebugCode::WIFI_SCAN_CANCELED);
-      if (scanMaintenanceLeaseId_ != 0) {
-        WebCommand command;
-        command.type = WebCommandType::START_WIFI_SCAN;
-        command.requestId = scanRequestId_;
-        command.maintenanceLeaseId = scanMaintenanceLeaseId_;
-        (void)enqueueMaintenanceCompletion(
-            command, false, CommandResultState::CANCELED);
-        scanMaintenanceLeaseId_ = 0;
-        scanRequestId_ = 0;
-      }
+      abortWifiScan(now, false);
     }
     return;
   }
@@ -1447,6 +1512,14 @@ void ShotStopperNetwork::serviceWifiScan(uint32_t now) {
   }
 
   if (state != WifiScanState::RUNNING) {
+    return;
+  }
+  uint32_t scanStartedAtMs = 0;
+  portENTER_CRITICAL(&dataMux_);
+  scanStartedAtMs = scan_.updatedAtMs;
+  portEXIT_CRITICAL(&dataMux_);
+  if (static_cast<uint32_t>(now - scanStartedAtMs) >= WIFI_SCAN_TIMEOUT_MS) {
+    abortWifiScan(now, true);
     return;
   }
   const int16_t result = WiFi.scanComplete();
@@ -2129,6 +2202,63 @@ void ShotStopperNetwork::stopHttpServer() {
     httpd_stop(server_);
     server_ = nullptr;
   }
+  httpServeFailStreak_ = 0;
+  httpRecyclePending_ = false;
+}
+
+void ShotStopperNetwork::recycleHttpServer() {
+  stopHttpServer();
+  const bool httpReady = startHttpServer();
+  httpRetryAtMs_ = httpReady ? 0 : millis() + HTTP_RETRY_MS;
+  portENTER_CRITICAL(&dataMux_);
+  status_.networkActive = httpReady &&
+                          (status_.apActive ||
+                           status_.staState == StaState::CONNECTED);
+  portEXIT_CRITICAL(&dataMux_);
+  if (serialDebugEnabled()) {
+    Serial.println(httpReady ? "HTTP server recycled"
+                             : "HTTP server recycle failed; will retry");
+  }
+}
+
+void ShotStopperNetwork::requestHttpRecycle() {
+  httpRecyclePending_ = true;
+}
+
+void ShotStopperNetwork::noteHttpServeResult(bool ok) {
+  if (ok) {
+    httpServeFailStreak_ = 0;
+    return;
+  }
+  if (httpServeFailStreak_ < UINT8_MAX) {
+    ++httpServeFailStreak_;
+  }
+  if (httpServeFailStreak_ >= HTTP_STICKY_RECYCLE_FAILS) {
+    httpServeFailStreak_ = 0;
+    log(DebugCategory::NETWORK, DebugCode::NETWORK_RETRY, -3,
+        HTTP_STICKY_RECYCLE_FAILS);
+    // Defer: httpd_stop from inside a URI handler wedges the server and
+    // briefly drops ICMP/TCP (ping blinks, Web UI never recovers cleanly).
+    requestHttpRecycle();
+  }
+}
+
+void ShotStopperNetwork::recoverFromResourcePressure() {
+  // Request recycle on the network task only; never stop httpd from loopTask.
+  requestHttpRecycle();
+  const NetworkStatusSnapshot status = snapshot();
+  if (!status.wifiConfigured) {
+    return;
+  }
+  const IPAddress localIp = WiFi.localIP();
+  const bool hasIp = !(localIp[0] == 0 && localIp[1] == 0 && localIp[2] == 0 &&
+                       localIp[3] == 0);
+  if (status.staState == StaState::CONNECTED &&
+      (WiFi.status() != WL_CONNECTED || !hasIp)) {
+    if (!wifiScanInProgress()) {
+      beginStationConnect(settingsCopy(), millis());
+    }
+  }
 }
 
 void ShotStopperNetwork::randomHex(char output[TOKEN_HEX_CAPACITY]) {
@@ -2314,7 +2444,12 @@ esp_err_t ShotStopperNetwork::sendJson(httpd_req_t *request,
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
   httpd_resp_set_hdr(request, "Cache-Control", "no-store");
   httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
-  return httpd_resp_send(request, json, HTTPD_RESP_USE_STRLEN);
+  const esp_err_t result =
+      httpd_resp_send(request, json, HTTPD_RESP_USE_STRLEN);
+  if (instance_ != nullptr) {
+    instance_->noteHttpServeResult(result == ESP_OK);
+  }
+  return result;
 }
 
 esp_err_t ShotStopperNetwork::sendError(httpd_req_t *request,
