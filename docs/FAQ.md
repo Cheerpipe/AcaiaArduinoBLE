@@ -62,4 +62,4 @@ Para detalle técnico completo, consulta el [README principal](../README.md).
 | No para al llegar al peso al inicio | **BBW protection (s)** |
 | Vaso tardío | **Automatic retare**, **Retare window (s)**, **Minimum cup weight (g)** |
 | Sin stop por peso | **Brew by weight** (OFF) |
-| Primer shot BBW sin balanza bloqueado | **Brew → No-scale BBW** (*Avoid BBW shot without scale*, **Last shot cooldown**). También **Home → Quick Settings** (ON/OFF; solo lectura si BBW está OFF) |
+| Primer shot BBW sin balanza bloqueado | **Machine and scale → No-scale BBW** (*Avoid BBW shot without scale*, **Last shot cooldown**). También **Home → Quick Settings** (ON/OFF; solo lectura si BBW está OFF) |
