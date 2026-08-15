@@ -124,7 +124,7 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('"alertOutputChannel"') ||
     !network.includes('"bookooMuteOnBuzzerOnly"') ||
     !network.includes('"bookooConnectBeepLevel"') ||
-    !network.includes('fields, 46') ||
+    !network.includes('fields, 47') ||
     !network.includes('allowedCount > 64') ||
     !network.includes('uint64_t seen') ||
     !network.includes('WEB_UI_ASSET_TAG') ||
@@ -387,6 +387,7 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !network.includes('avoidBbwShotWithoutScale') ||
     !network.includes('lastShotCooldownMs') ||
     !network.includes('serialDebugOutput') ||
+    !network.includes('ringRetainLogLevel') ||
     !network.includes('noScaleShotGuard') ||
     !network.includes('noScaleShotGuardEnabled') ||
     !network.includes('noScaleShotGuardArmed') ||
@@ -767,14 +768,27 @@ if (!ui.includes('id="debugPanel"') ||
     html.indexOf('data-route="/admin"') > html.indexOf('data-route="/debug"') ||
     html.indexOf('data-route="/debug"') > html.indexOf('data-route="/log"') ||
     !html.includes('id="serialDebugOutput" class="mutable"') ||
+    !html.includes('id="ringRetainLogLevel" class="mutable"') ||
+    html.indexOf('id="ringRetainLogLevel"') > html.indexOf('id="serialDebugOutput"') ||
     !ui.includes("if($('serialDebugOutput'))$('serialDebugOutput').checked=!!c.serialDebugOutput") ||
+    !ui.includes("if($('ringRetainLogLevel'))$('ringRetainLogLevel').value=c.ringRetainLogLevel||'none'") ||
+    !ui.includes('function ringLogEnabled(') ||
+    !ui.includes('function updateLogNavVisibility(') ||
+    !ui.includes('id="navLogWrap"') ||
+    !ui.includes("p==='/log'&&!ringLogEnabled()") ||
+    !ui.includes('updateLogNavVisibility();') ||
     firmware.indexOf('serialLogLevel = runtimeConfig.serialDebugOutput',
                      firmware.indexOf('persistenceReady = EEPROM.begin')) < 0 ||
     firmware.indexOf('serialLogLevel = runtimeConfig.serialDebugOutput',
                      firmware.indexOf('persistenceReady = EEPROM.begin')) >
         firmware.indexOf('BOOT_RESET_REASON') ||
+    firmware.indexOf('ringRetainLogLevel =',
+                     firmware.indexOf('persistenceReady = EEPROM.begin')) < 0 ||
     !ui.includes('serialDebugOutput:c.serialDebugOutput') ||
+    !ui.includes('ringRetainLogLevel:c.ringRetainLogLevel') ||
     !ui.includes("serialDebugOutput').onchange") ||
+    !ui.includes("ringRetainLogLevel').onchange") ||
+    !network.includes('ringRetainLogLevel') ||
     !html.includes('id="ruleChart"') ||
     !html.includes('id="ruleChartTimeTrack"') ||
     !html.includes('id="ruleChartWeightTrack"') ||

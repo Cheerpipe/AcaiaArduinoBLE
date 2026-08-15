@@ -482,7 +482,7 @@ ShotPresetBank presetBank;
 LastCycleSummary lastCycle;
 DebugRingBuffer debugLog;
 LogLevel serialLogLevel = LogLevel::NONE;
-LogLevel ringRetainLogLevel = LogLevel::INFO;
+LogLevel ringRetainLogLevel = LogLevel::NONE;
 uint32_t lastReportedLogOverwritten = 0;
 ShotLog shotLog;
 LastShotStore lastShotStore;
@@ -5100,6 +5100,8 @@ void commitLiveRuntimeConfig(const RuntimeConfig &composed, int32_t reasonBits) 
   runtimeConfig = composed;
   serialLogLevel = runtimeConfig.serialDebugOutput ? LogLevel::INFO
                                                    : LogLevel::NONE;
+  ringRetainLogLevel =
+      static_cast<LogLevel>(runtimeConfig.ringRetainLogLevel);
   addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED,
                 static_cast<int32_t>(runtimeConfig.revision));
   requestBookooSilenceIfConfigured();
@@ -5436,6 +5438,7 @@ void processWebCommand(const WebCommand &command) {
           command.config.avoidBbwShotWithoutScale;
       candidate.lastShotCooldownMs = command.config.lastShotCooldownMs;
       candidate.serialDebugOutput = command.config.serialDebugOutput;
+      candidate.ringRetainLogLevel = command.config.ringRetainLogLevel;
       // Session Manual switch may arrive via brewByWeight on Home; keep as timerOnly.
       candidate.timerOnly = command.config.timerOnly;
 #if defined(SHOT_STOPPER_HOST_TEST)
@@ -6110,19 +6113,9 @@ void setup() {
   persistenceReady = EEPROM.begin(EEPROM_SIZE);
 #ifndef SHOT_STOPPER_HOST_TEST
   bool settingsLoaded = false;
-  bool configMigrated = false;
-  if (persistenceReady &&
-      loadPersistedSettings(persistedSettings, &configMigrated)) {
+  if (persistenceReady && loadPersistedSettings(persistedSettings)) {
     settingsLoaded = true;
     noteDurableStorageRevision(persistedSettings.storageRevision);
-    if (configMigrated) {
-      if (savePersistedSettings(persistedSettings)) {
-        addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_MIGRATED);
-      } else {
-        addDebugEvent(DebugCategory::CONFIG, DebugCode::INITIALIZATION_FAILED,
-                      BOOT_SUBSYSTEM_SETTINGS_SAVE);
-      }
-    }
   } else if (persistenceReady) {
     if (initializeDefaultSettings(persistedSettings)) {
       settingsLoaded = true;
@@ -6169,6 +6162,8 @@ void setup() {
 #endif
   serialLogLevel = runtimeConfig.serialDebugOutput ? LogLevel::INFO
                                                    : LogLevel::NONE;
+  ringRetainLogLevel =
+      static_cast<LogLevel>(runtimeConfig.ringRetainLogLevel);
 
   logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_RESET_REASON,
           static_cast<int32_t>(safetyResetStatus.reasonCode));

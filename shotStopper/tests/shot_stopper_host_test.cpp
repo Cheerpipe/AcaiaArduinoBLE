@@ -1613,6 +1613,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.avoidBbwShotWithoutScale);
   CHECK(config.lastShotCooldownMs == DEFAULT_LAST_SHOT_COOLDOWN_MS);
   CHECK(!config.serialDebugOutput);
+  CHECK(config.ringRetainLogLevel == static_cast<uint8_t>(LogLevel::NONE));
 }
 
 void w02_each_runtime_field_is_validated() {
@@ -1692,6 +1693,16 @@ void w03_runtime_timing_relations_are_transactional() {
   config.lastShotCooldownMs = MAX_LAST_SHOT_COOLDOWN_MS + 1;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::LAST_SHOT_COOLDOWN);
+  config = RuntimeConfig{};
+  config.ringRetainLogLevel = static_cast<uint8_t>(LogLevel::NONE) + 1;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::RING_RETAIN_LOG_LEVEL);
+  uint8_t parsedLevel = 255;
+  CHECK(parseLogLevel("info", parsedLevel));
+  CHECK(parsedLevel == static_cast<uint8_t>(LogLevel::INFO));
+  CHECK(parseLogLevel("none", parsedLevel));
+  CHECK(parsedLevel == static_cast<uint8_t>(LogLevel::NONE));
+  CHECK(!parseLogLevel("verbose", parsedLevel));
 }
 
 void w04_wifi_credentials_have_strict_bounds() {
@@ -3899,6 +3910,32 @@ void w25b_log_levels_and_cycle_events_reach_ring() {
   CHECK(!logLevelAtMost(LogLevel::DEBUG, LogLevel::INFO));
 }
 
+void w25c_ring_retain_none_skips_ring_and_error_filters() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  debugLog.clear();
+  ringRetainLogLevel = LogLevel::NONE;
+  serialLogLevel = LogLevel::NONE;
+  addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_STARTED);
+  addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
+                static_cast<int32_t>(Cn9ArmFailReason::SAFETY_LOCKOUT));
+  DebugEvent noneEvents[DEBUG_EVENT_CAPACITY] = {};
+  CHECK(copyDebugEvents(0, noneEvents, DEBUG_EVENT_CAPACITY) == 0);
+
+  debugLog.clear();
+  ringRetainLogLevel = LogLevel::ERROR;
+  addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_STARTED);
+  addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_CONNECTING);
+  addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
+                static_cast<int32_t>(Cn9ArmFailReason::SAFETY_LOCKOUT));
+  DebugEvent errorEvents[DEBUG_EVENT_CAPACITY] = {};
+  const size_t count =
+      copyDebugEvents(0, errorEvents, DEBUG_EVENT_CAPACITY);
+  CHECK(count == 1);
+  CHECK(errorEvents[0].code == DebugCode::CN9_ARM_FAILED);
+  CHECK(errorEvents[0].level == LogLevel::CRITICAL);
+}
+
 void r41_negative_weight_in_range_starts_automatic_cycle() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -4921,31 +4958,6 @@ void s04_shot_log_remove_by_id() {
   CHECK(!shotLog.removeById(99999U));
 }
 
-void s05_shot_log_migrates_schema_v2() {
-  ShotLogStoreV2 legacy = {};
-  legacy.header.bootId = 3;
-  legacy.header.nextRecordId = 2;
-  legacy.header.count = 1;
-  legacy.header.writeIndex = 1;
-  legacy.records[0].id = 1;
-  legacy.records[0].bootId = 3;
-  legacy.records[0].endedAtMs = 45000;
-  legacy.records[0].durationDs = 285;
-  legacy.records[0].goalWeightG = 18;
-  finalizeShotLogStoreV2(legacy);
-  CHECK(validShotLogStoreV2(legacy));
-
-  ShotLogStore migrated = {};
-  migrateShotLogStoreV2(legacy, migrated);
-  CHECK(validShotLogStore(migrated));
-  CHECK(migrated.header.count == 1);
-  CHECK(migrated.header.bootId == 3);
-  CHECK(migrated.records[0].id == 1);
-  CHECK(migrated.records[0].durationDs == 285);
-  CHECK(migrated.records[0].hasWallTime == 0);
-  CHECK(migrated.records[0].endedAtLocalSec == 0);
-}
-
 void s06_shot_log_local_sec_from_utc() {
   CHECK(shotLogLocalSecFromUtc(1'700'000'000U, -240) ==
         1'700'000'000U - 14400U);
@@ -4986,83 +4998,8 @@ void s08_shot_log_without_sync_has_no_wall_time() {
   CHECK(stored[0].endedAtUnixSec == 0);
 }
 
-void s09_shot_log_migrates_schema_v3() {
-  ShotLogStoreV3 legacy = {};
-  legacy.header.bootId = 2;
-  legacy.header.nextRecordId = 2;
-  legacy.header.count = 1;
-  legacy.header.writeIndex = 1;
-  legacy.records[0].id = 1;
-  legacy.records[0].bootId = 2;
-  legacy.records[0].endedAtMs = 90000;
-  legacy.records[0].endedAtUnixSec = 1'700'000'000U;
-  legacy.records[0].durationDs = 150;
-  finalizeShotLogStoreV3(legacy);
-  CHECK(validShotLogStoreV3(legacy));
-
-  ShotLogStore migrated = {};
-  migrateShotLogStoreV3(legacy, migrated);
-  CHECK(validShotLogStore(migrated));
-  CHECK(migrated.records[0].endedAtUnixSec == 1'700'000'000U);
-  CHECK(migrated.records[0].hasWallTime == 0);
-  CHECK(migrated.records[0].endedAtLocalSec == 0);
-}
-
-void s10_shot_log_migrates_schema_v4() {
-  ShotLogStoreV4 legacy = {};
-  legacy.header.bootId = 4;
-  legacy.header.nextRecordId = 2;
-  legacy.header.count = 1;
-  legacy.header.writeIndex = 1;
-  legacy.records[0].id = 1;
-  legacy.records[0].bootId = 4;
-  legacy.records[0].durationDs = 260;
-  legacy.records[0].goalWeightG = 36;
-  legacy.header.magic = SHOT_LOG_MAGIC;
-  legacy.header.schemaVersion = 4;
-  legacy.header.recordSize = sizeof(ShotLogRecordV4);
-  legacy.header.checksum = shotLogChecksumBytes(legacy.header);
-
-  ShotLogStore migrated = {};
-  migrateShotLogStoreV4(legacy, migrated);
-  CHECK(validShotLogStore(migrated));
-  CHECK(migrated.records[0].extractionGuardEnabled == 0);
-  CHECK(migrated.records[0].stopDetail ==
-        static_cast<uint8_t>(ShotLogStopDetail::NORMAL_TARGET));
-}
-
-void s11_shot_log_record_stays_v5_size() {
+void s11_shot_log_record_stays_fixed_size() {
   CHECK(sizeof(ShotLogRecord) == 48);
-  CHECK(sizeof(ShotLogRecord) == sizeof(ShotLogRecordV5));
-  CHECK(sizeof(ShotLogStore) == sizeof(ShotLogStoreV5));
-}
-
-void s12_shot_log_migrates_schema_v5() {
-  ShotLogStoreV5 legacy = {};
-  legacy.header.bootId = 5;
-  legacy.header.nextRecordId = 2;
-  legacy.header.count = 1;
-  legacy.header.writeIndex = 1;
-  legacy.records[0].id = 1;
-  legacy.records[0].bootId = 5;
-  legacy.records[0].durationDs = 280;
-  legacy.records[0].goalWeightG = 36;
-  legacy.records[0].actualWeightCg = 3600;
-  legacy.header.magic = SHOT_LOG_MAGIC;
-  legacy.header.schemaVersion = 5;
-  legacy.header.recordSize = sizeof(ShotLogRecordV5);
-  legacy.header.checksum = shotLogChecksumBytes(legacy.header);
-  CHECK(validShotLogStoreV5(legacy));
-
-  ShotLogStore migrated = {};
-  migrateShotLogStoreV5(legacy, migrated);
-  CHECK(validShotLogStore(migrated));
-  CHECK(migrated.records[0].actualWeightSource ==
-        static_cast<uint8_t>(ActualWeightSource::POST_DRIP));
-  compactShotLogStore(migrated);
-  finalizeShotLogStore(migrated);
-  CHECK(shotLogPersistedBytes(migrated) ==
-        sizeof(ShotLogHeader) + sizeof(ShotLogRecord));
 }
 
 void s13_persist_debug_messages_identify_origin() {
@@ -5634,6 +5571,7 @@ const TestCase testCases[] = {
     {"W24", w24_debug_ring_is_bounded_and_ordered},
     {"W25", w25_weight_samples_do_not_fill_debug_log},
     {"W25B", w25b_log_levels_and_cycle_events_reach_ring},
+    {"W25C", w25c_ring_retain_none_skips_ring_and_error_filters},
     {"W26", w26_status_is_a_copied_snapshot},
     {"W27", w27_stale_weight_is_not_presented_as_current},
     {"W28", w28_web_command_queue_is_bounded},
@@ -5726,14 +5664,10 @@ const TestCase testCases[] = {
     {"S16", s16_last_shot_clear_empties_snapshot},
     {"S18", s18_last_shot_keeps_no_scale_guard_from_cycle},
     {"S04", s04_shot_log_remove_by_id},
-    {"S05", s05_shot_log_migrates_schema_v2},
     {"S06", s06_shot_log_local_sec_from_utc},
     {"S07", s07_shot_log_stores_fixed_wall_time},
     {"S08", s08_shot_log_without_sync_has_no_wall_time},
-    {"S09", s09_shot_log_migrates_schema_v3},
-    {"S10", s10_shot_log_migrates_schema_v4},
-    {"S11", s11_shot_log_record_stays_v5_size},
-    {"S12", s12_shot_log_migrates_schema_v5},
+    {"S11", s11_shot_log_record_stays_fixed_size},
     {"S13", s13_persist_debug_messages_identify_origin},
     {"H01", h01_health_threshold_alerts_fire_once_per_crossing},
     {"N01", n01_wall_clock_tracks_utc_from_anchor},

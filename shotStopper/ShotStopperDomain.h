@@ -12,26 +12,7 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 30;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 29;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V29 = 29;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V28 = 28;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V27 = 27;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V26 = 26;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V25 = 25;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V24 = 24;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V23 = 23;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V22 = 22;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V21 = 21;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V20 = 20;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V19 = 19;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V18 = 18;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V17 = 17;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V16 = 16;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V15 = 15;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V14 = 14;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V13 = 13;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V12 = 12;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 1;
 constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
 constexpr size_t PREFERRED_SCALE_NAME_CAPACITY = 32;
 constexpr size_t SCALE_HISTORY_CAPACITY = 8;
@@ -203,9 +184,6 @@ constexpr uint32_t DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 100;
 constexpr uint32_t MIN_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 0;
 constexpr uint32_t MAX_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 1000;
 constexpr uint32_t MAX_SCALE_TIMER_STOP_CATCHUP_MS = 2000;
-// Legacy persisted field name (schema ≤21); migrated to scaleTimerStopExtraDelayMs.
-constexpr uint32_t DEFAULT_SHOT_TIMER_START_DELAY_MS =
-    DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS;
 constexpr float MAX_OFFSET_G = 5.0f;
 constexpr float DEFAULT_WEIGHT_OFFSET_G = 1.5f;
 constexpr size_t AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT = 5;
@@ -762,6 +740,15 @@ inline void pushAutoToManualGuardSample(
   samples[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT - 1] = durationDs;
 }
 
+enum class LogLevel : uint8_t {
+  CRITICAL = 0,
+  ERROR = 1,
+  WARNING = 2,
+  INFO = 3,
+  DEBUG = 4,
+  NONE = 5
+};
+
 struct RuntimeConfig {
   uint32_t revision = 1;
   uint8_t goalWeightG = DEFAULT_GOAL_WEIGHT_G;
@@ -793,7 +780,7 @@ struct RuntimeConfig {
   // Default: buzzer_only with SHOT_STOPPER_ENABLE_BUZZER, else scale_only.
   uint8_t alertOutputChannel =
       static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL);
-  // Keeps schema-23 NVS blob size distinct from schema 22.
+  // Reserved for future config fields without a schema bump if unused.
   uint32_t reservedConfig = 0;
   uint32_t reservedConfig2 = 0;
   uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
@@ -833,14 +820,16 @@ struct RuntimeConfig {
       static_cast<uint8_t>(ScaleMacCacheMode::FULL);
   bool bookooMuteOnBuzzerOnly = true;
   uint8_t bookooConnectBeepLevel = DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL;
-  // Keeps schema-24 NVS blob size distinct from schema 23.
+  // Reserved for future config fields without a schema bump if unused.
   uint32_t reservedConfig3 = 0;
   bool avoidBbwShotWithoutScale = true;
   uint32_t lastShotCooldownMs = DEFAULT_LAST_SHOT_COOLDOWN_MS;
   // USB debug spew (paddle/CN9/Wi-Fi traces). CLI replies stay independent.
   bool serialDebugOutput = false;
-  // Keeps schema-28 NVS blob size distinct from schema 27.
+  // Reserved for future config fields without a schema bump if unused.
   uint32_t reservedConfig4 = 0;
+  // Minimum level retained in the RAM debug ring (WebUI Log). NONE disables.
+  uint8_t ringRetainLogLevel = static_cast<uint8_t>(LogLevel::NONE);
 };
 
 struct CycleConfigSnapshot {
@@ -966,7 +955,8 @@ enum class ConfigValidationError : uint8_t {
   ALERT_OUTPUT_CHANNEL,
   EXTENDED_PULSE_RATE,
   BOOKOO_CONNECT_BEEP_LEVEL,
-  LAST_SHOT_COOLDOWN
+  LAST_SHOT_COOLDOWN,
+  RING_RETAIN_LOG_LEVEL
 };
 
 constexpr size_t MAX_SHOT_PRESETS = 8;
@@ -1037,13 +1027,6 @@ inline void repairSlowExtractionGuard(RuntimeConfig &runtime) {
         runtime.maxBrewTimeMs <= runtime.minBrewTimeMs))) {
     runtime.slowExtractionGuardEnabled = false;
   }
-}
-
-inline void fillMigratedSlowExtractionGuard(RuntimeConfig &runtime) {
-  runtime.slowExtractionGuardEnabled = true;
-  runtime.maxBrewTimeMs = DEFAULT_MAX_BREW_TIME_MS;
-  runtime.minRecoveryWeightG = defaultMinRecoveryWeightG(runtime.goalWeightG);
-  repairSlowExtractionGuard(runtime);
 }
 
 // NVS dual-slot budget headroom for PersistedSettings including the preset bank.
@@ -1257,6 +1240,10 @@ inline ConfigValidationError validateRuntimeConfig(
       config.lastShotCooldownMs > MAX_LAST_SHOT_COOLDOWN_MS) {
     return ConfigValidationError::LAST_SHOT_COOLDOWN;
   }
+  if (config.ringRetainLogLevel >
+      static_cast<uint8_t>(LogLevel::NONE)) {
+    return ConfigValidationError::RING_RETAIN_LOG_LEVEL;
+  }
   if (config.fastExtractionGuardEnabled) {
     if (!isfinite(config.maxRecoveryWeightG) ||
         config.maxRecoveryWeightG < MIN_MAX_RECOVERY_WEIGHT_G ||
@@ -1364,6 +1351,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "bookooConnectBeepLevel";
     case ConfigValidationError::LAST_SHOT_COOLDOWN:
       return "lastShotCooldownMs";
+    case ConfigValidationError::RING_RETAIN_LOG_LEVEL:
+      return "ringRetainLogLevel";
   }
   return "unknown";
 }
@@ -2025,15 +2014,6 @@ inline bool controlAllowsNetworkBringup(const ControlStatusSnapshot &) {
   return true;
 }
 
-enum class LogLevel : uint8_t {
-  CRITICAL = 0,
-  ERROR = 1,
-  WARNING = 2,
-  INFO = 3,
-  DEBUG = 4,
-  NONE = 5
-};
-
 enum class DebugCategory : uint8_t {
   PADDLE,
   RELAY,
@@ -2089,7 +2069,6 @@ enum class DebugCode : uint8_t {
   AUTO_TO_MANUAL_GUARD_CLEARED,
   AUTO_TO_MANUAL_GUARD_FIRED,
   CONFIG_PERSISTED,
-  CONFIG_MIGRATED,
   AP_STARTED,
   AP_STOPPED,
   STA_CONNECTING,
@@ -2282,6 +2261,37 @@ inline const char *logLevelName(LogLevel level) {
   return "unknown";
 }
 
+inline bool parseLogLevel(const char *text, uint8_t &level) {
+  if (text == nullptr) {
+    return false;
+  }
+  if (strcmp(text, "critical") == 0) {
+    level = static_cast<uint8_t>(LogLevel::CRITICAL);
+    return true;
+  }
+  if (strcmp(text, "error") == 0) {
+    level = static_cast<uint8_t>(LogLevel::ERROR);
+    return true;
+  }
+  if (strcmp(text, "warning") == 0) {
+    level = static_cast<uint8_t>(LogLevel::WARNING);
+    return true;
+  }
+  if (strcmp(text, "info") == 0) {
+    level = static_cast<uint8_t>(LogLevel::INFO);
+    return true;
+  }
+  if (strcmp(text, "debug") == 0) {
+    level = static_cast<uint8_t>(LogLevel::DEBUG);
+    return true;
+  }
+  if (strcmp(text, "none") == 0) {
+    level = static_cast<uint8_t>(LogLevel::NONE);
+    return true;
+  }
+  return false;
+}
+
 inline char logLevelLetter(LogLevel level) {
   switch (level) {
     case LogLevel::CRITICAL: return 'C';
@@ -2467,7 +2477,6 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::AUTO_TO_MANUAL_GUARD_FIRED:
       return "auto-to-manual guard opened CN9";
     case DebugCode::CONFIG_PERSISTED: return "configuration persisted";
-    case DebugCode::CONFIG_MIGRATED: return "legacy configuration migrated";
     case DebugCode::AP_STARTED: return "access point started";
     case DebugCode::AP_STOPPED: return "access point stopped";
     case DebugCode::STA_CONNECTING: return "station connecting";

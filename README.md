@@ -113,7 +113,7 @@ Brew settings live in **named presets** (factory **Single** / **Double**, plus c
 
 All workflow parameters below are editable from the Web UI **Settings**
 panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
-`settingsB`, config schema **v30**). Defaults are shown in parentheses.
+`settingsB`, config schema **v1**). Defaults are shown in parentheses.
 
 | Setting | What it does |
 | --- | --- |
@@ -177,7 +177,7 @@ buzzer support, Output channel and the triple checkboxes are hidden.
 ### Shot history
 
 - Up to **120** completed extractions stored in NVS (shot log schema **v6**;
-  migrates older v2–v5 stores; writes a compact blob of only used records;
+  writes a compact blob of only used records;
   minimum duration 10 s; rinses and very short gestures are excluded).
 - Each record includes: local time (when NTP synced), duration, goal weight,
   actual weight, `actual_weight_source` (`post_drip` / `last_known` / `none`),

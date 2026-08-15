@@ -242,6 +242,9 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "Bookoo scale volume must be disabled (0) or 1 to 5.";
     case ConfigValidationError::LAST_SHOT_COOLDOWN:
       return "Last shot cooldown must be from 5 to 240 min.";
+    case ConfigValidationError::RING_RETAIN_LOG_LEVEL:
+      return "Ring log level must be none, critical, error, warning, info, or "
+             "debug.";
   }
   return "Invalid configuration.";
 }
@@ -311,6 +314,14 @@ bool jsonAlertOutputChannel(cJSON *object, const char *name, uint8_t &output,
     return false;
   }
   return parseAlertOutputChannel(item->valuestring, output);
+}
+
+bool jsonLogLevel(cJSON *object, const char *name, uint8_t &output) {
+  cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+  if (!cJSON_IsString(item) || item->valuestring == nullptr) {
+    return false;
+  }
+  return parseLogLevel(item->valuestring, output);
 }
 
 bool jsonExtendedPulseRate(cJSON *object, const char *name, uint8_t &output) {
@@ -2914,7 +2925,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"bookooConnectBeepLevel\":%u,"
       "\"avoidBbwShotWithoutScale\":%s,"
       "\"lastShotCooldownMs\":%lu,"
-      "\"serialDebugOutput\":%s},"
+      "\"serialDebugOutput\":%s,"
+      "\"ringRetainLogLevel\":\"%s\"},"
       "\"presets\":%s,"
       "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
       "\"nextRetryInMs\":%lu,\"consecutiveFailures\":%u,"
@@ -3057,6 +3069,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.config.avoidBbwShotWithoutScale ? "true" : "false",
       static_cast<unsigned long>(control.config.lastShotCooldownMs),
       control.config.serialDebugOutput ? "true" : "false",
+      logLevelName(static_cast<LogLevel>(control.config.ringRetainLogLevel)),
       g_presetsStatusJson,
       timeSyncStateName(timeStatus.state),
       static_cast<unsigned long>(timeStatus.utcSec),
@@ -3584,9 +3597,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "weightOffsetBaselineG",
       "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom",
       "scaleMacCacheMode", "bookooMuteOnBuzzerOnly", "bookooConnectBeepLevel",
-      "avoidBbwShotWithoutScale", "lastShotCooldownMs", "serialDebugOutput"};
+      "avoidBbwShotWithoutScale", "lastShotCooldownMs", "serialDebugOutput",
+      "ringRetainLogLevel"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 46)) {
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 47)) {
     parseError =
         "Config must include exactly the expected fields with correct types.";
   } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
@@ -3728,6 +3742,11 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (!jsonBoolean(root, "serialDebugOutput",
                           candidate.serialDebugOutput)) {
     parseError = "serialDebugOutput must be a boolean.";
+  } else if (!jsonLogLevel(root, "ringRetainLogLevel",
+                           candidate.ringRetainLogLevel)) {
+    parseError =
+        "ringRetainLogLevel must be none, critical, error, warning, info, or "
+        "debug.";
   }
   if (root != nullptr) {
     cJSON_Delete(root);
