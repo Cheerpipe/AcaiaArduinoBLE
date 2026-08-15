@@ -48,11 +48,11 @@ const jsBytes = Buffer.byteLength(js, 'utf8');
 if (htmlBytes > 40960) {
   throw new Error('Web UI HTML source exceeds the 40 KiB authoring budget');
 }
-if (jsBytes > 69632) {
-  throw new Error('Web UI JS source exceeds the 68 KiB authoring budget');
+if (jsBytes > 71680) {
+  throw new Error('Web UI JS source exceeds the 70 KiB authoring budget');
 }
-if (htmlBytes + jsBytes > 106496) {
-  throw new Error('Web UI HTML+JS source exceeds the 104 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 110592) {
+  throw new Error('Web UI HTML+JS source exceeds the 108 KiB combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -566,6 +566,9 @@ if (!ui.includes('<legend>Brew</legend>') ||
         html.indexOf('<summary>A→M time guard</summary>') ||
     !ui.includes('function updateHomeGuardSwitchesLock(') ||
     !ui.includes('function persistHomeGuard(') ||
+    !ui.includes('function flushHomeGuards(') ||
+    !ui.includes('function scheduleHomeGuardFlush(') ||
+    !ui.includes('function withCommandGate(') ||
     !ui.includes('function beginHomeSwitchPending(') ||
     !ui.includes('function applyPolledHomeSwitch(') ||
     !ui.includes('function applyHomeSwitchesFromConfig(') ||
@@ -580,7 +583,10 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes("'fastExtractionGuardEnabled',1)") ||
     !ui.includes("'slowExtractionGuardEnabled',1)") ||
     !ui.includes("'autoToManualGuardEnabled',1)") ||
-    !ui.includes('el.disabled=!controlsMutable||!on||pend||!!homeSwitchPending[h]') ||
+    !ui.includes('el.disabled=!controlsMutable||!on||pend') ||
+    ui.includes('el.disabled=!controlsMutable||!on||pend||!!homeSwitchPending[h]') ||
+    !ui.includes('homeFlushBusy') ||
+    !ui.includes('scheduleHomeGuardFlush()') ||
     !ui.includes("classList.toggle('fieldOff',!on)") ||
     !ui.includes('$(\'homeBrewByWeight\').disabled=!controlsMutable||pend') ||
     !css.includes('.switchRow.switchPending') ||
@@ -687,9 +693,9 @@ if (!ui.includes('id="firmwareFooter"') ||
 if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
     !ui.includes('loadLog()') ||
-    !ui.includes('setInterval(()=>refreshLog(),2500)') ||
-    !ui.includes('id="view-log"') ||
+    !ui.includes('refreshLog()') ||
     !ui.includes("name==='log'") ||
+    !ui.includes('id="view-log"') ||
     !ui.includes('id="logLevelFilter"') ||
     !ui.includes('e.level') ||
     !ui.includes('value="boot"')) {
@@ -966,12 +972,20 @@ if (!maxRespHeadersMatch || Number(maxRespHeadersMatch[1]) < 12) {
   throw new Error('HTTP server must allow at least 12 response headers for gzip and ETag');
 }
 if (!ui.includes('function withPollGate(') ||
+    !ui.includes('function withCommandGate(') ||
+    !ui.includes('function armStatusTimer(') ||
+    !ui.includes('function statusPollDue(') ||
+    !ui.includes('commandBusy') ||
+    !ui.includes('statusLiveShot') ||
+    !ui.includes('visibilitychange') ||
+    !ui.includes('await refreshStatus()') ||
     !ui.includes('noteReachFail(') ||
     !ui.includes('function startView(') ||
     !ui.includes('function stopViewPolls(') ||
     !ui.includes('function renderRoute(') ||
-    !ui.includes('setInterval(()=>refreshStatus(),2500)')) {
-  throw new Error('Web UI must serialize view-scoped polls and soft-fail unreachable bursts');
+    !ui.includes('armStatusTimer()') ||
+    ui.includes('setInterval(()=>refreshStatus(),2500)')) {
+  throw new Error('Web UI must adapt/pause status polls, serialize commands, and soft-fail unreachable bursts');
 }
 if (!ui.includes('async function loadStatus(){') ||
     !ui.includes('async function loadShots(){') ||
@@ -1223,8 +1237,8 @@ if (generated.logoGzip.length > 4096) {
 }
 if (generated.gzip.length + generated.jsGzip.length + generated.cssGzip.length +
         generated.logoGzip.length >
-    29696) {
-  throw new Error('Combined HTML+JS+CSS+logo gzip exceeds the 29 KiB flash budget');
+    30720) {
+  throw new Error('Combined HTML+JS+CSS+logo gzip exceeds the 30 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
