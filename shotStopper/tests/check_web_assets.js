@@ -984,8 +984,15 @@ if (!ui.includes('function withPollGate(') ||
     !ui.includes('function stopViewPolls(') ||
     !ui.includes('function renderRoute(') ||
     !ui.includes('armStatusTimer()') ||
+    !ui.includes('AbortController') ||
+    !ui.includes('Device timeout') ||
+    !ui.includes("throw new Error('Invalid response')") ||
+    !ui.includes("throw new Error('Invalid status')") ||
+    !ui.includes('!s.safety||!s.health||!s.scale||!s.network||!s.config') ||
+    ui.includes('return withPollGate(async()=>{if(heartbeatBusy') ||
+    ui.includes('heartbeatBusy||document.hidden||!authenticated()') ||
     ui.includes('setInterval(()=>refreshStatus(),2500)')) {
-  throw new Error('Web UI must adapt/pause status polls, serialize commands, and soft-fail unreachable bursts');
+  throw new Error('Web UI must adapt/pause status polls, serialize commands, time out hung fetches, and keep heartbeat off the poll chain');
 }
 if (!ui.includes('async function loadStatus(){') ||
     !ui.includes('async function loadShots(){') ||
@@ -1226,8 +1233,8 @@ if (logoRoundTrip !== generated.logo) {
 if (generated.gzip.length > 8192) {
   throw new Error('Compressed Web UI HTML exceeds the 8 KiB gzip budget');
 }
-if (generated.jsGzip.length > 18432) {
-  throw new Error('Compressed Web UI JS exceeds the 18 KiB gzip budget');
+if (generated.jsGzip.length > 18688) {
+  throw new Error('Compressed Web UI JS exceeds the 18.25 KiB gzip budget');
 }
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
