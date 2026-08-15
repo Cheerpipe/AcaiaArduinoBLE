@@ -3095,6 +3095,8 @@ void executeScaleTareCommand(const ScaleCommand &command) {
 void executeScaleBeepCommand(DebugCode successCode, DebugCode failureCode,
                              DebugCode unsupportedCode) {
   if (!scale.isConnected()) {
+    updateWorkerLinkState();
+    setScaleLinkState(ScaleLinkState::DISCONNECTED);
     addDebugEvent(DebugCategory::SCALE, failureCode);
     return;
   }
@@ -3146,6 +3148,12 @@ bool takeScaleDebugCommand(BookooDebugAction &action, uint8_t &beepLevel) {
 }
 
 void executeScaleDebugCommand(BookooDebugAction action, uint8_t beepLevel) {
+  if (!scale.isConnected()) {
+    updateWorkerLinkState();
+    setScaleLinkState(ScaleLinkState::DISCONNECTED);
+    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_DEBUG_FAILED);
+    return;
+  }
   if (!scaleIsBookooGeneric()) {
     addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_DEBUG_UNSUPPORTED);
     return;
@@ -3868,6 +3876,13 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
                                  uint32_t &connectRetryMs,
                                  bool &connectAttemptSeriesActive,
                                  uint32_t &scanSessionAtMs) {
+  // Library drop can happen on a beep/command path that never refreshed the
+  // link snapshot. Clear CONNECTED before idle scan work so the UI cannot sit
+  // on "BLE connected" for the whole (indefinite) discovery session.
+  if (!scale.isConnected()) {
+    updateWorkerLinkState();
+    setScaleLinkState(ScaleLinkState::DISCONNECTED);
+  }
   if (applyScaleDiscoveryPause()) {
     return;
   }
@@ -4061,6 +4076,17 @@ void scaleWorkerTask(void *) {
     markScaleWorkerProgress();
     BLE.poll();
 
+    // Packet timeout / remote-drop detection must not wait behind beeps or
+    // queued commands. Bookoo has no heartbeat; silence is the only watchdog.
+    if (scale.isConnected()) {
+      connectAttemptSeriesActive = false;
+      connectRetryMs = SCALE_CONNECT_RETRY_MS;
+      serviceScaleWorkerLink();
+    } else if (getScaleLinkSnapshot().state == ScaleLinkState::CONNECTED) {
+      updateWorkerLinkState();
+      setScaleLinkState(ScaleLinkState::DISCONNECTED);
+    }
+
     ScaleCommand command;
     if (xQueueReceive(scaleCommandQueue, &command, 0) == pdTRUE) {
       executeScaleCommand(command);
@@ -4084,17 +4110,11 @@ void scaleWorkerTask(void *) {
         uint8_t debugLevel = 0;
         if (takeScaleDebugCommand(debugAction, debugLevel)) {
           executeScaleDebugCommand(debugAction, debugLevel);
-        } else if (!applyScaleDiscoveryPause()) {
-          if (scale.isConnected()) {
-            connectAttemptSeriesActive = false;
-            connectRetryMs = SCALE_CONNECT_RETRY_MS;
-            serviceScaleWorkerLink();
-          } else {
-            serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
-                                        connectRetryMs,
-                                        connectAttemptSeriesActive,
-                                        scanSessionAtMs);
-          }
+        } else if (!scale.isConnected() && !applyScaleDiscoveryPause()) {
+          serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                                      connectRetryMs,
+                                      connectAttemptSeriesActive,
+                                      scanSessionAtMs);
         }
       }
     }
