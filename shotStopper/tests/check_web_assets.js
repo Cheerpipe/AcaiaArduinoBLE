@@ -672,10 +672,17 @@ if (!ui.includes('id="debugPanel"') ||
     !ui.includes("['beepSnapButton','snap']") ||
     !ui.includes('function debugBuzzer(') ||
     !ui.includes('Shown with SHOT_STOPPER_ENABLE_BUZZER') ||
-    html.indexOf('id="saveDateTimeButton"') > html.indexOf('id="debugPanel"') ||
-    html.indexOf('id="debugPanel"') > html.indexOf('id="restartPanel"') ||
+    html.indexOf('id="view-debug"') < 0 ||
+    html.indexOf('id="debugPanel"') < html.indexOf('id="view-debug"') ||
+    html.indexOf('id="debugPanel"') >
+        html.indexOf('</section>', html.indexOf('id="view-debug"')) ||
     html.indexOf('id="serialDebugOutput"') < html.indexOf('id="debugPanel"') ||
-    html.indexOf('id="serialDebugOutput"') > html.indexOf('id="restartPanel"') ||
+    html.indexOf('id="serialDebugOutput"') >
+        html.indexOf('</section>', html.indexOf('id="view-debug"')) ||
+    html.slice(html.indexOf('id="view-admin"'), html.indexOf('id="view-debug"'))
+        .includes('id="debugPanel"') ||
+    html.indexOf('data-route="/admin"') > html.indexOf('data-route="/debug"') ||
+    html.indexOf('data-route="/debug"') > html.indexOf('data-route="/log"') ||
     !html.includes('id="serialDebugOutput" class="mutable"') ||
     !ui.includes("if($('serialDebugOutput'))$('serialDebugOutput').checked=!!c.serialDebugOutput") ||
     firmware.indexOf('serialLogLevel = runtimeConfig.serialDebugOutput',
@@ -700,7 +707,7 @@ if (!ui.includes('id="debugPanel"') ||
     !firmware.includes('localBuzzer.request(command.buzzerPattern)') ||
     !firmware.includes('enqueueScaleDebugCommand') ||
     !firmware.includes('executeScaleDebugCommand')) {
-  throw new Error('Admin debug must expose Bookoo BLE commands and buzzer tests');
+  throw new Error('Debug page must expose Bookoo BLE commands and buzzer tests');
 }
 if (!ui.includes('id="staIpMode"') ||
     !ui.includes('id="staStaticIp"') ||
@@ -799,6 +806,7 @@ const expected = new Map([
   ['GET /log', 'rootHandler'],
   ['GET /history', 'rootHandler'],
   ['GET /admin', 'rootHandler'],
+  ['GET /debug', 'rootHandler'],
   ['GET /settings', 'rootHandler'],
   ['GET /app.js', 'jsHandler'],
   ['GET /app.css', 'cssHandler'],
@@ -853,7 +861,7 @@ if (!ui.includes('async function loadStatus(){') ||
     !ui.includes('function refreshStatus(){return withPollGate(loadStatus)}') ||
     !ui.includes('function refreshShots(){return withPollGate(loadShots)}') ||
     !ui.includes('function refreshLog(){return withPollGate(loadLog)}') ||
-    !ui.includes("name==='home'||name==='settings'||name==='admin'") ||
+    !ui.includes("name==='home'||name==='settings'||name==='admin'||name==='debug'") ||
     ui.includes("name==='presets'") ||
     !ui.includes("name==='history'") ||
     !ui.includes('renderRoute(location.pathname)') ||
@@ -865,11 +873,13 @@ if (!ui.includes('id="view-home"') ||
     !ui.includes('id="view-settings"') ||
     ui.includes('id="view-presets"') ||
     !ui.includes('id="view-admin"') ||
+    !ui.includes('id="view-debug"') ||
     !ui.includes('data-route="/settings"') ||
     ui.includes('data-route="/presets"') ||
     !ui.includes('data-route="/admin"') ||
+    !ui.includes('data-route="/debug"') ||
     !ui.includes('history.pushState')) {
-  throw new Error('Web UI must expose Home/History/Admin/Log/Settings routes as an SPA');
+  throw new Error('Web UI must expose Home/History/Admin/Debug/Log/Settings routes as an SPA');
 }
 const maxHandlersMatch = network.match(/max_uri_handlers\s*=\s*(\d+)/);
 if (!maxHandlersMatch) {

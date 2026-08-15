@@ -194,7 +194,7 @@ See [Factory credentials (first use)](#factory-credentials-first-use) for AP
 name, default passwords, and step-by-step first connection.
 
 - Fully **embedded Web UI** SPA with routes (`/`, `/presets`, `/settings`,
-  `/history`, `/admin`, `/log`): same-origin assets only (no CDN). Authoring
+  `/history`, `/admin`, `/debug`, `/log`): same-origin assets only (no CDN). Authoring
   budget HTML ≤ **40 KiB**, JS ≤ **60 KiB**, combined HTML+JS ≤ **80 KiB**;
   gzip HTML ≤ **8 KiB**, gzip JS ≤ **16 KiB**, gzip CSS ≤ **6 KiB**, gzip logo ≤
   **4 KiB**, combined ≤ **28 KiB**. Reloads
@@ -263,7 +263,7 @@ name, default passwords, and step-by-step first connection.
   filters, dropped-event counter, copy, and clear view (client-side only);
   also available via `GET /api/v1/log`. Serial and UI share the same structured
   pipeline (`logEmit`); the Web log ring retains Info by default. USB debug
-  print is **off** by default (`serialDebugOutput`); enable it from Admin or
+  print is **off** by default (`serialDebugOutput`); enable it from Debug or
   `SERIAL_DEBUG_ON`. CLI replies on the same port stay on.
 - **USB serial CLI** at **115200** baud for recovery and provisioning without the
   Web UI: factory reset, AP/UI password, STA Wi-Fi, shot-history clear, serial
@@ -859,7 +859,7 @@ This writes `shotStopper/ShotStopperVersion.h` and
 `shotStopper/web/app.css`, and `shotStopper/web/logo.svg` (JS is minified with
 Terser). The installed firmware reports the version on Serial boot, in
 `GET /api/v1/status` as `firmwareVersion`, and in the Web UI footer. `GET /`
-(and `/history`, `/log`, `/settings`) serves the SPA HTML as gzip with an
+(and `/history`, `/log`, `/settings`, `/debug`) serves the SPA HTML as gzip with an
 `ETag` derived from that version. `GET /app.js`, `GET /app.css`, and
 `GET /logo.svg` are gzip with a long-lived cache and the same ETag family. Use
 `curl --compressed` if you fetch HTML/JS/CSS/SVG from the command line.
@@ -971,7 +971,7 @@ not `tty.*`, for monitoring). On Linux it is often `/dev/ttyUSB0` or
 Open the monitor with `arduino-cli`, replacing the port with yours.
 Use **115200** for ESP32 boot messages and Shot Stopper logs and CLI (same
 rate after the app starts). Debug paddle/CN9/Wi-Fi traces are **off** by
-default; enable them from Admin (**Serial debug output**) or `SERIAL_DEBUG_ON`.
+default; enable them from Debug (**Serial debug output**) or `SERIAL_DEBUG_ON`.
 
 ```sh
 arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200
