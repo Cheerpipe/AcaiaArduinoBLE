@@ -3632,6 +3632,11 @@ void w25b_log_levels_and_cycle_events_reach_ring() {
   CHECK(debugCodeDefaultLevel(DebugCode::CN9_ARM_FAILED) ==
         LogLevel::CRITICAL);
   CHECK(debugCodeDefaultLevel(DebugCode::SCALE_CONNECTING) == LogLevel::DEBUG);
+  CHECK(!logLevelAtMost(LogLevel::CRITICAL, LogLevel::NONE));
+  CHECK(!logLevelAtMost(LogLevel::DEBUG, LogLevel::NONE));
+  CHECK(logLevelAtMost(LogLevel::WARNING, LogLevel::INFO));
+  CHECK(logLevelAtMost(LogLevel::INFO, LogLevel::INFO));
+  CHECK(!logLevelAtMost(LogLevel::DEBUG, LogLevel::INFO));
 }
 
 void r41_negative_weight_in_range_starts_automatic_cycle() {
@@ -4533,15 +4538,30 @@ void sc09_serial_debug_toggles_without_ready() {
   CHECK(session.active);
   CHECK(!runtimeConfig.serialDebugOutput);
   CHECK(serialLogLevel == LogLevel::NONE);
+  Serial.tx.clear();
+  addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED);
+  serialTrace(LogLevel::WARNING, "Scale name scan: no advertisement");
+  CHECK(!serialTxContains("configuration accepted"));
+  CHECK(!serialTxContains("Scale name scan: no advertisement"));
   feedSerial("SERIAL_DEBUG_ON\n");
   CHECK(serialTxContains("OK serial debug on"));
   CHECK(runtimeConfig.serialDebugOutput);
   CHECK(serialLogLevel == LogLevel::INFO);
   CHECK(runtimePersistPending);
+  Serial.tx.clear();
+  addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED);
+  serialTrace(LogLevel::WARNING, "Scale name scan: no advertisement");
+  CHECK(serialTxContains("configuration accepted"));
+  CHECK(serialTxContains("Scale name scan: no advertisement"));
   feedSerial("SERIAL_DEBUG_OFF\n");
   CHECK(serialTxContains("OK serial debug off"));
   CHECK(!runtimeConfig.serialDebugOutput);
   CHECK(serialLogLevel == LogLevel::NONE);
+  Serial.tx.clear();
+  addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED);
+  serialTrace(LogLevel::WARNING, "Scale name scan: no advertisement");
+  CHECK(!serialTxContains("configuration accepted"));
+  CHECK(!serialTxContains("Scale name scan: no advertisement"));
 }
 
 void s04_shot_log_remove_by_id() {

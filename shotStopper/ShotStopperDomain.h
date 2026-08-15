@@ -1914,6 +1914,10 @@ inline char logLevelLetter(LogLevel level) {
 }
 
 inline bool logLevelAtMost(LogLevel level, LogLevel threshold) {
+  // NONE is the serial-off sentinel, not "more verbose than DEBUG".
+  if (threshold == LogLevel::NONE) {
+    return false;
+  }
   return static_cast<uint8_t>(level) <= static_cast<uint8_t>(threshold);
 }
 
