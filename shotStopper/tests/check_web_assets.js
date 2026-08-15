@@ -221,7 +221,7 @@ if (!ui.includes('authenticatedOnly') ||
   throw new Error('Web UI must expose a public read-only Home, hide other tabs until sign-in, and redirect unknown routes to /');
 }
 if (!html.includes('id="rememberMe"') ||
-    /id="rememberMe"[^>]*\bchecked\b/.test(html) ||
+    !/id="rememberMe"[^>]*\bchecked\b/.test(html) ||
     html.includes('Stay signed in for 7 days on this browser.') ||
     !js.includes('rememberMe:r') ||
     !js.includes('r?localStorage:sessionStorage') ||
