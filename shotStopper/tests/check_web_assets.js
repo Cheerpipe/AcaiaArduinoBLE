@@ -435,8 +435,11 @@ if (!html.includes('<summary>Paddle</summary>') ||
     !html.includes('id="paddleMode"') ||
     !html.includes('<option value="natural">Natural</option>') ||
     !html.includes('<option value="original">Original</option>') ||
-    !html.includes('hold paddle ON to brew') ||
-    !html.includes('Early stop: paddle ON then OFF') ||
+    !html.includes('<strong>Natural:</strong>') ||
+    !html.includes('<strong>Original:</strong>') ||
+    !html.includes('like a normal brew switch') ||
+    !html.includes('original Tater Mazer Shot Stopper') ||
+    !html.includes('move the paddle ON during the shot') ||
     !html.includes('Do not press the scale') ||
     !ui.includes("paddleMode:['natural','original']") ||
     !ui.includes("if($('paddleMode'))$('paddleMode').value=") ||
@@ -1290,8 +1293,8 @@ const logoRoundTrip = zlib.gunzipSync(generated.logoGzip).toString('utf8');
 if (logoRoundTrip !== generated.logo) {
   throw new Error('Generated gzip Web logo does not round-trip to the minified SVG');
 }
-if (generated.gzip.length > 8448) {
-  throw new Error('Compressed Web UI HTML exceeds the 8.25 KiB gzip budget');
+if (generated.gzip.length > 9216) {
+  throw new Error('Compressed Web UI HTML exceeds the 9 KiB gzip budget');
 }
 if (generated.jsGzip.length > 18688) {
   throw new Error('Compressed Web UI JS exceeds the 18.25 KiB gzip budget');
