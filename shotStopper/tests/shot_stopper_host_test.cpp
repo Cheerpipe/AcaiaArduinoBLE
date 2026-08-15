@@ -2828,6 +2828,8 @@ void w92_parse_sequence_pattern_ids() {
   CHECK(parsed == BuzzerPattern::SWING);
   CHECK(parseBuzzerPatternId("echo", parsed));
   CHECK(parsed == BuzzerPattern::ECHO);
+  CHECK(parseBuzzerPatternId("echoinv", parsed));
+  CHECK(parsed == BuzzerPattern::ECHO_INVERTED);
   CHECK(parseBuzzerPatternId("morse", parsed));
   CHECK(parsed == BuzzerPattern::MORSE);
   CHECK(parseBuzzerPatternId("snap", parsed));
@@ -2892,6 +2894,19 @@ void w95_web_buzzer_test_plays_chime_sequence() {
   CHECK(localBuzzer.active == BuzzerPattern::CHIME);
   CHECK(localBuzzer.beepCount == 3);
   CHECK(localBuzzer.onMs == BUZZER_CHIME_NOTES[0].onMs);
+}
+
+void w96_echo_inverted_uses_long_bookend_tones() {
+  resetHarness(false, false);
+  CHECK(BUZZER_ECHO_INVERTED_NOTES[0].onMs == 220);
+  CHECK(BUZZER_ECHO_INVERTED_NOTES[3].onMs == 220);
+  CHECK(BUZZER_ECHO_INVERTED_NOTES[1].onMs == 50);
+  CHECK(BUZZER_ECHO_INVERTED_NOTES[2].onMs == 50);
+  CHECK(localBuzzer.request(BuzzerPattern::ECHO_INVERTED));
+  CHECK(localBuzzer.active == BuzzerPattern::ECHO_INVERTED);
+  CHECK(localBuzzer.beepCount == 4);
+  CHECK(localBuzzer.onMs == BUZZER_ECHO_INVERTED_NOTES[0].onMs);
+  CHECK(localBuzzer.gapMs == BUZZER_ECHO_INVERTED_NOTES[0].gapMs);
 }
 
 void w60_web_buzzer_test_plays_requested_pattern() {
@@ -4807,8 +4822,12 @@ void sc04_clear_shots_empties_log() {
 
 void sc05_serial_cli_parser_covers_supported_commands() {
   SerialCliRequest request;
+  CHECK(serialCliParseLine("HELP", request));
+  CHECK(request.verb == SerialCliVerb::HELP);
   CHECK(serialCliParseLine("HELLO", request));
   CHECK(request.verb == SerialCliVerb::HELLO);
+  CHECK(serialCliParseLine("REBOOT", request));
+  CHECK(request.verb == SerialCliVerb::REBOOT);
   CHECK(serialCliParseLine("SET_AP_PASSWORD password1234", request));
   CHECK(request.verb == SerialCliVerb::SET_AP_PASSWORD);
   CHECK(strcmp(request.arg1, "password1234") == 0);
@@ -4836,6 +4855,10 @@ void sc05_serial_cli_parser_covers_supported_commands() {
   CHECK(request.verb == SerialCliVerb::SERIAL_DEBUG_ON);
   CHECK(serialCliParseLine("SERIAL_DEBUG_OFF", request));
   CHECK(request.verb == SerialCliVerb::SERIAL_DEBUG_OFF);
+  CHECK(!serialCliParseLine("HELP extra", request));
+  CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
+  CHECK(!serialCliParseLine("REBOOT extra", request));
+  CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(!serialCliParseLine("SERIAL_DEBUG_ON extra", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(serialCliParseLine("SET_AP_PASSWORD Micra1234", request));
@@ -4922,6 +4945,48 @@ void sc09_serial_debug_toggles_without_ready() {
   serialTrace(LogLevel::WARNING, "Scale name scan: no advertisement");
   CHECK(!serialTxContains("configuration accepted"));
   CHECK(!serialTxContains("Scale name scan: no advertisement"));
+}
+
+void sc10_help_prints_one_line_per_command() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(session.active);
+  Serial.tx.clear();
+  feedSerial("help\n");
+  CHECK(serialTxContains("HELP  list commands"));
+  CHECK(serialTxContains("HELLO  probe CLI"));
+  CHECK(serialTxContains("REBOOT  restart firmware"));
+  CHECK(serialTxContains("FACTORY_RESET  wipe Wi-Fi"));
+  CHECK(serialTxContains("RESET_AP_PASSWORD  restore AP/UI password"));
+  CHECK(serialTxContains("SET_AP_PASSWORD <password>"));
+  CHECK(serialTxContains("SET_WIFI <ssid> [password]"));
+  CHECK(serialTxContains("CLEAR_WIFI  forget STA Wi-Fi"));
+  CHECK(serialTxContains("CLEAR_SHOTS  clear shot history"));
+  CHECK(serialTxContains("RESET_NETWORK_UI  forget STA Wi-Fi"));
+  CHECK(serialTxContains("SERIAL_DEBUG_ON  enable USB debug"));
+  CHECK(serialTxContains("SERIAL_DEBUG_OFF  disable USB debug"));
+  CHECK(serialTxContains("e.g. SET_WIFI CafeLAN CafePass1"));
+  CHECK(session.active);
+}
+
+void sc11_reboot_queues_restart_when_ready() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  feedSerial("REBOOT\n");
+  CHECK(serialTxContains("OK queued REBOOT"));
+  runLoopAfter(MAINTENANCE_LEASE_SETTLE_MS);
+  CHECK(hostLastForwardedNetworkCommand.type == WebCommandType::RESTART);
+}
+
+void sc12_reboot_rejected_while_active() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  startCycle();
+  feedSerial("REBOOT\n");
+  CHECK(serialTxContains("ERR not ready"));
+  CHECK(session.active);
+  CHECK(getRelaySafetySnapshot().closed);
 }
 
 void s04_shot_log_remove_by_id() {
@@ -5638,6 +5703,7 @@ const TestCase testCases[] = {
     {"W93", w93_scale_connected_chime_on_buzzer_only_rising_edge},
     {"W94", w94_scale_connected_silent_when_flag_off_or_not_buzzer_only},
     {"W95", w95_web_buzzer_test_plays_chime_sequence},
+    {"W96", w96_echo_inverted_uses_long_bookend_tones},
     {"D01", d01_idle_scan_stays_enabled_between_ticks},
     {"D02", d02_full_empty_mac_uses_name_scan},
     {"D03", d03_scan_start_failed_uses_backoff},
@@ -5677,6 +5743,9 @@ const TestCase testCases[] = {
     {"SC07", sc07_reset_ap_password_and_clear_wifi_queue},
     {"SC08", sc08_set_ap_password_queues_change},
     {"SC09", sc09_serial_debug_toggles_without_ready},
+    {"SC10", sc10_help_prints_one_line_per_command},
+    {"SC11", sc11_reboot_queues_restart_when_ready},
+    {"SC12", sc12_reboot_rejected_while_active},
 };
 
 }  // namespace

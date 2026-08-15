@@ -274,8 +274,8 @@ name, default passwords, and step-by-step first connection.
   print is **off** by default (`serialDebugOutput`); enable it from Debug or
   `SERIAL_DEBUG_ON`. CLI replies on the same port stay on.
 - **USB serial CLI** at **115200** baud for recovery and provisioning without the
-  Web UI: factory reset, AP/UI password, STA Wi-Fi, shot-history clear, serial
-  debug on/off, and a `HELLO` probe. See [USB serial CLI](#usb-serial-cli).
+  Web UI: `HELP`, reboot, factory reset, AP/UI password, STA Wi-Fi, shot-history
+  clear, serial debug on/off, and a `HELLO` probe. See [USB serial CLI](#usb-serial-cli).
 
 **Web paddle and remote control** (opt-in build only):
 
@@ -361,7 +361,7 @@ triple beeps, **Scale connected** (Buzzer only, default ON), and **Extended shot
 (Disabled / Slow / Medium / Fast / Rapid; default Fast). All alert events (including
 tare/start/stop feedback when the channel routes to the buzzer) go through that
 setting. Debug short/long/double/triple, Slow/Medium/Fast/Rapid (3 s), and
-Chime/Swing/Echo/Morse/Snap buttons play the same catalog as the live alerts.
+Chime/Swing/Echo/Echo inverted/Morse/Snap buttons play the same catalog as the live alerts.
 
 ## Optional hardware: WS2812B status LEDs (ALED)
 
@@ -664,8 +664,8 @@ window fails, while STA retries continue. Use the same Web UI password
 **`Micra1234`** (or the password you set under **Web UI password**). Factory
 reset restores all values in the table above. If you lose STA or the UI
 password, recover over SoftAP or USB with the
-[USB serial CLI](#usb-serial-cli) (`HELLO`, `RESET_AP_PASSWORD`, `CLEAR_WIFI`,
-or `FACTORY_RESET`).
+[USB serial CLI](#usb-serial-cli) (`HELP`, `HELLO`, `REBOOT`, `RESET_AP_PASSWORD`,
+`CLEAR_WIFI`, or `FACTORY_RESET`).
 
 STA addressing can be **DHCP** (default) or **static IP** from the Wi‑Fi panel.
 After any STA save, the new settings stay **pending** until you sign in at the
@@ -1059,7 +1059,7 @@ The firmware accepts **line-based commands** on the same USB serial port as the
 logs (**115200** baud). Commands are case-insensitive; SSIDs and passwords are
 case-sensitive. Destructive commands use the same safety gate as the Web UI:
 physical paddle **OFF**, CN9 open, state **Ready**, no active cycle.
-`SERIAL_DEBUG_ON` / `SERIAL_DEBUG_OFF` are allowed at any time.
+`HELP`, `HELLO`, `SERIAL_DEBUG_ON` / `SERIAL_DEBUG_OFF` are allowed at any time.
 
 Do not type into the scrolling monitor if you cannot see what you send. Close
 any other serial client, then **pipe** the command with `arduino-cli monitor`.
@@ -1068,7 +1068,9 @@ resets the ESP32). Replace the port with yours from `arduino-cli board list`.
 
 | Command | Parameters | Effect |
 | --- | --- | --- |
+| `HELP` | none | Prints one-line summaries and examples of every CLI command |
 | `HELLO` | none | Replies `how are you` (probe that serial commands work) |
+| `REBOOT` | none | Restarts the firmware (same safety gate as other destructive commands) |
 | `FACTORY_RESET` | none | Erases Wi-Fi, workflow settings, calibration, and shot history; restores AP/UI password **`Micra1234`**; restarts |
 | `RESET_AP_PASSWORD` | none | Restores AP and Web UI password to **`Micra1234`** (does not change STA Wi-Fi) |
 | `SET_AP_PASSWORD` | `<password>` | Sets AP and Web UI password (8–63 characters; cannot be `Micra1234`) |
@@ -1080,13 +1082,26 @@ resets the ESP32). Replace the port with yours from `arduino-cli board list`.
 | `SERIAL_DEBUG_OFF` | none | Disables USB debug traces (CLI replies stay on) and persists; replies before silencing |
 
 Successful mutating commands print `OK queued …` (or `OK shots cleared` /
-`OK serial debug on` / `OK serial debug off` / `how are you`). Rejections print
-`ERR …`. Passwords are not echoed in the OK line.
+`OK serial debug on` / `OK serial debug off` / `how are you`). `HELP` prints
+one line per command. Rejections print `ERR …`. Passwords are not echoed in the
+OK line.
+
+List commands:
+
+```sh
+(sleep 4; printf 'HELP\n'; sleep 2) | arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200
+```
 
 Probe:
 
 ```sh
 (sleep 4; printf 'HELLO\n'; sleep 2) | arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200
+```
+
+Reboot:
+
+```sh
+(sleep 4; printf 'REBOOT\n'; sleep 6) | arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200
 ```
 
 Factory reset:
@@ -1138,8 +1153,8 @@ Clear shot history:
 ```
 
 `SET_WIFI` always uses **DHCP**. Static IP must still be set from the Web UI.
-After `SET_WIFI` / `CLEAR_WIFI` / `FACTORY_RESET` the board restarts; the
-monitor session may drop — run `arduino-cli monitor` again if you need logs.
+After `REBOOT` / `SET_WIFI` / `CLEAR_WIFI` / `FACTORY_RESET` the board restarts;
+the monitor session may drop — run `arduino-cli monitor` again if you need logs.
 
 ### Troubleshooting serial output
 

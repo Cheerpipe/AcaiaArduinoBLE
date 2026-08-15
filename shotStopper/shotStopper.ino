@@ -5837,9 +5837,18 @@ void dispatchSerialCliRequest(SerialCliRequest &request) {
   switch (request.verb) {
     case SerialCliVerb::NONE:
       return;
+    case SerialCliVerb::HELP:
+      serialCliPrintHelp();
+      return;
     case SerialCliVerb::HELLO:
       serialCliReply("how are you");
       return;
+    case SerialCliVerb::REBOOT: {
+      WebCommand command;
+      command.type = WebCommandType::RESTART;
+      serialCliQueueIfSafe(command, request.verb);
+      return;
+    }
     case SerialCliVerb::UNKNOWN:
     case SerialCliVerb::LINE_TOO_LONG:
     case SerialCliVerb::INVALID_ARGS:

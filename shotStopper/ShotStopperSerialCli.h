@@ -10,7 +10,9 @@ constexpr size_t SERIAL_CLI_VERB_CAPACITY = 24;
 
 enum class SerialCliVerb : uint8_t {
   NONE = 0,
+  HELP,
   HELLO,
+  REBOOT,
   FACTORY_RESET,
   RESET_AP_PASSWORD,
   SET_AP_PASSWORD,
@@ -42,7 +44,9 @@ struct SerialCliParser {
 inline const char *serialCliVerbName(SerialCliVerb verb) {
   switch (verb) {
     case SerialCliVerb::NONE: return "NONE";
+    case SerialCliVerb::HELP: return "HELP";
     case SerialCliVerb::HELLO: return "HELLO";
+    case SerialCliVerb::REBOOT: return "REBOOT";
     case SerialCliVerb::FACTORY_RESET: return "FACTORY_RESET";
     case SerialCliVerb::RESET_AP_PASSWORD: return "RESET_AP_PASSWORD";
     case SerialCliVerb::SET_AP_PASSWORD: return "SET_AP_PASSWORD";
@@ -207,8 +211,14 @@ inline bool serialCliParseLine(const char *line, SerialCliRequest &request) {
     return true;
   };
 
+  if (serialCliEqualsIgnoreCase(verb, "help")) {
+    return requireNoArgs(SerialCliVerb::HELP);
+  }
   if (serialCliEqualsIgnoreCase(verb, "hello")) {
     return requireNoArgs(SerialCliVerb::HELLO);
+  }
+  if (serialCliEqualsIgnoreCase(verb, "reboot")) {
+    return requireNoArgs(SerialCliVerb::REBOOT);
   }
   if (serialCliEqualsIgnoreCase(verb, "factory_reset")) {
     return requireNoArgs(SerialCliVerb::FACTORY_RESET);
@@ -281,8 +291,40 @@ inline bool serialCliParseLine(const char *line, SerialCliRequest &request) {
   }
 
   request.verb = SerialCliVerb::UNKNOWN;
-  request.error = "unknown command";
+  request.error = "unknown command; try HELP";
   return true;
+}
+
+inline void serialCliPrintHelp() {
+  Serial.println(
+      "Commands are case-insensitive. Destructive need paddle OFF, CN9 open, "
+      "Ready, no cycle.");
+  Serial.println("HELP  list commands  e.g. HELP");
+  Serial.println("HELLO  probe CLI  e.g. HELLO");
+  Serial.println("REBOOT  restart firmware  e.g. REBOOT");
+  Serial.println(
+      "FACTORY_RESET  wipe Wi-Fi, settings, shots; AP/UI password Micra1234; "
+      "restart  e.g. FACTORY_RESET");
+  Serial.println(
+      "RESET_AP_PASSWORD  restore AP/UI password Micra1234 (STA Wi-Fi "
+      "unchanged)  e.g. RESET_AP_PASSWORD");
+  Serial.println(
+      "SET_AP_PASSWORD <password>  set AP/UI password (8-63 chars, not "
+      "Micra1234)  e.g. SET_AP_PASSWORD password1234");
+  Serial.println(
+      "SET_WIFI <ssid> [password]  save STA Wi-Fi (DHCP) and restart; omit "
+      "password if open; quote spaces  e.g. SET_WIFI CafeLAN CafePass1");
+  Serial.println("CLEAR_WIFI  forget STA Wi-Fi only; restart  e.g. CLEAR_WIFI");
+  Serial.println("CLEAR_SHOTS  clear shot history  e.g. CLEAR_SHOTS");
+  Serial.println(
+      "RESET_NETWORK_UI  forget STA Wi-Fi and restore AP/UI password "
+      "Micra1234; restart  e.g. RESET_NETWORK_UI");
+  Serial.println(
+      "SERIAL_DEBUG_ON  enable USB debug traces (any time)  e.g. "
+      "SERIAL_DEBUG_ON");
+  Serial.println(
+      "SERIAL_DEBUG_OFF  disable USB debug traces; CLI replies stay on  e.g. "
+      "SERIAL_DEBUG_OFF");
 }
 
 inline bool serialCliFeed(SerialCliParser &parser, char received,
