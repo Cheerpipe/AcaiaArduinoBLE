@@ -128,7 +128,7 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('"alertOutputChannel"') ||
     !network.includes('"bookooMuteOnBuzzerOnly"') ||
     !network.includes('"bookooConnectBeepLevel"') ||
-    !network.includes('fields, 48') ||
+    !network.includes('fields, 49') ||
     !network.includes('allowedCount > 64') ||
     !network.includes('uint64_t seen') ||
     !network.includes('WEB_UI_ASSET_TAG') ||
@@ -385,12 +385,18 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     html.indexOf('<legend>Machine and scale</legend>') >
         html.indexOf('<summary>No-scale BBW</summary>') ||
     html.indexOf('<summary>No-scale BBW</summary>') >
+        html.indexOf('<summary>Paddle</summary>') ||
+    html.indexOf('<summary>Paddle</summary>') >
         html.indexOf('<summary>Quick rinse</summary>') ||
     html.indexOf('id="avoidBbwShotWithoutScale"') <
         html.indexOf('<legend>Machine and scale</legend>') ||
     html.indexOf('id="avoidBbwShotWithoutScale"') >
         html.indexOf('id="lastShotCooldownMin"') ||
     html.indexOf('id="lastShotCooldownMin"') >
+        html.indexOf('<summary>Paddle</summary>') ||
+    html.indexOf('id="paddleMode"') <
+        html.indexOf('<summary>Paddle</summary>') ||
+    html.indexOf('id="paddleMode"') >
         html.indexOf('<summary>Quick rinse</summary>') ||
     html.indexOf('id="avoidBbwShotWithoutScale"') <
         html.indexOf('id="saveBrewPresetButton"') ||
@@ -424,6 +430,24 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !network.includes('reset-guard-samples') ||
     !network.includes('AUTO_TO_MANUAL_GUARD')) {
   throw new Error('Auto-to-manual time guard must be wired in config UI, live panel, shots API, and routes');
+}
+if (!html.includes('<summary>Paddle</summary>') ||
+    !html.includes('id="paddleMode"') ||
+    !html.includes('<option value="natural">Natural</option>') ||
+    !html.includes('<option value="original">Original</option>') ||
+    !html.includes('hold paddle ON to brew') ||
+    !html.includes('Early stop: paddle ON then OFF') ||
+    !html.includes('Do not press the scale') ||
+    !ui.includes("paddleMode:['natural','original']") ||
+    !ui.includes("if($('paddleMode'))$('paddleMode').value=") ||
+    !network.includes('"paddleMode"') ||
+    !network.includes('paddleMode must be natural or original.') ||
+    !network.includes('jsonPaddleMode') ||
+    !firmware.includes('candidate.paddleMode = command.config.paddleMode') ||
+    !domain.includes('enum class PaddleMode') ||
+    !domain.includes('NATURAL = 0') ||
+    !domain.includes('ORIGINAL = 1')) {
+  throw new Error('Machine Paddle mode must expose Natural/Original in UI, API, and APPLY_CONFIG');
 }
 if (!ui.includes('id="learnedOffsetG"') ||
     !ui.includes('id="weightOffsetBaselineG"') ||
@@ -1266,8 +1290,8 @@ const logoRoundTrip = zlib.gunzipSync(generated.logoGzip).toString('utf8');
 if (logoRoundTrip !== generated.logo) {
   throw new Error('Generated gzip Web logo does not round-trip to the minified SVG');
 }
-if (generated.gzip.length > 8192) {
-  throw new Error('Compressed Web UI HTML exceeds the 8 KiB gzip budget');
+if (generated.gzip.length > 8448) {
+  throw new Error('Compressed Web UI HTML exceeds the 8.25 KiB gzip budget');
 }
 if (generated.jsGzip.length > 18688) {
   throw new Error('Compressed Web UI JS exceeds the 18.25 KiB gzip budget');

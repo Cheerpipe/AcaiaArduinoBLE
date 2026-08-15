@@ -66,6 +66,8 @@ void p01_defaults_are_valid() {
   CHECK(settings.preferredScaleName[0] == '\0');
   CHECK(settings.runtime.scaleMacCacheMode ==
         static_cast<uint8_t>(ScaleMacCacheMode::FULL));
+  CHECK(settings.runtime.paddleMode ==
+        static_cast<uint8_t>(PaddleMode::NATURAL));
   CHECK(settings.runtime.alertOutputChannel ==
         static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL));
   CHECK(DEFAULT_ALERT_OUTPUT_CHANNEL ==

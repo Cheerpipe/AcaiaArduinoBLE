@@ -12,7 +12,7 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 2;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 3;
 constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
 constexpr size_t PREFERRED_SCALE_NAME_CAPACITY = 32;
 constexpr size_t SCALE_HISTORY_CAPACITY = 8;
@@ -71,6 +71,43 @@ inline bool parseScaleMacCacheMode(const char *text, uint8_t &mode) {
   }
   if (strcmp(text, "full") == 0) {
     mode = static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+    return true;
+  }
+  return false;
+}
+
+// Natural = current FW paddle semantics. Original = legacy Shot Stopper
+// start gesture (BBW+scale only).
+enum class PaddleMode : uint8_t {
+  NATURAL = 0,
+  ORIGINAL = 1
+};
+
+inline bool validPaddleMode(uint8_t mode) {
+  return mode == static_cast<uint8_t>(PaddleMode::NATURAL) ||
+         mode == static_cast<uint8_t>(PaddleMode::ORIGINAL);
+}
+
+inline const char *paddleModeId(uint8_t mode) {
+  switch (static_cast<PaddleMode>(mode)) {
+    case PaddleMode::ORIGINAL:
+      return "original";
+    case PaddleMode::NATURAL:
+    default:
+      return "natural";
+  }
+}
+
+inline bool parsePaddleMode(const char *text, uint8_t &mode) {
+  if (text == nullptr) {
+    return false;
+  }
+  if (strcmp(text, "natural") == 0) {
+    mode = static_cast<uint8_t>(PaddleMode::NATURAL);
+    return true;
+  }
+  if (strcmp(text, "original") == 0) {
+    mode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
     return true;
   }
   return false;
@@ -766,6 +803,7 @@ struct RuntimeConfig {
       DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
   uint32_t paddleReturnReminderMaxDurationMs =
       DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
+  uint8_t paddleMode = static_cast<uint8_t>(PaddleMode::NATURAL);
   // Local buzzer alerts (active when SHOT_STOPPER_ENABLE_BUZZER is 1 or 2).
   bool buzzerScaleLostBeep = true;
   bool buzzerAutoToManualGuardEndBeep = true;
@@ -838,6 +876,7 @@ struct CycleConfigSnapshot {
       DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
   uint32_t paddleReturnReminderMaxDurationMs =
       DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
+  uint8_t paddleMode = static_cast<uint8_t>(PaddleMode::NATURAL);
   uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
   uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
   bool autoRetare = true;
@@ -883,6 +922,7 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
       config.paddleReturnReminderIntervalMs;
   snapshot.paddleReturnReminderMaxDurationMs =
       config.paddleReturnReminderMaxDurationMs;
+  snapshot.paddleMode = config.paddleMode;
   snapshot.rinseGestureMs = config.rinseGestureMs;
   snapshot.rinseDurationMs = config.rinseDurationMs;
   snapshot.autoRetare = config.autoRetare;
@@ -949,7 +989,8 @@ enum class ConfigValidationError : uint8_t {
   SLOW_EXTENDED_PULSE_RATE,
   BOOKOO_CONNECT_BEEP_LEVEL,
   LAST_SHOT_COOLDOWN,
-  RING_RETAIN_LOG_LEVEL
+  RING_RETAIN_LOG_LEVEL,
+  PADDLE_MODE
 };
 
 constexpr size_t MAX_SHOT_PRESETS = 8;
@@ -1231,6 +1272,9 @@ inline ConfigValidationError validateRuntimeConfig(
       static_cast<uint8_t>(LogLevel::NONE)) {
     return ConfigValidationError::RING_RETAIN_LOG_LEVEL;
   }
+  if (!validPaddleMode(config.paddleMode)) {
+    return ConfigValidationError::PADDLE_MODE;
+  }
   if (config.fastExtractionGuardEnabled) {
     if (!isfinite(config.maxRecoveryWeightG) ||
         config.maxRecoveryWeightG < MIN_MAX_RECOVERY_WEIGHT_G ||
@@ -1342,6 +1386,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "lastShotCooldownMs";
     case ConfigValidationError::RING_RETAIN_LOG_LEVEL:
       return "ringRetainLogLevel";
+    case ConfigValidationError::PADDLE_MODE:
+      return "paddleMode";
   }
   return "unknown";
 }

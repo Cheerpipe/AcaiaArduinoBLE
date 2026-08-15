@@ -290,7 +290,8 @@ void verifySafetyInvariants() {
     ++failures;
   }
   if (!paddleOn && !rawPaddleOn && stopperState != StopperState::RINSE &&
-      session.source != ControlSource::WEB && relay.closed) {
+      session.source != ControlSource::WEB && relay.closed &&
+      !originalBbwSemanticsActive()) {
     std::cerr << "Safety invariant failed: stable paddle OFF has CN9 closed\n";
     ++failures;
   }
@@ -1641,6 +1642,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.lastShotCooldownMs == DEFAULT_LAST_SHOT_COOLDOWN_MS);
   CHECK(!config.serialDebugOutput);
   CHECK(config.ringRetainLogLevel == static_cast<uint8_t>(LogLevel::NONE));
+  CHECK(config.paddleMode == static_cast<uint8_t>(PaddleMode::NATURAL));
 }
 
 void w02_each_runtime_field_is_validated() {
@@ -1734,6 +1736,15 @@ void w03_runtime_timing_relations_are_transactional() {
   CHECK(parseLogLevel("none", parsedLevel));
   CHECK(parsedLevel == static_cast<uint8_t>(LogLevel::NONE));
   CHECK(!parseLogLevel("verbose", parsedLevel));
+  config = RuntimeConfig{};
+  config.paddleMode = 9;
+  CHECK(validateRuntimeConfig(config) == ConfigValidationError::PADDLE_MODE);
+  uint8_t parsedPaddle = 255;
+  CHECK(parsePaddleMode("natural", parsedPaddle));
+  CHECK(parsedPaddle == static_cast<uint8_t>(PaddleMode::NATURAL));
+  CHECK(parsePaddleMode("original", parsedPaddle));
+  CHECK(parsedPaddle == static_cast<uint8_t>(PaddleMode::ORIGINAL));
+  CHECK(!parsePaddleMode("legacy", parsedPaddle));
 }
 
 void w04_wifi_credentials_have_strict_bounds() {
@@ -5702,6 +5713,185 @@ void r64_slow_guard_min_weight_cut_from_predicted_time() {
   CHECK(session.endReason == EndReason::SLOW_EXTRACTION_MIN_WEIGHT);
 }
 
+void pm01_original_bbw_release_after_rinse_keeps_cn9_closed() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
+  startCycle();
+  advanceToBrew();
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(originalBbwSemanticsActive());
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.active);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(originalBbwSemanticsActive());
+}
+
+void pm02_original_bbw_release_inside_rinse_is_rinse() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
+  const uint32_t rawOnAt = startCycle();
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(getRelaySafetySnapshot().closed);
+}
+
+void pm03_original_no_scale_paddle_off_ends_shot() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
+  startCycle();
+  reachManualNoScaleState();
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void pm04_original_timer_only_paddle_off_ends_shot() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
+  runtimeConfig.timerOnly = true;
+  startCycle();
+  advanceToBrew();
+  CHECK(stopperState == StopperState::BREW);
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void pm05_original_bbw_promote_then_off_ends_like_natural() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
+  startCycle();
+  advanceToBrew();
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(getRelaySafetySnapshot().closed);
+  setRawPaddle(true);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(session.paddlePromotedToNatural);
+  CHECK(!originalBbwSemanticsActive());
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(getRelaySafetySnapshot().closed);
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void pm06_original_bbw_hold_blocks_auto_stop_until_release() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  shot.expectedEndS = 1.0f;
+  runLoopAfter(1000);
+  loop();
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(getRelaySafetySnapshot().closed);
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void pm07_original_bbw_hard_limit_while_held() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
+  startCycle();
+  advanceToBrew();
+  reachSessionElapsed(HARD_MAX_CN9_CLOSED_MS);
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::GLOBAL_LIMIT);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void pm08_natural_paddle_off_after_rinse_still_ends_shot() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  CHECK(runtimeConfig.paddleMode == static_cast<uint8_t>(PaddleMode::NATURAL));
+  startCycle();
+  advanceToBrew();
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void pm09_apply_config_accepts_original_paddle_mode() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  WebCommand update;
+  update.type = WebCommandType::APPLY_CONFIG;
+  update.config = runtimeConfig;
+  update.config.paddleMode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
+  processWebCommand(update);
+  CHECK(runtimeConfig.paddleMode == static_cast<uint8_t>(PaddleMode::ORIGINAL));
+}
+
+void configureOriginalBbwShortWall() {
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
+  runtimeConfig.operationalWallMs = 10000;
+  runtimeConfig.autoToManualGuardEnabled = false;
+}
+
+void advanceToOriginalBbwOperationalWall() {
+  const uint32_t wallAtMs =
+      session.cn9ClosedAtMs + session.config.operationalWallMs;
+  CHECK(hostMillis <= wallAtMs);
+  runLoopAfter(wallAtMs - hostMillis);
+}
+
+void pm10_original_bbw_hold_skips_operational_wall() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  configureOriginalBbwShortWall();
+  startCycle();
+  advanceToBrew();
+  CHECK(session.originalBbwHardMaxArmed);
+  CHECK(getRelaySafetySnapshot().operationalLimitMs == HARD_MAX_CN9_CLOSED_MS);
+  advanceToOriginalBbwOperationalWall();
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.active);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(session.endReason == EndReason::NONE);
+}
+
+void pm11_original_bbw_release_honors_operational_wall() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  configureOriginalBbwShortWall();
+  startCycle();
+  advanceToBrew();
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(originalBbwSemanticsActive());
+  advanceToOriginalBbwOperationalWall();
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(session.endReason == EndReason::CONFIGURED_WALL_LIMIT);
+  runLoopAfter(1);
+  CHECK(stopperState == StopperState::READY);
+}
+
 using TestFunction = void (*)();
 
 struct TestCase {
@@ -5738,6 +5928,17 @@ const TestCase testCases[] = {
     {"T26", t26_reconnected_suspended_cycle_sends_one_stop_on_release},
     {"T27", t27_configuration_is_rejected_while_cycle_is_active},
     {"T28", t28_paddle_motion_cannot_cancel_or_extend_rinse},
+    {"PM01", pm01_original_bbw_release_after_rinse_keeps_cn9_closed},
+    {"PM02", pm02_original_bbw_release_inside_rinse_is_rinse},
+    {"PM03", pm03_original_no_scale_paddle_off_ends_shot},
+    {"PM04", pm04_original_timer_only_paddle_off_ends_shot},
+    {"PM05", pm05_original_bbw_promote_then_off_ends_like_natural},
+    {"PM06", pm06_original_bbw_hold_blocks_auto_stop_until_release},
+    {"PM07", pm07_original_bbw_hard_limit_while_held},
+    {"PM08", pm08_natural_paddle_off_after_rinse_still_ends_shot},
+    {"PM09", pm09_apply_config_accepts_original_paddle_mode},
+    {"PM10", pm10_original_bbw_hold_skips_operational_wall},
+    {"PM11", pm11_original_bbw_release_honors_operational_wall},
     {"R01", r01_transient_disconnect_suspends_weight_control},
     {"R02", r02_stalled_scale_worker_suspends_until_validated},
     {"R03", r03_non_finite_weights_cannot_corrupt_state_or_offset},

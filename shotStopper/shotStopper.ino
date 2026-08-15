@@ -404,6 +404,8 @@ struct CycleSession {
   bool autoToManualGuardEnforced = false;
   uint32_t autoToManualGuardDeadlineAtMs = 0;
   uint8_t activePresetId = 0;
+  bool paddlePromotedToNatural = false;
+  bool originalBbwHardMaxArmed = false;
 };
 
 struct PendingShotFinalize {
@@ -4473,7 +4475,15 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
   resetShotTrajectory(session.startedAtMs);
   initializeBbwProtection();
 
-  if (!setCn9Closed(true, session.config.operationalWallMs)) {
+  const bool originalBbwStart =
+      session.config.paddleMode ==
+          static_cast<uint8_t>(PaddleMode::ORIGINAL) &&
+      session.startedWithScale && !session.config.timerOnly;
+  session.originalBbwHardMaxArmed = originalBbwStart;
+  const uint32_t closeLimitMs = originalBbwStart
+                                    ? HARD_MAX_CN9_CLOSED_MS
+                                    : session.config.operationalWallMs;
+  if (!setCn9Closed(true, closeLimitMs)) {
     session.active = false;
     session.endReason = EndReason::RELAY_SAFETY_FAILURE;
     transitionTo(StopperState::REQUIRES_OFF);
@@ -4659,9 +4669,27 @@ void enterBrewOrManualFromStart() {
   transitionTo(StopperState::MANUAL_NO_SCALE);
 }
 
+bool paddleModeOriginal() {
+  return session.config.paddleMode ==
+         static_cast<uint8_t>(PaddleMode::ORIGINAL);
+}
+
+bool originalBbwSemanticsActive() {
+  return session.active && paddleModeOriginal() &&
+         !session.paddlePromotedToNatural && session.startedWithScale &&
+         !session.config.timerOnly && stopperState == StopperState::BREW;
+}
+
+bool originalBbwHoldOverride() {
+  return originalBbwSemanticsActive() && (paddleOn || rawPaddleOn);
+}
+
 void demoteActiveCycleToRinseOrEnd() {
   if (withinRinseGestureWindow()) {
     enterRinse();
+    return;
+  }
+  if (originalBbwSemanticsActive()) {
     return;
   }
   if (session.automaticEnabled) {
@@ -4804,6 +4832,12 @@ void stateMachineTask() {
     handleOperationalLimitTrip();
     return;
   }
+  if (relay.closed && session.active && session.originalBbwHardMaxArmed &&
+      !originalBbwHoldOverride() &&
+      elapsedMs(relay.closedAtMs) >= session.config.operationalWallMs) {
+    handleOperationalLimitTrip();
+    return;
+  }
 
   if (maintenanceLease.active) {
     if (relay.closed) {
@@ -4874,10 +4908,16 @@ void stateMachineTask() {
       return;
 
     case StopperState::BREW:
-      // Early paddle OFF demotes the brew to a rinse; otherwise ends the shot.
+      // Early paddle OFF demotes the brew to a rinse; otherwise ends the shot
+      // unless Original BBW semantics keep CN9 closed after the rinse window.
       if (paddleTurnedOff) {
         demoteActiveCycleToRinseOrEnd();
-        return;
+        if (!session.active || stopperState != StopperState::BREW) {
+          return;
+        }
+      }
+      if (paddleTurnedOn && originalBbwSemanticsActive()) {
+        session.paddlePromotedToNatural = true;
       }
 
       expirePostTareBaselineIfNeeded();
@@ -4892,21 +4932,24 @@ void stateMachineTask() {
         serialTrace(LogLevel::WARNING, "Scale stream suspended during brew");
       }
 
-      if (autoToManualGuardDeadlineDue()) {
-        addDebugEvent(DebugCategory::SCALE,
-                      DebugCode::AUTO_TO_MANUAL_GUARD_FIRED,
-                      static_cast<int32_t>(elapsedMs(session.startedAtMs)));
-        finalizeCycle(EndReason::AUTO_TO_MANUAL_GUARD,
-                      StopperState::REQUIRES_OFF);
-        return;
-      }
+      if (!originalBbwHoldOverride()) {
+        const StopperState afterAutomation =
+            (paddleOn || rawPaddleOn) ? StopperState::REQUIRES_OFF
+                                      : StopperState::READY;
+        if (autoToManualGuardDeadlineDue()) {
+          addDebugEvent(DebugCategory::SCALE,
+                        DebugCode::AUTO_TO_MANUAL_GUARD_FIRED,
+                        static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+          finalizeCycle(EndReason::AUTO_TO_MANUAL_GUARD, afterAutomation);
+          return;
+        }
 
-      if (automaticScaleStopDue()) {
-        const EndReason reason = session.directStopPending
-                                     ? session.directStopReason
-                                     : EndReason::SCALE_THRESHOLD;
-        finalizeCycle(reason,
-                      StopperState::REQUIRES_OFF);
+        if (automaticScaleStopDue()) {
+          const EndReason reason = session.directStopPending
+                                       ? session.directStopReason
+                                       : EndReason::SCALE_THRESHOLD;
+          finalizeCycle(reason, afterAutomation);
+        }
       }
       return;
 
@@ -5378,6 +5421,7 @@ void processWebCommand(const WebCommand &command) {
           command.config.paddleReturnReminderIntervalMs;
       candidate.paddleReturnReminderMaxDurationMs =
           command.config.paddleReturnReminderMaxDurationMs;
+      candidate.paddleMode = command.config.paddleMode;
       candidate.buzzerScaleLostBeep = command.config.buzzerScaleLostBeep;
       candidate.buzzerAutoToManualGuardEndBeep =
           command.config.buzzerAutoToManualGuardEndBeep;

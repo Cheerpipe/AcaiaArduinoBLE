@@ -248,6 +248,8 @@ const char *configValidationMessage(ConfigValidationError error) {
     case ConfigValidationError::RING_RETAIN_LOG_LEVEL:
       return "Ring log level must be none, critical, error, warning, info, or "
              "debug.";
+    case ConfigValidationError::PADDLE_MODE:
+      return "Paddle mode must be natural or original.";
   }
   return "Invalid configuration.";
 }
@@ -273,6 +275,14 @@ const char *autoToManualGuardLimitModeId(uint8_t mode) {
   return mode == static_cast<uint8_t>(AutoToManualGuardLimitMode::MANUAL)
              ? "manual"
              : "auto";
+}
+
+bool jsonPaddleMode(cJSON *object, const char *name, uint8_t &output) {
+  cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+  if (!cJSON_IsString(item) || item->valuestring == nullptr) {
+    return false;
+  }
+  return parsePaddleMode(item->valuestring, output);
 }
 
 bool jsonNtpPreset(cJSON *object, const char *name, uint8_t &output) {
@@ -2897,6 +2907,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"paddleReturnReminderBeep\":%s,"
       "\"paddleReturnReminderIntervalMs\":%lu,"
       "\"paddleReturnReminderMaxDurationMs\":%lu,"
+      "\"paddleMode\":\"%s\","
       "\"buzzerScaleLostBeep\":%s,"
       "\"buzzerAutoToManualGuardEndBeep\":%s,"
       "\"buzzerManualNoScaleBeep\":%s,"
@@ -3039,6 +3050,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
           control.config.paddleReturnReminderIntervalMs),
       static_cast<unsigned long>(
           control.config.paddleReturnReminderMaxDurationMs),
+      paddleModeId(control.config.paddleMode),
       control.config.buzzerScaleLostBeep ? "true" : "false",
       control.config.buzzerAutoToManualGuardEndBeep ? "true" : "false",
       control.config.buzzerManualNoScaleBeep ? "true" : "false",
@@ -3590,6 +3602,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "canTareStartTimer", "scaleTimerStopExtraDelayMs", "firstDropBeep",
       "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
+      "paddleMode",
       "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
       "buzzerManualNoScaleBeep", "buzzerScaleConnectedBeep",
       "buzzerExtendedPulseRate", "buzzerSlowExtendedPulseRate",
@@ -3608,7 +3621,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "avoidBbwShotWithoutScale", "lastShotCooldownMs", "serialDebugOutput",
       "ringRetainLogLevel"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 48)) {
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 49)) {
     parseError =
         "Config must include exactly the expected fields with correct types.";
   } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
@@ -3644,6 +3657,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
                          candidate.paddleReturnReminderMaxDurationMs)) {
     parseError =
         "paddleReturnReminderMaxDurationMs must be an integer (milliseconds).";
+  } else if (!jsonPaddleMode(root, "paddleMode", candidate.paddleMode)) {
+    parseError = "paddleMode must be natural or original.";
   } else if (!jsonBoolean(root, "buzzerScaleLostBeep",
                           candidate.buzzerScaleLostBeep)) {
     parseError = "buzzerScaleLostBeep must be a boolean.";
