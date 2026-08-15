@@ -828,12 +828,23 @@ void ShotStopperNetwork::publishConfiguredAddressStatus() {
   portEXIT_CRITICAL(&dataMux_);
 }
 
+bool ShotStopperNetwork::serialDebugEnabled() const {
+  if (callbacks_.copyRuntimeConfig == nullptr) {
+    return false;
+  }
+  RuntimeConfig live = {};
+  callbacks_.copyRuntimeConfig(&live);
+  return live.serialDebugOutput;
+}
+
 void ShotStopperNetwork::armPendingConfirmWindow(uint32_t now) {
   portENTER_CRITICAL(&dataMux_);
   staConfirmArmed_ = true;
   staConfirmDeadlineMs_ = now + STA_CONFIRM_TIMEOUT_MS;
   portEXIT_CRITICAL(&dataMux_);
-  Serial.println("WiFi STA config pending confirmation for 180 s");
+  if (serialDebugEnabled()) {
+    Serial.println("WiFi STA config pending confirmation for 180 s");
+  }
 }
 
 void ShotStopperNetwork::clearPendingConfirmWindow() {
@@ -878,13 +889,15 @@ bool ShotStopperNetwork::confirmPendingNetwork(const char *reason) {
   publishConfiguredAddressStatus();
   log(DebugCategory::CONFIG, DebugCode::CONFIG_PERSISTED,
       static_cast<int32_t>(next.runtime.revision));
-  Serial.print("WiFi STA config confirmed");
-  if (reason != nullptr && reason[0] != '\0') {
-    Serial.print(" (");
-    Serial.print(reason);
-    Serial.print(')');
+  if (serialDebugEnabled()) {
+    Serial.print("WiFi STA config confirmed");
+    if (reason != nullptr && reason[0] != '\0') {
+      Serial.print(" (");
+      Serial.print(reason);
+      Serial.print(')');
+    }
+    Serial.println();
   }
-  Serial.println();
   return true;
 }
 
@@ -894,13 +907,15 @@ bool ShotStopperNetwork::revertPendingNetwork(uint32_t now,
   if (next.staConfigState != static_cast<uint8_t>(StaConfigState::PENDING)) {
     return false;
   }
-  Serial.print("WiFi STA pending config reverted");
-  if (reason != nullptr && reason[0] != '\0') {
-    Serial.print(" (");
-    Serial.print(reason);
-    Serial.print(')');
+  if (serialDebugEnabled()) {
+    Serial.print("WiFi STA pending config reverted");
+    if (reason != nullptr && reason[0] != '\0') {
+      Serial.print(" (");
+      Serial.print(reason);
+      Serial.print(')');
+    }
+    Serial.println();
   }
-  Serial.println();
   if (!restoreLkgToActive(next)) {
     clearStaNetwork(next);
   }
@@ -964,11 +979,15 @@ void ShotStopperNetwork::startStation(const PersistedSettings &settings,
     } else {
       WiFi.config(ip, gateway, netmask, dns1);
     }
-    Serial.println("WiFi STA connecting with static IP; AP disabled");
+    if (serialDebugEnabled()) {
+      Serial.println("WiFi STA connecting with static IP; AP disabled");
+    }
   } else {
     const IPAddress none;
     WiFi.config(none, none, none);
-    Serial.println("WiFi STA connecting; AP disabled");
+    if (serialDebugEnabled()) {
+      Serial.println("WiFi STA connecting; AP disabled");
+    }
   }
   WiFi.begin(settings.staSsid,
              settings.staOpen ? nullptr : settings.staPassword);
@@ -1003,9 +1022,11 @@ bool ShotStopperNetwork::startFallbackAccessPoint(uint32_t now) {
   status_.windowRemainingMs = AP_WINDOW_MS;
   portEXIT_CRITICAL(&dataMux_);
   log(DebugCategory::NETWORK, DebugCode::AP_STARTED, apReady, httpReady);
-  Serial.print("WiFi fallback AP ");
-  Serial.print(apReady && httpReady ? "ready at " : "failed at ");
-  Serial.println(AP_IP);
+  if (serialDebugEnabled()) {
+    Serial.print("WiFi fallback AP ");
+    Serial.print(apReady && httpReady ? "ready at " : "failed at ");
+    Serial.println(AP_IP);
+  }
   if (!apReady || !httpReady) {
     stopHttpServer();
     WiFi.softAPdisconnect(true);
@@ -1063,7 +1084,10 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       staNtpEligibleAtMs_ = 0;
       g_wallClock.markDisabled();
       staReconnectAttemptAtMs_ = now;
-      Serial.println("WiFi STA disconnected; Web server waiting for reconnect");
+      if (serialDebugEnabled()) {
+        Serial.println(
+            "WiFi STA disconnected; Web server waiting for reconnect");
+      }
       return;
     }
     {
@@ -1128,8 +1152,10 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       portEXIT_CRITICAL(&dataMux_);
     }
     log(DebugCategory::NETWORK, DebugCode::STA_CONNECTED);
-    Serial.print("WiFi STA connected; IP: ");
-    Serial.println(address);
+    if (serialDebugEnabled()) {
+      Serial.print("WiFi STA connected; IP: ");
+      Serial.println(address);
+    }
     staNtpEligibleAtMs_ = now + NTP_STA_SETTLE_MS;
     ntpRearmPending_ = true;
     if (settingsCopy().staConfigState ==
@@ -1150,8 +1176,11 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
         static_cast<int32_t>(WiFi.status()));
     const bool pending = settingsCopy().staConfigState ==
                          static_cast<uint8_t>(StaConfigState::PENDING);
-    Serial.println(pending ? "WiFi STA failed; reverting pending config to AP"
-                           : "WiFi STA failed; starting fallback AP");
+    if (serialDebugEnabled()) {
+      Serial.println(pending
+                         ? "WiFi STA failed; reverting pending config to AP"
+                         : "WiFi STA failed; starting fallback AP");
+    }
     const bool recovered =
         pending ? revertPendingNetwork(now, "connect timeout")
                 : startFallbackAccessPoint(now);
@@ -2644,7 +2673,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"bookooMuteOnBuzzerOnly\":%s,"
       "\"bookooConnectBeepLevel\":%u,"
       "\"avoidBbwShotWithoutScale\":%s,"
-      "\"lastShotCooldownMs\":%lu},"
+      "\"lastShotCooldownMs\":%lu,"
+      "\"serialDebugOutput\":%s},"
       "\"presets\":%s,"
       "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
       "\"nextRetryInMs\":%lu,\"consecutiveFailures\":%u,"
@@ -2778,6 +2808,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned>(control.config.bookooConnectBeepLevel),
       control.config.avoidBbwShotWithoutScale ? "true" : "false",
       static_cast<unsigned long>(control.config.lastShotCooldownMs),
+      control.config.serialDebugOutput ? "true" : "false",
       g_presetsStatusJson,
       timeSyncStateName(timeStatus.state),
       static_cast<unsigned long>(timeStatus.utcSec),
@@ -3286,9 +3317,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "weightOffsetBaselineG",
       "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom",
       "scaleMacCacheMode", "bookooMuteOnBuzzerOnly", "bookooConnectBeepLevel",
-      "avoidBbwShotWithoutScale", "lastShotCooldownMs"};
+      "avoidBbwShotWithoutScale", "lastShotCooldownMs", "serialDebugOutput"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 41)) {
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 42)) {
     parseError =
         "Config must include exactly the expected fields with correct types.";
   } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
@@ -3416,6 +3447,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (!jsonUint32(root, "lastShotCooldownMs",
                          candidate.lastShotCooldownMs)) {
     parseError = "lastShotCooldownMs must be an integer (milliseconds).";
+  } else if (!jsonBoolean(root, "serialDebugOutput",
+                          candidate.serialDebugOutput)) {
+    parseError = "serialDebugOutput must be a boolean.";
   }
   if (root != nullptr) {
     cJSON_Delete(root);

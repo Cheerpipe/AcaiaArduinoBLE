@@ -136,6 +136,7 @@ class ShotStopperNetwork {
   private:
   void mergePreferredScaleMac(PersistedSettings &settings);
   void overlayLiveShotSettings(PersistedSettings &settings);
+  bool serialDebugEnabled() const;
   static constexpr uint32_t AP_WINDOW_MS = 180000;
   static constexpr uint32_t UI_GRACE_MS = 180000;
   static constexpr uint32_t SESSION_REMEMBER_MS = 7UL * 24UL * 60UL * 60UL * 1000UL;

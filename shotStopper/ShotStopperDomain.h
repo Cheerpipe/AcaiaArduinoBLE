@@ -11,8 +11,10 @@
 
 namespace shotstopper {
 
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 26;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 25;
+constexpr uint32_t SERIAL_BAUD = 115200;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 27;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 26;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V26 = 26;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V25 = 25;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V24 = 24;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V23 = 23;
@@ -724,6 +726,8 @@ struct RuntimeConfig {
   uint32_t reservedConfig3 = 0;
   bool avoidBbwShotWithoutScale = true;
   uint32_t lastShotCooldownMs = DEFAULT_LAST_SHOT_COOLDOWN_MS;
+  // USB debug spew (paddle/CN9/Wi-Fi traces). CLI replies stay independent.
+  bool serialDebugOutput = false;
 };
 
 struct CycleConfigSnapshot {

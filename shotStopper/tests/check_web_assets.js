@@ -113,7 +113,7 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('"alertOutputChannel"') ||
     !network.includes('"bookooMuteOnBuzzerOnly"') ||
     !network.includes('"bookooConnectBeepLevel"') ||
-    !network.includes('fields, 41') ||
+    !network.includes('fields, 42') ||
     !network.includes('allowedCount > 64') ||
     !network.includes('uint64_t seen') ||
     !network.includes('WEB_UI_ASSET_TAG') ||
@@ -334,6 +334,7 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
         html.indexOf('id="saveBrewPresetButton"') ||
     !network.includes('avoidBbwShotWithoutScale') ||
     !network.includes('lastShotCooldownMs') ||
+    !network.includes('serialDebugOutput') ||
     !network.includes('noScaleShotGuard') ||
     !ui.includes('A→M ·') ||
     !ui.includes('actual_weight_source') ||
@@ -630,6 +631,19 @@ if (!ui.includes('id="debugPanel"') ||
     !ui.includes('Shown with SHOT_STOPPER_ENABLE_BUZZER') ||
     html.indexOf('id="saveDateTimeButton"') > html.indexOf('id="debugPanel"') ||
     html.indexOf('id="debugPanel"') > html.indexOf('id="restartPanel"') ||
+    html.indexOf('id="serialDebugOutput"') < html.indexOf('id="debugPanel"') ||
+    html.indexOf('id="serialDebugOutput"') > html.indexOf('id="restartPanel"') ||
+    !html.includes('id="serialDebugOutput" class="mutable"') ||
+    !ui.includes("if($('serialDebugOutput'))$('serialDebugOutput').checked=!!c.serialDebugOutput") ||
+    firmware.indexOf('serialLogLevel = runtimeConfig.serialDebugOutput',
+                     firmware.indexOf('persistenceReady = EEPROM.begin')) < 0 ||
+    firmware.indexOf('serialLogLevel = runtimeConfig.serialDebugOutput',
+                     firmware.indexOf('persistenceReady = EEPROM.begin')) >
+        firmware.indexOf('BOOT_RESET_REASON') ||
+    !ui.includes('serialDebugOutput:c.serialDebugOutput') ||
+    !ui.includes("serialDebugOutput').onchange") ||
+    !firmware.includes('SERIAL_DEBUG_ON') ||
+    !firmware.includes('SERIAL_DEBUG_OFF') ||
     !network.includes('buzzerHandler') ||
     !network.includes('bookooHandler') ||
     !network.includes('BUZZER_UNSUPPORTED') ||

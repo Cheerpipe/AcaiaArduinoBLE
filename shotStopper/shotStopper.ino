@@ -477,7 +477,7 @@ LocalBuzzer localBuzzer;
 ShotPresetBank presetBank;
 LastCycleSummary lastCycle;
 DebugRingBuffer debugLog;
-LogLevel serialLogLevel = LogLevel::INFO;
+LogLevel serialLogLevel = LogLevel::NONE;
 LogLevel ringRetainLogLevel = LogLevel::INFO;
 uint32_t lastReportedLogOverwritten = 0;
 ShotLog shotLog;
@@ -4806,6 +4806,8 @@ void queueRuntimePersist(int32_t reasonBits) {
 
 void commitLiveRuntimeConfig(const RuntimeConfig &composed, int32_t reasonBits) {
   runtimeConfig = composed;
+  serialLogLevel = runtimeConfig.serialDebugOutput ? LogLevel::INFO
+                                                   : LogLevel::NONE;
   addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED,
                 static_cast<int32_t>(runtimeConfig.revision));
   requestBookooSilenceIfConfigured();
@@ -5132,6 +5134,7 @@ void processWebCommand(const WebCommand &command) {
       candidate.avoidBbwShotWithoutScale =
           command.config.avoidBbwShotWithoutScale;
       candidate.lastShotCooldownMs = command.config.lastShotCooldownMs;
+      candidate.serialDebugOutput = command.config.serialDebugOutput;
       // Session Manual switch may arrive via brewByWeight on Home; keep as timerOnly.
       candidate.timerOnly = command.config.timerOnly;
 #if defined(SHOT_STOPPER_HOST_TEST)
@@ -5623,6 +5626,24 @@ void dispatchSerialCliRequest(SerialCliRequest &request) {
       serialCliReply("OK shots cleared");
       return;
     }
+    case SerialCliVerb::SERIAL_DEBUG_ON:
+    case SerialCliVerb::SERIAL_DEBUG_OFF: {
+      const bool enable = request.verb == SerialCliVerb::SERIAL_DEBUG_ON;
+      if (!enable) {
+        serialCliReply("OK serial debug off");
+      }
+      RuntimeConfig candidate = runtimeConfig;
+      candidate.serialDebugOutput = enable;
+      ++candidate.revision;
+      if (candidate.revision == 0) {
+        candidate.revision = 1;
+      }
+      commitLiveRuntimeConfig(candidate, RUNTIME_PERSIST_REASON_USER);
+      if (enable) {
+        serialCliReply("OK serial debug on");
+      }
+      return;
+    }
   }
 }
 
@@ -5755,39 +5776,11 @@ void setup() {
     tripRelaySafety(RelaySafetyFault::FEEDBACK_STUCK_CLOSED);
   }
 
-  Serial.begin(9600);
+  Serial.begin(SERIAL_BAUD);
 #if SHOT_STOPPER_ENABLE_ALED == 1
   statusIndicatorsReady = initializeStatusIndicators();
   updateStatusIndicators();
 #endif
-
-  logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_RESET_REASON,
-          static_cast<int32_t>(safetyResetStatus.reasonCode));
-  logEmit(relaySafetyTimersReady ? LogLevel::INFO : LogLevel::CRITICAL,
-          DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
-          BOOT_SUBSYSTEM_RELAY_TIMERS, relaySafetyTimersReady ? 1 : 0);
-  logEmit(platformClockReady ? LogLevel::INFO : LogLevel::CRITICAL,
-          DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM, BOOT_SUBSYSTEM_CPU,
-          platformClockReady ? 1 : 0);
-  if (!platformClockReady) {
-    addDebugEvent(DebugCategory::SECURITY, DebugCode::INITIALIZATION_FAILED,
-                  BOOT_SUBSYSTEM_CPU);
-  }
-  logEmit(taskWatchdogReady ? LogLevel::INFO : LogLevel::CRITICAL,
-          DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
-          BOOT_SUBSYSTEM_TASK_WDT, taskWatchdogReady ? 1 : 0);
-#if SHOT_STOPPER_ENABLE_ALED == 1
-  if (!statusIndicatorsReady) {
-    logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
-            BOOT_SUBSYSTEM_INDICATORS, 0);
-  } else {
-    logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
-            BOOT_SUBSYSTEM_INDICATORS, 1);
-  }
-#endif
-  if (safetyResetStatus.recoveryRequired) {
-    addDebugEvent(DebugCategory::SECURITY, DebugCode::SAFETY_LOCKOUT_ACTIVE);
-  }
 
   persistenceReady = EEPROM.begin(EEPROM_SIZE);
 #ifndef SHOT_STOPPER_HOST_TEST
@@ -5834,6 +5827,36 @@ void setup() {
   runtimeConfig = RuntimeConfig{};
   seedDefaultShotPresetBank(presetBank);
 #endif
+  serialLogLevel = runtimeConfig.serialDebugOutput ? LogLevel::INFO
+                                                   : LogLevel::NONE;
+
+  logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_RESET_REASON,
+          static_cast<int32_t>(safetyResetStatus.reasonCode));
+  logEmit(relaySafetyTimersReady ? LogLevel::INFO : LogLevel::CRITICAL,
+          DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+          BOOT_SUBSYSTEM_RELAY_TIMERS, relaySafetyTimersReady ? 1 : 0);
+  logEmit(platformClockReady ? LogLevel::INFO : LogLevel::CRITICAL,
+          DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM, BOOT_SUBSYSTEM_CPU,
+          platformClockReady ? 1 : 0);
+  if (!platformClockReady) {
+    addDebugEvent(DebugCategory::SECURITY, DebugCode::INITIALIZATION_FAILED,
+                  BOOT_SUBSYSTEM_CPU);
+  }
+  logEmit(taskWatchdogReady ? LogLevel::INFO : LogLevel::CRITICAL,
+          DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+          BOOT_SUBSYSTEM_TASK_WDT, taskWatchdogReady ? 1 : 0);
+#if SHOT_STOPPER_ENABLE_ALED == 1
+  if (!statusIndicatorsReady) {
+    logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_INDICATORS, 0);
+  } else {
+    logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_INDICATORS, 1);
+  }
+#endif
+  if (safetyResetStatus.recoveryRequired) {
+    addDebugEvent(DebugCategory::SECURITY, DebugCode::SAFETY_LOCKOUT_ACTIVE);
+  }
 
 #ifndef SHOT_STOPPER_HOST_TEST
   shotLog.load();

@@ -2,6 +2,10 @@
 
 #include <stdint.h>
 
+#ifndef SHOT_STOPPER_HOST_TEST
+#include <esp_timer.h>
+#endif
+
 #include "ShotStopperDomain.h"
 
 namespace shotstopper {
@@ -28,7 +32,8 @@ constexpr uint32_t BUZZER_PULSE_TRAIN_DEBUG_MS = 3000;
 
 // Non-blocking local-buzzer driver. Passive (ENABLE=1) uses hardware PWM
 // (ledc); active (ENABLE=2) uses GPIO HIGH/LOW. Host stubs map both to a
-// digital level so patterns can be asserted without LEDC.
+// digital level so patterns can be asserted without LEDC. Phase edges are
+// armed on esp_timer so Serial/loop stalls cannot stretch beeps.
 struct LocalBuzzer {
   uint8_t pin = 0;
   bool ready = false;
@@ -44,6 +49,8 @@ struct LocalBuzzer {
   uint32_t deadlineAtMs = 0;
   uint32_t pendingDurationMs = 0;
   uint32_t acceptedRequests = 0;
+  esp_timer_handle_t phaseTimer = nullptr;
+  portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
   void begin(uint8_t gpioPin);
   // Starts immediately when idle, otherwise keeps one pending slot. TRIPLE
@@ -64,9 +71,34 @@ struct LocalBuzzer {
   void stopTone();
   void applyDeadline(uint32_t durationMs, uint32_t nowMs);
   bool deadlineReached(uint32_t nowMs) const;
+  void cancelPhaseTimer();
+  void armPhaseTimer(uint32_t delayMs);
   void finish(uint32_t nowMs);
   bool startPattern(BuzzerPattern pattern, uint32_t nowMs);
+  static void phaseTimerCallback(void *arg);
 };
+
+inline void LocalBuzzer::cancelPhaseTimer() {
+  if (phaseTimer != nullptr) {
+    (void)esp_timer_stop(phaseTimer);
+  }
+}
+
+inline void LocalBuzzer::armPhaseTimer(uint32_t delayMs) {
+  cancelPhaseTimer();
+  if (phaseTimer == nullptr || delayMs == 0) {
+    return;
+  }
+  (void)esp_timer_start_once(phaseTimer,
+                             static_cast<uint64_t>(delayMs) * 1000ULL);
+}
+
+inline void LocalBuzzer::phaseTimerCallback(void *arg) {
+  if (arg == nullptr) {
+    return;
+  }
+  static_cast<LocalBuzzer *>(arg)->service(millis());
+}
 
 inline void LocalBuzzer::begin(uint8_t gpioPin) {
   pin = gpioPin;
@@ -83,8 +115,19 @@ inline void LocalBuzzer::begin(uint8_t gpioPin) {
   deadlineAtMs = 0;
   pendingDurationMs = 0;
   acceptedRequests = 0;
+  cancelPhaseTimer();
   if (!BUZZER_SUPPORT_ENABLED || pin == 0) {
     return;
+  }
+  if (phaseTimer == nullptr) {
+    esp_timer_create_args_t args = {};
+    args.callback = &LocalBuzzer::phaseTimerCallback;
+    args.arg = this;
+    args.dispatch_method = ESP_TIMER_TASK;
+    args.name = "buzzer_phase";
+    if (esp_timer_create(&args, &phaseTimer) != ESP_OK) {
+      phaseTimer = nullptr;
+    }
   }
   if (BUZZER_ACTIVE_DRIVE) {
     pinMode(pin, OUTPUT);
@@ -142,6 +185,7 @@ inline void LocalBuzzer::finish(uint32_t nowMs) {
   looping = false;
   deadlineAtMs = 0;
   if (pending == BuzzerPattern::NONE) {
+    cancelPhaseTimer();
     return;
   }
   const BuzzerPattern next = pending;
@@ -149,6 +193,7 @@ inline void LocalBuzzer::finish(uint32_t nowMs) {
   pending = BuzzerPattern::NONE;
   pendingDurationMs = 0;
   if (!startPattern(next, nowMs)) {
+    cancelPhaseTimer();
     return;
   }
   applyDeadline(nextDurationMs, nowMs);
@@ -193,6 +238,7 @@ inline bool LocalBuzzer::startPattern(BuzzerPattern pattern, uint32_t nowMs) {
   beepIndex = 0;
   phaseStartedAtMs = nowMs;
   startTone();
+  armPhaseTimer(onMs);
   return true;
 }
 
@@ -200,54 +246,57 @@ inline bool LocalBuzzer::request(BuzzerPattern pattern, uint32_t durationMs) {
   if (!BUZZER_SUPPORT_ENABLED || !ready || pattern == BuzzerPattern::NONE) {
     return false;
   }
+  portENTER_CRITICAL(&mux);
   const uint32_t nowMs = millis();
+  bool accepted = false;
   if (buzzerPatternIsPulseTrain(active)) {
     if (pattern == active) {
       applyDeadline(durationMs, nowMs);
       ++acceptedRequests;
-      return true;
+      accepted = true;
+    } else {
+      pending = BuzzerPattern::NONE;
+      pendingDurationMs = 0;
+      if (startPattern(pattern, nowMs)) {
+        applyDeadline(durationMs, nowMs);
+        ++acceptedRequests;
+        accepted = true;
+      }
     }
-    pending = BuzzerPattern::NONE;
-    pendingDurationMs = 0;
-    if (!startPattern(pattern, nowMs)) {
-      return false;
+  } else if (active == BuzzerPattern::NONE) {
+    if (startPattern(pattern, nowMs)) {
+      applyDeadline(durationMs, nowMs);
+      ++acceptedRequests;
+      accepted = true;
     }
-    applyDeadline(durationMs, nowMs);
-    ++acceptedRequests;
-    return true;
-  }
-  if (active == BuzzerPattern::NONE) {
-    if (!startPattern(pattern, nowMs)) {
-      return false;
-    }
-    applyDeadline(durationMs, nowMs);
-    ++acceptedRequests;
-    return true;
-  }
-  if (pending == BuzzerPattern::NONE) {
+  } else if (pending == BuzzerPattern::NONE) {
     pending = pattern;
     pendingDurationMs = durationMs;
     ++acceptedRequests;
-    return true;
-  }
-  if (pattern == BuzzerPattern::TRIPLE && pending != BuzzerPattern::TRIPLE) {
+    accepted = true;
+  } else if (pattern == BuzzerPattern::TRIPLE &&
+             pending != BuzzerPattern::TRIPLE) {
     pending = BuzzerPattern::TRIPLE;
     pendingDurationMs = 0;
-    return true;
+    accepted = true;
+  } else {
+    accepted = pattern == pending;
   }
-  // Same pattern already queued, or a weaker pattern while TRIPLE is pending.
-  return pattern == pending;
+  portEXIT_CRITICAL(&mux);
+  return accepted;
 }
 
 inline void LocalBuzzer::stopIf(BuzzerPattern pattern) {
   if (!BUZZER_SUPPORT_ENABLED || !ready || pattern == BuzzerPattern::NONE) {
     return;
   }
+  portENTER_CRITICAL(&mux);
   if (pending == pattern) {
     pending = BuzzerPattern::NONE;
     pendingDurationMs = 0;
   }
   if (active != pattern) {
+    portEXIT_CRITICAL(&mux);
     return;
   }
   const uint32_t nowMs = millis();
@@ -258,6 +307,8 @@ inline void LocalBuzzer::stopIf(BuzzerPattern pattern) {
   looping = false;
   deadlineAtMs = 0;
   if (pending == BuzzerPattern::NONE) {
+    cancelPhaseTimer();
+    portEXIT_CRITICAL(&mux);
     return;
   }
   const BuzzerPattern next = pending;
@@ -265,23 +316,33 @@ inline void LocalBuzzer::stopIf(BuzzerPattern pattern) {
   pending = BuzzerPattern::NONE;
   pendingDurationMs = 0;
   if (!startPattern(next, nowMs)) {
+    cancelPhaseTimer();
+    portEXIT_CRITICAL(&mux);
     return;
   }
   applyDeadline(nextDurationMs, nowMs);
+  portEXIT_CRITICAL(&mux);
 }
 
 inline void LocalBuzzer::service(uint32_t nowMs) {
-  if (!BUZZER_SUPPORT_ENABLED || !ready || active == BuzzerPattern::NONE) {
+  if (!BUZZER_SUPPORT_ENABLED || !ready) {
+    return;
+  }
+  portENTER_CRITICAL(&mux);
+  if (active == BuzzerPattern::NONE) {
+    portEXIT_CRITICAL(&mux);
     return;
   }
   if (looping && deadlineReached(nowMs)) {
     finish(nowMs);
+    portEXIT_CRITICAL(&mux);
     return;
   }
   const uint32_t elapsed =
       static_cast<uint32_t>(nowMs - phaseStartedAtMs);
   if (toneOn) {
     if (elapsed < onMs) {
+      portEXIT_CRITICAL(&mux);
       return;
     }
     stopTone();
@@ -289,33 +350,46 @@ inline void LocalBuzzer::service(uint32_t nowMs) {
     if (looping) {
       if (deadlineReached(nowMs)) {
         finish(nowMs);
+      } else {
+        armPhaseTimer(gapMs);
       }
+      portEXIT_CRITICAL(&mux);
       return;
     }
     if (beepIndex + 1U >= beepCount) {
       finish(nowMs);
+    } else {
+      armPhaseTimer(gapMs);
     }
+    portEXIT_CRITICAL(&mux);
     return;
   }
   if (elapsed < gapMs) {
+    portEXIT_CRITICAL(&mux);
     return;
   }
   if (looping) {
     if (deadlineReached(nowMs)) {
       finish(nowMs);
+      portEXIT_CRITICAL(&mux);
       return;
     }
     phaseStartedAtMs = nowMs;
     startTone();
+    armPhaseTimer(onMs);
+    portEXIT_CRITICAL(&mux);
     return;
   }
   ++beepIndex;
   if (beepIndex >= beepCount) {
     finish(nowMs);
+    portEXIT_CRITICAL(&mux);
     return;
   }
   phaseStartedAtMs = nowMs;
   startTone();
+  armPhaseTimer(onMs);
+  portEXIT_CRITICAL(&mux);
 }
 
 }  // namespace shotstopper

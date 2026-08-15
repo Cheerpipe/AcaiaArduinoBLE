@@ -18,6 +18,8 @@ enum class SerialCliVerb : uint8_t {
   CLEAR_SHOTS,
   CLEAR_WIFI,
   RESET_NETWORK_UI,
+  SERIAL_DEBUG_ON,
+  SERIAL_DEBUG_OFF,
   UNKNOWN,
   LINE_TOO_LONG,
   INVALID_ARGS
@@ -48,6 +50,8 @@ inline const char *serialCliVerbName(SerialCliVerb verb) {
     case SerialCliVerb::CLEAR_SHOTS: return "CLEAR_SHOTS";
     case SerialCliVerb::CLEAR_WIFI: return "CLEAR_WIFI";
     case SerialCliVerb::RESET_NETWORK_UI: return "RESET_NETWORK_UI";
+    case SerialCliVerb::SERIAL_DEBUG_ON: return "SERIAL_DEBUG_ON";
+    case SerialCliVerb::SERIAL_DEBUG_OFF: return "SERIAL_DEBUG_OFF";
     case SerialCliVerb::UNKNOWN: return "UNKNOWN";
     case SerialCliVerb::LINE_TOO_LONG: return "LINE_TOO_LONG";
     case SerialCliVerb::INVALID_ARGS: return "INVALID_ARGS";
@@ -220,6 +224,12 @@ inline bool serialCliParseLine(const char *line, SerialCliRequest &request) {
   }
   if (serialCliEqualsIgnoreCase(verb, "reset_network_ui")) {
     return requireNoArgs(SerialCliVerb::RESET_NETWORK_UI);
+  }
+  if (serialCliEqualsIgnoreCase(verb, "serial_debug_on")) {
+    return requireNoArgs(SerialCliVerb::SERIAL_DEBUG_ON);
+  }
+  if (serialCliEqualsIgnoreCase(verb, "serial_debug_off")) {
+    return requireNoArgs(SerialCliVerb::SERIAL_DEBUG_OFF);
   }
 
   if (serialCliEqualsIgnoreCase(verb, "set_ap_password")) {

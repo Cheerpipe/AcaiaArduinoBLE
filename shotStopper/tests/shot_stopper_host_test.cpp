@@ -113,7 +113,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   noScaleShotGuardHoldAtMs = 0;
   debugLog.clear();
   lastReportedLogOverwritten = 0;
-  serialLogLevel = LogLevel::INFO;
+  serialLogLevel = LogLevel::NONE;
   ringRetainLogLevel = LogLevel::INFO;
   publishedControlStatus = ControlStatusSnapshot{};
   maintenanceLease = MaintenanceLease{};
@@ -306,6 +306,7 @@ void runLoopAfter(uint32_t deltaMs) {
   }
   hostServiceEspTimer(relaySafetyTimer);
   hostServiceEspTimer(operationalLimitTimer);
+  hostServiceEspTimer(localBuzzer.phaseTimer);
   independentSafetyTimer.serviceForHost();
   loop();
   verifySafetyInvariants();
@@ -1465,6 +1466,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.fastExtractionGuardEnabled);
   CHECK(config.avoidBbwShotWithoutScale);
   CHECK(config.lastShotCooldownMs == DEFAULT_LAST_SHOT_COOLDOWN_MS);
+  CHECK(!config.serialDebugOutput);
 }
 
 void w02_each_runtime_field_is_validated() {
@@ -2105,6 +2107,39 @@ void w50_local_buzzer_plays_triple_pattern_non_blocking() {
   CHECK(!localBuzzer.busy());
   CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
   CHECK(!localBuzzer.request(BuzzerPattern::NONE));
+}
+
+void w50b_buzzer_phase_timer_holds_triple_rhythm_without_loop() {
+  resetHarness(false, false);
+  CHECK(localBuzzer.request(BuzzerPattern::TRIPLE));
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  hostMillis += BUZZER_BEEP_ON_MS;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  CHECK(localBuzzer.busy());
+  hostMillis += BUZZER_BEEP_GAP_MS;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  hostMillis += BUZZER_BEEP_ON_MS;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  hostMillis += BUZZER_BEEP_GAP_MS;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  hostMillis += BUZZER_BEEP_ON_MS;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  CHECK(!localBuzzer.busy());
+}
+
+void w50c_buzzer_phase_timer_advances_despite_loop_stall() {
+  resetHarness(false, false);
+  CHECK(localBuzzer.request(BuzzerPattern::TRIPLE));
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  hostMillis += 150;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  CHECK(localBuzzer.busy());
 }
 
 void w51_local_buzzer_triple_on_scale_lost_during_bbw() {
@@ -4432,6 +4467,12 @@ void sc05_serial_cli_parser_covers_supported_commands() {
   CHECK(request.verb == SerialCliVerb::CLEAR_WIFI);
   CHECK(serialCliParseLine("RESET_NETWORK_UI", request));
   CHECK(request.verb == SerialCliVerb::RESET_NETWORK_UI);
+  CHECK(serialCliParseLine("SERIAL_DEBUG_ON", request));
+  CHECK(request.verb == SerialCliVerb::SERIAL_DEBUG_ON);
+  CHECK(serialCliParseLine("SERIAL_DEBUG_OFF", request));
+  CHECK(request.verb == SerialCliVerb::SERIAL_DEBUG_OFF);
+  CHECK(!serialCliParseLine("SERIAL_DEBUG_ON extra", request));
+  CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(serialCliParseLine("SET_AP_PASSWORD Micra1234", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(serialCliParseLine("SET_WIFI Cafe short", request));
@@ -4483,6 +4524,24 @@ void sc08_set_ap_password_queues_change() {
   CHECK(hostLastForwardedNetworkCommand.type ==
         WebCommandType::CHANGE_AP_PASSWORD);
   CHECK(strcmp(hostLastForwardedNetworkCommand.password, "password1234") == 0);
+}
+
+void sc09_serial_debug_toggles_without_ready() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(session.active);
+  CHECK(!runtimeConfig.serialDebugOutput);
+  CHECK(serialLogLevel == LogLevel::NONE);
+  feedSerial("SERIAL_DEBUG_ON\n");
+  CHECK(serialTxContains("OK serial debug on"));
+  CHECK(runtimeConfig.serialDebugOutput);
+  CHECK(serialLogLevel == LogLevel::INFO);
+  CHECK(runtimePersistPending);
+  feedSerial("SERIAL_DEBUG_OFF\n");
+  CHECK(serialTxContains("OK serial debug off"));
+  CHECK(!runtimeConfig.serialDebugOutput);
+  CHECK(serialLogLevel == LogLevel::NONE);
 }
 
 void s04_shot_log_remove_by_id() {
@@ -5039,6 +5098,8 @@ const TestCase testCases[] = {
     {"W43", w43_manual_palette_tracks_timer_only_and_scale_loss},
     {"W44", w44_paddle_return_reminder_stops_after_fifteen_minutes},
     {"W50", w50_local_buzzer_plays_triple_pattern_non_blocking},
+    {"W50b", w50b_buzzer_phase_timer_holds_triple_rhythm_without_loop},
+    {"W50c", w50c_buzzer_phase_timer_advances_despite_loop_stall},
     {"W51", w51_local_buzzer_triple_on_scale_lost_during_bbw},
     {"W52", w52_local_buzzer_triple_on_manual_bbw_without_scale},
     {"W53", w53_local_buzzer_silent_when_bbw_off_without_scale},
@@ -5128,6 +5189,7 @@ const TestCase testCases[] = {
     {"SC06", sc06_serial_cli_feed_completes_on_crlf},
     {"SC07", sc07_reset_ap_password_and_clear_wifi_queue},
     {"SC08", sc08_set_ap_password_queues_change},
+    {"SC09", sc09_serial_debug_toggles_without_ready},
 };
 
 }  // namespace
