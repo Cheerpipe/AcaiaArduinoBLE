@@ -285,6 +285,22 @@ class AcaiaArduinoBLE {
   }
   bool isScanning() const { return scanning; }
   bool isDirectedScan() const { return scanning && directedScan; }
+  bool takeSeenAdvertisement(char *macOut, size_t macCapacity, char *nameOut,
+                             size_t nameCapacity) {
+    if (!seenPending) {
+      return false;
+    }
+    if (macOut != nullptr && macCapacity > 0) {
+      strncpy(macOut, seenMac, macCapacity - 1);
+      macOut[macCapacity - 1] = '\0';
+    }
+    if (nameOut != nullptr && nameCapacity > 0) {
+      strncpy(nameOut, seenName, nameCapacity - 1);
+      nameOut[nameCapacity - 1] = '\0';
+    }
+    seenPending = false;
+    return true;
+  }
   const char *address() const {
     return connected ? connectedAddress : "";
   }
@@ -385,11 +401,14 @@ class AcaiaArduinoBLE {
   bool connected = false;
   bool scanning = false;
   bool directedScan = false;
+  bool seenPending = false;
   bool startScanSucceeds = true;
   bool pollScanConnects = false;
   bool lastForceRestart = false;
   size_t startScanCalls = 0;
   char lastStartScanMac[ACAIA_MAC_CAPACITY] = {};
+  char seenMac[ACAIA_MAC_CAPACITY] = {};
+  char seenName[ACAIA_NAME_CAPACITY] = {};
   char connectedAddress[ACAIA_MAC_CAPACITY] = "01:02:03:04:05:06";
   char connectedLocalName[ACAIA_NAME_CAPACITY] = "BOOKOO";
   char connectedProtocol[20] = "bookoo_generic";

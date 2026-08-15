@@ -191,17 +191,16 @@ void testNonBlockingScanConnectsWithoutInit() {
     CHECK(strcmp(scale.localName(), "PYXIS") == 0);
 }
 
-void testDirectedScanUsesAddressFilter() {
+void testConnectFilterUsesNameScan() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
     fixture.peripheral->address = "AA:BB:CC:DD:EE:FF";
     AcaiaArduinoBLE scale(false);
     CHECK(scale.startScan("AA:BB:CC:DD:EE:FF"));
     CHECK(scale.isDirectedScan());
-    CHECK(BLE.scanCalls == 0);
-    CHECK(BLE.scanForAddressCalls == 1);
+    CHECK(BLE.scanCalls == 1);
+    CHECK(BLE.scanForAddressCalls == 0);
     CHECK(BLE.lastWithDuplicates);
-    CHECK(BLE.lastScanAddress == "AA:BB:CC:DD:EE:FF");
     CHECK(scale.pollScan());
     CHECK(scale.isConnected());
     CHECK(!scale.isDirectedScan());
@@ -210,17 +209,26 @@ void testDirectedScanUsesAddressFilter() {
     resetFake();
     fixture = makeScale(NEW);
     fixture.peripheral->address = "11:22:33:44:55:66";
+    fixture.peripheral->localName = "PYXIS";
     AcaiaArduinoBLE mismatch(false);
     CHECK(mismatch.startScan("AA:BB:CC:DD:EE:FF"));
     CHECK(!mismatch.pollScan());
     CHECK(mismatch.isScanning());
+    char seenMac[ACAIA_MAC_CAPACITY] = {};
+    char seenName[ACAIA_NAME_CAPACITY] = {};
+    CHECK(mismatch.takeSeenAdvertisement(seenMac, sizeof(seenMac), seenName,
+                                         sizeof(seenName)));
+    CHECK(strcmp(seenMac, "11:22:33:44:55:66") == 0);
+    CHECK(strcmp(seenName, "PYXIS") == 0);
+    CHECK(!mismatch.takeSeenAdvertisement(seenMac, sizeof(seenMac), seenName,
+                                          sizeof(seenName)));
     fakeMillis = SCALE_SCAN_TIMEOUT_MS;
     CHECK(!mismatch.pollScan());
     CHECK(mismatch.isScanning());
     CHECK(BLE.stopScanCalls == 0);
 }
 
-void testDirectedScanConnectsWithoutLocalName() {
+void testConnectFilterConnectsWithoutLocalName() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
     fixture.peripheral->address = "aa:bb:cc:dd:ee:ff";
@@ -247,14 +255,14 @@ void testStartScanRestartsOnFilterChange() {
     resetFake();
     AcaiaArduinoBLE scale(false);
     CHECK(scale.startScan("AA:BB:CC:DD:EE:FF"));
-    CHECK(BLE.scanForAddressCalls == 1);
-    CHECK(BLE.scanCalls == 0);
+    CHECK(BLE.scanCalls == 1);
+    CHECK(BLE.scanForAddressCalls == 0);
     CHECK(scale.startScan(nullptr));
     CHECK(scale.isScanning());
     CHECK(!scale.isDirectedScan());
     CHECK(BLE.stopScanCalls == 1);
-    CHECK(BLE.scanCalls == 1);
-    CHECK(BLE.scanForAddressCalls == 1);
+    CHECK(BLE.scanCalls == 2);
+    CHECK(BLE.scanForAddressCalls == 0);
 }
 
 void testCleanupOnInitializationFailures() {
@@ -630,8 +638,8 @@ int main() {
     testScanDiagnostics();
     testNonBlockingScanDoesNotRestartOrResetIdle();
     testNonBlockingScanConnectsWithoutInit();
-    testDirectedScanUsesAddressFilter();
-    testDirectedScanConnectsWithoutLocalName();
+    testConnectFilterUsesNameScan();
+    testConnectFilterConnectsWithoutLocalName();
     testNameScanIgnoresEmptyLocalName();
     testStartScanRestartsOnFilterChange();
     testCleanupOnInitializationFailures();

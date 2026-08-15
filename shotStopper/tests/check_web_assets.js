@@ -51,8 +51,8 @@ if (htmlBytes > 40960) {
 if (jsBytes > 69632) {
   throw new Error('Web UI JS source exceeds the 68 KiB authoring budget');
 }
-if (htmlBytes + jsBytes > 104448) {
-  throw new Error('Web UI HTML+JS source exceeds the 102 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 106496) {
+  throw new Error('Web UI HTML+JS source exceeds the 104 KiB combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -261,29 +261,38 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !ui.includes('function formatScaleWeight(') ||
     !ui.includes('function formatScaleTimer(') ||
     !ui.includes('id="preferredScale"') ||
-    !ui.includes('id="preferredScaleSettings"') ||
+    !ui.includes('id="preferredScaleSelect"') ||
+    !ui.includes('id="preferredScalePauseHint"') ||
     !ui.includes('id="alwaysUseThisScale"') ||
     !ui.includes('id="forgetPairedScale"') ||
     !ui.includes('Always use this scale') ||
-    !ui.includes('Paired scale') ||
-    !ui.includes('Forget this scale') ||
+    !ui.includes('Preferred scale') ||
+    !ui.includes('Clear preferred') ||
     !ui.includes('scaleMacCacheMode') ||
     !ui.includes('/api/v1/scale/preferred/clear') ||
+    !ui.includes('/api/v1/scale/preferred/select') ||
     !ui.includes('function formatPreferredScale(') ||
+    !ui.includes('function updatePreferredScaleSelect(') ||
+    !ui.includes('function selectPreferredScale(') ||
     !ui.includes('function forgetPairedScale(') ||
-    !ui.includes('The stopper will not look for a scale for 30 seconds.') ||
+    !ui.includes('Saved scale history is kept') ||
     !ui.includes(' (not locked)') ||
     !ui.includes('macCachePauseRemainingMs>0') ||
+    ui.includes('id="preferredScaleSettings"') ||
     ui.includes('id="scaleMacCacheMode"') ||
     ui.includes('id="clearPreferredScale"') ||
     ui.includes('id="scaleMacCacheFullWarn"') ||
     ui.includes('Use scale MAC cache') ||
-    ui.includes('Preferred scale') ||
+    ui.includes('Paired scale') ||
+    ui.includes('Forget this scale') ||
     !network.includes('preferredScaleClearHandler') ||
+    !network.includes('preferredScaleSelectHandler') ||
     !network.includes('/api/v1/scale/preferred/clear') ||
+    !network.includes('/api/v1/scale/preferred/select') ||
     !network.includes('Always use this scale must be on or off.') ||
     !network.includes('scaleMacCacheMode must be disabled or full.') ||
     !network.includes('The paired scale cannot be forgotten while a cycle') ||
+    !network.includes('\\"history\\"') ||
     network.includes('Preferred scale cache cannot be cleared') ||
     !network.includes('\\"timerMs\\"')) {
   throw new Error('Status must use one metric per row and homologate Paddle/CN9 OPEN/OFF and CLOSED/ON labels');
@@ -442,7 +451,7 @@ if (!html.includes('<summary>Tare</summary>') ||
         html.indexOf('<summary>Scales</summary>') ||
     html.indexOf('id="alwaysUseThisScale"') <
         html.indexOf('<summary>Scales</summary>') ||
-    html.indexOf('id="preferredScaleSettings"') <
+    html.indexOf('id="preferredScaleSelect"') <
         html.indexOf('<summary>Scales</summary>') ||
     html.indexOf('id="forgetPairedScale"') <
         html.indexOf('<summary>Scales</summary>') ||
@@ -912,6 +921,7 @@ const expected = new Map([
   ['GET /api/v1/log', 'logHandler'],
   ['POST /api/v1/config', 'configHandler'],
   ['POST /api/v1/scale/preferred/clear', 'preferredScaleClearHandler'],
+  ['POST /api/v1/scale/preferred/select', 'preferredScaleSelectHandler'],
   ['POST /api/v1/presets', 'presetsHandler'],
   ['POST /api/v1/calibration/reset', 'resetCalibrationHandler'],
   ['POST /api/v1/calibration/reset-guard-samples', 'resetGuardSamplesHandler'],

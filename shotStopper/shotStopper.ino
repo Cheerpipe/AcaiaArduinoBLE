@@ -530,6 +530,8 @@ uint32_t scaleTimerAgeMs = 0;
 char scaleProtocolName[20] = "none";
 char scalePreferredMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
 char scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY] = {};
+ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY] = {};
+uint32_t scaleHistorySeq = 0;
 bool scalePreferredMacDirty = false;
 uint32_t scaleDiscoveryPausedUntilMs = 0;
 uint32_t scalePreferredDirectedResetGeneration = 0;
@@ -3661,6 +3663,15 @@ void copyPreferredScaleName(char *out, size_t capacity) {
   portEXIT_CRITICAL(&scalePreferredMacMux);
 }
 
+void copyScaleHistory(ScaleHistoryEntry *out) {
+  if (out == nullptr) {
+    return;
+  }
+  portENTER_CRITICAL(&scalePreferredMacMux);
+  memcpy(out, scaleHistory, sizeof(scaleHistory));
+  portEXIT_CRITICAL(&scalePreferredMacMux);
+}
+
 bool hasPreferredScaleMac() {
   char mac[PREFERRED_SCALE_MAC_CAPACITY];
   copyPreferredScaleMac(mac, sizeof(mac));
@@ -3687,7 +3698,21 @@ ScaleMacCacheMode currentScaleMacCacheMode() {
       canonicalScaleMacCacheMode(runtimeConfig.scaleMacCacheMode));
 }
 
+void noteScaleHistory(const char *mac, const char *name) {
+  if (mac == nullptr || !validPreferredScaleMac(mac) || mac[0] == '\0') {
+    return;
+  }
+  bool changed = false;
+  portENTER_CRITICAL(&scalePreferredMacMux);
+  changed = upsertScaleHistory(scaleHistory, scaleHistorySeq, mac, name);
+  if (changed) {
+    scalePreferredMacDirty = true;
+  }
+  portEXIT_CRITICAL(&scalePreferredMacMux);
+}
+
 void notePreferredScale(const char *mac, const char *name) {
+  noteScaleHistory(mac, name);
   if (currentScaleMacCacheMode() == ScaleMacCacheMode::OFF) {
     return;
   }
@@ -3697,6 +3722,9 @@ void notePreferredScale(const char *mac, const char *name) {
   if (mac == nullptr || !validPreferredScaleMac(mac) || mac[0] == '\0') {
     return;
   }
+  char canonicalMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+  strncpy(canonicalMac, mac, PREFERRED_SCALE_MAC_CAPACITY - 1);
+  canonicalizePreferredScaleMac(canonicalMac, sizeof(canonicalMac));
   char safeName[PREFERRED_SCALE_NAME_CAPACITY] = {};
   if (name != nullptr && validPreferredScaleName(name)) {
     strncpy(safeName, name, PREFERRED_SCALE_NAME_CAPACITY - 1);
@@ -3704,12 +3732,20 @@ void notePreferredScale(const char *mac, const char *name) {
   bool changed = false;
   bool macChanged = false;
   portENTER_CRITICAL(&scalePreferredMacMux);
-  macChanged = strncmp(scalePreferredMac, mac, PREFERRED_SCALE_MAC_CAPACITY) != 0;
+  // FULL: lock first connect when empty; never auto-steal to another MAC
+  // (case-insensitive — BLE often reports lowercase).
+  if (scalePreferredMac[0] != '\0' &&
+      !preferredScaleMacEqual(scalePreferredMac, canonicalMac)) {
+    portEXIT_CRITICAL(&scalePreferredMacMux);
+    return;
+  }
+  macChanged =
+      strncmp(scalePreferredMac, canonicalMac, PREFERRED_SCALE_MAC_CAPACITY) !=
+      0;
   const bool nameChanged =
       strncmp(scalePreferredName, safeName, PREFERRED_SCALE_NAME_CAPACITY) != 0;
   if (macChanged || nameChanged) {
-    strncpy(scalePreferredMac, mac, PREFERRED_SCALE_MAC_CAPACITY - 1);
-    scalePreferredMac[PREFERRED_SCALE_MAC_CAPACITY - 1] = '\0';
+    memcpy(scalePreferredMac, canonicalMac, sizeof(scalePreferredMac));
     strncpy(scalePreferredName, safeName, PREFERRED_SCALE_NAME_CAPACITY - 1);
     scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY - 1] = '\0';
     scalePreferredMacDirty = true;
@@ -3718,8 +3754,75 @@ void notePreferredScale(const char *mac, const char *name) {
   portEXIT_CRITICAL(&scalePreferredMacMux);
   if (changed && macChanged) {
     serialTracef(LogLevel::INFO, "Preferred scale updated: %s — %s",
-                 safeName[0] != '\0' ? safeName : "(unknown)", mac);
+                 safeName[0] != '\0' ? safeName : "(unknown)", canonicalMac);
   }
+}
+
+void clearPreferredScaleCache();
+
+// Clear preferred without the Forget 30 s pause (dropdown "None").
+void clearPreferredScaleSelectionOnly() {
+  portENTER_CRITICAL(&scalePreferredMacMux);
+  scalePreferredMac[0] = '\0';
+  scalePreferredName[0] = '\0';
+  scalePreferredMacDirty = true;
+  scaleDiscoveryPausedUntilMs = 0;
+  ++scalePreferredDirectedResetGeneration;
+  portEXIT_CRITICAL(&scalePreferredMacMux);
+  serialTrace(LogLevel::INFO, "Preferred scale cleared (history kept)");
+  if (scale.isScanning() || scale.isConnected()) {
+    // Restart discovery under the new (unlocked) policy.
+    scale.disconnect();
+    updateWorkerLinkState();
+    setScaleLinkState(ScaleLinkState::DISCONNECTED);
+  }
+}
+
+void selectPreferredScale(const char *mac, const char *name) {
+  if (mac == nullptr || mac[0] == '\0') {
+    clearPreferredScaleSelectionOnly();
+    return;
+  }
+  if (!validPreferredScaleMac(mac)) {
+    return;
+  }
+  char canonicalMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+  strncpy(canonicalMac, mac, PREFERRED_SCALE_MAC_CAPACITY - 1);
+  canonicalizePreferredScaleMac(canonicalMac, sizeof(canonicalMac));
+  char resolvedName[PREFERRED_SCALE_NAME_CAPACITY] = {};
+  if (name != nullptr && validPreferredScaleName(name) && name[0] != '\0') {
+    strncpy(resolvedName, name, PREFERRED_SCALE_NAME_CAPACITY - 1);
+  } else {
+    portENTER_CRITICAL(&scalePreferredMacMux);
+    findScaleHistoryName(scaleHistory, canonicalMac, resolvedName,
+                         sizeof(resolvedName));
+    portEXIT_CRITICAL(&scalePreferredMacMux);
+  }
+  noteScaleHistory(canonicalMac, resolvedName);
+  portENTER_CRITICAL(&scalePreferredMacMux);
+  memcpy(scalePreferredMac, canonicalMac, sizeof(scalePreferredMac));
+  strncpy(scalePreferredName, resolvedName, PREFERRED_SCALE_NAME_CAPACITY - 1);
+  scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY - 1] = '\0';
+  scalePreferredMacDirty = true;
+  scaleDiscoveryPausedUntilMs = 0;
+  ++scalePreferredDirectedResetGeneration;
+  portEXIT_CRITICAL(&scalePreferredMacMux);
+  if (scale.isConnected()) {
+    const char *connected = scale.address();
+    if (connected == nullptr ||
+        !preferredScaleMacEqual(connected, canonicalMac)) {
+      scale.disconnect();
+      updateWorkerLinkState();
+      setScaleLinkState(ScaleLinkState::DISCONNECTED);
+    }
+  } else if (scale.isScanning()) {
+    scale.disconnect();
+    updateWorkerLinkState();
+    setScaleLinkState(ScaleLinkState::DISCONNECTED);
+  }
+  serialTracef(LogLevel::INFO, "Preferred scale selected: %s — %s",
+               resolvedName[0] != '\0' ? resolvedName : "(unknown)",
+               canonicalMac);
 }
 
 void clearPreferredScaleCache() {
@@ -3738,12 +3841,14 @@ void servicePreferredScaleMacPersistence() {
 #ifndef SHOT_STOPPER_HOST_TEST
   char mac[PREFERRED_SCALE_MAC_CAPACITY];
   char name[PREFERRED_SCALE_NAME_CAPACITY];
+  ScaleHistoryEntry history[SCALE_HISTORY_CAPACITY];
   bool dirty = false;
   portENTER_CRITICAL(&scalePreferredMacMux);
   dirty = scalePreferredMacDirty;
   if (dirty) {
     memcpy(mac, scalePreferredMac, sizeof(mac));
     memcpy(name, scalePreferredName, sizeof(name));
+    memcpy(history, scaleHistory, sizeof(history));
   }
   portEXIT_CRITICAL(&scalePreferredMacMux);
   if (!dirty) {
@@ -3752,7 +3857,8 @@ void servicePreferredScaleMacPersistence() {
   if (strncmp(persistedSettings.preferredScaleMac, mac,
               PREFERRED_SCALE_MAC_CAPACITY) == 0 &&
       strncmp(persistedSettings.preferredScaleName, name,
-              PREFERRED_SCALE_NAME_CAPACITY) == 0) {
+              PREFERRED_SCALE_NAME_CAPACITY) == 0 &&
+      memcmp(persistedSettings.scaleHistory, history, sizeof(history)) == 0) {
     portENTER_CRITICAL(&scalePreferredMacMux);
     scalePreferredMacDirty = false;
     portEXIT_CRITICAL(&scalePreferredMacMux);
@@ -3769,6 +3875,8 @@ void servicePreferredScaleMacPersistence() {
          sizeof(persistedSettings.preferredScaleMac));
   memcpy(persistedSettings.preferredScaleName, name,
          sizeof(persistedSettings.preferredScaleName));
+  memcpy(persistedSettings.scaleHistory, history,
+         sizeof(persistedSettings.scaleHistory));
   if (!runtimePersistPending ||
       (runtimePersistReasonBits & RUNTIME_PERSIST_REASON_SCALE_MAC) == 0) {
     queueRuntimePersist(RUNTIME_PERSIST_REASON_SCALE_MAC);
@@ -3790,6 +3898,7 @@ void logScaleConnectionFailed(bool directed) {
                scale.lastDisconnectReasonName());
 }
 
+// FULL + preferred MAC → name scan with connect-filter (not GAP directed).
 bool shouldUseDirectedScaleScan(ScaleMacCacheMode cacheMode, bool hasMac) {
   return cacheMode == ScaleMacCacheMode::FULL && hasMac;
 }
@@ -3819,6 +3928,14 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
 
   if (scale.isScanning()) {
     const bool connected = scale.pollScan();
+    char seenMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+    char seenName[PREFERRED_SCALE_NAME_CAPACITY] = {};
+    bool sawCompatibleAd = false;
+    if (scale.takeSeenAdvertisement(seenMac, sizeof(seenMac), seenName,
+                                    sizeof(seenName))) {
+      noteScaleHistory(seenMac, seenName);
+      sawCompatibleAd = true;
+    }
     if (connected) {
       connectAttemptSeriesActive = false;
       connectRetryMs = SCALE_CONNECT_RETRY_MS;
@@ -3844,16 +3961,21 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       const bool logAttempt =
           !connectAttemptSeriesActive ||
           elapsedMs(lastConnectLogMs) >= SCALE_CONNECT_LOG_MS;
-      if (directed && logAttempt) {
+      if (logAttempt && !sawCompatibleAd) {
+        lastConnectLogMs = lastScanCycleMs;
+        connectAttemptSeriesActive = true;
+        if (directed) {
+          serialTrace(LogLevel::WARNING,
+                      "Preferred scale attempt: no advertisement");
+        } else {
+          serialTrace(LogLevel::WARNING,
+                      "Scale name scan: no advertisement");
+        }
+      } else if (logAttempt && directed && sawCompatibleAd) {
         lastConnectLogMs = lastScanCycleMs;
         connectAttemptSeriesActive = true;
         serialTrace(LogLevel::WARNING,
-                    "Preferred scale attempt: no advertisement");
-      } else if (!directed && logAttempt) {
-        lastConnectLogMs = lastScanCycleMs;
-        connectAttemptSeriesActive = true;
-        serialTrace(LogLevel::WARNING,
-                    "Scale name scan: no advertisement");
+                    "Preferred scale attempt: other scale seen, waiting");
       }
       if (elapsedMs(scanSessionAtMs) >= SCALE_SCAN_HCI_RESTART_MS) {
         char preferredMac[PREFERRED_SCALE_MAC_CAPACITY];
@@ -5042,12 +5164,16 @@ void serviceSettingsPersistResult() {
                   static_cast<int32_t>(runtimeRevision));
     char liveMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
     char liveName[PREFERRED_SCALE_NAME_CAPACITY] = {};
+    ScaleHistoryEntry liveHistory[SCALE_HISTORY_CAPACITY] = {};
     copyPreferredScaleMac(liveMac, sizeof(liveMac));
     copyPreferredScaleName(liveName, sizeof(liveName));
+    copyScaleHistory(liveHistory);
     if (strncmp(persistedSettings.preferredScaleMac, liveMac,
                 PREFERRED_SCALE_MAC_CAPACITY) == 0 &&
         strncmp(persistedSettings.preferredScaleName, liveName,
-                PREFERRED_SCALE_NAME_CAPACITY) == 0) {
+                PREFERRED_SCALE_NAME_CAPACITY) == 0 &&
+        memcmp(persistedSettings.scaleHistory, liveHistory,
+               sizeof(liveHistory)) == 0) {
       portENTER_CRITICAL(&scalePreferredMacMux);
       scalePreferredMacDirty = false;
       portEXIT_CRITICAL(&scalePreferredMacMux);
@@ -5086,10 +5212,13 @@ bool dispatchSettingsPersist() {
                         sizeof(request.blob.preferredScaleMac));
   copyPreferredScaleName(request.blob.preferredScaleName,
                          sizeof(request.blob.preferredScaleName));
+  copyScaleHistory(request.blob.scaleHistory);
   memcpy(persistedSettings.preferredScaleMac, request.blob.preferredScaleMac,
          sizeof(persistedSettings.preferredScaleMac));
   memcpy(persistedSettings.preferredScaleName, request.blob.preferredScaleName,
          sizeof(persistedSettings.preferredScaleName));
+  memcpy(persistedSettings.scaleHistory, request.blob.scaleHistory,
+         sizeof(persistedSettings.scaleHistory));
   request.runtimeRevision = runtimeConfig.revision;
   if (xQueueSend(settingsPersistQueue, &request, 0) != pdTRUE) {
     return false;
@@ -5481,6 +5610,23 @@ void processWebCommand(const WebCommand &command) {
       reportControlCommandResult(command, CommandResultState::APPLIED);
       return;
 
+    case WebCommandType::SELECT_PREFERRED_SCALE:
+      if (!controlAllowsConfigurationNow()) {
+        rejectWebCommand(command);
+        return;
+      }
+      if (command.scaleSelectMac[0] == '\0') {
+        clearPreferredScaleCache();
+      } else if (!validPreferredScaleMac(command.scaleSelectMac)) {
+        rejectWebCommand(command);
+        return;
+      } else {
+        selectPreferredScale(command.scaleSelectMac, command.scaleSelectName);
+      }
+      servicePreferredScaleMacPersistence();
+      reportControlCommandResult(command, CommandResultState::APPLIED);
+      return;
+
     case WebCommandType::START_WIFI_SCAN:
       if (!beginMaintenanceLease(command, false)) {
         rejectWebCommand(command);
@@ -5626,6 +5772,7 @@ void publishControlStatus() {
   copyPreferredScaleMac(next.preferredScaleMac, sizeof(next.preferredScaleMac));
   copyPreferredScaleName(next.preferredScaleName,
                          sizeof(next.preferredScaleName));
+  copyScaleHistory(next.scaleHistory);
   next.scaleMacCachePauseRemainingMs = scaleMacCachePauseRemainingMs(now);
   if (session.active) {
     next.cycleFlowDuringRetare = session.flowDuringRetare;
@@ -5994,12 +6141,27 @@ void setup() {
       strncpy(scalePreferredMac, persistedSettings.preferredScaleMac,
               PREFERRED_SCALE_MAC_CAPACITY - 1);
       scalePreferredMac[PREFERRED_SCALE_MAC_CAPACITY - 1] = '\0';
+      canonicalizePreferredScaleMac(scalePreferredMac,
+                                    sizeof(scalePreferredMac));
     }
     if (validPreferredScaleName(persistedSettings.preferredScaleName)) {
       strncpy(scalePreferredName, persistedSettings.preferredScaleName,
               PREFERRED_SCALE_NAME_CAPACITY - 1);
       scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY - 1] = '\0';
     }
+    memcpy(scaleHistory, persistedSettings.scaleHistory, sizeof(scaleHistory));
+    scaleHistorySeq = 0;
+    for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
+      if (scaleHistory[i].mac[0] != '\0') {
+        canonicalizePreferredScaleMac(scaleHistory[i].mac,
+                                      sizeof(scaleHistory[i].mac));
+      }
+      if (scaleHistory[i].lastSeenSeq > scaleHistorySeq) {
+        scaleHistorySeq = scaleHistory[i].lastSeenSeq;
+      }
+    }
+    seedScaleHistoryFromPreferred(scaleHistory, scaleHistorySeq,
+                                  scalePreferredMac, scalePreferredName);
   }
 #else
   runtimeConfig = RuntimeConfig{};
@@ -6134,6 +6296,7 @@ void setup() {
     callbacks.clearLastShot = clearLastShot;
     callbacks.copyPreferredScaleMac = copyPreferredScaleMac;
     callbacks.copyPreferredScaleName = copyPreferredScaleName;
+    callbacks.copyScaleHistory = copyScaleHistory;
     callbacks.copyPresetBank = copyPresetBank;
     callbacks.copyRuntimeConfig = copyRuntimeConfig;
     if (!networkManager.begin(persistedSettings, callbacks)) {

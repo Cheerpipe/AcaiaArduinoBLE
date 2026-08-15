@@ -60,6 +60,7 @@ struct PersistedSettings {
   uint8_t authHash[AUTH_HASH_LENGTH] = {};
   char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
   char preferredScaleName[PREFERRED_SCALE_NAME_CAPACITY] = {};
+  ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY] = {};
   uint32_t checksum = 0;
 };
 
@@ -998,7 +999,46 @@ struct PersistedSettingsV28 {
   uint32_t checksum;
 };
 
-static_assert(sizeof(PersistedSettings) != sizeof(PersistedSettingsV28),
+// Schema 29: current runtime/presets; preferred MAC/name only (no history).
+struct PersistedSettingsV29 {
+  uint32_t magic;
+  uint32_t schemaVersion;
+  uint32_t structureSize;
+  uint32_t storageRevision;
+  RuntimeConfig runtime;
+  ShotPresetBank presets;
+  bool staConfigured;
+  bool staOpen;
+  char staSsid[WIFI_SSID_CAPACITY];
+  char staPassword[WIFI_PASSWORD_CAPACITY];
+  uint8_t staIpMode;
+  uint8_t staIp[4];
+  uint8_t staNetmask[4];
+  uint8_t staGateway[4];
+  uint8_t staDns1[4];
+  uint8_t staDns2[4];
+  uint8_t staConfigState;
+  bool lkgValid;
+  bool lkgOpen;
+  char lkgSsid[WIFI_SSID_CAPACITY];
+  char lkgPassword[WIFI_PASSWORD_CAPACITY];
+  uint8_t lkgIpMode;
+  uint8_t lkgIp[4];
+  uint8_t lkgNetmask[4];
+  uint8_t lkgGateway[4];
+  uint8_t lkgDns1[4];
+  uint8_t lkgDns2[4];
+  char apPassword[WIFI_PASSWORD_CAPACITY];
+  uint8_t authSalt[AUTH_SALT_LENGTH];
+  uint8_t authHash[AUTH_HASH_LENGTH];
+  char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY];
+  char preferredScaleName[PREFERRED_SCALE_NAME_CAPACITY];
+  uint32_t checksum;
+};
+
+static_assert(sizeof(PersistedSettings) != sizeof(PersistedSettingsV29),
+              "Schema 30 blob size must differ from schema 29 for migration");
+static_assert(sizeof(PersistedSettingsV29) != sizeof(PersistedSettingsV28),
               "Schema 29 blob size must differ from schema 28 for migration");
 static_assert(sizeof(PersistedSettingsV28) != sizeof(PersistedSettingsV27),
               "Schema 28 blob size must differ from schema 27 for migration");
@@ -1643,6 +1683,12 @@ inline uint32_t persistedSettingsV28Checksum(
     const PersistedSettingsV28 &settings) {
   return crc32(reinterpret_cast<const uint8_t *>(&settings),
                offsetof(PersistedSettingsV28, checksum));
+}
+
+inline uint32_t persistedSettingsV29Checksum(
+    const PersistedSettingsV29 &settings) {
+  return crc32(reinterpret_cast<const uint8_t *>(&settings),
+               offsetof(PersistedSettingsV29, checksum));
 }
 
 inline void clearStaAddressFields(PersistedSettings &settings) {
@@ -2665,6 +2711,7 @@ inline bool validPersistedSettings(const PersistedSettings &settings) {
       !validAccessPointPassword(settings.apPassword) ||
       !validPreferredScaleMac(settings.preferredScaleMac) ||
       !validPreferredScaleName(settings.preferredScaleName) ||
+      !validScaleHistoryEntries(settings.scaleHistory) ||
       !validPersistedStaNetwork(settings)) {
     return false;
   }
@@ -2674,6 +2721,15 @@ inline bool validPersistedSettings(const PersistedSettings &settings) {
 
 inline void finalizePersistedSettings(PersistedSettings &settings) {
   ensurePersistedPresetBank(settings);
+  uint32_t seedSeq = 0;
+  for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
+    if (settings.scaleHistory[i].lastSeenSeq > seedSeq) {
+      seedSeq = settings.scaleHistory[i].lastSeenSeq;
+    }
+  }
+  seedScaleHistoryFromPreferred(settings.scaleHistory, seedSeq,
+                                settings.preferredScaleMac,
+                                settings.preferredScaleName);
   settings.magic = PERSISTED_SETTINGS_MAGIC;
   settings.schemaVersion = CONFIG_SCHEMA_VERSION;
   settings.structureSize = sizeof(PersistedSettings);
@@ -3875,6 +3931,79 @@ inline bool readV28SettingsSlot(Preferences &preferences, const char *key,
   return true;
 }
 
+inline bool readV29SettingsSlot(Preferences &preferences, const char *key,
+                                PersistedSettings &settings) {
+  if (preferences.getBytesLength(key) != sizeof(PersistedSettingsV29)) {
+    return false;
+  }
+  PersistedSettingsV29 legacy = {};
+  if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
+      legacy.magic != PERSISTED_SETTINGS_MAGIC ||
+      legacy.schemaVersion != CONFIG_SCHEMA_VERSION_V29 ||
+      legacy.structureSize != sizeof(PersistedSettingsV29) ||
+      legacy.checksum != persistedSettingsV29Checksum(legacy) ||
+      !validAccessPointPassword(legacy.apPassword) ||
+      !validPreferredScaleMac(legacy.preferredScaleMac) ||
+      !validPreferredScaleName(legacy.preferredScaleName) ||
+      (legacy.staConfigured != 0 &&
+       (!validWifiSsid(legacy.staSsid) ||
+        !validWifiPassword(legacy.staPassword, legacy.staOpen != 0) ||
+        !validStaAddressConfig(legacy.staIpMode, legacy.staIp, legacy.staNetmask,
+                               legacy.staGateway, legacy.staDns1,
+                               legacy.staDns2)))) {
+    return false;
+  }
+
+  if (!passwordHashMatches(legacy.authSalt, legacy.apPassword,
+                           legacy.authHash)) {
+    return false;
+  }
+
+  settings = PersistedSettings{};
+  settings.storageRevision = legacy.storageRevision;
+  settings.runtime = legacy.runtime;
+  settings.presets = legacy.presets;
+  settings.staConfigured = legacy.staConfigured;
+  settings.staOpen = legacy.staOpen;
+  memcpy(settings.staSsid, legacy.staSsid, sizeof(settings.staSsid));
+  memcpy(settings.staPassword, legacy.staPassword,
+         sizeof(settings.staPassword));
+  settings.staIpMode = legacy.staIpMode;
+  memcpy(settings.staIp, legacy.staIp, sizeof(settings.staIp));
+  memcpy(settings.staNetmask, legacy.staNetmask, sizeof(settings.staNetmask));
+  memcpy(settings.staGateway, legacy.staGateway, sizeof(settings.staGateway));
+  memcpy(settings.staDns1, legacy.staDns1, sizeof(settings.staDns1));
+  memcpy(settings.staDns2, legacy.staDns2, sizeof(settings.staDns2));
+  settings.staConfigState = legacy.staConfigState;
+  settings.lkgValid = legacy.lkgValid;
+  settings.lkgOpen = legacy.lkgOpen;
+  memcpy(settings.lkgSsid, legacy.lkgSsid, sizeof(settings.lkgSsid));
+  memcpy(settings.lkgPassword, legacy.lkgPassword,
+         sizeof(settings.lkgPassword));
+  settings.lkgIpMode = legacy.lkgIpMode;
+  memcpy(settings.lkgIp, legacy.lkgIp, sizeof(settings.lkgIp));
+  memcpy(settings.lkgNetmask, legacy.lkgNetmask, sizeof(settings.lkgNetmask));
+  memcpy(settings.lkgGateway, legacy.lkgGateway, sizeof(settings.lkgGateway));
+  memcpy(settings.lkgDns1, legacy.lkgDns1, sizeof(settings.lkgDns1));
+  memcpy(settings.lkgDns2, legacy.lkgDns2, sizeof(settings.lkgDns2));
+  memcpy(settings.apPassword, legacy.apPassword, sizeof(settings.apPassword));
+  memcpy(settings.authSalt, legacy.authSalt, sizeof(settings.authSalt));
+  memcpy(settings.authHash, legacy.authHash, sizeof(settings.authHash));
+  memcpy(settings.preferredScaleMac, legacy.preferredScaleMac,
+         sizeof(settings.preferredScaleMac));
+  memcpy(settings.preferredScaleName, legacy.preferredScaleName,
+         sizeof(settings.preferredScaleName));
+  if (validateRuntimeConfig(settings.runtime) !=
+      ConfigValidationError::NONE) {
+    return false;
+  }
+  if (!validPersistedStaNetwork(settings)) {
+    return false;
+  }
+  finalizePersistedSettings(settings);
+  return true;
+}
+
 inline bool readAnySettingsSlot(Preferences &preferences, const char *key,
                                 PersistedSettings &settings,
                                 bool *legacyFormat = nullptr) {
@@ -3895,10 +4024,13 @@ inline bool readAnySettingsSlot(Preferences &preferences, const char *key,
                         length == sizeof(PersistedSettingsV25) ||
                         length == sizeof(PersistedSettingsV26) ||
                         length == sizeof(PersistedSettingsV27) ||
-                        length == sizeof(PersistedSettingsV28);
+                        length == sizeof(PersistedSettingsV28) ||
+                        length == sizeof(PersistedSettingsV29);
   bool valid = false;
   if (length == sizeof(PersistedSettings)) {
     valid = readSettingsSlot(preferences, key, settings);
+  } else if (length == sizeof(PersistedSettingsV29)) {
+    valid = readV29SettingsSlot(preferences, key, settings);
   } else if (length == sizeof(PersistedSettingsV28)) {
     valid = readV28SettingsSlot(preferences, key, settings);
   } else if (length == sizeof(PersistedSettingsV27)) {

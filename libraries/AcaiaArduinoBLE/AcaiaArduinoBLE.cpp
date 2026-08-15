@@ -147,6 +147,9 @@ AcaiaArduinoBLE::AcaiaArduinoBLE(bool debug) :
     _scanMac{},
     _address{},
     _localName{},
+    _seenMac{},
+    _seenName{},
+    _seenPending(false),
     _lastDisconnectReason(AcaiaDisconnectReason::NONE) {
 }
 
@@ -180,12 +183,12 @@ void AcaiaArduinoBLE::stopIdleScan(AcaiaDisconnectReason reason) {
 bool AcaiaArduinoBLE::startScan(const char *mac, bool forceRestart) {
     logVersionOnce();
 
-    const bool directed = mac != nullptr && mac[0] != '\0';
+    const bool filtered = mac != nullptr && mac[0] != '\0';
     // An active GAP scan must not be restarted with the same filter.
     // ArduinoBLE/ESP32 HCI can drop the scanner if scan() is issued while
     // already enabled. A filter change (or forceRestart) stops first.
     if (_scanning && !_connected && !_hasPeripheral) {
-        const bool sameFilter = directed
+        const bool sameFilter = filtered
             ? macAddressEqual(_scanMac, mac)
             : _scanMac[0] == '\0';
         if (sameFilter && !forceRestart) {
@@ -199,27 +202,29 @@ bool AcaiaArduinoBLE::startScan(const char *mac, bool forceRestart) {
     }
 
     BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
-    if (directed) {
+    _seenPending = false;
+    _seenMac[0] = '\0';
+    _seenName[0] = '\0';
+    if (filtered) {
         strncpy(_scanMac, mac, sizeof(_scanMac) - 1);
         _scanMac[sizeof(_scanMac) - 1] = '\0';
     } else {
         _scanMac[0] = '\0';
     }
     if (_debug) {
-        if (!directed) {
+        if (!filtered) {
             Serial.println("Scanning for any compatible scale (name scan)...");
         } else {
             Serial.print("Scanning for preferred scale ");
             Serial.print(_scanMac);
-            Serial.println("...");
+            Serial.println(" (name scan + connect filter)...");
         }
     }
 
-    // withDuplicates=true so a missed first advertisement is not fatal while
-    // the idle scan stays enabled. ArduinoBLE still takes String at GAP.
-    const bool scanStarted = directed
-        ? static_cast<bool>(BLE.scanForAddress(String(_scanMac), true))
-        : static_cast<bool>(BLE.scan(true));
+    // Always name-scan so non-preferred compatible scales can be observed for
+    // history while a connect filter is active. withDuplicates=true so a
+    // missed first advertisement is not fatal while the idle scan stays on.
+    const bool scanStarted = static_cast<bool>(BLE.scan(true));
     if (!scanStarted) {
         Serial.println("BLE scan failed to start");
         stopIdleScan(AcaiaDisconnectReason::SCAN_START_FAILED);
@@ -232,6 +237,23 @@ bool AcaiaArduinoBLE::startScan(const char *mac, bool forceRestart) {
 
 bool AcaiaArduinoBLE::isScanning() const {
     return _scanning;
+}
+
+bool AcaiaArduinoBLE::takeSeenAdvertisement(char *macOut, size_t macCapacity,
+                                            char *nameOut, size_t nameCapacity) {
+    if (!_seenPending) {
+        return false;
+    }
+    if (macOut != nullptr && macCapacity > 0) {
+        strncpy(macOut, _seenMac, macCapacity - 1);
+        macOut[macCapacity - 1] = '\0';
+    }
+    if (nameOut != nullptr && nameCapacity > 0) {
+        strncpy(nameOut, _seenName, nameCapacity - 1);
+        nameOut[nameCapacity - 1] = '\0';
+    }
+    _seenPending = false;
+    return true;
 }
 
 bool AcaiaArduinoBLE::pollScan() {
@@ -254,16 +276,28 @@ bool AcaiaArduinoBLE::pollScan() {
     }
 
     if (peripheral) {
-        const bool directed = _scanMac[0] != '\0';
+        const bool filtered = _scanMac[0] != '\0';
         const bool nameOk = isScaleName(peripheral.localName().c_str());
         const bool macOk =
-            directed &&
+            filtered &&
             macAddressEqual(peripheral.address().c_str(), _scanMac);
-        if ((directed && macOk) || (!directed && nameOk)) {
+
+        if (nameOk) {
+            strncpy(_seenMac, peripheral.address().c_str(),
+                    sizeof(_seenMac) - 1);
+            _seenMac[sizeof(_seenMac) - 1] = '\0';
+            strncpy(_seenName, peripheral.localName().c_str(),
+                    sizeof(_seenName) - 1);
+            _seenName[sizeof(_seenName) - 1] = '\0';
+            _seenPending = true;
+        }
+
+        // Unfiltered: first compatible name. Filtered: matching MAC (name
+        // optional — preferred scales may advertise briefly without a name).
+        if ((!filtered && nameOk) || macOk) {
             BLE.stopScan();
             _scanning = false;
             _scanStartedAt = 0;
-            _scanMac[0] = '\0';
             return completeConnection(peripheral);
         }
     }

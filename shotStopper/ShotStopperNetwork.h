@@ -111,6 +111,7 @@ struct NetworkBridgeCallbacks {
   // Keeps NVS Wi-Fi/runtime saves from overwriting a newer preferred scale MAC.
   void (*copyPreferredScaleMac)(char *out, size_t capacity) = nullptr;
   void (*copyPreferredScaleName)(char *out, size_t capacity) = nullptr;
+  void (*copyScaleHistory)(ScaleHistoryEntry *out) = nullptr;
   void (*copyPresetBank)(ShotPresetBank *out) = nullptr;
   void (*copyRuntimeConfig)(RuntimeConfig *out) = nullptr;
 };
@@ -295,6 +296,7 @@ class ShotStopperNetwork {
   static esp_err_t timeSyncHandler(httpd_req_t *request);
   static esp_err_t configHandler(httpd_req_t *request);
   static esp_err_t preferredScaleClearHandler(httpd_req_t *request);
+  static esp_err_t preferredScaleSelectHandler(httpd_req_t *request);
   static esp_err_t presetsHandler(httpd_req_t *request);
   static esp_err_t resetCalibrationHandler(httpd_req_t *request);
   static esp_err_t resetGuardSamplesHandler(httpd_req_t *request);

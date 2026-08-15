@@ -46,9 +46,12 @@ watchdog; the idle GAP scan stays enabled until a match or a filter change.
 `startScan()` does not restart an already-active GAP scan with the same filter;
 it does stop and restart when the MAC/name filter changes or `forceRestart` is
 set. Idle scans request `withDuplicates=true` so a missed first advertisement
-is not dropped for the rest of the session. Directed scans match by MAC even
-when the advertisement has no local name; name scans still require a known
-scale prefix.
+is not dropped for the rest of the session. A non-empty `startScan(mac)` still
+runs a **name scan** (`BLE.scan`), but only GATT-connects when the address
+matches; other compatible advertisements are exposed via
+`takeSeenAdvertisement()` for history without connecting. Name scans without a
+filter still require a known scale prefix; a connect-filter MAC may connect
+even when the advertisement has no local name.
 
 Stock ArduinoBLE 2.1.0 scans active at 20/20 ms. Shot Stopper patches GAP to
 active 40/20 ms (50% duty) via `scripts/patch_arduinoble.sh` so SCAN_RSP names

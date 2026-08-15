@@ -74,14 +74,17 @@ class AcaiaArduinoBLE {
         // mac may be nullptr or empty for a name scan.
         bool init(const char *mac = nullptr);
 
-        // Non-blocking GAP scan. Never calls BLE.begin()/end(). If a scan is
-        // already active with the same filter, this is a no-op success.
-        // A different MAC/name filter (or forceRestart) stops and restarts GAP.
-        // mac may be nullptr or empty for a name scan.
+        // Non-blocking GAP name scan (BLE.scan). Never calls BLE.begin()/end().
+        // If a scan is already active with the same connect filter, this is a
+        // no-op success. A different filter (or forceRestart) stops and restarts.
+        // mac may be nullptr or empty: connect the first compatible scale.
+        // mac non-empty: still name-scan all advertisements, but only GATT-
+        // connect when the address matches (other compatible scales are
+        // reported via takeSeenAdvertisement without connecting).
         bool startScan(const char *mac = nullptr, bool forceRestart = false);
         // Poll an active scan. Performs GATT connect only when a scale
-        // advertisement matches. Idle scans stay enabled until a match,
-        // filter change, or init()'s SCALE_SCAN_TIMEOUT_MS deadline.
+        // advertisement matches the connect policy. Idle scans stay enabled
+        // until a connect, filter change, or init()'s SCALE_SCAN_TIMEOUT_MS.
         // Returns true if connected after this call.
         bool pollScan();
         bool isScanning() const;
@@ -116,7 +119,12 @@ class AcaiaArduinoBLE {
         // owned by this object and remain valid until the next scan/reset.
         const char* address() const;
         const char* localName() const;
+        // True while scanning with a non-empty connect-filter MAC.
         bool isDirectedScan() const;
+        // If pollScan observed a compatible advertisement this call, copies
+        // MAC/name and returns true (clears the pending flag).
+        bool takeSeenAdvertisement(char *macOut, size_t macCapacity,
+                                   char *nameOut, size_t nameCapacity);
 
         AcaiaDisconnectReason lastDisconnectReason() const;
         const char* lastDisconnectReasonName() const;
@@ -194,6 +202,9 @@ class AcaiaArduinoBLE {
         char                _scanMac[ACAIA_MAC_CAPACITY];
         char                _address[ACAIA_MAC_CAPACITY];
         char                _localName[ACAIA_NAME_CAPACITY];
+        char                _seenMac[ACAIA_MAC_CAPACITY];
+        char                _seenName[ACAIA_NAME_CAPACITY];
+        bool                _seenPending;
         AcaiaDisconnectReason _lastDisconnectReason;
 };
 

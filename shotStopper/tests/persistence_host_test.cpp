@@ -2085,11 +2085,95 @@ void p41_v28_tiny_goal_disables_slow_instead_of_factory_reset() {
   CHECK(!loaded.runtime.slowExtractionGuardEnabled);
 }
 
+void p42_v29_migrates_preferred_into_scale_history() {
+  PersistedSettings current = {};
+  CHECK(initializeDefaultSettings(current));
+  finalizePersistedSettings(current);
+
+  PersistedSettingsV29 legacy = {};
+  legacy.magic = PERSISTED_SETTINGS_MAGIC;
+  legacy.schemaVersion = CONFIG_SCHEMA_VERSION_V29;
+  legacy.structureSize = sizeof(PersistedSettingsV29);
+  legacy.storageRevision = 21;
+  legacy.runtime = current.runtime;
+  legacy.presets = current.presets;
+  legacy.staConfigured = false;
+  legacy.staOpen = false;
+  legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  legacy.staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  legacy.lkgValid = false;
+  memcpy(legacy.apPassword, current.apPassword, sizeof(legacy.apPassword));
+  memcpy(legacy.authSalt, current.authSalt, sizeof(legacy.authSalt));
+  memcpy(legacy.authHash, current.authHash, sizeof(legacy.authHash));
+  strcpy(legacy.preferredScaleMac, "AA:BB:CC:DD:EE:30");
+  strcpy(legacy.preferredScaleName, "Lunar");
+  legacy.checksum = persistedSettingsV29Checksum(legacy);
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &legacy,
+                           sizeof(legacy));
+
+  PersistedSettings loaded;
+  bool migrated = false;
+  CHECK(loadPersistedSettings(loaded, &migrated));
+  CHECK(migrated);
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(strcmp(loaded.preferredScaleMac, "AA:BB:CC:DD:EE:30") == 0);
+  CHECK(strcmp(loaded.preferredScaleName, "Lunar") == 0);
+  CHECK(scaleHistoryOccupiedCount(loaded.scaleHistory) == 1);
+  CHECK(strcmp(loaded.scaleHistory[0].mac, "AA:BB:CC:DD:EE:30") == 0);
+  CHECK(strcmp(loaded.scaleHistory[0].name, "Lunar") == 0);
+}
+
+void p43_scale_history_upsert_and_lru() {
+  ScaleHistoryEntry entries[SCALE_HISTORY_CAPACITY] = {};
+  uint32_t seq = 0;
+  CHECK(upsertScaleHistory(entries, seq, "AA:BB:CC:DD:EE:01", "One"));
+  CHECK(upsertScaleHistory(entries, seq, "AA:BB:CC:DD:EE:02", "Two"));
+  CHECK(!upsertScaleHistory(entries, seq, "AA:BB:CC:DD:EE:01", "One"));
+  // Case-insensitive: lowercase must not create a duplicate slot.
+  CHECK(!upsertScaleHistory(entries, seq, "aa:bb:cc:dd:ee:01", "One"));
+  CHECK(scaleHistoryOccupiedCount(entries) == 2);
+  CHECK(strcmp(entries[0].mac, "AA:BB:CC:DD:EE:01") == 0);
+  for (uint8_t i = 3; i <= 9; ++i) {
+    char mac[PREFERRED_SCALE_MAC_CAPACITY];
+    snprintf(mac, sizeof(mac), "AA:BB:CC:DD:EE:%02X", i);
+    CHECK(upsertScaleHistory(entries, seq, mac, "X"));
+  }
+  CHECK(scaleHistoryOccupiedCount(entries) == SCALE_HISTORY_CAPACITY);
+  bool foundOne = false;
+  bool foundTwo = false;
+  for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
+    if (strcmp(entries[i].mac, "AA:BB:CC:DD:EE:01") == 0) {
+      foundOne = true;
+    }
+    if (strcmp(entries[i].mac, "AA:BB:CC:DD:EE:02") == 0) {
+      foundTwo = true;
+    }
+  }
+  // Refreshing :01 made it newest; :02 is the LRU victim when the table fills.
+  CHECK(foundOne);
+  CHECK(!foundTwo);
+}
+
+void p44_scale_history_canonicalizes_mac_case() {
+  ScaleHistoryEntry entries[SCALE_HISTORY_CAPACITY] = {};
+  uint32_t seq = 0;
+  CHECK(upsertScaleHistory(entries, seq, "aa:bb:cc:dd:ee:10", "Pearl"));
+  CHECK(strcmp(entries[0].mac, "AA:BB:CC:DD:EE:10") == 0);
+  CHECK(preferredScaleMacEqual(entries[0].mac, "Aa:Bb:Cc:Dd:Ee:10"));
+  char name[PREFERRED_SCALE_NAME_CAPACITY] = {};
+  CHECK(findScaleHistoryName(entries, "AA:BB:CC:DD:EE:10", name, sizeof(name)));
+  CHECK(strcmp(name, "Pearl") == 0);
+  CHECK(findScaleHistoryName(entries, "aa:bb:cc:dd:ee:10", name, sizeof(name)));
+  CHECK(strcmp(name, "Pearl") == 0);
+}
+
 void p24_preset_bank_size_and_crud_budgets() {
   CHECK(sizeof(ShotPreset) <= 128);
   CHECK(sizeof(ShotPresetBank) <= 1100);
   CHECK(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET);
   CHECK(sizeof(WebCommand) <= 512);
+  CHECK(sizeof(PersistedSettings) != sizeof(PersistedSettingsV29));
+  CHECK(sizeof(PersistedSettingsV29) != sizeof(PersistedSettingsV28));
   CHECK(sizeof(PersistedSettings) != sizeof(PersistedSettingsV28));
   CHECK(sizeof(PersistedSettings) != sizeof(PersistedSettingsV27));
   CHECK(sizeof(PersistedSettings) != sizeof(PersistedSettingsV26));
@@ -2331,6 +2415,9 @@ const TestCase tests[] = {
     {"P39", p39_v28_goal_below_slow_floor_migrates_without_factory_reset},
     {"P40", p40_v28_wall_below_slow_max_migrates_without_factory_reset},
     {"P41", p41_v28_tiny_goal_disables_slow_instead_of_factory_reset},
+    {"P42", p42_v29_migrates_preferred_into_scale_history},
+    {"P43", p43_scale_history_upsert_and_lru},
+    {"P44", p44_scale_history_canonicalizes_mac_case},
     {"P24", p24_preset_bank_size_and_crud_budgets},
     {"P25", p25_invalid_active_id_keeps_customs},
     {"P26", p26_save_candidate_validation_does_not_require_live_mutation},

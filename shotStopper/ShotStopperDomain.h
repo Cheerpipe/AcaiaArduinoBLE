@@ -12,8 +12,9 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 29;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 28;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 30;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 29;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V29 = 29;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V28 = 28;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V27 = 27;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V26 = 26;
@@ -33,6 +34,7 @@ constexpr uint32_t CONFIG_SCHEMA_VERSION_V13 = 13;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V12 = 12;
 constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
 constexpr size_t PREFERRED_SCALE_NAME_CAPACITY = 32;
+constexpr size_t SCALE_HISTORY_CAPACITY = 8;
 constexpr uint32_t SCALE_PAIRING_DISCOVERY_PAUSE_MS = 30000;
 constexpr size_t NTP_SERVER_HOST_CAPACITY = 64;
 constexpr uint32_t NTP_RESYNC_INTERVAL_MS = 3600UL * 1000UL;
@@ -53,9 +55,16 @@ enum class NtpServerPreset : uint8_t {
 // Paired-scale lock. PARTIAL is legacy NVS only and canonicalizes to FULL.
 enum class ScaleMacCacheMode : uint8_t {
   // Named OFF (not DISABLED): ESP32 Arduino defines a DISABLED GPIO macro.
-  OFF = 0,      // Name scan; do not pair on connect.
+  OFF = 0,      // Name scan; connect first compatible; do not lock preferred.
   PARTIAL = 1,  // Legacy; treated as FULL.
-  FULL = 2      // Pair first connect; directed scan while a MAC is stored.
+  FULL = 2      // Name scan; connect only preferred (or first if none yet).
+};
+
+// BLE-seen scales remembered for the preferred-scale dropdown (NVS + status).
+struct ScaleHistoryEntry {
+  char mac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+  char name[PREFERRED_SCALE_NAME_CAPACITY] = {};
+  uint32_t lastSeenSeq = 0;
 };
 
 inline uint8_t canonicalScaleMacCacheMode(uint8_t mode) {
@@ -1453,6 +1462,154 @@ inline bool validPreferredScaleName(const char *name) {
   return true;
 }
 
+inline bool validScaleHistoryEntries(const ScaleHistoryEntry *entries) {
+  if (entries == nullptr) {
+    return false;
+  }
+  for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
+    if (!validPreferredScaleMac(entries[i].mac) ||
+        !validPreferredScaleName(entries[i].name)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline char preferredScaleMacUpper(char c) {
+  if (c >= 'a' && c <= 'z') {
+    return static_cast<char>(c - ('a' - 'A'));
+  }
+  return c;
+}
+
+// Case-insensitive BLE MAC compare (AA:BB:… vs aa:bb:…).
+inline bool preferredScaleMacEqual(const char *left, const char *right) {
+  if (left == nullptr || right == nullptr) {
+    return false;
+  }
+  for (size_t i = 0; i < PREFERRED_SCALE_MAC_CAPACITY; ++i) {
+    const char a = preferredScaleMacUpper(left[i]);
+    const char b = preferredScaleMacUpper(right[i]);
+    if (a != b) {
+      return false;
+    }
+    if (a == '\0') {
+      return true;
+    }
+  }
+  return true;
+}
+
+inline void canonicalizePreferredScaleMac(char *mac, size_t capacity) {
+  if (mac == nullptr || capacity == 0) {
+    return;
+  }
+  for (size_t i = 0; i + 1 < capacity && mac[i] != '\0'; ++i) {
+    mac[i] = preferredScaleMacUpper(mac[i]);
+  }
+}
+
+inline size_t scaleHistoryOccupiedCount(const ScaleHistoryEntry *entries) {
+  size_t count = 0;
+  if (entries == nullptr) {
+    return 0;
+  }
+  for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
+    if (entries[i].mac[0] != '\0') {
+      ++count;
+    }
+  }
+  return count;
+}
+
+// Upsert by MAC (case-insensitive). Stores canonical uppercase MAC.
+// Returns true if the table changed. Advances *seqCounter.
+inline bool upsertScaleHistory(ScaleHistoryEntry *entries, uint32_t &seqCounter,
+                               const char *mac, const char *name) {
+  if (entries == nullptr || mac == nullptr || !validPreferredScaleMac(mac) ||
+      mac[0] == '\0') {
+    return false;
+  }
+  char canonicalMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+  strncpy(canonicalMac, mac, PREFERRED_SCALE_MAC_CAPACITY - 1);
+  canonicalizePreferredScaleMac(canonicalMac, sizeof(canonicalMac));
+  char safeName[PREFERRED_SCALE_NAME_CAPACITY] = {};
+  if (name != nullptr && validPreferredScaleName(name)) {
+    strncpy(safeName, name, PREFERRED_SCALE_NAME_CAPACITY - 1);
+  }
+  ++seqCounter;
+  if (seqCounter == 0) {
+    seqCounter = 1;
+  }
+  for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
+    if (preferredScaleMacEqual(entries[i].mac, canonicalMac)) {
+      bool changed = false;
+      if (strncmp(entries[i].mac, canonicalMac, PREFERRED_SCALE_MAC_CAPACITY) !=
+          0) {
+        memcpy(entries[i].mac, canonicalMac, sizeof(entries[i].mac));
+        changed = true;
+      }
+      if (strncmp(entries[i].name, safeName, PREFERRED_SCALE_NAME_CAPACITY) !=
+          0) {
+        memcpy(entries[i].name, safeName, sizeof(entries[i].name));
+        changed = true;
+      }
+      entries[i].lastSeenSeq = seqCounter;
+      return changed;
+    }
+  }
+  for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
+    if (entries[i].mac[0] == '\0') {
+      memcpy(entries[i].mac, canonicalMac, sizeof(entries[i].mac));
+      memcpy(entries[i].name, safeName, sizeof(entries[i].name));
+      entries[i].lastSeenSeq = seqCounter;
+      return true;
+    }
+  }
+  size_t victim = 0;
+  uint32_t oldest = entries[0].lastSeenSeq;
+  for (size_t i = 1; i < SCALE_HISTORY_CAPACITY; ++i) {
+    if (entries[i].lastSeenSeq < oldest) {
+      oldest = entries[i].lastSeenSeq;
+      victim = i;
+    }
+  }
+  memcpy(entries[victim].mac, canonicalMac, sizeof(entries[victim].mac));
+  memcpy(entries[victim].name, safeName, sizeof(entries[victim].name));
+  entries[victim].lastSeenSeq = seqCounter;
+  return true;
+}
+
+inline void seedScaleHistoryFromPreferred(ScaleHistoryEntry *entries,
+                                          uint32_t &seqCounter,
+                                          const char *mac, const char *name) {
+  if (entries == nullptr || scaleHistoryOccupiedCount(entries) > 0) {
+    return;
+  }
+  if (mac == nullptr || mac[0] == '\0' || !validPreferredScaleMac(mac)) {
+    return;
+  }
+  upsertScaleHistory(entries, seqCounter, mac, name);
+}
+
+inline bool findScaleHistoryName(const ScaleHistoryEntry *entries,
+                                 const char *mac, char *nameOut,
+                                 size_t nameOutCapacity) {
+  if (entries == nullptr || mac == nullptr || nameOut == nullptr ||
+      nameOutCapacity == 0) {
+    return false;
+  }
+  nameOut[0] = '\0';
+  for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
+    if (preferredScaleMacEqual(entries[i].mac, mac)) {
+      strncpy(nameOut, entries[i].name, nameOutCapacity - 1);
+      nameOut[nameOutCapacity - 1] = '\0';
+      return true;
+    }
+  }
+  return false;
+}
+
 enum class StaIpMode : uint8_t { DHCP = 0, STATIC = 1 };
 
 enum class StaConfigState : uint8_t { CONFIRMED = 0, PENDING = 1 };
@@ -1591,6 +1748,7 @@ enum class WebCommandType : uint8_t {
   FACTORY_RESET,
   CLEAR_SHOT_LOG,
   CLEAR_PREFERRED_SCALE,
+  SELECT_PREFERRED_SCALE,
   PERSIST_RUNTIME,
   START_WIFI_SCAN,
   BUZZER_TEST,
@@ -1623,6 +1781,8 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::CLEAR_SHOT_LOG: return "clear shot history";
     case WebCommandType::CLEAR_PREFERRED_SCALE:
       return "forget paired scale";
+    case WebCommandType::SELECT_PREFERRED_SCALE:
+      return "select preferred scale";
     case WebCommandType::PERSIST_RUNTIME: return "persist workflow";
     case WebCommandType::START_WIFI_SCAN: return "scan Wi-Fi networks";
     case WebCommandType::BUZZER_TEST: return "buzzer test";
@@ -1667,6 +1827,9 @@ struct WebCommand {
   uint8_t staGateway[4] = {};
   uint8_t staDns1[4] = {};
   uint8_t staDns2[4] = {};
+  // SELECT_PREFERRED_SCALE payload (also safe unused for other commands).
+  char scaleSelectMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+  char scaleSelectName[PREFERRED_SCALE_NAME_CAPACITY] = {};
   bool succeeded = false;
   CommandResultState resultState = CommandResultState::NONE;
 };
@@ -1843,6 +2006,7 @@ struct ControlStatusSnapshot {
   char scaleProtocol[20] = "none";
   char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
   char preferredScaleName[PREFERRED_SCALE_NAME_CAPACITY] = {};
+  ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY] = {};
   uint32_t scaleMacCachePauseRemainingMs = 0;
   bool noScaleShotGuardEnabled = true;
   bool noScaleShotGuardArmed = true;

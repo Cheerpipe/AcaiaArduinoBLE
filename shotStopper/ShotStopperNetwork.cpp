@@ -410,6 +410,7 @@ esp_err_t sendJsonStringChunk(httpd_req_t *request, const char *value) {
 
 char g_statusResponseBuffer[7680];
 char g_presetsStatusJson[2800];
+char g_scaleHistoryJson[1400];
 
 void sanitizeJsonEmbed(const char *input, char *output, size_t capacity) {
   if (capacity == 0) {
@@ -527,6 +528,9 @@ void ShotStopperNetwork::mergePreferredScaleMac(PersistedSettings &settings) {
   if (callbacks_.copyPreferredScaleName != nullptr) {
     callbacks_.copyPreferredScaleName(settings.preferredScaleName,
                                       sizeof(settings.preferredScaleName));
+  }
+  if (callbacks_.copyScaleHistory != nullptr) {
+    callbacks_.copyScaleHistory(settings.scaleHistory);
   }
 }
 
@@ -1972,6 +1976,8 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/config", HTTP_POST, configHandler) &&
       registerHandler(server_, "/api/v1/scale/preferred/clear", HTTP_POST,
                       preferredScaleClearHandler) &&
+      registerHandler(server_, "/api/v1/scale/preferred/select", HTTP_POST,
+                      preferredScaleSelectHandler) &&
       registerHandler(server_, "/api/v1/presets", HTTP_POST, presetsHandler) &&
       registerHandler(server_, "/api/v1/calibration/reset", HTTP_POST,
                       resetCalibrationHandler) &&
@@ -2661,6 +2667,40 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       g_presetsStatusJson[used] = 0;
     }
   }
+  g_scaleHistoryJson[0] = '[';
+  g_scaleHistoryJson[1] = ']';
+  g_scaleHistoryJson[2] = 0;
+  {
+    size_t used = 0;
+    int n = snprintf(g_scaleHistoryJson, sizeof(g_scaleHistoryJson), "[");
+    if (n > 0) {
+      used = static_cast<size_t>(n);
+    }
+    bool first = true;
+    for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
+      const ScaleHistoryEntry &entry = control.scaleHistory[i];
+      if (entry.mac[0] == '\0') {
+        continue;
+      }
+      char safeMac[PREFERRED_SCALE_MAC_CAPACITY * 2] = {};
+      char safeName[PREFERRED_SCALE_NAME_CAPACITY * 2] = {};
+      sanitizeJsonEmbed(entry.mac, safeMac, sizeof(safeMac));
+      sanitizeJsonEmbed(entry.name, safeName, sizeof(safeName));
+      n = snprintf(g_scaleHistoryJson + used, sizeof(g_scaleHistoryJson) - used,
+                   "%s{\"mac\":\"%s\",\"name\":\"%s\"}", first ? "" : ",",
+                   safeMac, safeName);
+      if (n <= 0 ||
+          static_cast<size_t>(n) >= sizeof(g_scaleHistoryJson) - used) {
+        break;
+      }
+      used += static_cast<size_t>(n);
+      first = false;
+    }
+    if (used + 1 < sizeof(g_scaleHistoryJson)) {
+      g_scaleHistoryJson[used++] = ']';
+      g_scaleHistoryJson[used] = 0;
+    }
+  }
   const int written = snprintf(
       g_statusResponseBuffer, sizeof(g_statusResponseBuffer),
       "{\"firmwareVersion\":\"%s\",\"state\":\"%s\",\"stateLabel\":\"%s\","
@@ -2733,7 +2773,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"lastDisconnectReason\":%u,"
       "\"lastDisconnectReasonName\":\"%s\",\"eventsDropped\":%lu,"
       "\"preferredMac\":\"%s\",\"preferredName\":\"%s\","
-      "\"macCachePauseRemainingMs\":%lu},"
+      "\"macCachePauseRemainingMs\":%lu,\"history\":%s},"
       "\"lastCycle\":{\"valid\":%s,"
       "\"durationMs\":%lu,\"endReason\":\"%s\","
       "\"lastWeightG\":%s,\"weightAgeMs\":%lu},"
@@ -2886,6 +2926,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(control.scaleEventsDropped),
       safePreferredScaleMac, safePreferredScaleName,
       static_cast<unsigned long>(control.scaleMacCachePauseRemainingMs),
+      g_scaleHistoryJson,
       control.lastCycle.valid ? "true" : "false",
       static_cast<unsigned long>(control.lastCycle.durationMs),
       endReasonName(control.lastCycle.endReason), lastWeight,
@@ -3577,6 +3618,64 @@ esp_err_t ShotStopperNetwork::preferredScaleClearHandler(httpd_req_t *request) {
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; nothing was cleared.");
+  }
+  return self.sendAccepted(request, command.requestId);
+}
+
+esp_err_t ShotStopperNetwork::preferredScaleSelectHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authenticate(request, true)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
+                     "Invalid session or CSRF token.");
+  }
+  ControlStatusSnapshot status;
+  self.callbacks_.copyControlStatus(status);
+  if (!controlAllowsConfiguration(status)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "The preferred scale cannot be changed while a cycle "
+                     "is active.");
+  }
+
+  char body[REQUEST_BODY_CAPACITY] = {};
+  if (!readJsonBody(request, body)) {
+    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
+                     "A bounded JSON request is required.");
+  }
+  cJSON *root = cJSON_Parse(body);
+  char mac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+  char name[PREFERRED_SCALE_NAME_CAPACITY] = {};
+  const char *parseError = nullptr;
+  if (root == nullptr) {
+    parseError = "JSON body is required.";
+  } else if (!jsonString(root, "mac", mac, sizeof(mac), true)) {
+    parseError = "mac must be a string (empty clears the preferred scale).";
+  } else if (mac[0] != '\0' && !validPreferredScaleMac(mac)) {
+    parseError = "mac must be empty or a BLE address AA:BB:CC:DD:EE:FF.";
+  } else {
+    cJSON *nameItem = cJSON_GetObjectItemCaseSensitive(root, "name");
+    if (nameItem != nullptr) {
+      if (!jsonString(root, "name", name, sizeof(name), true) ||
+          !validPreferredScaleName(name)) {
+        parseError = "name contains unsupported characters.";
+      }
+    }
+  }
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  if (parseError != nullptr) {
+    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST", parseError);
+  }
+
+  WebCommand command;
+  command.type = WebCommandType::SELECT_PREFERRED_SCALE;
+  command.requestId = self.allocateRequestId();
+  strncpy(command.scaleSelectMac, mac, sizeof(command.scaleSelectMac) - 1);
+  strncpy(command.scaleSelectName, name, sizeof(command.scaleSelectName) - 1);
+  if (!self.callbacks_.enqueueWebCommand(command)) {
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
+                     "Control is busy; nothing was selected.");
   }
   return self.sendAccepted(request, command.requestId);
 }
