@@ -167,9 +167,11 @@ routed by **Output channel** when a local buzzer is compiled in.
 | **Paddle-off reminder** | Repeat beeps while the **physical paddle stays ON** and **CN9 is open** (default ON). |
 | **Paddle reminder interval (s)** | Time between reminder beeps (5–60 s; default 10 s). |
 | **Paddle reminder limit (min)** | Stop beeping after this duration even if the paddle remains ON (1–60 min; default 15 min). |
-| **Scale lost / ATM / manual-no-scale** | Triple beeps on the local buzzer (shown with buzzer support; disabled when Output channel is Scale only). |
-| **Scale connected** | Distinctive echo when a scale connects or reconnects. Shown only when Output channel is **Buzzer only** (default ON). |
-| **Extended shot pulse** | Local-buzzer pulses while Fast or Slow extraction guard keeps the shot running past the normal BBW cut. Dropdown: Disabled, Slow, Medium, **Fast (default)**, Rapid. Shown with buzzer support; disabled when Output channel is Scale only. Active and passive buzzers use the same on/off timing. |
+| **Scale lost** | Echo inverted on the local buzzer when the scale disconnects (idle or during a shot). Shown with buzzer support; disabled when Output channel is Scale only. |
+| **ATM / manual-no-scale** | Triple beeps on the local buzzer when A→M ends or when BBW needs a scale that is missing. Shown with buzzer support; disabled when Output channel is Scale only. |
+| **Scale connected** | Distinctive echo when a scale connects or reconnects. Buzzer only or Scale priority (always local buzzer; default ON). |
+| **Extended shot pulse** | Local-buzzer pulses while Fast extraction guard keeps the shot running past the normal BBW cut. Dropdown: Disabled, Slow, Medium, **Fast (default)**, Rapid. Shown with buzzer support; disabled when Output channel is Scale only. |
+| **Slow extended pulse** | Same rate dropdown for Slow extraction guard (past max brew time until min recovery weight). Default Fast. |
 
 Shot completion still adds one extra beep after stop (not configurable). Without
 buzzer support, Output channel and the triple checkboxes are hidden.
@@ -356,11 +358,13 @@ flag or set `=0` for builds without that hardware. Output channel then defaults
 to **Scale only**.
 
 When enabled, Alerts shows **Output channel** (default **Buzzer only**; also
-Scale priority / Scale only) plus checkboxes for scale-lost / ATM-end / manual-without-scale
-triple beeps, **Scale connected** (Buzzer only, default ON), and **Extended shot pulse**
-(Disabled / Slow / Medium / Fast / Rapid; default Fast). All alert events (including
-tare/start/stop feedback when the channel routes to the buzzer) go through that
-setting. Debug short/long/double/triple, Slow/Medium/Fast/Rapid (3 s), and
+Scale priority / Scale only) plus checkboxes for **Scale lost** (Echo inverted),
+ATM-end / manual-without-scale triple beeps, **Scale connected** (Echo; Buzzer
+only or Scale priority, default ON), **Extended shot pulse** (Fast extraction),
+and **Slow extended pulse** (each Disabled / Slow / Medium / Fast / Rapid;
+default Fast). All alert events (including tare/start/stop feedback when the
+channel routes to the buzzer) go through that setting. Debug
+short/long/double/triple, Slow/Medium/Fast/Rapid (3 s), and
 Chime/Swing/Echo/Echo inverted/Morse/Snap buttons play the same catalog as the live alerts.
 
 ## Optional hardware: WS2812B status LEDs (ALED)

@@ -238,6 +238,9 @@ const char *configValidationMessage(ConfigValidationError error) {
     case ConfigValidationError::EXTENDED_PULSE_RATE:
       return "Extended shot pulse must be disabled, slow, medium, fast, or "
              "rapid.";
+    case ConfigValidationError::SLOW_EXTENDED_PULSE_RATE:
+      return "Slow extended pulse must be disabled, slow, medium, fast, or "
+             "rapid.";
     case ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL:
       return "Bookoo scale volume must be disabled (0) or 1 to 5.";
     case ConfigValidationError::LAST_SHOT_COOLDOWN:
@@ -2899,6 +2902,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"buzzerManualNoScaleBeep\":%s,"
       "\"buzzerScaleConnectedBeep\":%s,"
       "\"buzzerExtendedPulseRate\":\"%s\","
+      "\"buzzerSlowExtendedPulseRate\":\"%s\","
       "\"alertOutputChannel\":\"%s\","
       "\"rinseGestureMs\":%lu,"
       "\"rinseDurationMs\":%lu,"
@@ -3040,6 +3044,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.config.buzzerManualNoScaleBeep ? "true" : "false",
       control.config.buzzerScaleConnectedBeep ? "true" : "false",
       extendedPulseRateId(control.config.buzzerExtendedPulseRate),
+      extendedPulseRateId(control.config.buzzerSlowExtendedPulseRate),
       alertOutputChannelId(control.config.alertOutputChannel),
       static_cast<unsigned long>(control.config.rinseGestureMs),
       static_cast<unsigned long>(control.config.rinseDurationMs),
@@ -3587,7 +3592,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
       "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
       "buzzerManualNoScaleBeep", "buzzerScaleConnectedBeep",
-      "buzzerExtendedPulseRate",
+      "buzzerExtendedPulseRate", "buzzerSlowExtendedPulseRate",
       "alertOutputChannel",
       "autoRetare", "retareWindowMs", "minimumCupWeightG",
       "retareStabilitySamples", "retareStabilityToleranceG",
@@ -3603,7 +3608,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "avoidBbwShotWithoutScale", "lastShotCooldownMs", "serialDebugOutput",
       "ringRetainLogLevel"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 47)) {
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 48)) {
     parseError =
         "Config must include exactly the expected fields with correct types.";
   } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
@@ -3655,6 +3660,11 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
                                     candidate.buzzerExtendedPulseRate)) {
     parseError =
         "buzzerExtendedPulseRate must be disabled, slow, medium, fast, or rapid.";
+  } else if (!jsonExtendedPulseRate(root, "buzzerSlowExtendedPulseRate",
+                                    candidate.buzzerSlowExtendedPulseRate)) {
+    parseError =
+        "buzzerSlowExtendedPulseRate must be disabled, slow, medium, fast, or "
+        "rapid.";
   } else if (!jsonAlertOutputChannel(root, "alertOutputChannel",
                                      candidate.alertOutputChannel,
                                      /*optional=*/true)) {

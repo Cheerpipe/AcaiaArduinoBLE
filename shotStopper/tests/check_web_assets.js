@@ -62,8 +62,13 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('buzzerManualNoScaleBeep') ||
     !ui.includes('buzzerScaleConnectedBeep') ||
     !ui.includes('buzzerExtendedPulseRate') ||
+    !ui.includes('buzzerSlowExtendedPulseRate') ||
     !html.includes('id="buzzerExtendedPulseRate"') ||
+    !html.includes('id="buzzerSlowExtendedPulseRate"') ||
     !html.includes('class="buzzerOpt scaleIncapableOpt">Extended shot pulse<select id="buzzerExtendedPulseRate"') ||
+    !html.includes('class="buzzerOpt scaleIncapableOpt">Slow extended pulse<select id="buzzerSlowExtendedPulseRate"') ||
+    !html.includes('> Scale lost<small class="fieldHint">Echo inverted when the scale disconnects') ||
+    html.includes('Scale lost (BBW)') ||
     !html.includes('option value="fast" selected') ||
     !html.includes('option value="rapid">Rapid') ||
     html.includes('id="buzzerExtendedPulseBeep"') ||
@@ -80,10 +85,8 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('id="bookooConnectBeepLevel"') ||
     !html.includes('id="bookooMuteOnBuzzerOnly" type="checkbox" checked') ||
     !html.includes('id="buzzerScaleConnectedBeep" type="checkbox" checked') ||
-    !html.includes('class="buzzerOpt buzzerOnlyOpt hidden"') ||
-    !ui.includes('function updateBuzzerOnlyAlertControls(') ||
-    !ui.includes("el.value==='buzzer_only'") ||
-    !ui.includes('querySelectorAll(\'.buzzerOnlyOpt\')') ||
+    !html.includes('class="buzzerOpt scaleIncapableOpt"><input id="buzzerScaleConnectedBeep"') ||
+    html.includes('buzzerOnlyOpt') ||
     !html.includes('option value="4" selected') ||
     !ui.includes('when Buzzer only is saved') ||
     !html.includes('Volume on connect/reconnect. <strong>Scale only or Scale priority.</strong>') ||
@@ -121,10 +124,11 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('"buzzerManualNoScaleBeep"') ||
     !network.includes('"buzzerScaleConnectedBeep"') ||
     !network.includes('"buzzerExtendedPulseRate"') ||
+    !network.includes('"buzzerSlowExtendedPulseRate"') ||
     !network.includes('"alertOutputChannel"') ||
     !network.includes('"bookooMuteOnBuzzerOnly"') ||
     !network.includes('"bookooConnectBeepLevel"') ||
-    !network.includes('fields, 47') ||
+    !network.includes('fields, 48') ||
     !network.includes('allowedCount > 64') ||
     !network.includes('uint64_t seen') ||
     !network.includes('WEB_UI_ASSET_TAG') ||
@@ -183,6 +187,7 @@ if (!network.includes('"firstDropBeep"') ||
     !ui.includes('/api/v1/time/sync') ||
     !firmware.includes('session.config.firstDropBeep') ||
     !firmware.includes('candidate.buzzerScaleConnectedBeep') ||
+    !firmware.includes('candidate.buzzerSlowExtendedPulseRate') ||
     !firmware.includes('localBuzzer') ||
     !firmware.includes('BUZZER_SUPPORT_ENABLED') ||
     !firmware.includes('BUZZER_GPIO') ||
@@ -1190,7 +1195,9 @@ if (!safeBeep.includes('return setBeepLevel(1)') ||
 }
 if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
     !firmware.includes('emitAlert(AlertEvent::SCALE_CONNECTED') ||
-    !firmware.includes('emitLocalAlertBuzzer(BuzzerPattern::ECHO)') ||
+    !firmware.includes('emitAlert(AlertEvent::SCALE_LOST') ||
+    !firmware.includes('BuzzerPattern::ECHO') ||
+    !firmware.includes('BuzzerPattern::ECHO_INVERTED') ||
     !firmware.includes('requestScaleBrewBeep(') ||
     !firmware.includes('cancelScaleBrewBeep(session.id)') ||
     !firmware.includes('onFirstDropsDetected') ||

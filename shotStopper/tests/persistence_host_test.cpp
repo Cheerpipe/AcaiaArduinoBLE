@@ -76,6 +76,8 @@ void p01_defaults_are_valid() {
         DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL);
   CHECK(settings.runtime.buzzerExtendedPulseRate ==
         static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE));
+  CHECK(settings.runtime.buzzerSlowExtendedPulseRate ==
+        static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE));
   CHECK(settings.runtime.avoidBbwShotWithoutScale);
   CHECK(settings.runtime.lastShotCooldownMs == DEFAULT_LAST_SHOT_COOLDOWN_MS);
   CHECK(!settings.runtime.serialDebugOutput);

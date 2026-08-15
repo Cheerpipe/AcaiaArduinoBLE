@@ -1618,8 +1618,12 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.buzzerScaleConnectedBeep);
   CHECK(config.buzzerExtendedPulseRate ==
         static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE));
+  CHECK(config.buzzerSlowExtendedPulseRate ==
+        static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE));
   CHECK(DEFAULT_EXTENDED_PULSE_RATE == ExtendedPulseRate::FAST);
   CHECK(buzzerPatternForExtendedPulseRate(config.buzzerExtendedPulseRate) ==
+        BuzzerPattern::PULSE_4HZ);
+  CHECK(buzzerPatternForExtendedPulseRate(config.buzzerSlowExtendedPulseRate) ==
         BuzzerPattern::PULSE_4HZ);
   CHECK(config.alertOutputChannel ==
         static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL));
@@ -1708,6 +1712,10 @@ void w03_runtime_timing_relations_are_transactional() {
   config.buzzerExtendedPulseRate = 9;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::EXTENDED_PULSE_RATE);
+  config = RuntimeConfig{};
+  config.buzzerSlowExtendedPulseRate = 9;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::SLOW_EXTENDED_PULSE_RATE);
   config = RuntimeConfig{};
   config.lastShotCooldownMs = MIN_LAST_SHOT_COOLDOWN_MS - 1;
   CHECK(validateRuntimeConfig(config) ==
@@ -2334,7 +2342,7 @@ void w50c_buzzer_phase_timer_advances_despite_loop_stall() {
   CHECK(localBuzzer.busy());
 }
 
-void w51_local_buzzer_triple_on_scale_lost_during_bbw() {
+void w51_local_buzzer_echo_inverted_on_scale_lost_during_bbw() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
@@ -2344,9 +2352,30 @@ void w51_local_buzzer_triple_on_scale_lost_during_bbw() {
         session.weightControlState == WeightControlState::VALIDATING);
   const uint32_t before = localBuzzer.acceptedRequests;
   setScaleConnected(false);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(localBuzzer.active == BuzzerPattern::ECHO_INVERTED);
   loop();
   CHECK(session.weightControlState == WeightControlState::SUSPENDED);
   CHECK(localBuzzer.acceptedRequests == before + 1);
+}
+
+void w51b_scale_lost_echo_inverted_when_idle() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  CHECK(!session.active);
+  const uint32_t before = localBuzzer.acceptedRequests;
+  setScaleConnected(false);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(localBuzzer.active == BuzzerPattern::ECHO_INVERTED);
+}
+
+void w51c_scale_lost_silent_when_flag_off() {
+  resetHarness(false, true);
+  runtimeConfig.buzzerScaleLostBeep = false;
+  reachReadyFromBoot();
+  const uint32_t before = localBuzzer.acceptedRequests;
+  setScaleConnected(false);
+  CHECK(localBuzzer.acceptedRequests == before);
 }
 
 void w52_local_buzzer_triple_on_manual_bbw_without_scale() {
@@ -2592,9 +2621,9 @@ void w56_atm_beep_queued_when_scale_lost_after_deadline() {
   setScaleConnected(false);
   loop();
   CHECK(session.endReason == EndReason::AUTO_TO_MANUAL_GUARD);
-  // Scale-lost TRIPLE + ATM TRIPLE (completion SINGLE is delayed ~200 ms).
+  // Scale-lost Echo inverted + ATM TRIPLE (completion SINGLE is delayed ~200 ms).
   CHECK(localBuzzer.acceptedRequests == before + 2);
-  // Drain ATM/scale-lost triples so the delayed completion SINGLE can start.
+  // Drain ATM/scale-lost alerts so the delayed completion SINGLE can start.
   for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
     runLoopAfter(40);
   }
@@ -2631,7 +2660,7 @@ void w64_buzzer_only_first_drop_uses_local_buzzer() {
   CHECK(!scaleBeepPending);
 }
 
-void w65_scale_only_mutes_scale_lost_triple() {
+void w65_scale_only_mutes_scale_lost() {
   resetHarness(false, true);
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::SCALE_ONLY);
@@ -2757,6 +2786,17 @@ void w84_pulse_train_yields_to_triple() {
   drainLocalBuzzer();
 }
 
+void w84b_echo_inverted_upgrades_weak_pending() {
+  resetHarness(false, false);
+  CHECK(localBuzzer.request(BuzzerPattern::SINGLE));
+  CHECK(localBuzzer.active == BuzzerPattern::SINGLE);
+  CHECK(localBuzzer.request(BuzzerPattern::DOUBLE));
+  CHECK(localBuzzer.pending == BuzzerPattern::DOUBLE);
+  CHECK(localBuzzer.request(BuzzerPattern::ECHO_INVERTED));
+  CHECK(localBuzzer.pending == BuzzerPattern::ECHO_INVERTED);
+  drainLocalBuzzer();
+}
+
 void w85_debug_pulse_rates_use_same_on_ms_and_3s() {
   resetHarness(false, false);
   reachReadyFromBoot();
@@ -2859,7 +2899,7 @@ void w92_parse_sequence_pattern_ids() {
   CHECK(parsed == BuzzerPattern::SNAP);
 }
 
-void w93_scale_connected_chime_on_buzzer_only_rising_edge() {
+void w93_scale_connected_echo_on_rising_edge() {
   resetHarness(false, false);
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
@@ -2874,11 +2914,20 @@ void w93_scale_connected_chime_on_buzzer_only_rising_edge() {
   setScaleConnected(true);
   CHECK(localBuzzer.acceptedRequests == afterConnect);
   setScaleConnected(false);
-  setScaleConnected(true);
   CHECK(localBuzzer.acceptedRequests == afterConnect + 1);
+  CHECK(localBuzzer.active == BuzzerPattern::ECHO_INVERTED ||
+        localBuzzer.pending == BuzzerPattern::ECHO_INVERTED);
+  for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
+    hostMillis += 40;
+    hostServiceEspTimer(localBuzzer.phaseTimer);
+    localBuzzer.service(hostMillis);
+  }
+  setScaleConnected(true);
+  CHECK(localBuzzer.acceptedRequests == afterConnect + 2);
+  CHECK(localBuzzer.active == BuzzerPattern::ECHO);
 }
 
-void w94_scale_connected_silent_when_flag_off_or_not_buzzer_only() {
+void w94_scale_connected_silent_when_flag_off_or_scale_only() {
   resetHarness(false, false);
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
@@ -2893,7 +2942,8 @@ void w94_scale_connected_silent_when_flag_off_or_not_buzzer_only() {
   runtimeConfig.buzzerScaleConnectedBeep = true;
   const uint32_t beforePriority = localBuzzer.acceptedRequests;
   setScaleConnected(true);
-  CHECK(localBuzzer.acceptedRequests == beforePriority);
+  CHECK(localBuzzer.acceptedRequests == beforePriority + 1);
+  CHECK(localBuzzer.active == BuzzerPattern::ECHO);
 
   resetHarness(false, false);
   runtimeConfig.alertOutputChannel =
@@ -3278,8 +3328,10 @@ void w81_scale_priority_failed_start_falls_back_after_disconnect() {
   CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
   const uint32_t before = localBuzzer.acceptedRequests;
   setScaleConnected(false);
-  CHECK(executeNextScaleCommand());
+  // Scale-lost Echo inverted on disconnect, then command fallback SINGLE.
   CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(executeNextScaleCommand());
+  CHECK(localBuzzer.acceptedRequests == before + 2);
 }
 
 void setHostPreferredScaleMac(const char *mac) {
@@ -5463,6 +5515,82 @@ void r61_slow_guard_extends_and_stops_at_min_weight() {
   CHECK(session.endReason == EndReason::SLOW_EXTRACTION_MIN_WEIGHT);
 }
 
+void r61b_slow_extended_pulse_uses_slow_rate_setting() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.slowExtractionGuardEnabled = true;
+  runtimeConfig.buzzerExtendedPulseRate =
+      static_cast<uint8_t>(ExtendedPulseRate::FAST);
+  runtimeConfig.buzzerSlowExtendedPulseRate =
+      static_cast<uint8_t>(ExtendedPulseRate::RAPID);
+  runtimeConfig.minRecoveryWeightG = 30.0f;
+  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  publishWeight(20.0f);
+  publishWeight(20.1f);
+  session.lastAcceptedWeightG = 20.1f;
+  currentWeight = 20.1f;
+  reachSessionElapsed(44000);
+  CHECK(session.slowExtractionExtended);
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_5HZ);
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.slowExtractionGuardEnabled = true;
+  runtimeConfig.buzzerExtendedPulseRate =
+      static_cast<uint8_t>(ExtendedPulseRate::FAST);
+  runtimeConfig.buzzerSlowExtendedPulseRate =
+      static_cast<uint8_t>(ExtendedPulseRate::OFF);
+  runtimeConfig.minRecoveryWeightG = 30.0f;
+  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  publishWeight(20.0f);
+  publishWeight(20.1f);
+  session.lastAcceptedWeightG = 20.1f;
+  currentWeight = 20.1f;
+  reachSessionElapsed(44000);
+  CHECK(session.slowExtractionExtended);
+  CHECK(!buzzerPatternIsPulseTrain(localBuzzer.active));
+}
+
+void r61c_extended_pulse_resumes_after_scale_lost_alert() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.fastExtractionGuardEnabled = true;
+  runtimeConfig.autoToManualGuardEnabled = false;
+  runtimeConfig.maxRecoveryWeightG = 42.5f;
+  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  runLoopAfter(22000);
+  const float threshold = effectiveStopThreshold();
+  publishWeight(threshold + 0.1f);
+  publishWeight(threshold + 0.2f);
+  CHECK(session.extractionExtended);
+  CHECK(session.active);
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_4HZ);
+  setScaleConnected(false);
+  CHECK(localBuzzer.active == BuzzerPattern::ECHO_INVERTED);
+  for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
+    hostMillis += 40;
+    hostServiceEspTimer(localBuzzer.phaseTimer);
+    localBuzzer.service(hostMillis);
+  }
+  CHECK(!localBuzzer.busy());
+  CHECK(session.active);
+  CHECK(session.extractionExtended);
+  serviceExtendedPulseAlert();
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_4HZ);
+}
+
 void r62_fast_extended_is_not_cut_by_slow() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -5627,6 +5755,8 @@ const TestCase testCases[] = {
     {"R59", r59_slow_guard_on_time_bbw_is_scale_threshold},
     {"R60", r60_slow_guard_cuts_at_max_time_when_above_floor},
     {"R61", r61_slow_guard_extends_and_stops_at_min_weight},
+    {"R61b", r61b_slow_extended_pulse_uses_slow_rate_setting},
+    {"R61c", r61c_extended_pulse_resumes_after_scale_lost_alert},
     {"R62", r62_fast_extended_is_not_cut_by_slow},
     {"R63", r63_slow_guard_disabled_continues_past_max_time},
     {"R64", r64_slow_guard_min_weight_cut_from_predicted_time},
@@ -5711,7 +5841,9 @@ const TestCase testCases[] = {
     {"W50", w50_local_buzzer_plays_triple_pattern_non_blocking},
     {"W50b", w50b_buzzer_phase_timer_holds_triple_rhythm_without_loop},
     {"W50c", w50c_buzzer_phase_timer_advances_despite_loop_stall},
-    {"W51", w51_local_buzzer_triple_on_scale_lost_during_bbw},
+    {"W51", w51_local_buzzer_echo_inverted_on_scale_lost_during_bbw},
+    {"W51b", w51b_scale_lost_echo_inverted_when_idle},
+    {"W51c", w51c_scale_lost_silent_when_flag_off},
     {"W52", w52_local_buzzer_triple_on_manual_bbw_without_scale},
     {"W53", w53_local_buzzer_silent_when_bbw_off_without_scale},
     {"NS01", ns01_armed_blocks_first_bbw_no_scale_shot},
@@ -5735,7 +5867,7 @@ const TestCase testCases[] = {
     {"W62", w62_local_buzzer_drive_matches_compile_flag},
     {"W63", w63_scale_priority_paddle_uses_scale_when_connected},
     {"W64", w64_buzzer_only_first_drop_uses_local_buzzer},
-    {"W65", w65_scale_only_mutes_scale_lost_triple},
+    {"W65", w65_scale_only_mutes_scale_lost},
     {"W66", w66_web_bookoo_debug_dispatches_actions},
     {"W67", w67_web_bookoo_debug_rejected_while_active},
     {"W68", w68_web_bookoo_debug_rejected_when_disconnected},
@@ -5755,6 +5887,7 @@ const TestCase testCases[] = {
     {"W82", w82_pulse_train_loops_until_deadline_or_stopIf},
     {"W83", w83_web_buzzer_test_pulse_uses_same_train_for_3s},
     {"W84", w84_pulse_train_yields_to_triple},
+    {"W84b", w84b_echo_inverted_upgrades_weak_pending},
     {"W85", w85_debug_pulse_rates_use_same_on_ms_and_3s},
     {"W86", w86_config_applies_to_ram_immediately_and_coalesces},
     {"W87", w87_nvs_fail_keeps_ram_and_requeues},
@@ -5762,8 +5895,8 @@ const TestCase testCases[] = {
     {"W89", w89_restart_flush_includes_live_and_aborts_on_fail},
     {"W91", w91_chime_sequence_uses_irregular_note_timings},
     {"W92", w92_parse_sequence_pattern_ids},
-    {"W93", w93_scale_connected_chime_on_buzzer_only_rising_edge},
-    {"W94", w94_scale_connected_silent_when_flag_off_or_not_buzzer_only},
+    {"W93", w93_scale_connected_echo_on_rising_edge},
+    {"W94", w94_scale_connected_silent_when_flag_off_or_scale_only},
     {"W95", w95_web_buzzer_test_plays_chime_sequence},
     {"W96", w96_echo_inverted_uses_long_bookend_tones},
     {"D01", d01_idle_scan_stays_enabled_between_ticks},

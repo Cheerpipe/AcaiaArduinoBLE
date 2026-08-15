@@ -423,7 +423,7 @@ inline AlertOutputChannel effectiveAlertOutputChannel(uint8_t stored) {
   return static_cast<AlertOutputChannel>(stored);
 }
 
-// Local-buzzer pulse rate while Fast extraction guard is in extended mode.
+// Local-buzzer pulse rate while Fast/Slow extraction guards are extended.
 enum class ExtendedPulseRate : uint8_t {
   // Named OFF (not DISABLED): ESP32 Arduino defines a DISABLED GPIO macro.
   OFF = 0,
@@ -773,6 +773,8 @@ struct RuntimeConfig {
   bool buzzerScaleConnectedBeep = true;
   uint8_t buzzerExtendedPulseRate =
       static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE);
+  uint8_t buzzerSlowExtendedPulseRate =
+      static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE);
   // scale_only | buzzer_only | scale_priority (ignored when buzzer not compiled).
   // Default: buzzer_only with SHOT_STOPPER_ENABLE_BUZZER, else scale_only.
   uint8_t alertOutputChannel =
@@ -944,6 +946,7 @@ enum class ConfigValidationError : uint8_t {
   SCALE_MAC_CACHE_MODE,
   ALERT_OUTPUT_CHANNEL,
   EXTENDED_PULSE_RATE,
+  SLOW_EXTENDED_PULSE_RATE,
   BOOKOO_CONNECT_BEEP_LEVEL,
   LAST_SHOT_COOLDOWN,
   RING_RETAIN_LOG_LEVEL
@@ -1214,6 +1217,9 @@ inline ConfigValidationError validateRuntimeConfig(
   if (!validExtendedPulseRate(config.buzzerExtendedPulseRate)) {
     return ConfigValidationError::EXTENDED_PULSE_RATE;
   }
+  if (!validExtendedPulseRate(config.buzzerSlowExtendedPulseRate)) {
+    return ConfigValidationError::SLOW_EXTENDED_PULSE_RATE;
+  }
   if (config.bookooConnectBeepLevel > BOOKOO_BEEP_LEVEL_MAX) {
     return ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL;
   }
@@ -1328,6 +1334,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "alertOutputChannel";
     case ConfigValidationError::EXTENDED_PULSE_RATE:
       return "buzzerExtendedPulseRate";
+    case ConfigValidationError::SLOW_EXTENDED_PULSE_RATE:
+      return "buzzerSlowExtendedPulseRate";
     case ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL:
       return "bookooConnectBeepLevel";
     case ConfigValidationError::LAST_SHOT_COOLDOWN:

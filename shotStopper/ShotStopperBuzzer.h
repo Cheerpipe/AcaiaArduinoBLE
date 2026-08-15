@@ -104,12 +104,13 @@ struct LocalBuzzer {
   portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
   void begin(uint8_t gpioPin);
-  // Starts immediately when idle, otherwise keeps one pending slot. TRIPLE
-  // upgrades any non-TRIPLE pending pattern; a weaker pattern is rejected
-  // while TRIPLE is pending. A finite pattern interrupts an active
-  // PULSE_TRAIN (and other pulse rates) so a looping cue cannot block
-  // alarms. durationMs is used only for pulse trains (0 = until stopIf).
-  // Returns false if unsupported, not ready, or not accepted.
+  // Starts immediately when idle, otherwise keeps one pending slot. High
+  // priority patterns (TRIPLE, ECHO, ECHO_INVERTED) upgrade any weaker pending
+  // pattern; a weaker pattern is rejected while a high-priority pattern is
+  // pending. A finite pattern interrupts an active PULSE_TRAIN (and other
+  // pulse rates) so a looping cue cannot block alarms. durationMs is used
+  // only for pulse trains (0 = until stopIf). Returns false if unsupported,
+  // not ready, or not accepted.
   bool request(BuzzerPattern pattern, uint32_t durationMs = 0);
   void stopIf(BuzzerPattern pattern);
   void service(uint32_t nowMs);
@@ -313,6 +314,11 @@ inline bool LocalBuzzer::startPattern(BuzzerPattern pattern, uint32_t nowMs) {
   return true;
 }
 
+inline bool buzzerPatternIsHighPriority(BuzzerPattern pattern) {
+  return pattern == BuzzerPattern::TRIPLE || pattern == BuzzerPattern::ECHO ||
+         pattern == BuzzerPattern::ECHO_INVERTED;
+}
+
 inline bool LocalBuzzer::request(BuzzerPattern pattern, uint32_t durationMs) {
   if (!BUZZER_SUPPORT_ENABLED || !ready || pattern == BuzzerPattern::NONE) {
     return false;
@@ -345,10 +351,10 @@ inline bool LocalBuzzer::request(BuzzerPattern pattern, uint32_t durationMs) {
     pendingDurationMs = durationMs;
     ++acceptedRequests;
     accepted = true;
-  } else if (pattern == BuzzerPattern::TRIPLE &&
-             pending != BuzzerPattern::TRIPLE) {
-    pending = BuzzerPattern::TRIPLE;
-    pendingDurationMs = 0;
+  } else if (buzzerPatternIsHighPriority(pattern) &&
+             !buzzerPatternIsHighPriority(pending)) {
+    pending = pattern;
+    pendingDurationMs = buzzerPatternIsPulseTrain(pattern) ? durationMs : 0;
     accepted = true;
   } else {
     accepted = pattern == pending;

@@ -1019,6 +1019,10 @@ void setScaleLinkState(ScaleLinkState state) {
     if (state == ScaleLinkState::CONNECTED &&
         runtimeConfig.buzzerScaleConnectedBeep) {
       emitAlert(AlertEvent::SCALE_CONNECTED);
+    } else if (previous == ScaleLinkState::CONNECTED &&
+               state != ScaleLinkState::CONNECTED &&
+               runtimeConfig.buzzerScaleLostBeep) {
+      emitAlert(AlertEvent::SCALE_LOST);
     }
   }
 }
@@ -1085,11 +1089,6 @@ void setWeightControlState(WeightControlState state) {
                     static_cast<int32_t>(
                         session.autoToManualGuardDeadlineAtMs -
                         session.startedAtMs));
-    }
-    if (runtimeConfig.buzzerScaleLostBeep && session.active &&
-        (previous == WeightControlState::ACTIVE ||
-         previous == WeightControlState::VALIDATING)) {
-      emitAlert(AlertEvent::SCALE_LOST);
     }
   } else if (state == WeightControlState::ACTIVE &&
              (previous == WeightControlState::SUSPENDED ||
@@ -2254,7 +2253,7 @@ void enterSlowExtractionExtended(float weightG, uint32_t atMs) {
                 static_cast<int32_t>(elapsedMs(session.startedAtMs)));
   (void)atMs;
   if (buzzerPatternForExtendedPulseRate(
-          runtimeConfig.buzzerExtendedPulseRate) != BuzzerPattern::NONE) {
+          runtimeConfig.buzzerSlowExtendedPulseRate) != BuzzerPattern::NONE) {
     emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
   }
   calculateExpectedEndTime();
@@ -3256,9 +3255,10 @@ bool startPulseTrain(BuzzerPattern pattern, uint32_t durationMs) {
 }
 
 bool startExtendedPulseTrain(uint32_t durationMs) {
-  return startPulseTrain(
-      buzzerPatternForExtendedPulseRate(runtimeConfig.buzzerExtendedPulseRate),
-      durationMs);
+  const uint8_t rate = session.slowExtractionExtended
+                           ? runtimeConfig.buzzerSlowExtendedPulseRate
+                           : runtimeConfig.buzzerExtendedPulseRate;
+  return startPulseTrain(buzzerPatternForExtendedPulseRate(rate), durationMs);
 }
 
 void stopPulseTrains() {
@@ -3302,20 +3302,20 @@ bool queueScaleIndependentAlert(AlertEvent event, uint32_t cycleId) {
 // Independent / multi-tone alerts: first drop, paddle, completion, triples.
 bool emitAlert(AlertEvent event, uint32_t cycleId) {
   const AlertOutputChannel channel = currentAlertOutputChannel();
-  if (event == AlertEvent::SCALE_CONNECTED) {
-    if (channel != AlertOutputChannel::BUZZER_ONLY) {
-      return false;
-    }
-    return emitLocalAlertBuzzer(BuzzerPattern::ECHO);
-  }
   const bool scaleCapable = alertEventScaleCapable(event);
   BuzzerPattern buzzerPattern = BuzzerPattern::SINGLE;
-  if (event == AlertEvent::SCALE_LOST || event == AlertEvent::ATM_END ||
-      event == AlertEvent::MANUAL_NO_SCALE) {
+  if (event == AlertEvent::SCALE_CONNECTED) {
+    buzzerPattern = BuzzerPattern::ECHO;
+  } else if (event == AlertEvent::SCALE_LOST) {
+    buzzerPattern = BuzzerPattern::ECHO_INVERTED;
+  } else if (event == AlertEvent::ATM_END ||
+             event == AlertEvent::MANUAL_NO_SCALE) {
     buzzerPattern = BuzzerPattern::TRIPLE;
   } else if (event == AlertEvent::EXTENDED_PULSE) {
-    buzzerPattern =
-        buzzerPatternForExtendedPulseRate(runtimeConfig.buzzerExtendedPulseRate);
+    const uint8_t rate = session.slowExtractionExtended
+                             ? runtimeConfig.buzzerSlowExtendedPulseRate
+                             : runtimeConfig.buzzerExtendedPulseRate;
+    buzzerPattern = buzzerPatternForExtendedPulseRate(rate);
     if (buzzerPattern == BuzzerPattern::NONE) {
       return false;
     }
@@ -3484,10 +3484,12 @@ void cancelScaleCompletionBeep() {
 }
 
 void serviceExtendedPulseAlert() {
-  const BuzzerPattern pattern =
-      buzzerPatternForExtendedPulseRate(runtimeConfig.buzzerExtendedPulseRate);
+  const uint8_t rate = session.slowExtractionExtended
+                           ? runtimeConfig.buzzerSlowExtendedPulseRate
+                           : runtimeConfig.buzzerExtendedPulseRate;
+  const BuzzerPattern pattern = buzzerPatternForExtendedPulseRate(rate);
   const bool want =
-      BUZZER_SUPPORT_ENABLED && localBuzzer.ready &&       session.active &&
+      BUZZER_SUPPORT_ENABLED && localBuzzer.ready && session.active &&
       (session.extractionExtended || session.slowExtractionExtended) &&
       pattern != BuzzerPattern::NONE &&
       currentAlertOutputChannel() != AlertOutputChannel::SCALE_ONLY;
@@ -5379,6 +5381,8 @@ void processWebCommand(const WebCommand &command) {
       candidate.buzzerScaleConnectedBeep =
           command.config.buzzerScaleConnectedBeep;
       candidate.buzzerExtendedPulseRate = command.config.buzzerExtendedPulseRate;
+      candidate.buzzerSlowExtendedPulseRate =
+          command.config.buzzerSlowExtendedPulseRate;
       candidate.alertOutputChannel = command.config.alertOutputChannel;
       candidate.bookooMuteOnBuzzerOnly = command.config.bookooMuteOnBuzzerOnly;
       candidate.bookooConnectBeepLevel = command.config.bookooConnectBeepLevel;
