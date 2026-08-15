@@ -981,6 +981,11 @@ if (!network.includes('recv_wait_timeout = 2') ||
   throw new Error(
       'HTTP recv/send wait timeouts must stay short so LRU can free stalled sockets');
 }
+const maxReqHdrMatch = network.match(/max_req_hdr_len\s*=\s*(\d+)/);
+if (!maxReqHdrMatch || Number(maxReqHdrMatch[1]) < 2048) {
+  throw new Error(
+      'HTTP server must allow at least 2048 request header bytes (Safari UA/Cookie 431)');
+}
 const maxRespHeadersMatch = network.match(/max_resp_headers\s*=\s*(\d+)/);
 if (!maxRespHeadersMatch || Number(maxRespHeadersMatch[1]) < 12) {
   throw new Error('HTTP server must allow at least 12 response headers for gzip and ETag');

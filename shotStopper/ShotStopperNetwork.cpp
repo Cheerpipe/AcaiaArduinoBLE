@@ -2095,6 +2095,10 @@ bool ShotStopperNetwork::startHttpServer() {
   // works. ESP-IDF uses (max_open_sockets + 3) LWIP sockets total.
   config.max_open_sockets = 10;
   config.max_uri_handlers = 36;
+  // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
+  // the IDF default (1024) is enough most of the time but intermittent POSTs
+  // (heartbeat) have returned 431 Request Header Fields Too Large.
+  config.max_req_hdr_len = 2048;
   config.max_resp_headers = 12;
   config.backlog_conn = 10;
   config.lru_purge_enable = true;
