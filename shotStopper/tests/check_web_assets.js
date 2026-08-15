@@ -1075,6 +1075,19 @@ if (stopSoftAp.includes('WiFi.mode(WIFI_STA)')) {
   throw new Error(
       'stopSoftApKeepStation must not force WIFI_STA and risk dropping the STA link');
 }
+if (!stopSoftAp.includes('stopHttpServer()')) {
+  throw new Error(
+      'stopSoftApKeepStation must stop HTTP so STA rebind can restart the server');
+}
+if (network.includes('raising SoftAP and retrying STA')) {
+  throw new Error(
+      'STA disconnect must retry station before raising SoftAP');
+}
+if (!network.includes('retrying STA before SoftAP') ||
+    !network.includes('STA_CONNECT_TIMEOUT_MS')) {
+  throw new Error(
+      'SoftAP with credentials must wait for STA_CONNECT_TIMEOUT after STA-first attempts');
+}
 if (!network.includes('!status.apActive') ||
     !network.includes('STA_CONNECT_TIMEOUT_MS')) {
   throw new Error(

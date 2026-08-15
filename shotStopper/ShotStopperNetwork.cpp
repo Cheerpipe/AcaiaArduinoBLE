@@ -1038,11 +1038,14 @@ void ShotStopperNetwork::stopSoftApKeepStation() {
     return;
   }
   // Keep WIFI_AP_STA (or current mode) after SoftAP stop so the fresh STA
-  // association is not reset by a mode switch to WIFI_STA.
+  // association is not reset by a mode switch to WIFI_STA. Always tear down
+  // HTTP so the next startHttpServer() rebinds on the STA interface.
   WiFi.softAPdisconnect(true);
+  stopHttpServer();
   portENTER_CRITICAL(&dataMux_);
   status_.apActive = false;
   status_.apClients = 0;
+  status_.networkActive = false;
   status_.windowRemainingMs = 0;
   portEXIT_CRITICAL(&dataMux_);
   log(DebugCategory::NETWORK, DebugCode::AP_STOPPED);
@@ -1170,22 +1173,15 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       stopNtp();
       staNtpEligibleAtMs_ = 0;
       g_wallClock.markDisabled();
+      // STA-first on link loss: retry station before raising SoftAP.
+      staConnectStartedAtMs_ = now;
       staReconnectAttemptAtMs_ = now;
       if (serialDebugEnabled()) {
         Serial.println(
-            "WiFi STA disconnected; raising SoftAP and retrying STA");
+            "WiFi STA disconnected; retrying STA before SoftAP");
       }
-      if (!ensureAccessPoint(now)) {
-        startupComplete_ = false;
-        if (startupFailures_ < UINT8_MAX) {
-          ++startupFailures_;
-        }
-        networkRetryAtMs_ = now + NETWORK_RETRY_MIN_MS;
-        portENTER_CRITICAL(&dataMux_);
-        status_.startupFailures = startupFailures_;
-        portEXIT_CRITICAL(&dataMux_);
-        log(DebugCategory::NETWORK, DebugCode::NETWORK_RETRY,
-            startupFailures_, NETWORK_RETRY_MIN_MS);
+      if (!wifiScanInProgress()) {
+        beginStationConnect(settingsCopy(), now);
       }
       return;
     }
@@ -1272,7 +1268,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       static_cast<uint32_t>(now - staConnectStartedAtMs_) >=
           STA_CONNECT_TIMEOUT_MS &&
       !status.apActive) {
-    // STA-first bootstrap only: raise SoftAP after the first-connect window.
+    // STA-first: raise SoftAP only after the connect window without a link.
     if (wifiScanInProgress()) {
       return;
     }
@@ -1331,6 +1327,30 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
     return;
   }
 
+  // SoftAP after STA window while still DISCONNECTED/FAILED (e.g. scan delayed
+  // the reconnect begin). Never raise SoftAP immediately on link loss.
+  if (!status.apActive &&
+      (status.staState == StaState::DISCONNECTED ||
+       status.staState == StaState::FAILED) &&
+      static_cast<uint32_t>(now - staConnectStartedAtMs_) >=
+          STA_CONNECT_TIMEOUT_MS &&
+      !wifiScanInProgress()) {
+    if (!ensureAccessPoint(now)) {
+      startupComplete_ = false;
+      if (startupFailures_ < UINT8_MAX) {
+        ++startupFailures_;
+      }
+      networkRetryAtMs_ = now + NETWORK_RETRY_MIN_MS;
+      portENTER_CRITICAL(&dataMux_);
+      status_.startupFailures = startupFailures_;
+      portEXIT_CRITICAL(&dataMux_);
+      log(DebugCategory::NETWORK, DebugCode::NETWORK_RETRY,
+          startupFailures_, NETWORK_RETRY_MIN_MS);
+      return;
+    }
+    staReconnectAttemptAtMs_ = now;
+  }
+
   if (status.staState == StaState::CONNECTING && status.apActive &&
       !wifiScanInProgress()) {
     const wl_status_t wifiStatus = WiFi.status();
@@ -1348,24 +1368,6 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       if (serialDebugEnabled() && terminalFail) {
         Serial.println("WiFi STA recovery attempt ended; will retry");
       }
-      return;
-    }
-  }
-
-  if (!status.apActive &&
-      (status.staState == StaState::DISCONNECTED ||
-       status.staState == StaState::FAILED)) {
-    if (!ensureAccessPoint(now)) {
-      startupComplete_ = false;
-      if (startupFailures_ < UINT8_MAX) {
-        ++startupFailures_;
-      }
-      networkRetryAtMs_ = now + NETWORK_RETRY_MIN_MS;
-      portENTER_CRITICAL(&dataMux_);
-      status_.startupFailures = startupFailures_;
-      portEXIT_CRITICAL(&dataMux_);
-      log(DebugCategory::NETWORK, DebugCode::NETWORK_RETRY,
-          startupFailures_, NETWORK_RETRY_MIN_MS);
       return;
     }
   }

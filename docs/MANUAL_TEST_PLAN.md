@@ -21,7 +21,8 @@ Perform all relay and CN9 tests on a bench first. Do not connect CN9 to the mach
 | M14b | Save valid static IP and restart; sign in within 3 min. | STA uses configured IP; status shows static mode; config becomes CONFIRMED. |
 | M14c | Save unreachable/wrong static IP (or skip sign-in for 3 min). | Pending config reverts to last-known-good (or clears STA); SoftAP recovery is available and STA retries continue when credentials remain. |
 | M15 | Save invalid/unreachable STA credentials and restart. | After the attempt timeout, SoftAP is available and STA association retries continue while SoftAP stays up. |
-| M15b | With confirmed STA online, disable the home AP / force a link drop. | SoftAP returns while the device keeps retrying STA; SoftAP stops again after STA recovers. |
+| M15b | With confirmed STA online, disable the home AP / force a link drop for less than ~15 s, then restore it. | SoftAP does not appear; STA recovers and Web UI stays on the STA IP. |
+| M15c | With confirmed STA online, disable the home AP for more than ~15 s. | SoftAP returns after the STA-first window while STA retries continue; SoftAP stops again after STA recovers and Web UI responds on the STA IP. |
 | M16 | Scan Wi-Fi in Ready, then start a physical cycle. | Scan is cancelled; control and relay behavior are unaffected. |
 | M17 | On the remote-control opt-in build, leave a browser virtual paddle ON, then close/disconnect it. | Heartbeat timeout safely opens CN9. |
 | M18 | Reset or remove controller power while measuring relay COM/NO. | Contact remains open; there is no unintended close pulse. |
