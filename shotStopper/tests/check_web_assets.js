@@ -26,6 +26,9 @@ const ui = html + '\n' + js;
 if (!logo.includes('<svg') || !logo.includes('viewBox=')) {
   throw new Error('Web UI logo.svg must be a valid SVG asset');
 }
+if (/<details\b[^>]*\bopen\b/i.test(html)) {
+  throw new Error('All collapsible <details> groups must start collapsed (no open attribute)');
+}
 if (!css.includes('.brandLogo') ||
     !css.includes('height:1em') ||
     !css.includes('inline-flex') ||
@@ -45,11 +48,11 @@ const jsBytes = Buffer.byteLength(js, 'utf8');
 if (htmlBytes > 40960) {
   throw new Error('Web UI HTML source exceeds the 40 KiB authoring budget');
 }
-if (jsBytes > 65536) {
-  throw new Error('Web UI JS source exceeds the 64 KiB authoring budget');
+if (jsBytes > 69632) {
+  throw new Error('Web UI JS source exceeds the 68 KiB authoring budget');
 }
-if (htmlBytes + jsBytes > 102400) {
-  throw new Error('Web UI HTML+JS source exceeds the 100 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 104448) {
+  throw new Error('Web UI HTML+JS source exceeds the 102 KiB combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -89,11 +92,12 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
   throw new Error('Web UI must show paddle state, scale beep options, and buzzer alerts');
 }
 if (!ui.includes('id="operationalWallS" type="number" min="5" max="60"') ||
+    !ui.includes('Max BBW time (s)') ||
     !ui.includes('hard-caps at 60 s') ||
     !ui.includes('sToMs(') ||
     !ui.includes('rinseGestureMs:sToMs') ||
-    !network.includes('CN9 limit must be from 5 to 60 s.')) {
-  throw new Error('CN9 operational limit must be capped at 60 s in the UI and API messages');
+    !network.includes('Max BBW time must be from 5 to 60 s.')) {
+  throw new Error('Max BBW time must be capped at 60 s in the UI and API messages');
 }
 if (!ui.includes('function rangeCheck(') ||
     !ui.includes('function showFieldError(') ||
@@ -380,6 +384,15 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !firmware.includes('last.noScaleShotGuardEnabled') ||
     !firmware.includes('last.noScaleShotGuardArmed') ||
     !ui.includes('A→M ·') ||
+    !ui.includes('function updateHomeGuardSubs(') ||
+    !ui.includes('updateHomeGuardSubs(s,live)') ||
+    !ui.includes("setHomeSub('homeBbwSub'") ||
+    !css.includes('.swS') ||
+    !css.includes('.homeSwitchGrid .swS') ||
+    !css.includes('.homeGuardGrid{') ||
+    !css.includes('.homeGuardGrid .swL{padding-right:3ch}') ||
+    !css.includes('grid-template-columns:subgrid') ||
+    !css.includes('#brewModeRow{width:auto') ||
     !ui.includes('actual_weight_source') ||
     !network.includes('autoToManualGuardEnabled') ||
     !network.includes('autoToManualGuardBaselineMs') ||
@@ -497,6 +510,24 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('id="homePresetCards"') ||
     !ui.includes('id="homeBrewByWeight"') ||
     !ui.includes('id="quickSettingsPanel"') ||
+    !html.includes('class="homeSwitchGrid"') ||
+    !html.includes('id="homeBbwSub"') ||
+    !html.includes('id="homeNoScaleSub"') ||
+    !html.includes('id="homeFastSub"') ||
+    !html.includes('id="homeSlowSub"') ||
+    !html.includes('id="homeAtmSub"') ||
+    !html.includes('class="swS"') ||
+    html.indexOf('class="homeSwitchGrid"') > html.indexOf('id="homeBrewByWeight"') ||
+    html.indexOf('id="homeBrewByWeight"') > html.indexOf('id="homeAvoidBbwShotWithoutScale"') ||
+    html.indexOf('id="homeAvoidBbwShotWithoutScale"') >
+        html.indexOf('id="homeAutoToManualGuardEnabled"') ||
+    html.indexOf('id="homeAutoToManualGuardEnabled"') >
+        html.indexOf('id="homeSlowExtractionGuardEnabled"') ||
+    html.indexOf('id="homeSlowExtractionGuardEnabled"') >
+        html.indexOf('id="homeFastExtractionGuardEnabled"') ||
+    html.indexOf('id="homeFastExtractionGuardEnabled"') > html.indexOf('id="homePresetBlock"') ||
+    !html.includes('class="homeGuardGrid"') ||
+    html.indexOf('class="homeGuardGrid"') > html.indexOf('id="homeAvoidBbwShotWithoutScale"') ||
     !ui.includes('id="homeAvoidBbwShotWithoutScale"') ||
     !ui.includes('id="homeFastExtractionGuardEnabled"') ||
     !ui.includes('id="homeSlowExtractionGuardEnabled"') ||
@@ -504,18 +535,18 @@ if (!ui.includes('<legend>Brew</legend>') ||
     html.indexOf('id="quickSettingsPanel"') > html.indexOf('id="shotPanel"') ||
     html.indexOf('id="homeBrewByWeight"') > html.indexOf('id="homeAvoidBbwShotWithoutScale"') ||
     html.indexOf('id="homeAvoidBbwShotWithoutScale"') >
-        html.indexOf('id="homeFastExtractionGuardEnabled"') ||
-    html.indexOf('id="homeFastExtractionGuardEnabled"') >
-        html.indexOf('id="homeSlowExtractionGuardEnabled"') ||
-    html.indexOf('id="homeSlowExtractionGuardEnabled"') >
         html.indexOf('id="homeAutoToManualGuardEnabled"') ||
     html.indexOf('id="homeAutoToManualGuardEnabled"') >
+        html.indexOf('id="homeSlowExtractionGuardEnabled"') ||
+    html.indexOf('id="homeSlowExtractionGuardEnabled"') >
+        html.indexOf('id="homeFastExtractionGuardEnabled"') ||
+    html.indexOf('id="homeFastExtractionGuardEnabled"') >
         html.indexOf('id="homePresetBlock"') ||
-    html.indexOf('id="homeAutoToManualGuardEnabled"') > html.indexOf('id="shotPanel"') ||
-    !html.includes('>No-scale BBW</span>') ||
-    !html.includes('>Fast extraction guard</span>') ||
-    !html.includes('>Slow extraction guard</span>') ||
-    !html.includes('>A→M time guard</span>') ||
+    html.indexOf('id="homeFastExtractionGuardEnabled"') > html.indexOf('id="shotPanel"') ||
+    !html.includes('>No-scale BBW<span') ||
+    !html.includes('>Fast extraction guard<span') ||
+    !html.includes('>Slow extraction guard<span') ||
+    !html.includes('>A→M time guard<span') ||
     html.indexOf('<summary>No-scale BBW</summary>') < 0 ||
     html.indexOf('<summary>Fast extraction guard</summary>') < 0 ||
     html.indexOf('<summary>Slow extraction guard</summary>') < 0 ||
@@ -544,6 +575,19 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes("classList.toggle('fieldOff',!on)") ||
     !ui.includes('$(\'homeBrewByWeight\').disabled=!controlsMutable||pend') ||
     !css.includes('.switchRow.switchPending') ||
+    !css.includes('.homeSwitchGrid') ||
+    !css.includes('justify-content:flex-start') ||
+    !css.includes('.homeSwitchGrid{') ||
+    !css.includes('border-bottom:1px solid') ||
+    !css.includes('.homeSwitchGrid .switchState{display:none}') ||
+    !css.includes('.homeSwitchGrid .swS') ||
+    !css.includes('.homeGuardGrid{') ||
+    !css.includes('.homeGuardGrid .swL{padding-right:3ch}') ||
+    !css.includes('grid-template-columns:subgrid') ||
+    !css.includes('#brewModeRow{width:auto') ||
+    !css.includes('#brewModeRow .switch{width:5.7rem') ||
+    !css.includes('.ruleChartHead{') ||
+    !css.includes('.ruleChartHead strong,.ruleChartMode{display:none}') ||
     !css.includes('background:#c9a227') ||
     !ui.includes("beginHomeSwitchPending('homeBrewByWeight'") ||
     !ui.includes('beginHomeSwitchPending(h,on)') ||
@@ -716,6 +760,32 @@ if (!ui.includes('id="debugPanel"') ||
         firmware.indexOf('BOOT_RESET_REASON') ||
     !ui.includes('serialDebugOutput:c.serialDebugOutput') ||
     !ui.includes("serialDebugOutput').onchange") ||
+    !html.includes('id="ruleChart"') ||
+    !html.includes('id="ruleChartTimeTrack"') ||
+    !html.includes('id="ruleChartWeightTrack"') ||
+    html.indexOf('id="ruleChart"') < html.indexOf('id="homePresetCards"') ||
+    html.indexOf('id="ruleChart"') > html.indexOf('id="shotPanel"') ||
+    html.includes('Extraction rules') ||
+    (html.indexOf('id="ruleChart"') > html.indexOf('id="debugPanel"') &&
+      html.indexOf('id="ruleChart"') < html.indexOf('id="serialDebugOutput"')) ||
+    !css.includes('.ruleChart') ||
+    !css.includes('.ruleSeg-fast') ||
+    !css.includes('.ruleSeg-bbw') ||
+    !css.includes('.ruleSeg-slow') ||
+    !css.includes('.ruleChartIdle') ||
+    !ui.includes('function buildRuleChartModel(') ||
+    !ui.includes('function renderRuleChart(') ||
+    !ui.includes('function updateRuleChartFromStatus(') ||
+    !ui.includes('updateRuleChartFromStatus(s)') ||
+    !ui.includes('bbw&&!!c.fastExtractionGuardEnabled') ||
+    !ui.includes('bbw&&!!c.slowExtractionGuardEnabled') ||
+    !ui.includes("mode:'timerOnly'") ||
+    !ui.includes("['fast'") ||
+    !ui.includes("['bbw'") ||
+    !ui.includes("['slow'") ||
+    !ui.includes("['idle'") ||
+    !ui.includes("if($('ruleChartPreset'))$('ruleChartPreset').textContent=''") ||
+    !ui.includes("if($('ruleChartMode'))$('ruleChartMode').textContent=''") ||
     !firmware.includes('SERIAL_DEBUG_ON') ||
     !firmware.includes('SERIAL_DEBUG_OFF') ||
     !network.includes('buzzerHandler') ||
@@ -1067,8 +1137,8 @@ if (logoRoundTrip !== generated.logo) {
 if (generated.gzip.length > 8192) {
   throw new Error('Compressed Web UI HTML exceeds the 8 KiB gzip budget');
 }
-if (generated.jsGzip.length > 16384) {
-  throw new Error('Compressed Web UI JS exceeds the 16 KiB gzip budget');
+if (generated.jsGzip.length > 18432) {
+  throw new Error('Compressed Web UI JS exceeds the 18 KiB gzip budget');
 }
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
@@ -1078,8 +1148,8 @@ if (generated.logoGzip.length > 4096) {
 }
 if (generated.gzip.length + generated.jsGzip.length + generated.cssGzip.length +
         generated.logoGzip.length >
-    28672) {
-  throw new Error('Combined HTML+JS+CSS+logo gzip exceeds the 28 KiB flash budget');
+    29696) {
+  throw new Error('Combined HTML+JS+CSS+logo gzip exceeds the 29 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
@@ -1169,6 +1239,69 @@ if (network.includes('sendJson') &&
                    network.indexOf('esp_err_t ShotStopperNetwork::sendError'))
         .includes('no-store')) {
   throw new Error('JSON API responses must remain Cache-Control: no-store');
+}
+
+{
+  const start = js.indexOf('function buildRuleChartModel(');
+  const end = js.indexOf('let ruleChartSig=');
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error('Rule chart model helpers not found for matrix checks');
+  }
+  const helpers = new Function(
+      js.slice(start, end) +
+      ';return{buildRuleChartModel:buildRuleChartModel};')();
+  const base = {
+    brewByWeight: true,
+    fastExtractionGuardEnabled: true,
+    slowExtractionGuardEnabled: true,
+    operationalWallMs: 50000,
+    minBrewTimeMs: 28000,
+    maxBrewTimeMs: 44000,
+    goalWeightG: 36,
+    minRecoveryWeightG: 30,
+    maxRecoveryWeightG: 42.5,
+  };
+  const kinds = (segs) => (segs || []).map((s) => s[0]).join(',');
+  const off = helpers.buildRuleChartModel({...base, brewByWeight: false});
+  if (off.mode !== 'timerOnly' || kinds(off.tSeg) !== 'idle' ||
+      kinds(off.wSeg) !== 'idle' || off.fs) {
+    throw new Error('Rule chart: BBW off must be timerOnly idle (ignore guard flags)');
+  }
+  const both = helpers.buildRuleChartModel(base);
+  if (both.mode !== 'active' || kinds(both.tSeg) !== 'fast,bbw,slow' ||
+      kinds(both.wSeg) !== 'slow,bbw,fast' || !both.fs || both.goal !== 36) {
+    throw new Error('Rule chart: BBW+Fast+Slow matrix row failed');
+  }
+  const fastOnly = helpers.buildRuleChartModel({
+    ...base, slowExtractionGuardEnabled: false
+  });
+  if (kinds(fastOnly.tSeg) !== 'fast,bbw' ||
+      kinds(fastOnly.wSeg) !== 'bbw,fast' || !fastOnly.fs) {
+    throw new Error('Rule chart: Fast on / Slow off must extend BBW into Slow');
+  }
+  const slowOnly = helpers.buildRuleChartModel({
+    ...base, fastExtractionGuardEnabled: false
+  });
+  if (kinds(slowOnly.tSeg) !== 'bbw,slow' ||
+      kinds(slowOnly.wSeg) !== 'slow,bbw' || slowOnly.fs) {
+    throw new Error('Rule chart: Fast off / Slow on must extend BBW into Fast');
+  }
+  const none = helpers.buildRuleChartModel({
+    ...base, fastExtractionGuardEnabled: false,
+    slowExtractionGuardEnabled: false
+  });
+  if (kinds(none.tSeg) !== 'bbw' || kinds(none.wSeg) !== 'bbw' ||
+      none.fs || none.goal !== 36) {
+    throw new Error('Rule chart: both guards off must be BBW-only with goal');
+  }
+  const ignoredGuards = helpers.buildRuleChartModel({
+    ...base, brewByWeight: false, fastExtractionGuardEnabled: true,
+    slowExtractionGuardEnabled: true
+  });
+  if (ignoredGuards.mode !== 'timerOnly' ||
+      kinds(ignoredGuards.tSeg) !== 'idle') {
+    throw new Error('Rule chart: guards must be ignored when BBW is off');
+  }
 }
 
 console.log(

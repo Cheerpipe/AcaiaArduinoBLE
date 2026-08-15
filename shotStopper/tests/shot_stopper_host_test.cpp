@@ -799,6 +799,7 @@ void t16_only_micra_states_are_compiled() {
 void t17_simultaneous_global_limit_and_paddle_off_is_idempotent() {
   resetHarness(false, true);
   reachReadyFromBoot();
+  runtimeConfig.operationalWallMs = HARD_MAX_CN9_CLOSED_MS;
   startCycle();
   advanceToBrew();
   reachSessionElapsed(HARD_MAX_CN9_CLOSED_MS - PADDLE_DEBOUNCE_MS);
@@ -1145,7 +1146,7 @@ void r05_regression_uses_last_ten_valid_samples() {
     recordWeightSample(20.0f - static_cast<float>(i),
                        shot.startMs + static_cast<uint32_t>(i * 1000));
   }
-  CHECK(shot.expectedEndS == HARD_MAX_CN9_CLOSED_MS / 1000.0f);
+  CHECK(shot.expectedEndS == session.config.operationalWallMs / 1000.0f);
 
   // Intercept already above target with a positive slope predicts a time in
   // the past of the sample window; fall back to the operational wall.
@@ -1205,6 +1206,7 @@ void r07_timing_remains_correct_across_millis_wrap() {
   rawPaddleChangedAtMs = hostMillis;
   runLoopAfter(PADDLE_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
+  runtimeConfig.operationalWallMs = HARD_MAX_CN9_CLOSED_MS;
   startCycle();
   reachManualNoScaleState();
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
@@ -1579,7 +1581,7 @@ void r20_three_unsafe_resets_are_latched_as_a_boot_loop() {
 void w01_default_runtime_configuration_is_valid() {
   const RuntimeConfig config;
   CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
-  CHECK(config.operationalWallMs == HARD_MAX_CN9_CLOSED_MS);
+  CHECK(config.operationalWallMs == DEFAULT_OPERATIONAL_WALL_MS);
   CHECK(config.rinseGestureMs == 1000);
   CHECK(config.minBrewTimeMs == 28000);
   CHECK(config.canTareStartTimer);

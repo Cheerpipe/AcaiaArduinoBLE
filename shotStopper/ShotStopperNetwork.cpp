@@ -187,15 +187,15 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "BBW protection must be at least effective retare "
              "window + 3 s.";
     case ConfigValidationError::OPERATIONAL_WALL:
-      return "CN9 limit must be from 5 to 60 s.";
+      return "Max BBW time must be from 5 to 60 s.";
     case ConfigValidationError::PADDLE_REMINDER_INTERVAL:
       return "Paddle reminder interval must be from 5 to 60 s.";
     case ConfigValidationError::PADDLE_REMINDER_MAX_DURATION:
       return "Paddle reminder limit must be from 1 to 60 min and at least "
              "the reminder interval.";
     case ConfigValidationError::TIMING_RELATION:
-      return "Required: rinse gesture < CN9 limit; rinse duration, retare "
-             "window, and BBW protection each ≤ CN9.";
+      return "Required: rinse gesture < Max BBW time; rinse duration, retare "
+             "window, and BBW protection each ≤ Max BBW time.";
     case ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE:
       return "The Bookoo combined command requires automatic tare.";
     case ConfigValidationError::SCALE_TIMER_STOP_EXTRA_DELAY:
@@ -212,14 +212,22 @@ const char *configValidationMessage(ConfigValidationError error) {
     case ConfigValidationError::MIN_BREW_TIME:
       return "Min brew time must be from 5 to 55 s.";
     case ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION:
-      return "Fast guard requires max recovery > target, min brew < CN9 "
-             "limit, and min brew ≥ BBW protection.";
+      return "Fast guard requires max recovery > target, min brew < Max BBW "
+             "time, and min brew ≥ BBW protection.";
+    case ConfigValidationError::MIN_RECOVERY_WEIGHT:
+      return "Min recovery must be from 10 to 200 g.";
+    case ConfigValidationError::MAX_BREW_TIME:
+      return "Max brew time must be from 5 to 55 s.";
+    case ConfigValidationError::SLOW_EXTRACTION_GUARD_RELATION:
+      return "Slow guard requires min recovery < target, max brew < Max BBW "
+             "time, max brew ≥ BBW protection, and max brew > min brew "
+             "when Fast is on.";
     case ConfigValidationError::AUTO_TO_MANUAL_GUARD_MODE:
       return "A→M limit mode must be manual or auto.";
     case ConfigValidationError::AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT:
-      return "A→M manual limit must be from 10 s up to the CN9 limit.";
+      return "A→M manual limit must be from 10 s up to Max BBW time.";
     case ConfigValidationError::AUTO_TO_MANUAL_GUARD_BASELINE:
-      return "A→M baseline must be from 10 s up to the CN9 limit.";
+      return "A→M baseline must be from 10 s up to Max BBW time.";
     case ConfigValidationError::WEIGHT_OFFSET_BASELINE:
       return "Offset baseline must be from 0 to 5.0 g.";
     case ConfigValidationError::SCALE_MAC_CACHE_MODE:

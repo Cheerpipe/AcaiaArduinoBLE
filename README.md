@@ -57,7 +57,7 @@ Examples that did not exist (or barely existed) in the original stopper sketch:
 - **Auto-to-manual time guard** — on by default; caps CN9 time if an automatic
   shot loses the scale mid-brew (Auto trend or Manual limit); reconnect stays
   preferred for the whole cycle.
-- **Advanced workflow settings** (rinse, CN9 limits, reminders, scale options).
+- **Advanced workflow settings** (rinse, Max BBW time, reminders, scale options).
 - **Safety and observability** — supervisor, task watchdog, optional external
   K2/feedback, structured debug log, hardware monitor.
 - **OTA over Wi-Fi** — planned; see [Not yet implemented](#not-yet-implemented).
@@ -97,7 +97,7 @@ In short: **hard to build, easy to live with.**
   manual extraction, and automatic **brew by weight** when a scale is available.
 - **Physical paddle has priority** over every remote path. Web commands never
   bypass paddle safety or an active local cycle.
-- Configurable **CN9 limit** per cycle (5–60 s) plus a firmware hard cap of
+- Configurable **Max BBW time** per cycle (5–60 s; default 50 s) plus a firmware hard cap of
   60 s on every close path.
 - Learned **stop offset** (default 1.5 g, capped at 5.0 g) updated from
   post-drip analysis; resettable from the Web UI to a configurable baseline
@@ -118,7 +118,7 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | Setting | What it does |
 | --- | --- |
 | **Target (g)** | Goal weight for brew by weight (10–200 g; default 36 g). |
-| **CN9 limit (s)** | Maximum CN9 closed time per cycle (5–60 s; default 60 s). |
+| **Max BBW time (s)** | Maximum brew-by-weight cycle time (5–60 s; default 50 s). |
 | **Baseline offset (g)** | Seed for **Reset learned stop offset to baseline** (0–5 g; factory default 1.5 g). Save before reset. |
 | **Fast extraction guard** | **On by default**. See [Fast extraction guard](#fast-extraction-guard). |
 | **Slow extraction guard** | **On by default**. See [Slow extraction guard](#slow-extraction-guard). |
@@ -589,7 +589,7 @@ absolute deadline from cycle start.
 | --- | --- | --- |
 | **Enable A→M time guard** | ON | Master switch for the CN9 deadline |
 | **Limit mode** | Auto | **Auto** = linear trend of the last five good shot durations; **Manual** = fixed seconds |
-| **Manual limit (s)** | 32 | Used when Limit mode is Manual (clamped to 10 s … CN9 limit) |
+| **Manual limit (s)** | 32 | Used when Limit mode is Manual (clamped to 10 s … Max BBW time) |
 | **Trend (s)** | ~32 | Read-only; current Auto prediction (always shown) |
 | **Baseline duration (s)** | 32 | Seed used by **Reset A→M samples** (five equal values). Factory default for Manual limit |
 
