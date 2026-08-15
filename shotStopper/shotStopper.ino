@@ -3311,6 +3311,8 @@ bool emitAlert(AlertEvent event, uint32_t cycleId) {
   } else if (event == AlertEvent::ATM_END ||
              event == AlertEvent::MANUAL_NO_SCALE) {
     buzzerPattern = BuzzerPattern::TRIPLE;
+  } else if (event == AlertEvent::COMPLETION_EXTRA) {
+    buzzerPattern = BuzzerPattern::LONG;
   } else if (event == AlertEvent::EXTENDED_PULSE) {
     const uint8_t rate = session.slowExtractionExtended
                              ? runtimeConfig.buzzerSlowExtendedPulseRate
@@ -3433,7 +3435,7 @@ void cancelScalePaddleReturnReminderBeep() {
   portEXIT_CRITICAL(&scaleBeepMux);
 }
 
-bool shotCompletionGetsDoubleBeep(EndReason reason) {
+bool shotCompletionGetsLongBeep(EndReason reason) {
   switch (reason) {
     case EndReason::PADDLE:
     case EndReason::SCALE_THRESHOLD:
@@ -4513,9 +4515,11 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
       runtimeConfig.buzzerAutoToManualGuardEndBeep) {
     emitAlert(AlertEvent::ATM_END);
   }
-  emitImmediateCommandAlertIfBuzzer();
-  if (shotCompletionGetsDoubleBeep(reason)) {
+  if (shotCompletionGetsLongBeep(reason)) {
+    // Completion LONG replaces the stop-timer SINGLE so ends are one cue.
     scheduleScaleCompletionBeep();
+  } else {
+    emitImmediateCommandAlertIfBuzzer();
   }
 
   schedulePendingShotFinalize(reason, durationMs);

@@ -1235,7 +1235,8 @@ const immediateCommandAlertCalls =
     firmware.split('emitImmediateCommandAlertIfBuzzer();').length - 1;
 if (immediateCommandAlertCalls < 4 ||
     !firmware.includes('emitImmediateCommandAlertIfBuzzer();\n    if (!requestRemoteTimerStart())') ||
-    !firmware.includes('emitImmediateCommandAlertIfBuzzer();\n  if (shotCompletionGetsDoubleBeep') ||
+    !firmware.includes(
+        'if (shotCompletionGetsLongBeep(reason)) {\n    // Completion LONG replaces the stop-timer SINGLE so ends are one cue.\n    scheduleScaleCompletionBeep();\n  } else {\n    emitImmediateCommandAlertIfBuzzer();') ||
     !firmware.includes('emitImmediateCommandAlertIfBuzzer();\n  markRetareEnded')) {
   throw new Error('Command alerts must fire at CN9/paddle/retare, not after BLE');
 }

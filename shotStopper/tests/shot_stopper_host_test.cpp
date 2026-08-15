@@ -2621,14 +2621,28 @@ void w56_atm_beep_queued_when_scale_lost_after_deadline() {
   setScaleConnected(false);
   loop();
   CHECK(session.endReason == EndReason::AUTO_TO_MANUAL_GUARD);
-  // Scale-lost Echo inverted + ATM TRIPLE (completion SINGLE is delayed ~200 ms).
+  // Scale-lost Echo inverted + ATM TRIPLE (completion LONG is delayed ~200 ms).
   CHECK(localBuzzer.acceptedRequests == before + 2);
-  // Drain ATM/scale-lost alerts so the delayed completion SINGLE can start.
-  for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
+  // Drain ATM/scale-lost; stop once completion LONG is playing (do not drain it).
+  bool sawCompletionLong = false;
+  for (uint32_t step = 0; step < 120; ++step) {
+    if (localBuzzer.active == BuzzerPattern::LONG) {
+      sawCompletionLong = true;
+      break;
+    }
+    if (!localBuzzer.busy() &&
+        static_cast<int32_t>(millis() - scaleCompletionBeepDueAtMs) >= 0) {
+      runLoopAfter(10);
+      continue;
+    }
     runLoopAfter(40);
   }
-  runLoopAfter(SCALE_COMPLETION_BEEP_DELAY_MS + 60);
+  if (!sawCompletionLong) {
+    runLoopAfter(SCALE_COMPLETION_BEEP_DELAY_MS + 60);
+  }
   CHECK(localBuzzer.acceptedRequests >= before + 3);
+  CHECK(localBuzzer.active == BuzzerPattern::LONG);
+  CHECK(localBuzzer.onMs == BUZZER_LONG_ON_MS);
 }
 
 void w63_scale_priority_paddle_uses_scale_when_connected() {
@@ -3261,10 +3275,18 @@ void w77_scale_priority_disconnected_beeps_on_cn9_without_ble() {
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
   CHECK(localBuzzer.acceptedRequests == before + 1);
   CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 0);
+  // Drain manual-no-scale TRIPLE so stop completion LONG can start cleanly.
+  for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
+    runLoopAfter(40);
+  }
   const uint32_t afterStart = localBuzzer.acceptedRequests;
   finalizeCycle(EndReason::PADDLE, StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(localBuzzer.acceptedRequests == afterStart);
+  runLoopAfter(SCALE_COMPLETION_BEEP_DELAY_MS + 60);
   CHECK(localBuzzer.acceptedRequests == afterStart + 1);
+  CHECK(localBuzzer.active == BuzzerPattern::LONG);
+  CHECK(localBuzzer.onMs == BUZZER_LONG_ON_MS);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
 }
 
@@ -3289,10 +3311,17 @@ void w79_buzzer_only_stop_beeps_before_timer_stop_result() {
   reachReadyFromBoot();
   startCycle();
   CHECK(executeNextScaleCommand());
+  for (uint32_t step = 0; step < 20 && localBuzzer.busy(); ++step) {
+    runLoopAfter(40);
+  }
   const uint32_t before = localBuzzer.acceptedRequests;
   finalizeCycle(EndReason::PADDLE, StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(localBuzzer.acceptedRequests == before);
+  runLoopAfter(SCALE_COMPLETION_BEEP_DELAY_MS + 60);
   CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(localBuzzer.active == BuzzerPattern::LONG);
+  CHECK(localBuzzer.onMs == BUZZER_LONG_ON_MS);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
   CHECK(executeNextScaleCommand());
   CHECK(localBuzzer.acceptedRequests == before + 1);
