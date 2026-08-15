@@ -207,14 +207,16 @@ name, default passwords, and step-by-step first connection.
   returns **304**. Shared script is `GET /app.js`, stylesheet is `GET /app.css`,
   and brand mark is `GET /logo.svg` (all gzip, versioned query, long-lived
   `immutable` cache). Inactive views do not poll their APIs.
-- **STA** mode when credentials are saved; **fallback AP**
-  (`MicraShotStopperAP` at `192.168.4.1`) when STA is unavailable. Modes are
-  **exclusive** (STA or AP, not concurrent AP+STA). STA addressing is **DHCP**
-  or **static IP**, with a **3-minute confirm-or-revert** window after save.
-- AP fallback stays up for **3 minutes** after boot if nobody signs in, then
-  shuts down until the next restart. Once STA connects, HTTP/Wi-Fi remain
-  available (no visibility timer). After logout on AP, a **3-minute grace**
-  window keeps the UI reachable.
+- **STA** when credentials are saved and the home network is reachable;
+  **SoftAP** (`MicraShotStopperAP` at `192.168.4.1`) whenever there is no STA
+  link (no credentials, or credentials saved but not associated). While SoftAP
+  is up and credentials exist, the firmware keeps retrying STA in concurrent
+  **AP+STA** mode; once STA connects, SoftAP is stopped. STA addressing is
+  **DHCP** or **static IP**, with a **3-minute confirm-or-revert** window after
+  save.
+- SoftAP stays available while unassociated (no idle 3-minute shutdown). Once
+  STA connects, HTTP remains on the STA IP. After logout, sessions still expire
+  by heartbeat / remember-me rules; SoftAP itself is not torn down for idle UI.
 - **Public read-only** home (shot + status), shot history, diagnostic log,
   settings preview, and firmware version footer without signing in.
 - Authenticated session (factory password **`Micra1234`** — same as the AP;
@@ -647,25 +649,27 @@ Passwords are **case-sensitive** (`M` uppercase, rest lowercase).
    **`Micra1234`** to change settings, save your home Wi‑Fi, or run
    maintenance actions.
 
-The fallback AP stays up for **3 minutes** after boot if nobody signs in, then
-shuts down until the next restart — sign in promptly on first use, or configure
-STA Wi‑Fi before that window expires.
+The SoftAP stays available whenever the device has no STA link — including
+first boot with no home Wi‑Fi saved, and while saved credentials are still
+trying to associate. There is no idle SoftAP shutdown timer.
 
 ### After home Wi‑Fi (STA) is saved
 
-Once STA credentials are stored and the device joins your network, the fallback
-AP is not used. Open the Web UI at **`http://<device-ip>`** (find the IP in
-your router’s DHCP list, the saved static IP, or serial logs at **115200** baud).
-Use the same Web UI password **`Micra1234`** (or the password you set under
-**Web UI password**). Factory reset restores all values in the table above.
-If you lose STA or the UI password, recover over USB with the
+Once STA credentials are stored and the device joins your network, SoftAP is
+stopped and the Web UI is at **`http://<device-ip>`** (find the IP in your
+router’s DHCP list, the saved static IP, or serial logs at **115200** baud).
+If STA drops, SoftAP comes back while the device keeps retrying your home
+network. Use the same Web UI password **`Micra1234`** (or the password you set
+under **Web UI password**). Factory reset restores all values in the table
+above. If you lose STA or the UI password, recover over SoftAP or USB with the
 [USB serial CLI](#usb-serial-cli) (`HELLO`, `RESET_AP_PASSWORD`, `CLEAR_WIFI`,
 or `FACTORY_RESET`).
 
 STA addressing can be **DHCP** (default) or **static IP** from the Wi‑Fi panel.
 After any STA save, the new settings stay **pending** until you sign in at the
 device IP within **3 minutes**; otherwise the previous (last-known-good)
-network settings are restored and SoftAP recovery opens again.
+network settings are restored and SoftAP recovery opens again while STA
+retries continue when credentials remain.
 
 ## Web UI and Wi-Fi (details)
 

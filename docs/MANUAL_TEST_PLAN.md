@@ -16,11 +16,12 @@ Perform all relay and CN9 tests on a bench first. Do not connect CN9 to the mach
 | M10 | Change a workflow field during brew, rinse, and manual states. | UI is disabled and API rejects each change; current snapshot is unchanged. |
 | M11 | Save valid workflow settings while Ready, restart, and reopen UI. | Values persist and apply to the next cycle only. |
 | M12 | Enter a relationship-invalid timing configuration. | Server rejects the complete transaction; no field changes. |
-| M13 | Boot without STA credentials. | AP is reachable at `http://192.168.4.1/` for three minutes. |
-| M14 | Save valid STA credentials (DHCP) and restart. | AP remains off; Serial prints DHCP address; UI stays available at that address after sign-in confirms pending config. |
+| M13 | Boot without STA credentials; leave SoftAP idle for more than 3 minutes. | AP remains reachable at `http://192.168.4.1/` (no idle SoftAP shutdown). |
+| M14 | Save valid STA credentials (DHCP) and restart. | SoftAP stops after STA associates; Serial prints DHCP address; UI stays available at that address after sign-in confirms pending config. |
 | M14b | Save valid static IP and restart; sign in within 3 min. | STA uses configured IP; status shows static mode; config becomes CONFIRMED. |
-| M14c | Save unreachable/wrong static IP (or skip sign-in for 3 min). | Pending config reverts to last-known-good (or clears STA); SoftAP recovery is available. |
-| M15 | Save invalid/unreachable STA credentials and restart. | After the attempt timeout, recovery AP becomes available. |
+| M14c | Save unreachable/wrong static IP (or skip sign-in for 3 min). | Pending config reverts to last-known-good (or clears STA); SoftAP recovery is available and STA retries continue when credentials remain. |
+| M15 | Save invalid/unreachable STA credentials and restart. | After the attempt timeout, SoftAP is available and STA association retries continue while SoftAP stays up. |
+| M15b | With confirmed STA online, disable the home AP / force a link drop. | SoftAP returns while the device keeps retrying STA; SoftAP stops again after STA recovers. |
 | M16 | Scan Wi-Fi in Ready, then start a physical cycle. | Scan is cancelled; control and relay behavior are unaffected. |
 | M17 | On the remote-control opt-in build, leave a browser virtual paddle ON, then close/disconnect it. | Heartbeat timeout safely opens CN9. |
 | M18 | Reset or remove controller power while measuring relay COM/NO. | Contact remains open; there is no unintended close pulse. |

@@ -138,11 +138,11 @@ class ShotStopperNetwork {
   void mergePreferredScaleMac(PersistedSettings &settings);
   void overlayLiveShotSettings(PersistedSettings &settings);
   bool serialDebugEnabled() const;
-  static constexpr uint32_t AP_WINDOW_MS = 180000;
   static constexpr uint32_t UI_GRACE_MS = 180000;
   static constexpr uint32_t SESSION_REMEMBER_MS = 7UL * 24UL * 60UL * 60UL * 1000UL;
   static constexpr uint32_t WEB_PADDLE_HEARTBEAT_TIMEOUT_MS = 15000;
   static constexpr uint32_t STA_CONNECT_TIMEOUT_MS = 15000;
+  static constexpr uint32_t STA_RECOVERY_ATTEMPT_MS = 60000;
   static constexpr uint32_t STA_CONFIRM_TIMEOUT_MS = 180000;
   static constexpr uint32_t STA_RECONNECT_INTERVAL_MS = 10000;
   static constexpr uint32_t RESTART_DELAY_MS = 750;
@@ -186,7 +186,6 @@ class ShotStopperNetwork {
   bool staEverConnected_ = false;
   bool scanRequested_ = false;
   bool everAuthenticated_ = false;
-  bool networkShutdownPending_ = false;
   bool restartPending_ = false;
   bool apRestartPending_ = false;
   bool heartbeatStopSent_ = false;
@@ -238,7 +237,11 @@ class ShotStopperNetwork {
   static void ntpSyncNotificationCallback(struct timeval *tv);
   bool startNetwork();
   void startStation(const PersistedSettings &settings, uint32_t now);
-  bool startFallbackAccessPoint(uint32_t now);
+  void applyStationAddressConfig(const PersistedSettings &settings);
+  void beginStationConnect(const PersistedSettings &settings, uint32_t now);
+  bool ensureAccessPoint(uint32_t now, bool force = false);
+  void stopSoftApKeepStation();
+  bool wifiScanInProgress();
   void stopNetwork();
   bool startHttpServer();
   void stopHttpServer();

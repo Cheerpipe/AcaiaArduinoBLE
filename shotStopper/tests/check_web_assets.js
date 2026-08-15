@@ -1037,20 +1037,48 @@ for (const field of forbiddenResponseFields) {
   }
 }
 
-if (!/AP_WINDOW_MS\s*=\s*180000/.test(networkHeader)) {
-  throw new Error('Fallback AP window must be exactly three minutes');
+if (/AP_WINDOW_MS/.test(networkHeader) || /AP_WINDOW_MS/.test(network)) {
+  throw new Error('Idle SoftAP shutdown window must remain removed');
 }
 if (!network.includes('WiFi.mode(WIFI_STA)') ||
     !network.includes('WiFi.mode(WIFI_AP)') ||
-    network.includes('WIFI_AP_STA')) {
-  throw new Error('Network startup must use exclusive STA-first or fallback AP modes');
+    !network.includes('WIFI_AP_STA') ||
+    !network.includes('ensureAccessPoint') ||
+    !network.includes('beginStationConnect') ||
+    !network.includes('stopSoftApKeepStation') ||
+    !network.includes('wifiScanInProgress') ||
+    !network.includes('STA_RECOVERY_ATTEMPT_MS')) {
+  throw new Error(
+      'Network must use STA-first boot, SoftAP when unassociated, WIFI_AP_STA while retrying STA, and pause retries during Wi-Fi scan');
 }
 if (!network.includes('WiFi.scanNetworks(true, false, false, 120)') ||
     !network.includes('esp_wifi_scan_stop()')) {
   throw new Error('WiFi scan must be asynchronous and cancelable during active control');
 }
-if (!network.includes('if (!network.apActive)')) {
-  throw new Error('STA-only mode must bypass AP/session shutdown policy');
+if (network.includes('networkShutdownPending_') ||
+    /networkShutdownPending_\s*=\s*age\s*>=/.test(network)) {
+  throw new Error('SoftAP must not shut down on an idle visibility timer');
+}
+if (!network.includes(
+        'SoftAP stays up whenever STA is down; there is no idle SoftAP shutdown')) {
+  throw new Error('serviceSessions must keep SoftAP up without an idle shutdown timer');
+}
+const stopSoftApStart = network.indexOf(
+    'void ShotStopperNetwork::stopSoftApKeepStation()');
+const stopSoftApEnd = network.indexOf(
+    'bool ShotStopperNetwork::wifiScanInProgress()', stopSoftApStart);
+if (stopSoftApStart < 0 || stopSoftApEnd < 0) {
+  throw new Error('stopSoftApKeepStation implementation not found');
+}
+const stopSoftAp = network.slice(stopSoftApStart, stopSoftApEnd);
+if (stopSoftAp.includes('WiFi.mode(WIFI_STA)')) {
+  throw new Error(
+      'stopSoftApKeepStation must not force WIFI_STA and risk dropping the STA link');
+}
+if (!network.includes('!status.apActive') ||
+    !network.includes('STA_CONNECT_TIMEOUT_MS')) {
+  throw new Error(
+      'STA connect timeout must remain SoftAP bootstrap-only when AP is inactive');
 }
 if (network.includes('\\"passwordChangeRequired\\"') ||
     network.includes('PASSWORD_CHANGE_REQUIRED') ||
