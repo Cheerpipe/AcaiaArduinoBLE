@@ -215,6 +215,9 @@ constexpr uint8_t DIRECT_STOP_CONFIRMATION_SAMPLES = 2;
 constexpr uint8_t WEIGHT_RECOVERY_CONFIRMATION_SAMPLES = 3;
 constexpr uint32_t DIRECT_STOP_CONFIRMATION_WINDOW_MS = 1000;
 constexpr float MAX_RECOVERY_WEIGHT_DROP_G = 2.0f;
+constexpr size_t WEIGHT_TREND_POINT_COUNT = 10;
+constexpr float WEIGHT_TREND_MIN_LAST_SAMPLE_G = 10.0f;
+constexpr float WEIGHT_TREND_MIN_HORIZON_S = 0.25f;
 
 #ifndef SHOT_STOPPER_ENABLE_REMOTE_CN9
 #define SHOT_STOPPER_ENABLE_REMOTE_CN9 0
@@ -577,7 +580,7 @@ inline const char *stopperStateName(StopperState state) {
 enum class EndReason : uint8_t {
   NONE,
   PADDLE,
-  SCALE_PREDICTION,
+  SCALE_PREDICTION,  // legacy; new firmware never assigns this
   SCALE_THRESHOLD,
   WEIGHT_ANOMALY,
   GLOBAL_LIMIT,
@@ -651,6 +654,58 @@ inline uint32_t autoToManualGuardTrendMs(
     predictedMs = static_cast<float>(wallCap);
   }
   return static_cast<uint32_t>(predictedMs + 0.5f);
+}
+
+// Linear least-squares over the last WEIGHT_TREND_POINT_COUNT samples of
+// (timeS, weightG); returns the time when weight reaches targetWeightG.
+inline float predictedWeightStopTimeS(const float *timeS, const float *weightG,
+                                      size_t datapoints, float targetWeightG,
+                                      float fallbackEndS) {
+  if (timeS == nullptr || weightG == nullptr ||
+      datapoints < WEIGHT_TREND_POINT_COUNT || !isfinite(targetWeightG) ||
+      !isfinite(fallbackEndS)) {
+    return fallbackEndS;
+  }
+  if (weightG[datapoints - 1] < WEIGHT_TREND_MIN_LAST_SAMPLE_G) {
+    return fallbackEndS;
+  }
+
+  float sumXY = 0.0f;
+  float sumX = 0.0f;
+  float sumY = 0.0f;
+  float sumSquaredX = 0.0f;
+  const size_t first = datapoints - WEIGHT_TREND_POINT_COUNT;
+  for (size_t i = first; i < datapoints; ++i) {
+    if (!isfinite(timeS[i]) || !isfinite(weightG[i])) {
+      return fallbackEndS;
+    }
+    sumXY += timeS[i] * weightG[i];
+    sumX += timeS[i];
+    sumY += weightG[i];
+    sumSquaredX += timeS[i] * timeS[i];
+  }
+
+  const float n = static_cast<float>(WEIGHT_TREND_POINT_COUNT);
+  const float denominator = n * sumSquaredX - sumX * sumX;
+  if (fabsf(denominator) < 0.000001f) {
+    return fallbackEndS;
+  }
+
+  const float slope = (n * sumXY - sumX * sumY) / denominator;
+  if (slope <= 0.0f || !isfinite(slope)) {
+    return fallbackEndS;
+  }
+
+  const float meanX = sumX / n;
+  const float meanY = sumY / n;
+  const float intercept = meanY - slope * meanX;
+  const float predicted = (targetWeightG - intercept) / slope;
+  const float latestSampleS = timeS[datapoints - 1];
+  if (!isfinite(predicted) ||
+      predicted < latestSampleS + WEIGHT_TREND_MIN_HORIZON_S) {
+    return fallbackEndS;
+  }
+  return predicted;
 }
 
 inline uint32_t autoToManualGuardLimitMs(

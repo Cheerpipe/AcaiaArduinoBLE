@@ -46,7 +46,7 @@ enum class ShotLogCut : uint8_t {
 
 enum class ShotLogStopDetail : uint8_t {
   NORMAL_TARGET = 0,
-  PREDICTION = 1,
+  PREDICTION = 1,  // legacy writes only; new shots never store this
   EXTENDED_MAX_WEIGHT = 2,
   EXTENDED_MIN_TIME = 3,
   AUTO_TO_MANUAL = 4,
@@ -83,7 +83,7 @@ inline ShotLogStopDetail shotLogStopDetailFromEndReason(
       return ShotLogStopDetail::EXTENDED_MIN_TIME;
     case EndReason::AUTO_TO_MANUAL_GUARD:
       return ShotLogStopDetail::AUTO_TO_MANUAL;
-    case EndReason::SCALE_PREDICTION:
+    case EndReason::SCALE_PREDICTION:  // legacy records only
       return ShotLogStopDetail::PREDICTION;
     case EndReason::SCALE_THRESHOLD:
     case EndReason::WEIGHT_ANOMALY:

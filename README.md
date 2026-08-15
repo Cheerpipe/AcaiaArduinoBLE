@@ -179,7 +179,7 @@ buzzer support, Output channel and the triple checkboxes are hidden.
   error and error %, learned offset used, average flow (g/s), first-drop time,
   shot type (`auto`, `timer_only`, `manual`), **cut type**
   (`auto`, `manual`, `limit` — how CN9 opened), **stop detail**
-  (`normal_target`, `prediction`, `extended_max_weight`, `extended_min_time`,
+  (`normal_target`, `extended_max_weight`, `extended_min_time`,
   `auto_to_manual`, `other`), and when the fast extraction guard was active:
   whether the shot was extended, `targetReachedEarlyS`, and the max recovery
   weight / minimum brew time that applied.
@@ -428,7 +428,7 @@ stateDiagram-v2
   RINSE --> REQUIRES_OFF: complete, paddle ON
   BREW --> READY: paddle/Web stop
   MANUAL_NO_SCALE --> READY: paddle/Web stop
-  BREW --> REQUIRES_OFF: threshold, predicted, or safety stop
+  BREW --> REQUIRES_OFF: weight, time, or safety stop
 ```
 
 ## Scale stop logic
@@ -443,8 +443,8 @@ BBW protection run in parallel from shot start and do not delay that entry.
    configured timeout from shot start. Automatic stop by weight is inhibited
    while retare or BBW protection still blocks. First drops beep and log but
    do not end this window.
-3. **Brew by weight**: after both windows end, direct threshold and predictive
-   stop are armed immediately.
+3. **Brew by weight**: after both windows end, weight stop is armed
+   immediately (same predicted-weight tool as every other recipe weight cut).
 
 Manual stop, CN9 time limits, paddle OFF, and all safety mechanisms remain
 active throughout. Timer-only and manual-no-scale cycles skip retare and
@@ -474,12 +474,14 @@ also configure:
 ### How it works
 
 1. **Normal stop** — the scale reaches the target at or after the minimum brew
-   time → CN9 opens at the target (unchanged behavior).
-2. **Too fast** — the target is reached *before* the minimum brew time → the
-   shot enters **extended** mode and keeps running until either:
-   - **Max recovery weight** is reached (always stops), or
+   time → CN9 opens at the target (`normal_target`). BBW does not run before
+   that minimum time.
+2. **Too fast** — the target is reached *before* the minimum brew time → BBW
+   is inhibited and the shot enters **extended** mode until either:
+   - **Max recovery weight** (same weight-cut tool as BBW: predicted time plus
+     a real-weight backup) → `extended_max_weight`, or
    - **Minimum brew time** is reached *and* the scale still shows at least the
-     target weight (stops even if below max recovery).
+     target weight (stops even if below max recovery) → `extended_min_time`.
 
 Elapsed time is measured from cycle start (CN9 close), consistent with other
 timing in the firmware. The learned stop offset applies to both target and max

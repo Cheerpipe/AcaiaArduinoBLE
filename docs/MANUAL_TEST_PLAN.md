@@ -53,7 +53,7 @@ Perform all relay and CN9 tests on a bench first. Do not connect CN9 to the mach
 | M45 | Start an automatic shot with the cup already on the scale before paddle ON. | Initial tare only; retare window runs but does not retare a stable full cup; first drops after retare end trigger optional beep; shot stops at target weight after BBW protection ends. |
 | M46 | Power-cycle the scale, reconnect, place a cup, and run the first paddle shot. | The first shot enters automatic brew; the log does not show `MANUAL_NO_SCALE` from missing fresh weight. |
 | M47 | During early brew with rejections, inspect the Web UI log. | Each rejection names the reason (`slew`, `range`, etc.) and includes numeric weight context. |
-| M48 | Run an automatic brew to target weight after M45 or M46. | CN9 opens by prediction or threshold after BBW protection ends. |
+| M48 | Run an automatic brew to target weight after M45 or M46. | CN9 opens at the BBW target after BBW protection ends (`normal_target`). |
 | M49 | Start an automatic shot with the cup off the scale, then place a ~150 g cup within 1 s of brew start. | Automatic retare occurs once; shot timer does not restart; first drops beep once after retare window; shot stops at target weight. |
 | M50 | Repeat M49 with automatic retare disabled. | No retare window; BBW protection still runs from shot start. |
 | M51 | During the retare window, place only a stable ~7 g object (below minimum cup weight). | No retare; retare window expires; BBW protection continues until timeout. |

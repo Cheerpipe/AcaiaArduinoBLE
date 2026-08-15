@@ -267,7 +267,7 @@ static_assert(SCALE_WORKER_STALE_MS > PADDLE_DEBOUNCE_MS &&
 constexpr size_t EEPROM_SIZE = 2;
 constexpr size_t WEIGHT_ADDR = 0;
 constexpr size_t OFFSET_ADDR = 1;
-constexpr size_t TREND_POINT_COUNT = 10;
+constexpr size_t TREND_POINT_COUNT = WEIGHT_TREND_POINT_COUNT;
 constexpr size_t MAX_SHOT_DATAPOINTS = 1000;
 
 enum class ScaleLinkState : uint8_t {
@@ -1940,8 +1940,12 @@ void serviceRemoteTimerStopRetry() {
 }
 
 // ---------------------------------------------------------------------------
-// Shot prediction and offset analysis
+// Shot weight-cut prediction and offset analysis
 // ---------------------------------------------------------------------------
+
+bool fastExtractionGuardSession();
+float effectiveStopThreshold();
+float effectiveMaxStopThreshold();
 
 void resetShotTrajectory(uint32_t startedAtMs) {
   shot.startMs = startedAtMs;
@@ -1950,59 +1954,17 @@ void resetShotTrajectory(uint32_t startedAtMs) {
   shot.automaticBrew = false;
 }
 
+float activeWeightCutTargetG() {
+  if (session.extractionExtended && fastExtractionGuardSession()) {
+    return effectiveMaxStopThreshold();
+  }
+  return effectiveStopThreshold();
+}
+
 void calculateExpectedEndTime() {
-  if (session.extractionExtended) {
-    shot.expectedEndS = session.config.operationalWallMs / 1000.0f;
-    return;
-  }
-  if (shot.datapoints < TREND_POINT_COUNT ||
-      shot.weight[shot.datapoints - 1] < 10.0f) {
-    shot.expectedEndS = session.config.operationalWallMs / 1000.0f;
-    return;
-  }
-
-  float sumXY = 0.0f;
-  float sumX = 0.0f;
-  float sumY = 0.0f;
-  float sumSquaredX = 0.0f;
-  const size_t first = shot.datapoints - TREND_POINT_COUNT;
-
-  for (size_t i = first; i < shot.datapoints; ++i) {
-    sumXY += shot.timeS[i] * shot.weight[i];
-    sumX += shot.timeS[i];
-    sumY += shot.weight[i];
-    sumSquaredX += shot.timeS[i] * shot.timeS[i];
-  }
-
-  const float n = static_cast<float>(TREND_POINT_COUNT);
-  const float denominator = n * sumSquaredX - sumX * sumX;
-  if (fabsf(denominator) < 0.000001f) {
-    shot.expectedEndS = session.config.operationalWallMs / 1000.0f;
-    return;
-  }
-
-  const float slope = (n * sumXY - sumX * sumY) / denominator;
-  if (slope <= 0.0f || !isfinite(slope)) {
-    shot.expectedEndS = session.config.operationalWallMs / 1000.0f;
-    return;
-  }
-
-  const float meanX = sumX / n;
-  const float meanY = sumY / n;
-  const float intercept = meanY - slope * meanX;
-  const float predicted =
-      (session.config.goalWeightG - session.config.weightOffsetG - intercept) /
-      slope;
-  // Reject fits that already expired (or land inside the sample window): a
-  // noisy early regression must not trip SCALE_PREDICTION immediately.
-  const float latestSampleS = shot.timeS[shot.datapoints - 1];
-  constexpr float kMinPredictionHorizonS = 0.25f;
-  if (!isfinite(predicted) ||
-      predicted < latestSampleS + kMinPredictionHorizonS) {
-    shot.expectedEndS = session.config.operationalWallMs / 1000.0f;
-  } else {
-    shot.expectedEndS = predicted;
-  }
+  shot.expectedEndS = predictedWeightStopTimeS(
+      shot.timeS, shot.weight, shot.datapoints, activeWeightCutTargetG(),
+      session.config.operationalWallMs / 1000.0f);
 }
 
 bool shouldTrackWeight() {
@@ -2273,6 +2235,23 @@ void expirePostTareBaselineIfNeeded() {
                 static_cast<int32_t>(POST_TARE_BASELINE_GRACE_MS));
 }
 
+void enterFastExtractionExtended(float weightG, uint32_t atMs) {
+  if (session.extractionExtended) {
+    return;
+  }
+  session.extractionExtended = true;
+  session.targetReachedEarly = true;
+  session.targetReachedAtMs = atMs;
+  addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_ENTERED,
+                static_cast<int32_t>(weightG * 100.0f),
+                static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+  if (buzzerPatternForExtendedPulseRate(
+          runtimeConfig.buzzerExtendedPulseRate) != BuzzerPattern::NONE) {
+    emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
+  }
+  calculateExpectedEndTime();
+}
+
 void considerDirectStopSample(float weight, uint32_t receivedAtMs,
                               uint32_t packetSequence,
                               uint32_t connectionGeneration) {
@@ -2338,19 +2317,9 @@ void considerDirectStopSample(float weight, uint32_t receivedAtMs,
     return;
   }
 
-  if (overThreshold && fastExtractionGuardSession() && !minBrewTimeReached()) {
-    if (!session.extractionExtended) {
-      session.extractionExtended = true;
-      session.targetReachedEarly = true;
-      session.targetReachedAtMs = receivedAtMs;
-      addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_ENTERED,
-                    static_cast<int32_t>(weight * 100.0f),
-                    static_cast<int32_t>(elapsedMs(session.startedAtMs)));
-      if (buzzerPatternForExtendedPulseRate(
-              runtimeConfig.buzzerExtendedPulseRate) != BuzzerPattern::NONE) {
-        emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
-      }
-    }
+  if (overThreshold && fastExtractionGuardSession() &&
+      (!minBrewTimeReached() || session.extractionExtended)) {
+    enterFastExtractionExtended(weight, receivedAtMs);
     resetDirectStopConfirmation();
     return;
   }
@@ -2642,7 +2611,8 @@ void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
 void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   const bool logEligible = shotLogEligible(reason, durationMs);
   const bool offsetAnalysis = shot.automaticBrew && !session.config.timerOnly &&
-                              session.calibrationEligible;
+                              session.calibrationEligible &&
+                              !session.extractionExtended;
   if (!logEligible && !offsetAnalysis) {
     return;
   }
@@ -2882,7 +2852,7 @@ void pendingShotFinalizeTask() {
 
   maybeQueueAutoToManualGuardSample(snapshot, finalWeightG, postDripWeightValid);
 
-  if (!snapshot.offsetAnalysis) {
+  if (!snapshot.offsetAnalysis || snapshot.extractionExtended) {
     return;
   }
 
@@ -4555,7 +4525,6 @@ bool automaticScaleStopDue() {
                     static_cast<int32_t>(elapsedMs(session.startedAtMs)));
       return true;
     }
-    return false;
   }
 
   if (!session.receivedFreshWeightInCycle ||
@@ -4565,7 +4534,29 @@ bool automaticScaleStopDue() {
     return false;
   }
   const float elapsedS = cycleElapsedSeconds();
-  return elapsedS >= shot.expectedEndS;
+  if (elapsedS < shot.expectedEndS) {
+    return false;
+  }
+
+  if (fastExtractionGuardSession() && !minBrewTimeReached() &&
+      !session.extractionExtended) {
+    enterFastExtractionExtended(session.lastAcceptedWeightG, millis());
+    return false;
+  }
+
+  if (session.extractionExtended && fastExtractionGuardSession()) {
+    session.directStopPending = true;
+    session.directStopReason = EndReason::FAST_EXTRACTION_MAX_WEIGHT;
+    addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_STOP_MAX,
+                  static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f));
+    return true;
+  }
+
+  session.directStopPending = true;
+  session.directStopReason = EndReason::SCALE_THRESHOLD;
+  addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_THRESHOLD_CONFIRMED,
+                static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f));
+  return true;
 }
 
 void handleGlobalLimitTrip() {
@@ -4714,7 +4705,7 @@ void stateMachineTask() {
       if (automaticScaleStopDue()) {
         const EndReason reason = session.directStopPending
                                      ? session.directStopReason
-                                     : EndReason::SCALE_PREDICTION;
+                                     : EndReason::SCALE_THRESHOLD;
         finalizeCycle(reason,
                       StopperState::REQUIRES_OFF);
       }

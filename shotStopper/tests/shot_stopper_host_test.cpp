@@ -646,7 +646,7 @@ void t07_scale_prediction_requires_release_after_stop() {
   runLoopAfter(1000);
   loop();
   CHECK(stopperState == StopperState::REQUIRES_OFF);
-  CHECK(session.endReason == EndReason::SCALE_PREDICTION);
+  CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
 }
@@ -888,7 +888,7 @@ void t23_prediction_triggers_after_bbw_protection_ends() {
   runLoopAfter(1000);
   loop();
   CHECK(stopperState == StopperState::REQUIRES_OFF);
-  CHECK(session.endReason == EndReason::SCALE_PREDICTION);
+  CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
 }
 
 void t24_paddle_off_during_brew_is_immediate() {
@@ -1113,6 +1113,19 @@ void r04_scale_commands_execute_once_and_report_results() {
 }
 
 void r05_regression_uses_last_ten_valid_samples() {
+  float times[WEIGHT_TREND_POINT_COUNT];
+  float weights[WEIGHT_TREND_POINT_COUNT];
+  for (size_t i = 0; i < WEIGHT_TREND_POINT_COUNT; ++i) {
+    times[i] = static_cast<float>(i + 1);
+    weights[i] = static_cast<float>(i + 1) * 2.0f;
+  }
+  CHECK(fabsf(predictedWeightStopTimeS(times, weights, WEIGHT_TREND_POINT_COUNT,
+                                       34.5f, 60.0f) -
+              17.25f) < 0.001f);
+  CHECK(fabsf(predictedWeightStopTimeS(times, weights, WEIGHT_TREND_POINT_COUNT,
+                                       41.0f, 60.0f) -
+              20.5f) < 0.001f);
+
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
@@ -1141,6 +1154,18 @@ void r05_regression_uses_last_ten_valid_samples() {
                        shot.startMs + static_cast<uint32_t>(i * 1000));
   }
   CHECK(shot.expectedEndS == session.config.operationalWallMs / 1000.0f);
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.fastExtractionGuardEnabled = true;
+  startCycle();
+  session.extractionExtended = true;
+  resetShotTrajectory(session.startedAtMs);
+  for (size_t i = 1; i <= TREND_POINT_COUNT; ++i) {
+    recordWeightSample(static_cast<float>(i) * 2.0f,
+                       shot.startMs + static_cast<uint32_t>(i * 1000));
+  }
+  CHECK(fabsf(shot.expectedEndS - 20.5f) < 0.001f);
 }
 
 void r06_hard_timer_opens_cn9_without_control_loop() {
@@ -1283,6 +1308,25 @@ void r11_final_shot_analysis_updates_only_valid_offset() {
   runLoopAfter(DRIP_DELAY_MS);
   finishHostMaintenance();
   CHECK(fabsf(runtimeConfig.weightOffsetG) < 0.001f);
+}
+
+void r58_extended_shot_does_not_learn_weight_offset() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  const float originalOffset = runtimeConfig.weightOffsetG;
+  pendingFinalize.pending = true;
+  pendingFinalize.offsetAnalysis = true;
+  pendingFinalize.extractionExtended = true;
+  pendingFinalize.endedAtMs = hostMillis;
+  pendingFinalize.endedWeightSequence = 0;
+  pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  pendingFinalize.weightOffsetG = originalOffset;
+  currentWeight = DEFAULT_GOAL_WEIGHT_G + 3.0f;
+  currentWeightSequence = 1;
+  currentWeightReceivedAtMs = hostMillis + 1;
+  runLoopAfter(DRIP_DELAY_MS);
+  finishHostMaintenance();
+  CHECK(runtimeConfig.weightOffsetG == originalOffset);
 }
 
 void r12_scale_worker_service_publishes_weight_and_detects_failure() {
@@ -5206,6 +5250,47 @@ void r50_guard_extends_and_stops_at_min_time() {
   CHECK(session.endReason == EndReason::FAST_EXTRACTION_MIN_TIME);
 }
 
+void r56_guard_inhibits_bbw_weight_cut_before_min_time() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.fastExtractionGuardEnabled = true;
+  runtimeConfig.maxRecoveryWeightG = 42.5f;
+  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  shot.expectedEndS = 1.0f;
+  runLoopAfter(1000);
+  loop();
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(session.extractionExtended);
+  CHECK(session.endReason == EndReason::NONE);
+}
+
+void r57_guard_max_weight_cut_from_predicted_time() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.fastExtractionGuardEnabled = true;
+  runtimeConfig.maxRecoveryWeightG = 42.5f;
+  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  runLoopAfter(22000);
+  const float threshold = effectiveStopThreshold();
+  publishWeight(threshold + 0.1f);
+  publishWeight(threshold + 0.2f);
+  CHECK(session.extractionExtended);
+  CHECK(getRelaySafetySnapshot().closed);
+  shot.expectedEndS = 0.0f;
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::FAST_EXTRACTION_MAX_WEIGHT);
+}
+
 using TestFunction = void (*)();
 
 struct TestCase {
@@ -5281,6 +5366,9 @@ const TestCase testCases[] = {
     {"R51", r51_auto_to_manual_guard_fires_while_scale_lost},
     {"R52", r52_auto_to_manual_guard_clears_on_scale_recovery},
     {"R53", r53_auto_to_manual_guard_disabled_does_not_cut_early},
+    {"R56", r56_guard_inhibits_bbw_weight_cut_before_min_time},
+    {"R57", r57_guard_max_weight_cut_from_predicted_time},
+    {"R58", r58_extended_shot_does_not_learn_weight_offset},
     {"R32", r32_old_connection_generation_cannot_update_weight},
     {"R33", r33_weight_mailbox_keeps_latest_and_reports_gap},
     {"R34", r34_suspended_control_recovers_after_three_attributed_samples},
