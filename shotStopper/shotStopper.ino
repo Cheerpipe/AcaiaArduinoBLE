@@ -397,6 +397,7 @@ struct CycleSession {
   CycleConfigSnapshot config = {};
   EndReason endReason = EndReason::NONE;
   bool extractionExtended = false;
+  bool slowExtractionExtended = false;
   bool targetReachedEarly = false;
   uint32_t targetReachedAtMs = 0;
   bool autoToManualGuardArmed = false;
@@ -425,6 +426,8 @@ struct PendingShotFinalize {
   EndReason endReason = EndReason::NONE;
   bool extractionGuardEnabled = false;
   bool extractionExtended = false;
+  bool slowExtractionGuardEnabled = false;
+  bool slowExtractionExtended = false;
   bool targetReachedEarly = false;
   uint16_t targetReachedEarlyDs = SHOT_LOG_METRIC_MISSING;
   float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
@@ -892,9 +895,15 @@ void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
   last.goalWeightG = session.config.goalWeightG;
   last.extractionExtended =
       session.extractionExtended && session.config.fastExtractionGuardEnabled;
+  last.slowExtractionExtended =
+      session.slowExtractionExtended &&
+      session.config.slowExtractionGuardEnabled;
   last.activeStopWeightG =
-      last.extractionExtended ? session.config.maxRecoveryWeightG
-                              : static_cast<float>(session.config.goalWeightG);
+      last.extractionExtended
+          ? session.config.maxRecoveryWeightG
+          : (last.slowExtractionExtended
+                 ? session.config.minRecoveryWeightG
+                 : static_cast<float>(session.config.goalWeightG));
   const uint32_t startMs =
       session.cn9ClosedAtMs != 0U ? session.cn9ClosedAtMs : session.startedAtMs;
   if (session.firstDropMs != 0 &&
@@ -907,6 +916,7 @@ void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
       shot.automaticBrew));
   last.scaleAvailable = session.startedWithScale;
   last.fastExtractionGuardEnabled = session.config.fastExtractionGuardEnabled;
+  last.slowExtractionGuardEnabled = session.config.slowExtractionGuardEnabled;
   last.autoToManualGuardEnabled = session.config.autoToManualGuardEnabled;
   last.autoToManualGuardEnforced = session.autoToManualGuardEnforced;
   last.autoToManualGuardArmed = session.autoToManualGuardArmed;
@@ -1243,6 +1253,10 @@ const char *endReasonName(EndReason reason) {
       return "fast extraction max weight";
     case EndReason::FAST_EXTRACTION_MIN_TIME:
       return "fast extraction min time";
+    case EndReason::SLOW_EXTRACTION_MAX_TIME:
+      return "slow extraction max time";
+    case EndReason::SLOW_EXTRACTION_MIN_WEIGHT:
+      return "slow extraction min weight";
     case EndReason::AUTO_TO_MANUAL_GUARD:
       return "auto-to-manual time guard";
   }
@@ -1944,8 +1958,10 @@ void serviceRemoteTimerStopRetry() {
 // ---------------------------------------------------------------------------
 
 bool fastExtractionGuardSession();
+bool slowExtractionGuardSession();
 float effectiveStopThreshold();
 float effectiveMaxStopThreshold();
+float effectiveMinStopThreshold();
 
 void resetShotTrajectory(uint32_t startedAtMs) {
   shot.startMs = startedAtMs;
@@ -1957,6 +1973,9 @@ void resetShotTrajectory(uint32_t startedAtMs) {
 float activeWeightCutTargetG() {
   if (session.extractionExtended && fastExtractionGuardSession()) {
     return effectiveMaxStopThreshold();
+  }
+  if (session.slowExtractionExtended && slowExtractionGuardSession()) {
+    return effectiveMinStopThreshold();
   }
   return effectiveStopThreshold();
 }
@@ -1983,8 +2002,17 @@ float effectiveMaxStopThreshold() {
   return session.config.maxRecoveryWeightG - session.config.weightOffsetG;
 }
 
+float effectiveMinStopThreshold() {
+  return session.config.minRecoveryWeightG - session.config.weightOffsetG;
+}
+
 bool fastExtractionGuardSession() {
   return session.active && session.config.fastExtractionGuardEnabled &&
+         !session.config.timerOnly && session.startedWithScale;
+}
+
+bool slowExtractionGuardSession() {
+  return session.active && session.config.slowExtractionGuardEnabled &&
          !session.config.timerOnly && session.startedWithScale;
 }
 
@@ -1996,8 +2024,20 @@ bool minBrewTimeReached() {
   return elapsedMs(relay.closedAtMs) >= session.config.minBrewTimeMs;
 }
 
+bool maxBrewTimeReached() {
+  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
+  if (!relay.closed) {
+    return false;
+  }
+  return elapsedMs(relay.closedAtMs) >= session.config.maxBrewTimeMs;
+}
+
 bool targetWeightReached(float weight) {
   return weight >= effectiveStopThreshold();
+}
+
+bool minRecoveryWeightReached(float weight) {
+  return weight >= effectiveMinStopThreshold();
 }
 
 void requestScaleBrewBeep(uint32_t cycleId);
@@ -2252,6 +2292,22 @@ void enterFastExtractionExtended(float weightG, uint32_t atMs) {
   calculateExpectedEndTime();
 }
 
+void enterSlowExtractionExtended(float weightG, uint32_t atMs) {
+  if (session.slowExtractionExtended || session.extractionExtended) {
+    return;
+  }
+  session.slowExtractionExtended = true;
+  addDebugEvent(DebugCategory::SCALE, DebugCode::SLOW_EXTRACTION_ENTERED,
+                static_cast<int32_t>(weightG * 100.0f),
+                static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+  (void)atMs;
+  if (buzzerPatternForExtendedPulseRate(
+          runtimeConfig.buzzerExtendedPulseRate) != BuzzerPattern::NONE) {
+    emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
+  }
+  calculateExpectedEndTime();
+}
+
 void considerDirectStopSample(float weight, uint32_t receivedAtMs,
                               uint32_t packetSequence,
                               uint32_t connectionGeneration) {
@@ -2274,8 +2330,11 @@ void considerDirectStopSample(float weight, uint32_t receivedAtMs,
   const bool overMax =
       fastExtractionGuardSession() && session.extractionExtended &&
       weight >= effectiveMaxStopThreshold();
+  const bool overMin =
+      slowExtractionGuardSession() && session.slowExtractionExtended &&
+      weight >= effectiveMinStopThreshold();
   const bool overThreshold = weight >= effectiveStopThreshold();
-  if (!overThreshold && !overload && !overMax) {
+  if (!overThreshold && !overload && !overMax && !overMin) {
     resetDirectStopConfirmation();
     return;
   }
@@ -2313,6 +2372,15 @@ void considerDirectStopSample(float weight, uint32_t receivedAtMs,
     session.directStopPending = true;
     session.directStopReason = EndReason::FAST_EXTRACTION_MAX_WEIGHT;
     addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_STOP_MAX,
+                  static_cast<int32_t>(weight * 100.0f));
+    return;
+  }
+
+  if (overMin) {
+    session.directStopPending = true;
+    session.directStopReason = EndReason::SLOW_EXTRACTION_MIN_WEIGHT;
+    addDebugEvent(DebugCategory::SCALE,
+                  DebugCode::SLOW_EXTRACTION_STOP_MIN_WEIGHT,
                   static_cast<int32_t>(weight * 100.0f));
     return;
   }
@@ -2612,7 +2680,8 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   const bool logEligible = shotLogEligible(reason, durationMs);
   const bool offsetAnalysis = shot.automaticBrew && !session.config.timerOnly &&
                               session.calibrationEligible &&
-                              !session.extractionExtended;
+                              !session.extractionExtended &&
+                              !session.slowExtractionExtended;
   if (!logEligible && !offsetAnalysis) {
     return;
   }
@@ -2646,6 +2715,9 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   pendingFinalize.extractionGuardEnabled =
       session.config.fastExtractionGuardEnabled;
   pendingFinalize.extractionExtended = session.extractionExtended;
+  pendingFinalize.slowExtractionGuardEnabled =
+      session.config.slowExtractionGuardEnabled;
+  pendingFinalize.slowExtractionExtended = session.slowExtractionExtended;
   pendingFinalize.targetReachedEarly = session.targetReachedEarly;
   pendingFinalize.maxRecoveryWeightG = session.config.maxRecoveryWeightG;
   pendingFinalize.minBrewTimeMs = session.config.minBrewTimeMs;
@@ -2695,8 +2767,10 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
       snapshot.automaticBrew));
   record.cutType = static_cast<uint8_t>(
       shotLogCutFromEndReason(snapshot.endReason));
-  record.extractionGuardEnabled = snapshot.extractionGuardEnabled ? 1U : 0U;
-  record.extractionExtended = snapshot.extractionExtended ? 1U : 0U;
+  record.extractionGuardEnabled = shotLogPackGuardFlags(
+      snapshot.extractionGuardEnabled, snapshot.slowExtractionGuardEnabled);
+  record.extractionExtended = shotLogPackExtendedFlags(
+      snapshot.extractionExtended, snapshot.slowExtractionExtended);
   record.stopDetail = static_cast<uint8_t>(shotLogStopDetailFromEndReason(
       snapshot.endReason, snapshot.extractionGuardEnabled,
       snapshot.extractionExtended));
@@ -2772,7 +2846,7 @@ void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
                                        float finalWeightG,
                                        bool postDripWeightValid) {
   if (!postDripWeightValid || snapshot.timerOnly ||
-      snapshot.extractionExtended ||
+      snapshot.extractionExtended || snapshot.slowExtractionExtended ||
       snapshot.endReason == EndReason::AUTO_TO_MANUAL_GUARD ||
       snapshot.endReason == EndReason::RINSE_COMPLETE ||
       snapshot.endReason == EndReason::SHORT_SHOT ||
@@ -2852,7 +2926,8 @@ void pendingShotFinalizeTask() {
 
   maybeQueueAutoToManualGuardSample(snapshot, finalWeightG, postDripWeightValid);
 
-  if (!snapshot.offsetAnalysis || snapshot.extractionExtended) {
+  if (!snapshot.offsetAnalysis || snapshot.extractionExtended ||
+      snapshot.slowExtractionExtended) {
     return;
   }
 
@@ -3411,6 +3486,8 @@ bool shotCompletionGetsDoubleBeep(EndReason reason) {
     case EndReason::WEB_HEARTBEAT_TIMEOUT:
     case EndReason::FAST_EXTRACTION_MAX_WEIGHT:
     case EndReason::FAST_EXTRACTION_MIN_TIME:
+    case EndReason::SLOW_EXTRACTION_MAX_TIME:
+    case EndReason::SLOW_EXTRACTION_MIN_WEIGHT:
     case EndReason::AUTO_TO_MANUAL_GUARD:
       return true;
     default:
@@ -3451,8 +3528,9 @@ void serviceExtendedPulseAlert() {
   const BuzzerPattern pattern =
       buzzerPatternForExtendedPulseRate(runtimeConfig.buzzerExtendedPulseRate);
   const bool want =
-      BUZZER_SUPPORT_ENABLED && localBuzzer.ready && session.active &&
-      session.extractionExtended && pattern != BuzzerPattern::NONE &&
+      BUZZER_SUPPORT_ENABLED && localBuzzer.ready &&       session.active &&
+      (session.extractionExtended || session.slowExtractionExtended) &&
+      pattern != BuzzerPattern::NONE &&
       currentAlertOutputChannel() != AlertOutputChannel::SCALE_ONLY;
   if (!want) {
     if (buzzerPatternIsPulseTrain(localBuzzer.active) &&
@@ -4527,6 +4605,22 @@ bool automaticScaleStopDue() {
     }
   }
 
+  if (slowExtractionGuardSession() && !session.extractionExtended &&
+      !session.slowExtractionExtended && maxBrewTimeReached() &&
+      !targetWeightReached(session.lastAcceptedWeightG)) {
+    if (minRecoveryWeightReached(session.lastAcceptedWeightG)) {
+      session.directStopPending = true;
+      session.directStopReason = EndReason::SLOW_EXTRACTION_MAX_TIME;
+      addDebugEvent(DebugCategory::SCALE,
+                    DebugCode::SLOW_EXTRACTION_STOP_MAX_TIME,
+                    static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f),
+                    static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+      return true;
+    }
+    enterSlowExtractionExtended(session.lastAcceptedWeightG, millis());
+    return false;
+  }
+
   if (!session.receivedFreshWeightInCycle ||
       session.weightControlState != WeightControlState::ACTIVE ||
       currentWeightSequence == session.weightSequenceAtStart ||
@@ -4548,6 +4642,15 @@ bool automaticScaleStopDue() {
     session.directStopPending = true;
     session.directStopReason = EndReason::FAST_EXTRACTION_MAX_WEIGHT;
     addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_STOP_MAX,
+                  static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f));
+    return true;
+  }
+
+  if (session.slowExtractionExtended && slowExtractionGuardSession()) {
+    session.directStopPending = true;
+    session.directStopReason = EndReason::SLOW_EXTRACTION_MIN_WEIGHT;
+    addDebugEvent(DebugCategory::SCALE,
+                  DebugCode::SLOW_EXTRACTION_STOP_MIN_WEIGHT,
                   static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f));
     return true;
   }
@@ -5538,6 +5641,8 @@ void publishControlStatus() {
     next.cycleElapsedMs = cycleShotElapsedMs();
     next.cycleExtractionExtended =
         session.extractionExtended && fastExtractionGuardSession();
+    next.cycleSlowExtractionExtended =
+        session.slowExtractionExtended && slowExtractionGuardSession();
     next.cycleTargetReachedEarly = session.targetReachedEarly;
     if (next.cycleExtractionExtended) {
       next.cycleActiveStopWeightG = session.config.maxRecoveryWeightG;
@@ -5546,6 +5651,9 @@ void publishControlStatus() {
           elapsed >= session.config.minBrewTimeMs
               ? 0U
               : session.config.minBrewTimeMs - elapsed;
+    } else if (next.cycleSlowExtractionExtended) {
+      next.cycleActiveStopWeightG = session.config.minRecoveryWeightG;
+      next.cycleMinBrewTimeRemainingMs = 0;
     } else {
       next.cycleActiveStopWeightG =
           static_cast<float>(session.config.goalWeightG);

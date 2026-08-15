@@ -2503,6 +2503,10 @@ const char *ShotStopperNetwork::endReasonName(EndReason reason) {
       return "FAST_EXTRACTION_MAX_WEIGHT";
     case EndReason::FAST_EXTRACTION_MIN_TIME:
       return "FAST_EXTRACTION_MIN_TIME";
+    case EndReason::SLOW_EXTRACTION_MAX_TIME:
+      return "SLOW_EXTRACTION_MAX_TIME";
+    case EndReason::SLOW_EXTRACTION_MIN_WEIGHT:
+      return "SLOW_EXTRACTION_MIN_WEIGHT";
     case EndReason::AUTO_TO_MANUAL_GUARD:
       return "AUTO_TO_MANUAL_GUARD";
   }
@@ -2618,19 +2622,24 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
           g_presetsStatusJson + used, sizeof(g_presetsStatusJson) - used,
           "%s{\"id\":%u,\"name\":\"%s\",\"isFactory\":%s,\"brewByWeight\":%s,"
           "\"goalWeightG\":%u,\"minBrewTimeMs\":%lu,\"maxRecoveryWeightG\":%.1f,"
+          "\"maxBrewTimeMs\":%lu,\"minRecoveryWeightG\":%.1f,"
           "\"bbwProtectionMs\":%lu,\"operationalWallMs\":%lu,"
           "\"weightOffsetG\":%.2f,\"weightOffsetBaselineG\":%.2f,"
-          "\"fastExtractionGuardEnabled\":%s,\"autoToManualGuardEnabled\":%s}",
+          "\"fastExtractionGuardEnabled\":%s,\"slowExtractionGuardEnabled\":%s,"
+          "\"autoToManualGuardEnabled\":%s}",
           i == 0 ? "" : ",", static_cast<unsigned>(p.id), safeName,
           p.isFactory ? "true" : "false", p.brewByWeight ? "true" : "false",
           static_cast<unsigned>(p.goalWeightG),
           static_cast<unsigned long>(p.minBrewTimeMs),
           static_cast<double>(p.maxRecoveryWeightG),
+          static_cast<unsigned long>(p.maxBrewTimeMs),
+          static_cast<double>(p.minRecoveryWeightG),
           static_cast<unsigned long>(p.bbwProtectionMs),
           static_cast<unsigned long>(p.operationalWallMs),
           static_cast<double>(p.weightOffsetG),
           static_cast<double>(p.weightOffsetBaselineG),
           p.fastExtractionGuardEnabled ? "true" : "false",
+          p.slowExtractionGuardEnabled ? "true" : "false",
           p.autoToManualGuardEnabled ? "true" : "false");
       if (n < 0 ||
           static_cast<size_t>(n) >= sizeof(g_presetsStatusJson) - used) {
@@ -2685,6 +2694,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"fastExtractionGuardEnabled\":%s,"
       "\"maxRecoveryWeightG\":%.1f,"
       "\"minBrewTimeMs\":%lu,"
+      "\"slowExtractionGuardEnabled\":%s,"
+      "\"minRecoveryWeightG\":%.1f,"
+      "\"maxBrewTimeMs\":%lu,"
       "\"autoToManualGuardEnabled\":%s,"
       "\"autoToManualGuardLimitMode\":\"%s\","
       "\"autoToManualGuardManualLimitMs\":%lu,"
@@ -2723,6 +2735,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"firstDropElapsedMs\":%lu,\"retarePerformed\":%s,"
       "\"shotType\":\"%s\",\"scaleProtocol\":\"%s\","
       "\"scaleAvailable\":%s,\"fastExtractionGuardEnabled\":%s,"
+      "\"slowExtractionGuardEnabled\":%s,\"slowExtractionExtended\":%s,"
       "\"minBrewTimeRemainingMs\":%lu,"
       "\"autoToManualGuardEnabled\":%s,"
       "\"autoToManualGuardArmed\":%s,"
@@ -2754,7 +2767,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       "\"retarePerformed\":%s,\"shotType\":\"%s\",\"flowDuringRetare\":%s,"
       "\"firstDropMs\":%lu,\"retareFlowFirstDetectedAtMs\":%lu,"
       "\"firstDropElapsedMs\":%lu,"
-      "\"extractionExtended\":%s,\"targetReachedEarly\":%s,"
+      "\"extractionExtended\":%s,\"slowExtractionExtended\":%s,"
+      "\"targetReachedEarly\":%s,"
       "\"activeStopWeightG\":%.1f,\"minBrewTimeRemainingMs\":%lu,"
       "\"autoToManualGuardArmed\":%s,"
       "\"autoToManualGuardEnforced\":%s,"
@@ -2821,6 +2835,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       control.config.fastExtractionGuardEnabled ? "true" : "false",
       static_cast<double>(control.config.maxRecoveryWeightG),
       static_cast<unsigned long>(control.config.minBrewTimeMs),
+      control.config.slowExtractionGuardEnabled ? "true" : "false",
+      static_cast<double>(control.config.minRecoveryWeightG),
+      static_cast<unsigned long>(control.config.maxBrewTimeMs),
       control.config.autoToManualGuardEnabled ? "true" : "false",
       autoToManualGuardLimitModeId(control.config.autoToManualGuardLimitMode),
       static_cast<unsigned long>(control.config.autoToManualGuardManualLimitMs),
@@ -2876,6 +2893,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       safeLastShotProtocol,
       control.lastShot.scaleAvailable ? "true" : "false",
       control.lastShot.fastExtractionGuardEnabled ? "true" : "false",
+      control.lastShot.slowExtractionGuardEnabled ? "true" : "false",
+      control.lastShot.slowExtractionExtended ? "true" : "false",
       static_cast<unsigned long>(control.lastShot.minBrewTimeRemainingMs),
       control.lastShot.autoToManualGuardEnabled ? "true" : "false",
       control.lastShot.autoToManualGuardArmed ? "true" : "false",
@@ -2934,6 +2953,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
               ? control.cycleFirstDropMs - control.cycleStartedAtMs
               : 0U),
       control.cycleExtractionExtended ? "true" : "false",
+      control.cycleSlowExtractionExtended ? "true" : "false",
       control.cycleTargetReachedEarly ? "true" : "false",
       static_cast<double>(control.cycleActiveStopWeightG),
       static_cast<unsigned long>(control.cycleMinBrewTimeRemainingMs),
@@ -3121,6 +3141,7 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
              "\"offsetG\":%.2f,\"avgFlowGS\":%s,\"firstDropS\":%s,"
              "\"shotType\":\"%s\",\"cutType\":\"%s\","
              "\"extractionGuardEnabled\":%s,\"extractionExtended\":%s,"
+             "\"slowExtractionGuardEnabled\":%s,\"slowExtractionExtended\":%s,"
              "\"stopDetail\":\"%s\",\"maxRecoveryWeightG\":%s,"
              "\"minBrewTimeS\":%s,\"targetReachedEarlyS\":%s,"
              "\"actualWeightSource\":\"%s\"}",
@@ -3139,8 +3160,12 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
              firstDrop,
              shotLogTypeName(static_cast<ShotLogType>(record.shotType)),
              shotLogCutName(static_cast<ShotLogCut>(record.cutType)),
-             record.extractionGuardEnabled ? "true" : "false",
-             record.extractionExtended ? "true" : "false",
+             shotLogFastGuardEnabled(record.extractionGuardEnabled) ? "true"
+                                                                    : "false",
+             shotLogFastExtended(record.extractionExtended) ? "true" : "false",
+             shotLogSlowGuardEnabled(record.extractionGuardEnabled) ? "true"
+                                                                    : "false",
+             shotLogSlowExtended(record.extractionExtended) ? "true" : "false",
              shotLogStopDetailName(
                  static_cast<ShotLogStopDetail>(record.stopDetail)),
              maxRecovery, minBrewTime, targetEarly,
@@ -3341,6 +3366,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "retareStabilityMaxGapMs", "retareStabilityMinDurationMs",
       "bbwProtectionMs", "fastExtractionGuardEnabled",
       "maxRecoveryWeightG", "minBrewTimeMs",
+      "slowExtractionGuardEnabled", "minRecoveryWeightG", "maxBrewTimeMs",
       "autoToManualGuardEnabled", "autoToManualGuardLimitMode",
       "autoToManualGuardManualLimitMs", "autoToManualGuardBaselineMs",
       "weightOffsetBaselineG",
@@ -3348,7 +3374,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "scaleMacCacheMode", "bookooMuteOnBuzzerOnly", "bookooConnectBeepLevel",
       "avoidBbwShotWithoutScale", "lastShotCooldownMs", "serialDebugOutput"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 43)) {
+  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 46)) {
     parseError =
         "Config must include exactly the expected fields with correct types.";
   } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
@@ -3436,6 +3462,14 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
     parseError = "maxRecoveryWeightG must be a number.";
   } else if (!jsonUint32(root, "minBrewTimeMs", candidate.minBrewTimeMs)) {
     parseError = "minBrewTimeMs must be an integer (milliseconds).";
+  } else if (!jsonBoolean(root, "slowExtractionGuardEnabled",
+                          candidate.slowExtractionGuardEnabled)) {
+    parseError = "slowExtractionGuardEnabled must be a boolean.";
+  } else if (!jsonFloat(root, "minRecoveryWeightG",
+                        candidate.minRecoveryWeightG)) {
+    parseError = "minRecoveryWeightG must be a number.";
+  } else if (!jsonUint32(root, "maxBrewTimeMs", candidate.maxBrewTimeMs)) {
+    parseError = "maxBrewTimeMs must be an integer (milliseconds).";
   } else if (!jsonBoolean(root, "autoToManualGuardEnabled",
                           candidate.autoToManualGuardEnabled)) {
     parseError = "autoToManualGuardEnabled must be a boolean.";
@@ -3621,6 +3655,11 @@ esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
           !jsonFloat(root, "maxRecoveryWeightG",
                      command.config.maxRecoveryWeightG) ||
           !jsonUint32(root, "minBrewTimeMs", command.config.minBrewTimeMs) ||
+          !jsonBoolean(root, "slowExtractionGuardEnabled",
+                       command.config.slowExtractionGuardEnabled) ||
+          !jsonFloat(root, "minRecoveryWeightG",
+                     command.config.minRecoveryWeightG) ||
+          !jsonUint32(root, "maxBrewTimeMs", command.config.maxBrewTimeMs) ||
           !jsonBoolean(root, "autoToManualGuardEnabled",
                        command.config.autoToManualGuardEnabled) ||
           !jsonAutoToManualGuardLimitMode(

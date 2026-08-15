@@ -52,6 +52,8 @@ Examples that did not exist (or barely existed) in the original stopper sketch:
   telemetry) with export.
 - **Fast extraction guard** — optional extension when target weight is reached
   too quickly (minimum brew time + max recovery weight); on by default.
+- **Slow extraction guard** — optional floor when the shot is still under
+  target at max brew time (max brew time + min recovery weight); on by default.
 - **Auto-to-manual time guard** — on by default; caps CN9 time if an automatic
   shot loses the scale mid-brew (Auto trend or Manual limit); reconnect stays
   preferred for the whole cycle.
@@ -105,13 +107,13 @@ In short: **hard to build, easy to live with.**
 
 ### Shot presets
 
-Brew settings live in **named presets** (factory **Single** / **Double**, plus customs). The active preset supplies goal weight, BBW/guards, learned stop offset and its baseline, and A→M samples. Changing preset persists only the active id (no copy-on-select). Manage presets under **Settings → Brew** (dense cards: New · Duplicate · Load · Save · Delete; rename on the card). **New** seeds firmware Double defaults (not the saved Double in NVS). **Home → Quick Settings** has **Brew by weight** (session Manual), plus **No-scale BBW** (machine), **Fast extraction guard**, and **A→M time guard**. Guard switches persist immediately (machine config for No-scale; active preset for the other two) and become read-only when Brew by weight is off. Machine/scale, alerts, Wi‑Fi, and password stay outside the recipe.
+Brew settings live in **named presets** (factory **Single** / **Double**, plus customs). The active preset supplies goal weight, BBW/guards, learned stop offset and its baseline, and A→M samples. Changing preset persists only the active id (no copy-on-select). Manage presets under **Settings → Brew** (dense cards: New · Duplicate · Load · Save · Delete; rename on the card). **New** seeds firmware Double defaults (not the saved Double in NVS). **Home → Quick Settings** has **Brew by weight** (session Manual), plus **No-scale BBW** (machine), **Fast extraction guard**, **Slow extraction guard**, and **A→M time guard**. Guard switches persist immediately (machine config for No-scale; active preset for the other three) and become read-only when Brew by weight is off. Machine/scale, alerts, Wi‑Fi, and password stay outside the recipe.
 
 ### Brew and weight settings
 
 All workflow parameters below are editable from the Web UI **Settings**
 panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
-`settingsB`, config schema **v20**). Defaults are shown in parentheses.
+`settingsB`, config schema **v29**). Defaults are shown in parentheses.
 
 | Setting | What it does |
 | --- | --- |
@@ -119,6 +121,7 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | **CN9 limit (s)** | Maximum CN9 closed time per cycle (5–60 s; default 60 s). |
 | **Baseline offset (g)** | Seed for **Reset learned stop offset to baseline** (0–5 g; factory default 1.5 g). Save before reset. |
 | **Fast extraction guard** | **On by default**. See [Fast extraction guard](#fast-extraction-guard). |
+| **Slow extraction guard** | **On by default**. See [Slow extraction guard](#slow-extraction-guard). |
 | **Auto-to-manual time guard** | **On by default**. See [Auto-to-manual time guard](#auto-to-manual-time-guard). |
 | **Automatic tare** | Send an initial tare when an automatic shot starts (default ON). |
 | **Brew by weight** | **On by default**. Stop the shot by scale weight. Off keeps tare/timer but disables weight stop, BBW protection, automatic retare, and offset learning (same as the former Timer only setting). |
@@ -164,7 +167,7 @@ routed by **Output channel** when a local buzzer is compiled in.
 | **Paddle reminder limit (min)** | Stop beeping after this duration even if the paddle remains ON (1–60 min; default 15 min). |
 | **Scale lost / ATM / manual-no-scale** | Triple beeps on the local buzzer (shown with buzzer support; disabled when Output channel is Scale only). |
 | **Scale connected** | Distinctive echo when a scale connects or reconnects. Shown only when Output channel is **Buzzer only** (default ON). |
-| **Extended shot pulse** | Local-buzzer pulses while Fast extraction guard keeps the shot running past target. Dropdown: Disabled, Slow, Medium, **Fast (default)**, Rapid. Shown with buzzer support; disabled when Output channel is Scale only. Active and passive buzzers use the same on/off timing. |
+| **Extended shot pulse** | Local-buzzer pulses while Fast or Slow extraction guard keeps the shot running past the normal BBW cut. Dropdown: Disabled, Slow, Medium, **Fast (default)**, Rapid. Shown with buzzer support; disabled when Output channel is Scale only. Active and passive buzzers use the same on/off timing. |
 
 Shot completion still adds one extra beep after stop (not configurable). Without
 buzzer support, Output channel and the triple checkboxes are hidden.
@@ -195,7 +198,7 @@ name, default passwords, and step-by-step first connection.
 
 - Fully **embedded Web UI** SPA with routes (`/`, `/presets`, `/settings`,
   `/history`, `/admin`, `/debug`, `/log`): same-origin assets only (no CDN). Authoring
-  budget HTML ≤ **40 KiB**, JS ≤ **60 KiB**, combined HTML+JS ≤ **80 KiB**;
+  budget HTML ≤ **40 KiB**, JS ≤ **64 KiB**, combined HTML+JS ≤ **100 KiB**;
   gzip HTML ≤ **8 KiB**, gzip JS ≤ **16 KiB**, gzip CSS ≤ **6 KiB**, gzip logo ≤
   **4 KiB**, combined ≤ **28 KiB**. Reloads
   revalidate HTML with `ETag` (`Cache-Control: no-cache`) so unchanged firmware
@@ -501,6 +504,64 @@ active stop weight and time remaining). Shot history and CSV export record
 `ext_guard`, `ext`, `stop`, `max_rec_g`, `min_brew_s`, `early_s`, plus
 `shot_type` and `cut_type`.
 
+## Slow extraction guard
+
+Optional brew-by-weight enhancement, **enabled by default**. It is the inverse
+of Fast extraction guard: shots that have **not** reached the BBW target by a
+maximum brew time — often a sign of a grind that is too fine or a stalled
+extraction — should not wait all the way to the CN9 wall.
+
+When enabled, you still set a mandatory **target weight** (same as today). You
+also configure:
+
+| Setting | Default | Role |
+| --- | --- | --- |
+| **Enable** | ON | Master switch for the slow-shot recovery |
+| **Min recovery weight (g)** | 30 (Double) / 14 (Single) | Floor if the shot must be extended past max brew time |
+| **Max brew time (s)** | 44 | Latest time to wait for the normal BBW target |
+
+### How it works
+
+1. **Normal stop** — the scale reaches the BBW target at or before the max brew
+   time → CN9 opens at the target (`normal_target`). Slow does not fire.
+2. **Too slow** — max brew time is reached *without* the BBW target:
+   - If the scale is already at or above **min recovery** → cut now
+     (`slow_max_time`).
+   - If it is still below that floor → the shot enters **extended** mode until
+     **min recovery weight** (same weight-cut tool as BBW: predicted time plus
+     a real-weight backup) → `slow_min_weight`, or until the CN9 wall.
+
+BBW wins by weight: a shot that hits the target on time is a normal BBW stop.
+Fast extended and Slow extended are mutually exclusive; Slow does not interrupt
+a shot that Fast already extended (that shot already reached BBW).
+
+Elapsed time is measured from cycle start (CN9 close), consistent with other
+timing in the firmware. The learned stop offset applies to the min recovery
+threshold (`min recovery − offset`), the same way it applies to Fast’s max
+recovery. Prediction is only a tool; the logged reason is always the mechanism
+(`slow_max_time` / `slow_min_weight`), never `SCALE_PREDICTION`.
+
+Max brew time is a **decision point**, not a replacement for the CN9 wall. If
+the shot is already over the floor at 44 s, it cuts there and the 60 s wall is
+rarely used. If it is still under the floor, it may continue toward min
+recovery **or** hit the CN9 wall, which remains the hard cap.
+
+When Fast is also ON, max brew time must be greater than min brew time so the
+normal BBW window sits between them (28 s–44 s on factory Double).
+
+### Why it is useful
+
+If coffee is only at 20 g at 44 s and you know a drinkable cup needs at least
+30 g, the guard either cuts at 44 s (when already over the floor) or lets the
+shot continue toward 30 g instead of waiting for 36 g or the 60 s wall.
+
+### Telemetry
+
+The live shot panel shows when the guard is off, idle, on, or **extended**
+(with the active stop weight). Shot history and CSV export record `slow_guard`,
+`slow_ext`, and `stop` (`slow_max_time` / `slow_min_weight`). Compact history
+does not store the min-g / max-s recipe values; those live on the preset.
+
 ## Auto-to-manual time guard
 
 Safety layer for automatic brew-by-weight shots that lose the scale mid-
@@ -518,7 +579,7 @@ turn into an over-extracted shot.
 
 There is **no** permanent lockout to manual after a fixed reconnect window.
 Reconnect remains preferred; if the scale returns with three coherent samples,
-weight control (including Fast extraction guard, if enabled) resumes and A→M
+weight control (including Fast or Slow extraction guard, if enabled) resumes and A→M
 enforcement clears. A later disconnect in the same cycle reuses the same
 absolute deadline from cycle start.
 
@@ -543,7 +604,7 @@ the live shot panel has a dedicated **A→M time guard** line (`Off` / `Idle` /
 Successful shots continuously feed a ring of five durations (deciseconds),
 independent of whether the guard is enabled or which limit mode is selected:
 
-- Total shot duration; error ≤ 10 % vs goal; not extraction-extended; not rinse;
+- Total shot duration; error ≤ 10 % vs goal; not Fast/Slow extraction-extended; not rinse;
   not stopped by this guard; post-drip weight available
 - Auto and manual shots qualify when weight/error criteria are met
 - Fresh devices restore five logical **32 s** samples. **Reset A→M samples to
@@ -553,7 +614,7 @@ independent of whether the guard is enabled or which limit mode is selected:
 ### Telemetry
 
 - Live panel **A→M time guard** line: `Off` / `Idle` / `Armed` / `A→M · Ns`
-  when enforced (separate from Fast extraction guard)
+  when enforced (separate from Fast and Slow extraction guards)
 - History: `stop_detail = auto_to_manual`, `cut_type = limit`;
   `actual_weight_source` may be `last_known` when logged without post-drip weight
 - CSV export includes `actual_weight_source`

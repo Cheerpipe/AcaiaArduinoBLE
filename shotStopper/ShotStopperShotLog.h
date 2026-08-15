@@ -50,8 +50,41 @@ enum class ShotLogStopDetail : uint8_t {
   EXTENDED_MAX_WEIGHT = 2,
   EXTENDED_MIN_TIME = 3,
   AUTO_TO_MANUAL = 4,
+  SLOW_MAX_TIME = 5,
+  SLOW_MIN_WEIGHT = 6,
   OTHER = 255
 };
+
+constexpr uint8_t SHOT_LOG_FAST_GUARD_BIT = 0x01;
+constexpr uint8_t SHOT_LOG_SLOW_GUARD_BIT = 0x02;
+constexpr uint8_t SHOT_LOG_FAST_EXTENDED_BIT = 0x01;
+constexpr uint8_t SHOT_LOG_SLOW_EXTENDED_BIT = 0x02;
+
+inline uint8_t shotLogPackGuardFlags(bool fastEnabled, bool slowEnabled) {
+  return static_cast<uint8_t>((fastEnabled ? SHOT_LOG_FAST_GUARD_BIT : 0) |
+                              (slowEnabled ? SHOT_LOG_SLOW_GUARD_BIT : 0));
+}
+
+inline uint8_t shotLogPackExtendedFlags(bool fastExtended, bool slowExtended) {
+  return static_cast<uint8_t>((fastExtended ? SHOT_LOG_FAST_EXTENDED_BIT : 0) |
+                              (slowExtended ? SHOT_LOG_SLOW_EXTENDED_BIT : 0));
+}
+
+inline bool shotLogFastGuardEnabled(uint8_t flags) {
+  return (flags & SHOT_LOG_FAST_GUARD_BIT) != 0;
+}
+
+inline bool shotLogSlowGuardEnabled(uint8_t flags) {
+  return (flags & SHOT_LOG_SLOW_GUARD_BIT) != 0;
+}
+
+inline bool shotLogFastExtended(uint8_t flags) {
+  return (flags & SHOT_LOG_FAST_EXTENDED_BIT) != 0;
+}
+
+inline bool shotLogSlowExtended(uint8_t flags) {
+  return (flags & SHOT_LOG_SLOW_EXTENDED_BIT) != 0;
+}
 
 inline const char *shotLogStopDetailName(ShotLogStopDetail detail) {
   switch (detail) {
@@ -60,6 +93,8 @@ inline const char *shotLogStopDetailName(ShotLogStopDetail detail) {
     case ShotLogStopDetail::EXTENDED_MAX_WEIGHT: return "extended_max_weight";
     case ShotLogStopDetail::EXTENDED_MIN_TIME: return "extended_min_time";
     case ShotLogStopDetail::AUTO_TO_MANUAL: return "auto_to_manual";
+    case ShotLogStopDetail::SLOW_MAX_TIME: return "slow_max_time";
+    case ShotLogStopDetail::SLOW_MIN_WEIGHT: return "slow_min_weight";
     case ShotLogStopDetail::OTHER: return "other";
   }
   return "unknown";
@@ -81,6 +116,10 @@ inline ShotLogStopDetail shotLogStopDetailFromEndReason(
       return ShotLogStopDetail::EXTENDED_MAX_WEIGHT;
     case EndReason::FAST_EXTRACTION_MIN_TIME:
       return ShotLogStopDetail::EXTENDED_MIN_TIME;
+    case EndReason::SLOW_EXTRACTION_MAX_TIME:
+      return ShotLogStopDetail::SLOW_MAX_TIME;
+    case EndReason::SLOW_EXTRACTION_MIN_WEIGHT:
+      return ShotLogStopDetail::SLOW_MIN_WEIGHT;
     case EndReason::AUTO_TO_MANUAL_GUARD:
       return ShotLogStopDetail::AUTO_TO_MANUAL;
     case EndReason::SCALE_PREDICTION:  // legacy records only
@@ -120,6 +159,8 @@ inline ShotLogCut shotLogCutFromEndReason(EndReason reason) {
     case EndReason::WEIGHT_ANOMALY:
     case EndReason::FAST_EXTRACTION_MAX_WEIGHT:
     case EndReason::FAST_EXTRACTION_MIN_TIME:
+    case EndReason::SLOW_EXTRACTION_MAX_TIME:
+    case EndReason::SLOW_EXTRACTION_MIN_WEIGHT:
       return ShotLogCut::AUTO;
     case EndReason::PADDLE:
     case EndReason::WEB_STOP:

@@ -12,8 +12,9 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 28;
-constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 27;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 29;
+constexpr uint32_t PREVIOUS_CONFIG_SCHEMA_VERSION = 28;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V28 = 28;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V27 = 27;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V26 = 26;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V25 = 25;
@@ -181,6 +182,12 @@ constexpr float MAX_MAX_RECOVERY_WEIGHT_G = 200.0f;
 constexpr uint32_t DEFAULT_MIN_BREW_TIME_MS = 28000;
 constexpr uint32_t MIN_MIN_BREW_TIME_MS = 5000;
 constexpr uint32_t MAX_MIN_BREW_TIME_MS = 55000;
+constexpr float DEFAULT_MIN_RECOVERY_WEIGHT_G = 30.0f;
+constexpr float MIN_MIN_RECOVERY_WEIGHT_G = 10.0f;
+constexpr float MAX_MIN_RECOVERY_WEIGHT_G = 200.0f;
+constexpr uint32_t DEFAULT_MAX_BREW_TIME_MS = 44000;
+constexpr uint32_t MIN_MAX_BREW_TIME_MS = 5000;
+constexpr uint32_t MAX_MAX_BREW_TIME_MS = 55000;
 // Extra delay after measured scale start lag before stopping the scale timer at
 // shot end (lets the scale display catch up to CN9 time).
 constexpr uint32_t DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 100;
@@ -593,6 +600,8 @@ enum class EndReason : uint8_t {
   RELAY_SAFETY_FAILURE,
   FAST_EXTRACTION_MAX_WEIGHT,
   FAST_EXTRACTION_MIN_TIME,
+  SLOW_EXTRACTION_MAX_TIME,
+  SLOW_EXTRACTION_MIN_WEIGHT,
   AUTO_TO_MANUAL_GUARD
 };
 
@@ -795,6 +804,9 @@ struct RuntimeConfig {
   bool fastExtractionGuardEnabled = true;
   float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
   uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
+  bool slowExtractionGuardEnabled = true;
+  float minRecoveryWeightG = DEFAULT_MIN_RECOVERY_WEIGHT_G;
+  uint32_t maxBrewTimeMs = DEFAULT_MAX_BREW_TIME_MS;
   bool autoToManualGuardEnabled = true;
   uint8_t autoToManualGuardLimitMode =
       static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
@@ -850,6 +862,9 @@ struct CycleConfigSnapshot {
   bool fastExtractionGuardEnabled = true;
   float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
   uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
+  bool slowExtractionGuardEnabled = true;
+  float minRecoveryWeightG = DEFAULT_MIN_RECOVERY_WEIGHT_G;
+  uint32_t maxBrewTimeMs = DEFAULT_MAX_BREW_TIME_MS;
   bool autoToManualGuardEnabled = true;
   uint8_t autoToManualGuardLimitMode =
       static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
@@ -892,6 +907,9 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.fastExtractionGuardEnabled = config.fastExtractionGuardEnabled;
   snapshot.maxRecoveryWeightG = config.maxRecoveryWeightG;
   snapshot.minBrewTimeMs = config.minBrewTimeMs;
+  snapshot.slowExtractionGuardEnabled = config.slowExtractionGuardEnabled;
+  snapshot.minRecoveryWeightG = config.minRecoveryWeightG;
+  snapshot.maxBrewTimeMs = config.maxBrewTimeMs;
   snapshot.autoToManualGuardEnabled = config.autoToManualGuardEnabled;
   snapshot.autoToManualGuardLimitMode = config.autoToManualGuardLimitMode;
   snapshot.autoToManualGuardManualLimitMs =
@@ -928,6 +946,9 @@ enum class ConfigValidationError : uint8_t {
   MAX_RECOVERY_WEIGHT,
   MIN_BREW_TIME,
   FAST_EXTRACTION_GUARD_RELATION,
+  MIN_RECOVERY_WEIGHT,
+  MAX_BREW_TIME,
+  SLOW_EXTRACTION_GUARD_RELATION,
   AUTO_TO_MANUAL_GUARD_MODE,
   AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT,
   AUTO_TO_MANUAL_GUARD_BASELINE,
@@ -947,6 +968,75 @@ constexpr float FACTORY_SINGLE_WEIGHT_OFFSET_G = 0.5f;
 constexpr uint8_t FACTORY_SINGLE_GOAL_WEIGHT_G = 18;
 constexpr float FACTORY_SINGLE_MAX_RECOVERY_WEIGHT_G = 20.0f;
 constexpr uint32_t FACTORY_SINGLE_MIN_BREW_TIME_MS = 16000;
+constexpr float FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G = 14.0f;
+constexpr uint32_t FACTORY_SINGLE_MAX_BREW_TIME_MS = 44000;
+
+inline float defaultMinRecoveryWeightG(uint8_t goalWeightG,
+                                       uint8_t presetId = 0) {
+  if (presetId == FACTORY_PRESET_ID_SINGLE ||
+      goalWeightG <= FACTORY_SINGLE_GOAL_WEIGHT_G) {
+    return FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G;
+  }
+  return DEFAULT_MIN_RECOVERY_WEIGHT_G;
+}
+
+inline void repairSlowExtractionGuard(RuntimeConfig &runtime) {
+  if (!runtime.slowExtractionGuardEnabled) {
+    return;
+  }
+  if (!isfinite(runtime.minRecoveryWeightG) ||
+      runtime.minRecoveryWeightG < MIN_MIN_RECOVERY_WEIGHT_G ||
+      runtime.minRecoveryWeightG > MAX_MIN_RECOVERY_WEIGHT_G ||
+      runtime.minRecoveryWeightG >= static_cast<float>(runtime.goalWeightG)) {
+    const float repaired = static_cast<float>(runtime.goalWeightG) - 1.0f;
+    if (repaired >= MIN_MIN_RECOVERY_WEIGHT_G &&
+        repaired <= MAX_MIN_RECOVERY_WEIGHT_G &&
+        repaired < static_cast<float>(runtime.goalWeightG)) {
+      runtime.minRecoveryWeightG = repaired;
+    } else {
+      runtime.slowExtractionGuardEnabled = false;
+    }
+  }
+  if (runtime.maxBrewTimeMs >= runtime.operationalWallMs) {
+    runtime.maxBrewTimeMs = runtime.operationalWallMs > 1000
+                                ? runtime.operationalWallMs - 1000
+                                : DEFAULT_MAX_BREW_TIME_MS;
+  }
+  if (runtime.maxBrewTimeMs < runtime.bbwProtectionMs) {
+    runtime.maxBrewTimeMs = runtime.bbwProtectionMs;
+  }
+  if (runtime.fastExtractionGuardEnabled &&
+      runtime.maxBrewTimeMs <= runtime.minBrewTimeMs) {
+    const uint32_t repaired = runtime.minBrewTimeMs + 1000;
+    if (repaired < runtime.operationalWallMs &&
+        repaired <= MAX_MAX_BREW_TIME_MS) {
+      runtime.maxBrewTimeMs = repaired;
+    } else {
+      runtime.slowExtractionGuardEnabled = false;
+    }
+  }
+  if (runtime.slowExtractionGuardEnabled &&
+      (!isfinite(runtime.minRecoveryWeightG) ||
+       runtime.minRecoveryWeightG < MIN_MIN_RECOVERY_WEIGHT_G ||
+       runtime.minRecoveryWeightG > MAX_MIN_RECOVERY_WEIGHT_G ||
+       runtime.minRecoveryWeightG >= static_cast<float>(runtime.goalWeightG) ||
+       runtime.maxBrewTimeMs < MIN_MAX_BREW_TIME_MS ||
+       runtime.maxBrewTimeMs > MAX_MAX_BREW_TIME_MS ||
+       runtime.maxBrewTimeMs >= runtime.operationalWallMs ||
+       runtime.maxBrewTimeMs < runtime.bbwProtectionMs ||
+       (runtime.fastExtractionGuardEnabled &&
+        runtime.maxBrewTimeMs <= runtime.minBrewTimeMs))) {
+    runtime.slowExtractionGuardEnabled = false;
+  }
+}
+
+inline void fillMigratedSlowExtractionGuard(RuntimeConfig &runtime) {
+  runtime.slowExtractionGuardEnabled = true;
+  runtime.maxBrewTimeMs = DEFAULT_MAX_BREW_TIME_MS;
+  runtime.minRecoveryWeightG = defaultMinRecoveryWeightG(runtime.goalWeightG);
+  repairSlowExtractionGuard(runtime);
+}
+
 // NVS dual-slot budget headroom for PersistedSettings including the preset bank.
 constexpr size_t PERSISTED_SETTINGS_NVS_BUDGET = 3072;
 
@@ -973,6 +1063,9 @@ struct ShotPreset {
   bool fastExtractionGuardEnabled = true;
   float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
   uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
+  bool slowExtractionGuardEnabled = true;
+  float minRecoveryWeightG = DEFAULT_MIN_RECOVERY_WEIGHT_G;
+  uint32_t maxBrewTimeMs = DEFAULT_MAX_BREW_TIME_MS;
   bool autoToManualGuardEnabled = true;
   uint8_t autoToManualGuardLimitMode =
       static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
@@ -1155,22 +1248,39 @@ inline ConfigValidationError validateRuntimeConfig(
       config.lastShotCooldownMs > MAX_LAST_SHOT_COOLDOWN_MS) {
     return ConfigValidationError::LAST_SHOT_COOLDOWN;
   }
-  if (!config.fastExtractionGuardEnabled) {
-    return ConfigValidationError::NONE;
+  if (config.fastExtractionGuardEnabled) {
+    if (!isfinite(config.maxRecoveryWeightG) ||
+        config.maxRecoveryWeightG < MIN_MAX_RECOVERY_WEIGHT_G ||
+        config.maxRecoveryWeightG > MAX_MAX_RECOVERY_WEIGHT_G) {
+      return ConfigValidationError::MAX_RECOVERY_WEIGHT;
+    }
+    if (config.minBrewTimeMs < MIN_MIN_BREW_TIME_MS ||
+        config.minBrewTimeMs > MAX_MIN_BREW_TIME_MS) {
+      return ConfigValidationError::MIN_BREW_TIME;
+    }
+    if (config.maxRecoveryWeightG <= static_cast<float>(config.goalWeightG) ||
+        config.minBrewTimeMs >= config.operationalWallMs ||
+        config.minBrewTimeMs < config.bbwProtectionMs) {
+      return ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION;
+    }
   }
-  if (!isfinite(config.maxRecoveryWeightG) ||
-      config.maxRecoveryWeightG < MIN_MAX_RECOVERY_WEIGHT_G ||
-      config.maxRecoveryWeightG > MAX_MAX_RECOVERY_WEIGHT_G) {
-    return ConfigValidationError::MAX_RECOVERY_WEIGHT;
-  }
-  if (config.minBrewTimeMs < MIN_MIN_BREW_TIME_MS ||
-      config.minBrewTimeMs > MAX_MIN_BREW_TIME_MS) {
-    return ConfigValidationError::MIN_BREW_TIME;
-  }
-  if (config.maxRecoveryWeightG <= static_cast<float>(config.goalWeightG) ||
-      config.minBrewTimeMs >= config.operationalWallMs ||
-      config.minBrewTimeMs < config.bbwProtectionMs) {
-    return ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION;
+  if (config.slowExtractionGuardEnabled) {
+    if (!isfinite(config.minRecoveryWeightG) ||
+        config.minRecoveryWeightG < MIN_MIN_RECOVERY_WEIGHT_G ||
+        config.minRecoveryWeightG > MAX_MIN_RECOVERY_WEIGHT_G) {
+      return ConfigValidationError::MIN_RECOVERY_WEIGHT;
+    }
+    if (config.maxBrewTimeMs < MIN_MAX_BREW_TIME_MS ||
+        config.maxBrewTimeMs > MAX_MAX_BREW_TIME_MS) {
+      return ConfigValidationError::MAX_BREW_TIME;
+    }
+    if (config.minRecoveryWeightG >= static_cast<float>(config.goalWeightG) ||
+        config.maxBrewTimeMs >= config.operationalWallMs ||
+        config.maxBrewTimeMs < config.bbwProtectionMs ||
+        (config.fastExtractionGuardEnabled &&
+         config.maxBrewTimeMs <= config.minBrewTimeMs)) {
+      return ConfigValidationError::SLOW_EXTRACTION_GUARD_RELATION;
+    }
   }
   return ConfigValidationError::NONE;
 }
@@ -1221,6 +1331,12 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "minBrewTimeMs";
     case ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION:
       return "fastExtractionGuardRelation";
+    case ConfigValidationError::MIN_RECOVERY_WEIGHT:
+      return "minRecoveryWeightG";
+    case ConfigValidationError::MAX_BREW_TIME:
+      return "maxBrewTimeMs";
+    case ConfigValidationError::SLOW_EXTRACTION_GUARD_RELATION:
+      return "slowExtractionGuardRelation";
     case ConfigValidationError::AUTO_TO_MANUAL_GUARD_MODE:
       return "autoToManualGuardLimitMode";
     case ConfigValidationError::AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT:
@@ -1635,6 +1751,8 @@ struct PersistedLastShot {
   uint8_t shotType = 0;
   bool scaleAvailable = false;
   bool fastExtractionGuardEnabled = false;
+  bool slowExtractionGuardEnabled = false;
+  bool slowExtractionExtended = false;
   bool autoToManualGuardEnabled = false;
   bool autoToManualGuardEnforced = false;
   bool autoToManualGuardArmed = false;
@@ -1714,6 +1832,7 @@ struct ControlStatusSnapshot {
   uint32_t cycleStartedAtMs = 0;
   uint32_t cycleElapsedMs = 0;
   bool cycleExtractionExtended = false;
+  bool cycleSlowExtractionExtended = false;
   bool cycleTargetReachedEarly = false;
   float cycleActiveStopWeightG = 0.0f;
   uint32_t cycleMinBrewTimeRemainingMs = 0;
@@ -1856,6 +1975,9 @@ enum class DebugCode : uint8_t {
   FAST_EXTRACTION_ENTERED,
   FAST_EXTRACTION_STOP_MAX,
   FAST_EXTRACTION_STOP_MIN_TIME,
+  SLOW_EXTRACTION_ENTERED,
+  SLOW_EXTRACTION_STOP_MAX_TIME,
+  SLOW_EXTRACTION_STOP_MIN_WEIGHT,
   SHOT_LOG_PERSIST_FAILED,
   RUNTIME_PERSIST_FAILED,
   BOOT_BANNER,
@@ -2252,6 +2374,12 @@ inline const char *debugCodeName(DebugCode code) {
       return "fast extraction guard stopped at max weight";
     case DebugCode::FAST_EXTRACTION_STOP_MIN_TIME:
       return "fast extraction guard stopped at min brew time";
+    case DebugCode::SLOW_EXTRACTION_ENTERED:
+      return "slow extraction guard extended shot";
+    case DebugCode::SLOW_EXTRACTION_STOP_MAX_TIME:
+      return "slow extraction guard stopped at max brew time";
+    case DebugCode::SLOW_EXTRACTION_STOP_MIN_WEIGHT:
+      return "slow extraction guard stopped at min weight";
     case DebugCode::SHOT_LOG_PERSIST_FAILED:
       return "shot history NVS persist failed";
     case DebugCode::RUNTIME_PERSIST_FAILED:
@@ -2403,6 +2531,10 @@ inline const char *endReasonDebugName(EndReason reason) {
       return "fast extraction max weight";
     case EndReason::FAST_EXTRACTION_MIN_TIME:
       return "fast extraction min time";
+    case EndReason::SLOW_EXTRACTION_MAX_TIME:
+      return "slow extraction max time";
+    case EndReason::SLOW_EXTRACTION_MIN_WEIGHT:
+      return "slow extraction min weight";
     case EndReason::AUTO_TO_MANUAL_GUARD: return "auto-to-manual time guard";
   }
   return "unknown";

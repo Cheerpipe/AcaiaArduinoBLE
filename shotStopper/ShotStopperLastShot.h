@@ -12,7 +12,7 @@
 namespace shotstopper {
 
 constexpr uint32_t LAST_SHOT_MAGIC = 0x4C534854U;  // "LSHT"
-constexpr uint16_t LAST_SHOT_SCHEMA_VERSION = 2;
+constexpr uint16_t LAST_SHOT_SCHEMA_VERSION = 3;
 
 struct LastShotBlob {
   uint32_t magic = LAST_SHOT_MAGIC;

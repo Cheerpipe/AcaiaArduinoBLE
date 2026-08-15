@@ -89,6 +89,10 @@ void p01_defaults_are_valid_v16() {
   CHECK(std::fabs(settings.runtime.maxRecoveryWeightG -
                   DEFAULT_MAX_RECOVERY_WEIGHT_G) < 0.001f);
   CHECK(settings.runtime.minBrewTimeMs == DEFAULT_MIN_BREW_TIME_MS);
+  CHECK(settings.runtime.slowExtractionGuardEnabled);
+  CHECK(std::fabs(settings.runtime.minRecoveryWeightG -
+                  DEFAULT_MIN_RECOVERY_WEIGHT_G) < 0.001f);
+  CHECK(settings.runtime.maxBrewTimeMs == DEFAULT_MAX_BREW_TIME_MS);
   CHECK(settings.runtime.autoToManualGuardEnabled);
   CHECK(settings.runtime.autoToManualGuardLimitMode ==
         static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO));
@@ -374,6 +378,25 @@ void p09_fast_extraction_guard_validation() {
   config.maxRecoveryWeightG = 36.0f;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION);
+
+  config = {};
+  config.goalWeightG = 36;
+  config.minRecoveryWeightG = 30.0f;
+  config.maxBrewTimeMs = 44000;
+  config.slowExtractionGuardEnabled = true;
+  config.bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
+  config.operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
+  CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
+  config.minRecoveryWeightG = 36.0f;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::SLOW_EXTRACTION_GUARD_RELATION);
+  config.minRecoveryWeightG = 30.0f;
+  config.fastExtractionGuardEnabled = true;
+  config.maxRecoveryWeightG = 42.5f;
+  config.minBrewTimeMs = 28000;
+  config.maxBrewTimeMs = 28000;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::SLOW_EXTRACTION_GUARD_RELATION);
 }
 
 void p10_auto_to_manual_guard_trend_and_validation() {
@@ -514,6 +537,14 @@ void p12_shot_log_persists_compact_blob() {
   CHECK(out[0].goalWeightG == 36);
   CHECK(out[0].actualWeightSource ==
         static_cast<uint8_t>(ActualWeightSource::POST_DRIP));
+  CHECK(shotLogPackGuardFlags(true, true) ==
+        (SHOT_LOG_FAST_GUARD_BIT | SHOT_LOG_SLOW_GUARD_BIT));
+  CHECK(shotLogSlowGuardEnabled(shotLogPackGuardFlags(false, true)));
+  CHECK(shotLogSlowExtended(shotLogPackExtendedFlags(false, true)));
+  CHECK(strcmp(shotLogStopDetailName(ShotLogStopDetail::SLOW_MAX_TIME),
+               "slow_max_time") == 0);
+  CHECK(strcmp(shotLogStopDetailName(ShotLogStopDetail::SLOW_MIN_WEIGHT),
+               "slow_min_weight") == 0);
 }
 
 void p13_shot_log_migrates_v5_full_blob_to_compact() {
@@ -1117,7 +1148,7 @@ void p27_schema_twenty_migrates_to_twenty_one() {
          current.runtime.autoToManualGuardSamplesDs,
          sizeof(runtimeV20.autoToManualGuardSamplesDs));
   legacy.runtime = runtimeV20;
-  legacy.presets = current.presets;
+  copyShotPresetBankToV28(current.presets, legacy.presets);
   legacy.staConfigured = false;
   legacy.staOpen = false;
   legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
@@ -1204,7 +1235,7 @@ void p28_schema_twenty_one_migrates_to_twenty_two() {
   runtimeV21.scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::FULL);
   legacy.runtime = runtimeV21;
-  legacy.presets = current.presets;
+  copyShotPresetBankToV28(current.presets, legacy.presets);
   legacy.staConfigured = false;
   legacy.staOpen = false;
   legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
@@ -1303,7 +1334,7 @@ void p30_schema_twenty_two_migrates_to_twenty_three() {
   runtimeV22.scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL);
   legacy.runtime = runtimeV22;
-  legacy.presets = current.presets;
+  copyShotPresetBankToV28(current.presets, legacy.presets);
   legacy.staConfigured = false;
   legacy.staOpen = false;
   legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
@@ -1407,7 +1438,7 @@ void p31_schema_twenty_three_migrates_to_twenty_four() {
   runtimeV23.scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::FULL);
   legacy.runtime = runtimeV23;
-  legacy.presets = current.presets;
+  copyShotPresetBankToV28(current.presets, legacy.presets);
   legacy.staConfigured = false;
   legacy.staOpen = false;
   legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
@@ -1509,7 +1540,7 @@ void p32_schema_twenty_four_migrates_to_twenty_five() {
   runtimeV24.bookooConnectBeepLevel = 2;
   runtimeV24.bookooMuteOnBuzzerOnly = false;
   legacy.runtime = runtimeV24;
-  legacy.presets = current.presets;
+  copyShotPresetBankToV28(current.presets, legacy.presets);
   legacy.staConfigured = false;
   legacy.staOpen = false;
   legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
@@ -1609,7 +1640,7 @@ void p33_schema_twenty_five_migrates_to_twenty_six() {
   runtimeV25.revision = 8;
   runtimeV25.goalWeightG = 40;
   legacy.runtime = runtimeV25;
-  legacy.presets = current.presets;
+  copyShotPresetBankToV28(current.presets, legacy.presets);
   legacy.staConfigured = false;
   legacy.staOpen = false;
   legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
@@ -1747,6 +1778,100 @@ void fillRuntimeConfigV27FromCurrent(const RuntimeConfig &source,
   out.serialDebugOutput = source.serialDebugOutput;
 }
 
+void fillRuntimeConfigV28FromCurrent(const RuntimeConfig &source,
+                                     RuntimeConfigV28 &out) {
+  out = RuntimeConfigV28{};
+  out.revision = source.revision;
+  out.goalWeightG = source.goalWeightG;
+  out.weightOffsetG = source.weightOffsetG;
+  out.weightOffsetBaselineG = source.weightOffsetBaselineG;
+  out.autoTare = source.autoTare;
+  out.timerOnly = source.timerOnly;
+  out.canTareStartTimer = source.canTareStartTimer;
+  out.scaleTimerStopExtraDelayMs = source.scaleTimerStopExtraDelayMs;
+  out.firstDropBeep = source.firstDropBeep;
+  out.paddleReturnReminderBeep = source.paddleReturnReminderBeep;
+  out.paddleReturnReminderIntervalMs = source.paddleReturnReminderIntervalMs;
+  out.paddleReturnReminderMaxDurationMs =
+      source.paddleReturnReminderMaxDurationMs;
+  out.buzzerScaleLostBeep = source.buzzerScaleLostBeep;
+  out.buzzerAutoToManualGuardEndBeep = source.buzzerAutoToManualGuardEndBeep;
+  out.buzzerManualNoScaleBeep = source.buzzerManualNoScaleBeep;
+  out.buzzerScaleConnectedBeep = source.buzzerScaleConnectedBeep;
+  out.buzzerExtendedPulseRate = source.buzzerExtendedPulseRate;
+  out.alertOutputChannel = source.alertOutputChannel;
+  out.reservedConfig = source.reservedConfig;
+  out.reservedConfig2 = source.reservedConfig2;
+  out.rinseGestureMs = source.rinseGestureMs;
+  out.rinseDurationMs = source.rinseDurationMs;
+  out.autoRetare = source.autoRetare;
+  out.retareWindowMs = source.retareWindowMs;
+  out.minimumCupWeightG = source.minimumCupWeightG;
+  out.retareStabilitySamples = source.retareStabilitySamples;
+  out.retareStabilityToleranceG = source.retareStabilityToleranceG;
+  out.retareStabilityMaxGapMs = source.retareStabilityMaxGapMs;
+  out.retareStabilityMinDurationMs = source.retareStabilityMinDurationMs;
+  out.bbwProtectionMs = source.bbwProtectionMs;
+  out.operationalWallMs = source.operationalWallMs;
+  out.timezoneOffsetMinutes = source.timezoneOffsetMinutes;
+  out.ntpServerPreset = source.ntpServerPreset;
+  memcpy(out.ntpServerCustom, source.ntpServerCustom,
+         sizeof(out.ntpServerCustom));
+  out.fastExtractionGuardEnabled = source.fastExtractionGuardEnabled;
+  out.maxRecoveryWeightG = source.maxRecoveryWeightG;
+  out.minBrewTimeMs = source.minBrewTimeMs;
+  out.autoToManualGuardEnabled = source.autoToManualGuardEnabled;
+  out.autoToManualGuardLimitMode = source.autoToManualGuardLimitMode;
+  out.autoToManualGuardManualLimitMs = source.autoToManualGuardManualLimitMs;
+  out.autoToManualGuardBaselineMs = source.autoToManualGuardBaselineMs;
+  memcpy(out.autoToManualGuardSamplesDs, source.autoToManualGuardSamplesDs,
+         sizeof(out.autoToManualGuardSamplesDs));
+  out.scaleMacCacheMode = source.scaleMacCacheMode;
+  out.bookooMuteOnBuzzerOnly = source.bookooMuteOnBuzzerOnly;
+  out.bookooConnectBeepLevel = source.bookooConnectBeepLevel;
+  out.reservedConfig3 = source.reservedConfig3;
+  out.avoidBbwShotWithoutScale = source.avoidBbwShotWithoutScale;
+  out.lastShotCooldownMs = source.lastShotCooldownMs;
+  out.serialDebugOutput = source.serialDebugOutput;
+  out.reservedConfig4 = source.reservedConfig4;
+}
+
+void putLegacyV28Settings(void (*tweakRuntime)(RuntimeConfigV28 &),
+                          const char *preferredMac) {
+  resetHostPersistence();
+  PersistedSettings current;
+  CHECK(initializeDefaultSettings(current));
+  ensurePersistedPresetBank(current);
+  finalizePersistedSettings(current);
+
+  PersistedSettingsV28 legacy = {};
+  legacy.magic = PERSISTED_SETTINGS_MAGIC;
+  legacy.schemaVersion = CONFIG_SCHEMA_VERSION_V28;
+  legacy.structureSize = sizeof(PersistedSettingsV28);
+  legacy.storageRevision = 17;
+  RuntimeConfigV28 runtimeV28 = {};
+  fillRuntimeConfigV28FromCurrent(current.runtime, runtimeV28);
+  runtimeV28.revision = 12;
+  if (tweakRuntime != nullptr) {
+    tweakRuntime(runtimeV28);
+  }
+  legacy.runtime = runtimeV28;
+  copyShotPresetBankToV28(current.presets, legacy.presets);
+  legacy.staConfigured = false;
+  legacy.staOpen = false;
+  legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  legacy.staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  legacy.lkgValid = false;
+  memcpy(legacy.apPassword, current.apPassword, sizeof(legacy.apPassword));
+  memcpy(legacy.authSalt, current.authSalt, sizeof(legacy.authSalt));
+  memcpy(legacy.authHash, current.authHash, sizeof(legacy.authHash));
+  strcpy(legacy.preferredScaleMac, preferredMac);
+  strcpy(legacy.preferredScaleName, "Pearl");
+  legacy.checksum = persistedSettingsV28Checksum(legacy);
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &legacy,
+                           sizeof(legacy));
+}
+
 void p34_schema_twenty_six_migrates_to_twenty_seven() {
   resetHostPersistence();
   PersistedSettings current;
@@ -1766,7 +1891,7 @@ void p34_schema_twenty_six_migrates_to_twenty_seven() {
   runtimeV26.avoidBbwShotWithoutScale = false;
   runtimeV26.lastShotCooldownMs = 7200000;
   legacy.runtime = runtimeV26;
-  legacy.presets = current.presets;
+  copyShotPresetBankToV28(current.presets, legacy.presets);
   legacy.staConfigured = false;
   legacy.staOpen = false;
   legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
@@ -1813,7 +1938,7 @@ void p36_schema_twenty_seven_migrates_to_twenty_eight() {
   runtimeV27.serialDebugOutput = true;
   runtimeV27.buzzerScaleLostBeep = false;
   legacy.runtime = runtimeV27;
-  legacy.presets = current.presets;
+  copyShotPresetBankToV28(current.presets, legacy.presets);
   legacy.staConfigured = false;
   legacy.staOpen = false;
   legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
@@ -1840,15 +1965,137 @@ void p36_schema_twenty_seven_migrates_to_twenty_eight() {
   CHECK(strcmp(loaded.preferredScaleMac, "AA:BB:CC:DD:EE:55") == 0);
 }
 
+void p37_schema_twenty_eight_migrates_to_twenty_nine() {
+  resetHostPersistence();
+  PersistedSettings current;
+  CHECK(initializeDefaultSettings(current));
+  ensurePersistedPresetBank(current);
+  uint8_t customId = 0;
+  CHECK(createUntitledShotPreset(current.presets, customId));
+  ShotPreset *custom = mutableShotPreset(current.presets, customId);
+  CHECK(custom != nullptr);
+  custom->goalWeightG = FACTORY_SINGLE_GOAL_WEIGHT_G;
+  custom->slowExtractionGuardEnabled = false;
+  custom->minRecoveryWeightG = 0.0f;
+  custom->maxBrewTimeMs = 0;
+  finalizePersistedSettings(current);
+
+  PersistedSettingsV28 legacy = {};
+  legacy.magic = PERSISTED_SETTINGS_MAGIC;
+  legacy.schemaVersion = CONFIG_SCHEMA_VERSION_V28;
+  legacy.structureSize = sizeof(PersistedSettingsV28);
+  legacy.storageRevision = 17;
+  RuntimeConfigV28 runtimeV28 = {};
+  fillRuntimeConfigV28FromCurrent(current.runtime, runtimeV28);
+  runtimeV28.revision = 12;
+  runtimeV28.goalWeightG = 38;
+  runtimeV28.serialDebugOutput = true;
+  runtimeV28.buzzerScaleConnectedBeep = false;
+  legacy.runtime = runtimeV28;
+  copyShotPresetBankToV28(current.presets, legacy.presets);
+  legacy.staConfigured = false;
+  legacy.staOpen = false;
+  legacy.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  legacy.staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  legacy.lkgValid = false;
+  memcpy(legacy.apPassword, current.apPassword, sizeof(legacy.apPassword));
+  memcpy(legacy.authSalt, current.authSalt, sizeof(legacy.authSalt));
+  memcpy(legacy.authHash, current.authHash, sizeof(legacy.authHash));
+  strcpy(legacy.preferredScaleMac, "AA:BB:CC:DD:EE:66");
+  strcpy(legacy.preferredScaleName, "Pearl");
+  legacy.checksum = persistedSettingsV28Checksum(legacy);
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &legacy,
+                           sizeof(legacy));
+
+  PersistedSettings loaded;
+  bool migrated = false;
+  CHECK(loadPersistedSettings(loaded, &migrated));
+  CHECK(migrated);
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.runtime.goalWeightG == 38);
+  CHECK(loaded.runtime.serialDebugOutput);
+  CHECK(!loaded.runtime.buzzerScaleConnectedBeep);
+  CHECK(loaded.runtime.slowExtractionGuardEnabled);
+  CHECK(loaded.runtime.maxBrewTimeMs == DEFAULT_MAX_BREW_TIME_MS);
+  CHECK(std::fabs(loaded.runtime.minRecoveryWeightG -
+                  DEFAULT_MIN_RECOVERY_WEIGHT_G) < 0.001f);
+  const ShotPreset *dbl =
+      findShotPreset(loaded.presets, FACTORY_PRESET_ID_DOUBLE);
+  const ShotPreset *sgl =
+      findShotPreset(loaded.presets, FACTORY_PRESET_ID_SINGLE);
+  const ShotPreset *migratedCustom = findShotPreset(loaded.presets, customId);
+  CHECK(dbl != nullptr && sgl != nullptr && migratedCustom != nullptr);
+  CHECK(dbl->slowExtractionGuardEnabled);
+  CHECK(std::fabs(dbl->minRecoveryWeightG - DEFAULT_MIN_RECOVERY_WEIGHT_G) <
+        0.001f);
+  CHECK(dbl->maxBrewTimeMs == DEFAULT_MAX_BREW_TIME_MS);
+  CHECK(sgl->slowExtractionGuardEnabled);
+  CHECK(std::fabs(sgl->minRecoveryWeightG -
+                  FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G) < 0.001f);
+  CHECK(migratedCustom->slowExtractionGuardEnabled);
+  CHECK(std::fabs(migratedCustom->minRecoveryWeightG -
+                  FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G) < 0.001f);
+  CHECK(strcmp(loaded.preferredScaleMac, "AA:BB:CC:DD:EE:66") == 0);
+}
+
+void p39_v28_goal_below_slow_floor_migrates_without_factory_reset() {
+  putLegacyV28Settings(
+      [](RuntimeConfigV28 &runtime) { runtime.goalWeightG = 24; },
+      "AA:BB:CC:DD:EE:77");
+
+  PersistedSettings loaded;
+  bool migrated = false;
+  CHECK(loadPersistedSettings(loaded, &migrated));
+  CHECK(migrated);
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.runtime.goalWeightG == 24);
+  CHECK(strcmp(loaded.preferredScaleMac, "AA:BB:CC:DD:EE:77") == 0);
+  CHECK(loaded.runtime.slowExtractionGuardEnabled);
+  CHECK(std::fabs(loaded.runtime.minRecoveryWeightG - 23.0f) < 0.001f);
+}
+
+void p40_v28_wall_below_slow_max_migrates_without_factory_reset() {
+  putLegacyV28Settings(
+      [](RuntimeConfigV28 &runtime) { runtime.operationalWallMs = 40000; },
+      "AA:BB:CC:DD:EE:78");
+
+  PersistedSettings loaded;
+  bool migrated = false;
+  CHECK(loadPersistedSettings(loaded, &migrated));
+  CHECK(migrated);
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.runtime.operationalWallMs == 40000);
+  CHECK(strcmp(loaded.preferredScaleMac, "AA:BB:CC:DD:EE:78") == 0);
+  CHECK(loaded.runtime.slowExtractionGuardEnabled);
+  CHECK(loaded.runtime.maxBrewTimeMs == 39000);
+}
+
+void p41_v28_tiny_goal_disables_slow_instead_of_factory_reset() {
+  putLegacyV28Settings(
+      [](RuntimeConfigV28 &runtime) { runtime.goalWeightG = 10; },
+      "AA:BB:CC:DD:EE:79");
+
+  PersistedSettings loaded;
+  bool migrated = false;
+  CHECK(loadPersistedSettings(loaded, &migrated));
+  CHECK(migrated);
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.runtime.goalWeightG == 10);
+  CHECK(strcmp(loaded.preferredScaleMac, "AA:BB:CC:DD:EE:79") == 0);
+  CHECK(!loaded.runtime.slowExtractionGuardEnabled);
+}
+
 void p24_preset_bank_size_and_crud_budgets() {
   CHECK(sizeof(ShotPreset) <= 128);
   CHECK(sizeof(ShotPresetBank) <= 1100);
   CHECK(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET);
   CHECK(sizeof(WebCommand) <= 512);
+  CHECK(sizeof(PersistedSettings) != sizeof(PersistedSettingsV28));
   CHECK(sizeof(PersistedSettings) != sizeof(PersistedSettingsV27));
   CHECK(sizeof(PersistedSettings) != sizeof(PersistedSettingsV26));
   CHECK(sizeof(PersistedSettings) != sizeof(PersistedSettingsV25));
   CHECK(sizeof(PersistedSettings) > sizeof(PersistedSettingsV19));
+  CHECK(sizeof(ShotPreset) != sizeof(ShotPresetV28));
 
   ShotPresetBank bank;
   seedDefaultShotPresetBank(bank);
@@ -1856,6 +2103,14 @@ void p24_preset_bank_size_and_crud_budgets() {
   CHECK(bank.activeId == FACTORY_PRESET_ID_DOUBLE);
   CHECK(bank.presets[0].id == FACTORY_PRESET_ID_DOUBLE);
   CHECK(bank.presets[1].id == FACTORY_PRESET_ID_SINGLE);
+  CHECK(bank.presets[0].slowExtractionGuardEnabled);
+  CHECK(std::fabs(bank.presets[0].minRecoveryWeightG -
+                  DEFAULT_MIN_RECOVERY_WEIGHT_G) < 0.001f);
+  CHECK(bank.presets[0].maxBrewTimeMs == DEFAULT_MAX_BREW_TIME_MS);
+  CHECK(bank.presets[1].slowExtractionGuardEnabled);
+  CHECK(std::fabs(bank.presets[1].minRecoveryWeightG -
+                  FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G) < 0.001f);
+  CHECK(bank.presets[1].maxBrewTimeMs == FACTORY_SINGLE_MAX_BREW_TIME_MS);
 
   // Legacy Single-then-Double banks reorder on ensure.
   ShotPresetBank legacy;
@@ -1982,6 +2237,25 @@ void p35_invalid_fast_extraction_recipe_keeps_custom() {
         kept->maxRecoveryWeightG > static_cast<float>(kept->goalWeightG));
 }
 
+void p38_invalid_slow_extraction_recipe_keeps_custom() {
+  ShotPresetBank bank;
+  seedDefaultShotPresetBank(bank);
+  uint8_t customId = 0;
+  CHECK(createUntitledShotPreset(bank, customId));
+  CHECK(bank.count == 3);
+  ShotPreset *custom = mutableShotPreset(bank, customId);
+  CHECK(custom != nullptr);
+  custom->slowExtractionGuardEnabled = true;
+  custom->goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  custom->minRecoveryWeightG = 36.0f;
+  ensureShotPresetBank(bank, DEFAULT_RETARE_WINDOW_MS, true);
+  CHECK(bank.count == 3);
+  const ShotPreset *kept = findShotPreset(bank, customId);
+  CHECK(kept != nullptr);
+  CHECK(!kept->slowExtractionGuardEnabled ||
+        kept->minRecoveryWeightG < static_cast<float>(kept->goalWeightG));
+}
+
 void p16_static_ip_address_validation() {
   uint8_t ip[4] = {192, 168, 1, 50};
   uint8_t mask[4] = {255, 255, 255, 0};
@@ -2053,10 +2327,15 @@ const TestCase tests[] = {
     {"P33", p33_schema_twenty_five_migrates_to_twenty_six},
     {"P34", p34_schema_twenty_six_migrates_to_twenty_seven},
     {"P36", p36_schema_twenty_seven_migrates_to_twenty_eight},
+    {"P37", p37_schema_twenty_eight_migrates_to_twenty_nine},
+    {"P39", p39_v28_goal_below_slow_floor_migrates_without_factory_reset},
+    {"P40", p40_v28_wall_below_slow_max_migrates_without_factory_reset},
+    {"P41", p41_v28_tiny_goal_disables_slow_instead_of_factory_reset},
     {"P24", p24_preset_bank_size_and_crud_budgets},
     {"P25", p25_invalid_active_id_keeps_customs},
     {"P26", p26_save_candidate_validation_does_not_require_live_mutation},
     {"P35", p35_invalid_fast_extraction_recipe_keeps_custom},
+    {"P38", p38_invalid_slow_extraction_recipe_keeps_custom},
     {"P16", p16_static_ip_address_validation},
     {"P17", p17_legacy_password_hash_still_verifies},
     {"P18", p18_shot_log_keeps_history_when_inactive_slot_write_fails},

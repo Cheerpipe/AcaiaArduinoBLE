@@ -100,6 +100,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   runtimeConfig.autoRetare = false;
   runtimeConfig.bbwProtectionMs = 3000;
   runtimeConfig.fastExtractionGuardEnabled = false;
+  runtimeConfig.slowExtractionGuardEnabled = false;
   runtimeConfig.avoidBbwShotWithoutScale = false;
   // Host scenarios assert immediate scale timer stop; delayed stop is covered by ST02.
   runtimeConfig.scaleTimerStopExtraDelayMs = 0;
@@ -1166,6 +1167,18 @@ void r05_regression_uses_last_ten_valid_samples() {
                        shot.startMs + static_cast<uint32_t>(i * 1000));
   }
   CHECK(fabsf(shot.expectedEndS - 20.5f) < 0.001f);
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.slowExtractionGuardEnabled = true;
+  startCycle();
+  session.slowExtractionExtended = true;
+  resetShotTrajectory(session.startedAtMs);
+  for (size_t i = 1; i <= TREND_POINT_COUNT; ++i) {
+    recordWeightSample(static_cast<float>(i) * 2.0f,
+                       shot.startMs + static_cast<uint32_t>(i * 1000));
+  }
+  CHECK(fabsf(shot.expectedEndS - 14.25f) < 0.001f);
 }
 
 void r06_hard_timer_opens_cn9_without_control_loop() {
@@ -1322,6 +1335,25 @@ void r58_extended_shot_does_not_learn_weight_offset() {
   pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
   pendingFinalize.weightOffsetG = originalOffset;
   currentWeight = DEFAULT_GOAL_WEIGHT_G + 3.0f;
+  currentWeightSequence = 1;
+  currentWeightReceivedAtMs = hostMillis + 1;
+  runLoopAfter(DRIP_DELAY_MS);
+  finishHostMaintenance();
+  CHECK(runtimeConfig.weightOffsetG == originalOffset);
+}
+
+void r65_slow_extended_shot_does_not_learn_weight_offset() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  const float originalOffset = runtimeConfig.weightOffsetG;
+  pendingFinalize.pending = true;
+  pendingFinalize.offsetAnalysis = true;
+  pendingFinalize.slowExtractionExtended = true;
+  pendingFinalize.endedAtMs = hostMillis;
+  pendingFinalize.endedWeightSequence = 0;
+  pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  pendingFinalize.weightOffsetG = originalOffset;
+  currentWeight = DEFAULT_GOAL_WEIGHT_G - 6.0f;
   currentWeightSequence = 1;
   currentWeightReceivedAtMs = hostMillis + 1;
   runLoopAfter(DRIP_DELAY_MS);
@@ -1572,6 +1604,10 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.bookooMuteOnBuzzerOnly);
   CHECK(config.bookooConnectBeepLevel == DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL);
   CHECK(config.fastExtractionGuardEnabled);
+  CHECK(config.slowExtractionGuardEnabled);
+  CHECK(fabsf(config.minRecoveryWeightG - DEFAULT_MIN_RECOVERY_WEIGHT_G) <
+        0.001f);
+  CHECK(config.maxBrewTimeMs == DEFAULT_MAX_BREW_TIME_MS);
   CHECK(config.avoidBbwShotWithoutScale);
   CHECK(config.lastShotCooldownMs == DEFAULT_LAST_SHOT_COOLDOWN_MS);
   CHECK(!config.serialDebugOutput);
@@ -1603,6 +1639,18 @@ void w02_each_runtime_field_is_validated() {
   config.maxRecoveryWeightG = 36.0f;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION);
+  config = RuntimeConfig{};
+  config.fastExtractionGuardEnabled = false;
+  config.slowExtractionGuardEnabled = true;
+  config.minRecoveryWeightG = 36.0f;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::SLOW_EXTRACTION_GUARD_RELATION);
+  config = RuntimeConfig{};
+  config.fastExtractionGuardEnabled = true;
+  config.slowExtractionGuardEnabled = true;
+  config.maxBrewTimeMs = config.minBrewTimeMs;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::SLOW_EXTRACTION_GUARD_RELATION);
 }
 
 void w03_runtime_timing_relations_are_transactional() {
@@ -5291,6 +5339,157 @@ void r57_guard_max_weight_cut_from_predicted_time() {
   CHECK(session.endReason == EndReason::FAST_EXTRACTION_MAX_WEIGHT);
 }
 
+void r59_slow_guard_on_time_bbw_is_scale_threshold() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.slowExtractionGuardEnabled = true;
+  runtimeConfig.minRecoveryWeightG = 30.0f;
+  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  reachSessionElapsed(32000);
+  const float threshold = effectiveStopThreshold();
+  publishWeight(threshold + 0.1f);
+  publishWeight(threshold + 0.2f);
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
+  CHECK(!session.slowExtractionExtended);
+}
+
+void r60_slow_guard_cuts_at_max_time_when_above_floor() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.slowExtractionGuardEnabled = true;
+  runtimeConfig.minRecoveryWeightG = 30.0f;
+  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  publishWeight(32.0f);
+  publishWeight(32.1f);
+  session.lastAcceptedWeightG = 32.1f;
+  currentWeight = 32.1f;
+  reachSessionElapsed(44000);
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::SLOW_EXTRACTION_MAX_TIME);
+  CHECK(!session.slowExtractionExtended);
+}
+
+void r61_slow_guard_extends_and_stops_at_min_weight() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.slowExtractionGuardEnabled = true;
+  runtimeConfig.minRecoveryWeightG = 30.0f;
+  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  publishWeight(20.0f);
+  publishWeight(20.1f);
+  session.lastAcceptedWeightG = 20.1f;
+  currentWeight = 20.1f;
+  reachSessionElapsed(44000);
+  CHECK(session.slowExtractionExtended);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.endReason == EndReason::NONE);
+  CHECK(localBuzzer.active == BuzzerPattern::PULSE_4HZ);
+
+  const float minThreshold = effectiveMinStopThreshold();
+  publishWeight(minThreshold + 0.1f);
+  publishWeight(minThreshold + 0.2f);
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::SLOW_EXTRACTION_MIN_WEIGHT);
+}
+
+void r62_fast_extended_is_not_cut_by_slow() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.fastExtractionGuardEnabled = true;
+  runtimeConfig.slowExtractionGuardEnabled = true;
+  runtimeConfig.maxRecoveryWeightG = 42.5f;
+  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.minRecoveryWeightG = 30.0f;
+  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  runLoopAfter(22000);
+  const float threshold = effectiveStopThreshold();
+  publishWeight(threshold + 0.1f);
+  publishWeight(threshold + 0.2f);
+  CHECK(session.extractionExtended);
+  CHECK(!session.slowExtractionExtended);
+  session.lastAcceptedWeightG = 20.0f;
+  currentWeight = 20.0f;
+  reachSessionElapsed(44000);
+  CHECK(session.extractionExtended);
+  CHECK(!session.slowExtractionExtended);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.endReason == EndReason::NONE);
+  const float maxThreshold = effectiveMaxStopThreshold();
+  publishWeight(maxThreshold + 0.1f);
+  publishWeight(maxThreshold + 0.2f);
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::FAST_EXTRACTION_MAX_WEIGHT);
+}
+
+void r63_slow_guard_disabled_continues_past_max_time() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.slowExtractionGuardEnabled = false;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  publishWeight(20.0f);
+  publishWeight(20.1f);
+  session.lastAcceptedWeightG = 20.1f;
+  currentWeight = 20.1f;
+  reachSessionElapsed(44000);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(!session.slowExtractionExtended);
+  CHECK(session.endReason == EndReason::NONE);
+  const float threshold = effectiveStopThreshold();
+  publishWeight(threshold + 0.1f);
+  publishWeight(threshold + 0.2f);
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
+}
+
+void r64_slow_guard_min_weight_cut_from_predicted_time() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.slowExtractionGuardEnabled = true;
+  runtimeConfig.minRecoveryWeightG = 30.0f;
+  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  publishWeight(20.0f);
+  publishWeight(20.1f);
+  session.lastAcceptedWeightG = 20.1f;
+  currentWeight = 20.1f;
+  reachSessionElapsed(44000);
+  CHECK(session.slowExtractionExtended);
+  CHECK(getRelaySafetySnapshot().closed);
+  shot.expectedEndS = 0.0f;
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::SLOW_EXTRACTION_MIN_WEIGHT);
+}
+
 using TestFunction = void (*)();
 
 struct TestCase {
@@ -5369,6 +5568,13 @@ const TestCase testCases[] = {
     {"R56", r56_guard_inhibits_bbw_weight_cut_before_min_time},
     {"R57", r57_guard_max_weight_cut_from_predicted_time},
     {"R58", r58_extended_shot_does_not_learn_weight_offset},
+    {"R59", r59_slow_guard_on_time_bbw_is_scale_threshold},
+    {"R60", r60_slow_guard_cuts_at_max_time_when_above_floor},
+    {"R61", r61_slow_guard_extends_and_stops_at_min_weight},
+    {"R62", r62_fast_extended_is_not_cut_by_slow},
+    {"R63", r63_slow_guard_disabled_continues_past_max_time},
+    {"R64", r64_slow_guard_min_weight_cut_from_predicted_time},
+    {"R65", r65_slow_extended_shot_does_not_learn_weight_offset},
     {"R32", r32_old_connection_generation_cannot_update_weight},
     {"R33", r33_weight_mailbox_keeps_latest_and_reports_gap},
     {"R34", r34_suspended_control_recovers_after_three_attributed_samples},
