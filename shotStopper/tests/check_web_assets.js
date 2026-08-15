@@ -962,7 +962,7 @@ if (!safeBeep.includes('return setBeepLevel(1)') ||
 }
 if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
     !firmware.includes('emitAlert(AlertEvent::SCALE_CONNECTED') ||
-    !firmware.includes('BuzzerPattern::CHIME') ||
+    !firmware.includes('emitLocalAlertBuzzer(BuzzerPattern::ECHO)') ||
     !firmware.includes('requestScaleBrewBeep(') ||
     !firmware.includes('cancelScaleBrewBeep(session.id)') ||
     !firmware.includes('onFirstDropsDetected') ||

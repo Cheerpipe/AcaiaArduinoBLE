@@ -2737,7 +2737,9 @@ void w93_scale_connected_chime_on_buzzer_only_rising_edge() {
   const uint32_t before = localBuzzer.acceptedRequests;
   setScaleConnected(true);
   CHECK(localBuzzer.acceptedRequests == before + 1);
-  CHECK(localBuzzer.active == BuzzerPattern::CHIME);
+  CHECK(localBuzzer.active == BuzzerPattern::ECHO);
+  CHECK(localBuzzer.beepCount == 4);
+  CHECK(localBuzzer.onMs == BUZZER_ECHO_NOTES[0].onMs);
   const uint32_t afterConnect = localBuzzer.acceptedRequests;
   setScaleConnected(true);
   CHECK(localBuzzer.acceptedRequests == afterConnect);

@@ -3301,7 +3301,7 @@ bool emitAlert(AlertEvent event, uint32_t cycleId) {
     if (channel != AlertOutputChannel::BUZZER_ONLY) {
       return false;
     }
-    return emitLocalAlertBuzzer(BuzzerPattern::CHIME);
+    return emitLocalAlertBuzzer(BuzzerPattern::ECHO);
   }
   const bool scaleCapable = alertEventScaleCapable(event);
   BuzzerPattern buzzerPattern = BuzzerPattern::SINGLE;
