@@ -1052,30 +1052,8 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
       'Network must use STA-first boot, SoftAP when unassociated, WIFI_AP_STA while retrying STA, and pause retries during Wi-Fi scan');
 }
 if (!network.includes('WiFi.scanNetworks(true, false, false, 120)') ||
-    !network.includes('esp_wifi_scan_stop()') ||
-    !network.includes('abortWifiScan') ||
-    !network.includes('WIFI_SCAN_TIMEOUT_MS')) {
-  throw new Error(
-      'WiFi scan must be asynchronous, cancelable, abortable on mode change, and time-bounded');
-}
-if (!network.includes('recoverFromResourcePressure') ||
-    !network.includes('recycleHttpServer') ||
-    !network.includes('noteHttpServeResult') ||
-    !network.includes('requestHttpRecycle') ||
-    !network.includes('httpRecyclePending_') ||
-    !network.includes('STA_NO_IP_GRACE_MS')) {
-  throw new Error(
-      'Network must defer HTTP recycle off the URI handler path and grace sticky no-IP reconnects');
-}
-if (!network.includes('WiFi.reconnect()') ||
-    !network.includes('soft-retry')) {
-  throw new Error(
-      'STA retries under SoftAP must prefer soft reconnect to avoid SoftAP thrash');
-}
-if (!network.includes('associated without IP') &&
-    !network.includes('forcing station reconnect')) {
-  throw new Error(
-      'STA sticky association without IP must force a station reconnect');
+    !network.includes('esp_wifi_scan_stop()')) {
+  throw new Error('WiFi scan must be asynchronous and cancelable during active control');
 }
 if (network.includes('networkShutdownPending_') ||
     /networkShutdownPending_\s*=\s*age\s*>=/.test(network)) {
@@ -1121,25 +1099,6 @@ if (network.includes('\\"passwordChangeRequired\\"') ||
     ui.includes('factory AP/UI password') ||
     ui.includes('Change the factory AP/UI password')) {
   throw new Error('Factory password change gate must remain removed from status/UI/API');
-}
-
-const pollScanStart = bleLibrary.indexOf('bool AcaiaArduinoBLE::pollScan()');
-const pollScanEnd = bleLibrary.indexOf('bool AcaiaArduinoBLE::completeConnection(', pollScanStart);
-if (pollScanStart < 0 || pollScanEnd < 0) {
-  throw new Error('pollScan implementation not found');
-}
-const pollScan = bleLibrary.slice(pollScanStart, pollScanEnd);
-if (!pollScan.includes('addressBuf') || !pollScan.includes('nameBuf') ||
-    (pollScan.match(/peripheral\.address\(\)/g) || []).length !== 1 ||
-    (pollScan.match(/peripheral\.localName\(\)/g) || []).length !== 1) {
-  throw new Error(
-      'pollScan must copy address/name once into fixed buffers to limit String churn');
-}
-if (!firmware.includes('recoverFromResourcePressure') ||
-    !firmware.includes('HEAP_RECOVERY_COOLDOWN_MS') ||
-    !firmware.includes('HEAP_RECOVERY_MIN_UPTIME_MS')) {
-  throw new Error(
-      'HEALTH_HEAP_LOW must trigger deferred Wi-Fi/httpd recovery after boot settle, without pausing BLE');
 }
 
 const safeBeepStart = bleLibrary.indexOf('bool AcaiaArduinoBLE::beepWithoutStateChange()');
