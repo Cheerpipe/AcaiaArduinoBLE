@@ -75,11 +75,6 @@ inline void digitalWrite(uint8_t pin, uint8_t level) {
   }
 }
 
-inline void analogWrite(uint8_t pin, int value) {
-  (void)pin;
-  (void)value;
-}
-
 inline size_t hostLedcAttachCalls = 0;
 
 inline bool ledcAttach(uint8_t pin, double freq, uint8_t resolution) {
@@ -112,7 +107,6 @@ inline bool setCpuFrequencyMhz(uint32_t mhz) {
   return hostCpuFrequencySetSucceeds;
 }
 
-inline void enableLoopWDT() {}
 inline void vTaskDelay(TickType_t ticks) { (void)ticks; }
 inline void portENTER_CRITICAL(portMUX_TYPE *mux) { (void)mux; }
 inline void portEXIT_CRITICAL(portMUX_TYPE *mux) { (void)mux; }

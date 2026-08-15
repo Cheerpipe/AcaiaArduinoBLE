@@ -12,7 +12,7 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 1;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 2;
 constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
 constexpr size_t PREFERRED_SCALE_NAME_CAPACITY = 32;
 constexpr size_t SCALE_HISTORY_CAPACITY = 8;
@@ -22,7 +22,6 @@ constexpr uint32_t NTP_RESYNC_INTERVAL_MS = 3600UL * 1000UL;
 constexpr uint32_t NTP_UNSYNCED_RETRY_MS = 60UL * 1000UL;
 constexpr uint32_t NTP_FIRST_SYNC_TIMEOUT_MS = 30000;
 constexpr uint32_t NTP_STA_SETTLE_MS = 8000;
-constexpr uint32_t NTP_SYNC_TIMEOUT_MS = 60000;
 constexpr uint32_t NTP_STALE_AFTER_MS = 24UL * 3600UL * 1000UL;
 constexpr uint8_t NTP_MAX_CONSECUTIVE_FAILURES = 255;
 
@@ -33,12 +32,11 @@ enum class NtpServerPreset : uint8_t {
   NIST = 3
 };
 
-// Paired-scale lock. PARTIAL is legacy NVS only and canonicalizes to FULL.
+// Paired-scale lock.
 enum class ScaleMacCacheMode : uint8_t {
   // Named OFF (not DISABLED): ESP32 Arduino defines a DISABLED GPIO macro.
-  OFF = 0,      // Name scan; connect first compatible; do not lock preferred.
-  PARTIAL = 1,  // Legacy; treated as FULL.
-  FULL = 2      // Name scan; connect only preferred (or first if none yet).
+  OFF = 0,   // Name scan; connect first compatible; do not lock preferred.
+  FULL = 1,  // Name scan; connect only preferred (or first if none yet).
 };
 
 // BLE-seen scales remembered for the preferred-scale dropdown (NVS + status).
@@ -48,19 +46,13 @@ struct ScaleHistoryEntry {
   uint32_t lastSeenSeq = 0;
 };
 
-inline uint8_t canonicalScaleMacCacheMode(uint8_t mode) {
-  if (mode == static_cast<uint8_t>(ScaleMacCacheMode::PARTIAL)) {
-    return static_cast<uint8_t>(ScaleMacCacheMode::FULL);
-  }
-  return mode;
-}
-
 inline bool validScaleMacCacheMode(uint8_t mode) {
-  return mode <= static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+  return mode == static_cast<uint8_t>(ScaleMacCacheMode::OFF) ||
+         mode == static_cast<uint8_t>(ScaleMacCacheMode::FULL);
 }
 
 inline const char *scaleMacCacheModeId(uint8_t mode) {
-  switch (static_cast<ScaleMacCacheMode>(canonicalScaleMacCacheMode(mode))) {
+  switch (static_cast<ScaleMacCacheMode>(mode)) {
     case ScaleMacCacheMode::OFF:
       return "disabled";
     case ScaleMacCacheMode::FULL:
@@ -77,7 +69,7 @@ inline bool parseScaleMacCacheMode(const char *text, uint8_t &mode) {
     mode = static_cast<uint8_t>(ScaleMacCacheMode::OFF);
     return true;
   }
-  if (strcmp(text, "partial") == 0 || strcmp(text, "full") == 0) {
+  if (strcmp(text, "full") == 0) {
     mode = static_cast<uint8_t>(ScaleMacCacheMode::FULL);
     return true;
   }
@@ -504,7 +496,6 @@ inline BuzzerPattern buzzerPatternForExtendedPulseRate(uint8_t rate) {
 #define SHOT_STOPPER_ENABLE_ALED 0
 #endif
 
-constexpr bool ALED_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_ALED == 1;
 static_assert(SHOT_STOPPER_ENABLE_ALED == 0 || SHOT_STOPPER_ENABLE_ALED == 1,
               "SHOT_STOPPER_ENABLE_ALED must be 0 or 1");
 
@@ -572,24 +563,24 @@ inline const char *stopperStateName(StopperState state) {
 }
 
 enum class EndReason : uint8_t {
-  NONE,
-  PADDLE,
-  SCALE_PREDICTION,  // legacy; new firmware never assigns this
-  SCALE_THRESHOLD,
-  WEIGHT_ANOMALY,
-  GLOBAL_LIMIT,
-  CONFIGURED_WALL_LIMIT,
-  SHORT_SHOT,
-  RINSE_COMPLETE,
-  WEB_STOP,
-  PHYSICAL_OVERRIDE,
-  WEB_HEARTBEAT_TIMEOUT,
-  RELAY_SAFETY_FAILURE,
-  FAST_EXTRACTION_MAX_WEIGHT,
-  FAST_EXTRACTION_MIN_TIME,
-  SLOW_EXTRACTION_MAX_TIME,
-  SLOW_EXTRACTION_MIN_WEIGHT,
-  AUTO_TO_MANUAL_GUARD
+  NONE = 0,
+  PADDLE = 1,
+  // 2 was SCALE_PREDICTION (removed); keep ordinals stable for old logs.
+  SCALE_THRESHOLD = 3,
+  WEIGHT_ANOMALY = 4,
+  GLOBAL_LIMIT = 5,
+  CONFIGURED_WALL_LIMIT = 6,
+  SHORT_SHOT = 7,
+  RINSE_COMPLETE = 8,
+  WEB_STOP = 9,
+  PHYSICAL_OVERRIDE = 10,
+  WEB_HEARTBEAT_TIMEOUT = 11,
+  RELAY_SAFETY_FAILURE = 12,
+  FAST_EXTRACTION_MAX_WEIGHT = 13,
+  FAST_EXTRACTION_MIN_TIME = 14,
+  SLOW_EXTRACTION_MAX_TIME = 15,
+  SLOW_EXTRACTION_MIN_WEIGHT = 16,
+  AUTO_TO_MANUAL_GUARD = 17
 };
 
 enum class AutoToManualGuardLimitMode : uint8_t {
@@ -780,9 +771,6 @@ struct RuntimeConfig {
   // Default: buzzer_only with SHOT_STOPPER_ENABLE_BUZZER, else scale_only.
   uint8_t alertOutputChannel =
       static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL);
-  // Reserved for future config fields without a schema bump if unused.
-  uint32_t reservedConfig = 0;
-  uint32_t reservedConfig2 = 0;
   uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
   uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
   bool autoRetare = true;
@@ -820,14 +808,10 @@ struct RuntimeConfig {
       static_cast<uint8_t>(ScaleMacCacheMode::FULL);
   bool bookooMuteOnBuzzerOnly = true;
   uint8_t bookooConnectBeepLevel = DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL;
-  // Reserved for future config fields without a schema bump if unused.
-  uint32_t reservedConfig3 = 0;
   bool avoidBbwShotWithoutScale = true;
   uint32_t lastShotCooldownMs = DEFAULT_LAST_SHOT_COOLDOWN_MS;
   // USB debug spew (paddle/CN9/Wi-Fi traces). CLI replies stay independent.
   bool serialDebugOutput = false;
-  // Reserved for future config fields without a schema bump if unused.
-  uint32_t reservedConfig4 = 0;
   // Minimum level retained in the RAM debug ring (WebUI Log). NONE disables.
   uint8_t ringRetainLogLevel = static_cast<uint8_t>(LogLevel::NONE);
 };
@@ -969,15 +953,6 @@ constexpr float FACTORY_SINGLE_MAX_RECOVERY_WEIGHT_G = 20.0f;
 constexpr uint32_t FACTORY_SINGLE_MIN_BREW_TIME_MS = 16000;
 constexpr float FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G = 14.0f;
 constexpr uint32_t FACTORY_SINGLE_MAX_BREW_TIME_MS = 44000;
-
-inline float defaultMinRecoveryWeightG(uint8_t goalWeightG,
-                                       uint8_t presetId = 0) {
-  if (presetId == FACTORY_PRESET_ID_SINGLE ||
-      goalWeightG <= FACTORY_SINGLE_GOAL_WEIGHT_G) {
-    return FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G;
-  }
-  return DEFAULT_MIN_RECOVERY_WEIGHT_G;
-}
 
 inline void repairSlowExtractionGuard(RuntimeConfig &runtime) {
   if (!runtime.slowExtractionGuardEnabled) {
@@ -2010,10 +1985,6 @@ inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {
          status.safetyState != RelaySafetyState::LOCKOUT;
 }
 
-inline bool controlAllowsNetworkBringup(const ControlStatusSnapshot &) {
-  return true;
-}
-
 enum class DebugCategory : uint8_t {
   PADDLE,
   RELAY,
@@ -2689,7 +2660,6 @@ inline const char *endReasonDebugName(EndReason reason) {
   switch (reason) {
     case EndReason::NONE: return "none";
     case EndReason::PADDLE: return "paddle";
-    case EndReason::SCALE_PREDICTION: return "scale prediction";
     case EndReason::SCALE_THRESHOLD: return "scale threshold";
     case EndReason::WEIGHT_ANOMALY: return "weight anomaly";
     case EndReason::GLOBAL_LIMIT: return "global CN9 limit";

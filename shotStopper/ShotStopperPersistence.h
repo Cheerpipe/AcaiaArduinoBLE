@@ -320,29 +320,6 @@ inline bool validPersistedStaNetwork(const PersistedSettings &settings) {
                                settings.lkgDns1, settings.lkgDns2);
 }
 
-inline void normalizeRuntimeBbwProtectionDefaults(RuntimeConfig &runtime) {
-  if (runtime.bbwProtectionMs < DEFAULT_BBW_PROTECTION_MS) {
-    runtime.bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
-  }
-  const uint32_t minimum = minimumBbwProtectionMs(runtime);
-  if (runtime.bbwProtectionMs < minimum) {
-    runtime.bbwProtectionMs = minimum;
-  }
-}
-
-inline void applyAutoToManualGuardDefaults(RuntimeConfig &runtime) {
-  runtime.autoToManualGuardEnabled = true;
-  runtime.autoToManualGuardLimitMode =
-      static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
-  runtime.autoToManualGuardManualLimitMs =
-      DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
-  runtime.autoToManualGuardBaselineMs =
-      DEFAULT_AUTO_TO_MANUAL_GUARD_BASELINE_MS;
-  resetAutoToManualGuardSamples(runtime.autoToManualGuardSamplesDs,
-                                runtime.autoToManualGuardBaselineMs);
-}
-
-
 inline void ensurePersistedPresetBank(PersistedSettings &settings) {
   // Only migrate recipe→bank when empty. Invalid activeId is repaired in
   // ensureShotPresetBank without wiping customs or copying session Manual.

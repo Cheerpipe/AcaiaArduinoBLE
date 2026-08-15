@@ -280,7 +280,7 @@ void verifySafetyInvariants() {
 
   if (relay.closed && (!stateMayCloseRelay || !session.active)) {
     std::cerr << "Safety invariant failed: CN9 closed in "
-              << stateName(stopperState) << "\n";
+              << stopperStateName(stopperState) << "\n";
     ++failures;
   }
   if ((stopperState == StopperState::READY ||
@@ -4749,16 +4749,6 @@ void n08_web_rinse_requests_ntp_when_unsynced() {
   CHECK(hostNtpSyncRequestCount == 1);
 }
 
-void n09_network_bringup_ignores_paddle() {
-  ControlStatusSnapshot status = {};
-  status.state = StopperState::BREW;
-  status.activeCycle = true;
-  status.relayClosed = true;
-  status.physicalPaddleOn = true;
-  CHECK(!controlAllowsConfiguration(status));
-  CHECK(controlAllowsNetworkBringup(status));
-}
-
 void feedSerial(const char *text) {
   Serial.inject(text);
   size_t guard = 0;
@@ -5678,7 +5668,6 @@ const TestCase testCases[] = {
     {"N06", n06_synced_clock_skips_activity_ntp_request},
     {"N07", n07_syncing_clock_skips_activity_ntp_request},
     {"N08", n08_web_rinse_requests_ntp_when_unsynced},
-    {"N09", n09_network_bringup_ignores_paddle},
     {"SC01", sc01_hello_replies_how_are_you},
     {"SC02", sc02_factory_reset_rejected_while_active},
     {"SC03", sc03_set_wifi_queues_save_network},

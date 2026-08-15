@@ -122,8 +122,6 @@ inline ShotLogStopDetail shotLogStopDetailFromEndReason(
       return ShotLogStopDetail::SLOW_MIN_WEIGHT;
     case EndReason::AUTO_TO_MANUAL_GUARD:
       return ShotLogStopDetail::AUTO_TO_MANUAL;
-    case EndReason::SCALE_PREDICTION:  // legacy records only
-      return ShotLogStopDetail::PREDICTION;
     case EndReason::SCALE_THRESHOLD:
     case EndReason::WEIGHT_ANOMALY:
       return extractionExtended && extractionGuardEnabled
@@ -155,7 +153,6 @@ inline const char *shotLogCutName(ShotLogCut cut) {
 inline ShotLogCut shotLogCutFromEndReason(EndReason reason) {
   switch (reason) {
     case EndReason::SCALE_THRESHOLD:
-    case EndReason::SCALE_PREDICTION:
     case EndReason::WEIGHT_ANOMALY:
     case EndReason::FAST_EXTRACTION_MAX_WEIGHT:
     case EndReason::FAST_EXTRACTION_MIN_TIME:

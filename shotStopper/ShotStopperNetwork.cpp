@@ -696,7 +696,7 @@ void ShotStopperNetwork::service() {
   ControlStatusSnapshot control;
   callbacks_.copyControlStatus(control);
 
-  if (!startupComplete_ && controlAllowsNetworkBringup(control) &&
+  if (!startupComplete_ &&
       static_cast<int32_t>(now - networkRetryAtMs_) >= 0) {
     if (startNetwork()) {
       startupFailures_ = 0;
@@ -2665,7 +2665,6 @@ const char *ShotStopperNetwork::endReasonName(EndReason reason) {
   switch (reason) {
     case EndReason::NONE: return "NONE";
     case EndReason::PADDLE: return "PADDLE";
-    case EndReason::SCALE_PREDICTION: return "SCALE_PREDICTION";
     case EndReason::SCALE_THRESHOLD: return "SCALE_THRESHOLD";
     case EndReason::WEIGHT_ANOMALY: return "WEIGHT_ANOMALY";
     case EndReason::GLOBAL_LIMIT: return "GLOBAL_LIMIT";

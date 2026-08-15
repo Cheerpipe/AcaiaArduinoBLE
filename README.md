@@ -544,7 +544,7 @@ Elapsed time is measured from cycle start (CN9 close), consistent with other
 timing in the firmware. The learned stop offset applies to the min recovery
 threshold (`min recovery − offset`), the same way it applies to Fast’s max
 recovery. Prediction is only a tool; the logged reason is always the mechanism
-(`slow_max_time` / `slow_min_weight`), never `SCALE_PREDICTION`.
+(`slow_max_time` / `slow_min_weight`).
 
 Max brew time is a **decision point**, not a replacement for the CN9 wall. If
 the shot is already over the floor at 44 s, it cuts there and the 60 s wall is

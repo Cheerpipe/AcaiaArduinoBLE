@@ -356,38 +356,6 @@ inline void copyUserRecipeFromConfig(const RuntimeConfig &config,
   preset.autoToManualGuardBaselineMs = config.autoToManualGuardBaselineMs;
 }
 
-inline void copyUserRecipeToPreset(ShotPreset &preset, bool brewByWeight,
-                                   uint8_t goalWeightG,
-                                   uint32_t operationalWallMs,
-                                   uint32_t bbwProtectionMs,
-                                   float weightOffsetBaselineG,
-                                   bool fastExtractionGuardEnabled,
-                                   float maxRecoveryWeightG,
-                                   uint32_t minBrewTimeMs,
-                                   bool slowExtractionGuardEnabled,
-                                   float minRecoveryWeightG,
-                                   uint32_t maxBrewTimeMs,
-                                   bool autoToManualGuardEnabled,
-                                   uint8_t autoToManualGuardLimitMode,
-                                   uint32_t autoToManualGuardManualLimitMs,
-                                   uint32_t autoToManualGuardBaselineMs) {
-  preset.brewByWeight = brewByWeight;
-  preset.goalWeightG = goalWeightG;
-  preset.operationalWallMs = operationalWallMs;
-  preset.bbwProtectionMs = bbwProtectionMs;
-  preset.weightOffsetBaselineG = weightOffsetBaselineG;
-  preset.fastExtractionGuardEnabled = fastExtractionGuardEnabled;
-  preset.maxRecoveryWeightG = maxRecoveryWeightG;
-  preset.minBrewTimeMs = minBrewTimeMs;
-  preset.slowExtractionGuardEnabled = slowExtractionGuardEnabled;
-  preset.minRecoveryWeightG = minRecoveryWeightG;
-  preset.maxBrewTimeMs = maxBrewTimeMs;
-  preset.autoToManualGuardEnabled = autoToManualGuardEnabled;
-  preset.autoToManualGuardLimitMode = autoToManualGuardLimitMode;
-  preset.autoToManualGuardManualLimitMs = autoToManualGuardManualLimitMs;
-  preset.autoToManualGuardBaselineMs = autoToManualGuardBaselineMs;
-}
-
 inline bool allocateShotPresetId(ShotPresetBank &bank, uint8_t &outId) {
   for (uint16_t attempt = 0; attempt < 256; ++attempt) {
     const uint8_t candidate = bank.nextId == 0 ? 1 : bank.nextId;

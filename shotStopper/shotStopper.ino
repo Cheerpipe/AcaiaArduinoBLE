@@ -1185,17 +1185,6 @@ void scheduleScaleTimerStopAfterCycle() {
   }
   pendingScaleTimerStop.pending = true;
   pendingScaleTimerStop.dueAtMs = millis() + delayMs;
-  // #region agent log
-  serialTracef(LogLevel::DEBUG,
-               "agent scaleTimerStopScheduled extra=%lu lag=%lu delay=%lu dueIn=%lu",
-               static_cast<unsigned long>(
-                   session.config.scaleTimerStopExtraDelayMs),
-               static_cast<unsigned long>(session.scaleStartLagCaptured
-                                              ? session.scaleStartLagMs
-                                              : 0U),
-               static_cast<unsigned long>(delayMs),
-               static_cast<unsigned long>(delayMs));
-  // #endregion
 }
 
 void servicePendingScaleTimerStop() {
@@ -1224,45 +1213,6 @@ void maybeCaptureScaleStartLag() {
   }
   session.scaleStartLagMs = elapsedMs(relay.closedAtMs);
   session.scaleStartLagCaptured = true;
-  // #region agent log
-  serialTracef(LogLevel::DEBUG,
-               "agent scaleStartLagMs=%lu",
-               static_cast<unsigned long>(session.scaleStartLagMs));
-  // #endregion
-}
-
-const char *stateName(StopperState state) {
-  return stopperStateName(state);
-}
-
-const char *endReasonName(EndReason reason) {
-  switch (reason) {
-    case EndReason::NONE: return "none";
-    case EndReason::PADDLE: return "paddle";
-    case EndReason::SCALE_PREDICTION: return "scale prediction";
-    case EndReason::SCALE_THRESHOLD: return "scale threshold";
-    case EndReason::WEIGHT_ANOMALY: return "weight anomaly";
-    case EndReason::GLOBAL_LIMIT: return "global CN9 limit";
-    case EndReason::CONFIGURED_WALL_LIMIT:
-      return "configured wall limit";
-    case EndReason::SHORT_SHOT: return "short shot";
-    case EndReason::RINSE_COMPLETE: return "rinse complete";
-    case EndReason::WEB_STOP: return "web stop";
-    case EndReason::PHYSICAL_OVERRIDE: return "physical override";
-    case EndReason::WEB_HEARTBEAT_TIMEOUT: return "web heartbeat timeout";
-    case EndReason::RELAY_SAFETY_FAILURE: return "relay safety failure";
-    case EndReason::FAST_EXTRACTION_MAX_WEIGHT:
-      return "fast extraction max weight";
-    case EndReason::FAST_EXTRACTION_MIN_TIME:
-      return "fast extraction min time";
-    case EndReason::SLOW_EXTRACTION_MAX_TIME:
-      return "slow extraction max time";
-    case EndReason::SLOW_EXTRACTION_MIN_WEIGHT:
-      return "slow extraction min weight";
-    case EndReason::AUTO_TO_MANUAL_GUARD:
-      return "auto-to-manual time guard";
-  }
-  return "unknown";
 }
 
 void transitionTo(StopperState nextState) {
@@ -3478,7 +3428,6 @@ void cancelScalePaddleReturnReminderBeep() {
 bool shotCompletionGetsDoubleBeep(EndReason reason) {
   switch (reason) {
     case EndReason::PADDLE:
-    case EndReason::SCALE_PREDICTION:
     case EndReason::SCALE_THRESHOLD:
     case EndReason::WEIGHT_ANOMALY:
     case EndReason::GLOBAL_LIMIT:
@@ -3694,8 +3643,7 @@ bool scaleDiscoveryPaused(uint32_t nowMs = millis()) {
 }
 
 ScaleMacCacheMode currentScaleMacCacheMode() {
-  return static_cast<ScaleMacCacheMode>(
-      canonicalScaleMacCacheMode(runtimeConfig.scaleMacCacheMode));
+  return static_cast<ScaleMacCacheMode>(runtimeConfig.scaleMacCacheMode);
 }
 
 void noteScaleHistory(const char *mac, const char *name) {
