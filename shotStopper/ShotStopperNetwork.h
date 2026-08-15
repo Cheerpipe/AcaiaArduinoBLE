@@ -145,6 +145,7 @@ class ShotStopperNetwork {
   static constexpr uint32_t STA_RECOVERY_ATTEMPT_MS = 60000;
   static constexpr uint32_t STA_CONFIRM_TIMEOUT_MS = 180000;
   static constexpr uint32_t STA_RECONNECT_INTERVAL_MS = 10000;
+  static constexpr uint32_t WIFI_SCAN_TIMEOUT_MS = 20000;
   static constexpr uint32_t RESTART_DELAY_MS = 750;
   static constexpr uint32_t NETWORK_RETRY_MIN_MS = 1000;
   static constexpr uint32_t NETWORK_RETRY_MAX_MS = 30000;
@@ -177,6 +178,7 @@ class ShotStopperNetwork {
   NetworkBridgeCallbacks callbacks_ = {};
   QueueHandle_t acceptedCommandQueue_ = nullptr;
   TaskHandle_t taskHandle_ = nullptr;
+  SemaphoreHandle_t statusResponseMux_ = nullptr;
   httpd_handle_t server_ = nullptr;
   portMUX_TYPE dataMux_ = portMUX_INITIALIZER_UNLOCKED;
   WebSession sessions_[SESSION_COUNT] = {};
@@ -242,6 +244,7 @@ class ShotStopperNetwork {
   bool ensureAccessPoint(uint32_t now, bool force = false);
   void stopSoftApKeepStation();
   bool wifiScanInProgress();
+  void abortWifiScan(uint32_t now, bool logTimeout);
   void stopNetwork();
   bool startHttpServer();
   void stopHttpServer();

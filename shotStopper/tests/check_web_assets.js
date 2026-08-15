@@ -947,6 +947,20 @@ const maxSocketsMatch = network.match(/max_open_sockets\s*=\s*(\d+)/);
 if (!maxSocketsMatch || Number(maxSocketsMatch[1]) < 10) {
   throw new Error('HTTP server must allow at least 10 open sockets for Web UI polling');
 }
+if (!network.includes('statusResponseMux_') ||
+    !network.includes('STATUS_BUSY')) {
+  throw new Error(
+      'Status handler must serialize the shared status buffers with a mutex');
+}
+if (!network.includes('"Connection"') || !network.includes('"close"')) {
+  throw new Error(
+      'API JSON responses must send Connection: close to avoid keep-alive socket pinning');
+}
+if (!network.includes('recv_wait_timeout = 2') ||
+    !network.includes('send_wait_timeout = 2')) {
+  throw new Error(
+      'HTTP recv/send wait timeouts must stay short so LRU can free stalled sockets');
+}
 const maxRespHeadersMatch = network.match(/max_resp_headers\s*=\s*(\d+)/);
 if (!maxRespHeadersMatch || Number(maxRespHeadersMatch[1]) < 12) {
   throw new Error('HTTP server must allow at least 12 response headers for gzip and ETag');
@@ -1052,8 +1066,18 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
       'Network must use STA-first boot, SoftAP when unassociated, WIFI_AP_STA while retrying STA, and pause retries during Wi-Fi scan');
 }
 if (!network.includes('WiFi.scanNetworks(true, false, false, 120)') ||
-    !network.includes('esp_wifi_scan_stop()')) {
-  throw new Error('WiFi scan must be asynchronous and cancelable during active control');
+    !network.includes('esp_wifi_scan_stop()') ||
+    !network.includes('abortWifiScan') ||
+    !network.includes('WIFI_SCAN_TIMEOUT_MS')) {
+  throw new Error(
+      'WiFi scan must be asynchronous, cancelable, abortable on mode change, and time-bounded');
+}
+if (network.includes('recycleHttpServer') ||
+    network.includes('noteHttpServeResult') ||
+    network.includes('recoverFromResourcePressure') ||
+    network.includes('associated without IP')) {
+  throw new Error(
+      'HTTP recycle / sticky no-IP recovery must stay removed — they kill ping when WebUI opens');
 }
 if (network.includes('networkShutdownPending_') ||
     /networkShutdownPending_\s*=\s*age\s*>=/.test(network)) {

@@ -459,6 +459,12 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
   if (acceptedCommandQueue_ == nullptr) {
     return false;
   }
+  statusResponseMux_ = xSemaphoreCreateMutex();
+  if (statusResponseMux_ == nullptr) {
+    vQueueDelete(acceptedCommandQueue_);
+    acceptedCommandQueue_ = nullptr;
+    return false;
+  }
   instance_ = this;
   ntpConfigRevision_ = settings_.runtime.revision;
   g_wallClock.reset();
@@ -467,6 +473,8 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
                               tskIDLE_PRIORITY + 1, &taskHandle_,
                               0) != pdPASS) {
     instance_ = nullptr;
+    vSemaphoreDelete(statusResponseMux_);
+    statusResponseMux_ = nullptr;
     vQueueDelete(acceptedCommandQueue_);
     acceptedCommandQueue_ = nullptr;
     taskHandle_ = nullptr;
@@ -1013,6 +1021,7 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
 void ShotStopperNetwork::startStation(const PersistedSettings &settings,
                                       uint32_t now) {
   stopHttpServer();
+  abortWifiScan(now, false);
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
   staEverConnected_ = false;
@@ -1063,6 +1072,43 @@ bool ShotStopperNetwork::wifiScanInProgress() {
   return busy;
 }
 
+void ShotStopperNetwork::abortWifiScan(uint32_t now, bool logTimeout) {
+  bool wasRunning = false;
+  bool wasQueuedOrRequested = false;
+  portENTER_CRITICAL(&dataMux_);
+  wasRunning = scan_.state == WifiScanState::RUNNING;
+  wasQueuedOrRequested =
+      scanRequested_ || scan_.state == WifiScanState::QUEUED || wasRunning;
+  if (wasQueuedOrRequested) {
+    scanRequested_ = false;
+    scan_.state = logTimeout ? WifiScanState::FAILED : WifiScanState::CANCELED;
+    scan_.updatedAtMs = now;
+    scan_.count = 0;
+  }
+  portEXIT_CRITICAL(&dataMux_);
+  if (wasRunning) {
+    esp_wifi_scan_stop();
+    WiFi.scanDelete();
+  }
+  if (!wasQueuedOrRequested) {
+    return;
+  }
+  log(DebugCategory::NETWORK,
+      logTimeout ? DebugCode::WIFI_SCAN_ERROR : DebugCode::WIFI_SCAN_CANCELED,
+      logTimeout ? -1 : 0);
+  if (scanMaintenanceLeaseId_ != 0) {
+    WebCommand command;
+    command.type = WebCommandType::START_WIFI_SCAN;
+    command.requestId = scanRequestId_;
+    command.maintenanceLeaseId = scanMaintenanceLeaseId_;
+    (void)enqueueMaintenanceCompletion(command, false,
+                                       logTimeout ? CommandResultState::FAILED
+                                                  : CommandResultState::CANCELED);
+    scanMaintenanceLeaseId_ = 0;
+    scanRequestId_ = 0;
+  }
+}
+
 bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
   const PersistedSettings settings = settingsCopy();
   NetworkStatusSnapshot status = snapshot();
@@ -1070,6 +1116,7 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
     return true;
   }
 
+  abortWifiScan(now, false);
   const bool keepStation = settings.staConfigured;
   stopHttpServer();
   if (!keepStation) {
@@ -1402,28 +1449,8 @@ void ShotStopperNetwork::serviceWifiScan(uint32_t now) {
   if (!safe) {
     const bool canceled = requested || state == WifiScanState::RUNNING ||
                           state == WifiScanState::QUEUED;
-    if (state == WifiScanState::RUNNING) {
-      esp_wifi_scan_stop();
-      WiFi.scanDelete();
-    }
     if (canceled) {
-      portENTER_CRITICAL(&dataMux_);
-      scanRequested_ = false;
-      scan_.state = WifiScanState::CANCELED;
-      scan_.updatedAtMs = now;
-      scan_.count = 0;
-      portEXIT_CRITICAL(&dataMux_);
-      log(DebugCategory::NETWORK, DebugCode::WIFI_SCAN_CANCELED);
-      if (scanMaintenanceLeaseId_ != 0) {
-        WebCommand command;
-        command.type = WebCommandType::START_WIFI_SCAN;
-        command.requestId = scanRequestId_;
-        command.maintenanceLeaseId = scanMaintenanceLeaseId_;
-        (void)enqueueMaintenanceCompletion(
-            command, false, CommandResultState::CANCELED);
-        scanMaintenanceLeaseId_ = 0;
-        scanRequestId_ = 0;
-      }
+      abortWifiScan(now, false);
     }
     return;
   }
@@ -1447,6 +1474,14 @@ void ShotStopperNetwork::serviceWifiScan(uint32_t now) {
   }
 
   if (state != WifiScanState::RUNNING) {
+    return;
+  }
+  uint32_t scanStartedAtMs = 0;
+  portENTER_CRITICAL(&dataMux_);
+  scanStartedAtMs = scan_.updatedAtMs;
+  portEXIT_CRITICAL(&dataMux_);
+  if (static_cast<uint32_t>(now - scanStartedAtMs) >= WIFI_SCAN_TIMEOUT_MS) {
+    abortWifiScan(now, true);
     return;
   }
   const int16_t result = WiFi.scanComplete();
@@ -2052,8 +2087,9 @@ bool ShotStopperNetwork::startHttpServer() {
   config.max_resp_headers = 12;
   config.backlog_conn = 10;
   config.lru_purge_enable = true;
-  config.recv_wait_timeout = 4;
-  config.send_wait_timeout = 4;
+  // Keep stuck clients from occupying sockets under BLE/Wi-Fi coex stalls.
+  config.recv_wait_timeout = 2;
+  config.send_wait_timeout = 2;
   if (httpd_start(&server_, &config) != ESP_OK) {
     server_ = nullptr;
     return false;
@@ -2314,6 +2350,9 @@ esp_err_t ShotStopperNetwork::sendJson(httpd_req_t *request,
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
   httpd_resp_set_hdr(request, "Cache-Control", "no-store");
   httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
+  // Close after each API response so keep-alive does not pin sockets while
+  // status/heartbeat polls overlap under coex delay (ping stays up, UI flaps).
+  httpd_resp_set_hdr(request, "Connection", "close");
   return httpd_resp_send(request, json, HTTPD_RESP_USE_STRLEN);
 }
 
@@ -2666,6 +2705,13 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   // Status intentionally has no authentication requirement. It is the
   // read-only landing view and contains no credentials, session material, or
   // actionable state. Every mutating route remains authenticated.
+  // Serialize builds: g_statusResponseBuffer / presets / scale history are
+  // process-wide and httpd serves multiple sockets concurrently.
+  if (self.statusResponseMux_ == nullptr ||
+      xSemaphoreTake(self.statusResponseMux_, pdMS_TO_TICKS(1500)) != pdTRUE) {
+    return sendError(request, "503 Service Unavailable", "STATUS_BUSY",
+                     "Status snapshot is busy; retry shortly.");
+  }
   ControlStatusSnapshot control;
   self.callbacks_.copyControlStatus(control);
   const NetworkStatusSnapshot network = self.snapshot();
@@ -3125,10 +3171,16 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       static_cast<unsigned long>(control.debugEventsDropped));
   if (written < 0 ||
       static_cast<size_t>(written) >= sizeof(g_statusResponseBuffer)) {
-    return sendError(request, "500 Internal Server Error", "STATUS_TOO_LARGE",
-                     "Status snapshot exceeds its size limit.");
+    const esp_err_t tooLarge =
+        sendError(request, "500 Internal Server Error", "STATUS_TOO_LARGE",
+                  "Status snapshot exceeds its size limit.");
+    xSemaphoreGive(self.statusResponseMux_);
+    return tooLarge;
   }
-  return sendJson(request, STATUS_OK, g_statusResponseBuffer);
+  const esp_err_t sent =
+      sendJson(request, STATUS_OK, g_statusResponseBuffer);
+  xSemaphoreGive(self.statusResponseMux_);
+  return sent;
 }
 
 esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
