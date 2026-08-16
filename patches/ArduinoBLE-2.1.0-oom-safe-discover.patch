@@ -1,0 +1,143 @@
+--- a/src/utility/BLELinkedList.h
++++ b/src/utility/BLELinkedList.h
+@@ -20,6 +20,8 @@
+ #ifndef _BLE_LINKED_LIST_
+ #define _BLE_LINKED_LIST_
+ 
++#include <cstdlib>
++#include <new>
+ #include <stddef.h>
+ 
+ template<class T> struct BLELinkedListNode
+@@ -33,7 +35,9 @@
+   BLELinkedList();
+   ~BLELinkedList();
+ 
+-  void add(T);
++  // Returns false if the node could not be allocated (OOM). Callers that must
++  // not abort under heap pressure should check the result.
++  bool add(T);
+   T get(unsigned int index) const;
+   void clear();
+   T remove(unsigned int index);
+@@ -58,10 +62,17 @@
+   clear();
+ }
+ 
+-template <typename T> void BLELinkedList<T>::add(T item)
++template <typename T> bool BLELinkedList<T>::add(T item)
+ {
+-  BLELinkedListNode<T>* itemNode = new BLELinkedListNode<T>();
++  // Avoid operator new: on this toolchain even new(nothrow) can abort when
++  // allocating the bad_alloc exception object also fails under OOM.
++  void* mem = malloc(sizeof(BLELinkedListNode<T>));
++  if (mem == NULL) {
++    return false;
++  }
+ 
++  BLELinkedListNode<T>* itemNode = new (mem) BLELinkedListNode<T>();
++
+   itemNode->data = item;
+   itemNode->next = NULL;
+ 
+@@ -73,6 +84,7 @@
+   _last = itemNode;
+ 
+   _size++;
++  return true;
+ }
+ 
+ template <typename T> T BLELinkedList<T>::get(unsigned int index) const
+@@ -99,7 +111,8 @@
+ 
+     itemNode = itemNode->next;
+ 
+-    delete n;
++    n->~BLELinkedListNode();
++    free(n);
+   }
+ 
+   _size = 0;
+@@ -138,7 +151,8 @@
+     _last = previousItemNode;
+   }
+ 
+-  delete itemNode;
++  itemNode->~BLELinkedListNode();
++  free(itemNode);
+   _size--;
+ 
+   return result;
+--- a/src/utility/GAP.cpp
++++ b/src/utility/GAP.cpp
+@@ -22,6 +22,9 @@
+ 
+ #include "GAP.h"
+ 
++#include <cstdlib>
++#include <new>
++
+ #define GAP_MAX_DISCOVERED_QUEUE_SIZE 32
+ 
+ #define GAP_ADV_IND (0x00)
+@@ -142,7 +145,10 @@
+   for (unsigned int i = 0; i < _discoveredDevices.size(); i++) {
+     BLEDevice* device = _discoveredDevices.get(i);
+ 
+-    delete device;
++    if (device != NULL) {
++      device->~BLEDevice();
++      free(device);
++    }
+   }
+ 
+   _discoveredDevices.clear();
+@@ -157,7 +163,8 @@
+       BLEDevice result = *device;
+ 
+       _discoveredDevices.remove(i);
+-      delete device;
++      device->~BLEDevice();
++      free(device);
+ 
+       if (matchesScanFilter(result)) {
+         return result;
+@@ -224,13 +231,25 @@
+     if (_discoveredDevices.size() >= GAP_MAX_DISCOVERED_QUEUE_SIZE) {
+       BLEDevice* device_first = _discoveredDevices.remove(0);
+       if (device_first != NULL) {
+-        delete device_first;
++        device_first->~BLEDevice();
++        free(device_first);
+       }
+     }
+ 
+-    discoveredDevice = new BLEDevice(addressType, address);
++    // ESP32 WiFi+BLE can exhaust the heap. Avoid operator new entirely:
++    // even new(nothrow) calls the throwing allocator, which tries to build a
++    // bad_alloc exception and abort()s when that allocation also fails.
++    void *mem = malloc(sizeof(BLEDevice));
++    if (mem == NULL) {
++      return;
++    }
++    discoveredDevice = new (mem) BLEDevice(addressType, address);
+ 
+-    _discoveredDevices.add(discoveredDevice);
++    if (!_discoveredDevices.add(discoveredDevice)) {
++      discoveredDevice->~BLEDevice();
++      free(discoveredDevice);
++      return;
++    }
+     discoveredIndex = _discoveredDevices.size() - 1;
+   }
+ 
+@@ -245,7 +264,8 @@
+     BLEDevice device = *discoveredDevice;
+ 
+     _discoveredDevices.remove(discoveredIndex);
+-    delete discoveredDevice;
++    discoveredDevice->~BLEDevice();
++    free(discoveredDevice);
+ 
+     if (matchesScanFilter(device)) {
+       _discoverEventHandler(device);

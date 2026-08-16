@@ -963,9 +963,11 @@ arduino-cli lib install ArduinoBLE@2.1.0
 
 `./scripts/patch_arduinoble.sh` is required: stock ArduinoBLE 2.1.0 scans
 active at 20/20 ms (100% duty). The patch sets active 40/20 ms (50% duty) so
-SCAN_RSP names stay visible while leaving airtime for the Wi-Fi AP. The
-script is idempotent and also converts a leftover 100/30 patch. Set
-`ARDUINO_BLE_HOME` if ArduinoBLE is not in the default Arduino libraries path.
+SCAN_RSP names stay visible while leaving airtime for the Wi-Fi AP, and makes
+discovery OOM-safe (`malloc` + placement `new`) so a starved heap drops an
+advertisement instead of aborting. The script is idempotent and also converts
+a leftover 100/30 patch. Set `ARDUINO_BLE_HOME` if ArduinoBLE is not in the
+default Arduino libraries path.
 
 Idle discovery does not start or stop GAP every 1 s or 3 s. Those timers are
 retry (only when scan is down), a software tick for logs, and log throttle.

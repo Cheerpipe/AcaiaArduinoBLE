@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Patch ArduinoBLE 2.1.0 GAP scan to active 40/20 ms (50% duty).
-# Stock is active 20/20. Also converts a leftover 100/30 (active or passive).
+# Patch ArduinoBLE 2.1.0 for Shot Stopper:
+#  1) GAP scan active 40/20 ms (50% duty; stock is 20/20)
+#  2) OOM-safe discovery (malloc + placement new; no abort on bad_alloc)
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-patch_file="$script_dir/../patches/ArduinoBLE-2.1.0-scan-40-20.patch"
+scan_patch="$script_dir/../patches/ArduinoBLE-2.1.0-scan-40-20.patch"
+oom_patch="$script_dir/../patches/ArduinoBLE-2.1.0-oom-safe-discover.patch"
 
 candidates=()
 if [[ -n "${ARDUINO_BLE_HOME:-}" ]]; then
@@ -42,21 +44,32 @@ if [[ -z "$target" ]]; then
 fi
 
 gap="$target/src/utility/GAP.cpp"
+list="$target/src/utility/BLELinkedList.h"
 
-if grep -q 'leSetScanParameters(0x01, 0x0040, 0x0020' "$gap"; then
-  echo "ArduinoBLE GAP scan already 40/20: $target"
+apply_scan=0
+apply_oom=0
+
+if ! grep -q 'leSetScanParameters(0x01, 0x0040, 0x0020' "$gap"; then
+  apply_scan=1
+fi
+
+if ! grep -q 'malloc(sizeof(BLEDevice))' "$gap" || \
+   ! grep -q 'malloc(sizeof(BLELinkedListNode' "$list"; then
+  apply_oom=1
+fi
+
+if [[ "$apply_scan" -eq 0 && "$apply_oom" -eq 0 ]]; then
+  echo "ArduinoBLE already patched (scan 40/20 + OOM-safe discover): $target"
   exit 0
 fi
 
-if [[ -f "$patch_file" ]] && command -v patch >/dev/null 2>&1; then
-  if patch -p1 --dry-run -d "$target" < "$patch_file" >/dev/null 2>&1; then
-    patch -p1 -d "$target" < "$patch_file"
+if [[ "$apply_scan" -eq 1 ]]; then
+  if [[ -f "$scan_patch" ]] && command -v patch >/dev/null 2>&1 && \
+     patch -p1 --dry-run -d "$target" < "$scan_patch" >/dev/null 2>&1; then
+    patch -p1 -d "$target" < "$scan_patch"
     echo "Patched ArduinoBLE GAP scan to active 40/20: $target"
-    exit 0
-  fi
-fi
-
-python3 - "$gap" <<'PY'
+  else
+    python3 - "$gap" <<'PY'
 from pathlib import Path
 import sys
 path = Path(sys.argv[1])
@@ -90,4 +103,24 @@ if text == old:
     raise SystemExit("ArduinoBLE GAP scan params were not a known 20/20 or 100/30 variant")
 path.write_text(text)
 PY
-echo "Patched ArduinoBLE GAP scan to active 40/20: $target"
+    echo "Patched ArduinoBLE GAP scan to active 40/20: $target"
+  fi
+fi
+
+if [[ "$apply_oom" -eq 1 ]]; then
+  if [[ ! -f "$oom_patch" ]]; then
+    echo "Missing OOM-safe patch: $oom_patch" >&2
+    exit 1
+  fi
+  if ! command -v patch >/dev/null 2>&1; then
+    echo "patch(1) is required to apply $oom_patch" >&2
+    exit 1
+  fi
+  if ! patch -p1 --dry-run -d "$target" < "$oom_patch" >/dev/null 2>&1; then
+    echo "OOM-safe discover patch does not apply cleanly to: $target" >&2
+    echo "Install stock ArduinoBLE@2.1.0, then re-run this script." >&2
+    exit 1
+  fi
+  patch -p1 -d "$target" < "$oom_patch"
+  echo "Patched ArduinoBLE OOM-safe discovery: $target"
+fi
