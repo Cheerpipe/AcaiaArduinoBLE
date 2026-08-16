@@ -5,9 +5,10 @@
 
 #ifdef ARDUINO
 #include <Arduino.h>
-#include <esp_freertos_hooks.h>
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #endif
 
 namespace shotstopper {
@@ -17,8 +18,6 @@ namespace shotstopper {
 constexpr float HWMON_CPU_LOAD_MAX = 2.0f;
 constexpr float HWMON_EMA_TAU_1M_S = 60.0f;
 constexpr float HWMON_EMA_TAU_5M_S = 300.0f;
-// Re-entrant idle-hook gaps larger than this are treated as non-idle (other work).
-constexpr uint64_t HWMON_IDLE_GAP_MAX_US = 500;
 
 struct HwmonSnapshot {
   float cpuLoad5s = 0.0f;
@@ -39,16 +38,14 @@ class Hwmon {
  public:
   void begin() {
 #ifdef ARDUINO
-    if (hooksInstalled_) {
-      return;
-    }
-    activeInstance_ = this;
-    (void)esp_register_freertos_idle_hook_for_cpu(idleHook0, 0);
-#if portNUM_PROCESSORS > 1
-    (void)esp_register_freertos_idle_hook_for_cpu(idleHook1, 1);
-#endif
-    hooksInstalled_ = true;
     sampleStartedUs_ = esp_timer_get_time();
+    prevIdleCounter_[0] = idleRunTimeCounter_(0);
+#if portNUM_PROCESSORS > 1
+    prevIdleCounter_[1] = idleRunTimeCounter_(1);
+#else
+    prevIdleCounter_[1] = 0;
+#endif
+    countersPrimed_ = true;
 #else
     sampleStartedUs_ = 0;
 #endif
@@ -131,56 +128,32 @@ class Hwmon {
     return previous + alpha * (sample - previous);
   }
 
-  void noteIdleCore_(int core) {
 #ifdef ARDUINO
-    const uint64_t now = esp_timer_get_time();
-    portENTER_CRITICAL(&idleMux_);
-    const uint64_t last = lastIdleStampUs_[core];
-    if (last != 0U) {
-      const uint64_t dt = now - last;
-      if (dt > 0U && dt <= HWMON_IDLE_GAP_MAX_US) {
-        idleAccumUs_[core] += dt;
-      }
-    }
-    lastIdleStampUs_[core] = now;
-    portEXIT_CRITICAL(&idleMux_);
-#else
-    (void)core;
-#endif
+  // FreeRTOS idle run-time counters (µs via esp_timer, uint32 wrap ~71 min).
+  // Prefer these over idle hooks: esp_register_freertos_idle_hook's return
+  // true means "once per tick", so a 500 µs gap cap counted ~0 idle forever.
+  static uint32_t idleRunTimeCounter_(BaseType_t core) {
+    return static_cast<uint32_t>(ulTaskGetIdleRunTimeCounterForCore(core));
   }
 
-#ifdef ARDUINO
-  // Not IRAM_ATTR: Xtensa forbids IRAM code that needs flash literals for
-  // C++ static/member access (l32r "literal placed after use").
-  static bool idleHook0() {
-    if (activeInstance_ != nullptr) {
-      activeInstance_->noteIdleCore_(0);
-    }
-    return true;
+  static uint32_t idleDeltaUs_(uint32_t now, uint32_t prev) {
+    // Unsigned wrap-safe delta for configRUN_TIME_COUNTER_TYPE uint32_t.
+    return static_cast<uint32_t>(now - prev);
   }
-
-#if portNUM_PROCESSORS > 1
-  static bool idleHook1() {
-    if (activeInstance_ != nullptr) {
-      activeInstance_->noteIdleCore_(1);
-    }
-    return true;
-  }
-#endif
 #endif
 
   void sampleCpuLoad_(HwmonSnapshot &out, uint32_t intervalMs) {
     uint64_t idle0 = 0;
     uint64_t idle1 = 0;
-#ifdef ARDUINO
-    portENTER_CRITICAL(&idleMux_);
-    idle0 = idleAccumUs_[0];
-    idle1 = idleAccumUs_[1];
-    idleAccumUs_[0] = 0;
-    idleAccumUs_[1] = 0;
-    portEXIT_CRITICAL(&idleMux_);
-    const uint64_t nowUs = esp_timer_get_time();
     uint64_t wallUs = 0;
+#ifdef ARDUINO
+    const uint32_t idle0Now = idleRunTimeCounter_(0);
+#if portNUM_PROCESSORS > 1
+    const uint32_t idle1Now = idleRunTimeCounter_(1);
+#else
+    const uint32_t idle1Now = 0;
+#endif
+    const uint64_t nowUs = esp_timer_get_time();
     if (sampleStartedUs_ != 0U && nowUs > sampleStartedUs_) {
       wallUs = nowUs - sampleStartedUs_;
     }
@@ -188,12 +161,25 @@ class Hwmon {
     if (wallUs == 0U && intervalMs > 0U) {
       wallUs = static_cast<uint64_t>(intervalMs) * 1000ULL;
     }
+    if (countersPrimed_) {
+      idle0 = idleDeltaUs_(idle0Now, prevIdleCounter_[0]);
+      idle1 = idleDeltaUs_(idle1Now, prevIdleCounter_[1]);
+    }
+    prevIdleCounter_[0] = idle0Now;
+    prevIdleCounter_[1] = idle1Now;
+    countersPrimed_ = true;
+    if (idle0 > wallUs) {
+      idle0 = wallUs;
+    }
+    if (idle1 > wallUs) {
+      idle1 = wallUs;
+    }
 #else
     idle0 = idleAccumUs_[0];
     idle1 = idleAccumUs_[1];
     idleAccumUs_[0] = 0;
     idleAccumUs_[1] = 0;
-    uint64_t wallUs =
+    wallUs =
         intervalMs > 0U ? static_cast<uint64_t>(intervalMs) * 1000ULL : 0U;
     // Host default: half-idle on each core → load 1.0 when nothing injected.
     if (idle0 == 0U && idle1 == 0U && wallUs > 0U && !hostIdleInjected_) {
@@ -253,16 +239,12 @@ class Hwmon {
   }
 
 #ifdef ARDUINO
-  static Hwmon *activeInstance_;
-  portMUX_TYPE idleMux_ = portMUX_INITIALIZER_UNLOCKED;
-  bool hooksInstalled_ = false;
+  uint32_t prevIdleCounter_[2] = {};
+  bool countersPrimed_ = false;
 #endif
 #ifndef ARDUINO
   bool hostIdleInjected_ = false;
-#endif
   uint64_t idleAccumUs_[2] = {};
-#ifdef ARDUINO
-  uint64_t lastIdleStampUs_[2] = {};
 #endif
   uint64_t sampleStartedUs_ = 0;
   float cpu0Busy_ = 0.0f;
@@ -273,9 +255,5 @@ class Hwmon {
   float tempPeakC_ = 0.0f;
   bool tempPeakValid_ = false;
 };
-
-#ifdef ARDUINO
-inline Hwmon *Hwmon::activeInstance_ = nullptr;
-#endif
 
 }  // namespace shotstopper
