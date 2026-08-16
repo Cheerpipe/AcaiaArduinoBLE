@@ -124,7 +124,7 @@ persist.
 | Command | Parameters | Effect |
 | --- | --- | --- |
 | `LOG_DUMP` | none | Prints the RAM debug ring (oldest first). Says so if empty or retain is none |
-| `HEALTH` | none | Heap, loop gap, task stacks, alert latches |
+| `HEALTH` | none | Heap, loop gap, task stacks, CPU load, current and peak temperature, alert latches |
 | `SCALE_STATUS` | none | BLE scale link, preferred MAC/name, weight freshness |
 | `NTP_STATUS` | none | Wall clock / NTP state. Notes if STA is down |
 

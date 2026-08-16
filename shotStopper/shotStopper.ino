@@ -6038,6 +6038,9 @@ void serialCliPrintLiveHealth() {
   dump.cpuLoad5m = hwmonSnapshot.cpuLoad5m;
   dump.cpu0Busy = hwmonSnapshot.cpu0Busy;
   dump.cpu1Busy = hwmonSnapshot.cpu1Busy;
+  dump.tempValid = hwmonSnapshot.tempValid;
+  dump.tempC = hwmonSnapshot.tempC;
+  dump.tempPeakC = hwmonSnapshot.tempPeakC;
   serialCliPrintHealth(dump);
 }
 

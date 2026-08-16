@@ -558,11 +558,14 @@ struct SerialCliHealthDump {
   bool stackAlertLatched = false;
   bool loopGapAlertLatched = false;
   bool cpuLoadValid = false;
+  bool tempValid = false;
   float cpuLoad5s = 0.0f;
   float cpuLoad1m = 0.0f;
   float cpuLoad5m = 0.0f;
   float cpu0Busy = 0.0f;
   float cpu1Busy = 0.0f;
+  float tempC = 0.0f;
+  float tempPeakC = 0.0f;
 };
 
 struct SerialCliScaleDump {
@@ -770,6 +773,12 @@ inline void serialCliPrintHealth(const SerialCliHealthDump &dump) {
   Serial.println(dump.cpu0Busy, 2);
   Serial.print("cpu1Busy=");
   Serial.println(dump.cpu1Busy, 2);
+  Serial.print("tempValid=");
+  Serial.println(dump.tempValid ? "true" : "false");
+  Serial.print("tempC=");
+  Serial.println(dump.tempC, 1);
+  Serial.print("tempPeakC=");
+  Serial.println(dump.tempPeakC, 1);
 }
 
 inline void serialCliPrintScaleStatus(const SerialCliScaleDump &dump) {

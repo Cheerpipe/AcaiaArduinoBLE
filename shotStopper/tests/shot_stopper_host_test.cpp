@@ -5313,6 +5313,9 @@ void sc15_status_printers_use_dump_views() {
   health.cpuLoad5m = 0.61f;
   health.cpu0Busy = 0.20f;
   health.cpu1Busy = 0.22f;
+  health.tempValid = true;
+  health.tempC = 42.5f;
+  health.tempPeakC = 47.0f;
   Serial.tx.clear();
   serialCliPrintHealth(health);
   CHECK(serialTxContains("HEALTH"));
@@ -5323,6 +5326,9 @@ void sc15_status_printers_use_dump_views() {
   CHECK(serialTxContains("cpuLoad5m=0.61"));
   CHECK(serialTxContains("cpu0Busy=0.20"));
   CHECK(serialTxContains("cpu1Busy=0.22"));
+  CHECK(serialTxContains("tempValid=true"));
+  CHECK(serialTxContains("tempC=42.5"));
+  CHECK(serialTxContains("tempPeakC=47.0"));
 
   SerialCliScaleDump scale;
   scale.state = "CONNECTED";
