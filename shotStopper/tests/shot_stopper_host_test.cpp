@@ -3685,6 +3685,8 @@ void w86_config_applies_to_ram_immediately_and_coalesces() {
   reachReadyFromBoot();
   const uint32_t firstRevision = runtimeConfig.revision;
   const bool originalAvoid = runtimeConfig.avoidBbwShotWithoutScale;
+  const uint32_t originalCooldown = runtimeConfig.lastShotCooldownMs;
+  const bool originalAutoTare = runtimeConfig.autoTare;
   WebCommand first;
   first.type = WebCommandType::APPLY_CONFIG;
   first.config = runtimeConfig;
@@ -3692,6 +3694,8 @@ void w86_config_applies_to_ram_immediately_and_coalesces() {
   processWebCommand(first);
   CHECK(!maintenanceLease.active);
   CHECK(runtimeConfig.avoidBbwShotWithoutScale == !originalAvoid);
+  CHECK(runtimeConfig.lastShotCooldownMs == originalCooldown);
+  CHECK(runtimeConfig.autoTare == originalAutoTare);
   CHECK(runtimeConfig.revision == firstRevision + 1);
   CHECK(runtimePersistPending);
 

@@ -62,6 +62,11 @@ const char *scaleDisconnectReasonName(uint8_t reason) {
   return "UNKNOWN";
 }
 
+bool jsonFieldPresent(cJSON *object, const char *name) {
+  return object != nullptr && name != nullptr &&
+         cJSON_GetObjectItemCaseSensitive(object, name) != nullptr;
+}
+
 bool jsonBoolean(cJSON *object, const char *name, bool &output) {
   cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
   if (!cJSON_IsBool(item)) {
@@ -3292,33 +3297,48 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   size_t used = 0;
   const bool liveShot =
       control.activeCycle || control.relayClosed;
+  // Shared envelope only: page-specific config (NTP, serial debug, buzzer)
+  // is appended below so home/settings polls stay lean.
   bool ok = statusJsonAppend(
       &used,
-      "{\"firmwareVersion\":\"%s\",\"configMutable\":%s,"
-      "\"buzzerSupported\":%s,\"liveShot\":%s,"
-      "\"config\":{\"ringRetainLogLevel\":\"%s\","
-      "\"timezoneOffsetMinutes\":%d,"
-      "\"ntpServerPreset\":\"%s\",\"ntpServerCustom\":\"%s\","
-      "\"serialDebugOutput\":%s",
+      "{\"firmwareVersion\":\"%s\",\"configMutable\":%s,\"liveShot\":%s",
       safeFirmwareVersion,
       controlAllowsConfiguration(control) ? "true" : "false",
-      BUZZER_SUPPORT_ENABLED ? "true" : "false",
-      liveShot ? "true" : "false",
-      logLevelName(static_cast<LogLevel>(control.config.ringRetainLogLevel)),
-      static_cast<int>(control.config.timezoneOffsetMinutes),
-      ntpPresetId(control.config.ntpServerPreset), safeNtpCustom,
-      control.config.serialDebugOutput ? "true" : "false");
+      liveShot ? "true" : "false");
+  if (ok &&
+      (page == StatusPage::Settings || page == StatusPage::Debug)) {
+    ok = statusJsonAppend(&used, ",\"buzzerSupported\":%s",
+                          BUZZER_SUPPORT_ENABLED ? "true" : "false");
+  }
+  if (ok) {
+    ok = statusJsonAppend(
+        &used, ",\"config\":{\"revision\":%lu,\"ringRetainLogLevel\":\"%s\"",
+        static_cast<unsigned long>(control.config.revision),
+        logLevelName(static_cast<LogLevel>(control.config.ringRetainLogLevel)));
+  }
+  if (ok && page == StatusPage::Admin) {
+    ok = statusJsonAppend(
+        &used,
+        ",\"timezoneOffsetMinutes\":%d,\"ntpServerPreset\":\"%s\","
+        "\"ntpServerCustom\":\"%s\"",
+        static_cast<int>(control.config.timezoneOffsetMinutes),
+        ntpPresetId(control.config.ntpServerPreset), safeNtpCustom);
+  }
+  if (ok && page == StatusPage::Debug) {
+    ok = statusJsonAppend(
+        &used, ",\"serialDebugOutput\":%s",
+        control.config.serialDebugOutput ? "true" : "false");
+  }
 
   if (ok && page == StatusPage::Home) {
     ok = statusJsonAppend(
         &used,
-        ",\"revision\":%lu,\"brewByWeight\":%s,\"goalWeightG\":%u,"
+        ",\"brewByWeight\":%s,\"goalWeightG\":%u,"
         "\"operationalWallMs\":%lu,\"minBrewTimeMs\":%lu,\"maxBrewTimeMs\":%lu,"
         "\"minRecoveryWeightG\":%.1f,\"maxRecoveryWeightG\":%.1f,"
         "\"fastExtractionGuardEnabled\":%s,\"slowExtractionGuardEnabled\":%s,"
         "\"autoToManualGuardEnabled\":%s,\"avoidBbwShotWithoutScale\":%s,"
         "\"scaleMacCacheMode\":\"%s\"",
-        static_cast<unsigned long>(control.config.revision),
         control.config.timerOnly ? "false" : "true",
         static_cast<unsigned>(control.config.goalWeightG),
         static_cast<unsigned long>(control.config.operationalWallMs),
@@ -3334,7 +3354,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   } else if (ok && page == StatusPage::Settings) {
     ok = statusJsonAppend(
         &used,
-        ",\"revision\":%lu,\"goalWeightG\":%u,\"weightOffsetG\":%.2f,"
+        ",\"goalWeightG\":%u,\"weightOffsetG\":%.2f,"
         "\"weightOffsetBaselineG\":%.2f,\"autoTare\":%s,\"brewByWeight\":%s,"
         "\"canTareStartTimer\":%s,\"scaleTimerStopExtraDelayMs\":%lu,"
         "\"firstDropBeep\":%s,\"paddleReturnReminderBeep\":%s,"
@@ -3359,7 +3379,6 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"autoToManualGuardTrendMs\":%lu,\"scaleMacCacheMode\":\"%s\","
         "\"bookooMuteOnBuzzerOnly\":%s,\"bookooConnectBeepLevel\":%u,"
         "\"avoidBbwShotWithoutScale\":%s,\"lastShotCooldownMs\":%lu",
-        static_cast<unsigned long>(control.config.revision),
         static_cast<unsigned>(control.config.goalWeightG),
         static_cast<double>(control.config.weightOffsetG),
         static_cast<double>(control.config.weightOffsetBaselineG),
@@ -3975,191 +3994,255 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
                      "A bounded JSON request is required.");
   }
   cJSON *root = cJSON_Parse(body);
+  // Patch: seed live effective config; only present keys overwrite.
   RuntimeConfig candidate = status.config;
-  bool brewByWeight = true;
+  bool brewByWeightPresent = false;
+  bool brewByWeight = !candidate.timerOnly;
+  bool baseRevisionPresent = false;
+  uint32_t baseRevision = 0;
   char customNtp[NTP_SERVER_HOST_CAPACITY] = {};
   memcpy(customNtp, candidate.ntpServerCustom, sizeof(customNtp));
   static const char *const fields[] = {
-      "goalWeightG", "rinseGestureMs", "rinseDurationMs", "operationalWallMs",
-      "autoTare", "brewByWeight",
-      "canTareStartTimer", "scaleTimerStopExtraDelayMs", "firstDropBeep",
-      "paddleReturnReminderBeep",
+      "baseRevision", "goalWeightG", "rinseGestureMs", "rinseDurationMs",
+      "operationalWallMs", "autoTare", "brewByWeight", "canTareStartTimer",
+      "scaleTimerStopExtraDelayMs", "firstDropBeep", "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
-      "paddleMode",
-      "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
+      "paddleMode", "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
       "buzzerManualNoScaleBeep", "buzzerScaleConnectedBeep",
       "buzzerExtendedPulseRate", "buzzerSlowExtendedPulseRate",
-      "alertOutputChannel",
-      "autoRetare", "retareWindowMs", "minimumCupWeightG",
+      "alertOutputChannel", "autoRetare", "retareWindowMs", "minimumCupWeightG",
       "retareStabilitySamples", "retareStabilityToleranceG",
       "retareStabilityMaxGapMs", "retareStabilityMinDurationMs",
-      "bbwProtectionMs", "fastExtractionGuardEnabled",
-      "maxRecoveryWeightG", "minBrewTimeMs",
-      "slowExtractionGuardEnabled", "minRecoveryWeightG", "maxBrewTimeMs",
-      "autoToManualGuardEnabled", "autoToManualGuardLimitMode",
+      "bbwProtectionMs", "fastExtractionGuardEnabled", "maxRecoveryWeightG",
+      "minBrewTimeMs", "slowExtractionGuardEnabled", "minRecoveryWeightG",
+      "maxBrewTimeMs", "autoToManualGuardEnabled", "autoToManualGuardLimitMode",
       "autoToManualGuardManualLimitMs", "autoToManualGuardBaselineMs",
-      "weightOffsetBaselineG",
-      "timezoneOffsetMinutes", "ntpServerPreset", "ntpServerCustom",
-      "scaleMacCacheMode", "bookooMuteOnBuzzerOnly", "bookooConnectBeepLevel",
-      "avoidBbwShotWithoutScale", "lastShotCooldownMs", "serialDebugOutput",
-      "ringRetainLogLevel"};
+      "weightOffsetBaselineG", "timezoneOffsetMinutes", "ntpServerPreset",
+      "ntpServerCustom", "scaleMacCacheMode", "bookooMuteOnBuzzerOnly",
+      "bookooConnectBeepLevel", "avoidBbwShotWithoutScale", "lastShotCooldownMs",
+      "serialDebugOutput", "ringRetainLogLevel"};
   const char *parseError = nullptr;
-  if (root == nullptr || !jsonHasOnlyUniqueFields(root, fields, 49)) {
+  size_t settingFieldCount = 0;
+  if (root != nullptr) {
+    for (cJSON *item = root->child; item != nullptr; item = item->next) {
+      if (item->string != nullptr &&
+          strcmp(item->string, "baseRevision") != 0) {
+        ++settingFieldCount;
+      }
+    }
+  }
+  if (root == nullptr ||
+      !jsonHasOnlyUniqueFields(root, fields,
+                               sizeof(fields) / sizeof(fields[0]))) {
     parseError =
-        "Config must include exactly the expected fields with correct types.";
-  } else if (!jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
+        "Config must be a JSON object with known fields and correct types.";
+  } else if (settingFieldCount == 0) {
+    parseError = "Config patch must include at least one setting field.";
+  } else if (jsonFieldPresent(root, "baseRevision") &&
+             !jsonUint32(root, "baseRevision", baseRevision)) {
+    parseError = "baseRevision must be an integer.";
+  } else if (jsonFieldPresent(root, "goalWeightG") &&
+             !jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
     parseError = "goalWeightG must be an integer from 10 to 200.";
-  } else if (!jsonUint32(root, "rinseGestureMs", candidate.rinseGestureMs)) {
+  } else if (jsonFieldPresent(root, "rinseGestureMs") &&
+             !jsonUint32(root, "rinseGestureMs", candidate.rinseGestureMs)) {
     parseError = "rinseGestureMs must be an integer (milliseconds).";
-  } else if (!jsonUint32(root, "rinseDurationMs", candidate.rinseDurationMs)) {
+  } else if (jsonFieldPresent(root, "rinseDurationMs") &&
+             !jsonUint32(root, "rinseDurationMs", candidate.rinseDurationMs)) {
     parseError = "rinseDurationMs must be an integer (milliseconds).";
-  } else if (!jsonUint32(root, "operationalWallMs",
+  } else if (jsonFieldPresent(root, "operationalWallMs") &&
+             !jsonUint32(root, "operationalWallMs",
                          candidate.operationalWallMs)) {
     parseError = "operationalWallMs must be an integer (milliseconds).";
-  } else if (!jsonBoolean(root, "autoTare", candidate.autoTare)) {
+  } else if (jsonFieldPresent(root, "autoTare") &&
+             !jsonBoolean(root, "autoTare", candidate.autoTare)) {
     parseError = "autoTare must be a boolean.";
-  } else if (!jsonBoolean(root, "brewByWeight", brewByWeight)) {
+  } else if (jsonFieldPresent(root, "brewByWeight") &&
+             !jsonBoolean(root, "brewByWeight", brewByWeight)) {
     parseError = "brewByWeight must be a boolean.";
-  } else if (!jsonBoolean(root, "canTareStartTimer",
+  } else if (jsonFieldPresent(root, "canTareStartTimer") &&
+             !jsonBoolean(root, "canTareStartTimer",
                           candidate.canTareStartTimer)) {
     parseError = "canTareStartTimer must be a boolean.";
-  } else if (!jsonUint32(root, "scaleTimerStopExtraDelayMs",
+  } else if (jsonFieldPresent(root, "scaleTimerStopExtraDelayMs") &&
+             !jsonUint32(root, "scaleTimerStopExtraDelayMs",
                          candidate.scaleTimerStopExtraDelayMs)) {
     parseError = "scaleTimerStopExtraDelayMs must be an integer (milliseconds).";
-  } else if (!jsonBoolean(root, "firstDropBeep",
-                          candidate.firstDropBeep)) {
+  } else if (jsonFieldPresent(root, "firstDropBeep") &&
+             !jsonBoolean(root, "firstDropBeep", candidate.firstDropBeep)) {
     parseError = "firstDropBeep must be a boolean.";
-  } else if (!jsonBoolean(root, "paddleReturnReminderBeep",
+  } else if (jsonFieldPresent(root, "paddleReturnReminderBeep") &&
+             !jsonBoolean(root, "paddleReturnReminderBeep",
                           candidate.paddleReturnReminderBeep)) {
     parseError = "paddleReturnReminderBeep must be a boolean.";
-  } else if (!jsonUint32(root, "paddleReturnReminderIntervalMs",
+  } else if (jsonFieldPresent(root, "paddleReturnReminderIntervalMs") &&
+             !jsonUint32(root, "paddleReturnReminderIntervalMs",
                          candidate.paddleReturnReminderIntervalMs)) {
     parseError =
         "paddleReturnReminderIntervalMs must be an integer (milliseconds).";
-  } else if (!jsonUint32(root, "paddleReturnReminderMaxDurationMs",
+  } else if (jsonFieldPresent(root, "paddleReturnReminderMaxDurationMs") &&
+             !jsonUint32(root, "paddleReturnReminderMaxDurationMs",
                          candidate.paddleReturnReminderMaxDurationMs)) {
     parseError =
         "paddleReturnReminderMaxDurationMs must be an integer (milliseconds).";
-  } else if (!jsonPaddleMode(root, "paddleMode", candidate.paddleMode)) {
+  } else if (jsonFieldPresent(root, "paddleMode") &&
+             !jsonPaddleMode(root, "paddleMode", candidate.paddleMode)) {
     parseError = "paddleMode must be natural or original.";
-  } else if (!jsonBoolean(root, "buzzerScaleLostBeep",
+  } else if (jsonFieldPresent(root, "buzzerScaleLostBeep") &&
+             !jsonBoolean(root, "buzzerScaleLostBeep",
                           candidate.buzzerScaleLostBeep)) {
     parseError = "buzzerScaleLostBeep must be a boolean.";
-  } else if (!jsonBoolean(root, "buzzerAutoToManualGuardEndBeep",
+  } else if (jsonFieldPresent(root, "buzzerAutoToManualGuardEndBeep") &&
+             !jsonBoolean(root, "buzzerAutoToManualGuardEndBeep",
                           candidate.buzzerAutoToManualGuardEndBeep)) {
     parseError = "buzzerAutoToManualGuardEndBeep must be a boolean.";
-  } else if (!jsonBoolean(root, "buzzerManualNoScaleBeep",
+  } else if (jsonFieldPresent(root, "buzzerManualNoScaleBeep") &&
+             !jsonBoolean(root, "buzzerManualNoScaleBeep",
                           candidate.buzzerManualNoScaleBeep)) {
     parseError = "buzzerManualNoScaleBeep must be a boolean.";
-  } else if (!jsonBoolean(root, "buzzerScaleConnectedBeep",
+  } else if (jsonFieldPresent(root, "buzzerScaleConnectedBeep") &&
+             !jsonBoolean(root, "buzzerScaleConnectedBeep",
                           candidate.buzzerScaleConnectedBeep)) {
     parseError = "buzzerScaleConnectedBeep must be a boolean.";
-  } else if (!jsonExtendedPulseRate(root, "buzzerExtendedPulseRate",
+  } else if (jsonFieldPresent(root, "buzzerExtendedPulseRate") &&
+             !jsonExtendedPulseRate(root, "buzzerExtendedPulseRate",
                                     candidate.buzzerExtendedPulseRate)) {
     parseError =
         "buzzerExtendedPulseRate must be disabled, slow, medium, fast, or rapid.";
-  } else if (!jsonExtendedPulseRate(root, "buzzerSlowExtendedPulseRate",
+  } else if (jsonFieldPresent(root, "buzzerSlowExtendedPulseRate") &&
+             !jsonExtendedPulseRate(root, "buzzerSlowExtendedPulseRate",
                                     candidate.buzzerSlowExtendedPulseRate)) {
     parseError =
         "buzzerSlowExtendedPulseRate must be disabled, slow, medium, fast, or "
         "rapid.";
-  } else if (!jsonAlertOutputChannel(root, "alertOutputChannel",
+  } else if (jsonFieldPresent(root, "alertOutputChannel") &&
+             !jsonAlertOutputChannel(root, "alertOutputChannel",
                                      candidate.alertOutputChannel,
-                                     /*optional=*/true)) {
+                                     /*optional=*/false)) {
     parseError =
         "alertOutputChannel must be scale_only, buzzer_only, or scale_priority.";
-  } else if (!jsonBoolean(root, "autoRetare", candidate.autoRetare)) {
+  } else if (jsonFieldPresent(root, "autoRetare") &&
+             !jsonBoolean(root, "autoRetare", candidate.autoRetare)) {
     parseError = "autoRetare must be a boolean.";
-  } else if (!jsonUint32(root, "retareWindowMs", candidate.retareWindowMs)) {
+  } else if (jsonFieldPresent(root, "retareWindowMs") &&
+             !jsonUint32(root, "retareWindowMs", candidate.retareWindowMs)) {
     parseError = "retareWindowMs must be an integer (milliseconds).";
-  } else if (!jsonFloat(root, "minimumCupWeightG",
+  } else if (jsonFieldPresent(root, "minimumCupWeightG") &&
+             !jsonFloat(root, "minimumCupWeightG",
                         candidate.minimumCupWeightG)) {
     parseError = "minimumCupWeightG must be a number.";
-  } else if (!jsonUint8(root, "retareStabilitySamples",
+  } else if (jsonFieldPresent(root, "retareStabilitySamples") &&
+             !jsonUint8(root, "retareStabilitySamples",
                         candidate.retareStabilitySamples)) {
     parseError = "retareStabilitySamples must be an integer from 2 to 10.";
-  } else if (!jsonFloat(root, "retareStabilityToleranceG",
+  } else if (jsonFieldPresent(root, "retareStabilityToleranceG") &&
+             !jsonFloat(root, "retareStabilityToleranceG",
                         candidate.retareStabilityToleranceG)) {
     parseError = "retareStabilityToleranceG must be a number.";
-  } else if (!jsonUint32(root, "retareStabilityMaxGapMs",
+  } else if (jsonFieldPresent(root, "retareStabilityMaxGapMs") &&
+             !jsonUint32(root, "retareStabilityMaxGapMs",
                          candidate.retareStabilityMaxGapMs)) {
     parseError = "retareStabilityMaxGapMs must be an integer (milliseconds).";
-  } else if (!jsonUint32(root, "retareStabilityMinDurationMs",
+  } else if (jsonFieldPresent(root, "retareStabilityMinDurationMs") &&
+             !jsonUint32(root, "retareStabilityMinDurationMs",
                          candidate.retareStabilityMinDurationMs)) {
     parseError =
         "retareStabilityMinDurationMs must be an integer (milliseconds).";
-  } else if (!jsonUint32(root, "bbwProtectionMs",
-                         candidate.bbwProtectionMs)) {
+  } else if (jsonFieldPresent(root, "bbwProtectionMs") &&
+             !jsonUint32(root, "bbwProtectionMs", candidate.bbwProtectionMs)) {
     parseError = "bbwProtectionMs must be an integer (milliseconds).";
-  } else if (!jsonBoolean(root, "fastExtractionGuardEnabled",
+  } else if (jsonFieldPresent(root, "fastExtractionGuardEnabled") &&
+             !jsonBoolean(root, "fastExtractionGuardEnabled",
                           candidate.fastExtractionGuardEnabled)) {
     parseError = "fastExtractionGuardEnabled must be a boolean.";
-  } else if (!jsonFloat(root, "maxRecoveryWeightG",
+  } else if (jsonFieldPresent(root, "maxRecoveryWeightG") &&
+             !jsonFloat(root, "maxRecoveryWeightG",
                         candidate.maxRecoveryWeightG)) {
     parseError = "maxRecoveryWeightG must be a number.";
-  } else if (!jsonUint32(root, "minBrewTimeMs", candidate.minBrewTimeMs)) {
+  } else if (jsonFieldPresent(root, "minBrewTimeMs") &&
+             !jsonUint32(root, "minBrewTimeMs", candidate.minBrewTimeMs)) {
     parseError = "minBrewTimeMs must be an integer (milliseconds).";
-  } else if (!jsonBoolean(root, "slowExtractionGuardEnabled",
+  } else if (jsonFieldPresent(root, "slowExtractionGuardEnabled") &&
+             !jsonBoolean(root, "slowExtractionGuardEnabled",
                           candidate.slowExtractionGuardEnabled)) {
     parseError = "slowExtractionGuardEnabled must be a boolean.";
-  } else if (!jsonFloat(root, "minRecoveryWeightG",
+  } else if (jsonFieldPresent(root, "minRecoveryWeightG") &&
+             !jsonFloat(root, "minRecoveryWeightG",
                         candidate.minRecoveryWeightG)) {
     parseError = "minRecoveryWeightG must be a number.";
-  } else if (!jsonUint32(root, "maxBrewTimeMs", candidate.maxBrewTimeMs)) {
+  } else if (jsonFieldPresent(root, "maxBrewTimeMs") &&
+             !jsonUint32(root, "maxBrewTimeMs", candidate.maxBrewTimeMs)) {
     parseError = "maxBrewTimeMs must be an integer (milliseconds).";
-  } else if (!jsonBoolean(root, "autoToManualGuardEnabled",
+  } else if (jsonFieldPresent(root, "autoToManualGuardEnabled") &&
+             !jsonBoolean(root, "autoToManualGuardEnabled",
                           candidate.autoToManualGuardEnabled)) {
     parseError = "autoToManualGuardEnabled must be a boolean.";
-  } else if (!jsonAutoToManualGuardLimitMode(
+  } else if (jsonFieldPresent(root, "autoToManualGuardLimitMode") &&
+             !jsonAutoToManualGuardLimitMode(
                  root, "autoToManualGuardLimitMode",
                  candidate.autoToManualGuardLimitMode)) {
     parseError = "autoToManualGuardLimitMode must be \"manual\" or \"auto\".";
-  } else if (!jsonUint32(root, "autoToManualGuardManualLimitMs",
+  } else if (jsonFieldPresent(root, "autoToManualGuardManualLimitMs") &&
+             !jsonUint32(root, "autoToManualGuardManualLimitMs",
                          candidate.autoToManualGuardManualLimitMs)) {
     parseError =
         "autoToManualGuardManualLimitMs must be an integer (milliseconds).";
-  } else if (!jsonUint32(root, "autoToManualGuardBaselineMs",
+  } else if (jsonFieldPresent(root, "autoToManualGuardBaselineMs") &&
+             !jsonUint32(root, "autoToManualGuardBaselineMs",
                          candidate.autoToManualGuardBaselineMs)) {
     parseError =
         "autoToManualGuardBaselineMs must be an integer (milliseconds).";
-  } else if (!jsonFloat(root, "weightOffsetBaselineG",
+  } else if (jsonFieldPresent(root, "weightOffsetBaselineG") &&
+             !jsonFloat(root, "weightOffsetBaselineG",
                         candidate.weightOffsetBaselineG)) {
     parseError = "weightOffsetBaselineG must be a number.";
-  } else if (!jsonInt16(root, "timezoneOffsetMinutes",
+  } else if (jsonFieldPresent(root, "timezoneOffsetMinutes") &&
+             !jsonInt16(root, "timezoneOffsetMinutes",
                         candidate.timezoneOffsetMinutes)) {
     parseError = "timezoneOffsetMinutes must be an integer.";
-  } else if (!jsonNtpPreset(root, "ntpServerPreset",
+  } else if (jsonFieldPresent(root, "ntpServerPreset") &&
+             !jsonNtpPreset(root, "ntpServerPreset",
                             candidate.ntpServerPreset)) {
     parseError = "ntpServerPreset must be pool, google, cloudflare, or nist.";
-  } else if (!jsonString(root, "ntpServerCustom", customNtp, sizeof(customNtp),
+  } else if (jsonFieldPresent(root, "ntpServerCustom") &&
+             !jsonString(root, "ntpServerCustom", customNtp, sizeof(customNtp),
                          true)) {
     parseError = "ntpServerCustom must be a string of at most 63 characters.";
-  } else if (!jsonScaleMacCacheMode(root, "scaleMacCacheMode",
+  } else if (jsonFieldPresent(root, "scaleMacCacheMode") &&
+             !jsonScaleMacCacheMode(root, "scaleMacCacheMode",
                                     candidate.scaleMacCacheMode)) {
     parseError = "scaleMacCacheMode must be disabled or full.";
-  } else if (!jsonBoolean(root, "bookooMuteOnBuzzerOnly",
+  } else if (jsonFieldPresent(root, "bookooMuteOnBuzzerOnly") &&
+             !jsonBoolean(root, "bookooMuteOnBuzzerOnly",
                           candidate.bookooMuteOnBuzzerOnly)) {
     parseError = "bookooMuteOnBuzzerOnly must be a boolean.";
-  } else if (!jsonUint8(root, "bookooConnectBeepLevel",
-                        candidate.bookooConnectBeepLevel) ||
-             candidate.bookooConnectBeepLevel > BOOKOO_BEEP_LEVEL_MAX) {
+  } else if (jsonFieldPresent(root, "bookooConnectBeepLevel") &&
+             (!jsonUint8(root, "bookooConnectBeepLevel",
+                         candidate.bookooConnectBeepLevel) ||
+              candidate.bookooConnectBeepLevel > BOOKOO_BEEP_LEVEL_MAX)) {
     parseError = "bookooConnectBeepLevel must be an integer from 0 to 5.";
-  } else if (!jsonBoolean(root, "avoidBbwShotWithoutScale",
+  } else if (jsonFieldPresent(root, "avoidBbwShotWithoutScale") &&
+             !jsonBoolean(root, "avoidBbwShotWithoutScale",
                           candidate.avoidBbwShotWithoutScale)) {
     parseError = "avoidBbwShotWithoutScale must be a boolean.";
-  } else if (!jsonUint32(root, "lastShotCooldownMs",
+  } else if (jsonFieldPresent(root, "lastShotCooldownMs") &&
+             !jsonUint32(root, "lastShotCooldownMs",
                          candidate.lastShotCooldownMs)) {
     parseError = "lastShotCooldownMs must be an integer (milliseconds).";
-  } else if (!jsonBoolean(root, "serialDebugOutput",
+  } else if (jsonFieldPresent(root, "serialDebugOutput") &&
+             !jsonBoolean(root, "serialDebugOutput",
                           candidate.serialDebugOutput)) {
     parseError = "serialDebugOutput must be a boolean.";
-  } else if (!jsonLogLevel(root, "ringRetainLogLevel",
+  } else if (jsonFieldPresent(root, "ringRetainLogLevel") &&
+             !jsonLogLevel(root, "ringRetainLogLevel",
                            candidate.ringRetainLogLevel)) {
     parseError =
         "ringRetainLogLevel must be none, critical, error, warning, info, or "
         "debug.";
   }
   if (root != nullptr) {
+    brewByWeightPresent = jsonFieldPresent(root, "brewByWeight");
+    baseRevisionPresent = jsonFieldPresent(root, "baseRevision");
     cJSON_Delete(root);
   }
   if (parseError != nullptr) {
@@ -4167,10 +4250,19 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
                      parseError);
   }
-  candidate.timerOnly = !brewByWeight;
+  if (baseRevisionPresent && baseRevision != status.config.revision) {
+    memset(customNtp, 0, sizeof(customNtp));
+    return sendError(request, STATUS_CONFLICT, "CONFIG_REVISION_STALE",
+                     "Config changed; refresh and retry.");
+  }
+  if (brewByWeightPresent) {
+    candidate.timerOnly = !brewByWeight;
+  }
   memcpy(candidate.ntpServerCustom, customNtp, sizeof(candidate.ntpServerCustom));
   memset(customNtp, 0, sizeof(customNtp));
-  const ConfigValidationError error = validateRuntimeConfig(candidate);
+  const RuntimeConfig effective =
+      composeEffectiveConfig(candidate, status.presets);
+  const ConfigValidationError error = validateRuntimeConfig(effective);
   if (error != ConfigValidationError::NONE) {
     self.log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED,
              static_cast<int32_t>(error));

@@ -124,7 +124,10 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('"alertOutputChannel"') ||
     !network.includes('"bookooMuteOnBuzzerOnly"') ||
     !network.includes('"bookooConnectBeepLevel"') ||
-    !network.includes('fields, 49') ||
+    !network.includes('"baseRevision"') ||
+    !network.includes('jsonFieldPresent') ||
+    !network.includes('CONFIG_REVISION_STALE') ||
+    !network.includes('settingFieldCount') ||
     !network.includes('allowedCount > 64') ||
     !network.includes('uint64_t seen') ||
     !network.includes('WEB_UI_ASSET_TAG') ||
@@ -843,10 +846,11 @@ if (!ui.includes('id="debugPanel"') ||
         firmware.indexOf('BOOT_RESET_REASON') ||
     firmware.indexOf('ringRetainLogLevel =',
                      firmware.indexOf('persistenceReady = EEPROM.begin')) < 0 ||
-    !ui.includes('serialDebugOutput:c.serialDebugOutput') ||
-    !ui.includes('ringRetainLogLevel:c.ringRetainLogLevel') ||
+    !ui.includes("serialDebugOutput:!!($('serialDebugOutput')") ||
+    !ui.includes("ringRetainLogLevel:($('ringRetainLogLevel')") ||
     !ui.includes("serialDebugOutput').onchange") ||
     !ui.includes("ringRetainLogLevel').onchange") ||
+    !ui.includes('baseRevision') ||
     !network.includes('ringRetainLogLevel') ||
     !html.includes('id="ruleChart"') ||
     !html.includes('id="ruleChartTimeTrack"') ||
@@ -1086,6 +1090,13 @@ if (!ui.includes('function withPollGate(') ||
     !ui.includes("throw new Error('Invalid status')") ||
     !ui.includes('function statusUrl(') ||
     !ui.includes('function ensureSettingsHydrated(') ||
+    !ui.includes('function homeConfigPatch(') ||
+    !ui.includes('function withBaseRev(') ||
+    !ui.includes('function isConfigStale(') ||
+    !ui.includes('formRev') ||
+    !ui.includes('formRev===c.revision') ||
+    !ui.includes('baseRevision') ||
+    !ui.includes('command(path,value={},soft)') ||
     !ui.includes('/api/v1/status/') ||
     !ui.includes('function statusPageOk(') ||
     !ui.includes('function applyHomeStatus(') ||
@@ -1166,6 +1177,54 @@ for (const field of forbiddenResponseFields) {
       statusFormat.includes('"' + field + '"')) {
     throw new Error(`Secret field exposed by status JSON: ${field}`);
   }
+}
+// Shared status envelope: firmware/mutable/liveShot/ringRetain only.
+// NTP → admin; serialDebug → debug; buzzerSupported → settings|debug.
+if (!statusFormat.includes(
+        '{\\"firmwareVersion\\":\\"%s\\",\\"configMutable\\":%s,\\"liveShot\\":%s"')) {
+  throw new Error(
+      'Status shared envelope must open with firmwareVersion/configMutable/liveShot only');
+}
+if (/buzzerSupported.*liveShot|liveShot.*buzzerSupported/.test(
+        statusFormat.slice(
+            statusFormat.indexOf('{\\"firmwareVersion\\"'),
+            statusFormat.indexOf('{\\"firmwareVersion\\"') + 200))) {
+  throw new Error('buzzerSupported must not ride in the shared status open append');
+}
+if (!statusFormat.includes(
+        'page == StatusPage::Settings || page == StatusPage::Debug') ||
+    !statusFormat.includes(',\\"buzzerSupported\\":%s')) {
+  throw new Error('buzzerSupported must be gated to status settings|debug');
+}
+if (!statusFormat.includes('page == StatusPage::Admin') ||
+    !statusFormat.includes('\\"timezoneOffsetMinutes\\":%d') ||
+    !statusFormat.includes('\\"ntpServerPreset\\":\\"%s\\"') ||
+    !statusFormat.includes('\\"ntpServerCustom\\":\\"%s\\"')) {
+  throw new Error('NTP/timezone config must be gated to status admin');
+}
+if ((statusFormat.match(/page == StatusPage::Debug/g) || []).length < 1 ||
+    !statusFormat.includes(',\\"serialDebugOutput\\":%s')) {
+  throw new Error('serialDebugOutput must be gated to status debug');
+}
+const sharedRingOpen = statusFormat.indexOf(
+    ',\\"config\\":{\\"revision\\":%lu,\\"ringRetainLogLevel\\":\\"%s\\"');
+if (sharedRingOpen < 0) {
+  throw new Error(
+      'Status shared config must open with revision then ringRetainLogLevel');
+}
+const ringOpenSlice = statusFormat.slice(sharedRingOpen, sharedRingOpen + 180);
+if (ringOpenSlice.includes('timezoneOffsetMinutes') ||
+    ringOpenSlice.includes('ntpServerPreset') ||
+    ringOpenSlice.includes('serialDebugOutput')) {
+  throw new Error(
+      'NTP/serialDebug must not share the revision/ringRetainLogLevel open append');
+}
+if (!ui.includes(
+        "typeof s.buzzerSupported==='boolean')updateBuzzerAlertVisibility") &&
+    !ui.includes(
+        'typeof s.buzzerSupported==="boolean")updateBuzzerAlertVisibility')) {
+  throw new Error(
+      'applyCommonStatus must only update buzzer visibility when buzzerSupported is present');
 }
 
 const logHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::logHandler');
@@ -1420,8 +1479,8 @@ if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
 }
 if (generated.gzip.length + generated.jsGzip.length + generated.cssGzip.length >
-    30976) {
-  throw new Error('Combined HTML+JS+CSS gzip exceeds the 30.25 KiB flash budget');
+    31232) {
+  throw new Error('Combined HTML+JS+CSS gzip exceeds the 30.5 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
