@@ -202,6 +202,8 @@ class ShotStopperNetwork {
   NetworkStatusSnapshot status_ = {};
   WifiScanSnapshot scan_ = {};
   bool startupComplete_ = false;
+  // Latched for process lifetime after first STA CONNECTED. SoftAP auto-raise
+  // is boot/bootstrap only; never cleared by startStation / pending revert.
   bool staEverConnected_ = false;
   bool scanRequested_ = false;
   bool everAuthenticated_ = false;

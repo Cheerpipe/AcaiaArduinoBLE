@@ -39,11 +39,13 @@ Link mutations print `WARN cycle active; proceeding` if a shot is running.
 
 `WIFI_DISCONNECT`, `AP_STOP`, and `WEBUI_STOP` stay in effect until the
 matching `CONNECT` / `START` / `RESTART` or a reboot. Automatic STA retry,
-SoftAP fallback, and HTTP retry do not undo those stops.
+boot SoftAP fallback (only before a successful STA join this session), and
+HTTP retry do not undo those stops.
 
-`AP_START` keeps SoftAP up even if STA is already connected (AP+STA). The
-STA-first policy still tears down *automatic* recovery SoftAP when STA
-comes up. `WEBUI_STOP` is not undone by `AP_START`.
+`AP_START` keeps SoftAP up even if STA is already connected (AP+STA). After a
+successful STA join, SoftAP is not auto-raised on link loss — use `AP_START` or
+reboot. Automatic SoftAP from boot is still torn down when STA comes up.
+`WEBUI_STOP` is not undone by `AP_START`.
 
 ## Probe and help
 
@@ -74,7 +76,7 @@ comes up. `WEBUI_STOP` is not undone by `AP_START`.
 | Command | Parameters | Effect |
 | --- | --- | --- |
 | `WIFI_CONNECT` | none | Associates the saved STA. Errors if none is configured |
-| `WIFI_DISCONNECT` | none | Drops STA and holds reconnect. SoftAP may still rise |
+| `WIFI_DISCONNECT` | none | Drops STA and holds reconnect. SoftAP auto-raise only if STA never connected this session; otherwise use `AP_START` |
 | `WIFI_RESTART` | none | Drops then reconnects saved STA (no ESP reboot) |
 | `WIFI_STATUS` | none | Dumps STA config, link, timers, and holds |
 

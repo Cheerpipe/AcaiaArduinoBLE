@@ -270,15 +270,18 @@ name, default passwords, and step-by-step first connection.
   Inactive views do not poll their APIs.
 - **STA** when credentials are saved and the home network is reachable;
   **SoftAP** (`MicraShotStopperAP` at `192.168.4.1`) when there are no
-  credentials, or only after STA association fails (~15 s) while credentials
-  exist. While SoftAP is up and credentials exist, the firmware keeps retrying
-  STA in concurrent **AP+STA** mode; once STA connects, SoftAP is stopped and
-  HTTP is rebound on the STA IP. STA addressing is **DHCP** or **static IP**,
-  with a **3-minute confirm-or-revert** window after save.
-- SoftAP stays available while unassociated after that STA-first window (no
-  idle 3-minute shutdown). Once STA connects, HTTP remains on the STA IP.
-  After logout, sessions still expire by UI grace / remember-me rules; SoftAP
-  itself is not torn down for idle UI.
+  credentials, or only after STA association fails (~15 s) at boot while
+  credentials exist. While SoftAP is up and credentials exist, the firmware
+  keeps retrying STA in concurrent **AP+STA** mode; once STA connects, SoftAP
+  is stopped and HTTP is rebound on the STA IP. After a successful STA join,
+  link loss retries STA only (no SoftAP auto-raise; use USB `AP_START` or
+  reboot). STA addressing is **DHCP** or **static IP**, with a **3-minute
+  confirm-or-revert** window after save.
+- SoftAP stays available while unassociated after that boot STA-first window
+  (no idle 3-minute shutdown). Once STA connects, HTTP remains on the STA IP
+  and SoftAP is not re-raised automatically on later drops. After logout,
+  sessions still expire by UI grace / remember-me rules; SoftAP itself is not
+  torn down for idle UI.
 - **Public read-only** home (shot + status), shot history, diagnostic log,
   settings preview, and firmware version footer without signing in.
 - Authenticated session (factory password **`Micra1234`** — same as the AP;
@@ -722,26 +725,27 @@ Passwords are **case-sensitive** (`M` uppercase, rest lowercase).
    maintenance actions.
 
 The SoftAP stays available when there is no home Wi‑Fi saved, and after saved
-credentials fail to associate for about **15 seconds** (STA is tried first).
-There is no idle SoftAP shutdown timer.
+credentials fail to associate for about **15 seconds** at boot (STA is tried
+first). There is no idle SoftAP shutdown timer.
 
 ### After home Wi‑Fi (STA) is saved
 
 Once STA credentials are stored and the device joins your network, SoftAP is
 stopped and the Web UI is at **`http://<device-ip>`** (find the IP in your
 router’s DHCP list, the saved static IP, or serial logs at **115200** baud).
-If STA drops, the device retries STA first; SoftAP returns only after that
-window fails, while STA retries continue. Use the same Web UI password
-**`Micra1234`** (or the password you set under **Web UI password**). Factory
-reset restores all values in the table above. If you lose STA or the UI
-password, recover over SoftAP or USB with the
-[USB serial CLI](docs/SERIAL_CLI.md).
+If STA drops after a successful join, the device retries STA only — SoftAP is
+**not** raised automatically. Recover SoftAP with USB `AP_START` or a reboot.
+Use the same Web UI password **`Micra1234`** (or the password you set under
+**Web UI password**). Factory reset restores all values in the table above. If
+you lose STA or the UI password, recover over SoftAP (after reboot / `AP_START`)
+or USB with the [USB serial CLI](docs/SERIAL_CLI.md).
 
 STA addressing can be **DHCP** (default) or **static IP** from the Wi‑Fi panel.
 After any STA save, the new settings stay **pending** until you sign in at the
 device IP within **3 minutes**; otherwise the previous (last-known-good)
-network settings are restored and SoftAP recovery opens again while STA
-retries continue when credentials remain.
+network settings are restored and STA retries continue. SoftAP does **not**
+auto-raise after a successful STA join in that boot — use USB `AP_START` or
+reboot if you need the AP again.
 
 ## Web UI and Wi-Fi (details)
 

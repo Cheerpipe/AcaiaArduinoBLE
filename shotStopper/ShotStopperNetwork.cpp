@@ -981,9 +981,29 @@ bool ShotStopperNetwork::revertPendingNetwork(uint32_t now,
   stopNtp();
   staNtpEligibleAtMs_ = 0;
   g_wallClock.markDisabled();
-  staEverConnected_ = false;
+  // Keep staEverConnected_: SoftAP auto-raise stays boot-only after any prior
+  // successful STA join this process (AP_START / reboot still available).
   if (next.staConfigured) {
     startStation(next, now);
+    return true;
+  }
+  if (staEverConnected_) {
+    stopHttpServer();
+    WiFi.softAPdisconnect(true);
+    WiFi.disconnect(false, false);
+    WiFi.mode(WIFI_OFF);
+    portENTER_CRITICAL(&dataMux_);
+    status_.networkActive = false;
+    status_.apActive = false;
+    status_.apClients = 0;
+    status_.staState = StaState::NOT_CONFIGURED;
+    status_.staIp[0] = '\0';
+    status_.staLinkMetricsValid = false;
+    status_.staRssi = 0;
+    status_.staSignalQualityPct = 0;
+    portEXIT_CRITICAL(&dataMux_);
+    lifecycleLog(
+        "WiFi STA cleared after prior connect; SoftAP suppressed (AP_START or reboot)");
     return true;
   }
   return ensureAccessPoint(now);
@@ -1052,7 +1072,8 @@ void ShotStopperNetwork::startStation(const PersistedSettings &settings,
   abortWifiScan(now, false);
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
-  staEverConnected_ = false;
+  // Do not clear staEverConnected_: once STA has joined this boot, SoftAP must
+  // not auto-raise again (serial AP_START or reboot only).
   clearPendingConfirmWindow();
   portENTER_CRITICAL(&dataMux_);
   status_.networkActive = false;
@@ -1269,10 +1290,11 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       stopNtp();
       staNtpEligibleAtMs_ = 0;
       g_wallClock.markDisabled();
-      // STA-first on link loss: retry station before raising SoftAP.
+      // After a prior successful STA join this session, never auto-raise SoftAP
+      // on link loss — only retry station (SoftAP via AP_START or reboot).
       staConnectStartedAtMs_ = now;
       staReconnectAttemptAtMs_ = now;
-      lifecycleLog("WiFi STA disconnected; retrying STA before SoftAP");
+      lifecycleLog("WiFi STA disconnected; retrying STA (no SoftAP after prior connect)");
       if (!staReconnectHeld_ && !wifiScanInProgress()) {
         beginStationConnect(settingsCopy(), now);
       } else if (staReconnectHeld_) {
@@ -1368,7 +1390,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       static_cast<uint32_t>(now - staConnectStartedAtMs_) >=
           STA_CONNECT_TIMEOUT_MS &&
       !status.apActive) {
-    // STA-first: raise SoftAP only after the connect window without a link.
+    // SoftAP auto-raise is boot/bootstrap only (never after a prior CONNECTED).
     if (wifiScanInProgress()) {
       return;
     }
@@ -1380,9 +1402,8 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
         static_cast<int32_t>(WiFi.status()));
     const bool pending = settingsCopy().staConfigState ==
                          static_cast<uint8_t>(StaConfigState::PENDING);
-    lifecycleLog(pending ? "WiFi STA failed; reverting pending config"
-                         : "WiFi STA failed; SoftAP up, STA retry continues");
     if (pending) {
+      lifecycleLog("WiFi STA failed; reverting pending config");
       if (!revertPendingNetwork(now, "connect timeout")) {
         startupComplete_ = false;
         if (startupFailures_ < UINT8_MAX) {
@@ -1402,6 +1423,17 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       }
       return;
     }
+    if (staEverConnected_) {
+      lifecycleLog("WiFi STA failed; SoftAP suppressed after prior connect");
+      startupFailures_ = 0;
+      portENTER_CRITICAL(&dataMux_);
+      status_.startupFailures = 0;
+      status_.staState = StaState::DISCONNECTED;
+      portEXIT_CRITICAL(&dataMux_);
+      staReconnectAttemptAtMs_ = now;
+      return;
+    }
+    lifecycleLog("WiFi STA failed; SoftAP up, STA retry continues");
     if (apStartHeld_) {
       lifecycleLog("SoftAP raise held after STA fail");
       startupFailures_ = 0;
@@ -1431,9 +1463,9 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
     return;
   }
 
-  // SoftAP after STA window while still DISCONNECTED/FAILED (e.g. scan delayed
-  // the reconnect begin). Never raise SoftAP immediately on link loss.
-  if (!status.apActive &&
+  // SoftAP after STA bootstrap window while still DISCONNECTED/FAILED (e.g.
+  // scan delayed the reconnect begin). Never after a prior CONNECTED session.
+  if (!staEverConnected_ && !status.apActive &&
       (status.staState == StaState::DISCONNECTED ||
        status.staState == StaState::FAILED) &&
       static_cast<uint32_t>(now - staConnectStartedAtMs_) >=
@@ -1667,8 +1699,9 @@ void ShotStopperNetwork::serviceSessions(uint32_t now) {
     log(DebugCategory::WEB, DebugCode::UI_EXPIRED, expiredSessions);
   }
 
-  // SoftAP stays up whenever STA is down; there is no idle SoftAP shutdown
-  // timer. Sessions still expire via UI_GRACE_MS / remember-me above.
+  // SoftAP stays up when raised (boot/bootstrap or AP_START); there is no idle SoftAP shutdown
+  // timer. Sessions still expire via UI_GRACE_MS / remember-me above. After a prior
+  // STA CONNECTED, link loss does not auto-raise SoftAP.
   portENTER_CRITICAL(&dataMux_);
   status_.windowRemainingMs = 0;
   portEXIT_CRITICAL(&dataMux_);

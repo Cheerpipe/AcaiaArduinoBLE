@@ -1170,8 +1170,10 @@ if (network.includes('networkShutdownPending_') ||
   throw new Error('SoftAP must not shut down on an idle visibility timer');
 }
 if (!network.includes(
-        'SoftAP stays up whenever STA is down; there is no idle SoftAP shutdown')) {
-  throw new Error('serviceSessions must keep SoftAP up without an idle shutdown timer');
+        'there is no idle SoftAP shutdown') ||
+    !network.includes('link loss does not auto-raise SoftAP')) {
+  throw new Error(
+      'serviceSessions must keep SoftAP up without idle shutdown; post-CONNECTED link loss must not auto-raise SoftAP');
 }
 const stopSoftApStart = network.indexOf(
     'void ShotStopperNetwork::stopSoftAp(');
@@ -1245,14 +1247,26 @@ if (!network.includes('void ShotStopperNetwork::lifecycleLog(') ||
   throw new Error(
       'Automatic STA/SoftAP lifecycle logs must stay behind serialDebugEnabled');
 }
-if (network.includes('raising SoftAP and retrying STA')) {
+if (network.includes('raising SoftAP and retrying STA') ||
+    network.includes('retrying STA before SoftAP')) {
   throw new Error(
-      'STA disconnect must retry station before raising SoftAP');
+      'STA disconnect after prior connect must retry station without SoftAP auto-raise');
 }
-if (!network.includes('retrying STA before SoftAP') ||
+if (!network.includes('no SoftAP after prior connect') ||
+    !network.includes('SoftAP suppressed after prior connect') ||
+    !network.includes('!staEverConnected_') ||
     !network.includes('STA_CONNECT_TIMEOUT_MS')) {
   throw new Error(
-      'SoftAP with credentials must wait for STA_CONNECT_TIMEOUT after STA-first attempts');
+      'SoftAP auto-raise must gate on !staEverConnected_ and wait STA_CONNECT_TIMEOUT only for boot/bootstrap');
+}
+if (network.includes('staEverConnected_ = false')) {
+  throw new Error(
+      'staEverConnected_ must latch for process lifetime (never clear after first CONNECTED)');
+}
+if (!network.includes('SoftAP suppressed (AP_START or reboot)') ||
+    !networkHeader.includes('Latched for process lifetime')) {
+  throw new Error(
+      'Pending revert / startStation must keep SoftAP boot-only after prior STA join');
 }
 if (!network.includes('!status.apActive') ||
     !network.includes('STA_CONNECT_TIMEOUT_MS')) {
