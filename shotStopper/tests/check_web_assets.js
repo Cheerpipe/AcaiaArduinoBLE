@@ -1614,7 +1614,7 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!token)return;scanBusy=tru
     minBrewTimeMs: 28000,
     maxBrewTimeMs: 44000,
     goalWeightG: 36,
-    minRecoveryWeightG: 30,
+    minRecoveryWeightG: 34,
     maxRecoveryWeightG: 42.5,
   };
   const kinds = (segs) => (segs || []).map((s) => s[0]).join(',');

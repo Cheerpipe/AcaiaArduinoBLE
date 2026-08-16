@@ -596,7 +596,7 @@ also configure:
 | Setting | Default | Role |
 | --- | --- | --- |
 | **Enable** | ON | Master switch for the slow-shot recovery |
-| **Min recovery weight (g)** | 30 (Double) / 14 (Single) | Floor if the shot must be extended past max brew time |
+| **Min recovery weight (g)** | 34 (Double) / 34 (Single) | Floor if the shot must be extended past max brew time |
 | **Max brew time (s)** | 44 | Latest time to wait for the normal BBW target |
 
 ### How it works

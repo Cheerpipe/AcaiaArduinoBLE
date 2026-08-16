@@ -201,7 +201,7 @@ constexpr float MAX_MAX_RECOVERY_WEIGHT_G = 200.0f;
 constexpr uint32_t DEFAULT_MIN_BREW_TIME_MS = 28000;
 constexpr uint32_t MIN_MIN_BREW_TIME_MS = 5000;
 constexpr uint32_t MAX_MIN_BREW_TIME_MS = 55000;
-constexpr float DEFAULT_MIN_RECOVERY_WEIGHT_G = 30.0f;
+constexpr float DEFAULT_MIN_RECOVERY_WEIGHT_G = 34.0f;
 constexpr float MIN_MIN_RECOVERY_WEIGHT_G = 10.0f;
 constexpr float MAX_MIN_RECOVERY_WEIGHT_G = 200.0f;
 constexpr uint32_t DEFAULT_MAX_BREW_TIME_MS = 44000;
@@ -1001,7 +1001,7 @@ constexpr float FACTORY_SINGLE_WEIGHT_OFFSET_G = 0.5f;
 constexpr uint8_t FACTORY_SINGLE_GOAL_WEIGHT_G = 18;
 constexpr float FACTORY_SINGLE_MAX_RECOVERY_WEIGHT_G = 20.0f;
 constexpr uint32_t FACTORY_SINGLE_MIN_BREW_TIME_MS = 16000;
-constexpr float FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G = 14.0f;
+constexpr float FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G = 34.0f;
 constexpr uint32_t FACTORY_SINGLE_MAX_BREW_TIME_MS = 44000;
 
 inline void repairSlowExtractionGuard(RuntimeConfig &runtime) {
