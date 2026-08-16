@@ -465,6 +465,130 @@ bool applySystemTimeToWallClock(uint32_t now) {
   return g_wallClock.applyPendingSync(now);
 }
 
+
+enum class StatusPage : uint8_t { Home, Settings, Admin, Debug, Unknown };
+
+StatusPage parseStatusPage(const char *uri) {
+  if (uri == nullptr) {
+    return StatusPage::Unknown;
+  }
+  const char *path = uri;
+  const char *query = strchr(uri, '?');
+  char stack[64] = {};
+  if (query != nullptr) {
+    const size_t len = static_cast<size_t>(query - uri);
+    if (len >= sizeof(stack)) {
+      return StatusPage::Unknown;
+    }
+    memcpy(stack, uri, len);
+    stack[len] = '\0';
+    path = stack;
+  }
+  if (strcmp(path, "/api/v1/status/home") == 0) {
+    return StatusPage::Home;
+  }
+  if (strcmp(path, "/api/v1/status/settings") == 0) {
+    return StatusPage::Settings;
+  }
+  if (strcmp(path, "/api/v1/status/admin") == 0) {
+    return StatusPage::Admin;
+  }
+  if (strcmp(path, "/api/v1/status/debug") == 0) {
+    return StatusPage::Debug;
+  }
+  return StatusPage::Unknown;
+}
+
+bool statusJsonAppend(size_t *used, const char *fmt, ...) {
+  if (used == nullptr || *used >= sizeof(g_statusResponseBuffer)) {
+    return false;
+  }
+  va_list args;
+  va_start(args, fmt);
+  const int n = vsnprintf(g_statusResponseBuffer + *used,
+                          sizeof(g_statusResponseBuffer) - *used, fmt, args);
+  va_end(args);
+  if (n < 0 ||
+      static_cast<size_t>(n) >= sizeof(g_statusResponseBuffer) - *used) {
+    return false;
+  }
+  *used += static_cast<size_t>(n);
+  return true;
+}
+
+void buildSlimPresetsJson(const ControlStatusSnapshot &control) {
+  g_presetsStatusJson[0] = '{';
+  g_presetsStatusJson[1] = '}';
+  g_presetsStatusJson[2] = 0;
+  size_t used = 0;
+  int n = snprintf(g_presetsStatusJson, sizeof(g_presetsStatusJson),
+                   "{\"activeId\":%u,\"items\":[",
+                   static_cast<unsigned>(control.presets.activeId));
+  if (n > 0) {
+    used = static_cast<size_t>(n);
+  }
+  for (uint8_t i = 0; i < control.presets.count && i < MAX_SHOT_PRESETS; ++i) {
+    const ShotPreset &p = control.presets.presets[i];
+    char safeName[SHOT_PRESET_NAME_CAPACITY * 2] = {};
+    sanitizeJsonEmbed(p.name, safeName, sizeof(safeName));
+    n = snprintf(
+        g_presetsStatusJson + used, sizeof(g_presetsStatusJson) - used,
+        "%s{\"id\":%u,\"name\":\"%s\",\"isFactory\":%s,\"brewByWeight\":%s,"
+        "\"goalWeightG\":%u,\"minBrewTimeMs\":%lu,\"maxRecoveryWeightG\":%.1f}",
+        i == 0 ? "" : ",", static_cast<unsigned>(p.id), safeName,
+        p.isFactory ? "true" : "false", p.brewByWeight ? "true" : "false",
+        static_cast<unsigned>(p.goalWeightG),
+        static_cast<unsigned long>(p.minBrewTimeMs),
+        static_cast<double>(p.maxRecoveryWeightG));
+    if (n < 0 ||
+        static_cast<size_t>(n) >= sizeof(g_presetsStatusJson) - used) {
+      break;
+    }
+    used += static_cast<size_t>(n);
+  }
+  if (used + 2 < sizeof(g_presetsStatusJson)) {
+    g_presetsStatusJson[used++] = ']';
+    g_presetsStatusJson[used++] = '}';
+    g_presetsStatusJson[used] = 0;
+  }
+}
+
+void buildScaleHistoryJson(const ControlStatusSnapshot &control) {
+  g_scaleHistoryJson[0] = '[';
+  g_scaleHistoryJson[1] = ']';
+  g_scaleHistoryJson[2] = 0;
+  size_t used = 0;
+  int n = snprintf(g_scaleHistoryJson, sizeof(g_scaleHistoryJson), "[");
+  if (n > 0) {
+    used = static_cast<size_t>(n);
+  }
+  bool first = true;
+  for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
+    const ScaleHistoryEntry &entry = control.scaleHistory[i];
+    if (entry.mac[0] == '\0') {
+      continue;
+    }
+    char safeMac[PREFERRED_SCALE_MAC_CAPACITY * 2] = {};
+    char safeName[PREFERRED_SCALE_NAME_CAPACITY * 2] = {};
+    sanitizeJsonEmbed(entry.mac, safeMac, sizeof(safeMac));
+    sanitizeJsonEmbed(entry.name, safeName, sizeof(safeName));
+    n = snprintf(g_scaleHistoryJson + used, sizeof(g_scaleHistoryJson) - used,
+                 "%s{\"mac\":\"%s\",\"name\":\"%s\"}", first ? "" : ",",
+                 safeMac, safeName);
+    if (n <= 0 ||
+        static_cast<size_t>(n) >= sizeof(g_scaleHistoryJson) - used) {
+      break;
+    }
+    used += static_cast<size_t>(n);
+    first = false;
+  }
+  if (used + 1 < sizeof(g_scaleHistoryJson)) {
+    g_scaleHistoryJson[used++] = ']';
+    g_scaleHistoryJson[used] = 0;
+  }
+}
+
+
 }  // namespace
 
 ShotStopperNetwork *ShotStopperNetwork::instance_ = nullptr;
@@ -2458,7 +2582,7 @@ bool ShotStopperNetwork::startHttpServer() {
   // headroom for the HTML/JS/CSS boot burst plus LRU/TCP close. ESP-IDF uses
   // (max_open_sockets + 3) LWIP sockets total.
   config.max_open_sockets = 5;
-  config.max_uri_handlers = 34;
+  config.max_uri_handlers = 37;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
   // the IDF default (1024) is enough most of the time but intermittent
   // authenticated POSTs have returned 431 Request Header Fields Too Large.
@@ -2486,7 +2610,14 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/app.css", HTTP_GET, cssHandler) &&
       registerHandler(server_, "/api/v1/login", HTTP_POST, loginHandler) &&
       registerHandler(server_, "/api/v1/logout", HTTP_POST, logoutHandler) &&
-      registerHandler(server_, "/api/v1/status", HTTP_GET, statusHandler) &&
+      registerHandler(server_, "/api/v1/status/home", HTTP_GET,
+                      statusHandler) &&
+      registerHandler(server_, "/api/v1/status/settings", HTTP_GET,
+                      statusHandler) &&
+      registerHandler(server_, "/api/v1/status/admin", HTTP_GET,
+                      statusHandler) &&
+      registerHandler(server_, "/api/v1/status/debug", HTTP_GET,
+                      statusHandler) &&
       registerHandler(server_, "/api/v1/log", HTTP_GET, logHandler) &&
       registerHandler(server_, "/api/v1/shots", HTTP_GET, shotsHandler) &&
       registerHandler(server_, "/api/v1/shots/clear", HTTP_POST,
@@ -3060,6 +3191,13 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   // actionable state. Every mutating route remains authenticated.
   // Refresh UI_GRACE when the browser still presents a valid session token.
   self.touchSessionIfPresent(request);
+
+  const StatusPage page = parseStatusPage(request->uri);
+  if (page == StatusPage::Unknown) {
+    return sendError(request, "404 Not Found", "STATUS_PAGE_UNKNOWN",
+                     "Unknown status page; use /api/v1/status/{home|settings|admin|debug}.");
+  }
+
   // Serialize builds: g_statusResponseBuffer / presets / scale history are
   // process-wide and httpd serves multiple sockets concurrently.
   if (self.statusResponseMux_ == nullptr ||
@@ -3067,12 +3205,14 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
     return sendError(request, "503 Service Unavailable", "STATUS_BUSY",
                      "Status snapshot is busy; retry shortly.");
   }
+
   ControlStatusSnapshot control;
   self.callbacks_.copyControlStatus(control);
   const NetworkStatusSnapshot network = self.snapshot();
+  const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(millis());
+
   char currentWeight[32] = "null";
   char observedWeight[32] = "null";
-  char lastWeight[32] = "null";
   char lastShotWeight[32] = "null";
   char scaleTimer[32] = "null";
   char staRssiJson[16] = "null";
@@ -3089,10 +3229,6 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
     snprintf(scaleTimer, sizeof(scaleTimer), "%lu",
              static_cast<unsigned long>(control.currentTimerMs));
   }
-  if (control.lastCycle.weightValid) {
-    snprintf(lastWeight, sizeof(lastWeight), "%.2f",
-             static_cast<double>(control.lastCycle.lastWeightG));
-  }
   if (control.lastShot.valid && control.lastShot.weightValid) {
     snprintf(lastShotWeight, sizeof(lastShotWeight), "%.2f",
              static_cast<double>(control.lastShot.currentWeightG));
@@ -3104,434 +3240,350 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
              static_cast<unsigned>(network.staSignalQualityPct));
   }
 
-  const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(millis());
   char safeNtpCustom[NTP_SERVER_HOST_CAPACITY] = {};
   char safeActiveServer[NTP_SERVER_HOST_CAPACITY] = {};
+  char safeScaleProtocol[24] = {};
+  char safeLastShotProtocol[24] = {};
+  char safePreferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY * 2] = {};
+  char safePreferredScaleName[PREFERRED_SCALE_NAME_CAPACITY * 2] = {};
+  char safeFirmwareVersion[32] = {};
+  char safeStaSsid[WIFI_SSID_CAPACITY] = {};
   sanitizeJsonEmbed(control.config.ntpServerCustom, safeNtpCustom,
                     sizeof(safeNtpCustom));
   sanitizeJsonEmbed(timeStatus.activeServer, safeActiveServer,
                     sizeof(safeActiveServer));
-  char safeScaleProtocol[24] = {};
   sanitizeJsonEmbed(control.scaleProtocol, safeScaleProtocol,
                     sizeof(safeScaleProtocol));
-  char safeLastShotProtocol[24] = {};
   sanitizeJsonEmbed(control.lastShot.scaleProtocol, safeLastShotProtocol,
                     sizeof(safeLastShotProtocol));
-  char safePreferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY * 2] = {};
   sanitizeJsonEmbed(control.preferredScaleMac, safePreferredScaleMac,
                     sizeof(safePreferredScaleMac));
-  char safePreferredScaleName[PREFERRED_SCALE_NAME_CAPACITY * 2] = {};
   sanitizeJsonEmbed(control.preferredScaleName, safePreferredScaleName,
                     sizeof(safePreferredScaleName));
-  char safeFirmwareVersion[32] = {};
   sanitizeJsonEmbed(FW_VERSION, safeFirmwareVersion,
                     sizeof(safeFirmwareVersion));
-  char safeStaSsid[WIFI_SSID_CAPACITY] = {};
   sanitizeJsonEmbed(network.staSsid, safeStaSsid, sizeof(safeStaSsid));
-  g_presetsStatusJson[0] = '{';
-  g_presetsStatusJson[1] = '}';
-  g_presetsStatusJson[2] = 0;
-  {
-    size_t used = 0;
-    int n = snprintf(g_presetsStatusJson, sizeof(g_presetsStatusJson),
-                     "{\"activeId\":%u,\"items\":[",
-                     static_cast<unsigned>(control.presets.activeId));
-    if (n > 0) {
-      used = static_cast<size_t>(n);
-    }
-    for (uint8_t i = 0; i < control.presets.count && i < MAX_SHOT_PRESETS;
-         ++i) {
-      const ShotPreset &p = control.presets.presets[i];
-      char safeName[SHOT_PRESET_NAME_CAPACITY * 2] = {};
-      sanitizeJsonEmbed(p.name, safeName, sizeof(safeName));
-      n = snprintf(
-          g_presetsStatusJson + used, sizeof(g_presetsStatusJson) - used,
-          "%s{\"id\":%u,\"name\":\"%s\",\"isFactory\":%s,\"brewByWeight\":%s,"
-          "\"goalWeightG\":%u,\"minBrewTimeMs\":%lu,\"maxRecoveryWeightG\":%.1f,"
-          "\"maxBrewTimeMs\":%lu,\"minRecoveryWeightG\":%.1f,"
-          "\"bbwProtectionMs\":%lu,\"operationalWallMs\":%lu,"
-          "\"weightOffsetG\":%.2f,\"weightOffsetBaselineG\":%.2f,"
-          "\"fastExtractionGuardEnabled\":%s,\"slowExtractionGuardEnabled\":%s,"
-          "\"autoToManualGuardEnabled\":%s}",
-          i == 0 ? "" : ",", static_cast<unsigned>(p.id), safeName,
-          p.isFactory ? "true" : "false", p.brewByWeight ? "true" : "false",
-          static_cast<unsigned>(p.goalWeightG),
-          static_cast<unsigned long>(p.minBrewTimeMs),
-          static_cast<double>(p.maxRecoveryWeightG),
-          static_cast<unsigned long>(p.maxBrewTimeMs),
-          static_cast<double>(p.minRecoveryWeightG),
-          static_cast<unsigned long>(p.bbwProtectionMs),
-          static_cast<unsigned long>(p.operationalWallMs),
-          static_cast<double>(p.weightOffsetG),
-          static_cast<double>(p.weightOffsetBaselineG),
-          p.fastExtractionGuardEnabled ? "true" : "false",
-          p.slowExtractionGuardEnabled ? "true" : "false",
-          p.autoToManualGuardEnabled ? "true" : "false");
-      if (n < 0 ||
-          static_cast<size_t>(n) >= sizeof(g_presetsStatusJson) - used) {
-        break;
-      }
-      used += static_cast<size_t>(n);
-    }
-    if (used + 2 < sizeof(g_presetsStatusJson)) {
-      g_presetsStatusJson[used++] = ']';
-      g_presetsStatusJson[used++] = '}';
-      g_presetsStatusJson[used] = 0;
-    }
+
+  const bool needPresets =
+      page == StatusPage::Home || page == StatusPage::Settings;
+  const bool needHistory = page == StatusPage::Settings;
+  if (needPresets) {
+    buildSlimPresetsJson(control);
+  } else {
+    g_presetsStatusJson[0] = '{';
+    g_presetsStatusJson[1] = '}';
+    g_presetsStatusJson[2] = 0;
   }
-  g_scaleHistoryJson[0] = '[';
-  g_scaleHistoryJson[1] = ']';
-  g_scaleHistoryJson[2] = 0;
-  {
-    size_t used = 0;
-    int n = snprintf(g_scaleHistoryJson, sizeof(g_scaleHistoryJson), "[");
-    if (n > 0) {
-      used = static_cast<size_t>(n);
-    }
-    bool first = true;
-    for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
-      const ScaleHistoryEntry &entry = control.scaleHistory[i];
-      if (entry.mac[0] == '\0') {
-        continue;
-      }
-      char safeMac[PREFERRED_SCALE_MAC_CAPACITY * 2] = {};
-      char safeName[PREFERRED_SCALE_NAME_CAPACITY * 2] = {};
-      sanitizeJsonEmbed(entry.mac, safeMac, sizeof(safeMac));
-      sanitizeJsonEmbed(entry.name, safeName, sizeof(safeName));
-      n = snprintf(g_scaleHistoryJson + used, sizeof(g_scaleHistoryJson) - used,
-                   "%s{\"mac\":\"%s\",\"name\":\"%s\"}", first ? "" : ",",
-                   safeMac, safeName);
-      if (n <= 0 ||
-          static_cast<size_t>(n) >= sizeof(g_scaleHistoryJson) - used) {
-        break;
-      }
-      used += static_cast<size_t>(n);
-      first = false;
-    }
-    if (used + 1 < sizeof(g_scaleHistoryJson)) {
-      g_scaleHistoryJson[used++] = ']';
-      g_scaleHistoryJson[used] = 0;
-    }
+  if (needHistory) {
+    buildScaleHistoryJson(control);
+  } else {
+    g_scaleHistoryJson[0] = '[';
+    g_scaleHistoryJson[1] = ']';
+    g_scaleHistoryJson[2] = 0;
   }
-  const int written = snprintf(
-      g_statusResponseBuffer, sizeof(g_statusResponseBuffer),
-      "{\"firmwareVersion\":\"%s\",\"state\":\"%s\",\"stateLabel\":\"%s\","
-      "\"relayClosed\":%s,"
-      "\"physicalPaddleOn\":%s,\"virtualPaddleOn\":%s,"
-      "\"remoteControlEnabled\":%s,\"buzzerSupported\":%s,"
-      "\"controlSource\":\"%s\",\"cn9ElapsedMs\":%lu,"
-      "\"safety\":{\"state\":\"%s\",\"fault\":\"%s\","
-      "\"generation\":%lu,\"timersReady\":%s,"
-      "\"taskWatchdogReady\":%s,\"externalHardware\":%s,"
-      "\"feedbackClosed\":%s,\"resetReasonCode\":%lu,"
-      "\"unsafeResetCount\":%lu,\"recoveryRequired\":%s,"
-      "\"bootLoopDetected\":%s},"
-      "\"maintenance\":{\"active\":%s,\"leaseId\":%lu,"
-      "\"startedAtMs\":%lu,\"persistPending\":%s,\"persistFailed\":%s},"
-      "\"configMutable\":%s,\"config\":{\"revision\":%lu,"
-      "\"goalWeightG\":%u,\"weightOffsetG\":%.2f,"
-      "\"weightOffsetBaselineG\":%.2f,\"autoTare\":%s,\"brewByWeight\":%s,"
-      "\"canTareStartTimer\":%s,\"scaleTimerStopExtraDelayMs\":%lu,\"firstDropBeep\":%s,"
-      "\"paddleReturnReminderBeep\":%s,"
-      "\"paddleReturnReminderIntervalMs\":%lu,"
-      "\"paddleReturnReminderMaxDurationMs\":%lu,"
-      "\"paddleMode\":\"%s\","
-      "\"buzzerScaleLostBeep\":%s,"
-      "\"buzzerAutoToManualGuardEndBeep\":%s,"
-      "\"buzzerManualNoScaleBeep\":%s,"
-      "\"buzzerScaleConnectedBeep\":%s,"
-      "\"buzzerExtendedPulseRate\":\"%s\","
-      "\"buzzerSlowExtendedPulseRate\":\"%s\","
-      "\"alertOutputChannel\":\"%s\","
-      "\"rinseGestureMs\":%lu,"
-      "\"rinseDurationMs\":%lu,"
-      "\"autoRetare\":%s,\"retareWindowMs\":%lu,"
-      "\"minimumCupWeightG\":%.1f,"
-      "\"retareStabilitySamples\":%u,"
-      "\"retareStabilityToleranceG\":%.1f,"
-      "\"retareStabilityMaxGapMs\":%lu,"
-      "\"retareStabilityMinDurationMs\":%lu,"
-      "\"bbwProtectionMs\":%lu,"
-      "\"operationalWallMs\":%lu,"
-      "\"fastExtractionGuardEnabled\":%s,"
-      "\"maxRecoveryWeightG\":%.1f,"
-      "\"minBrewTimeMs\":%lu,"
-      "\"slowExtractionGuardEnabled\":%s,"
-      "\"minRecoveryWeightG\":%.1f,"
-      "\"maxBrewTimeMs\":%lu,"
-      "\"autoToManualGuardEnabled\":%s,"
-      "\"autoToManualGuardLimitMode\":\"%s\","
-      "\"autoToManualGuardManualLimitMs\":%lu,"
-      "\"autoToManualGuardBaselineMs\":%lu,"
-      "\"autoToManualGuardTrendMs\":%lu,"
+
+  const uint32_t cycleFirstDropElapsedMs =
+      control.cycleFirstDropMs != 0 && control.cycleStartedAtMs != 0 &&
+              static_cast<int32_t>(control.cycleFirstDropMs -
+                                   control.cycleStartedAtMs) >= 0
+          ? control.cycleFirstDropMs - control.cycleStartedAtMs
+          : 0U;
+
+  size_t used = 0;
+  const bool liveShot =
+      control.activeCycle || control.relayClosed;
+  bool ok = statusJsonAppend(
+      &used,
+      "{\"firmwareVersion\":\"%s\",\"configMutable\":%s,"
+      "\"buzzerSupported\":%s,\"liveShot\":%s,"
+      "\"config\":{\"ringRetainLogLevel\":\"%s\","
       "\"timezoneOffsetMinutes\":%d,"
       "\"ntpServerPreset\":\"%s\",\"ntpServerCustom\":\"%s\","
-      "\"scaleMacCacheMode\":\"%s\","
-      "\"bookooMuteOnBuzzerOnly\":%s,"
-      "\"bookooConnectBeepLevel\":%u,"
-      "\"avoidBbwShotWithoutScale\":%s,"
-      "\"lastShotCooldownMs\":%lu,"
-      "\"serialDebugOutput\":%s,"
-      "\"ringRetainLogLevel\":\"%s\"},"
-      "\"presets\":%s,"
-      "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
-      "\"nextRetryInMs\":%lu,\"consecutiveFailures\":%u,"
-      "\"activeServer\":\"%s\"},"
-      "\"scale\":{\"available\":%s,\"protocol\":\"%s\",\"streamState\":\"%s\","
-      "\"controlState\":\"%s\",\"controlAccepted\":%s,"
-      "\"currentWeightG\":%s,"
-      "\"weightAgeMs\":%lu,\"observedWeightG\":%s,"
-      "\"observedWeightAgeMs\":%lu,\"timerMs\":%s,\"timerAgeMs\":%lu,"
-      "\"connectionGeneration\":%lu,"
-      "\"packetSequence\":%lu,\"packetGaps\":%lu,"
-      "\"rejectedPackets\":%lu,\"reconnects\":%lu,"
-      "\"lastDisconnectReason\":%u,"
-      "\"lastDisconnectReasonName\":\"%s\",\"eventsDropped\":%lu,"
-      "\"preferredMac\":\"%s\",\"preferredName\":\"%s\","
-      "\"macCachePauseRemainingMs\":%lu,\"history\":%s},"
-      "\"lastCycle\":{\"valid\":%s,"
-      "\"durationMs\":%lu,\"endReason\":\"%s\","
-      "\"lastWeightG\":%s,\"weightAgeMs\":%lu},"
-      "\"lastShot\":{\"valid\":%s,\"currentWeightG\":%s,"
-      "\"goalWeightG\":%u,\"extractionExtended\":%s,"
-      "\"activeStopWeightG\":%.1f,\"durationMs\":%lu,"
-      "\"firstDropElapsedMs\":%lu,\"retarePerformed\":%s,"
-      "\"shotType\":\"%s\",\"scaleProtocol\":\"%s\","
-      "\"scaleAvailable\":%s,\"fastExtractionGuardEnabled\":%s,"
-      "\"slowExtractionGuardEnabled\":%s,\"slowExtractionExtended\":%s,"
-      "\"minBrewTimeRemainingMs\":%lu,"
-      "\"autoToManualGuardEnabled\":%s,"
-      "\"autoToManualGuardArmed\":%s,"
-      "\"autoToManualGuardEnforced\":%s,"
-      "\"autoToManualGuardRemainingMs\":%lu,"
-      "\"noScaleShotGuardEnabled\":%s,"
-      "\"noScaleShotGuardArmed\":%s},"
-      "\"network\":{\"networkActive\":%s,\"uiActive\":%s,"
-      "\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
-      "\"wifiConfigured\":%s,\"ssid\":\"%s\",\"open\":%s,\"staState\":\"%s\","
-      "\"staIp\":\"%s\",\"ipMode\":\"%s\",\"configState\":\"%s\","
-      "\"confirmRemainingMs\":%lu,"
-      "\"rssi\":%s,\"signalQualityPct\":%s,"
-      "\"configuredIp\":\"%s\",\"configuredNetmask\":\"%s\","
-      "\"configuredGateway\":\"%s\",\"configuredDns1\":\"%s\","
-      "\"configuredDns2\":\"%s\",\"windowRemainingMs\":%lu,"
-      "\"taskAgeMs\":%lu,\"taskStackMinWords\":%lu,"
-      "\"startupFailures\":%lu},"
-      "\"health\":{\"uptimeMs\":%lu,\"loopMaxGapMs\":%lu,"
-      "\"loopStackMinWords\":%lu,\"scaleStackMinWords\":%lu,"
-      "\"freeHeapBytes\":%lu,\"minimumFreeHeapBytes\":%lu,"
-      "\"largestFreeHeapBlockBytes\":%lu,"
-      "\"hwmon\":{\"cpuUsagePct\":%u,\"tempValid\":%s,"
-      "\"tempC\":%.1f,\"tempPeakC\":%.1f,"
-      "\"ramTotalBytes\":%lu,\"ramUsedBytes\":%lu,"
-      "\"ramFreeBytes\":%lu}},"
-      "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"},"
-      "\"cycle\":{\"active\":%s,\"id\":%lu,\"elapsedMs\":%lu,"
-      "\"retarePerformed\":%s,\"shotType\":\"%s\",\"flowDuringRetare\":%s,"
-      "\"firstDropMs\":%lu,\"retareFlowFirstDetectedAtMs\":%lu,"
-      "\"firstDropElapsedMs\":%lu,"
-      "\"extractionExtended\":%s,\"slowExtractionExtended\":%s,"
-      "\"targetReachedEarly\":%s,"
-      "\"activeStopWeightG\":%.1f,\"minBrewTimeRemainingMs\":%lu,"
-      "\"autoToManualGuardArmed\":%s,"
-      "\"autoToManualGuardEnforced\":%s,"
-      "\"autoToManualGuardRemainingMs\":%lu},"
-      "\"noScaleShotGuard\":{\"enabled\":%s,\"armed\":%s},"
-      "\"debugEventsDropped\":%lu}",
-      safeFirmwareVersion, stopperStateName(control.state),
-      stateLabel(control.state),
-      control.relayClosed ? "true" : "false",
-      control.physicalPaddleOn ? "true" : "false",
-      control.virtualPaddleOn ? "true" : "false",
-      control.remoteControlEnabled ? "true" : "false",
-      BUZZER_SUPPORT_ENABLED ? "true" : "false",
-      controlSourceName(control.source),
-      static_cast<unsigned long>(control.cn9ElapsedMs),
-      relaySafetyStateName(control.safetyState),
-      relaySafetyFaultName(control.safetyFault),
-      static_cast<unsigned long>(control.safetyGeneration),
-      control.safetyTimersReady ? "true" : "false",
-      control.taskWatchdogReady ? "true" : "false",
-      control.externalSafetyPresent ? "true" : "false",
-      control.cn9FeedbackClosed ? "true" : "false",
-      static_cast<unsigned long>(control.resetReasonCode),
-      static_cast<unsigned long>(control.unsafeResetCount),
-      control.resetRecoveryRequired ? "true" : "false",
-      control.bootLoopDetected ? "true" : "false",
-      control.maintenanceLeaseActive ? "true" : "false",
-      static_cast<unsigned long>(control.maintenanceLeaseId),
-      static_cast<unsigned long>(control.maintenanceStartedAtMs),
-      control.configPersistPending ? "true" : "false",
-      control.configPersistFailed ? "true" : "false",
+      "\"serialDebugOutput\":%s",
+      safeFirmwareVersion,
       controlAllowsConfiguration(control) ? "true" : "false",
-      static_cast<unsigned long>(control.config.revision),
-      static_cast<unsigned>(control.config.goalWeightG),
-      static_cast<double>(control.config.weightOffsetG),
-      static_cast<double>(control.config.weightOffsetBaselineG),
-      control.config.autoTare ? "true" : "false",
-      control.config.timerOnly ? "false" : "true",
-      control.config.canTareStartTimer ? "true" : "false",
-      static_cast<unsigned long>(control.config.scaleTimerStopExtraDelayMs),
-      control.config.firstDropBeep ? "true" : "false",
-      control.config.paddleReturnReminderBeep ? "true" : "false",
-      static_cast<unsigned long>(
-          control.config.paddleReturnReminderIntervalMs),
-      static_cast<unsigned long>(
-          control.config.paddleReturnReminderMaxDurationMs),
-      paddleModeId(control.config.paddleMode),
-      control.config.buzzerScaleLostBeep ? "true" : "false",
-      control.config.buzzerAutoToManualGuardEndBeep ? "true" : "false",
-      control.config.buzzerManualNoScaleBeep ? "true" : "false",
-      control.config.buzzerScaleConnectedBeep ? "true" : "false",
-      extendedPulseRateId(control.config.buzzerExtendedPulseRate),
-      extendedPulseRateId(control.config.buzzerSlowExtendedPulseRate),
-      alertOutputChannelId(control.config.alertOutputChannel),
-      static_cast<unsigned long>(control.config.rinseGestureMs),
-      static_cast<unsigned long>(control.config.rinseDurationMs),
-      control.config.autoRetare ? "true" : "false",
-      static_cast<unsigned long>(control.config.retareWindowMs),
-      static_cast<double>(control.config.minimumCupWeightG),
-      static_cast<unsigned>(control.config.retareStabilitySamples),
-      static_cast<double>(control.config.retareStabilityToleranceG),
-      static_cast<unsigned long>(control.config.retareStabilityMaxGapMs),
-      static_cast<unsigned long>(control.config.retareStabilityMinDurationMs),
-      static_cast<unsigned long>(control.config.bbwProtectionMs),
-      static_cast<unsigned long>(control.config.operationalWallMs),
-      control.config.fastExtractionGuardEnabled ? "true" : "false",
-      static_cast<double>(control.config.maxRecoveryWeightG),
-      static_cast<unsigned long>(control.config.minBrewTimeMs),
-      control.config.slowExtractionGuardEnabled ? "true" : "false",
-      static_cast<double>(control.config.minRecoveryWeightG),
-      static_cast<unsigned long>(control.config.maxBrewTimeMs),
-      control.config.autoToManualGuardEnabled ? "true" : "false",
-      autoToManualGuardLimitModeId(control.config.autoToManualGuardLimitMode),
-      static_cast<unsigned long>(control.config.autoToManualGuardManualLimitMs),
-      static_cast<unsigned long>(control.config.autoToManualGuardBaselineMs),
-      static_cast<unsigned long>(control.autoToManualGuardTrendMs),
-      static_cast<int>(control.config.timezoneOffsetMinutes),
-      ntpPresetId(control.config.ntpServerPreset),
-      safeNtpCustom,
-      scaleMacCacheModeId(control.config.scaleMacCacheMode),
-      control.config.bookooMuteOnBuzzerOnly ? "true" : "false",
-      static_cast<unsigned>(control.config.bookooConnectBeepLevel),
-      control.config.avoidBbwShotWithoutScale ? "true" : "false",
-      static_cast<unsigned long>(control.config.lastShotCooldownMs),
-      control.config.serialDebugOutput ? "true" : "false",
+      BUZZER_SUPPORT_ENABLED ? "true" : "false",
+      liveShot ? "true" : "false",
       logLevelName(static_cast<LogLevel>(control.config.ringRetainLogLevel)),
-      g_presetsStatusJson,
-      timeSyncStateName(timeStatus.state),
-      static_cast<unsigned long>(timeStatus.utcSec),
-      static_cast<unsigned long>(timeStatus.lastSyncAgeMs),
-      static_cast<unsigned long>(timeStatus.nextRetryInMs),
-      static_cast<unsigned>(timeStatus.consecutiveFailures),
-      safeActiveServer,
-      control.scaleAvailable ? "true" : "false", safeScaleProtocol,
-      weightStreamStateName(control.weightStreamState),
-      weightControlStateName(control.weightControlState),
-      control.currentWeightValid ? "true" : "false", currentWeight,
-      static_cast<unsigned long>(control.currentWeightAgeMs),
-      observedWeight,
-      static_cast<unsigned long>(control.observedWeightAgeMs),
-      scaleTimer,
-      static_cast<unsigned long>(control.currentTimerAgeMs),
-      static_cast<unsigned long>(control.scaleConnectionGeneration),
-      static_cast<unsigned long>(control.scalePacketSequence),
-      static_cast<unsigned long>(control.scalePacketGaps),
-      static_cast<unsigned long>(control.scaleRejectedPackets),
-      static_cast<unsigned long>(control.scaleReconnects),
-      static_cast<unsigned>(control.scaleLastDisconnectReason),
-      scaleDisconnectReasonName(control.scaleLastDisconnectReason),
-      static_cast<unsigned long>(control.scaleEventsDropped),
-      safePreferredScaleMac, safePreferredScaleName,
-      static_cast<unsigned long>(control.scaleMacCachePauseRemainingMs),
-      g_scaleHistoryJson,
-      control.lastCycle.valid ? "true" : "false",
-      static_cast<unsigned long>(control.lastCycle.durationMs),
-      endReasonName(control.lastCycle.endReason), lastWeight,
-      static_cast<unsigned long>(control.lastCycle.weightAgeAtEndMs),
-      control.lastShot.valid ? "true" : "false", lastShotWeight,
-      static_cast<unsigned>(control.lastShot.goalWeightG),
-      control.lastShot.extractionExtended ? "true" : "false",
-      static_cast<double>(control.lastShot.activeStopWeightG),
-      static_cast<unsigned long>(control.lastShot.durationMs),
-      static_cast<unsigned long>(control.lastShot.firstDropElapsedMs),
-      control.lastShot.retarePerformed ? "true" : "false",
-      lastShotTypeName(static_cast<LastShotType>(control.lastShot.shotType)),
-      safeLastShotProtocol,
-      control.lastShot.scaleAvailable ? "true" : "false",
-      control.lastShot.fastExtractionGuardEnabled ? "true" : "false",
-      control.lastShot.slowExtractionGuardEnabled ? "true" : "false",
-      control.lastShot.slowExtractionExtended ? "true" : "false",
-      static_cast<unsigned long>(control.lastShot.minBrewTimeRemainingMs),
-      control.lastShot.autoToManualGuardEnabled ? "true" : "false",
-      control.lastShot.autoToManualGuardArmed ? "true" : "false",
-      control.lastShot.autoToManualGuardEnforced ? "true" : "false",
-      static_cast<unsigned long>(control.lastShot.autoToManualGuardRemainingMs),
-      control.lastShot.noScaleShotGuardEnabled ? "true" : "false",
-      control.lastShot.noScaleShotGuardArmed ? "true" : "false",
-      network.networkActive ? "true" : "false",
-      network.uiAuthenticated ? "true" : "false",
-      network.apActive ? "true" : "false", network.apIp,
-      static_cast<unsigned>(network.apClients),
-      network.wifiConfigured ? "true" : "false",
-      safeStaSsid, network.staOpen ? "true" : "false",
-      staStateName(network.staState), network.staIp,
-      staIpModeName(network.staIpMode),
-      staConfigStateName(network.staConfigState),
-      static_cast<unsigned long>(network.confirmRemainingMs),
-      staRssiJson, staSignalQualityJson,
-      network.configuredIp, network.configuredNetmask,
-      network.configuredGateway, network.configuredDns1,
-      network.configuredDns2,
-      static_cast<unsigned long>(network.windowRemainingMs),
-      static_cast<unsigned long>(network.taskAgeMs),
-      static_cast<unsigned long>(network.taskStackMinWords),
-      static_cast<unsigned long>(network.startupFailures),
-      static_cast<unsigned long>(control.uptimeMs),
-      static_cast<unsigned long>(control.loopMaxGapMs),
-      static_cast<unsigned long>(control.loopStackMinWords),
-      static_cast<unsigned long>(control.scaleStackMinWords),
-      static_cast<unsigned long>(control.freeHeapBytes),
-      static_cast<unsigned long>(control.minimumFreeHeapBytes),
-      static_cast<unsigned long>(control.largestFreeHeapBlockBytes),
-      static_cast<unsigned>(control.hwmon.cpuUsagePct),
-      control.hwmon.tempValid ? "true" : "false",
-      static_cast<double>(control.hwmon.tempC),
-      static_cast<double>(control.hwmon.tempPeakC),
-      static_cast<unsigned long>(control.hwmon.ramTotalBytes),
-      static_cast<unsigned long>(control.hwmon.ramUsedBytes),
-      static_cast<unsigned long>(control.hwmon.ramFreeBytes),
-      static_cast<unsigned long>(network.lastCommandRequestId),
-      commandResultStateName(network.lastCommandState),
-      control.activeCycle ? "true" : "false",
-      static_cast<unsigned long>(control.cycleId),
-      static_cast<unsigned long>(
-          control.activeCycle ? control.cycleElapsedMs : 0U),
-      control.cycleRetarePerformed ? "true" : "false",
-      activeCycleShotTypeLabel(control),
-      control.cycleFlowDuringRetare ? "true" : "false",
-      static_cast<unsigned long>(control.cycleFirstDropMs),
-      static_cast<unsigned long>(control.cycleRetareFlowFirstDetectedAtMs),
-      static_cast<unsigned long>(
-          control.cycleFirstDropMs != 0 &&
-                  control.cycleStartedAtMs != 0 &&
-                  static_cast<int32_t>(control.cycleFirstDropMs -
-                                       control.cycleStartedAtMs) >= 0
-              ? control.cycleFirstDropMs - control.cycleStartedAtMs
-              : 0U),
-      control.cycleExtractionExtended ? "true" : "false",
-      control.cycleSlowExtractionExtended ? "true" : "false",
-      control.cycleTargetReachedEarly ? "true" : "false",
-      static_cast<double>(control.cycleActiveStopWeightG),
-      static_cast<unsigned long>(control.cycleMinBrewTimeRemainingMs),
-      control.cycleAutoToManualGuardArmed ? "true" : "false",
-      control.cycleAutoToManualGuardEnforced ? "true" : "false",
-      static_cast<unsigned long>(control.cycleAutoToManualGuardRemainingMs),
-      control.noScaleShotGuardEnabled ? "true" : "false",
-      control.noScaleShotGuardArmed ? "true" : "false",
-      static_cast<unsigned long>(control.debugEventsDropped));
-  if (written < 0 ||
-      static_cast<size_t>(written) >= sizeof(g_statusResponseBuffer)) {
+      static_cast<int>(control.config.timezoneOffsetMinutes),
+      ntpPresetId(control.config.ntpServerPreset), safeNtpCustom,
+      control.config.serialDebugOutput ? "true" : "false");
+
+  if (ok && page == StatusPage::Home) {
+    ok = statusJsonAppend(
+        &used,
+        ",\"revision\":%lu,\"brewByWeight\":%s,\"goalWeightG\":%u,"
+        "\"operationalWallMs\":%lu,\"minBrewTimeMs\":%lu,\"maxBrewTimeMs\":%lu,"
+        "\"minRecoveryWeightG\":%.1f,\"maxRecoveryWeightG\":%.1f,"
+        "\"fastExtractionGuardEnabled\":%s,\"slowExtractionGuardEnabled\":%s,"
+        "\"autoToManualGuardEnabled\":%s,\"avoidBbwShotWithoutScale\":%s,"
+        "\"scaleMacCacheMode\":\"%s\"",
+        static_cast<unsigned long>(control.config.revision),
+        control.config.timerOnly ? "false" : "true",
+        static_cast<unsigned>(control.config.goalWeightG),
+        static_cast<unsigned long>(control.config.operationalWallMs),
+        static_cast<unsigned long>(control.config.minBrewTimeMs),
+        static_cast<unsigned long>(control.config.maxBrewTimeMs),
+        static_cast<double>(control.config.minRecoveryWeightG),
+        static_cast<double>(control.config.maxRecoveryWeightG),
+        control.config.fastExtractionGuardEnabled ? "true" : "false",
+        control.config.slowExtractionGuardEnabled ? "true" : "false",
+        control.config.autoToManualGuardEnabled ? "true" : "false",
+        control.config.avoidBbwShotWithoutScale ? "true" : "false",
+        scaleMacCacheModeId(control.config.scaleMacCacheMode));
+  } else if (ok && page == StatusPage::Settings) {
+    ok = statusJsonAppend(
+        &used,
+        ",\"revision\":%lu,\"goalWeightG\":%u,\"weightOffsetG\":%.2f,"
+        "\"weightOffsetBaselineG\":%.2f,\"autoTare\":%s,\"brewByWeight\":%s,"
+        "\"canTareStartTimer\":%s,\"scaleTimerStopExtraDelayMs\":%lu,"
+        "\"firstDropBeep\":%s,\"paddleReturnReminderBeep\":%s,"
+        "\"paddleReturnReminderIntervalMs\":%lu,"
+        "\"paddleReturnReminderMaxDurationMs\":%lu,\"paddleMode\":\"%s\","
+        "\"buzzerScaleLostBeep\":%s,\"buzzerAutoToManualGuardEndBeep\":%s,"
+        "\"buzzerManualNoScaleBeep\":%s,\"buzzerScaleConnectedBeep\":%s,"
+        "\"buzzerExtendedPulseRate\":\"%s\","
+        "\"buzzerSlowExtendedPulseRate\":\"%s\","
+        "\"alertOutputChannel\":\"%s\",\"rinseGestureMs\":%lu,"
+        "\"rinseDurationMs\":%lu,\"autoRetare\":%s,\"retareWindowMs\":%lu,"
+        "\"minimumCupWeightG\":%.1f,\"retareStabilitySamples\":%u,"
+        "\"retareStabilityToleranceG\":%.1f,\"retareStabilityMaxGapMs\":%lu,"
+        "\"retareStabilityMinDurationMs\":%lu,\"bbwProtectionMs\":%lu,"
+        "\"operationalWallMs\":%lu,\"fastExtractionGuardEnabled\":%s,"
+        "\"maxRecoveryWeightG\":%.1f,\"minBrewTimeMs\":%lu,"
+        "\"slowExtractionGuardEnabled\":%s,\"minRecoveryWeightG\":%.1f,"
+        "\"maxBrewTimeMs\":%lu,\"autoToManualGuardEnabled\":%s,"
+        "\"autoToManualGuardLimitMode\":\"%s\","
+        "\"autoToManualGuardManualLimitMs\":%lu,"
+        "\"autoToManualGuardBaselineMs\":%lu,"
+        "\"autoToManualGuardTrendMs\":%lu,\"scaleMacCacheMode\":\"%s\","
+        "\"bookooMuteOnBuzzerOnly\":%s,\"bookooConnectBeepLevel\":%u,"
+        "\"avoidBbwShotWithoutScale\":%s,\"lastShotCooldownMs\":%lu",
+        static_cast<unsigned long>(control.config.revision),
+        static_cast<unsigned>(control.config.goalWeightG),
+        static_cast<double>(control.config.weightOffsetG),
+        static_cast<double>(control.config.weightOffsetBaselineG),
+        control.config.autoTare ? "true" : "false",
+        control.config.timerOnly ? "false" : "true",
+        control.config.canTareStartTimer ? "true" : "false",
+        static_cast<unsigned long>(control.config.scaleTimerStopExtraDelayMs),
+        control.config.firstDropBeep ? "true" : "false",
+        control.config.paddleReturnReminderBeep ? "true" : "false",
+        static_cast<unsigned long>(
+            control.config.paddleReturnReminderIntervalMs),
+        static_cast<unsigned long>(
+            control.config.paddleReturnReminderMaxDurationMs),
+        paddleModeId(control.config.paddleMode),
+        control.config.buzzerScaleLostBeep ? "true" : "false",
+        control.config.buzzerAutoToManualGuardEndBeep ? "true" : "false",
+        control.config.buzzerManualNoScaleBeep ? "true" : "false",
+        control.config.buzzerScaleConnectedBeep ? "true" : "false",
+        extendedPulseRateId(control.config.buzzerExtendedPulseRate),
+        extendedPulseRateId(control.config.buzzerSlowExtendedPulseRate),
+        alertOutputChannelId(control.config.alertOutputChannel),
+        static_cast<unsigned long>(control.config.rinseGestureMs),
+        static_cast<unsigned long>(control.config.rinseDurationMs),
+        control.config.autoRetare ? "true" : "false",
+        static_cast<unsigned long>(control.config.retareWindowMs),
+        static_cast<double>(control.config.minimumCupWeightG),
+        static_cast<unsigned>(control.config.retareStabilitySamples),
+        static_cast<double>(control.config.retareStabilityToleranceG),
+        static_cast<unsigned long>(control.config.retareStabilityMaxGapMs),
+        static_cast<unsigned long>(control.config.retareStabilityMinDurationMs),
+        static_cast<unsigned long>(control.config.bbwProtectionMs),
+        static_cast<unsigned long>(control.config.operationalWallMs),
+        control.config.fastExtractionGuardEnabled ? "true" : "false",
+        static_cast<double>(control.config.maxRecoveryWeightG),
+        static_cast<unsigned long>(control.config.minBrewTimeMs),
+        control.config.slowExtractionGuardEnabled ? "true" : "false",
+        static_cast<double>(control.config.minRecoveryWeightG),
+        static_cast<unsigned long>(control.config.maxBrewTimeMs),
+        control.config.autoToManualGuardEnabled ? "true" : "false",
+        autoToManualGuardLimitModeId(control.config.autoToManualGuardLimitMode),
+        static_cast<unsigned long>(control.config.autoToManualGuardManualLimitMs),
+        static_cast<unsigned long>(control.config.autoToManualGuardBaselineMs),
+        static_cast<unsigned long>(control.autoToManualGuardTrendMs),
+        scaleMacCacheModeId(control.config.scaleMacCacheMode),
+        control.config.bookooMuteOnBuzzerOnly ? "true" : "false",
+        static_cast<unsigned>(control.config.bookooConnectBeepLevel),
+        control.config.avoidBbwShotWithoutScale ? "true" : "false",
+        static_cast<unsigned long>(control.config.lastShotCooldownMs));
+  }
+
+  if (ok) {
+    ok = statusJsonAppend(&used, "}");
+  }
+
+  if (ok && page == StatusPage::Home) {
+    ok = statusJsonAppend(
+        &used,
+        ",\"state\":\"%s\",\"stateLabel\":\"%s\",\"relayClosed\":%s,"
+        "\"physicalPaddleOn\":%s,\"virtualPaddleOn\":%s,"
+        "\"remoteControlEnabled\":%s,\"controlSource\":\"%s\","
+        "\"cn9ElapsedMs\":%lu,"
+        "\"safety\":{\"state\":\"%s\",\"fault\":\"%s\","
+        "\"taskWatchdogReady\":%s,\"externalHardware\":%s,"
+        "\"recoveryRequired\":%s},"
+        "\"scale\":{\"available\":%s,\"protocol\":\"%s\","
+        "\"streamState\":\"%s\",\"controlState\":\"%s\","
+        "\"controlAccepted\":%s,\"currentWeightG\":%s,"
+        "\"observedWeightG\":%s,\"timerMs\":%s,"
+        "\"preferredMac\":\"%s\",\"preferredName\":\"%s\","
+        "\"macCachePauseRemainingMs\":%lu},"
+        "\"presets\":%s,"
+        "\"cycle\":{\"active\":%s,\"shotType\":\"%s\","
+        "\"retarePerformed\":%s,\"firstDropElapsedMs\":%lu,"
+        "\"extractionExtended\":%s,\"slowExtractionExtended\":%s,"
+        "\"activeStopWeightG\":%.1f,\"minBrewTimeRemainingMs\":%lu,"
+        "\"autoToManualGuardArmed\":%s,"
+        "\"autoToManualGuardEnforced\":%s,"
+        "\"autoToManualGuardRemainingMs\":%lu},"
+        "\"lastShot\":{\"valid\":%s,\"currentWeightG\":%s,"
+        "\"goalWeightG\":%u,\"extractionExtended\":%s,"
+        "\"activeStopWeightG\":%.1f,\"durationMs\":%lu,"
+        "\"firstDropElapsedMs\":%lu,\"retarePerformed\":%s,"
+        "\"shotType\":\"%s\",\"scaleProtocol\":\"%s\","
+        "\"scaleAvailable\":%s,\"fastExtractionGuardEnabled\":%s,"
+        "\"slowExtractionGuardEnabled\":%s,\"slowExtractionExtended\":%s,"
+        "\"minBrewTimeRemainingMs\":%lu,"
+        "\"autoToManualGuardEnabled\":%s,"
+        "\"autoToManualGuardArmed\":%s,"
+        "\"autoToManualGuardEnforced\":%s,"
+        "\"autoToManualGuardRemainingMs\":%lu,"
+        "\"noScaleShotGuardEnabled\":%s,"
+        "\"noScaleShotGuardArmed\":%s},"
+        "\"noScaleShotGuard\":{\"enabled\":%s,\"armed\":%s}",
+        stopperStateName(control.state), stateLabel(control.state),
+        control.relayClosed ? "true" : "false",
+        control.physicalPaddleOn ? "true" : "false",
+        control.virtualPaddleOn ? "true" : "false",
+        control.remoteControlEnabled ? "true" : "false",
+        controlSourceName(control.source),
+        static_cast<unsigned long>(control.cn9ElapsedMs),
+        relaySafetyStateName(control.safetyState),
+        relaySafetyFaultName(control.safetyFault),
+        control.taskWatchdogReady ? "true" : "false",
+        control.externalSafetyPresent ? "true" : "false",
+        control.resetRecoveryRequired ? "true" : "false",
+        control.scaleAvailable ? "true" : "false", safeScaleProtocol,
+        weightStreamStateName(control.weightStreamState),
+        weightControlStateName(control.weightControlState),
+        control.currentWeightValid ? "true" : "false", currentWeight,
+        observedWeight, scaleTimer, safePreferredScaleMac,
+        safePreferredScaleName,
+        static_cast<unsigned long>(control.scaleMacCachePauseRemainingMs),
+        g_presetsStatusJson, control.activeCycle ? "true" : "false",
+        activeCycleShotTypeLabel(control),
+        control.cycleRetarePerformed ? "true" : "false",
+        static_cast<unsigned long>(cycleFirstDropElapsedMs),
+        control.cycleExtractionExtended ? "true" : "false",
+        control.cycleSlowExtractionExtended ? "true" : "false",
+        static_cast<double>(control.cycleActiveStopWeightG),
+        static_cast<unsigned long>(control.cycleMinBrewTimeRemainingMs),
+        control.cycleAutoToManualGuardArmed ? "true" : "false",
+        control.cycleAutoToManualGuardEnforced ? "true" : "false",
+        static_cast<unsigned long>(control.cycleAutoToManualGuardRemainingMs),
+        control.lastShot.valid ? "true" : "false", lastShotWeight,
+        static_cast<unsigned>(control.lastShot.goalWeightG),
+        control.lastShot.extractionExtended ? "true" : "false",
+        static_cast<double>(control.lastShot.activeStopWeightG),
+        static_cast<unsigned long>(control.lastShot.durationMs),
+        static_cast<unsigned long>(control.lastShot.firstDropElapsedMs),
+        control.lastShot.retarePerformed ? "true" : "false",
+        lastShotTypeName(static_cast<LastShotType>(control.lastShot.shotType)),
+        safeLastShotProtocol,
+        control.lastShot.scaleAvailable ? "true" : "false",
+        control.lastShot.fastExtractionGuardEnabled ? "true" : "false",
+        control.lastShot.slowExtractionGuardEnabled ? "true" : "false",
+        control.lastShot.slowExtractionExtended ? "true" : "false",
+        static_cast<unsigned long>(control.lastShot.minBrewTimeRemainingMs),
+        control.lastShot.autoToManualGuardEnabled ? "true" : "false",
+        control.lastShot.autoToManualGuardArmed ? "true" : "false",
+        control.lastShot.autoToManualGuardEnforced ? "true" : "false",
+        static_cast<unsigned long>(
+            control.lastShot.autoToManualGuardRemainingMs),
+        control.lastShot.noScaleShotGuardEnabled ? "true" : "false",
+        control.lastShot.noScaleShotGuardArmed ? "true" : "false",
+        control.noScaleShotGuardEnabled ? "true" : "false",
+        control.noScaleShotGuardArmed ? "true" : "false");
+  } else if (ok && page == StatusPage::Settings) {
+    ok = statusJsonAppend(
+        &used,
+        ",\"scale\":{\"preferredMac\":\"%s\",\"preferredName\":\"%s\","
+        "\"macCachePauseRemainingMs\":%lu,\"history\":%s},"
+        "\"presets\":%s",
+        safePreferredScaleMac, safePreferredScaleName,
+        static_cast<unsigned long>(control.scaleMacCachePauseRemainingMs),
+        g_scaleHistoryJson, g_presetsStatusJson);
+  } else if (ok && page == StatusPage::Admin) {
+    ok = statusJsonAppend(
+        &used,
+        ",\"network\":{\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
+        "\"wifiConfigured\":%s,\"ssid\":\"%s\",\"open\":%s,"
+        "\"staState\":\"%s\",\"staIp\":\"%s\",\"ipMode\":\"%s\","
+        "\"configState\":\"%s\",\"confirmRemainingMs\":%lu,"
+        "\"rssi\":%s,\"signalQualityPct\":%s,"
+        "\"configuredIp\":\"%s\",\"configuredNetmask\":\"%s\","
+        "\"configuredGateway\":\"%s\",\"configuredDns1\":\"%s\","
+        "\"configuredDns2\":\"%s\"},"
+        "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
+        "\"nextRetryInMs\":%lu,\"activeServer\":\"%s\"},"
+        "\"maintenance\":{\"active\":%s,\"leaseId\":%lu,"
+        "\"persistPending\":%s,\"persistFailed\":%s},"
+        "\"health\":{\"uptimeMs\":%lu,\"loopMaxGapMs\":%lu,"
+        "\"freeHeapBytes\":%lu,\"minimumFreeHeapBytes\":%lu,"
+        "\"hwmon\":{\"cpuUsagePct\":%u,\"tempValid\":%s,"
+        "\"tempC\":%.1f,\"tempPeakC\":%.1f,"
+        "\"ramTotalBytes\":%lu,\"ramUsedBytes\":%lu,"
+        "\"ramFreeBytes\":%lu}},"
+        "\"safety\":{\"resetReasonCode\":%lu},"
+        "\"scale\":{\"packetGaps\":%lu,\"rejectedPackets\":%lu,"
+        "\"reconnects\":%lu,\"lastDisconnectReasonName\":\"%s\","
+        "\"eventsDropped\":%lu},"
+        "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"}",
+        network.apActive ? "true" : "false", network.apIp,
+        static_cast<unsigned>(network.apClients),
+        network.wifiConfigured ? "true" : "false", safeStaSsid,
+        network.staOpen ? "true" : "false", staStateName(network.staState),
+        network.staIp, staIpModeName(network.staIpMode),
+        staConfigStateName(network.staConfigState),
+        static_cast<unsigned long>(network.confirmRemainingMs), staRssiJson,
+        staSignalQualityJson, network.configuredIp, network.configuredNetmask,
+        network.configuredGateway, network.configuredDns1,
+        network.configuredDns2, timeSyncStateName(timeStatus.state),
+        static_cast<unsigned long>(timeStatus.utcSec),
+        static_cast<unsigned long>(timeStatus.lastSyncAgeMs),
+        static_cast<unsigned long>(timeStatus.nextRetryInMs), safeActiveServer,
+        control.maintenanceLeaseActive ? "true" : "false",
+        static_cast<unsigned long>(control.maintenanceLeaseId),
+        control.configPersistPending ? "true" : "false",
+        control.configPersistFailed ? "true" : "false",
+        static_cast<unsigned long>(control.uptimeMs),
+        static_cast<unsigned long>(control.loopMaxGapMs),
+        static_cast<unsigned long>(control.freeHeapBytes),
+        static_cast<unsigned long>(control.minimumFreeHeapBytes),
+        static_cast<unsigned>(control.hwmon.cpuUsagePct),
+        control.hwmon.tempValid ? "true" : "false",
+        static_cast<double>(control.hwmon.tempC),
+        static_cast<double>(control.hwmon.tempPeakC),
+        static_cast<unsigned long>(control.hwmon.ramTotalBytes),
+        static_cast<unsigned long>(control.hwmon.ramUsedBytes),
+        static_cast<unsigned long>(control.hwmon.ramFreeBytes),
+        static_cast<unsigned long>(control.resetReasonCode),
+        static_cast<unsigned long>(control.scalePacketGaps),
+        static_cast<unsigned long>(control.scaleRejectedPackets),
+        static_cast<unsigned long>(control.scaleReconnects),
+        scaleDisconnectReasonName(control.scaleLastDisconnectReason),
+        static_cast<unsigned long>(control.scaleEventsDropped),
+        static_cast<unsigned long>(network.lastCommandRequestId),
+        commandResultStateName(network.lastCommandState));
+  }
+
+  if (ok) {
+    ok = statusJsonAppend(&used, "}");
+  }
+
+  if (!ok) {
     const esp_err_t tooLarge =
         sendError(request, "500 Internal Server Error", "STATUS_TOO_LARGE",
                   "Status snapshot exceeds its size limit.");

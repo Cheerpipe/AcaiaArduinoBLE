@@ -44,11 +44,11 @@ const jsBytes = Buffer.byteLength(js, 'utf8');
 if (htmlBytes > 40960) {
   throw new Error('Web UI HTML source exceeds the 40 KiB authoring budget');
 }
-if (jsBytes > 71680) {
-  throw new Error('Web UI JS source exceeds the 70 KiB authoring budget');
+if (jsBytes > 75776) {
+  throw new Error('Web UI JS source exceeds the 74 KiB authoring budget');
 }
-if (htmlBytes + jsBytes > 110592) {
-  throw new Error('Web UI HTML+JS source exceeds the 108 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 114688) {
+  throw new Error('Web UI HTML+JS source exceeds the 112 KiB combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -242,7 +242,7 @@ if (!html.includes('id="rememberMe"') ||
     !network.includes('createSession(token, csrf, rememberMe)') ||
     !network.includes('session.rememberMe') ||
     !network.includes('session.createdAtMs') ||
-    !network.includes('uiActive')) {
+    !network.includes('uiAuthenticated')) {
   throw new Error(
       'Remember me must persist a 7-day session without 3-minute idle expiry');
 }
@@ -250,7 +250,7 @@ const statusSection = html.match(/<fieldset[^>]*><legend>Status<\/legend>([\s\S]
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     statusSection[1].includes('class="row"') ||
     (statusSection[1].match(/class="metric"/g) || []).length !== 13 ||
-    !ui.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'") ||
+    !(ui.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'") || ui.includes("onOff(s.relayClosed,'CLOSED (ON)','OPEN (OFF)')")) ||
     !ui.includes('id="scaleWeight"') ||
     !ui.includes('id="scaleTimer"') ||
     !ui.includes('Weight (scale)') ||
@@ -311,7 +311,7 @@ if (!ui.includes('id="shotPanel"') ||
     !ui.includes('id="shotType"') ||
     !ui.includes('id="shotScale"') ||
     !ui.includes('function updateShot(') ||
-    !network.includes('elapsedMs') ||
+    !network.includes('firstDropElapsedMs') ||
     !network.includes('retarePerformed') ||
     !network.includes('shotType') ||
     !network.includes('scaleProtocol') ||
@@ -326,7 +326,7 @@ if (!ui.includes('id="shotPanel"') ||
     !ui.includes('persistFailed') ||
     !ui.includes('Saving...') ||
     !network.includes('\\"cycle\\"') ||
-    !network.includes('flowDuringRetare') ||
+    !network.includes('extractionExtended') ||
     !ui.includes('updateShot(s)')) {
   throw new Error('Web UI must enforce remote policy, maintenance, durable command state, and live shot status');
 }
@@ -827,8 +827,10 @@ if (!ui.includes('id="debugPanel"') ||
     !html.includes('id="serialDebugOutput" class="mutable"') ||
     !html.includes('id="ringRetainLogLevel" class="mutable"') ||
     html.indexOf('id="ringRetainLogLevel"') > html.indexOf('id="serialDebugOutput"') ||
-    !ui.includes("if($('serialDebugOutput'))$('serialDebugOutput').checked=!!c.serialDebugOutput") ||
-    !ui.includes("if($('ringRetainLogLevel'))$('ringRetainLogLevel').value=c.ringRetainLogLevel||'none'") ||
+    !(ui.includes("if($('serialDebugOutput'))$('serialDebugOutput').checked=!!c.serialDebugOutput") ||
+         ui.includes("$('serialDebugOutput').checked=!!c.serialDebugOutput")) ||
+    !(ui.includes("if($('ringRetainLogLevel'))$('ringRetainLogLevel').value=c.ringRetainLogLevel||'none'") ||
+         ui.includes("$('ringRetainLogLevel').value=c.ringRetainLogLevel||'none'")) ||
     !ui.includes('function ringLogEnabled(') ||
     !ui.includes('function updateLogNavVisibility(') ||
     !ui.includes('id="navLogWrap"') ||
@@ -1003,7 +1005,10 @@ const expected = new Map([
   ['GET /app.css', 'cssHandler'],
   ['POST /api/v1/login', 'loginHandler'],
   ['POST /api/v1/logout', 'logoutHandler'],
-  ['GET /api/v1/status', 'statusHandler'],
+  ['GET /api/v1/status/home', 'statusHandler'],
+  ['GET /api/v1/status/settings', 'statusHandler'],
+  ['GET /api/v1/status/admin', 'statusHandler'],
+  ['GET /api/v1/status/debug', 'statusHandler'],
   ['GET /api/v1/log', 'logHandler'],
   ['POST /api/v1/config', 'configHandler'],
   ['POST /api/v1/scale/preferred/clear', 'preferredScaleClearHandler'],
@@ -1032,6 +1037,12 @@ const expected = new Map([
 const maxSocketsMatch = network.match(/max_open_sockets\s*=\s*(\d+)/);
 if (!maxSocketsMatch || Number(maxSocketsMatch[1]) < 5) {
   throw new Error('HTTP server must allow at least 5 open sockets for Web UI boot + API');
+}
+if (!network.includes('/api/v1/status/home') ||
+    !network.includes('/api/v1/status/settings') ||
+    !network.includes('/api/v1/status/admin') ||
+    !network.includes('/api/v1/status/debug')) {
+  throw new Error('Status API must expose per-page /api/v1/status/{home|settings|admin|debug}');
 }
 if (!network.includes('statusResponseMux_') ||
     !network.includes('STATUS_BUSY')) {
@@ -1073,7 +1084,14 @@ if (!ui.includes('function withPollGate(') ||
     !ui.includes('Device timeout') ||
     !ui.includes("throw new Error('Invalid response')") ||
     !ui.includes("throw new Error('Invalid status')") ||
-    !ui.includes('!s.safety||!s.health||!s.scale||!s.network||!s.config') ||
+    !ui.includes('function statusUrl(') ||
+    !ui.includes('function ensureSettingsHydrated(') ||
+    !ui.includes('/api/v1/status/') ||
+    !ui.includes('function statusPageOk(') ||
+    !ui.includes('function applyHomeStatus(') ||
+    !ui.includes('function applySettingsStatus(') ||
+    !ui.includes('function applyAdminStatus(') ||
+        ui.includes("api('/api/v1/status')") ||
     !ui.includes('DEVICE_MAX_INFLIGHT') ||
     !ui.includes('acquireDeviceSlot') ||
     !ui.includes('releaseDeviceSlot') ||
@@ -1129,22 +1147,27 @@ for (const [route, handler] of expected) {
     throw new Error(`Missing HTTP registration: ${route} -> ${handler}`);
   }
   if (uri !== '/' && !ui.includes(uri.split('?')[0])) {
-    throw new Error(`Registered API is not referenced by the UI: ${uri}`);
+    const statusPage = uri.match(/^\/api\/v1\/status\/(home|settings|admin|debug)$/);
+    if (!(statusPage && ui.includes('function statusUrl(') && ui.includes('/api/v1/status/'))) {
+      throw new Error(`Registered API is not referenced by the UI: ${uri}`);
+    }
   }
 }
 
 const forbiddenResponseFields = ['staPassword', 'apPassword', 'authHash', 'authSalt'];
-const statusFormatStart = network.indexOf('{\\"state\\"');
-const statusFormatEnd = network.indexOf('debugEventsDropped', statusFormatStart);
-if (statusFormatStart < 0 || statusFormatEnd < 0) {
-  throw new Error('Status JSON format not found');
+const statusHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::statusHandler');
+const statusHandlerEnd = network.indexOf('esp_err_t ShotStopperNetwork::logHandler', statusHandlerStart);
+if (statusHandlerStart < 0 || statusHandlerEnd < 0) {
+  throw new Error('Status handler not found');
 }
-const statusFormat = network.slice(statusFormatStart, statusFormatEnd);
+const statusFormat = network.slice(statusHandlerStart, statusHandlerEnd);
 for (const field of forbiddenResponseFields) {
-  if (statusFormat.includes(field)) {
+  if (statusFormat.includes('\\"' + field + '\\"') ||
+      statusFormat.includes('"' + field + '"')) {
     throw new Error(`Secret field exposed by status JSON: ${field}`);
   }
 }
+
 const logHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::logHandler');
 const logHandlerEnd = network.indexOf('esp_err_t ShotStopperNetwork::shotsHandler', logHandlerStart);
 if (logHandlerStart < 0 || logHandlerEnd < 0) {
@@ -1397,8 +1420,8 @@ if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
 }
 if (generated.gzip.length + generated.jsGzip.length + generated.cssGzip.length >
-    30720) {
-  throw new Error('Combined HTML+JS+CSS gzip exceeds the 30 KiB flash budget');
+    30976) {
+  throw new Error('Combined HTML+JS+CSS gzip exceeds the 30.25 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {

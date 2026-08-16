@@ -297,9 +297,9 @@ name, default passwords, and step-by-step first connection.
   same three guards as **current** machine state (`Off` / `Idle` / `Armed`,
   plus in-shot detail).
 - **REST API** (`/api/v1/…`):
-  - Read: `GET /status`, `GET /log`, `GET /shots`
+  - Read: `GET /api/v1/status/{page}`, `GET /log`, `GET /shots`
   - Auth: `POST /login`, `POST /logout` (session activity is refreshed by
-    authenticated API traffic and optional session headers on `GET /status` /
+    authenticated API traffic and optional session headers on `GET /api/v1/status/{page}` /
     `GET /shots`)
   - Config: `POST /config`, `POST /calibration/reset`, `POST /time/sync`,
     `POST /access-point/password`
@@ -317,7 +317,7 @@ name, default passwords, and step-by-step first connection.
 - **Factory reset** erases Wi-Fi, settings, calibration, shot history, and
   restores the AP/UI password to **`Micra1234`**, then restarts.
 
-**Diagnostics** (Status panel + Log panel + API):
+**Diagnostics** (Admin panel + Log panel + API):
 
 - Paddle state, CN9 relay state, CN9 safety supervisor (state, fault, watchdog,
   external hardware present, recovery required).
@@ -762,7 +762,7 @@ notes:
   reservation** that requires stable paddle OFF and open CN9; physical movement
   cancels it. Read-only status and the web UI remain available while the paddle
   is ON.
-- `202` responses include a `requestId`; `GET /api/v1/status` publishes the
+- `202` responses include a `requestId`; `GET /api/v1/status/{home|settings|admin|debug}` publishes the
   terminal command state (`APPLIED`, `PERSISTED`, `FAILED`, `CANCELED`).
 - You may optionally change the default password from the Web UI on a trusted
   network (see [Factory credentials](#factory-credentials-first-use)); it is
@@ -1012,7 +1012,7 @@ This writes `shotStopper/ShotStopperVersion.h` and
 `shotStopper/ShotStopperWebAssets.h`, `shotStopper/web/app.js`,
 `shotStopper/web/app.css` (JS is minified with
 Terser). The installed firmware reports the version on Serial boot, in
-`GET /api/v1/status` as `firmwareVersion`, and in the Web UI footer. `GET /`
+`GET /api/v1/status/{home|settings|admin|debug}` as `firmwareVersion`, and in the Web UI footer. `GET /`
 (and `/history`, `/log`, `/settings`, `/debug`) serves the SPA HTML as gzip with an
 `ETag` derived from that version. `GET /app.js` and `GET /app.css` are gzip with a
 long-lived cache and the same ETag family. Use
