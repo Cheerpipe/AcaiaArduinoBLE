@@ -1026,6 +1026,35 @@ strings build/esp32/shotStopper.ino.bin | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\+'
 
 ## Compile
 
+### Scripts de compilación, carga y monitor serie
+
+Los scripts de `scripts/` simplifican el flujo habitual. Ejecutados sin
+argumentos usan la misma configuración de desarrollo: puerto
+`/dev/cu.usbserial-0001`, arquitectura `esp32`, velocidad `115200` y los flags
+`-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1
+-DSHOT_STOPPER_ENABLE_BUZZER=2`.
+
+| Script | Uso | Descripción |
+| --- | --- | --- |
+| `./scripts/build` | `./scripts/build [ruta_serial] [arquitectura] [flags...]` | Genera la versión y Web UI, compila y deja el resultado en `build/<arquitectura>`. La ruta serial se incluye para mantener una interfaz uniforme, pero no se usa para compilar. |
+| `./scripts/upload` | `./scripts/upload [ruta_serial] [arquitectura]` | Sube el binario existente de `build/<arquitectura>`; no recompila. |
+| `./scripts/monitor` | `./scripts/monitor [ruta_serial] [velocidad]` | Abre el monitor serie. |
+
+Las arquitecturas admitidas son `esp32` y `esp32s3`. Cada script recibe
+argumentos posicionales y muestra ayuda con `help`, `--help` o `-h`:
+
+```sh
+./scripts/build
+./scripts/upload
+./scripts/monitor
+
+./scripts/build /dev/cu.usbmodem01 esp32s3 -DSHOT_STOPPER_ENABLE_ALED=1
+./scripts/upload /dev/cu.usbmodem01 esp32s3
+./scripts/monitor /dev/cu.usbmodem01 115200
+
+./scripts/build help
+```
+
 From the repository root, install Node deps if needed, generate the version and
 Web UI headers, and build for an ESP32 DevKit V4 with:
 

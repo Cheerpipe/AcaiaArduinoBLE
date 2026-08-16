@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly DEFAULT_PORT="/dev/cu.usbserial-0001"
+readonly DEFAULT_ARCH="esp32"
+
+usage() {
+  cat <<'EOF'
+Uso: ./scripts/upload [ruta_serial] [arquitectura]
+
+Sube automáticamente el binario ya compilado desde build/<arquitectura>.
+
+Valores por defecto (sin argumentos):
+  ruta_serial:  /dev/cu.usbserial-0001
+  arquitectura: esp32
+
+Arquitecturas admitidas: esp32, esp32s3.
+
+Ejemplos:
+  ./scripts/upload
+  ./scripts/upload /dev/cu.usbserial-0001 esp32
+  ./scripts/upload /dev/cu.usbmodem01 esp32s3
+EOF
+}
+
+if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  if [[ $# -ne 1 ]]; then
+    usage >&2
+    exit 2
+  fi
+  usage
+  exit 0
+fi
+
+if [[ $# -gt 2 ]]; then
+  usage >&2
+  exit 2
+fi
+
+port="${1:-$DEFAULT_PORT}"
+arch="${2:-$DEFAULT_ARCH}"
+
+case "$arch" in
+  esp32)
+    fqbn="esp32:esp32:esp32:PartitionScheme=min_spiffs"
+    build_dir="build/esp32"
+    ;;
+  esp32s3)
+    fqbn="esp32:esp32:esp32s3:PartitionScheme=min_spiffs"
+    build_dir="build/esp32s3"
+    ;;
+  *)
+    echo "Arquitectura no admitida: $arch (usa esp32 o esp32s3)." >&2
+    exit 2
+    ;;
+esac
+
+command -v arduino-cli >/dev/null 2>&1 || {
+  echo "No se encontró arduino-cli en PATH." >&2
+  exit 127
+}
+
+root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$root"
+
+if [[ ! -f "$build_dir/shotStopper.ino.bin" ]]; then
+  echo "No existe $build_dir/shotStopper.ino.bin. Ejecuta ./scripts/build primero." >&2
+  exit 1
+fi
+
+arduino-cli upload \
+  --fqbn "$fqbn" \
+  --port "$port" \
+  --input-dir "$build_dir" \
+  shotStopper

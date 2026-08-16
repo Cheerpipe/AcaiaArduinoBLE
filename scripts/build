@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Compile Shot Stopper. The serial port is accepted for a consistent interface
+# with upload, but Arduino CLI does not need it to compile.
+set -euo pipefail
+
+readonly DEFAULT_PORT="/dev/cu.usbserial-0001"
+readonly DEFAULT_ARCH="esp32"
+readonly DEFAULT_FLAGS="-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=2"
+
+usage() {
+  cat <<'EOF'
+Uso: ./scripts/build [ruta_serial] [arquitectura] [flags_de_compilacion...]
+
+Compila Shot Stopper y deja los artefactos en build/<arquitectura>.
+La ruta serial se acepta para mantener la misma interfaz que upload, pero no
+se utiliza durante la compilación.
+
+Valores por defecto (sin argumentos):
+  ruta_serial:  /dev/cu.usbserial-0001
+  arquitectura: esp32
+  flags:        -Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=2
+
+Arquitecturas admitidas: esp32, esp32s3.
+
+Ejemplos:
+  ./scripts/build
+  ./scripts/build /dev/cu.usbserial-0001 esp32
+  ./scripts/build /dev/cu.usbmodem01 esp32s3 -DSHOT_STOPPER_ENABLE_ALED=1
+EOF
+}
+
+if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  if [[ $# -ne 1 ]]; then
+    usage >&2
+    exit 2
+  fi
+  usage
+  exit 0
+fi
+
+port="${1:-$DEFAULT_PORT}"
+arch="${2:-$DEFAULT_ARCH}"
+if [[ $# -gt 2 ]]; then
+  flags="${*:3}"
+else
+  flags="$DEFAULT_FLAGS"
+fi
+
+case "$arch" in
+  esp32)
+    fqbn="esp32:esp32:esp32:PartitionScheme=min_spiffs"
+    build_dir="build/esp32"
+    ;;
+  esp32s3)
+    fqbn="esp32:esp32:esp32s3:PartitionScheme=min_spiffs"
+    build_dir="build/esp32s3"
+    ;;
+  *)
+    echo "Arquitectura no admitida: $arch (usa esp32 o esp32s3)." >&2
+    exit 2
+    ;;
+esac
+
+command -v arduino-cli >/dev/null 2>&1 || {
+  echo "No se encontró arduino-cli en PATH." >&2
+  exit 127
+}
+
+root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$root"
+
+echo "Compilando $arch (puerto configurado: $port)"
+./scripts/gen_version.sh
+node ./scripts/gen_web_ui.js
+rm -rf "$build_dir"
+mkdir -p "$build_dir"
+
+arduino-cli compile \
+  --fqbn "$fqbn" \
+  --warnings all \
+  --build-property "compiler.cpp.extra_flags=$flags" \
+  --library libraries/AcaiaArduinoBLE \
+  --build-path "$build_dir" \
+  shotStopper

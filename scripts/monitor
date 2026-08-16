@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly DEFAULT_PORT="/dev/cu.usbserial-0001"
+readonly DEFAULT_BAUDRATE="115200"
+
+usage() {
+  cat <<'EOF'
+Uso: ./scripts/monitor [ruta_serial] [velocidad]
+
+Inicia el monitor serie de Arduino CLI.
+
+Valores por defecto (sin argumentos):
+  ruta_serial: /dev/cu.usbserial-0001
+  velocidad:    115200
+
+Ejemplos:
+  ./scripts/monitor
+  ./scripts/monitor /dev/cu.usbserial-0001
+  ./scripts/monitor /dev/cu.usbmodem01 74880
+EOF
+}
+
+if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  if [[ $# -ne 1 ]]; then
+    usage >&2
+    exit 2
+  fi
+  usage
+  exit 0
+fi
+
+if [[ $# -gt 2 ]]; then
+  usage >&2
+  exit 2
+fi
+
+port="${1:-$DEFAULT_PORT}"
+baudrate="${2:-$DEFAULT_BAUDRATE}"
+
+command -v arduino-cli >/dev/null 2>&1 || {
+  echo "No se encontró arduino-cli en PATH." >&2
+  exit 127
+}
+
+arduino-cli monitor --port "$port" --config "baudrate=$baudrate"
