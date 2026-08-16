@@ -711,6 +711,11 @@ void ShotStopperNetwork::service() {
   ControlStatusSnapshot control;
   callbacks_.copyControlStatus(control);
 
+  // Drain CLI link mutations even when SoftAP/HTTP startup is still failing.
+  // A successful AP_START / WIFI_CONNECT can mark startup complete and skip
+  // the automatic retry that would otherwise fight the user's command.
+  processAcceptedCommands();
+
   if (!startupComplete_ &&
       static_cast<int32_t>(now - networkRetryAtMs_) >= 0) {
     if (startNetwork()) {
@@ -739,8 +744,6 @@ void ShotStopperNetwork::service() {
   if (!startupComplete_) {
     return;
   }
-
-  processAcceptedCommands();
   bool confirmRequested = false;
   portENTER_CRITICAL(&dataMux_);
   confirmRequested = pendingConfirmRequest_;
@@ -1030,13 +1033,13 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   portEXIT_CRITICAL(&dataMux_);
   log(DebugCategory::NETWORK, DebugCode::STA_CONNECTING);
   if (apActive) {
-    actionLog(settings.staIpMode == static_cast<uint8_t>(StaIpMode::STATIC)
-                  ? "WiFi STA retrying with static IP; SoftAP stays up"
-                  : "WiFi STA retrying; SoftAP stays up");
+    lifecycleLog(settings.staIpMode == static_cast<uint8_t>(StaIpMode::STATIC)
+                     ? "WiFi STA retrying with static IP; SoftAP stays up"
+                     : "WiFi STA retrying; SoftAP stays up");
   } else if (settings.staIpMode == static_cast<uint8_t>(StaIpMode::STATIC)) {
-    actionLog("WiFi STA connecting with static IP; AP disabled");
+    lifecycleLog("WiFi STA connecting with static IP; AP disabled");
   } else {
-    actionLog("WiFi STA connecting; AP disabled");
+    lifecycleLog("WiFi STA connecting; AP disabled");
   }
   WiFi.disconnect(false, false);
   WiFi.begin(settings.staSsid,
@@ -1086,8 +1089,8 @@ void ShotStopperNetwork::stopSoftAp(bool stopHttp) {
   status_.windowRemainingMs = 0;
   portEXIT_CRITICAL(&dataMux_);
   log(DebugCategory::NETWORK, DebugCode::AP_STOPPED);
-  actionLog(stopHttp ? "WiFi SoftAP stopped; HTTP stopped"
-                     : "WiFi SoftAP stopped; HTTP kept");
+  lifecycleLog(stopHttp ? "WiFi SoftAP stopped; HTTP stopped"
+                        : "WiFi SoftAP stopped; HTTP kept");
 }
 
 void ShotStopperNetwork::stopSoftApKeepStation() {
@@ -1153,7 +1156,12 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
 
   abortWifiScan(now, false);
   const bool keepStation = settings.staConfigured;
-  stopHttpServer();
+  const bool staLinkUp = keepStation && WiFi.status() == WL_CONNECTED;
+  const bool wantHttp = !httpStartHeld_;
+  const bool keepHttp = wantHttp && staLinkUp && server_ != nullptr;
+  if (wantHttp && !keepHttp) {
+    stopHttpServer();
+  }
   if (!keepStation) {
     WiFi.disconnect(false, false);
     WiFi.mode(WIFI_AP);
@@ -1166,21 +1174,25 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
   const bool configured =
       WiFi.softAPConfig(ip, ip, IPAddress(255, 255, 255, 0));
   const bool apReady = configured && WiFi.softAP(AP_SSID, settings.apPassword);
-  const bool httpReady = apReady && startHttpServer();
+  const bool httpReady =
+      keepHttp || (wantHttp && apReady && startHttpServer());
   networkStartedAtMs_ = now;
   portENTER_CRITICAL(&dataMux_);
-  everAuthenticated_ = false;
-  lastAuthenticatedAtMs_ = now;
+  if (!keepHttp) {
+    everAuthenticated_ = false;
+    lastAuthenticatedAtMs_ = now;
+    status_.uiAuthenticated = false;
+  }
   status_.networkActive = apReady && httpReady;
   status_.apActive = apReady;
-  status_.uiAuthenticated = false;
   status_.apClients = 0;
   if (!settings.staConfigured) {
     status_.staState = StaState::NOT_CONFIGURED;
-  } else if (status_.staState == StaState::CONNECTED) {
+  } else if (status_.staState == StaState::CONNECTED && !staLinkUp) {
     status_.staState = StaState::DISCONNECTED;
   }
-  if (!keepStation || status_.staState != StaState::CONNECTED) {
+  if (!staLinkUp &&
+      (!keepStation || status_.staState != StaState::CONNECTED)) {
     status_.staIp[0] = '\0';
     status_.staLinkMetricsValid = false;
     status_.staRssi = 0;
@@ -1189,10 +1201,14 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
   status_.windowRemainingMs = 0;
   portEXIT_CRITICAL(&dataMux_);
   log(DebugCategory::NETWORK, DebugCode::AP_STARTED, apReady, httpReady);
-  actionLogf("%s%s at %s", keepStation ? "WiFi recovery SoftAP " : "WiFi SoftAP ",
-             apReady && httpReady ? "ready" : "failed", AP_IP);
-  if (!apReady || !httpReady) {
-    stopHttpServer();
+  lifecycleLogf("%s%s at %s",
+                keepStation ? "WiFi recovery SoftAP " : "WiFi SoftAP ",
+                apReady && (httpReady || !wantHttp) ? "ready" : "failed",
+                AP_IP);
+  if (!apReady || (wantHttp && !httpReady)) {
+    if (!keepHttp) {
+      stopHttpServer();
+    }
     WiFi.softAPdisconnect(true);
     if (!keepStation) {
       WiFi.mode(WIFI_OFF);
@@ -1201,8 +1217,9 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
     status_.apActive = false;
     status_.networkActive = false;
     portEXIT_CRITICAL(&dataMux_);
+    return false;
   }
-  return apReady && httpReady;
+  return true;
 }
 
 void ShotStopperNetwork::stopNetwork() {
@@ -1255,15 +1272,15 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       // STA-first on link loss: retry station before raising SoftAP.
       staConnectStartedAtMs_ = now;
       staReconnectAttemptAtMs_ = now;
-      actionLog("WiFi STA disconnected; retrying STA before SoftAP");
+      lifecycleLog("WiFi STA disconnected; retrying STA before SoftAP");
       if (!staReconnectHeld_ && !wifiScanInProgress()) {
         beginStationConnect(settingsCopy(), now);
       } else if (staReconnectHeld_) {
-        actionLog("STA reconnect held; skipping retry");
+        lifecycleLog("STA reconnect held; skipping retry");
       }
       return;
     }
-    if (status.apActive) {
+    if (status.apActive && !apKeepRequested_) {
       stopSoftApKeepStation();
     }
     {
@@ -1282,7 +1299,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       status_.networkActive = httpReady;
       portEXIT_CRITICAL(&dataMux_);
       if (!httpReady) {
-        actionLog("HTTP start retry failed on STA");
+        lifecycleLog("HTTP start retry failed on STA");
       }
     }
     if (staConfirmArmed_ &&
@@ -1315,7 +1332,9 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       WiFi.status() == WL_CONNECTED) {
     char address[16] = {};
     formatIp(WiFi.localIP(), address);
-    stopSoftApKeepStation();
+    if (!apKeepRequested_) {
+      stopSoftApKeepStation();
+    }
     const bool mayStartHttp = !httpStartHeld_ &&
                               static_cast<int32_t>(now - httpRetryAtMs_) >= 0;
     const bool httpReady = mayStartHttp && startHttpServer();
@@ -1334,8 +1353,8 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       portEXIT_CRITICAL(&dataMux_);
     }
     log(DebugCategory::NETWORK, DebugCode::STA_CONNECTED);
-    actionLogf("WiFi STA connected; IP: %s http=%s", address,
-               httpReady ? "up" : (httpStartHeld_ ? "held" : "down"));
+    lifecycleLogf("WiFi STA connected; IP: %s http=%s", address,
+                  httpReady ? "up" : (httpStartHeld_ ? "held" : "down"));
     staNtpEligibleAtMs_ = now + NTP_STA_SETTLE_MS;
     ntpRearmPending_ = true;
     if (settingsCopy().staConfigState ==
@@ -1361,8 +1380,8 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
         static_cast<int32_t>(WiFi.status()));
     const bool pending = settingsCopy().staConfigState ==
                          static_cast<uint8_t>(StaConfigState::PENDING);
-    actionLog(pending ? "WiFi STA failed; reverting pending config"
-                      : "WiFi STA failed; SoftAP up, STA retry continues");
+    lifecycleLog(pending ? "WiFi STA failed; reverting pending config"
+                         : "WiFi STA failed; SoftAP up, STA retry continues");
     if (pending) {
       if (!revertPendingNetwork(now, "connect timeout")) {
         startupComplete_ = false;
@@ -1384,7 +1403,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       return;
     }
     if (apStartHeld_) {
-      actionLog("SoftAP raise held after STA fail");
+      lifecycleLog("SoftAP raise held after STA fail");
       startupFailures_ = 0;
       portENTER_CRITICAL(&dataMux_);
       status_.startupFailures = 0;
@@ -1421,7 +1440,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
           STA_CONNECT_TIMEOUT_MS &&
       !wifiScanInProgress()) {
     if (apStartHeld_) {
-      actionLog("SoftAP raise held");
+      lifecycleLog("SoftAP raise held");
     } else if (!ensureAccessPoint(now)) {
       startupComplete_ = false;
       if (startupFailures_ < UINT8_MAX) {
@@ -1453,7 +1472,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       portEXIT_CRITICAL(&dataMux_);
       staReconnectAttemptAtMs_ = now;
       if (terminalFail) {
-        actionLog("WiFi STA recovery attempt ended; will retry");
+        lifecycleLog("WiFi STA recovery attempt ended; will retry");
       }
       return;
     }
@@ -1729,6 +1748,7 @@ void ShotStopperNetwork::processAcceptedCommands() {
     }
     recordCommandResult(acceptedCommand_.requestId,
                         CommandResultState::APPLIED);
+    noteCliNetworkProgress();
     acceptedCommandPending_ = false;
     acceptedCommand_ = WebCommand{};
     return;
@@ -2091,13 +2111,18 @@ bool ShotStopperNetwork::handleCliNetworkAction(const WebCommand &command,
     }
     case WebCommandType::AP_START: {
       apStartHeld_ = false;
+      apKeepRequested_ = true;
       const bool ok = ensureAccessPoint(now, true);
+      if (!ok) {
+        apKeepRequested_ = false;
+      }
       actionLog(ok ? "AP_START SoftAP requested" : "ERR AP_START failed");
       printActionSnapshot("AP_START", ok);
       return true;
     }
     case WebCommandType::AP_STOP: {
       apStartHeld_ = true;
+      apKeepRequested_ = false;
       const bool staUp = snapshot().staState == StaState::CONNECTED &&
                          WiFi.status() == WL_CONNECTED;
       if (staUp) {
@@ -2188,7 +2213,26 @@ void ShotStopperNetwork::actionLogf(const char *fmt, ...) {
   Serial.println(line);
 }
 
+void ShotStopperNetwork::lifecycleLog(const char *message) {
+  if (serialDebugEnabled() && message != nullptr) {
+    Serial.println(message);
+  }
+}
+
+void ShotStopperNetwork::lifecycleLogf(const char *fmt, ...) {
+  if (!serialDebugEnabled() || fmt == nullptr) {
+    return;
+  }
+  char line[192] = {};
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(line, sizeof(line), fmt, args);
+  va_end(args);
+  Serial.println(line);
+}
+
 void ShotStopperNetwork::printActionSnapshot(const char *command, bool ok) {
+  refreshExtendedStatus(millis());
   const NetworkStatusSnapshot status = snapshot();
   actionLogf("%s %s ssid=%s mode=%s wifiStatus=%ld %s sta=%s ip=%s rssi=%d "
              "ap=%s apIp=%s clients=%u http=%s holds sta/ap/http=%d/%d/%d",
@@ -2208,6 +2252,24 @@ void ShotStopperNetwork::printActionSnapshot(const char *command, bool ok) {
              status.staReconnectHeld ? 1 : 0,
              status.apStartHeld ? 1 : 0,
              status.httpStartHeld ? 1 : 0);
+}
+
+void ShotStopperNetwork::noteCliNetworkProgress() {
+  if (startupComplete_) {
+    return;
+  }
+  const NetworkStatusSnapshot status = snapshot();
+  if (!status.apActive && server_ == nullptr &&
+      status.staState != StaState::CONNECTING &&
+      status.staState != StaState::CONNECTED) {
+    return;
+  }
+  startupComplete_ = true;
+  startupFailures_ = 0;
+  networkRetryAtMs_ = 0;
+  portENTER_CRITICAL(&dataMux_);
+  status_.startupFailures = 0;
+  portEXIT_CRITICAL(&dataMux_);
 }
 
 void ShotStopperNetwork::refreshExtendedStatus(uint32_t now) {
@@ -2402,7 +2464,7 @@ bool ShotStopperNetwork::startHttpServer() {
   config.send_wait_timeout = 2;
   if (httpd_start(&server_, &config) != ESP_OK) {
     server_ = nullptr;
-    actionLog("httpd_start failed");
+    lifecycleLog("httpd_start failed");
     return false;
   }
 

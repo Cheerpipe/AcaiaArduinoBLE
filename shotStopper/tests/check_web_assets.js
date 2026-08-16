@@ -1199,9 +1199,56 @@ if (!stopSoftAp.includes('stopHttpServer()')) {
 if (!network.includes('stopSoftApLeaveHttp') ||
     !network.includes('httpStartHeld_') ||
     !network.includes('staReconnectHeld_') ||
-    !network.includes('apStartHeld_')) {
+    !network.includes('apStartHeld_') ||
+    !network.includes('apKeepRequested_')) {
   throw new Error(
       'Network CLI holds must keep SoftAP/HTTP/STA stop from being undone');
+}
+const serviceStart = network.indexOf('void ShotStopperNetwork::service()');
+const serviceEnd = network.indexOf(
+    'bool ShotStopperNetwork::controlAllowsNetworkMutation', serviceStart);
+if (serviceStart < 0 || serviceEnd < 0) {
+  throw new Error('ShotStopperNetwork::service implementation not found');
+}
+const serviceBody = network.slice(serviceStart, serviceEnd);
+const processAt = serviceBody.indexOf('processAcceptedCommands()');
+const startupReturnAt = serviceBody.indexOf('if (!startupComplete_)');
+if (processAt < 0 || startupReturnAt < 0 || processAt > startupReturnAt) {
+  throw new Error(
+      'CLI network actions must drain before the startupComplete_ early return');
+}
+if (!network.includes('!apKeepRequested_')) {
+  throw new Error(
+      'STA-up SoftAP teardown must keep a user AP_START SoftAP');
+}
+const ensureStart = network.indexOf(
+    'bool ShotStopperNetwork::ensureAccessPoint');
+const ensureEnd = network.indexOf(
+    'void ShotStopperNetwork::stopNetwork()', ensureStart);
+if (ensureStart < 0 || ensureEnd < 0) {
+  throw new Error('ensureAccessPoint implementation not found');
+}
+const ensureBody = network.slice(ensureStart, ensureEnd);
+if (!ensureBody.includes('httpStartHeld_') ||
+    !ensureBody.includes('staLinkUp') ||
+    !ensureBody.includes('keepHttp')) {
+  throw new Error(
+      'ensureAccessPoint must keep a live STA link and skip HTTP while WEBUI_STOP is held');
+}
+const snapshotStart = network.indexOf(
+    'void ShotStopperNetwork::printActionSnapshot');
+const snapshotEnd = network.indexOf(
+    'void ShotStopperNetwork::noteCliNetworkProgress()', snapshotStart);
+if (snapshotStart < 0 || snapshotEnd < 0 ||
+    !network.slice(snapshotStart, snapshotEnd)
+         .includes('refreshExtendedStatus')) {
+  throw new Error(
+      'CLI action snapshot must refresh holds after the mutation');
+}
+if (!network.includes('void ShotStopperNetwork::lifecycleLog(') ||
+    !network.includes('serialDebugEnabled() && message')) {
+  throw new Error(
+      'Automatic STA/SoftAP lifecycle logs must stay behind serialDebugEnabled');
 }
 if (network.includes('raising SoftAP and retrying STA')) {
   throw new Error(

@@ -5164,7 +5164,7 @@ void sc10_help_prints_one_line_per_command() {
   CHECK(serialTxContains("WIFI_DISCONNECT  drop STA"));
   CHECK(serialTxContains("WIFI_RESTART  drop then reconnect"));
   CHECK(serialTxContains("WIFI_STATUS  dump STA"));
-  CHECK(serialTxContains("AP_START  raise SoftAP"));
+  CHECK(serialTxContains("AP_START  raise SoftAP (stays up with STA)"));
   CHECK(serialTxContains("AP_STOP  stop SoftAP"));
   CHECK(serialTxContains("AP_STATUS  dump SoftAP"));
   CHECK(serialTxContains("WEBUI_START  start HTTP"));

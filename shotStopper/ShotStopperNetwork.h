@@ -215,6 +215,7 @@ class ShotStopperNetwork {
   bool pendingConfirmRequest_ = false;
   bool staReconnectHeld_ = false;
   bool apStartHeld_ = false;
+  bool apKeepRequested_ = false;
   bool httpStartHeld_ = false;
   WebCommand acceptedCommand_ = {};
   WebCommand completionCommand_ = {};
@@ -288,9 +289,12 @@ class ShotStopperNetwork {
            int32_t argument2 = 0);
   void actionLog(const char *message);
   void actionLogf(const char *fmt, ...);
+  void lifecycleLog(const char *message);
+  void lifecycleLogf(const char *fmt, ...);
   void refreshExtendedStatus(uint32_t now);
   bool handleCliNetworkAction(const WebCommand &command, uint32_t now);
   void printActionSnapshot(const char *command, bool ok);
+  void noteCliNetworkProgress();
 
   bool authenticate(httpd_req_t *request, bool requireCsrf,
                     size_t *sessionIndex = nullptr);

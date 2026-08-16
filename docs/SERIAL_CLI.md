@@ -41,6 +41,10 @@ Link mutations print `WARN cycle active; proceeding` if a shot is running.
 matching `CONNECT` / `START` / `RESTART` or a reboot. Automatic STA retry,
 SoftAP fallback, and HTTP retry do not undo those stops.
 
+`AP_START` keeps SoftAP up even if STA is already connected (AP+STA). The
+STA-first policy still tears down *automatic* recovery SoftAP when STA
+comes up. `WEBUI_STOP` is not undone by `AP_START`.
+
 ## Probe and help
 
 | Command | Parameters | Effect |
@@ -78,7 +82,7 @@ SoftAP fallback, and HTTP retry do not undo those stops.
 
 | Command | Parameters | Effect |
 | --- | --- | --- |
-| `AP_START` | none | Raises SoftAP (`MicraShotStopperAP` at `192.168.4.1`) |
+| `AP_START` | none | Raises SoftAP (`MicraShotStopperAP` at `192.168.4.1`). Stays up if STA is connected. Does not start HTTP if `WEBUI_STOP` is held |
 | `AP_STOP` | none | Stops SoftAP and holds auto-raise. HTTP stays if STA is up |
 | `AP_STATUS` | none | Dumps SoftAP state (never the password) |
 | `SET_AP_PASSWORD` | `<password>` | Sets AP/UI password (8–63 chars, not `Micra1234`). Safety gate |

@@ -437,7 +437,8 @@ inline void serialCliPrintHelp() {
   Serial.println(
       "WIFI_RESTART  drop then reconnect saved STA  e.g. WIFI_RESTART");
   Serial.println("WIFI_STATUS  dump STA config and link  e.g. WIFI_STATUS");
-  Serial.println("AP_START  raise SoftAP (hold cleared)  e.g. AP_START");
+  Serial.println(
+      "AP_START  raise SoftAP (stays up with STA)  e.g. AP_START");
   Serial.println("AP_STOP  stop SoftAP and hold auto-raise  e.g. AP_STOP");
   Serial.println("AP_STATUS  dump SoftAP state  e.g. AP_STATUS");
   Serial.println("WEBUI_START  start HTTP server  e.g. WEBUI_START");
