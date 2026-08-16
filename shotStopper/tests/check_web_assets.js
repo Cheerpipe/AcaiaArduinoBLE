@@ -377,21 +377,23 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     html.indexOf('id="shotNoScaleGuard"') >
         html.indexOf('id="statusExtractionGuard"') ||
     html.indexOf('<legend>Machine and scale</legend>') >
-        html.indexOf('<summary>No-scale BBW</summary>') ||
-    html.indexOf('<summary>No-scale BBW</summary>') >
         html.indexOf('<summary>Paddle</summary>') ||
     html.indexOf('<summary>Paddle</summary>') >
+        html.indexOf('<summary>No-scale BBW</summary>') ||
+    html.indexOf('<summary>No-scale BBW</summary>') >
         html.indexOf('<summary>Quick rinse</summary>') ||
     html.indexOf('id="avoidBbwShotWithoutScale"') <
         html.indexOf('<legend>Machine and scale</legend>') ||
     html.indexOf('id="avoidBbwShotWithoutScale"') >
         html.indexOf('id="lastShotCooldownMin"') ||
+    html.indexOf('id="lastShotCooldownMin"') <
+        html.indexOf('<summary>No-scale BBW</summary>') ||
     html.indexOf('id="lastShotCooldownMin"') >
-        html.indexOf('<summary>Paddle</summary>') ||
+        html.indexOf('<summary>Quick rinse</summary>') ||
     html.indexOf('id="paddleMode"') <
         html.indexOf('<summary>Paddle</summary>') ||
     html.indexOf('id="paddleMode"') >
-        html.indexOf('<summary>Quick rinse</summary>') ||
+        html.indexOf('<summary>No-scale BBW</summary>') ||
     html.indexOf('id="avoidBbwShotWithoutScale"') <
         html.indexOf('id="saveBrewPresetButton"') ||
     !network.includes('avoidBbwShotWithoutScale') ||
