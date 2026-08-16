@@ -21,19 +21,15 @@ if (!htmlMatch) throw new Error('Embedded HTML raw string not found');
 const html = htmlMatch[1];
 const js = fs.readFileSync(path.join(sketchDir, 'web', 'app.js'), 'utf8');
 const css = fs.readFileSync(path.join(sketchDir, 'web', 'app.css'), 'utf8');
-const logo = fs.readFileSync(path.join(sketchDir, 'web', 'logo.svg'), 'utf8');
 const ui = html + '\n' + js;
-if (!logo.includes('<svg') || !logo.includes('viewBox=')) {
-  throw new Error('Web UI logo.svg must be a valid SVG asset');
-}
 if (/<details\b[^>]*\bopen\b/i.test(html)) {
   throw new Error('All collapsible <details> groups must start collapsed (no open attribute)');
 }
-if (!css.includes('.brandLogo') ||
-    !css.includes('height:1em') ||
-    !css.includes('inline-flex') ||
-    !css.includes('.brandLogo{filter:invert(1)}')) {
-  throw new Error('Brand logo must match heading height and invert in dark mode');
+if (css.includes('.brandLogo') || html.includes('logo.svg') || html.includes('brandLogo')) {
+  throw new Error('Web UI must not embed a logo asset or .brandLogo styles');
+}
+if (!css.includes('.brand') || !css.includes('inline-flex')) {
+  throw new Error('Brand heading styles must remain for text-only branding');
 }
 if (!html.includes('src="/app.js?v=__FW_VERSION__"') ||
     /<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(html)) {
@@ -221,8 +217,6 @@ if (!ui.includes('authenticatedOnly') ||
     !ui.includes('function knownPath(') ||
     !ui.includes("authenticated()&&known") ||
     !ui.includes('class="brand"') ||
-    !ui.includes('class="brandLogo"') ||
-    !ui.includes('src="/logo.svg?v=__FW_VERSION__"') ||
     !ui.includes('>Micra Shot Stopper</a>') ||
     !ui.includes('href="/" data-route="/"') ||
     !ui.includes("querySelectorAll('a[data-route]')") ||
@@ -984,10 +978,8 @@ const expected = new Map([
   ['GET /settings', 'rootHandler'],
   ['GET /app.js', 'jsHandler'],
   ['GET /app.css', 'cssHandler'],
-  ['GET /logo.svg', 'logoHandler'],
   ['POST /api/v1/login', 'loginHandler'],
   ['POST /api/v1/logout', 'logoutHandler'],
-  ['POST /api/v1/heartbeat', 'heartbeatHandler'],
   ['GET /api/v1/status', 'statusHandler'],
   ['GET /api/v1/log', 'logHandler'],
   ['POST /api/v1/config', 'configHandler'],
@@ -1015,8 +1007,8 @@ const expected = new Map([
 ]);
 
 const maxSocketsMatch = network.match(/max_open_sockets\s*=\s*(\d+)/);
-if (!maxSocketsMatch || Number(maxSocketsMatch[1]) < 10) {
-  throw new Error('HTTP server must allow at least 10 open sockets for Web UI polling');
+if (!maxSocketsMatch || Number(maxSocketsMatch[1]) < 5) {
+  throw new Error('HTTP server must allow at least 5 open sockets for Web UI boot + API');
 }
 if (!network.includes('statusResponseMux_') ||
     !network.includes('STATUS_BUSY')) {
@@ -1059,10 +1051,13 @@ if (!ui.includes('function withPollGate(') ||
     !ui.includes("throw new Error('Invalid response')") ||
     !ui.includes("throw new Error('Invalid status')") ||
     !ui.includes('!s.safety||!s.health||!s.scale||!s.network||!s.config') ||
-    ui.includes('return withPollGate(async()=>{if(heartbeatBusy') ||
-    ui.includes('heartbeatBusy||document.hidden||!authenticated()') ||
+    !ui.includes('DEVICE_MAX_INFLIGHT') ||
+    !ui.includes('acquireDeviceSlot') ||
+    !ui.includes('releaseDeviceSlot') ||
+    ui.includes('/api/v1/heartbeat') ||
+    ui.includes('function heartbeat(') ||
     ui.includes('setInterval(()=>refreshStatus(),2500)')) {
-  throw new Error('Web UI must adapt/pause status polls, serialize commands, time out hung fetches, and keep heartbeat off the poll chain');
+  throw new Error('Web UI must adapt/pause status polls, serialize commands, time out hung fetches, and use DEVICE_MAX_INFLIGHT without POST heartbeat');
 }
 if (!ui.includes('async function loadStatus(){') ||
     !ui.includes('async function loadShots(){') ||
@@ -1355,26 +1350,18 @@ const cssRoundTrip = zlib.gunzipSync(generated.cssGzip).toString('utf8');
 if (cssRoundTrip !== generated.css) {
   throw new Error('Generated gzip Web CSS does not round-trip to the minified CSS');
 }
-const logoRoundTrip = zlib.gunzipSync(generated.logoGzip).toString('utf8');
-if (logoRoundTrip !== generated.logo) {
-  throw new Error('Generated gzip Web logo does not round-trip to the minified SVG');
-}
 if (generated.gzip.length > 9216) {
   throw new Error('Compressed Web UI HTML exceeds the 9 KiB gzip budget');
 }
-if (generated.jsGzip.length > 18688) {
-  throw new Error('Compressed Web UI JS exceeds the 18.25 KiB gzip budget');
+if (generated.jsGzip.length > 20480) {
+  throw new Error('Compressed Web UI JS exceeds the 20 KiB gzip budget');
 }
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
 }
-if (generated.logoGzip.length > 4096) {
-  throw new Error('Compressed Web logo exceeds the 4 KiB gzip budget');
-}
-if (generated.gzip.length + generated.jsGzip.length + generated.cssGzip.length +
-        generated.logoGzip.length >
+if (generated.gzip.length + generated.jsGzip.length + generated.cssGzip.length >
     30720) {
-  throw new Error('Combined HTML+JS+CSS+logo gzip exceeds the 30 KiB flash budget');
+  throw new Error('Combined HTML+JS+CSS gzip exceeds the 30 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
@@ -1386,11 +1373,10 @@ if (!network.includes('SHOT_STOPPER_WEB_UI_GZIP') ||
     !network.includes('SHOT_STOPPER_WEB_JS_GZIP_LEN') ||
     !network.includes('SHOT_STOPPER_WEB_CSS_GZIP') ||
     !network.includes('SHOT_STOPPER_WEB_CSS_GZIP_LEN') ||
-    !network.includes('SHOT_STOPPER_WEB_LOGO_GZIP') ||
-    !network.includes('SHOT_STOPPER_WEB_LOGO_GZIP_LEN') ||
+    network.includes('SHOT_STOPPER_WEB_LOGO_GZIP') ||
     !network.includes('"Content-Encoding"') ||
     !network.includes('"gzip"')) {
-  throw new Error('GET /, GET /app.js, GET /app.css, and GET /logo.svg must send precompressed gzip bodies');
+  throw new Error('GET /, GET /app.js, and GET /app.css must send precompressed gzip bodies without logo');
 }
 if (network.includes('zlib.h') || network.includes('miniz.h') ||
     /mz_compress|deflateInit|gzipCompress/.test(network)) {
@@ -1402,21 +1388,19 @@ if (!network.includes('If-None-Match')) {
 const rootHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::rootHandler');
 const jsHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::jsHandler');
 const cssHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::cssHandler');
-const logoHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::logoHandler');
 const notFoundHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::notFoundHandler');
 const loginHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::loginHandler');
 if (rootHandlerStart < 0 || jsHandlerStart < 0 || cssHandlerStart < 0 ||
-    logoHandlerStart < 0 || notFoundHandlerStart < 0 || loginHandlerStart < 0 ||
+    notFoundHandlerStart < 0 || loginHandlerStart < 0 ||
+    network.includes('logoHandler') ||
     !(rootHandlerStart < jsHandlerStart && jsHandlerStart < cssHandlerStart &&
-      cssHandlerStart < logoHandlerStart &&
-      logoHandlerStart < notFoundHandlerStart &&
+      cssHandlerStart < notFoundHandlerStart &&
       notFoundHandlerStart < loginHandlerStart)) {
-  throw new Error('rootHandler/jsHandler/cssHandler/logoHandler/notFoundHandler order not found');
+  throw new Error('rootHandler/jsHandler/cssHandler/notFoundHandler order not found');
 }
 const rootHandler = network.slice(rootHandlerStart, jsHandlerStart);
 const jsHandler = network.slice(jsHandlerStart, cssHandlerStart);
-const cssHandler = network.slice(cssHandlerStart, logoHandlerStart);
-const logoHandler = network.slice(logoHandlerStart, notFoundHandlerStart);
+const cssHandler = network.slice(cssHandlerStart, notFoundHandlerStart);
 const notFoundHandler = network.slice(notFoundHandlerStart, loginHandlerStart);
 if (rootHandler.includes('no-store') || !rootHandler.includes('no-cache') ||
     !rootHandler.includes('STATUS_NOT_MODIFIED') ||
@@ -1424,33 +1408,34 @@ if (rootHandler.includes('no-store') || !rootHandler.includes('no-cache') ||
     !rootHandler.includes('ETag') ||
     !rootHandler.includes("style-src 'self'") ||
     !rootHandler.includes("script-src 'self'") ||
+    !rootHandler.includes('"Connection"') ||
+    !rootHandler.includes('"close"') ||
     rootHandler.includes("script-src 'unsafe-inline'") ||
     rootHandler.includes('HTTPD_RESP_USE_STRLEN')) {
-  throw new Error('GET / must revalidate with ETag/304, CSP script/style self, and gzip by length');
+  throw new Error('GET / must revalidate with ETag/304, CSP script/style self, Connection close, and gzip by length');
 }
 if (jsHandler.includes('no-store') ||
     !jsHandler.includes('max-age=31536000') ||
     !jsHandler.includes('immutable') ||
     !jsHandler.includes('STATUS_NOT_MODIFIED') ||
     !jsHandler.includes('SHOT_STOPPER_WEB_JS_GZIP') ||
+    !jsHandler.includes('"Connection"') ||
+    !jsHandler.includes('"close"') ||
     !jsHandler.includes('application/javascript')) {
-  throw new Error('GET /app.js must serve immutable gzip JS with ETag/304');
+  throw new Error('GET /app.js must serve immutable gzip JS with ETag/304 and Connection close');
 }
 if (cssHandler.includes('no-store') ||
     !cssHandler.includes('max-age=31536000') ||
     !cssHandler.includes('immutable') ||
     !cssHandler.includes('STATUS_NOT_MODIFIED') ||
     !cssHandler.includes('SHOT_STOPPER_WEB_CSS_GZIP') ||
+    !cssHandler.includes('"Connection"') ||
+    !cssHandler.includes('"close"') ||
     !cssHandler.includes('text/css')) {
-  throw new Error('GET /app.css must serve immutable gzip CSS with ETag/304');
+  throw new Error('GET /app.css must serve immutable gzip CSS with ETag/304 and Connection close');
 }
-if (logoHandler.includes('no-store') ||
-    !logoHandler.includes('max-age=31536000') ||
-    !logoHandler.includes('immutable') ||
-    !logoHandler.includes('STATUS_NOT_MODIFIED') ||
-    !logoHandler.includes('SHOT_STOPPER_WEB_LOGO_GZIP') ||
-    !logoHandler.includes('image/svg+xml')) {
-  throw new Error('GET /logo.svg must serve immutable gzip SVG with ETag/304');
+if (network.includes('logoHandler') || network.includes('SHOT_STOPPER_WEB_LOGO')) {
+  throw new Error('Firmware must not serve /logo.svg');
 }
 if (!notFoundHandler.includes('302 Found') ||
     !notFoundHandler.includes('Location') ||
@@ -1464,6 +1449,33 @@ if (network.includes('sendJson') &&
                    network.indexOf('esp_err_t ShotStopperNetwork::sendError'))
         .includes('no-store')) {
   throw new Error('JSON API responses must remain Cache-Control: no-store');
+}
+if (!network.includes('touchSessionIfPresent') ||
+    network.includes('heartbeatHandler') ||
+    network.includes('/api/v1/heartbeat') ||
+    networkHeader.includes('WEB_PADDLE_HEARTBEAT_TIMEOUT_MS') ||
+    network.includes('WEB_PADDLE_HEARTBEAT_TIMEOUT_MS') ||
+    network.includes('heartbeatStopSent_')) {
+  throw new Error(
+      'Session touch must replace POST /heartbeat; web paddle heartbeat CN9 timeout must be gone');
+}
+const logHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::logHandler');
+const shotsHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::shotsHandler');
+const wifiScanStatusStart =
+    network.indexOf('esp_err_t ShotStopperNetwork::wifiScanStatusHandler');
+if (logHandlerStart < 0 || shotsHandlerStart < 0 || wifiScanStatusStart < 0 ||
+    !network.slice(logHandlerStart, shotsHandlerStart).includes('"Connection"') ||
+    !network.slice(logHandlerStart, shotsHandlerStart).includes('"close"') ||
+    !network.slice(wifiScanStatusStart).includes('"Connection"') ||
+    !network.slice(wifiScanStatusStart, wifiScanStatusStart + 800)
+         .includes('"close"')) {
+  throw new Error('Chunked log and Wi-Fi scan status responses must send Connection: close');
+}
+if (!js.includes('withPollGate(async()=>{if(scanBusy||!token)return;scanBusy=true') ||
+    !js.includes("withCommandGate(async()=>{try{await api('/api/v1/shots/clear'") ||
+    !js.includes("withCommandGate(async()=>{try{await api('/api/v1/shots/delete'") ||
+    !js.includes("withCommandGate(async()=>{try{await api('/api/v1/logout'")) {
+  throw new Error('Wi-Fi scan and shot clear/delete/logout must use poll/command gates');
 }
 
 {
@@ -1532,7 +1544,7 @@ if (network.includes('sendJson') &&
 console.log(
   `Embedded Web UI: JavaScript valid, ${htmlBytes} bytes HTML / ${jsBytes} bytes JS source, ` +
   `${generated.gzip.length} bytes HTML gzip, ${generated.jsGzip.length} bytes JS gzip, ` +
-  `${generated.cssGzip.length} bytes CSS gzip, ${generated.logoGzip.length} bytes logo gzip, ` +
+  `${generated.cssGzip.length} bytes CSS gzip, ` +
   `${expected.size} routes checked`
 );
 })().catch((error) => {

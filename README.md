@@ -262,12 +262,12 @@ name, default passwords, and step-by-step first connection.
 - Fully **embedded Web UI** SPA with routes (`/`, `/presets`, `/settings`,
   `/history`, `/admin`, `/debug`, `/log`): same-origin assets only (no CDN). Authoring
   budget HTML ≤ **40 KiB**, JS ≤ **64 KiB**, combined HTML+JS ≤ **100 KiB**;
-  gzip HTML ≤ **8 KiB**, gzip JS ≤ **16 KiB**, gzip CSS ≤ **6 KiB**, gzip logo ≤
-  **4 KiB**, combined ≤ **28 KiB**. Reloads
+  gzip HTML ≤ **8 KiB**, gzip JS ≤ **20 KiB**, gzip CSS ≤ **6 KiB**,
+  combined ≤ **30 KiB**. Reloads
   revalidate HTML with `ETag` (`Cache-Control: no-cache`) so unchanged firmware
-  returns **304**. Shared script is `GET /app.js`, stylesheet is `GET /app.css`,
-  and brand mark is `GET /logo.svg` (all gzip, versioned query, long-lived
-  `immutable` cache). Inactive views do not poll their APIs.
+  returns **304**. Shared script is `GET /app.js` and stylesheet is `GET /app.css`
+  (gzip, versioned query, long-lived `immutable` cache; `Connection: close`).
+  Inactive views do not poll their APIs.
 - **STA** when credentials are saved and the home network is reachable;
   **SoftAP** (`MicraShotStopperAP` at `192.168.4.1`) when there are no
   credentials, or only after STA association fails (~15 s) while credentials
@@ -277,7 +277,7 @@ name, default passwords, and step-by-step first connection.
   with a **3-minute confirm-or-revert** window after save.
 - SoftAP stays available while unassociated after that STA-first window (no
   idle 3-minute shutdown). Once STA connects, HTTP remains on the STA IP.
-  After logout, sessions still expire by heartbeat / remember-me rules; SoftAP
+  After logout, sessions still expire by UI grace / remember-me rules; SoftAP
   itself is not torn down for idle UI.
 - **Public read-only** home (shot + status), shot history, diagnostic log,
   settings preview, and firmware version footer without signing in.
@@ -295,8 +295,9 @@ name, default passwords, and step-by-step first connection.
   plus in-shot detail).
 - **REST API** (`/api/v1/…`):
   - Read: `GET /status`, `GET /log`, `GET /shots`
-  - Auth: `POST /login`, `POST /logout`, `POST /heartbeat` (UI polls every
-    **10 s** while signed in)
+  - Auth: `POST /login`, `POST /logout` (session activity is refreshed by
+    authenticated API traffic and optional session headers on `GET /status` /
+    `GET /shots`)
   - Config: `POST /config`, `POST /calibration/reset`, `POST /time/sync`,
     `POST /access-point/password`
   - Network: `POST /network` (`save` / `forget` / `confirm`), `POST /network/scan`,
@@ -341,8 +342,9 @@ name, default passwords, and step-by-step first connection.
 **Web paddle and remote control** (opt-in build only):
 
 - **Virtual paddle** toggle (`POST /api/v1/control/paddle`) starts and ends a
-  remote cycle when signed in and remote CN9 is enabled. Remote paddle
-  sessions time out after **15 s** without a UI heartbeat.
+  remote cycle when signed in and remote CN9 is enabled. Closing or freezing
+  the browser does **not** force-open CN9; use **Stop**, physical paddle, or
+  shot limits. Logout / session replace still releases a web-owned lease.
 - **Start quick rinse**, **Stop shot** (opens CN9 only), and **Restart
   controller** from the Actions panel.
 - **Remote CN9 actuation for new cycles is disabled by default.** Virtual
@@ -439,10 +441,9 @@ flag) compile without LED support. See [WS2812B status indicators](#ws2812b-stat
 ├── VERSION                         # Release version (SemVer)
 ├── scripts/gen_version.sh          # Build-time version header generator
 ├── package.json                    # Node tooling (Terser) for Web UI minify
-├── scripts/gen_web_ui.js           # Gzip-precompressed Web UI/JS/CSS/logo header generator
+├── scripts/gen_web_ui.js           # Gzip-precompressed Web UI/JS/CSS header generator
 ├── shotStopper/web/app.js          # Authored Web UI JavaScript (embedded via generator)
 ├── shotStopper/web/app.css         # Authored Web UI stylesheet (embedded via generator)
-├── shotStopper/web/logo.svg        # Authored Web UI brand mark (embedded via generator)
 ├── shotStopper/                    # Main firmware sketch and host tests
 │   ├── shotStopper.ino
 │   ├── ShotStopperSerialCli.h      # USB serial command parser
@@ -452,6 +453,7 @@ flag) compile without LED support. See [WS2812B status indicators](#ws2812b-stat
 ├── docs/
 │   ├── FAQ.md
 │   ├── SERIAL_CLI.md
+│   ├── PLAN_WEB_SOCKETS_SESSION.md
 │   └── MANUAL_TEST_PLAN.md
 └── LICENSE
 ```
@@ -1004,13 +1006,13 @@ node ./scripts/gen_web_ui.js
 This writes `shotStopper/ShotStopperVersion.h` and
 `shotStopper/ShotStopperWebAssetsGzip.h` (both gitignored). The generator reads
 `shotStopper/ShotStopperWebAssets.h`, `shotStopper/web/app.js`,
-`shotStopper/web/app.css`, and `shotStopper/web/logo.svg` (JS is minified with
+`shotStopper/web/app.css` (JS is minified with
 Terser). The installed firmware reports the version on Serial boot, in
 `GET /api/v1/status` as `firmwareVersion`, and in the Web UI footer. `GET /`
 (and `/history`, `/log`, `/settings`, `/debug`) serves the SPA HTML as gzip with an
-`ETag` derived from that version. `GET /app.js`, `GET /app.css`, and
-`GET /logo.svg` are gzip with a long-lived cache and the same ETag family. Use
-`curl --compressed` if you fetch HTML/JS/CSS/SVG from the command line.
+`ETag` derived from that version. `GET /app.js` and `GET /app.css` are gzip with a
+long-lived cache and the same ETag family. Use
+`curl --compressed` if you fetch HTML/JS/CSS from the command line.
 
 To verify a compiled binary without flashing:
 

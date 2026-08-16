@@ -158,7 +158,6 @@ class ShotStopperNetwork {
   bool serialDebugEnabled() const;
   static constexpr uint32_t UI_GRACE_MS = 180000;
   static constexpr uint32_t SESSION_REMEMBER_MS = 7UL * 24UL * 60UL * 60UL * 1000UL;
-  static constexpr uint32_t WEB_PADDLE_HEARTBEAT_TIMEOUT_MS = 15000;
   static constexpr uint32_t STA_CONNECT_TIMEOUT_MS = 15000;
   static constexpr uint32_t STA_RECOVERY_ATTEMPT_MS = 60000;
   static constexpr uint32_t STA_CONFIRM_TIMEOUT_MS = 180000;
@@ -208,7 +207,6 @@ class ShotStopperNetwork {
   bool everAuthenticated_ = false;
   bool restartPending_ = false;
   bool apRestartPending_ = false;
-  bool heartbeatStopSent_ = false;
   bool acceptedCommandPending_ = false;
   bool completionPending_ = false;
   bool staConfirmArmed_ = false;
@@ -298,6 +296,7 @@ class ShotStopperNetwork {
 
   bool authenticate(httpd_req_t *request, bool requireCsrf,
                     size_t *sessionIndex = nullptr);
+  void touchSessionIfPresent(httpd_req_t *request);
   bool createSession(char token[TOKEN_HEX_CAPACITY],
                      char csrf[TOKEN_HEX_CAPACITY], bool rememberMe);
   void invalidateSession(size_t index, DebugCode code);
@@ -320,11 +319,9 @@ class ShotStopperNetwork {
   static esp_err_t rootHandler(httpd_req_t *request);
   static esp_err_t jsHandler(httpd_req_t *request);
   static esp_err_t cssHandler(httpd_req_t *request);
-  static esp_err_t logoHandler(httpd_req_t *request);
   static esp_err_t notFoundHandler(httpd_req_t *request, httpd_err_code_t error);
   static esp_err_t loginHandler(httpd_req_t *request);
   static esp_err_t logoutHandler(httpd_req_t *request);
-  static esp_err_t heartbeatHandler(httpd_req_t *request);
   static esp_err_t statusHandler(httpd_req_t *request);
   static esp_err_t logHandler(httpd_req_t *request);
   static esp_err_t shotsHandler(httpd_req_t *request);

@@ -1636,11 +1636,7 @@ void ShotStopperNetwork::finishWifiScan(int16_t resultCount, uint32_t now) {
 }
 
 void ShotStopperNetwork::serviceSessions(uint32_t now) {
-  ControlStatusSnapshot control;
-  callbacks_.copyControlStatus(control);
   bool anyAuthenticated = false;
-  bool ownerAuthenticated = false;
-  uint32_t ownerHeartbeat = 0;
   uint8_t expiredSessions = 0;
   portENTER_CRITICAL(&dataMux_);
   for (WebSession &session : sessions_) {
@@ -1648,7 +1644,8 @@ void ShotStopperNetwork::serviceSessions(uint32_t now) {
       continue;
     }
     // Remember-me sessions keep the token for SESSION_REMEMBER_MS from login.
-    // Other sessions expire after UI_GRACE_MS without heartbeat.
+    // Other sessions expire after UI_GRACE_MS without authenticated activity
+    // (status/shots touch or mutating authenticate()).
     const bool expired =
         session.rememberMe
             ? static_cast<uint32_t>(now - session.createdAtMs) >=
@@ -1663,33 +1660,11 @@ void ShotStopperNetwork::serviceSessions(uint32_t now) {
       continue;
     }
     anyAuthenticated = true;
-    if (control.activeCycle && control.source == ControlSource::WEB &&
-        session.id == control.webSessionId) {
-      ownerAuthenticated = true;
-      ownerHeartbeat = session.lastHeartbeatMs;
-    }
   }
   status_.uiAuthenticated = anyAuthenticated;
   portEXIT_CRITICAL(&dataMux_);
   if (expiredSessions > 0) {
     log(DebugCategory::WEB, DebugCode::UI_EXPIRED, expiredSessions);
-  }
-
-  if (control.activeCycle && control.source == ControlSource::WEB &&
-      control.relayClosed &&
-      (!ownerAuthenticated ||
-       static_cast<uint32_t>(now - ownerHeartbeat) >=
-           WEB_PADDLE_HEARTBEAT_TIMEOUT_MS)) {
-    if (!heartbeatStopSent_) {
-      WebCommand stop;
-      stop.type = WebCommandType::STOP_HEARTBEAT;
-      stop.requestId = allocateRequestId();
-      stop.webSessionId = control.webSessionId;
-      stop.controlLeaseId = control.controlLeaseId;
-      heartbeatStopSent_ = callbacks_.enqueueWebCommand(stop);
-    }
-  } else {
-    heartbeatStopSent_ = false;
   }
 
   // SoftAP stays up whenever STA is down; there is no idle SoftAP shutdown
@@ -2446,18 +2421,17 @@ bool ShotStopperNetwork::startHttpServer() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.task_priority = tskIDLE_PRIORITY + 1;
   config.stack_size = 12288;
-  // Browser keep-alive + overlapping status/log/shots/heartbeat/commands need
-  // headroom beyond four sockets; otherwise Safari shows intermittent
-  // connection failures ("Device unreachable") while the UI still partially
-  // works. ESP-IDF uses (max_open_sockets + 3) LWIP sockets total.
-  config.max_open_sockets = 10;
-  config.max_uri_handlers = 36;
+  // Web UI serializes API traffic (DEVICE_MAX_INFLIGHT, default 1). Reserve
+  // headroom for the HTML/JS/CSS boot burst plus LRU/TCP close. ESP-IDF uses
+  // (max_open_sockets + 3) LWIP sockets total.
+  config.max_open_sockets = 5;
+  config.max_uri_handlers = 34;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
-  // the IDF default (1024) is enough most of the time but intermittent POSTs
-  // (heartbeat) have returned 431 Request Header Fields Too Large.
+  // the IDF default (1024) is enough most of the time but intermittent
+  // authenticated POSTs have returned 431 Request Header Fields Too Large.
   config.max_req_hdr_len = 2048;
   config.max_resp_headers = 12;
-  config.backlog_conn = 10;
+  config.backlog_conn = 5;
   config.lru_purge_enable = true;
   // Keep stuck clients from occupying sockets under BLE/Wi-Fi coex stalls.
   config.recv_wait_timeout = 2;
@@ -2477,11 +2451,8 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/settings", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/app.js", HTTP_GET, jsHandler) &&
       registerHandler(server_, "/app.css", HTTP_GET, cssHandler) &&
-      registerHandler(server_, "/logo.svg", HTTP_GET, logoHandler) &&
       registerHandler(server_, "/api/v1/login", HTTP_POST, loginHandler) &&
       registerHandler(server_, "/api/v1/logout", HTTP_POST, logoutHandler) &&
-      registerHandler(server_, "/api/v1/heartbeat", HTTP_POST,
-                      heartbeatHandler) &&
       registerHandler(server_, "/api/v1/status", HTTP_GET, statusHandler) &&
       registerHandler(server_, "/api/v1/log", HTTP_GET, logHandler) &&
       registerHandler(server_, "/api/v1/shots", HTTP_GET, shotsHandler) &&
@@ -2626,9 +2597,10 @@ bool ShotStopperNetwork::authenticate(httpd_req_t *request, bool requireCsrf,
   }
 
   bool accepted = false;
+  const uint32_t now = millis();
   portENTER_CRITICAL(&dataMux_);
   for (size_t index = 0; index < SESSION_COUNT; ++index) {
-    const WebSession &session = sessions_[index];
+    WebSession &session = sessions_[index];
     if (session.active &&
         constantTimeTokenEqual(session.token, token, sizeof(token)) &&
         (!requireCsrf ||
@@ -2636,6 +2608,9 @@ bool ShotStopperNetwork::authenticate(httpd_req_t *request, bool requireCsrf,
       if (sessionIndex != nullptr) {
         *sessionIndex = index;
       }
+      session.lastHeartbeatMs = now;
+      lastAuthenticatedAtMs_ = now;
+      status_.uiAuthenticated = true;
       accepted = true;
       break;
     }
@@ -2645,6 +2620,12 @@ bool ShotStopperNetwork::authenticate(httpd_req_t *request, bool requireCsrf,
     requestPendingNetworkConfirm();
   }
   return accepted;
+}
+
+void ShotStopperNetwork::touchSessionIfPresent(httpd_req_t *request) {
+  // Read-only routes (status/shots) do not require auth but refresh UI_GRACE
+  // when the browser still presents a valid session token.
+  (void)authenticate(request, false);
 }
 
 void ShotStopperNetwork::invalidateSession(size_t index, DebugCode code) {
@@ -2689,8 +2670,7 @@ void ShotStopperNetwork::requestStopForSession(uint32_t webSessionId) {
   stop.requestId = allocateRequestId();
   stop.webSessionId = webSessionId;
   stop.controlLeaseId = control.controlLeaseId;
-  heartbeatStopSent_ = callbacks_.enqueueWebCommand(stop) ||
-                       heartbeatStopSent_;
+  (void)callbacks_.enqueueWebCommand(stop);
 }
 
 bool ShotStopperNetwork::loginRateLimited(uint32_t now) {
@@ -2723,8 +2703,8 @@ esp_err_t ShotStopperNetwork::sendJson(httpd_req_t *request,
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
   httpd_resp_set_hdr(request, "Cache-Control", "no-store");
   httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
-  // Close after each API response so keep-alive does not pin sockets while
-  // status/heartbeat polls overlap under coex delay (ping stays up, UI flaps).
+  // Close after each API response so keep-alive does not pin sockets on the
+  // ESP while BLE/Wi-Fi coex delays responses.
   httpd_resp_set_hdr(request, "Connection", "close");
   return httpd_resp_send(request, json, HTTPD_RESP_USE_STRLEN);
 }
@@ -2806,6 +2786,7 @@ esp_err_t ShotStopperNetwork::rootHandler(httpd_req_t *request) {
     httpd_resp_set_status(request, STATUS_NOT_MODIFIED);
     httpd_resp_set_hdr(request, "Cache-Control", "no-cache");
     httpd_resp_set_hdr(request, "ETag", etag);
+    httpd_resp_set_hdr(request, "Connection", "close");
     return httpd_resp_send(request, nullptr, 0);
   }
   httpd_resp_set_type(request, "text/html; charset=utf-8");
@@ -2818,6 +2799,7 @@ esp_err_t ShotStopperNetwork::rootHandler(httpd_req_t *request) {
       request, "Content-Security-Policy",
       "default-src 'self'; script-src 'self'; style-src 'self'; "
       "connect-src 'self'; frame-ancestors 'none'");
+  httpd_resp_set_hdr(request, "Connection", "close");
   return httpd_resp_send(
       request, reinterpret_cast<const char *>(SHOT_STOPPER_WEB_UI_GZIP),
       SHOT_STOPPER_WEB_UI_GZIP_LEN);
@@ -2831,6 +2813,7 @@ esp_err_t ShotStopperNetwork::jsHandler(httpd_req_t *request) {
     httpd_resp_set_hdr(request, "Cache-Control",
                        "public, max-age=31536000, immutable");
     httpd_resp_set_hdr(request, "ETag", etag);
+    httpd_resp_set_hdr(request, "Connection", "close");
     return httpd_resp_send(request, nullptr, 0);
   }
   httpd_resp_set_type(request, "application/javascript; charset=utf-8");
@@ -2840,6 +2823,7 @@ esp_err_t ShotStopperNetwork::jsHandler(httpd_req_t *request) {
   httpd_resp_set_hdr(request, "ETag", etag);
   httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
   httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
+  httpd_resp_set_hdr(request, "Connection", "close");
   return httpd_resp_send(
       request, reinterpret_cast<const char *>(SHOT_STOPPER_WEB_JS_GZIP),
       SHOT_STOPPER_WEB_JS_GZIP_LEN);
@@ -2853,6 +2837,7 @@ esp_err_t ShotStopperNetwork::cssHandler(httpd_req_t *request) {
     httpd_resp_set_hdr(request, "Cache-Control",
                        "public, max-age=31536000, immutable");
     httpd_resp_set_hdr(request, "ETag", etag);
+    httpd_resp_set_hdr(request, "Connection", "close");
     return httpd_resp_send(request, nullptr, 0);
   }
   httpd_resp_set_type(request, "text/css; charset=utf-8");
@@ -2862,31 +2847,10 @@ esp_err_t ShotStopperNetwork::cssHandler(httpd_req_t *request) {
   httpd_resp_set_hdr(request, "ETag", etag);
   httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
   httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
+  httpd_resp_set_hdr(request, "Connection", "close");
   return httpd_resp_send(
       request, reinterpret_cast<const char *>(SHOT_STOPPER_WEB_CSS_GZIP),
       SHOT_STOPPER_WEB_CSS_GZIP_LEN);
-}
-
-esp_err_t ShotStopperNetwork::logoHandler(httpd_req_t *request) {
-  char etag[WEB_UI_ETAG_CAPACITY] = {};
-  formatWebUiEtag(etag);
-  if (ifNoneMatchEquals(request, etag)) {
-    httpd_resp_set_status(request, STATUS_NOT_MODIFIED);
-    httpd_resp_set_hdr(request, "Cache-Control",
-                       "public, max-age=31536000, immutable");
-    httpd_resp_set_hdr(request, "ETag", etag);
-    return httpd_resp_send(request, nullptr, 0);
-  }
-  httpd_resp_set_type(request, "image/svg+xml");
-  httpd_resp_set_hdr(request, "Content-Encoding", "gzip");
-  httpd_resp_set_hdr(request, "Cache-Control",
-                     "public, max-age=31536000, immutable");
-  httpd_resp_set_hdr(request, "ETag", etag);
-  httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
-  httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
-  return httpd_resp_send(
-      request, reinterpret_cast<const char *>(SHOT_STOPPER_WEB_LOGO_GZIP),
-      SHOT_STOPPER_WEB_LOGO_GZIP_LEN);
 }
 
 esp_err_t ShotStopperNetwork::notFoundHandler(httpd_req_t *request,
@@ -2967,22 +2931,6 @@ esp_err_t ShotStopperNetwork::logoutHandler(httpd_req_t *request) {
                      "Invalid session or CSRF token.");
   }
   self.invalidateSession(sessionIndex, DebugCode::UI_LOGOUT);
-  return sendJson(request, STATUS_OK, "{\"ok\":true}");
-}
-
-esp_err_t ShotStopperNetwork::heartbeatHandler(httpd_req_t *request) {
-  ShotStopperNetwork &self = *instance_;
-  size_t sessionIndex = 0;
-  if (!self.authenticate(request, true, &sessionIndex)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
-  const uint32_t now = millis();
-  portENTER_CRITICAL(&self.dataMux_);
-  self.sessions_[sessionIndex].lastHeartbeatMs = now;
-  self.lastAuthenticatedAtMs_ = now;
-  self.status_.uiAuthenticated = true;
-  portEXIT_CRITICAL(&self.dataMux_);
   return sendJson(request, STATUS_OK, "{\"ok\":true}");
 }
 
@@ -3077,6 +3025,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   // Status intentionally has no authentication requirement. It is the
   // read-only landing view and contains no credentials, session material, or
   // actionable state. Every mutating route remains authenticated.
+  // Refresh UI_GRACE when the browser still presents a valid session token.
+  self.touchSessionIfPresent(request);
   // Serialize builds: g_statusResponseBuffer / presets / scale history are
   // process-wide and httpd serves multiple sockets concurrently.
   if (self.statusResponseMux_ == nullptr ||
@@ -3588,6 +3538,7 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
   self.callbacks_.copyControlStatus(control);
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
   httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+  httpd_resp_set_hdr(request, "Connection", "close");
   char header[96] = {};
   snprintf(header, sizeof(header),
            "{\"dropped\":%lu,\"bootId\":%lu,\"events\":[",
@@ -3662,6 +3613,7 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
+  self.touchSessionIfPresent(request);
   ControlStatusSnapshot control;
   self.callbacks_.copyControlStatus(control);
   static ShotLogRecord records[SHOT_LOG_CAPACITY];
@@ -3672,6 +3624,7 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
 
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
   httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+  httpd_resp_set_hdr(request, "Connection", "close");
   char header[96] = {};
   snprintf(header, sizeof(header),
            "{\"bootId\":%lu,\"shots\":[",
@@ -4947,6 +4900,7 @@ esp_err_t ShotStopperNetwork::wifiScanStatusHandler(httpd_req_t *request) {
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
   httpd_resp_set_hdr(request, "Cache-Control", "no-store");
   httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
+  httpd_resp_set_hdr(request, "Connection", "close");
   char prefix[128] = {};
   snprintf(prefix, sizeof(prefix),
            "{\"state\":\"%s\",\"updatedAtMs\":%lu,\"networks\":[",

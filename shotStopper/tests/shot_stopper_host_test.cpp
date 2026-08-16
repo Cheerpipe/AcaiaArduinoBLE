@@ -1946,7 +1946,7 @@ void w16_web_stop_during_rinse_preserves_rearm() {
   CHECK(!getRelaySafetySnapshot().closed);
 }
 
-void w17_web_heartbeat_timeout_is_a_safe_stop() {
+void w17_web_session_stop_is_a_safe_stop() {
   resetHarness(false, false);
   reachReadyFromBoot();
   WebCommand on = webControlCommand(WebCommandType::PADDLE_ON);
@@ -6225,7 +6225,7 @@ const TestCase testCases[] = {
     {"W14", w14_physical_motion_overrides_web_control},
     {"W15", w15_web_rinse_starts_scale_timer},
     {"W16", w16_web_stop_during_rinse_preserves_rearm},
-    {"W17", w17_web_heartbeat_timeout_is_a_safe_stop},
+    {"W17", w17_web_session_stop_is_a_safe_stop},
     {"W18", w18_web_stop_can_end_a_physical_brew_only_by_opening},
     {"W19", w19_web_start_is_rejected_outside_ready},
     {"W20", w20_restart_is_rejected_while_active},
