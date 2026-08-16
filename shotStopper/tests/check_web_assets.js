@@ -249,7 +249,7 @@ if (!html.includes('id="rememberMe"') ||
 const statusSection = html.match(/<fieldset[^>]*><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     statusSection[1].includes('class="row"') ||
-    (statusSection[1].match(/class="metric"/g) || []).length !== 29 ||
+    (statusSection[1].match(/class="metric"/g) || []).length !== 13 ||
     !ui.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'") ||
     !ui.includes('id="scaleWeight"') ||
     !ui.includes('id="scaleTimer"') ||
@@ -372,8 +372,6 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
         html.indexOf('id="statusAtmGuard"') ||
     html.indexOf('id="statusAtmGuard"') >
         html.indexOf('id="statusNoScaleGuard"') ||
-    html.indexOf('id="statusNoScaleGuard"') >
-        html.indexOf('<summary>Diagnostics</summary>') ||
     html.indexOf('id="shotNoScaleGuard"') >
         html.indexOf('id="statusExtractionGuard"') ||
     html.indexOf('<legend>Machine and scale</legend>') >
@@ -677,29 +675,52 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !css.includes('.btnGlyph .t')) {
   throw new Error('Brew presets CRUD UI must block factory delete, support reset, click-to-load, and unsaved switch confirm');
 }
-if (!ui.includes('id="hCpu"') ||
-    !ui.includes('id="hWifi"') ||
-    !ui.includes('id="hSsid"') ||
-    !ui.includes('id="hAp"') ||
-    !ui.includes('id="hUptime"') ||
-    !ui.includes('id="hResetReason"') ||
-    !ui.includes('id="hTemp"') ||
-    !ui.includes('id="hTPeak"') ||
-    !ui.includes('id="hRamT"') ||
-    !ui.includes('id="hRamU"') ||
-    !ui.includes('id="hRamF"') ||
-    !ui.includes('function updH(') ||
-    !ui.includes('updH(s.health,s.safety)') ||
-    !ui.includes('h.uptimeMs') ||
-    !ui.includes('resetReasonCode') ||
-    !ui.includes("RR[s.resetReasonCode]") ||
-    !network.includes('\\"hwmon\\"') ||
-    !network.includes('cpuUsagePct') ||
-    !network.includes('tempPeakC') ||
-    !network.includes('ramTotalBytes') ||
-    !network.includes('\\"uptimeMs\\"') ||
-    !network.includes('\\"resetReasonCode\\"')) {
-  throw new Error('Diagnostics must expose basic hwmon metrics in UI and status API');
+{
+  const adminHtml = html.slice(html.indexOf('id="view-admin"'),
+                               html.indexOf('id="view-debug"'));
+  const statusHtml = html.slice(html.indexOf('id="statusPanel"'),
+                                html.indexOf('id="actionsPanel"'));
+  if (!ui.includes('id="hCpu"') ||
+      !ui.includes('id="hWifi"') ||
+      !ui.includes('id="hSsid"') ||
+      !ui.includes('id="hAp"') ||
+      !ui.includes('id="hUptime"') ||
+      !ui.includes('id="hResetReason"') ||
+      !ui.includes('id="hTemp"') ||
+      !ui.includes('id="hTPeak"') ||
+      !ui.includes('id="hRamT"') ||
+      !ui.includes('id="hRamU"') ||
+      !ui.includes('id="hRamF"') ||
+      !ui.includes('function updH(') ||
+      !ui.includes('updH(s.health,s.safety)') ||
+      !ui.includes('h.uptimeMs') ||
+      !ui.includes('resetReasonCode') ||
+      !ui.includes("RR[s.resetReasonCode]") ||
+      !network.includes('\\"hwmon\\"') ||
+      !network.includes('cpuUsagePct') ||
+      !network.includes('tempPeakC') ||
+      !network.includes('ramTotalBytes') ||
+      !network.includes('\\"uptimeMs\\"') ||
+      !network.includes('\\"resetReasonCode\\"') ||
+      !adminHtml.includes('<summary>Diagnostics</summary>') ||
+      !adminHtml.includes('id="currentTime"') ||
+      !adminHtml.includes('id="ntpStatus"') ||
+      adminHtml.indexOf('<summary>Diagnostics</summary>') >
+          adminHtml.indexOf('id="currentTime"') ||
+      adminHtml.indexOf('id="currentTime"') >
+          adminHtml.indexOf('id="ntpStatus"') ||
+      adminHtml.indexOf('id="ntpStatus"') >
+          adminHtml.indexOf('id="hWifi"') ||
+      adminHtml.indexOf('id="dateTimePanel"') >
+          adminHtml.indexOf('<summary>Diagnostics</summary>') ||
+      adminHtml.indexOf('<summary>Diagnostics</summary>') >
+          adminHtml.indexOf('id="restartPanel"') ||
+      statusHtml.includes('<summary>Diagnostics</summary>') ||
+      statusHtml.includes('id="currentTime"') ||
+      statusHtml.includes('id="ntpStatus"')) {
+    throw new Error(
+        'Diagnostics must live on Admin after Date & time, with Current time/NTP first, and expose hwmon metrics in UI and status API');
+  }
 }
 if (!ui.includes('id="shotTable"') ||
     !ui.includes('id="exportShotsButton"') ||
