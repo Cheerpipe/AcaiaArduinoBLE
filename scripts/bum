@@ -51,6 +51,10 @@ if [[ ${#args[@]} -eq 0 ]]; then
   exec ./scripts/monitor
 fi
 
-./scripts/build "${args[@]}"
+if [[ ${#args[@]} -eq 3 ]]; then
+  ./scripts/build "${args[0]}" "${args[1]}"
+else
+  ./scripts/build "${args[0]}" "${args[1]}" "${args[@]:3}"
+fi
 ./scripts/upload "${args[0]}" "${args[1]}"
 exec ./scripts/monitor "${args[0]}" "${args[2]}"
