@@ -1777,6 +1777,14 @@ enum class WebCommandType : uint8_t {
   START_WIFI_SCAN,
   BUZZER_TEST,
   BOOKOO_DEBUG,
+  WIFI_CONNECT,
+  WIFI_DISCONNECT,
+  WIFI_RESTART,
+  AP_START,
+  AP_STOP,
+  WEBUI_START,
+  WEBUI_STOP,
+  WEBUI_RESTART,
   MAINTENANCE_COMPLETE
 };
 
@@ -1811,10 +1819,44 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::START_WIFI_SCAN: return "scan Wi-Fi networks";
     case WebCommandType::BUZZER_TEST: return "buzzer test";
     case WebCommandType::BOOKOO_DEBUG: return "bookoo debug";
+    case WebCommandType::WIFI_CONNECT: return "Wi-Fi connect";
+    case WebCommandType::WIFI_DISCONNECT: return "Wi-Fi disconnect";
+    case WebCommandType::WIFI_RESTART: return "Wi-Fi restart";
+    case WebCommandType::AP_START: return "start access point";
+    case WebCommandType::AP_STOP: return "stop access point";
+    case WebCommandType::WEBUI_START: return "start Web UI";
+    case WebCommandType::WEBUI_STOP: return "stop Web UI";
+    case WebCommandType::WEBUI_RESTART: return "restart Web UI";
     case WebCommandType::MAINTENANCE_COMPLETE:
       return "maintenance result";
   }
   return "unknown web command";
+}
+
+inline bool isCliNetworkAction(WebCommandType type) {
+  switch (type) {
+    case WebCommandType::WIFI_CONNECT:
+    case WebCommandType::WIFI_DISCONNECT:
+    case WebCommandType::WIFI_RESTART:
+    case WebCommandType::AP_START:
+    case WebCommandType::AP_STOP:
+    case WebCommandType::WEBUI_START:
+    case WebCommandType::WEBUI_STOP:
+    case WebCommandType::WEBUI_RESTART:
+      return true;
+    default:
+      return false;
+  }
+}
+
+inline LogLevel serialLogLevelFromRuntime(const RuntimeConfig &config) {
+  if (!config.serialDebugOutput) {
+    return LogLevel::NONE;
+  }
+  if (config.ringRetainLogLevel == static_cast<uint8_t>(LogLevel::DEBUG)) {
+    return LogLevel::DEBUG;
+  }
+  return LogLevel::INFO;
 }
 
 enum class CommandResultState : uint8_t {

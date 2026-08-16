@@ -65,6 +65,21 @@ struct NetworkStatusSnapshot {
   uint32_t startupFailures = 0;
   uint32_t lastCommandRequestId = 0;
   CommandResultState lastCommandState = CommandResultState::NONE;
+  bool httpActive = false;
+  bool staReconnectHeld = false;
+  bool apStartHeld = false;
+  bool httpStartHeld = false;
+  bool apPasswordFactory = false;
+  bool ntpMayArm = false;
+  uint8_t wifiMode = 0;
+  uint8_t channel = 0;
+  uint8_t scanState = 0;
+  uint8_t sessionCount = 0;
+  uint8_t ntpState = 0;
+  int32_t wifiStatus = 6;
+  uint32_t lastAuthAgeMs = 0;
+  uint32_t staConnectAgeMs = 0;
+  uint32_t staReconnectAgeMs = 0;
   char apIp[16] = "192.168.4.1";
   char staIp[16] = {};
   char staSsid[WIFI_SSID_CAPACITY] = {};
@@ -73,6 +88,9 @@ struct NetworkStatusSnapshot {
   char configuredGateway[16] = {};
   char configuredDns1[16] = {};
   char configuredDns2[16] = {};
+  char staMac[18] = {};
+  char apMac[18] = {};
+  char ntpActiveServer[NTP_SERVER_HOST_CAPACITY] = {};
 };
 
 inline uint8_t wifiRssiToSignalQualityPct(int32_t rssi) {
@@ -195,6 +213,9 @@ class ShotStopperNetwork {
   bool completionPending_ = false;
   bool staConfirmArmed_ = false;
   bool pendingConfirmRequest_ = false;
+  bool staReconnectHeld_ = false;
+  bool apStartHeld_ = false;
+  bool httpStartHeld_ = false;
   WebCommand acceptedCommand_ = {};
   WebCommand completionCommand_ = {};
   uint8_t acceptedCommandAttempts_ = 0;
@@ -243,6 +264,8 @@ class ShotStopperNetwork {
   void beginStationConnect(const PersistedSettings &settings, uint32_t now);
   bool ensureAccessPoint(uint32_t now, bool force = false);
   void stopSoftApKeepStation();
+  void stopSoftApLeaveHttp();
+  void stopSoftAp(bool stopHttp);
   bool wifiScanInProgress();
   void abortWifiScan(uint32_t now, bool logTimeout);
   void stopNetwork();
@@ -263,6 +286,11 @@ class ShotStopperNetwork {
   bool controlAllowsNetworkMutation(ControlStatusSnapshot *copy = nullptr);
   void log(DebugCategory category, DebugCode code, int32_t argument1 = 0,
            int32_t argument2 = 0);
+  void actionLog(const char *message);
+  void actionLogf(const char *fmt, ...);
+  void refreshExtendedStatus(uint32_t now);
+  bool handleCliNetworkAction(const WebCommand &command, uint32_t now);
+  void printActionSnapshot(const char *command, bool ok);
 
   bool authenticate(httpd_req_t *request, bool requireCsrf,
                     size_t *sessionIndex = nullptr);

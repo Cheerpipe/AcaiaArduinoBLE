@@ -5008,6 +5008,44 @@ void sc05_serial_cli_parser_covers_supported_commands() {
   CHECK(request.verb == SerialCliVerb::SERIAL_DEBUG_ON);
   CHECK(serialCliParseLine("SERIAL_DEBUG_OFF", request));
   CHECK(request.verb == SerialCliVerb::SERIAL_DEBUG_OFF);
+  CHECK(serialCliParseLine("DEBUG_FULL", request));
+  CHECK(request.verb == SerialCliVerb::DEBUG_FULL);
+  CHECK(serialCliParseLine("DEBUG_OFF", request));
+  CHECK(request.verb == SerialCliVerb::DEBUG_OFF);
+  CHECK(serialCliParseLine("DEBUG_STATUS", request));
+  CHECK(request.verb == SerialCliVerb::DEBUG_STATUS);
+  CHECK(serialCliParseLine("WIFI_CONNECT", request));
+  CHECK(request.verb == SerialCliVerb::WIFI_CONNECT);
+  CHECK(serialCliParseLine("WIFI_DISCONNECT", request));
+  CHECK(request.verb == SerialCliVerb::WIFI_DISCONNECT);
+  CHECK(serialCliParseLine("WIFI_RESTART", request));
+  CHECK(request.verb == SerialCliVerb::WIFI_RESTART);
+  CHECK(serialCliParseLine("WIFI_STATUS", request));
+  CHECK(request.verb == SerialCliVerb::WIFI_STATUS);
+  CHECK(serialCliParseLine("AP_START", request));
+  CHECK(request.verb == SerialCliVerb::AP_START);
+  CHECK(serialCliParseLine("AP_STOP", request));
+  CHECK(request.verb == SerialCliVerb::AP_STOP);
+  CHECK(serialCliParseLine("AP_STATUS", request));
+  CHECK(request.verb == SerialCliVerb::AP_STATUS);
+  CHECK(serialCliParseLine("WEBUI_START", request));
+  CHECK(request.verb == SerialCliVerb::WEBUI_START);
+  CHECK(serialCliParseLine("WEBUI_STOP", request));
+  CHECK(request.verb == SerialCliVerb::WEBUI_STOP);
+  CHECK(serialCliParseLine("WEBUI_RESTART", request));
+  CHECK(request.verb == SerialCliVerb::WEBUI_RESTART);
+  CHECK(serialCliParseLine("WEBUI_STATUS", request));
+  CHECK(request.verb == SerialCliVerb::WEBUI_STATUS);
+  CHECK(serialCliParseLine("NET_STATUS", request));
+  CHECK(request.verb == SerialCliVerb::NET_STATUS);
+  CHECK(serialCliParseLine("LOG_DUMP", request));
+  CHECK(request.verb == SerialCliVerb::LOG_DUMP);
+  CHECK(serialCliParseLine("HEALTH", request));
+  CHECK(request.verb == SerialCliVerb::HEALTH);
+  CHECK(serialCliParseLine("SCALE_STATUS", request));
+  CHECK(request.verb == SerialCliVerb::SCALE_STATUS);
+  CHECK(serialCliParseLine("NTP_STATUS", request));
+  CHECK(request.verb == SerialCliVerb::NTP_STATUS);
   CHECK(!serialCliParseLine("HELP extra", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(!serialCliParseLine("REBOOT extra", request));
@@ -5119,6 +5157,25 @@ void sc10_help_prints_one_line_per_command() {
   CHECK(serialTxContains("RESET_NETWORK_UI  forget STA Wi-Fi"));
   CHECK(serialTxContains("SERIAL_DEBUG_ON  enable USB debug"));
   CHECK(serialTxContains("SERIAL_DEBUG_OFF  disable USB debug"));
+  CHECK(serialTxContains("DEBUG_FULL  serial debug + ring DEBUG"));
+  CHECK(serialTxContains("DEBUG_OFF  serial off and ring none"));
+  CHECK(serialTxContains("DEBUG_STATUS  show serialDebugOutput"));
+  CHECK(serialTxContains("WIFI_CONNECT  associate saved STA"));
+  CHECK(serialTxContains("WIFI_DISCONNECT  drop STA"));
+  CHECK(serialTxContains("WIFI_RESTART  drop then reconnect"));
+  CHECK(serialTxContains("WIFI_STATUS  dump STA"));
+  CHECK(serialTxContains("AP_START  raise SoftAP"));
+  CHECK(serialTxContains("AP_STOP  stop SoftAP"));
+  CHECK(serialTxContains("AP_STATUS  dump SoftAP"));
+  CHECK(serialTxContains("WEBUI_START  start HTTP"));
+  CHECK(serialTxContains("WEBUI_STOP  stop HTTP"));
+  CHECK(serialTxContains("WEBUI_RESTART  bounce HTTP"));
+  CHECK(serialTxContains("WEBUI_STATUS  dump HTTP"));
+  CHECK(serialTxContains("NET_STATUS  WIFI + AP + WEBUI"));
+  CHECK(serialTxContains("LOG_DUMP  print RAM debug ring"));
+  CHECK(serialTxContains("HEALTH  heap, loop gap"));
+  CHECK(serialTxContains("SCALE_STATUS  BLE scale link"));
+  CHECK(serialTxContains("NTP_STATUS  wall clock"));
   CHECK(serialTxContains("e.g. SET_WIFI CafeLAN CafePass1"));
   CHECK(session.active);
 }
@@ -5140,6 +5197,136 @@ void sc12_reboot_rejected_while_active() {
   CHECK(serialTxContains("ERR not ready"));
   CHECK(session.active);
   CHECK(getRelaySafetySnapshot().closed);
+}
+
+void sc13_debug_full_and_off_during_cycle() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(session.active);
+  Serial.tx.clear();
+  feedSerial("DEBUG_FULL\n");
+  CHECK(serialTxContains("OK debug full"));
+  CHECK(runtimeConfig.serialDebugOutput);
+  CHECK(runtimeConfig.ringRetainLogLevel ==
+        static_cast<uint8_t>(LogLevel::DEBUG));
+  CHECK(serialLogLevel == LogLevel::DEBUG);
+  CHECK(ringRetainLogLevel == LogLevel::DEBUG);
+  CHECK(runtimePersistPending);
+  Serial.tx.clear();
+  addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_CONNECTING);
+  CHECK(serialTxContains("scale connecting"));
+  feedSerial("DEBUG_OFF\n");
+  CHECK(serialTxContains("OK debug off"));
+  CHECK(!runtimeConfig.serialDebugOutput);
+  CHECK(runtimeConfig.ringRetainLogLevel ==
+        static_cast<uint8_t>(LogLevel::NONE));
+  CHECK(serialLogLevel == LogLevel::NONE);
+  CHECK(ringRetainLogLevel == LogLevel::NONE);
+}
+
+void sc14_network_actions_queue_without_ready() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  startCycle();
+  Serial.tx.clear();
+  feedSerial("WIFI_CONNECT\n");
+  CHECK(serialTxContains("WARN cycle active; proceeding"));
+  CHECK(serialTxContains("OK queued WIFI_CONNECT"));
+  CHECK(hostLastForwardedNetworkCommand.type == WebCommandType::WIFI_CONNECT);
+  feedSerial("WEBUI_STOP\n");
+  CHECK(serialTxContains("OK queued WEBUI_STOP"));
+  CHECK(hostLastForwardedNetworkCommand.type == WebCommandType::WEBUI_STOP);
+  feedSerial("AP_START\n");
+  CHECK(serialTxContains("OK queued AP_START"));
+  CHECK(hostLastForwardedNetworkCommand.type == WebCommandType::AP_START);
+}
+
+void sc15_status_printers_use_dump_views() {
+  SerialCliNetworkDump dump;
+  dump.wifiConfigured = true;
+  dump.staOpen = false;
+  strncpy(dump.staSsid, "CafeLAN", sizeof(dump.staSsid) - 1);
+  dump.staState = 2;
+  dump.wifiStatus = 3;
+  dump.wifiMode = 1;
+  dump.httpActive = true;
+  dump.apActive = true;
+  dump.staReconnectHeld = true;
+  dump.apStartHeld = false;
+  dump.httpStartHeld = true;
+  strncpy(dump.staIp, "192.168.1.20", sizeof(dump.staIp) - 1);
+  Serial.tx.clear();
+  serialCliPrintNetStatus(dump);
+  CHECK(serialTxContains("WIFI_STATUS"));
+  CHECK(serialTxContains("ssid=CafeLAN"));
+  CHECK(serialTxContains("staState=CONNECTED"));
+  CHECK(serialTxContains("wifiStatus=3 CONNECTED"));
+  CHECK(serialTxContains("staReconnectHeld=true"));
+  CHECK(serialTxContains("AP_STATUS"));
+  CHECK(serialTxContains("ssid=MicraShotStopperAP"));
+  CHECK(serialTxContains("WEBUI_STATUS"));
+  CHECK(serialTxContains("httpActive=true"));
+  CHECK(serialTxContains("httpStartHeld=true"));
+
+  SerialCliHealthDump health;
+  health.freeHeapBytes = 80000;
+  health.loopMaxGapMs = 12;
+  health.networkStackMinWords = 400;
+  Serial.tx.clear();
+  serialCliPrintHealth(health);
+  CHECK(serialTxContains("HEALTH"));
+  CHECK(serialTxContains("heapFree=80000"));
+  CHECK(serialTxContains("stackNetwork=400"));
+
+  SerialCliScaleDump scale;
+  scale.state = "CONNECTED";
+  scale.protocolName = "bookoo";
+  strncpy(scale.preferredMac, "AA:BB:CC:DD:EE:FF",
+          sizeof(scale.preferredMac) - 1);
+  scale.weightFresh = true;
+  scale.currentWeightG = 18.5f;
+  Serial.tx.clear();
+  serialCliPrintScaleStatus(scale);
+  CHECK(serialTxContains("SCALE_STATUS"));
+  CHECK(serialTxContains("state=CONNECTED"));
+  CHECK(serialTxContains("preferredMac=AA:BB:CC:DD:EE:FF"));
+  CHECK(serialTxContains("weightG=18.50"));
+
+  SerialCliNtpDump ntp;
+  ntp.state = TimeSyncState::SYNCED;
+  ntp.utcSec = 1700000000;
+  strncpy(ntp.activeServer, "pool.ntp.org", sizeof(ntp.activeServer) - 1);
+  ntp.staUp = false;
+  Serial.tx.clear();
+  serialCliPrintNtpStatus(ntp);
+  CHECK(serialTxContains("NTP_STATUS"));
+  CHECK(serialTxContains("state=SYNCED"));
+  CHECK(serialTxContains("ntp cannot arm without STA"));
+}
+
+void sc16_debug_status_and_log_dump() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  ringRetainLogLevel = LogLevel::INFO;
+  runtimeConfig.ringRetainLogLevel = static_cast<uint8_t>(LogLevel::INFO);
+  Serial.tx.clear();
+  feedSerial("DEBUG_STATUS\n");
+  CHECK(serialTxContains("DEBUG_STATUS"));
+  CHECK(serialTxContains("serialDebugOutput=false"));
+  CHECK(serialTxContains("serialLogLevel=none"));
+  CHECK(serialTxContains("ringRetainLogLevel=info"));
+  addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED);
+  Serial.tx.clear();
+  feedSerial("LOG_DUMP\n");
+  CHECK(serialTxContains("LOG_DUMP"));
+  CHECK(serialTxContains("events="));
+  CHECK(serialTxContains("configuration accepted"));
+  ringRetainLogLevel = LogLevel::NONE;
+  runtimeConfig.ringRetainLogLevel = static_cast<uint8_t>(LogLevel::NONE);
+  Serial.tx.clear();
+  feedSerial("LOG_DUMP\n");
+  CHECK(serialTxContains("log ring retain is none"));
 }
 
 void s04_shot_log_remove_by_id() {
@@ -6171,6 +6358,10 @@ const TestCase testCases[] = {
     {"SC10", sc10_help_prints_one_line_per_command},
     {"SC11", sc11_reboot_queues_restart_when_ready},
     {"SC12", sc12_reboot_rejected_while_active},
+    {"SC13", sc13_debug_full_and_off_during_cycle},
+    {"SC14", sc14_network_actions_queue_without_ready},
+    {"SC15", sc15_status_printers_use_dump_views},
+    {"SC16", sc16_debug_status_and_log_dump},
 };
 
 }  // namespace

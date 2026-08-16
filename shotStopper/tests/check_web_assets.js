@@ -817,9 +817,9 @@ if (!ui.includes('id="debugPanel"') ||
     !ui.includes('id="navLogWrap"') ||
     !ui.includes("p==='/log'&&!ringLogEnabled()") ||
     !ui.includes('updateLogNavVisibility();') ||
-    firmware.indexOf('serialLogLevel = runtimeConfig.serialDebugOutput',
+    firmware.indexOf('serialLogLevel = serialLogLevelFromRuntime',
                      firmware.indexOf('persistenceReady = EEPROM.begin')) < 0 ||
-    firmware.indexOf('serialLogLevel = runtimeConfig.serialDebugOutput',
+    firmware.indexOf('serialLogLevel = serialLogLevelFromRuntime',
                      firmware.indexOf('persistenceReady = EEPROM.begin')) >
         firmware.indexOf('BOOT_RESET_REASON') ||
     firmware.indexOf('ringRetainLogLevel =',
@@ -857,6 +857,16 @@ if (!ui.includes('id="debugPanel"') ||
     !ui.includes("if($('ruleChartMode'))$('ruleChartMode').textContent=''") ||
     !firmware.includes('SERIAL_DEBUG_ON') ||
     !firmware.includes('SERIAL_DEBUG_OFF') ||
+    !firmware.includes('DEBUG_FULL') ||
+    !firmware.includes('DEBUG_OFF') ||
+    !firmware.includes('DEBUG_STATUS') ||
+    !firmware.includes('WIFI_CONNECT') ||
+    !firmware.includes('WIFI_DISCONNECT') ||
+    !firmware.includes('WEBUI_STOP') ||
+    !firmware.includes('LOG_DUMP') ||
+    !firmware.includes('SCALE_STATUS') ||
+    !firmware.includes('NTP_STATUS') ||
+    !firmware.includes('NET_STATUS') ||
     !network.includes('buzzerHandler') ||
     !network.includes('bookooHandler') ||
     !network.includes('BUZZER_UNSUPPORTED') ||
@@ -1169,11 +1179,13 @@ if (!network.includes(
   throw new Error('serviceSessions must keep SoftAP up without an idle shutdown timer');
 }
 const stopSoftApStart = network.indexOf(
+    'void ShotStopperNetwork::stopSoftAp(');
+const stopSoftApKeepStart = network.indexOf(
     'void ShotStopperNetwork::stopSoftApKeepStation()');
 const stopSoftApEnd = network.indexOf(
-    'bool ShotStopperNetwork::wifiScanInProgress()', stopSoftApStart);
-if (stopSoftApStart < 0 || stopSoftApEnd < 0) {
-  throw new Error('stopSoftApKeepStation implementation not found');
+    'bool ShotStopperNetwork::wifiScanInProgress()', stopSoftApKeepStart);
+if (stopSoftApStart < 0 || stopSoftApKeepStart < 0 || stopSoftApEnd < 0) {
+  throw new Error('stopSoftAp / stopSoftApKeepStation implementation not found');
 }
 const stopSoftAp = network.slice(stopSoftApStart, stopSoftApEnd);
 if (stopSoftAp.includes('WiFi.mode(WIFI_STA)')) {
@@ -1182,7 +1194,14 @@ if (stopSoftAp.includes('WiFi.mode(WIFI_STA)')) {
 }
 if (!stopSoftAp.includes('stopHttpServer()')) {
   throw new Error(
-      'stopSoftApKeepStation must stop HTTP so STA rebind can restart the server');
+      'stopSoftAp must be able to stop HTTP so STA rebind can restart the server');
+}
+if (!network.includes('stopSoftApLeaveHttp') ||
+    !network.includes('httpStartHeld_') ||
+    !network.includes('staReconnectHeld_') ||
+    !network.includes('apStartHeld_')) {
+  throw new Error(
+      'Network CLI holds must keep SoftAP/HTTP/STA stop from being undone');
 }
 if (network.includes('raising SoftAP and retrying STA')) {
   throw new Error(

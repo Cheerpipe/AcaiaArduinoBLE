@@ -5115,8 +5115,7 @@ void queueRuntimePersist(int32_t reasonBits) {
 
 void commitLiveRuntimeConfig(const RuntimeConfig &composed, int32_t reasonBits) {
   runtimeConfig = composed;
-  serialLogLevel = runtimeConfig.serialDebugOutput ? LogLevel::INFO
-                                                   : LogLevel::NONE;
+  serialLogLevel = serialLogLevelFromRuntime(runtimeConfig);
   ringRetainLogLevel =
       static_cast<LogLevel>(runtimeConfig.ringRetainLogLevel);
   addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED,
@@ -5695,6 +5694,19 @@ void processWebCommand(const WebCommand &command) {
     case WebCommandType::MAINTENANCE_COMPLETE:
       completeMaintenanceLease(command);
       return;
+
+    case WebCommandType::WIFI_CONNECT:
+    case WebCommandType::WIFI_DISCONNECT:
+    case WebCommandType::WIFI_RESTART:
+    case WebCommandType::AP_START:
+    case WebCommandType::AP_STOP:
+    case WebCommandType::WEBUI_START:
+    case WebCommandType::WEBUI_STOP:
+    case WebCommandType::WEBUI_RESTART:
+      if (!forwardAcceptedNetworkCommand(command)) {
+        rejectWebCommand(command);
+      }
+      return;
   }
 }
 
@@ -5905,6 +5917,187 @@ void serialCliQueueIfSafe(WebCommand &command, SerialCliVerb verb) {
   serialCliQueueCommand(command, verb);
 }
 
+void serialCliWarnIfCycleActive() {
+  if (session.active) {
+    serialCliReply("WARN cycle active; proceeding");
+  }
+}
+
+void serialCliQueueNetworkAction(WebCommandType type, SerialCliVerb verb) {
+  serialCliWarnIfCycleActive();
+  WebCommand command;
+  command.type = type;
+  command.requestId = millis();
+  if (!forwardAcceptedNetworkCommand(command)) {
+    serialCliReply("ERR network queue full");
+    return;
+  }
+  char line[48] = {};
+  snprintf(line, sizeof(line), "OK queued %s", serialCliVerbName(verb));
+  serialCliReply(line);
+}
+
+void serialCliFillNetworkDump(SerialCliNetworkDump &dump) {
+#ifndef SHOT_STOPPER_HOST_TEST
+  const NetworkStatusSnapshot snap = networkManager.snapshot();
+  dump.networkActive = snap.networkActive;
+  dump.apActive = snap.apActive;
+  dump.httpActive = snap.httpActive;
+  dump.uiAuthenticated = snap.uiAuthenticated;
+  dump.wifiConfigured = snap.wifiConfigured;
+  dump.staOpen = snap.staOpen;
+  dump.staLinkMetricsValid = snap.staLinkMetricsValid;
+  dump.staReconnectHeld = snap.staReconnectHeld;
+  dump.apStartHeld = snap.apStartHeld;
+  dump.httpStartHeld = snap.httpStartHeld;
+  dump.apPasswordFactory = snap.apPasswordFactory;
+  dump.ntpMayArm = snap.ntpMayArm;
+  dump.apClients = snap.apClients;
+  dump.staState = static_cast<uint8_t>(snap.staState);
+  dump.staIpMode = snap.staIpMode;
+  dump.staConfigState = snap.staConfigState;
+  dump.wifiMode = snap.wifiMode;
+  dump.channel = snap.channel;
+  dump.scanState = snap.scanState;
+  dump.sessionCount = snap.sessionCount;
+  dump.ntpState = snap.ntpState;
+  dump.staRssi = snap.staRssi;
+  dump.staSignalQualityPct = snap.staSignalQualityPct;
+  dump.wifiStatus = snap.wifiStatus;
+  dump.confirmRemainingMs = snap.confirmRemainingMs;
+  dump.taskAgeMs = snap.taskAgeMs;
+  dump.taskStackMinWords = snap.taskStackMinWords;
+  dump.startupFailures = snap.startupFailures;
+  dump.lastCommandRequestId = snap.lastCommandRequestId;
+  dump.lastAuthAgeMs = snap.lastAuthAgeMs;
+  dump.staConnectAgeMs = snap.staConnectAgeMs;
+  dump.staReconnectAgeMs = snap.staReconnectAgeMs;
+  dump.lastCommandState = snap.lastCommandState;
+  strncpy(dump.apIp, snap.apIp, sizeof(dump.apIp) - 1);
+  strncpy(dump.staIp, snap.staIp, sizeof(dump.staIp) - 1);
+  strncpy(dump.staSsid, snap.staSsid, sizeof(dump.staSsid) - 1);
+  strncpy(dump.configuredIp, snap.configuredIp, sizeof(dump.configuredIp) - 1);
+  strncpy(dump.configuredNetmask, snap.configuredNetmask,
+          sizeof(dump.configuredNetmask) - 1);
+  strncpy(dump.configuredGateway, snap.configuredGateway,
+          sizeof(dump.configuredGateway) - 1);
+  strncpy(dump.configuredDns1, snap.configuredDns1,
+          sizeof(dump.configuredDns1) - 1);
+  strncpy(dump.configuredDns2, snap.configuredDns2,
+          sizeof(dump.configuredDns2) - 1);
+  strncpy(dump.staMac, snap.staMac, sizeof(dump.staMac) - 1);
+  strncpy(dump.apMac, snap.apMac, sizeof(dump.apMac) - 1);
+  strncpy(dump.ntpActiveServer, snap.ntpActiveServer,
+          sizeof(dump.ntpActiveServer) - 1);
+#else
+  (void)dump;
+#endif
+}
+
+void serialCliPrintLiveNetworkStatus(SerialCliVerb verb) {
+  SerialCliNetworkDump dump;
+  serialCliFillNetworkDump(dump);
+  if (verb == SerialCliVerb::WIFI_STATUS) {
+    serialCliPrintWifiStatus(dump);
+  } else if (verb == SerialCliVerb::AP_STATUS) {
+    serialCliPrintApStatus(dump);
+  } else if (verb == SerialCliVerb::WEBUI_STATUS) {
+    serialCliPrintWebuiStatus(dump);
+  } else {
+    serialCliPrintNetStatus(dump);
+  }
+}
+
+void serialCliPrintLiveHealth() {
+  SerialCliHealthDump dump;
+  dump.freeHeapBytes = freeHeapBytes;
+  dump.minimumFreeHeapBytes = minimumFreeHeapBytes;
+  dump.largestFreeHeapBlockBytes = largestFreeHeapBlockBytes;
+  dump.loopMaxGapMs = loopMaxGapMs;
+  dump.healthIntervalMaxGapMs = healthIntervalMaxGapMs;
+  dump.loopStackMinWords = loopStackMinWords;
+  dump.scaleWorkerStackMinWords = scaleWorkerStackMinWords;
+#ifndef SHOT_STOPPER_HOST_TEST
+  dump.networkStackMinWords = networkManager.snapshot().taskStackMinWords;
+#endif
+  dump.heapAlertLatched = healthHeapAlertLatched;
+  dump.stackAlertLatched = healthStackAlertLatched;
+  dump.loopGapAlertLatched = healthLoopGapAlertLatched;
+  serialCliPrintHealth(dump);
+}
+
+void serialCliPrintLiveScaleStatus() {
+  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+  SerialCliScaleDump dump;
+  dump.state = link.state == ScaleLinkState::CONNECTED ? "CONNECTED"
+                                                       : "DISCONNECTED";
+  dump.protocolName = link.protocolName;
+  copyPreferredScaleMac(dump.preferredMac, sizeof(dump.preferredMac));
+  copyPreferredScaleName(dump.preferredName, sizeof(dump.preferredName));
+  dump.disconnectSequence = link.disconnectSequence;
+  dump.connectionGeneration = link.connectionGeneration;
+  dump.packetSequence = link.packetSequence;
+  dump.packetGaps = link.packetGaps;
+  dump.rejectedPackets = link.rejectedPackets;
+  dump.reconnects = link.reconnects;
+  dump.lastDisconnectReason = link.lastDisconnectReason;
+  dump.workerAgeMs = elapsedMs(link.workerProgressAtMs);
+  dump.timerValid = link.timerValid;
+  dump.timerMs = link.timerMs;
+  dump.timerAgeMs = link.timerAgeMs;
+  dump.weightFresh = currentWeightIsFresh();
+  dump.currentWeightG = currentWeight;
+  serialCliPrintScaleStatus(dump);
+}
+
+void serialCliPrintLiveNtpStatus() {
+  const TimeStatusSnapshot time = g_wallClock.snapshot(millis());
+  SerialCliNtpDump dump;
+  dump.state = time.state;
+  dump.utcSec = time.utcSec;
+  dump.lastSyncAgeMs = time.lastSyncAgeMs;
+  dump.nextRetryInMs = time.nextRetryInMs;
+  dump.consecutiveFailures = time.consecutiveFailures;
+  strncpy(dump.activeServer, time.activeServer, sizeof(dump.activeServer) - 1);
+  dump.ntpServerPreset = runtimeConfig.ntpServerPreset;
+  strncpy(dump.ntpServerCustom, runtimeConfig.ntpServerCustom,
+          sizeof(dump.ntpServerCustom) - 1);
+  dump.timezoneOffsetMinutes = runtimeConfig.timezoneOffsetMinutes;
+#ifndef SHOT_STOPPER_HOST_TEST
+  dump.staUp = networkManager.snapshot().staState == StaState::CONNECTED;
+#else
+  dump.staUp = false;
+#endif
+  serialCliPrintNtpStatus(dump);
+}
+
+void serialCliPrintLiveLogDump() {
+  DebugEvent events[DEBUG_EVENT_CAPACITY] = {};
+  const size_t count = copyDebugEvents(0, events, DEBUG_EVENT_CAPACITY);
+  serialCliPrintLogDumpPreamble(count, ringRetainLogLevel);
+  for (size_t index = 0; index < count; ++index) {
+    writeSerialLogLine(events[index]);
+  }
+}
+
+void serialCliApplyDebugPersist(bool serialOn, LogLevel ringLevel,
+                                const char *okMessage) {
+  if (!serialOn) {
+    serialCliReply(okMessage);
+  }
+  RuntimeConfig candidate = runtimeConfig;
+  candidate.serialDebugOutput = serialOn;
+  candidate.ringRetainLogLevel = static_cast<uint8_t>(ringLevel);
+  ++candidate.revision;
+  if (candidate.revision == 0) {
+    candidate.revision = 1;
+  }
+  commitLiveRuntimeConfig(candidate, RUNTIME_PERSIST_REASON_USER);
+  if (serialOn) {
+    serialCliReply(okMessage);
+  }
+}
+
 void dispatchSerialCliRequest(SerialCliRequest &request) {
   switch (request.verb) {
     case SerialCliVerb::NONE:
@@ -6001,6 +6194,59 @@ void dispatchSerialCliRequest(SerialCliRequest &request) {
       }
       return;
     }
+    case SerialCliVerb::DEBUG_FULL:
+      serialCliApplyDebugPersist(true, LogLevel::DEBUG, "OK debug full");
+      return;
+    case SerialCliVerb::DEBUG_OFF:
+      serialCliApplyDebugPersist(false, LogLevel::NONE, "OK debug off");
+      return;
+    case SerialCliVerb::DEBUG_STATUS:
+      serialCliPrintDebugStatus(runtimeConfig.serialDebugOutput, serialLogLevel,
+                                ringRetainLogLevel);
+      return;
+    case SerialCliVerb::WIFI_CONNECT:
+      serialCliQueueNetworkAction(WebCommandType::WIFI_CONNECT, request.verb);
+      return;
+    case SerialCliVerb::WIFI_DISCONNECT:
+      serialCliQueueNetworkAction(WebCommandType::WIFI_DISCONNECT,
+                                  request.verb);
+      return;
+    case SerialCliVerb::WIFI_RESTART:
+      serialCliQueueNetworkAction(WebCommandType::WIFI_RESTART, request.verb);
+      return;
+    case SerialCliVerb::AP_START:
+      serialCliQueueNetworkAction(WebCommandType::AP_START, request.verb);
+      return;
+    case SerialCliVerb::AP_STOP:
+      serialCliQueueNetworkAction(WebCommandType::AP_STOP, request.verb);
+      return;
+    case SerialCliVerb::WEBUI_START:
+      serialCliQueueNetworkAction(WebCommandType::WEBUI_START, request.verb);
+      return;
+    case SerialCliVerb::WEBUI_STOP:
+      serialCliQueueNetworkAction(WebCommandType::WEBUI_STOP, request.verb);
+      return;
+    case SerialCliVerb::WEBUI_RESTART:
+      serialCliQueueNetworkAction(WebCommandType::WEBUI_RESTART, request.verb);
+      return;
+    case SerialCliVerb::WIFI_STATUS:
+    case SerialCliVerb::AP_STATUS:
+    case SerialCliVerb::WEBUI_STATUS:
+    case SerialCliVerb::NET_STATUS:
+      serialCliPrintLiveNetworkStatus(request.verb);
+      return;
+    case SerialCliVerb::LOG_DUMP:
+      serialCliPrintLiveLogDump();
+      return;
+    case SerialCliVerb::HEALTH:
+      serialCliPrintLiveHealth();
+      return;
+    case SerialCliVerb::SCALE_STATUS:
+      serialCliPrintLiveScaleStatus();
+      return;
+    case SerialCliVerb::NTP_STATUS:
+      serialCliPrintLiveNtpStatus();
+      return;
   }
 }
 
@@ -6189,8 +6435,7 @@ void setup() {
   runtimeConfig = RuntimeConfig{};
   seedDefaultShotPresetBank(presetBank);
 #endif
-  serialLogLevel = runtimeConfig.serialDebugOutput ? LogLevel::INFO
-                                                   : LogLevel::NONE;
+  serialLogLevel = serialLogLevelFromRuntime(runtimeConfig);
   ringRetainLogLevel =
       static_cast<LogLevel>(runtimeConfig.ringRetainLogLevel);
 
