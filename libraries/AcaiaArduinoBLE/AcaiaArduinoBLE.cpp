@@ -5,6 +5,13 @@
 #include "AcaiaArduinoBLE.h"
 #include <ArduinoBLE.h>
 
+// Arduino-ESP32 3.3.6+ releases BLE controller RAM at boot unless a linked
+// TU includes this header (native BLE/SimpleBLE do; ArduinoBLE does not).
+// Without it, BLE.begin() fails after HCI reset times out (~1s).
+#if defined(ESP32) && __has_include("esp32-hal-alloc-ble-mem.h")
+#include "esp32-hal-alloc-ble-mem.h"
+#endif
+
 #include <math.h>
 #include <new>
 #include <string.h>

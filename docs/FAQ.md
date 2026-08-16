@@ -53,6 +53,7 @@ Para detalle técnico completo, consulta el [README principal](../README.md).
 | **¿Cómo sé por qué terminó un shot?** | En el **historial de shots**: `cut_type` (`auto`, `manual`, `limit`) y `stop_detail` (`normal_target`, `extended_max_weight`, `extended_min_time`, `slow_max_time`, `slow_min_weight`, `auto_to_manual`, etc.). El panel de diagnóstico y `GET /api/v1/log` amplían detalle. |
 | **El LED de escala parpadea amarillo pero “está conectada”.** | Amarillo lento = enlace BLE presente pero **worker o stream de peso obsoleto**. No confundir con verde sólido (stream fresco). El comportamiento de CN9 lo gobierna la máquina de estados, no el LED. |
 | **¿Es seguro confiar solo en el relé del ESP32?** | **No** como garantía física absoluta. El firmware incluye watchdogs, cierre transaccional y tope de 60 s, pero un relé soldado o un GPIO corto requieren **barrera K2 externa** opcional (heartbeat + feedback aislado). Ver [Watchdog and CN9 safety](../README.md#watchdog-and-cn9-safety). |
+| **Tras actualizar el core ESP32 veo `ble=fail` / balanza no detectada, pero la Web UI sí.** | En Arduino-ESP32 **3.3.6+** el core libera la RAM del controlador BLE al boot si ninguna librería declara usarla. ArduinoBLE no lo hace sola; la copia local de **AcaiaArduinoBLE** incluye `esp32-hal-alloc-ble-mem.h` para retenerla. Recompila y flashea con esa librería (`--library libraries/AcaiaArduinoBLE`). |
 
 ## Dónde ajustar cada comportamiento
 

@@ -31,6 +31,11 @@ standalone safety mechanism or as proof that BLE calls always make progress.
 See [Audit remediation](../../docs/audits/AUDIT_REMEDIATION.md) for the
 residual risk and the required hardware/soak validation.
 
+On Arduino-ESP32 **3.3.6+**, `initArduino()` releases BLE controller RAM unless
+a linked translation unit includes `esp32-hal-alloc-ble-mem.h`. Native
+`BLE`/`SimpleBLE` do; ArduinoBLE does not. This library includes that header
+on ESP32 so `BLE.begin()` can succeed.
+
 ## Robust connection behavior
 
 Version 3.5.0 adds a one-second ArduinoBLE operation timeout and forces a
