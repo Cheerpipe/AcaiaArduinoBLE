@@ -3572,8 +3572,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"health\":{\"uptimeMs\":%lu,\"loopMaxGapMs\":%lu,"
         "\"freeHeapBytes\":%lu,\"minimumFreeHeapBytes\":%lu,"
         "\"largestFreeHeapBlockBytes\":%lu,"
-        "\"hwmon\":{\"cpuUsagePct\":%u,\"tempValid\":%s,"
-        "\"tempC\":%.1f,\"tempPeakC\":%.1f,"
+        "\"hwmon\":{\"cpuLoad5s\":%.2f,\"cpuLoad1m\":%.2f,\"cpuLoad5m\":%.2f,"
+        "\"cpu0Busy\":%.2f,\"cpu1Busy\":%.2f,\"cpuLoadValid\":%s,"
+        "\"tempValid\":%s,\"tempC\":%.1f,\"tempPeakC\":%.1f,"
         "\"ramTotalBytes\":%lu,\"ramUsedBytes\":%lu,"
         "\"ramFreeBytes\":%lu}},"
         "\"safety\":{\"resetReasonCode\":%lu},"
@@ -3601,7 +3602,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.freeHeapBytes),
         static_cast<unsigned long>(control.minimumFreeHeapBytes),
         static_cast<unsigned long>(control.largestFreeHeapBlockBytes),
-        static_cast<unsigned>(control.hwmon.cpuUsagePct),
+        static_cast<double>(control.hwmon.cpuLoad5s),
+        static_cast<double>(control.hwmon.cpuLoad1m),
+        static_cast<double>(control.hwmon.cpuLoad5m),
+        static_cast<double>(control.hwmon.cpu0Busy),
+        static_cast<double>(control.hwmon.cpu1Busy),
+        control.hwmon.cpuLoadValid ? "true" : "false",
         control.hwmon.tempValid ? "true" : "false",
         static_cast<double>(control.hwmon.tempC),
         static_cast<double>(control.hwmon.tempPeakC),

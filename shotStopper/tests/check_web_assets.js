@@ -708,7 +708,17 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes('resetReasonCode') ||
       !ui.includes("RR[s.resetReasonCode]") ||
       !network.includes('\\"hwmon\\"') ||
-      !network.includes('cpuUsagePct') ||
+      !network.includes('cpuLoad5s') ||
+      !network.includes('cpuLoad1m') ||
+      !network.includes('cpuLoad5m') ||
+      !network.includes('cpu0Busy') ||
+      !network.includes('cpu1Busy') ||
+      !network.includes('cpuLoadValid') ||
+      !ui.includes('cpuLoad5s') ||
+      !ui.includes('cpuLoad1m') ||
+      !ui.includes('cpuLoad5m') ||
+      !ui.includes('cpuLoadValid') ||
+      !ui.includes('0–2 · 5s 1m 5m') ||
       !network.includes('tempPeakC') ||
       !network.includes('ramTotalBytes') ||
       !network.includes('\\"uptimeMs\\"') ||

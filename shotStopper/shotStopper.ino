@@ -6032,6 +6032,12 @@ void serialCliPrintLiveHealth() {
   dump.heapAlertLatched = healthHeapAlertLatched;
   dump.stackAlertLatched = healthStackAlertLatched;
   dump.loopGapAlertLatched = healthLoopGapAlertLatched;
+  dump.cpuLoadValid = hwmonSnapshot.cpuLoadValid;
+  dump.cpuLoad5s = hwmonSnapshot.cpuLoad5s;
+  dump.cpuLoad1m = hwmonSnapshot.cpuLoad1m;
+  dump.cpuLoad5m = hwmonSnapshot.cpuLoad5m;
+  dump.cpu0Busy = hwmonSnapshot.cpu0Busy;
+  dump.cpu1Busy = hwmonSnapshot.cpu1Busy;
   serialCliPrintHealth(dump);
 }
 
@@ -6557,6 +6563,7 @@ void setup() {
   }
 #endif
 
+  hwmon.begin();
   hwmonSnapshot = hwmon.sample(1);
   publishControlStatus();
 #ifndef SHOT_STOPPER_HOST_TEST
@@ -6725,7 +6732,6 @@ void loop() {
 #if SHOT_STOPPER_ENABLE_ALED == 1
   updateStatusIndicators();
 #endif
-  hwmon.noteLoopBusyMs(elapsedMs(loopStartedAtMs));
   if (!feedCurrentTaskWatchdog()) {
     reportTaskWatchdogFault();
     tripRelaySafety(RelaySafetyFault::TASK_WATCHDOG_FAILURE);

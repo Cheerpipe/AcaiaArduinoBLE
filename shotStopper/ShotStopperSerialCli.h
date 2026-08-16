@@ -447,7 +447,7 @@ inline void serialCliPrintHelp() {
   Serial.println("WEBUI_STATUS  dump HTTP/Web UI state  e.g. WEBUI_STATUS");
   Serial.println("NET_STATUS  WIFI + AP + WEBUI status  e.g. NET_STATUS");
   Serial.println("LOG_DUMP  print RAM debug ring  e.g. LOG_DUMP");
-  Serial.println("HEALTH  heap, loop gap, task stacks  e.g. HEALTH");
+  Serial.println("HEALTH  heap, loop gap, cpu load, task stacks  e.g. HEALTH");
   Serial.println("SCALE_STATUS  BLE scale link dump  e.g. SCALE_STATUS");
   Serial.println("NTP_STATUS  wall clock and NTP dump  e.g. NTP_STATUS");
 }
@@ -557,6 +557,12 @@ struct SerialCliHealthDump {
   bool heapAlertLatched = false;
   bool stackAlertLatched = false;
   bool loopGapAlertLatched = false;
+  bool cpuLoadValid = false;
+  float cpuLoad5s = 0.0f;
+  float cpuLoad1m = 0.0f;
+  float cpuLoad5m = 0.0f;
+  float cpu0Busy = 0.0f;
+  float cpu1Busy = 0.0f;
 };
 
 struct SerialCliScaleDump {
@@ -752,6 +758,18 @@ inline void serialCliPrintHealth(const SerialCliHealthDump &dump) {
   Serial.println(dump.stackAlertLatched ? "true" : "false");
   Serial.print("alertLoopGap=");
   Serial.println(dump.loopGapAlertLatched ? "true" : "false");
+  Serial.print("cpuLoadValid=");
+  Serial.println(dump.cpuLoadValid ? "true" : "false");
+  Serial.print("cpuLoad5s=");
+  Serial.println(dump.cpuLoad5s, 2);
+  Serial.print("cpuLoad1m=");
+  Serial.println(dump.cpuLoad1m, 2);
+  Serial.print("cpuLoad5m=");
+  Serial.println(dump.cpuLoad5m, 2);
+  Serial.print("cpu0Busy=");
+  Serial.println(dump.cpu0Busy, 2);
+  Serial.print("cpu1Busy=");
+  Serial.println(dump.cpu1Busy, 2);
 }
 
 inline void serialCliPrintScaleStatus(const SerialCliScaleDump &dump) {

@@ -159,6 +159,27 @@ class HostSerial {
     tx += '\n';
   }
 
+  void print(double value, int digits) {
+    std::ostringstream stream;
+    stream.setf(std::ios::fixed, std::ios::floatfield);
+    stream.precision(digits < 0 ? 2 : digits);
+    stream << value;
+    tx += stream.str();
+  }
+
+  void print(float value, int digits) {
+    print(static_cast<double>(value), digits);
+  }
+
+  void println(double value, int digits) {
+    print(value, digits);
+    tx += '\n';
+  }
+
+  void println(float value, int digits) {
+    println(static_cast<double>(value), digits);
+  }
+
   void println() { tx += '\n'; }
 };
 

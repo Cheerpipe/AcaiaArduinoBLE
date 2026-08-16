@@ -5207,7 +5207,7 @@ void sc10_help_prints_one_line_per_command() {
   CHECK(serialTxContains("WEBUI_STATUS  dump HTTP"));
   CHECK(serialTxContains("NET_STATUS  WIFI + AP + WEBUI"));
   CHECK(serialTxContains("LOG_DUMP  print RAM debug ring"));
-  CHECK(serialTxContains("HEALTH  heap, loop gap"));
+  CHECK(serialTxContains("HEALTH  heap, loop gap, cpu load"));
   CHECK(serialTxContains("SCALE_STATUS  BLE scale link"));
   CHECK(serialTxContains("NTP_STATUS  wall clock"));
   CHECK(serialTxContains("e.g. SET_WIFI CafeLAN CafePass1"));
@@ -5307,11 +5307,22 @@ void sc15_status_printers_use_dump_views() {
   health.freeHeapBytes = 80000;
   health.loopMaxGapMs = 12;
   health.networkStackMinWords = 400;
+  health.cpuLoadValid = true;
+  health.cpuLoad5s = 0.42f;
+  health.cpuLoad1m = 0.55f;
+  health.cpuLoad5m = 0.61f;
+  health.cpu0Busy = 0.20f;
+  health.cpu1Busy = 0.22f;
   Serial.tx.clear();
   serialCliPrintHealth(health);
   CHECK(serialTxContains("HEALTH"));
   CHECK(serialTxContains("heapFree=80000"));
   CHECK(serialTxContains("stackNetwork=400"));
+  CHECK(serialTxContains("cpuLoad5s=0.42"));
+  CHECK(serialTxContains("cpuLoad1m=0.55"));
+  CHECK(serialTxContains("cpuLoad5m=0.61"));
+  CHECK(serialTxContains("cpu0Busy=0.20"));
+  CHECK(serialTxContains("cpu1Busy=0.22"));
 
   SerialCliScaleDump scale;
   scale.state = "CONNECTED";
@@ -5497,6 +5508,38 @@ void h01_health_threshold_alerts_fire_once_per_crossing() {
   CHECK(!debugEventExists(DebugCode::HEALTH_LOOP_GAP));
   serviceHealthThresholdAlerts(HEALTH_LOOP_GAP_CLEAR_MS);
   CHECK(!healthLoopGapAlertLatched);
+}
+
+void h02_hwmon_cpu_load_uses_idle_and_ema() {
+  Hwmon monitor;
+  monitor.begin();
+
+  // Fully idle both cores over 5s → load 0.0
+  monitor.hostSetIdleAccumUs(5000000ULL, 5000000ULL);
+  HwmonSnapshot snap = monitor.sample(5000);
+  CHECK(snap.cpuLoadValid);
+  CHECK(snap.cpu0Busy >= 0.0f && snap.cpu0Busy <= 0.01f);
+  CHECK(snap.cpu1Busy >= 0.0f && snap.cpu1Busy <= 0.01f);
+  CHECK(snap.cpuLoad5s >= 0.0f && snap.cpuLoad5s <= 0.01f);
+  CHECK(snap.cpuLoad1m >= 0.0f && snap.cpuLoad1m <= 0.01f);
+
+  // Fully busy both cores → load 2.0
+  monitor.hostSetIdleAccumUs(0, 0);
+  snap = monitor.sample(5000);
+  CHECK(snap.cpuLoadValid);
+  CHECK(snap.cpu0Busy >= 0.99f && snap.cpu0Busy <= 1.0f);
+  CHECK(snap.cpu1Busy >= 0.99f && snap.cpu1Busy <= 1.0f);
+  CHECK(snap.cpuLoad5s >= 1.99f && snap.cpuLoad5s <= 2.0f);
+  // EMA moves toward 2 but stays below after one 5s step from 0
+  CHECK(snap.cpuLoad1m > 0.05f && snap.cpuLoad1m < 2.0f);
+  CHECK(snap.cpuLoad5m > 0.0f && snap.cpuLoad5m < snap.cpuLoad1m + 0.001f);
+
+  // Half idle each core → load 1.0
+  monitor.hostSetIdleAccumUs(2500000ULL, 2500000ULL);
+  snap = monitor.sample(5000);
+  CHECK(snap.cpuLoad5s >= 0.99f && snap.cpuLoad5s <= 1.01f);
+  CHECK(snap.cpu0Busy >= 0.49f && snap.cpu0Busy <= 0.51f);
+  CHECK(snap.cpu1Busy >= 0.49f && snap.cpu1Busy <= 0.51f);
 }
 
 void r51_auto_to_manual_guard_fires_while_scale_lost() {
@@ -6374,6 +6417,7 @@ const TestCase testCases[] = {
     {"S11", s11_shot_log_record_stays_fixed_size},
     {"S13", s13_persist_debug_messages_identify_origin},
     {"H01", h01_health_threshold_alerts_fire_once_per_crossing},
+    {"H02", h02_hwmon_cpu_load_uses_idle_and_ema},
     {"N01", n01_wall_clock_tracks_utc_from_anchor},
     {"N02", n02_ntp_hostname_validation},
     {"N03", n03_unsynced_retry_is_one_minute},
