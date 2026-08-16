@@ -1039,20 +1039,32 @@ argumentos usan la misma configuración de desarrollo: puerto
 | `./scripts/build` | `./scripts/build [ruta_serial] [arquitectura] [flags...]` | Genera la versión y Web UI, compila y deja el resultado en `build/<arquitectura>`. La ruta serial se incluye para mantener una interfaz uniforme, pero no se usa para compilar. |
 | `./scripts/upload` | `./scripts/upload [ruta_serial] [arquitectura]` | Sube el binario existente de `build/<arquitectura>`; no recompila. |
 | `./scripts/monitor` | `./scripts/monitor [ruta_serial] [velocidad]` | Abre el monitor serie. |
+| `./scripts/bum` | `./scripts/bum [ruta_serial arquitectura velocidad [flags...]]` | Wrapper que ejecuta build, upload y monitor. Sin argumentos conserva los defaults de cada script; si se pasan argumentos, ruta, arquitectura y velocidad son obligatorias; los flags se aplican solo a build. |
 
 Las arquitecturas admitidas son `esp32` y `esp32s3`. Cada script recibe
 argumentos posicionales y muestra ayuda con `help`, `--help` o `-h`:
+
+- Sin argumentos, los tres scripts usan todos sus valores por defecto.
+- En `build` y `upload`, si se indica `ruta_serial`, también se debe indicar
+  `arquitectura`. Los flags de `build` son opcionales.
+- En `monitor`, la velocidad es opcional cuando se indica `ruta_serial`.
 
 ```sh
 ./scripts/build
 ./scripts/upload
 ./scripts/monitor
 
+# Build, upload y monitor en una sola orden
+./scripts/bum
+
 ./scripts/build /dev/cu.usbmodem01 esp32s3 -DSHOT_STOPPER_ENABLE_ALED=1
 ./scripts/upload /dev/cu.usbmodem01 esp32s3
 ./scripts/monitor /dev/cu.usbmodem01 115200
 
+./scripts/bum /dev/cu.usbmodem01 esp32s3 115200 -DSHOT_STOPPER_ENABLE_ALED=1
+
 ./scripts/build help
+./scripts/bum --help
 ```
 
 From the repository root, install Node deps if needed, generate the version and

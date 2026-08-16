@@ -10,6 +10,8 @@ Uso: ./scripts/monitor [ruta_serial] [velocidad]
 
 Inicia el monitor serie de Arduino CLI.
 
+La velocidad es opcional cuando se proporciona una ruta serial.
+
 Valores por defecto (sin argumentos):
   ruta_serial: /dev/cu.usbserial-0001
   velocidad:    115200

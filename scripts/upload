@@ -10,6 +10,9 @@ Uso: ./scripts/upload [ruta_serial] [arquitectura]
 
 Sube automáticamente el binario ya compilado desde build/<arquitectura>.
 
+Sin argumentos se usan todos los valores por defecto. Si se indica una ruta
+serial, la arquitectura también es obligatoria.
+
 Valores por defecto (sin argumentos):
   ruta_serial:  /dev/cu.usbserial-0001
   arquitectura: esp32
@@ -37,8 +40,17 @@ if [[ $# -gt 2 ]]; then
   exit 2
 fi
 
-port="${1:-$DEFAULT_PORT}"
-arch="${2:-$DEFAULT_ARCH}"
+if [[ $# -eq 0 ]]; then
+  port="$DEFAULT_PORT"
+  arch="$DEFAULT_ARCH"
+elif [[ $# -eq 1 ]]; then
+  echo "Falta la arquitectura después de la ruta serial." >&2
+  usage >&2
+  exit 2
+else
+  port="$1"
+  arch="$2"
+fi
 
 case "$arch" in
   esp32)

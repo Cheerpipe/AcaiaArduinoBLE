@@ -15,6 +15,9 @@ Compila Shot Stopper y deja los artefactos en build/<arquitectura>.
 La ruta serial se acepta para mantener la misma interfaz que upload, pero no
 se utiliza durante la compilación.
 
+Sin argumentos se usan todos los valores por defecto. Si se indica una ruta
+serial, la arquitectura también es obligatoria. Los flags son opcionales.
+
 Valores por defecto (sin argumentos):
   ruta_serial:  /dev/cu.usbserial-0001
   arquitectura: esp32
@@ -38,12 +41,22 @@ if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   exit 0
 fi
 
-port="${1:-$DEFAULT_PORT}"
-arch="${2:-$DEFAULT_ARCH}"
-if [[ $# -gt 2 ]]; then
-  flags="${*:3}"
-else
+if [[ $# -eq 0 ]]; then
+  port="$DEFAULT_PORT"
+  arch="$DEFAULT_ARCH"
   flags="$DEFAULT_FLAGS"
+elif [[ $# -eq 1 ]]; then
+  echo "Falta la arquitectura después de la ruta serial." >&2
+  usage >&2
+  exit 2
+else
+  port="$1"
+  arch="$2"
+  if [[ $# -gt 2 ]]; then
+    flags="${*:3}"
+  else
+    flags="$DEFAULT_FLAGS"
+  fi
 fi
 
 case "$arch" in
