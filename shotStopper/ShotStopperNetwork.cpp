@@ -3571,6 +3571,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"persistPending\":%s,\"persistFailed\":%s},"
         "\"health\":{\"uptimeMs\":%lu,\"loopMaxGapMs\":%lu,"
         "\"freeHeapBytes\":%lu,\"minimumFreeHeapBytes\":%lu,"
+        "\"largestFreeHeapBlockBytes\":%lu,"
         "\"hwmon\":{\"cpuUsagePct\":%u,\"tempValid\":%s,"
         "\"tempC\":%.1f,\"tempPeakC\":%.1f,"
         "\"ramTotalBytes\":%lu,\"ramUsedBytes\":%lu,"
@@ -3599,6 +3600,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.loopMaxGapMs),
         static_cast<unsigned long>(control.freeHeapBytes),
         static_cast<unsigned long>(control.minimumFreeHeapBytes),
+        static_cast<unsigned long>(control.largestFreeHeapBlockBytes),
         static_cast<unsigned>(control.hwmon.cpuUsagePct),
         control.hwmon.tempValid ? "true" : "false",
         static_cast<double>(control.hwmon.tempC),

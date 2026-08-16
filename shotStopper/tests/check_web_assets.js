@@ -696,10 +696,15 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes('id="hRamT"') ||
       !ui.includes('id="hRamU"') ||
       !ui.includes('id="hRamF"') ||
+      !ui.includes('id="hHeapMin"') ||
+      !ui.includes('id="hHeapLargest"') ||
       !ui.includes('function updH(') ||
       !ui.includes('updH(s.health,s.safety)') ||
       !ui.includes('function applyDiagnosticStatus(') ||
       !ui.includes('h.uptimeMs') ||
+      !ui.includes('h.minimumFreeHeapBytes') ||
+      !ui.includes('h.largestFreeHeapBlockBytes') ||
+      !ui.includes("toFixed(1)+' KB'") ||
       !ui.includes('resetReasonCode') ||
       !ui.includes("RR[s.resetReasonCode]") ||
       !network.includes('\\"hwmon\\"') ||
@@ -707,9 +712,13 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !network.includes('tempPeakC') ||
       !network.includes('ramTotalBytes') ||
       !network.includes('\\"uptimeMs\\"') ||
+      !network.includes('\\"minimumFreeHeapBytes\\"') ||
+      !network.includes('\\"largestFreeHeapBlockBytes\\"') ||
       !network.includes('\\"resetReasonCode\\"') ||
       !diagHtml.includes('id="diagnosticsPanel"') ||
       !diagHtml.includes('<legend>Diagnostics</legend>') ||
+      !diagHtml.includes('<strong>Heap min</strong>') ||
+      !diagHtml.includes('<strong>Heap largest</strong>') ||
       diagHtml.includes('<details') ||
       diagHtml.includes('<summary>Diagnostics</summary>') ||
       !diagHtml.includes('id="currentTime"') ||
@@ -717,6 +726,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       diagHtml.indexOf('id="diagnosticsPanel"') > diagHtml.indexOf('id="logPanel"') ||
       diagHtml.indexOf('id="currentTime"') > diagHtml.indexOf('id="ntpStatus"') ||
       diagHtml.indexOf('id="ntpStatus"') > diagHtml.indexOf('id="hWifi"') ||
+      diagHtml.indexOf('id="hRamF"') > diagHtml.indexOf('id="hHeapMin"') ||
+      diagHtml.indexOf('id="hHeapMin"') > diagHtml.indexOf('id="hHeapLargest"') ||
       adminHtml.includes('id="diagnosticsPanel"') ||
       adminHtml.includes('id="currentTime"') ||
       adminHtml.includes('<summary>Diagnostics</summary>') ||
@@ -1235,6 +1246,7 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'staIp', 'ipMode', 'configState', 'confirmRemainingMs', 'rssi',
     'signalQualityPct', 'utcSec', 'lastSyncAgeMs', 'nextRetryInMs',
     'activeServer', 'maintenance', 'persistPending', 'uptimeMs', 'hwmon',
+    'freeHeapBytes', 'minimumFreeHeapBytes', 'largestFreeHeapBlockBytes',
     'resetReasonCode', 'packetGaps', 'rejectedPackets', 'reconnects',
     'eventsDropped', 'lastCommand'
   ]) {
