@@ -32,6 +32,7 @@ dependency.
 | **Scope** | Generic, intended to work on several machines | Dedicated to the Micra and its independent paddle |
 | **Architecture** | Simple, mostly single-threaded | FreeRTOS tasks, queues, and isolation between control, BLE, and network |
 | **Features** | Minimal brew-by-weight stop | Rich workflow: retare, BBW protection, rinse, shot history, Web UI, diagnostics, safety layers |
+| **Config** | Bluetooth app; basic settings | Web UI — feature-rich, full control, presets, and shot history |
 | **Paddle machines** | Assumes you can work within the original machine constraints | Reads the physical paddle on GPIO and controls CN9 independently — no need to “fight” the paddle wiring |
 | **Resilience** | Straightforward happy path | Explicit state machines, watchdogs, transactional CN9 close, stream validation, recovery paths |
 
