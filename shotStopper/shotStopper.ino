@@ -4589,6 +4589,16 @@ bool beginRinseCycle(ControlSource source, uint32_t webSessionId,
     return false;
   }
   session.cn9ClosedAtMs = getRelaySafetySnapshot().closedAtMs;
+  // Only an Armed no-scale rinse clears the latch; keep Armed when the scale
+  // is usable (e.g. web rinse with a connected scale).
+  if (noScaleShotGuardArmed) {
+    const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
+    const bool scaleUsable =
+        scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
+    if (!scaleUsable) {
+      consumeNoScaleShotGuard();
+    }
+  }
   if (session.startedWithScale) {
     emitImmediateCommandAlertIfBuzzer();
     if (!requestRemoteTimerStart()) {
@@ -4888,7 +4898,6 @@ void stateMachineTask() {
           elapsedMs(noScaleShotGuardHoldAtMs) <=
               runtimeConfig.rinseGestureMs) {
         noScaleShotGuardHold = false;
-        armNoScaleShotGuard();
         if (!beginRinseCycle(ControlSource::PHYSICAL)) {
           return;
         }

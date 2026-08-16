@@ -2522,14 +2522,16 @@ void ns06_finished_shot_extends_cooldown() {
   CHECK(noScaleShotGuardArmed);
 }
 
-void ns07_web_rinse_does_not_consume_guard() {
+void ns07_web_rinse_consumes_guard() {
   resetHarness(false, false);
   enableNoScaleShotGuardForTest();
   reachReadyFromBoot();
   processWebCommand(webControlCommand(WebCommandType::RINSE));
   CHECK(stopperState == StopperState::RINSE);
-  CHECK(noScaleShotGuardArmed);
+  CHECK(!noScaleShotGuardArmed);
   CHECK(getRelaySafetySnapshot().closed);
+  CHECK(debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED));
+  CHECK(!debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED));
 }
 
 void ns08_blocked_beep_respects_alert_checkbox() {
@@ -2547,7 +2549,7 @@ void ns08_blocked_beep_respects_alert_checkbox() {
   CHECK(localBuzzer.acceptedRequests == before);
 }
 
-void ns09_armed_rinse_gesture_runs_and_stays_armed() {
+void ns09_armed_rinse_gesture_runs_and_consumes_guard() {
   resetHarness(false, false);
   enableNoScaleShotGuardForTest();
   reachReadyFromBoot();
@@ -2563,8 +2565,9 @@ void ns09_armed_rinse_gesture_runs_and_stays_armed() {
   releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
   CHECK(stopperState == StopperState::RINSE);
   CHECK(getRelaySafetySnapshot().closed);
-  CHECK(noScaleShotGuardArmed);
+  CHECK(!noScaleShotGuardArmed);
   CHECK(debugEventExists(DebugCode::RINSE_CLASSIFIED));
+  CHECK(debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED));
   CHECK(!debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED));
   CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
 }
@@ -2583,6 +2586,33 @@ void ns10_idle_rinse_gesture_does_not_rearm() {
   CHECK(stopperState == StopperState::RINSE);
   CHECK(!noScaleShotGuardArmed);
   CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
+}
+
+void ns11_web_rinse_with_scale_keeps_armed() {
+  resetHarness(false, true);
+  enableNoScaleShotGuardForTest();
+  reachReadyFromBoot();
+  publishWeight(0.0f);
+  CHECK(noScaleShotGuardArmed);
+  processWebCommand(webControlCommand(WebCommandType::RINSE));
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(noScaleShotGuardArmed);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(!debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED));
+  CHECK(!debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED));
+}
+
+void ns12_failed_rinse_does_not_consume_guard() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  reachReadyFromBoot();
+  CHECK(noScaleShotGuardArmed);
+  hostGptimerArmSucceeds = false;
+  processWebCommand(webControlCommand(WebCommandType::RINSE));
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(noScaleShotGuardArmed);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(!debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED));
 }
 
 void w54_local_buzzer_triple_on_auto_to_manual_guard_end() {
@@ -6269,10 +6299,12 @@ const TestCase testCases[] = {
     {"NS04", ns04_scale_available_rearms},
     {"NS05", ns05_cooldown_rearms_from_idle},
     {"NS06", ns06_finished_shot_extends_cooldown},
-    {"NS07", ns07_web_rinse_does_not_consume_guard},
+    {"NS07", ns07_web_rinse_consumes_guard},
     {"NS08", ns08_blocked_beep_respects_alert_checkbox},
-    {"NS09", ns09_armed_rinse_gesture_runs_and_stays_armed},
+    {"NS09", ns09_armed_rinse_gesture_runs_and_consumes_guard},
     {"NS10", ns10_idle_rinse_gesture_does_not_rearm},
+    {"NS11", ns11_web_rinse_with_scale_keeps_armed},
+    {"NS12", ns12_failed_rinse_does_not_consume_guard},
     {"W54", w54_local_buzzer_triple_on_auto_to_manual_guard_end},
     {"W55", w55_local_buzzer_queues_second_triple_while_busy},
     {"W56", w56_atm_beep_queued_when_scale_lost_after_deadline},
