@@ -956,7 +956,7 @@ Install the toolchain and dependency versions validated by this project:
 
 ```sh
 arduino-cli core update-index
-arduino-cli core install esp32:esp32@3.3.11
+arduino-cli core install esp32:esp32@3.3.3
 arduino-cli lib install ArduinoBLE@2.1.0
 ./scripts/patch_arduinoble.sh
 ```
@@ -969,11 +969,12 @@ advertisement instead of aborting. The script is idempotent and also converts
 a leftover 100/30 patch. Set `ARDUINO_BLE_HOME` if ArduinoBLE is not in the
 default Arduino libraries path.
 
-Arduino-ESP32 **3.3.6+** frees BLE controller RAM at boot unless a linked
-translation unit marks BLE in use. The vendored `AcaiaArduinoBLE` library
-includes `esp32-hal-alloc-ble-mem.h` for that reason. Without it you get
-`ble=fail` / `subsystem initialization failed` and no scale discovery even
-though Wi-Fi and the Web UI still work.
+This project is pinned to Arduino-ESP32 **3.3.3**. On **3.3.6+** the core
+frees BLE controller RAM at boot unless a translation unit includes
+`esp32-hal-alloc-ble-mem.h` (ArduinoBLE does not). That include is present but
+commented out in the vendored `AcaiaArduinoBLE` library: enabling it on 3.3.11
+restored `BLE.begin()` but left too little heap for the Web UI on ESP32
+without PSRAM. Revisit when moving cores or hardware.
 
 Idle discovery does not start or stop GAP every 1 s or 3 s. Those timers are
 retry (only when scan is down), a software tick for logs, and log throttle.

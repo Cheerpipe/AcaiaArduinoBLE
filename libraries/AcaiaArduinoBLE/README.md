@@ -33,8 +33,9 @@ residual risk and the required hardware/soak validation.
 
 On Arduino-ESP32 **3.3.6+**, `initArduino()` releases BLE controller RAM unless
 a linked translation unit includes `esp32-hal-alloc-ble-mem.h`. Native
-`BLE`/`SimpleBLE` do; ArduinoBLE does not. This library includes that header
-on ESP32 so `BLE.begin()` can succeed.
+`BLE`/`SimpleBLE` do; ArduinoBLE does not. The include is kept commented in
+this tree while the app stays on **3.3.3** (on 3.3.11 it fixed BLE but starved
+the Web UI heap on ESP32 without PSRAM).
 
 ## Robust connection behavior
 

@@ -8,9 +8,11 @@
 // Arduino-ESP32 3.3.6+ releases BLE controller RAM at boot unless a linked
 // TU includes this header (native BLE/SimpleBLE do; ArduinoBLE does not).
 // Without it, BLE.begin() fails after HCI reset times out (~1s).
-#if defined(ESP32) && __has_include("esp32-hal-alloc-ble-mem.h")
-#include "esp32-hal-alloc-ble-mem.h"
-#endif
+// Commented while the project is pinned to 3.3.3: retaining BLE RAM on
+// 3.3.11 fixed BLE but exhausted heap for the Web UI on ESP32 without PSRAM.
+// #if defined(ESP32) && __has_include("esp32-hal-alloc-ble-mem.h")
+// #include "esp32-hal-alloc-ble-mem.h"
+// #endif
 
 #include <math.h>
 #include <new>
