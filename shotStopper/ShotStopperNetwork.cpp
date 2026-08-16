@@ -471,7 +471,7 @@ bool applySystemTimeToWallClock(uint32_t now) {
 }
 
 
-enum class StatusPage : uint8_t { Home, Settings, Admin, Debug, Unknown };
+enum class StatusPage : uint8_t { Home, Settings, Admin, Diagnostic, Unknown };
 
 StatusPage parseStatusPage(const char *uri) {
   if (uri == nullptr) {
@@ -498,8 +498,8 @@ StatusPage parseStatusPage(const char *uri) {
   if (strcmp(path, "/api/v1/status/admin") == 0) {
     return StatusPage::Admin;
   }
-  if (strcmp(path, "/api/v1/status/debug") == 0) {
-    return StatusPage::Debug;
+  if (strcmp(path, "/api/v1/status/diagnostic") == 0) {
+    return StatusPage::Diagnostic;
   }
   return StatusPage::Unknown;
 }
@@ -2587,7 +2587,7 @@ bool ShotStopperNetwork::startHttpServer() {
   // headroom for the HTML/JS/CSS boot burst plus LRU/TCP close. ESP-IDF uses
   // (max_open_sockets + 3) LWIP sockets total.
   config.max_open_sockets = 5;
-  config.max_uri_handlers = 37;
+  config.max_uri_handlers = 35;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
   // the IDF default (1024) is enough most of the time but intermittent
   // authenticated POSTs have returned 431 Request Header Fields Too Large.
@@ -2606,10 +2606,10 @@ bool ShotStopperNetwork::startHttpServer() {
 
   const bool registered =
       registerHandler(server_, "/", HTTP_GET, rootHandler) &&
+      registerHandler(server_, "/diagnostic", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/log", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/history", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/admin", HTTP_GET, rootHandler) &&
-      registerHandler(server_, "/debug", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/settings", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/app.js", HTTP_GET, jsHandler) &&
       registerHandler(server_, "/app.css", HTTP_GET, cssHandler) &&
@@ -2621,7 +2621,7 @@ bool ShotStopperNetwork::startHttpServer() {
                       statusHandler) &&
       registerHandler(server_, "/api/v1/status/admin", HTTP_GET,
                       statusHandler) &&
-      registerHandler(server_, "/api/v1/status/debug", HTTP_GET,
+      registerHandler(server_, "/api/v1/status/diagnostic", HTTP_GET,
                       statusHandler) &&
       registerHandler(server_, "/api/v1/log", HTTP_GET, logHandler) &&
       registerHandler(server_, "/api/v1/shots", HTTP_GET, shotsHandler) &&
@@ -2651,10 +2651,6 @@ bool ShotStopperNetwork::startHttpServer() {
                       stopHandler) &&
       registerHandler(server_, "/api/v1/control/restart", HTTP_POST,
                       restartHandler) &&
-      registerHandler(server_, "/api/v1/control/buzzer", HTTP_POST,
-                      buzzerHandler) &&
-      registerHandler(server_, "/api/v1/control/bookoo", HTTP_POST,
-                      bookooHandler) &&
       registerHandler(server_, "/api/v1/factory-reset", HTTP_POST,
                       factoryResetHandler) &&
       registerHandler(server_, "/api/v1/network", HTTP_POST, networkHandler) &&
@@ -3200,7 +3196,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   const StatusPage page = parseStatusPage(request->uri);
   if (page == StatusPage::Unknown) {
     return sendError(request, "404 Not Found", "STATUS_PAGE_UNKNOWN",
-                     "Unknown status page; use /api/v1/status/{home|settings|admin|debug}.");
+                     "Unknown status page; use /api/v1/status/{home|settings|admin|diagnostic}.");
   }
 
   // Serialize builds: g_statusResponseBuffer / presets / scale history are
@@ -3301,12 +3297,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   // is appended below so home/settings polls stay lean.
   bool ok = statusJsonAppend(
       &used,
-      "{\"firmwareVersion\":\"%s\",\"configMutable\":%s,\"liveShot\":%s",
+      "{\"firmwareVersion\":\"%s\",\"bootId\":%lu,\"configMutable\":%s,\"liveShot\":%s",
       safeFirmwareVersion,
+      static_cast<unsigned long>(control.bootId),
       controlAllowsConfiguration(control) ? "true" : "false",
       liveShot ? "true" : "false");
-  if (ok &&
-      (page == StatusPage::Settings || page == StatusPage::Debug)) {
+  if (ok && page == StatusPage::Settings) {
     ok = statusJsonAppend(&used, ",\"buzzerSupported\":%s",
                           BUZZER_SUPPORT_ENABLED ? "true" : "false");
   }
@@ -3324,9 +3320,11 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<int>(control.config.timezoneOffsetMinutes),
         ntpPresetId(control.config.ntpServerPreset), safeNtpCustom);
   }
-  if (ok && page == StatusPage::Debug) {
+  if (ok && page == StatusPage::Diagnostic) {
     ok = statusJsonAppend(
-        &used, ",\"serialDebugOutput\":%s",
+        &used,
+        ",\"timezoneOffsetMinutes\":%d,\"serialDebugOutput\":%s",
+        static_cast<int>(control.config.timezoneOffsetMinutes),
         control.config.serialDebugOutput ? "true" : "false");
   }
 
@@ -3535,6 +3533,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.scaleMacCachePauseRemainingMs),
         g_scaleHistoryJson, g_presetsStatusJson);
   } else if (ok && page == StatusPage::Admin) {
+    // Admin page: Wi-Fi/AP status + STA address form hydration only.
+    // Diagnostics metrics live on status/diagnostic.
     ok = statusJsonAppend(
         &used,
         ",\"network\":{\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
@@ -3544,7 +3544,27 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"rssi\":%s,\"signalQualityPct\":%s,"
         "\"configuredIp\":\"%s\",\"configuredNetmask\":\"%s\","
         "\"configuredGateway\":\"%s\",\"configuredDns1\":\"%s\","
-        "\"configuredDns2\":\"%s\"},"
+        "\"configuredDns2\":\"%s\"}",
+        network.apActive ? "true" : "false", network.apIp,
+        static_cast<unsigned>(network.apClients),
+        network.wifiConfigured ? "true" : "false", safeStaSsid,
+        network.staOpen ? "true" : "false", staStateName(network.staState),
+        network.staIp, staIpModeName(network.staIpMode),
+        staConfigStateName(network.staConfigState),
+        static_cast<unsigned long>(network.confirmRemainingMs), staRssiJson,
+        staSignalQualityJson, network.configuredIp, network.configuredNetmask,
+        network.configuredGateway, network.configuredDns1,
+        network.configuredDns2);
+  } else if (ok && page == StatusPage::Diagnostic) {
+    // Lean diagnostic snapshot: metrics + log controls only (no STA address
+    // form fields; those stay on status/admin).
+    ok = statusJsonAppend(
+        &used,
+        ",\"network\":{\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
+        "\"wifiConfigured\":%s,\"ssid\":\"%s\","
+        "\"staState\":\"%s\",\"staIp\":\"%s\",\"ipMode\":\"%s\","
+        "\"configState\":\"%s\",\"confirmRemainingMs\":%lu,"
+        "\"rssi\":%s,\"signalQualityPct\":%s},"
         "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
         "\"nextRetryInMs\":%lu,\"activeServer\":\"%s\"},"
         "\"maintenance\":{\"active\":%s,\"leaseId\":%lu,"
@@ -3563,13 +3583,11 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         network.apActive ? "true" : "false", network.apIp,
         static_cast<unsigned>(network.apClients),
         network.wifiConfigured ? "true" : "false", safeStaSsid,
-        network.staOpen ? "true" : "false", staStateName(network.staState),
-        network.staIp, staIpModeName(network.staIpMode),
+        staStateName(network.staState), network.staIp,
+        staIpModeName(network.staIpMode),
         staConfigStateName(network.staConfigState),
         static_cast<unsigned long>(network.confirmRemainingMs), staRssiJson,
-        staSignalQualityJson, network.configuredIp, network.configuredNetmask,
-        network.configuredGateway, network.configuredDns1,
-        network.configuredDns2, timeSyncStateName(timeStatus.state),
+        staSignalQualityJson, timeSyncStateName(timeStatus.state),
         static_cast<unsigned long>(timeStatus.utcSec),
         static_cast<unsigned long>(timeStatus.lastSyncAgeMs),
         static_cast<unsigned long>(timeStatus.nextRetryInMs), safeActiveServer,
@@ -4695,114 +4713,6 @@ esp_err_t ShotStopperNetwork::restartHandler(httpd_req_t *request) {
   WebCommand command;
   command.type = WebCommandType::RESTART;
   command.requestId = self.allocateRequestId();
-  if (!self.callbacks_.enqueueWebCommand(command)) {
-    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
-                     "Control queue is full.");
-  }
-  return self.sendAccepted(request, command.requestId);
-}
-
-esp_err_t ShotStopperNetwork::buzzerHandler(httpd_req_t *request) {
-  ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
-  if (!BUZZER_SUPPORT_ENABLED) {
-    return sendError(request, "403 Forbidden", "BUZZER_UNSUPPORTED",
-                     "Local buzzer is disabled in this firmware build.");
-  }
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
-    return sendError(request, STATUS_CONFLICT,
-                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
-                     "Stop the cycle and wait for Ready before testing the buzzer.");
-  }
-  char body[REQUEST_BODY_CAPACITY] = {};
-  char patternName[12] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "A JSON body is required.");
-  }
-  cJSON *root = cJSON_Parse(body);
-  static const char *const fields[] = {"pattern"};
-  BuzzerPattern pattern = BuzzerPattern::NONE;
-  const bool parsed =
-      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
-      jsonString(root, "pattern", patternName, sizeof(patternName), false) &&
-      parseBuzzerPatternId(patternName, pattern);
-  if (root != nullptr) {
-    cJSON_Delete(root);
-  }
-  if (!parsed) {
-    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
-                     "pattern must be short, long, double, triple, pulse2, pulse3, pulse4, pulse5, chime, swing, echo, echoinv, morse, or snap.");
-  }
-  WebCommand command;
-  command.type = WebCommandType::BUZZER_TEST;
-  command.requestId = self.allocateRequestId();
-  command.buzzerPattern = pattern;
-  if (!self.callbacks_.enqueueWebCommand(command)) {
-    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
-                     "Control queue is full.");
-  }
-  return self.sendAccepted(request, command.requestId);
-}
-
-esp_err_t ShotStopperNetwork::bookooHandler(httpd_req_t *request) {
-  ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
-    return sendError(request, STATUS_CONFLICT,
-                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
-                     "Stop the cycle and wait for Ready before sending Bookoo commands.");
-  }
-  if (!status.scaleAvailable ||
-      strcmp(status.scaleProtocol, "bookoo_generic") != 0) {
-    return sendError(request, STATUS_CONFLICT, "BOOKOO_SCALE_UNAVAILABLE",
-                     "Connect a Bookoo scale before sending debug commands.");
-  }
-  char body[REQUEST_BODY_CAPACITY] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "A JSON body is required.");
-  }
-  cJSON *root = cJSON_Parse(body);
-  char actionName[12] = {};
-  BookooDebugAction action = BookooDebugAction::START;
-  uint8_t beepLevel = 0;
-  bool parsed = false;
-  if (root != nullptr &&
-      jsonString(root, "action", actionName, sizeof(actionName), false) &&
-      parseBookooDebugActionId(actionName, action)) {
-    if (action == BookooDebugAction::VOLUME) {
-      static const char *const volumeFields[] = {"action", "level"};
-      parsed = jsonHasOnlyUniqueFields(root, volumeFields, 2) &&
-               jsonUint8(root, "level", beepLevel) &&
-               beepLevel <= BOOKOO_BEEP_LEVEL_MAX;
-    } else {
-      static const char *const actionFields[] = {"action"};
-      parsed = jsonHasOnlyUniqueFields(root, actionFields, 1);
-    }
-  }
-  if (root != nullptr) {
-    cJSON_Delete(root);
-  }
-  if (!parsed) {
-    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
-                     "action must be start, stop, tare, combined, beep, or volume with level 0-5.");
-  }
-  WebCommand command;
-  command.type = WebCommandType::BOOKOO_DEBUG;
-  command.requestId = self.allocateRequestId();
-  command.bookooDebugAction = action;
-  command.bookooBeepLevel = beepLevel;
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control queue is full.");

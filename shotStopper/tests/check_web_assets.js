@@ -679,8 +679,10 @@ if (!ui.includes('<legend>Brew</legend>') ||
   throw new Error('Brew presets CRUD UI must block factory delete, support reset, click-to-load, and unsaved switch confirm');
 }
 {
+  const diagHtml = html.slice(html.indexOf('id="view-diagnostic"'),
+                              html.indexOf('</section>', html.indexOf('id="view-diagnostic"')) + 10);
   const adminHtml = html.slice(html.indexOf('id="view-admin"'),
-                               html.indexOf('id="view-debug"'));
+                               html.indexOf('id="firmwareFooter"'));
   const statusHtml = html.slice(html.indexOf('id="statusPanel"'),
                                 html.indexOf('id="actionsPanel"'));
   if (!ui.includes('id="hCpu"') ||
@@ -696,6 +698,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes('id="hRamF"') ||
       !ui.includes('function updH(') ||
       !ui.includes('updH(s.health,s.safety)') ||
+      !ui.includes('function applyDiagnosticStatus(') ||
       !ui.includes('h.uptimeMs') ||
       !ui.includes('resetReasonCode') ||
       !ui.includes("RR[s.resetReasonCode]") ||
@@ -705,24 +708,23 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !network.includes('ramTotalBytes') ||
       !network.includes('\\"uptimeMs\\"') ||
       !network.includes('\\"resetReasonCode\\"') ||
-      !adminHtml.includes('<summary>Diagnostics</summary>') ||
-      !adminHtml.includes('id="currentTime"') ||
-      !adminHtml.includes('id="ntpStatus"') ||
-      adminHtml.indexOf('<summary>Diagnostics</summary>') >
-          adminHtml.indexOf('id="currentTime"') ||
-      adminHtml.indexOf('id="currentTime"') >
-          adminHtml.indexOf('id="ntpStatus"') ||
-      adminHtml.indexOf('id="ntpStatus"') >
-          adminHtml.indexOf('id="hWifi"') ||
-      adminHtml.indexOf('id="dateTimePanel"') >
-          adminHtml.indexOf('<summary>Diagnostics</summary>') ||
-      adminHtml.indexOf('<summary>Diagnostics</summary>') >
-          adminHtml.indexOf('id="restartPanel"') ||
-      statusHtml.includes('<summary>Diagnostics</summary>') ||
+      !diagHtml.includes('id="diagnosticsPanel"') ||
+      !diagHtml.includes('<legend>Diagnostics</legend>') ||
+      diagHtml.includes('<details') ||
+      diagHtml.includes('<summary>Diagnostics</summary>') ||
+      !diagHtml.includes('id="currentTime"') ||
+      !diagHtml.includes('id="ntpStatus"') ||
+      diagHtml.indexOf('id="diagnosticsPanel"') > diagHtml.indexOf('id="logPanel"') ||
+      diagHtml.indexOf('id="currentTime"') > diagHtml.indexOf('id="ntpStatus"') ||
+      diagHtml.indexOf('id="ntpStatus"') > diagHtml.indexOf('id="hWifi"') ||
+      adminHtml.includes('id="diagnosticsPanel"') ||
+      adminHtml.includes('id="currentTime"') ||
+      adminHtml.includes('<summary>Diagnostics</summary>') ||
       statusHtml.includes('id="currentTime"') ||
-      statusHtml.includes('id="ntpStatus"')) {
+      statusHtml.includes('id="ntpStatus"') ||
+      css.includes('diagGroup')) {
     throw new Error(
-        'Diagnostics must live on Admin after Date & time, with Current time/NTP first, and expose hwmon metrics in UI and status API');
+        'Diagnostics must be a non-collapsible fieldset at the top of Diagnostic, above Log, with Current time/NTP first');
   }
 }
 if (!ui.includes('id="shotTable"') ||
@@ -745,6 +747,7 @@ if (!ui.includes('id="firmwareFooter"') ||
     !ui.includes('firmwareVersion') ||
     !ui.includes('updateFirmwareFooter()') ||
     !network.includes('\\"firmwareVersion\\"') ||
+    !network.includes('\\"bootId\\":%lu') ||
     !network.includes('FW_VERSION')) {
   throw new Error('Firmware version must be exposed in status API and web footer');
 }
@@ -752,12 +755,33 @@ if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
     !ui.includes('loadLog()') ||
     !ui.includes('refreshLog()') ||
-    !ui.includes("name==='log'") ||
-    !ui.includes('id="view-log"') ||
+    !ui.includes("name==='diagnostic'") ||
+    !ui.includes('id="view-diagnostic"') ||
+    !ui.includes('data-route="/diagnostic"') ||
+    !html.includes('>Diagnostic</a>') ||
     !ui.includes('id="logLevelFilter"') ||
     !ui.includes('e.level') ||
-    !ui.includes('value="boot"')) {
-  throw new Error('Diagnostic log must remain a public view with view-scoped refresh');
+    !ui.includes('value="boot"') ||
+    html.indexOf('id="ringRetainLogLevel"') < html.indexOf('id="view-diagnostic"') ||
+    html.indexOf('id="ringRetainLogLevel"') >
+        html.indexOf('</section>', html.indexOf('id="view-diagnostic"')) ||
+    html.indexOf('id="serialDebugOutput"') < html.indexOf('id="view-diagnostic"') ||
+    html.indexOf('id="serialDebugOutput"') >
+        html.indexOf('</section>', html.indexOf('id="view-diagnostic"')) ||
+    html.indexOf('id="ringRetainLogLevel"') > html.indexOf('id="serialDebugOutput"') ||
+    !html.includes('id="serialDebugOutput" class="mutable"') ||
+    !html.includes('id="ringRetainLogLevel" class="mutable"') ||
+    html.includes('id="navLogWrap"') ||
+    ui.includes('function ringLogEnabled(') ||
+    ui.includes('function updateLogNavVisibility(') ||
+    !html.includes('<hr class="logSep">') ||
+    html.indexOf('<hr class="logSep">') < html.indexOf('id="serialDebugOutput"') ||
+    html.indexOf('<hr class="logSep">') > html.indexOf('id="logLevelFilter"') ||
+    !css.includes('.logSep') ||
+    html.includes('data-route="/debug"') ||
+    html.includes('id="view-debug"') ||
+    html.includes('id="view-log"')) {
+  throw new Error('Diagnostic tab must host always-visible Log with ring/serial controls and separator');
 }
 if (!ui.includes('id="factoryResetButton"') ||
     !ui.includes("confirm('Restore all factory settings?") ||
@@ -771,74 +795,24 @@ if (!ui.includes('id="factoryResetButton"') ||
         .includes('restartButton')) {
   throw new Error('Factory reset must require UI and server-side confirmation');
 }
-if (!ui.includes('id="debugPanel"') ||
-    !html.includes('id="debugPanel" class="authenticatedOnly hidden"') ||
-    !ui.includes('id="bookooStartButton"') ||
-    !ui.includes('id="bookooStopButton"') ||
-    !ui.includes('id="bookooTareButton"') ||
-    !ui.includes('id="bookooCombinedButton"') ||
-    !ui.includes('id="bookooBeepButton"') ||
-    !ui.includes('id="bookooVol0Button"') ||
-    !ui.includes('id="bookooVol5Button"') ||
-    !ui.includes('/api/v1/control/bookoo') ||
-    !ui.includes('function debugBookoo(') ||
-    !ui.includes("['bookooStartButton','start']") ||
-    !ui.includes("debugBookoo('volume',{level:n})") ||
-    !ui.includes('id="beepShortButton"') ||
-    !ui.includes('id="beepLongButton"') ||
-    !ui.includes('id="beepDoubleButton"') ||
-    !ui.includes('id="beepTripleButton"') ||
-    !ui.includes('id="beepPulse2Button"') ||
-    !ui.includes('id="beepPulse3Button"') ||
-    !ui.includes('id="beepPulse4Button"') ||
-    !ui.includes('id="beepPulse5Button"') ||
-    !ui.includes('id="beepChimeButton"') ||
-    !ui.includes('id="beepSwingButton"') ||
-    !ui.includes('id="beepEchoButton"') ||
-    !ui.includes('id="beepEchoInvertedButton"') ||
-    !html.includes('Echo inverted') ||
-    !ui.includes('id="beepMorseButton"') ||
-    !ui.includes('id="beepSnapButton"') ||
-    !ui.includes('/api/v1/control/buzzer') ||
-    !ui.includes("['beepShortButton','short']") ||
-    !ui.includes("['beepLongButton','long']") ||
-    !ui.includes("['beepDoubleButton','double']") ||
-    !ui.includes("['beepTripleButton','triple']") ||
-    !ui.includes("['beepPulse2Button','pulse2']") ||
-    !ui.includes("['beepPulse3Button','pulse3']") ||
-    !ui.includes("['beepPulse4Button','pulse4']") ||
-    !ui.includes("['beepPulse5Button','pulse5']") ||
-    !ui.includes("['beepChimeButton','chime']") ||
-    !ui.includes("['beepSwingButton','swing']") ||
-    !ui.includes("['beepEchoButton','echo']") ||
-    !ui.includes("['beepEchoInvertedButton','echoinv']") ||
-    !ui.includes("['beepMorseButton','morse']") ||
-    !ui.includes("['beepSnapButton','snap']") ||
-    !ui.includes('function debugBuzzer(') ||
-    !ui.includes('Shown with SHOT_STOPPER_ENABLE_BUZZER') ||
-    html.indexOf('id="view-debug"') < 0 ||
-    html.indexOf('id="debugPanel"') < html.indexOf('id="view-debug"') ||
-    html.indexOf('id="debugPanel"') >
-        html.indexOf('</section>', html.indexOf('id="view-debug"')) ||
-    html.indexOf('id="serialDebugOutput"') < html.indexOf('id="debugPanel"') ||
-    html.indexOf('id="serialDebugOutput"') >
-        html.indexOf('</section>', html.indexOf('id="view-debug"')) ||
-    html.slice(html.indexOf('id="view-admin"'), html.indexOf('id="view-debug"'))
-        .includes('id="debugPanel"') ||
-    html.indexOf('data-route="/admin"') > html.indexOf('data-route="/debug"') ||
-    html.indexOf('data-route="/debug"') > html.indexOf('data-route="/log"') ||
-    !html.includes('id="serialDebugOutput" class="mutable"') ||
-    !html.includes('id="ringRetainLogLevel" class="mutable"') ||
-    html.indexOf('id="ringRetainLogLevel"') > html.indexOf('id="serialDebugOutput"') ||
-    !(ui.includes("if($('serialDebugOutput'))$('serialDebugOutput').checked=!!c.serialDebugOutput") ||
+if (html.includes('id="debugPanel"') ||
+    html.includes('id="view-debug"') ||
+    html.includes('data-route="/debug"') ||
+    ui.includes('function debugBuzzer(') ||
+    ui.includes('function debugBookoo(') ||
+    ui.includes('/api/v1/control/buzzer') ||
+    ui.includes('/api/v1/control/bookoo') ||
+    network.includes('buzzerHandler') ||
+    network.includes('bookooHandler') ||
+    network.includes('/api/v1/status/debug') ||
+    network.includes('"/debug"') ||
+    network.includes('StatusPage::Debug')) {
+  throw new Error('Debug tab/API must be removed from Web UI and network handlers');
+}
+if (!(ui.includes("if($('serialDebugOutput'))$('serialDebugOutput').checked=!!c.serialDebugOutput") ||
          ui.includes("$('serialDebugOutput').checked=!!c.serialDebugOutput")) ||
     !(ui.includes("if($('ringRetainLogLevel'))$('ringRetainLogLevel').value=c.ringRetainLogLevel||'none'") ||
          ui.includes("$('ringRetainLogLevel').value=c.ringRetainLogLevel||'none'")) ||
-    !ui.includes('function ringLogEnabled(') ||
-    !ui.includes('function updateLogNavVisibility(') ||
-    !ui.includes('id="navLogWrap"') ||
-    !ui.includes("p==='/log'&&!ringLogEnabled()") ||
-    !ui.includes('updateLogNavVisibility();') ||
     firmware.indexOf('serialLogLevel = serialLogLevelFromRuntime',
                      firmware.indexOf('persistenceReady = EEPROM.begin')) < 0 ||
     firmware.indexOf('serialLogLevel = serialLogLevelFromRuntime',
@@ -858,8 +832,6 @@ if (!ui.includes('id="debugPanel"') ||
     html.indexOf('id="ruleChart"') < html.indexOf('id="homePresetCards"') ||
     html.indexOf('id="ruleChart"') > html.indexOf('id="shotPanel"') ||
     html.includes('Extraction rules') ||
-    (html.indexOf('id="ruleChart"') > html.indexOf('id="debugPanel"') &&
-      html.indexOf('id="ruleChart"') < html.indexOf('id="serialDebugOutput"')) ||
     !css.includes('.ruleChart') ||
     !css.includes('.ruleSeg-fast') ||
     !css.includes('.ruleSeg-bbw') ||
@@ -890,21 +862,12 @@ if (!ui.includes('id="debugPanel"') ||
     !firmware.includes('SCALE_STATUS') ||
     !firmware.includes('NTP_STATUS') ||
     !firmware.includes('NET_STATUS') ||
-    !network.includes('buzzerHandler') ||
-    !network.includes('bookooHandler') ||
-    !network.includes('BUZZER_UNSUPPORTED') ||
-    !network.includes('BOOKOO_SCALE_UNAVAILABLE') ||
-    !network.includes('WebCommandType::BUZZER_TEST') ||
-    !network.includes('WebCommandType::BOOKOO_DEBUG') ||
-    !network.includes('parseBuzzerPatternId') ||
-    !network.includes('echoinv') ||
-    !network.includes('parseBookooDebugActionId') ||
     !firmware.includes('WebCommandType::BUZZER_TEST') ||
     !firmware.includes('WebCommandType::BOOKOO_DEBUG') ||
     !firmware.includes('localBuzzer.request(command.buzzerPattern)') ||
     !firmware.includes('enqueueScaleDebugCommand') ||
     !firmware.includes('executeScaleDebugCommand')) {
-  throw new Error('Debug page must expose Bookoo BLE commands and buzzer tests');
+  throw new Error('Ring/serial config, rule chart, CLI, and scale/buzzer command paths must remain');
 }
 if (!ui.includes('id="staIpMode"') ||
     !ui.includes('id="staStaticIp"') ||
@@ -924,9 +887,9 @@ if (!ui.includes('id="staIpMode"') ||
     !ui.includes("n.rssi") ||
     !ui.includes('signal ') ||
     !ui.includes(' dBm)') ||
-    !ui.includes("$('hWifi').textContent=$('networkStatus').textContent") ||
+    !ui.includes("$('hWifi').textContent=formatNetworkStatus(s.network)") ||
     !ui.includes("$('hSsid').textContent=s.network.ssid||'—'") ||
-    !ui.includes("$('hAp').textContent=$('apStatus').textContent") ||
+    !ui.includes("$('hAp').textContent='AP: '+(s.network.apActive?'active':'inactive')") ||
     !html.includes('<strong>WiFi</strong><div id="hWifi">') ||
     !html.includes('<strong>SSID</strong><div id="hSsid">') ||
     !html.includes('<strong>AP</strong><div id="hAp">') ||
@@ -1000,10 +963,10 @@ if (/<link\s+[^>]*href=["']https?:\/\//i.test(html) ||
 
 const expected = new Map([
   ['GET /', 'rootHandler'],
+  ['GET /diagnostic', 'rootHandler'],
   ['GET /log', 'rootHandler'],
   ['GET /history', 'rootHandler'],
   ['GET /admin', 'rootHandler'],
-  ['GET /debug', 'rootHandler'],
   ['GET /settings', 'rootHandler'],
   ['GET /app.js', 'jsHandler'],
   ['GET /app.css', 'cssHandler'],
@@ -1012,7 +975,7 @@ const expected = new Map([
   ['GET /api/v1/status/home', 'statusHandler'],
   ['GET /api/v1/status/settings', 'statusHandler'],
   ['GET /api/v1/status/admin', 'statusHandler'],
-  ['GET /api/v1/status/debug', 'statusHandler'],
+  ['GET /api/v1/status/diagnostic', 'statusHandler'],
   ['GET /api/v1/log', 'logHandler'],
   ['POST /api/v1/config', 'configHandler'],
   ['POST /api/v1/scale/preferred/clear', 'preferredScaleClearHandler'],
@@ -1024,8 +987,6 @@ const expected = new Map([
   ['POST /api/v1/control/rinse', 'rinseHandler'],
   ['POST /api/v1/control/stop', 'stopHandler'],
   ['POST /api/v1/control/restart', 'restartHandler'],
-  ['POST /api/v1/control/buzzer', 'buzzerHandler'],
-  ['POST /api/v1/control/bookoo', 'bookooHandler'],
   ['POST /api/v1/factory-reset', 'factoryResetHandler'],
   ['GET /api/v1/shots', 'shotsHandler'],
   ['POST /api/v1/shots/clear', 'shotsClearHandler'],
@@ -1045,8 +1006,8 @@ if (!maxSocketsMatch || Number(maxSocketsMatch[1]) < 5) {
 if (!network.includes('/api/v1/status/home') ||
     !network.includes('/api/v1/status/settings') ||
     !network.includes('/api/v1/status/admin') ||
-    !network.includes('/api/v1/status/debug')) {
-  throw new Error('Status API must expose per-page /api/v1/status/{home|settings|admin|debug}');
+    !network.includes('/api/v1/status/diagnostic')) {
+  throw new Error('Status API must expose per-page /api/v1/status/{home|settings|admin|diagnostic}');
 }
 if (!network.includes('statusResponseMux_') ||
     !network.includes('STATUS_BUSY')) {
@@ -1117,7 +1078,7 @@ if (!ui.includes('async function loadStatus(){') ||
     !ui.includes('function refreshStatus(){return withPollGate(loadStatus)}') ||
     !ui.includes('function refreshShots(){return withPollGate(loadShots)}') ||
     !ui.includes('function refreshLog(){return withPollGate(loadLog)}') ||
-    !ui.includes("name==='home'||name==='settings'||name==='admin'||name==='debug'") ||
+    !ui.includes("name==='home'||name==='settings'||name==='admin'||name==='diagnostic'") ||
     ui.includes("name==='presets'") ||
     !ui.includes("name==='history'") ||
     !ui.includes('renderRoute(location.pathname)') ||
@@ -1129,13 +1090,16 @@ if (!ui.includes('id="view-home"') ||
     !ui.includes('id="view-settings"') ||
     ui.includes('id="view-presets"') ||
     !ui.includes('id="view-admin"') ||
-    !ui.includes('id="view-debug"') ||
+    ui.includes('id="view-debug"') ||
+    !ui.includes('id="view-diagnostic"') ||
+    ui.includes('id="view-log"') ||
     !ui.includes('data-route="/settings"') ||
     ui.includes('data-route="/presets"') ||
     !ui.includes('data-route="/admin"') ||
-    !ui.includes('data-route="/debug"') ||
+    ui.includes('data-route="/debug"') ||
+    !ui.includes('data-route="/diagnostic"') ||
     !ui.includes('history.pushState')) {
-  throw new Error('Web UI must expose Home/History/Admin/Debug/Log/Settings routes as an SPA');
+  throw new Error('Web UI must expose Home/History/Admin/Diagnostic/Settings routes as an SPA');
 }
 const maxHandlersMatch = network.match(/max_uri_handlers\s*=\s*(\d+)/);
 if (!maxHandlersMatch) {
@@ -1158,7 +1122,7 @@ for (const [route, handler] of expected) {
     throw new Error(`Missing HTTP registration: ${route} -> ${handler}`);
   }
   if (uri !== '/' && !ui.includes(uri.split('?')[0])) {
-    const statusPage = uri.match(/^\/api\/v1\/status\/(home|settings|admin|debug)$/);
+    const statusPage = uri.match(/^\/api\/v1\/status\/(home|settings|admin|diagnostic)$/);
     if (!(statusPage && ui.includes('function statusUrl(') && ui.includes('/api/v1/status/'))) {
       throw new Error(`Registered API is not referenced by the UI: ${uri}`);
     }
@@ -1178,12 +1142,15 @@ for (const field of forbiddenResponseFields) {
     throw new Error(`Secret field exposed by status JSON: ${field}`);
   }
 }
-// Shared status envelope: firmware/mutable/liveShot/ringRetain only.
-// NTP → admin; serialDebug → debug; buzzerSupported → settings|debug.
+// Shared status envelope: firmware/bootId/mutable/liveShot/ringRetain only.
+// NTP → admin; serialDebug/diagnostics → diagnostic; buzzerSupported → settings.
 if (!statusFormat.includes(
-        '{\\"firmwareVersion\\":\\"%s\\",\\"configMutable\\":%s,\\"liveShot\\":%s"')) {
+        '{\\"firmwareVersion\\":\\"%s\\",\\"bootId\\":%lu,\\"configMutable\\":%s,' +
+            '\\"liveShot\\":%s"') ||
+    !ui.includes("typeof s.bootId==='number'") ||
+    !ui.includes('updateFirmwareFooter()')) {
   throw new Error(
-      'Status shared envelope must open with firmwareVersion/configMutable/liveShot only');
+      'Status shared envelope must open with firmwareVersion/bootId/configMutable/liveShot');
 }
 if (/buzzerSupported.*liveShot|liveShot.*buzzerSupported/.test(
         statusFormat.slice(
@@ -1191,10 +1158,10 @@ if (/buzzerSupported.*liveShot|liveShot.*buzzerSupported/.test(
             statusFormat.indexOf('{\\"firmwareVersion\\"') + 200))) {
   throw new Error('buzzerSupported must not ride in the shared status open append');
 }
-if (!statusFormat.includes(
-        'page == StatusPage::Settings || page == StatusPage::Debug') ||
-    !statusFormat.includes(',\\"buzzerSupported\\":%s')) {
-  throw new Error('buzzerSupported must be gated to status settings|debug');
+if (!statusFormat.includes('page == StatusPage::Settings') ||
+    !statusFormat.includes(',\\"buzzerSupported\\":%s') ||
+    statusFormat.includes('StatusPage::Debug')) {
+  throw new Error('buzzerSupported must be gated to status settings only');
 }
 if (!statusFormat.includes('page == StatusPage::Admin') ||
     !statusFormat.includes('\\"timezoneOffsetMinutes\\":%d') ||
@@ -1202,9 +1169,113 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
     !statusFormat.includes('\\"ntpServerCustom\\":\\"%s\\"')) {
   throw new Error('NTP/timezone config must be gated to status admin');
 }
-if ((statusFormat.match(/page == StatusPage::Debug/g) || []).length < 1 ||
-    !statusFormat.includes(',\\"serialDebugOutput\\":%s')) {
-  throw new Error('serialDebugOutput must be gated to status debug');
+{
+  const adminMarker = statusFormat.indexOf('Admin page: Wi-Fi/AP status');
+  if (adminMarker < 0) {
+    throw new Error('status/admin must use an Admin-only network body');
+  }
+  const adminBody = statusFormat.slice(
+      adminMarker, statusFormat.indexOf('} else if (ok && page == StatusPage::Diagnostic)',
+                                        adminMarker));
+  for (const field of [
+    'apActive', 'apIp', 'apClients', 'wifiConfigured', 'ssid', 'open',
+    'staState', 'staIp', 'ipMode', 'configState', 'confirmRemainingMs', 'rssi',
+    'signalQualityPct', 'configuredIp', 'configuredNetmask', 'configuredGateway',
+    'configuredDns1', 'configuredDns2'
+  ]) {
+    if (!adminBody.includes(field)) {
+      throw new Error('status/admin missing required network field: ' + field);
+    }
+  }
+  // Transversal fields used by Admin (footer + config revision + NTP form)
+  if (!statusFormat.includes('\\"bootId\\":%lu') ||
+      !statusFormat.includes('\\"firmwareVersion\\"') ||
+      !statusFormat.includes('\\"configMutable\\"') ||
+      !statusFormat.includes('\\"liveShot\\"') ||
+      !statusFormat.includes('\\"ringRetainLogLevel\\"') ||
+      !ui.includes("typeof s.bootId==='number'") ||
+      !ui.includes('function applyAdminStatus(') ||
+      !ui.includes('function loadAdminConfig(') ||
+      !ui.includes('loadNetworkAddress(s.network)')) {
+    throw new Error(
+        'status/admin must keep transversal bootId/firmware/liveShot and Admin network/NTP wiring');
+  }
+  // Diagnostics metrics must not ride on status/admin anymore
+  for (const forbidden of [
+    'maintenance', 'persistPending', 'hwmon', 'uptimeMs', 'resetReasonCode',
+    'packetGaps', 'lastCommand', 'utcSec', 'activeServer', 'serialDebugOutput',
+    'buzzerSupported', 'presets', 'brewByWeight'
+  ]) {
+    if (adminBody.includes(forbidden)) {
+      throw new Error(
+          'status/admin must not include Diagnostic/settings-only field: ' +
+          forbidden);
+    }
+  }
+  if (!ui.includes(
+          "v==='admin'?!!(s.network&&typeof c.timezoneOffsetMinutes==='number'&&c.ntpServerPreset!=null)")) {
+    throw new Error(
+        'statusPageOk(admin) must validate network + NTP config only');
+  }
+}
+if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
+    !statusFormat.includes(',\\"serialDebugOutput\\":%s') ||
+    !statusFormat.includes('StatusPage::Diagnostic')) {
+  throw new Error('serialDebugOutput and diagnostic metrics must be gated to status diagnostic');
+}
+{
+  const leanMarker = statusFormat.indexOf('Lean diagnostic snapshot');
+  if (leanMarker < 0) {
+    throw new Error('status/diagnostic must use a lean Diagnostic-only body');
+  }
+  const diagBody = statusFormat.slice(
+      leanMarker, statusFormat.indexOf('if (ok) {', leanMarker));
+  for (const field of [
+    'apActive', 'apIp', 'apClients', 'wifiConfigured', 'ssid', 'staState',
+    'staIp', 'ipMode', 'configState', 'confirmRemainingMs', 'rssi',
+    'signalQualityPct', 'utcSec', 'lastSyncAgeMs', 'nextRetryInMs',
+    'activeServer', 'maintenance', 'persistPending', 'uptimeMs', 'hwmon',
+    'resetReasonCode', 'packetGaps', 'rejectedPackets', 'reconnects',
+    'eventsDropped', 'lastCommand'
+  ]) {
+    if (!diagBody.includes(field)) {
+      throw new Error('status/diagnostic missing required field: ' + field);
+    }
+  }
+  // Transversal fields used by Diagnostic (footer + log controls + mutability)
+  if (!statusFormat.includes('\\"bootId\\":%lu') ||
+      !statusFormat.includes('\\"firmwareVersion\\"') ||
+      !statusFormat.includes('\\"configMutable\\"') ||
+      !statusFormat.includes('\\"liveShot\\"') ||
+      !statusFormat.includes('\\"ringRetainLogLevel\\"') ||
+      !statusFormat.includes('\\"timezoneOffsetMinutes\\":%d') ||
+      !ui.includes("typeof s.bootId==='number'") ||
+      !ui.includes('function applyDiagnosticStatus(')) {
+    throw new Error(
+        'status/diagnostic must keep transversal bootId/firmware/liveShot/ringRetain for the Diagnostic page');
+  }
+  for (const forbidden of [
+    'configuredIp', 'configuredNetmask', 'configuredGateway', 'configuredDns1',
+    'configuredDns2'
+  ]) {
+    if (diagBody.includes(forbidden)) {
+      throw new Error(
+          'status/diagnostic must not include Admin-only network field: ' +
+          forbidden);
+    }
+  }
+  // "open" appears only on Admin network object, not Diagnostic lean body.
+  if (/\\"open\\"/.test(diagBody)) {
+    throw new Error('status/diagnostic must not include Admin-only network open flag');
+  }
+  if (diagBody.includes('ntpServerPreset') ||
+      diagBody.includes('ntpServerCustom') ||
+      diagBody.includes('buzzerSupported') ||
+      diagBody.includes('presets') ||
+      diagBody.includes('brewByWeight')) {
+    throw new Error(
+        'status/diagnostic must not include settings/admin-only payload fields');
+  }
 }
 const sharedRingOpen = statusFormat.indexOf(
     ',\\"config\\":{\\"revision\\":%lu,\\"ringRetainLogLevel\\":\\"%s\\"');

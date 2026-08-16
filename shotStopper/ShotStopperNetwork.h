@@ -341,8 +341,6 @@ class ShotStopperNetwork {
   static esp_err_t rinseHandler(httpd_req_t *request);
   static esp_err_t stopHandler(httpd_req_t *request);
   static esp_err_t restartHandler(httpd_req_t *request);
-  static esp_err_t buzzerHandler(httpd_req_t *request);
-  static esp_err_t bookooHandler(httpd_req_t *request);
   static esp_err_t factoryResetHandler(httpd_req_t *request);
   static esp_err_t networkHandler(httpd_req_t *request);
   static esp_err_t wifiScanStartHandler(httpd_req_t *request);
