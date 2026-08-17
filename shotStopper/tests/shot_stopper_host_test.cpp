@@ -1065,7 +1065,7 @@ void r03_non_finite_weights_cannot_corrupt_state_or_offset() {
   currentWeight = std::numeric_limits<float>::quiet_NaN();
   currentWeightSequence = 1;
   currentWeightReceivedAtMs = hostMillis + 1;
-  runLoopAfter(DRIP_DELAY_MS);
+  runLoopAfter(pendingFinalize.dripDelayMs);
   CHECK(!pendingFinalize.pending);
   CHECK(isfinite(runtimeConfig.weightOffsetG));
   CHECK(runtimeConfig.weightOffsetG == originalOffset);
@@ -1293,7 +1293,7 @@ void r11_final_shot_analysis_updates_only_valid_offset() {
   currentWeight = DEFAULT_GOAL_WEIGHT_G + 1.0f;
   currentWeightSequence = 1;
   currentWeightReceivedAtMs = hostMillis + 1;
-  runLoopAfter(DRIP_DELAY_MS);
+  runLoopAfter(pendingFinalize.dripDelayMs);
   finishHostMaintenance();
   CHECK(fabsf(runtimeConfig.weightOffsetG - 2.5f) < 0.001f);
 
@@ -1307,7 +1307,7 @@ void r11_final_shot_analysis_updates_only_valid_offset() {
   currentWeight = DEFAULT_GOAL_WEIGHT_G + MAX_OFFSET_G + 1.0f;
   ++currentWeightSequence;
   currentWeightReceivedAtMs = hostMillis + 1;
-  runLoopAfter(DRIP_DELAY_MS);
+  runLoopAfter(pendingFinalize.dripDelayMs);
   CHECK(runtimeConfig.weightOffsetG == validOffset);
 
   pendingFinalize.pending = true;
@@ -1319,7 +1319,7 @@ void r11_final_shot_analysis_updates_only_valid_offset() {
   currentWeight = 32.0f;
   ++currentWeightSequence;
   currentWeightReceivedAtMs = hostMillis + 1;
-  runLoopAfter(DRIP_DELAY_MS);
+  runLoopAfter(pendingFinalize.dripDelayMs);
   finishHostMaintenance();
   CHECK(fabsf(runtimeConfig.weightOffsetG) < 0.001f);
 }
@@ -1338,7 +1338,7 @@ void r58_extended_shot_does_not_learn_weight_offset() {
   currentWeight = DEFAULT_GOAL_WEIGHT_G + 3.0f;
   currentWeightSequence = 1;
   currentWeightReceivedAtMs = hostMillis + 1;
-  runLoopAfter(DRIP_DELAY_MS);
+  runLoopAfter(pendingFinalize.dripDelayMs);
   finishHostMaintenance();
   CHECK(runtimeConfig.weightOffsetG == originalOffset);
 }
@@ -1357,7 +1357,7 @@ void r65_slow_extended_shot_does_not_learn_weight_offset() {
   currentWeight = DEFAULT_GOAL_WEIGHT_G - 6.0f;
   currentWeightSequence = 1;
   currentWeightReceivedAtMs = hostMillis + 1;
-  runLoopAfter(DRIP_DELAY_MS);
+  runLoopAfter(pendingFinalize.dripDelayMs);
   finishHostMaintenance();
   CHECK(runtimeConfig.weightOffsetG == originalOffset);
 }
@@ -1639,6 +1639,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.maxBrewTimeMs == DEFAULT_MAX_BREW_TIME_MS);
   CHECK(config.avoidBbwShotWithoutScale);
   CHECK(config.lastShotCooldownMs == DEFAULT_LAST_SHOT_COOLDOWN_MS);
+  CHECK(config.dripDelayMs == DEFAULT_DRIP_DELAY_MS);
   CHECK(!config.serialDebugOutput);
   CHECK(config.ringRetainLogLevel == static_cast<uint8_t>(LogLevel::NONE));
   CHECK(config.paddleMode == static_cast<uint8_t>(PaddleMode::NATURAL));
@@ -1725,6 +1726,13 @@ void w03_runtime_timing_relations_are_transactional() {
   config.lastShotCooldownMs = MAX_LAST_SHOT_COOLDOWN_MS + 1;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::LAST_SHOT_COOLDOWN);
+  config = RuntimeConfig{};
+  config.dripDelayMs = MIN_DRIP_DELAY_MS;
+  CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
+  config.dripDelayMs = MAX_DRIP_DELAY_MS;
+  CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
+  config.dripDelayMs = MAX_DRIP_DELAY_MS + 1;
+  CHECK(validateRuntimeConfig(config) == ConfigValidationError::DRIP_DELAY);
   config = RuntimeConfig{};
   config.ringRetainLogLevel = static_cast<uint8_t>(LogLevel::NONE) + 1;
   CHECK(validateRuntimeConfig(config) ==
@@ -3815,11 +3823,13 @@ void w86_config_applies_to_ram_immediately_and_coalesces() {
   first.type = WebCommandType::APPLY_CONFIG;
   first.config = runtimeConfig;
   first.config.avoidBbwShotWithoutScale = !originalAvoid;
+  first.config.dripDelayMs = 4200;
   processWebCommand(first);
   CHECK(!maintenanceLease.active);
   CHECK(runtimeConfig.avoidBbwShotWithoutScale == !originalAvoid);
   CHECK(runtimeConfig.lastShotCooldownMs == originalCooldown);
   CHECK(runtimeConfig.autoTare == originalAutoTare);
+  CHECK(runtimeConfig.dripDelayMs == 4200);
   CHECK(runtimeConfig.revision == firstRevision + 1);
   CHECK(runtimePersistPending);
 
@@ -4852,7 +4862,7 @@ void s02_shot_log_appends_after_drip_delay() {
   pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
   pendingFinalize.weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
   pendingFinalize.endedAtMs = hostMillis;
-  runLoopAfter(DRIP_DELAY_MS);
+  runLoopAfter(pendingFinalize.dripDelayMs);
   CHECK(!pendingFinalize.pending);
   CHECK(shotLog.count() == 1);
   ShotLogRecord records[1] = {};
@@ -4860,6 +4870,34 @@ void s02_shot_log_appends_after_drip_delay() {
   CHECK(records[0].durationDs == 120);
   CHECK(records[0].shotType ==
         static_cast<uint8_t>(ShotLogType::MANUAL));
+}
+
+void s02b_drip_delay_is_snapshotted_and_honors_boundaries() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  session.config = snapshotConfig(runtimeConfig);
+  session.config.dripDelayMs = 1700;
+  schedulePendingShotFinalize(EndReason::PADDLE, 12000);
+  CHECK(pendingFinalize.dripDelayMs == 1700);
+
+  pendingFinalize = PendingShotFinalize{};
+  pendingFinalize.pending = true;
+  pendingFinalize.dripDelayMs = 2500;
+  pendingFinalize.endedAtMs = hostMillis;
+
+  runtimeConfig.dripDelayMs = 0;
+  runLoopAfter(2499);
+  CHECK(pendingFinalize.pending);
+  CHECK(pendingFinalize.dripDelayMs == 2500);
+  runLoopAfter(1);
+  CHECK(!pendingFinalize.pending);
+
+  pendingFinalize = PendingShotFinalize{};
+  pendingFinalize.pending = true;
+  pendingFinalize.dripDelayMs = 0;
+  pendingFinalize.endedAtMs = hostMillis;
+  runLoopAfter(0);
+  CHECK(!pendingFinalize.pending);
 }
 
 void s17_new_cycle_commits_pending_log_as_last_known() {
@@ -4961,7 +4999,7 @@ void s15_last_shot_updates_weight_after_drip() {
   pendingFinalize.lastKnownWeightG = 10.0f;
   pendingFinalize.endedAtMs = hostMillis;
   pendingFinalize.endedWeightSequence = 4;
-  runLoopAfter(DRIP_DELAY_MS);
+  runLoopAfter(pendingFinalize.dripDelayMs);
   CHECK(!pendingFinalize.pending);
   CHECK(persistedLastShot.valid);
   CHECK(fabsf(persistedLastShot.currentWeightG - 36.4f) < 0.001f);
@@ -6536,6 +6574,7 @@ const TestCase testCases[] = {
     {"D06", d06_forget_pauses_discovery_for_30s},
     {"S01", s01_shot_log_filters_short_and_rinse},
     {"S02", s02_shot_log_appends_after_drip_delay},
+    {"S02B", s02b_drip_delay_is_snapshotted_and_honors_boundaries},
     {"S17", s17_new_cycle_commits_pending_log_as_last_known},
     {"W90", w90_save_unknown_preset_id_does_not_overwrite_active},
     {"S03", s03_shot_log_clear_empties_records},

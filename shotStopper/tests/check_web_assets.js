@@ -346,6 +346,7 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !ui.includes('id="autoToManualGuardLimitMode"') ||
     !ui.includes('id="autoToManualGuardBaselineS"') ||
     !ui.includes('id="scaleTimerStopExtraDelayMs"') ||
+    !ui.includes('id="dripDelayS" type="number" min="0" max="10" step="0.1"') ||
     !ui.includes('id="autoToManualGuardManualLimitS"') ||
     !ui.includes('id="autoToManualGuardTrendS"') ||
     !ui.includes('id="resetGuardSamplesButton"') ||
@@ -429,6 +430,7 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !network.includes('autoToManualGuardEnabled') ||
     !network.includes('autoToManualGuardBaselineMs') ||
     !network.includes('scaleTimerStopExtraDelayMs') ||
+    !network.includes('dripDelayMs') ||
     !network.includes('autoToManualGuardTrendMs') ||
     !network.includes('autoToManualGuardEnforced') ||
     !network.includes('autoToManualGuardArmed') ||
@@ -493,6 +495,10 @@ if (!html.includes('<summary>Tare</summary>') ||
         html.indexOf('<summary>Scales</summary>') ||
     html.indexOf('id="scaleTimerStopExtraDelayMs"') <
         html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('id="dripDelayS"') <
+        html.indexOf('id="scaleTimerStopExtraDelayMs"') ||
+    html.indexOf('id="alwaysUseThisScale"') <
+        html.indexOf('id="dripDelayS"') ||
     html.indexOf('id="alwaysUseThisScale"') <
         html.indexOf('<summary>Scales</summary>') ||
     html.indexOf('id="preferredScaleSelect"') <
@@ -533,6 +539,15 @@ if (!html.includes('<summary>Tare</summary>') ||
         html.indexOf('<summary>Alerts</summary>') ||
     !ui.includes("d.parentElement.closest('details')")) {
   throw new Error('Machine settings must split Tare and Scales, with Bookoo/Acaia/Felicita subgroups');
+}
+if (!ui.includes("rangeCheck('dripDelayS',0,10,'Drip delay',{unit:'s'})") ||
+    !ui.includes("dripDelayMs:sToMs('dripDelayS')") ||
+    !ui.includes("$('dripDelayS').value=String((c.dripDelayMs??3000)/1000)") ||
+    !ui.includes('Wait after the shot ends before capturing the final post-drip weight for history and offset learning.') ||
+    !network.includes('\\"dripDelayMs\\":%lu') ||
+    !network.includes('Drip delay must be from 0 to 10 s.') ||
+    !network.includes('candidate.dripDelayMs')) {
+  throw new Error('Drip delay must be wired through Settings, status/settings, and config validation');
 }
 if (!html.includes('<summary>AtomHeart Eclair</summary>') ||
     !html.includes('Eclair does not expose configurable volume, beep, mode, or combined tare-and-start commands.') ||

@@ -61,7 +61,6 @@ using namespace shotstopper;
 // ---------------------------------------------------------------------------
 
 constexpr uint32_t PADDLE_DEBOUNCE_MS = 30;
-constexpr uint32_t DRIP_DELAY_MS = 3000;
 constexpr uint32_t SCALE_CONNECT_RETRY_MS = 1000;
 constexpr uint32_t SCALE_CONNECT_RETRY_MAX_MS = 10000;
 constexpr uint32_t SCALE_CONNECT_LOG_MS = 10000;
@@ -411,6 +410,7 @@ struct PendingShotFinalize {
   bool offsetAnalysis = false;
   bool logEligible = false;
   uint32_t endedAtMs = 0;
+  uint32_t dripDelayMs = DEFAULT_DRIP_DELAY_MS;
   uint32_t endedWeightSequence = 0;
   uint32_t cycleStartedAtMs = 0;
   uint32_t bootId = 0;
@@ -2647,6 +2647,7 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   pendingFinalize.offsetAnalysis = offsetAnalysis;
   pendingFinalize.logEligible = logEligible;
   pendingFinalize.endedAtMs = millis();
+  pendingFinalize.dripDelayMs = session.config.dripDelayMs;
   pendingFinalize.endedWeightSequence = currentWeightSequence;
   pendingFinalize.cycleStartedAtMs =
       session.cn9ClosedAtMs != 0U ? session.cn9ClosedAtMs : session.startedAtMs;
@@ -2839,7 +2840,7 @@ void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
 
 void pendingShotFinalizeTask() {
   if (!pendingFinalize.pending ||
-      elapsedMs(pendingFinalize.endedAtMs) < DRIP_DELAY_MS) {
+      elapsedMs(pendingFinalize.endedAtMs) < pendingFinalize.dripDelayMs) {
     return;
   }
 
@@ -5475,6 +5476,7 @@ void processWebCommand(const WebCommand &command) {
       candidate.canTareStartTimer = command.config.canTareStartTimer;
       candidate.scaleTimerStopExtraDelayMs =
           command.config.scaleTimerStopExtraDelayMs;
+      candidate.dripDelayMs = command.config.dripDelayMs;
       candidate.soundAlertsMuted = command.config.soundAlertsMuted;
       candidate.firstDropBeep = command.config.firstDropBeep;
       candidate.paddleReturnReminderBeep = command.config.paddleReturnReminderBeep;

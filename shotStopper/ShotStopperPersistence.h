@@ -128,94 +128,6 @@ inline uint32_t persistedSettingsChecksum(const PersistedSettings &settings) {
 
 inline void finalizePersistedSettings(PersistedSettings &settings);
 
-// Schema v4 stored legacy access material immediately after the AP password.
-// Keep its exact layout only for one-way migration to v5.
-struct PersistedSettingsV4 {
-  uint32_t magic = PERSISTED_SETTINGS_MAGIC;
-  uint32_t schemaVersion = 4;
-  uint32_t structureSize = 0;
-  uint32_t storageRevision = 0;
-  RuntimeConfig runtime = {};
-  ShotPresetBank presets = {};
-  bool staConfigured = false;
-  bool staOpen = false;
-  char staSsid[WIFI_SSID_CAPACITY] = {};
-  char staPassword[WIFI_PASSWORD_CAPACITY] = {};
-  uint8_t staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
-  uint8_t staIp[4] = {};
-  uint8_t staNetmask[4] = {};
-  uint8_t staGateway[4] = {};
-  uint8_t staDns1[4] = {};
-  uint8_t staDns2[4] = {};
-  uint8_t staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
-  bool lkgValid = false;
-  bool lkgOpen = false;
-  char lkgSsid[WIFI_SSID_CAPACITY] = {};
-  char lkgPassword[WIFI_PASSWORD_CAPACITY] = {};
-  uint8_t lkgIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
-  uint8_t lkgIp[4] = {};
-  uint8_t lkgNetmask[4] = {};
-  uint8_t lkgGateway[4] = {};
-  uint8_t lkgDns1[4] = {};
-  uint8_t lkgDns2[4] = {};
-  char apPassword[WIFI_PASSWORD_CAPACITY] = {};
-  uint8_t authSalt[16] = {};
-  uint8_t authHash[32] = {};
-  char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
-  char preferredScaleName[PREFERRED_SCALE_NAME_CAPACITY] = {};
-  ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY] = {};
-  uint32_t checksum = 0;
-};
-
-inline bool validPersistedSettingsV4(const PersistedSettingsV4 &legacy) {
-  return legacy.magic == PERSISTED_SETTINGS_MAGIC &&
-         (legacy.schemaVersion == LEGACY_CONFIG_SCHEMA_VERSION ||
-          legacy.schemaVersion == OLDEST_CONFIG_SCHEMA_VERSION) &&
-         legacy.structureSize == sizeof(PersistedSettingsV4) &&
-         legacy.checksum == crc32(reinterpret_cast<const uint8_t *>(&legacy),
-                                  offsetof(PersistedSettingsV4, checksum));
-}
-
-inline void migratePersistedSettingsV4(const PersistedSettingsV4 &legacy,
-                                       PersistedSettings &settings) {
-  settings = PersistedSettings{};
-  settings.storageRevision = legacy.storageRevision;
-  settings.runtime = legacy.runtime;
-  settings.presets = legacy.presets;
-  settings.staConfigured = legacy.staConfigured;
-  settings.staOpen = legacy.staOpen;
-  memcpy(settings.staSsid, legacy.staSsid, sizeof(settings.staSsid));
-  memcpy(settings.staPassword, legacy.staPassword, sizeof(settings.staPassword));
-  settings.staIpMode = legacy.staIpMode;
-  memcpy(settings.staIp, legacy.staIp, sizeof(settings.staIp));
-  memcpy(settings.staNetmask, legacy.staNetmask, sizeof(settings.staNetmask));
-  memcpy(settings.staGateway, legacy.staGateway, sizeof(settings.staGateway));
-  memcpy(settings.staDns1, legacy.staDns1, sizeof(settings.staDns1));
-  memcpy(settings.staDns2, legacy.staDns2, sizeof(settings.staDns2));
-  settings.staConfigState = legacy.staConfigState;
-  settings.lkgValid = legacy.lkgValid;
-  settings.lkgOpen = legacy.lkgOpen;
-  memcpy(settings.lkgSsid, legacy.lkgSsid, sizeof(settings.lkgSsid));
-  memcpy(settings.lkgPassword, legacy.lkgPassword, sizeof(settings.lkgPassword));
-  settings.lkgIpMode = legacy.lkgIpMode;
-  memcpy(settings.lkgIp, legacy.lkgIp, sizeof(settings.lkgIp));
-  memcpy(settings.lkgNetmask, legacy.lkgNetmask, sizeof(settings.lkgNetmask));
-  memcpy(settings.lkgGateway, legacy.lkgGateway, sizeof(settings.lkgGateway));
-  memcpy(settings.lkgDns1, legacy.lkgDns1, sizeof(settings.lkgDns1));
-  memcpy(settings.lkgDns2, legacy.lkgDns2, sizeof(settings.lkgDns2));
-  memcpy(settings.apPassword, legacy.apPassword, sizeof(settings.apPassword));
-  memcpy(settings.preferredScaleMac, legacy.preferredScaleMac,
-         sizeof(settings.preferredScaleMac));
-  memcpy(settings.preferredScaleName, legacy.preferredScaleName,
-         sizeof(settings.preferredScaleName));
-  memcpy(settings.scaleHistory, legacy.scaleHistory, sizeof(settings.scaleHistory));
-  // v3 used this byte as padding; normalize it before validation.
-  if (legacy.schemaVersion == OLDEST_CONFIG_SCHEMA_VERSION) {
-    settings.runtime.soundAlertsMuted = false;
-  }
-  finalizePersistedSettings(settings);
-}
-
 inline void clearStaAddressFields(PersistedSettings &settings) {
   settings.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
   memset(settings.staIp, 0, sizeof(settings.staIp));
@@ -391,20 +303,6 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
   return true;
 }
 
-inline bool readLegacySettingsSlot(Preferences &preferences, const char *key,
-                                   PersistedSettings &settings) {
-  if (preferences.getBytesLength(key) != sizeof(PersistedSettingsV4)) {
-    return false;
-  }
-  PersistedSettingsV4 legacy = {};
-  if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
-      !validPersistedSettingsV4(legacy)) {
-    return false;
-  }
-  migratePersistedSettingsV4(legacy, settings);
-  return validPersistedSettings(settings);
-}
-
 inline bool savePersistedSettings(PersistedSettings &settings);
 
 inline bool loadPersistedSettings(PersistedSettings &settings) {
@@ -416,45 +314,25 @@ inline bool loadPersistedSettings(PersistedSettings &settings) {
   PersistedSettings &second = persistedSettingsScratch(1);
   first = PersistedSettings{};
   second = PersistedSettings{};
-  bool firstMigrated = false;
-  bool secondMigrated = false;
   bool firstValid = readSettingsSlot(preferences, SETTINGS_SLOT_A, first);
-  if (!firstValid) {
-    firstValid = readLegacySettingsSlot(preferences, SETTINGS_SLOT_A, first);
-    firstMigrated = firstValid;
-  }
   bool secondValid = readSettingsSlot(preferences, SETTINGS_SLOT_B, second);
-  if (!secondValid) {
-    secondValid = readLegacySettingsSlot(preferences, SETTINGS_SLOT_B, second);
-    secondMigrated = secondValid;
-  }
   preferences.end();
 
   if (!firstValid && !secondValid) {
     return false;
   }
-  bool selectedMigrated = false;
   if (!firstValid) {
     settings = second;
-    selectedMigrated = secondMigrated;
   } else if (!secondValid) {
     settings = first;
-    selectedMigrated = firstMigrated;
   } else {
     const int32_t revisionDelta =
         static_cast<int32_t>(second.storageRevision - first.storageRevision);
     if (revisionDelta > 0) {
       settings = second;
-      selectedMigrated = secondMigrated;
     } else {
       settings = first;
-      selectedMigrated = firstMigrated;
     }
-  }
-  if (selectedMigrated) {
-    // Best effort: boot with the migrated configuration even if NVS cannot be
-    // written now; the next successful save will retry it.
-    (void)savePersistedSettings(settings);
   }
   return true;
 }

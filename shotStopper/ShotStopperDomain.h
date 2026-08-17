@@ -12,9 +12,7 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 5;
-constexpr uint32_t LEGACY_CONFIG_SCHEMA_VERSION = 4;
-constexpr uint32_t OLDEST_CONFIG_SCHEMA_VERSION = 3;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 6;
 constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
 constexpr size_t PREFERRED_SCALE_NAME_CAPACITY = 32;
 constexpr size_t SCALE_HISTORY_CAPACITY = 8;
@@ -214,6 +212,9 @@ constexpr uint32_t MAX_MAX_BREW_TIME_MS = 55000;
 constexpr uint32_t DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 100;
 constexpr uint32_t MIN_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 0;
 constexpr uint32_t MAX_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 1000;
+constexpr uint32_t DEFAULT_DRIP_DELAY_MS = 3000;
+constexpr uint32_t MIN_DRIP_DELAY_MS = 0;
+constexpr uint32_t MAX_DRIP_DELAY_MS = 10000;
 constexpr uint32_t MAX_SCALE_TIMER_STOP_CATCHUP_MS = 2000;
 constexpr float MAX_OFFSET_G = 5.0f;
 constexpr float DEFAULT_WEIGHT_OFFSET_G = 1.5f;
@@ -864,6 +865,8 @@ struct RuntimeConfig {
   bool serialDebugOutput = false;
   // Minimum level retained in the RAM debug ring (WebUI Log). NONE disables.
   uint8_t ringRetainLogLevel = static_cast<uint8_t>(LogLevel::NONE);
+  // Wait after shot end before capturing the post-drip weight.
+  uint32_t dripDelayMs = DEFAULT_DRIP_DELAY_MS;
 };
 
 struct CycleConfigSnapshot {
@@ -874,6 +877,7 @@ struct CycleConfigSnapshot {
   bool timerOnly = false;
   bool canTareStartTimer = true;
   uint32_t scaleTimerStopExtraDelayMs = DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS;
+  uint32_t dripDelayMs = DEFAULT_DRIP_DELAY_MS;
   bool firstDropBeep = true;
   bool paddleReturnReminderBeep = true;
   uint32_t paddleReturnReminderIntervalMs =
@@ -920,6 +924,7 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.timerOnly = config.timerOnly;
   snapshot.canTareStartTimer = config.canTareStartTimer;
   snapshot.scaleTimerStopExtraDelayMs = config.scaleTimerStopExtraDelayMs;
+  snapshot.dripDelayMs = config.dripDelayMs;
   snapshot.firstDropBeep = config.firstDropBeep;
   snapshot.paddleReturnReminderBeep = config.paddleReturnReminderBeep;
   snapshot.paddleReturnReminderIntervalMs =
@@ -993,6 +998,7 @@ enum class ConfigValidationError : uint8_t {
   SLOW_EXTENDED_PULSE_RATE,
   BOOKOO_CONNECT_BEEP_LEVEL,
   LAST_SHOT_COOLDOWN,
+  DRIP_DELAY,
   RING_RETAIN_LOG_LEVEL,
   PADDLE_MODE
 };
@@ -1272,6 +1278,10 @@ inline ConfigValidationError validateRuntimeConfig(
       config.lastShotCooldownMs > MAX_LAST_SHOT_COOLDOWN_MS) {
     return ConfigValidationError::LAST_SHOT_COOLDOWN;
   }
+  if (config.dripDelayMs < MIN_DRIP_DELAY_MS ||
+      config.dripDelayMs > MAX_DRIP_DELAY_MS) {
+    return ConfigValidationError::DRIP_DELAY;
+  }
   if (config.ringRetainLogLevel >
       static_cast<uint8_t>(LogLevel::NONE)) {
     return ConfigValidationError::RING_RETAIN_LOG_LEVEL;
@@ -1388,6 +1398,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "bookooConnectBeepLevel";
     case ConfigValidationError::LAST_SHOT_COOLDOWN:
       return "lastShotCooldownMs";
+    case ConfigValidationError::DRIP_DELAY:
+      return "dripDelayMs";
     case ConfigValidationError::RING_RETAIN_LOG_LEVEL:
       return "ringRetainLogLevel";
     case ConfigValidationError::PADDLE_MODE:

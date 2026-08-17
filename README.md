@@ -196,6 +196,7 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | **Paddle mode** | Machine-level (**Settings → Machine and scale → Paddle**). **Natural** (default) or **Original**. See [Paddle modes](#paddle-modes). |
 | **Always use this scale** | **On by default** (`scaleMacCacheMode=full`). Name-scan for compatible scales; when a preferred MAC is set, only that MAC is connected; other compatible advertisements are stored in history (up to 8) without connecting. Off connects the first compatible scale and does not lock preferred. |
 | **Preferred scale** | Dropdown of BLE-seen scales (history). Select which MAC is preferred, or **Clear preferred** (30 s discovery pause; history kept). |
+| **Drip delay** | Machine-level (**Settings → Machine and scale → Scales**). Wait after a shot ends before capturing the final post-drip weight used by Last Shot, history, offset learning, and eligible A→M samples (default 3.0 s; 0–10 s). A value of 0 finalizes on the next control loop without an intentional post-drip window. |
 | **Last shot cooldown (min)** | Time after a blocked start, an Armed rinse that consumed the guard, or a finished (non-rinse) shot before the no-scale guard re-arms (default 60 min; 5–240). Boot and scale reconnect re-arm immediately. |
 | **Quick rinse gesture (s)** | Maximum paddle ON time that still counts as a quick rinse when released (default 1 s). |
 | **Quick rinse duration (s)** | How long CN9 stays closed after a quick rinse starts (default 4 s). |

@@ -252,6 +252,8 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "Bookoo scale volume must be disabled (0) or 1 to 5.";
     case ConfigValidationError::LAST_SHOT_COOLDOWN:
       return "Last shot cooldown must be from 5 to 240 min.";
+    case ConfigValidationError::DRIP_DELAY:
+      return "Drip delay must be from 0 to 10 s.";
     case ConfigValidationError::RING_RETAIN_LOG_LEVEL:
       return "Ring log level must be none, critical, error, warning, info, or "
              "debug.";
@@ -3233,6 +3235,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         ",\"goalWeightG\":%u,\"weightOffsetG\":%.2f,"
         "\"weightOffsetBaselineG\":%.2f,\"autoTare\":%s,\"brewByWeight\":%s,"
         "\"canTareStartTimer\":%s,\"scaleTimerStopExtraDelayMs\":%lu,"
+        "\"dripDelayMs\":%lu,"
         "\"soundAlertsEnabled\":%s,\"firstDropBeep\":%s,"
         "\"paddleReturnReminderBeep\":%s,"
         "\"paddleReturnReminderIntervalMs\":%lu,"
@@ -3263,6 +3266,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.config.timerOnly ? "false" : "true",
         control.config.canTareStartTimer ? "true" : "false",
         static_cast<unsigned long>(control.config.scaleTimerStopExtraDelayMs),
+        static_cast<unsigned long>(control.config.dripDelayMs),
         control.config.soundAlertsMuted ? "false" : "true",
         control.config.firstDropBeep ? "true" : "false",
         control.config.paddleReturnReminderBeep ? "true" : "false",
@@ -3891,7 +3895,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   static const char *const fields[] = {
       "baseRevision", "goalWeightG", "rinseGestureMs", "rinseDurationMs",
       "operationalWallMs", "autoTare", "brewByWeight", "canTareStartTimer",
-      "scaleTimerStopExtraDelayMs", "soundAlertsEnabled", "firstDropBeep",
+      "scaleTimerStopExtraDelayMs", "dripDelayMs", "soundAlertsEnabled",
+      "firstDropBeep",
       "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
       "paddleMode", "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
@@ -3955,6 +3960,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
              !jsonUint32(root, "scaleTimerStopExtraDelayMs",
                          candidate.scaleTimerStopExtraDelayMs)) {
     parseError = "scaleTimerStopExtraDelayMs must be an integer (milliseconds).";
+  } else if (jsonFieldPresent(root, "dripDelayMs") &&
+             !jsonUint32(root, "dripDelayMs", candidate.dripDelayMs)) {
+    parseError = "dripDelayMs must be an integer (milliseconds).";
   } else if (jsonFieldPresent(root, "soundAlertsEnabled") &&
              !jsonBoolean(root, "soundAlertsEnabled", soundAlertsEnabled)) {
     parseError = "soundAlertsEnabled must be a boolean.";
