@@ -109,7 +109,7 @@ awk -v root="$ROOT/" '
 
 analyzer_status=0
 
-if rg -q '\[-Wanalyzer-' "$report"; then
+if grep -q '\[-Wanalyzer-' "$report"; then
   analyzer_status=1
 fi
 
