@@ -38,6 +38,7 @@ inline void fillFactorySinglePreset(ShotPreset &preset) {
   preset.id = FACTORY_PRESET_ID_SINGLE;
   preset.isFactory = true;
   strncpy(preset.name, "Single", SHOT_PRESET_NAME_CAPACITY - 1);
+  preset.fastExtractionGuardEnabled = true;
   preset.goalWeightG = FACTORY_SINGLE_GOAL_WEIGHT_G;
   preset.maxRecoveryWeightG = FACTORY_SINGLE_MAX_RECOVERY_WEIGHT_G;
   preset.minBrewTimeMs = FACTORY_SINGLE_MIN_BREW_TIME_MS;
