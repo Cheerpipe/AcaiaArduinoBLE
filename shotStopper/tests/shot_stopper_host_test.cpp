@@ -1193,7 +1193,10 @@ void r05_regression_uses_last_ten_valid_samples() {
     recordWeightSample(static_cast<float>(i) * 2.0f,
                        shot.startMs + static_cast<uint32_t>(i * 1000));
   }
-  CHECK(fabsf(shot.expectedEndS - 14.25f) < 0.001f);
+  const float expectedSlowEndS =
+      (session.config.minRecoveryWeightG - session.config.weightOffsetG) /
+      2.0f;
+  CHECK(fabsf(shot.expectedEndS - expectedSlowEndS) < 0.001f);
 }
 
 void r06_hard_timer_opens_cn9_without_control_loop() {
@@ -2333,6 +2336,38 @@ void w50c_buzzer_phase_timer_advances_despite_loop_stall() {
   hostServiceEspTimer(localBuzzer.phaseTimer);
   CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
   CHECK(localBuzzer.busy());
+}
+
+void w50d_recovery_buzzer_patterns_have_exact_timings() {
+  resetHarness(false, false);
+  CHECK(localBuzzer.request(BuzzerPattern::RECOVERY_LONG));
+  CHECK(localBuzzer.beepCount == 1);
+  CHECK(localBuzzer.onMs == 1500);
+  hostMillis += 1499;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  hostMillis += 1;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(!localBuzzer.busy());
+
+  CHECK(localBuzzer.request(BuzzerPattern::RECOVERY_NETWORK_OK));
+  CHECK(localBuzzer.beepCount == 3);
+  CHECK(localBuzzer.onMs == 50);
+  CHECK(localBuzzer.gapMs == 50);
+  for (uint8_t note = 0; note < 3; ++note) {
+    hostMillis += 50;
+    hostServiceEspTimer(localBuzzer.phaseTimer);
+    if (note + 1U < 3U) {
+      hostMillis += 50;
+      hostServiceEspTimer(localBuzzer.phaseTimer);
+    }
+  }
+  CHECK(!localBuzzer.busy());
+
+  CHECK(localBuzzer.request(BuzzerPattern::RECOVERY_FACTORY_OK));
+  CHECK(localBuzzer.beepCount == 5);
+  CHECK(localBuzzer.onMs == 50);
+  CHECK(localBuzzer.gapMs == 50);
 }
 
 void w51_local_buzzer_echo_inverted_on_scale_lost_during_bbw() {
@@ -6586,6 +6621,7 @@ const TestCase testCases[] = {
     {"W50", w50_local_buzzer_plays_triple_pattern_non_blocking},
     {"W50b", w50b_buzzer_phase_timer_holds_triple_rhythm_without_loop},
     {"W50c", w50c_buzzer_phase_timer_advances_despite_loop_stall},
+    {"W50d", w50d_recovery_buzzer_patterns_have_exact_timings},
     {"W51", w51_local_buzzer_echo_inverted_on_scale_lost_during_bbw},
     {"W51b", w51b_scale_lost_echo_inverted_when_idle},
     {"W51c", w51c_scale_lost_silent_when_flag_off},

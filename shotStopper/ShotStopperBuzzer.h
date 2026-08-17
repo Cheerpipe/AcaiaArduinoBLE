@@ -15,6 +15,9 @@ constexpr uint32_t BUZZER_BEEP_ON_MS = 80;
 constexpr uint32_t BUZZER_BEEP_GAP_MS = 70;
 constexpr uint32_t BUZZER_SINGLE_ON_MS = 120;
 constexpr uint32_t BUZZER_LONG_ON_MS = 800;
+constexpr uint32_t BUZZER_RECOVERY_LONG_ON_MS = 1500;
+constexpr uint32_t BUZZER_RECOVERY_PULSE_ON_MS = 50;
+constexpr uint32_t BUZZER_RECOVERY_PULSE_GAP_MS = 50;
 constexpr uint32_t BUZZER_PULSE_TRAIN_ON_MS = 20;
 constexpr uint32_t BUZZER_PULSE_TRAIN_PERIOD_MS = 500;
 constexpr uint32_t BUZZER_PULSE_TRAIN_GAP_MS =
@@ -46,6 +49,19 @@ constexpr BuzzerNote BUZZER_ECHO_INVERTED_NOTES[] = {
 constexpr BuzzerNote BUZZER_MORSE_NOTES[] = {{250, 80}, {50, 80}, {250, 0}};
 constexpr BuzzerNote BUZZER_SNAP_NOTES[] = {
     {70, 30}, {200, 50}, {70, 30}, {200, 0}};
+constexpr BuzzerNote BUZZER_RECOVERY_NETWORK_NOTES[] = {
+    {BUZZER_RECOVERY_PULSE_ON_MS, BUZZER_RECOVERY_PULSE_GAP_MS},
+    {BUZZER_RECOVERY_PULSE_ON_MS, BUZZER_RECOVERY_PULSE_GAP_MS},
+    {BUZZER_RECOVERY_PULSE_ON_MS, 0}};
+constexpr BuzzerNote BUZZER_RECOVERY_FACTORY_NOTES[] = {
+    {BUZZER_RECOVERY_PULSE_ON_MS, BUZZER_RECOVERY_PULSE_GAP_MS},
+    {BUZZER_RECOVERY_PULSE_ON_MS, BUZZER_RECOVERY_PULSE_GAP_MS},
+    {BUZZER_RECOVERY_PULSE_ON_MS, BUZZER_RECOVERY_PULSE_GAP_MS},
+    {BUZZER_RECOVERY_PULSE_ON_MS, BUZZER_RECOVERY_PULSE_GAP_MS},
+    {BUZZER_RECOVERY_PULSE_ON_MS, 0}};
+// A deliberately distinct long-short-long failure motif.
+constexpr BuzzerNote BUZZER_RECOVERY_ERROR_NOTES[] = {
+    {300, 100}, {70, 100}, {300, 0}};
 
 inline const BuzzerNote *buzzerSequenceNotes(BuzzerPattern pattern,
                                              uint8_t &count) {
@@ -74,6 +90,18 @@ inline const BuzzerNote *buzzerSequenceNotes(BuzzerPattern pattern,
       count = static_cast<uint8_t>(sizeof(BUZZER_SNAP_NOTES) /
                                    sizeof(BUZZER_SNAP_NOTES[0]));
       return BUZZER_SNAP_NOTES;
+    case BuzzerPattern::RECOVERY_NETWORK_OK:
+      count = static_cast<uint8_t>(sizeof(BUZZER_RECOVERY_NETWORK_NOTES) /
+                                   sizeof(BUZZER_RECOVERY_NETWORK_NOTES[0]));
+      return BUZZER_RECOVERY_NETWORK_NOTES;
+    case BuzzerPattern::RECOVERY_FACTORY_OK:
+      count = static_cast<uint8_t>(sizeof(BUZZER_RECOVERY_FACTORY_NOTES) /
+                                   sizeof(BUZZER_RECOVERY_FACTORY_NOTES[0]));
+      return BUZZER_RECOVERY_FACTORY_NOTES;
+    case BuzzerPattern::RECOVERY_ERROR:
+      count = static_cast<uint8_t>(sizeof(BUZZER_RECOVERY_ERROR_NOTES) /
+                                   sizeof(BUZZER_RECOVERY_ERROR_NOTES[0]));
+      return BUZZER_RECOVERY_ERROR_NOTES;
     default:
       count = 0;
       return nullptr;
@@ -273,6 +301,10 @@ inline bool LocalBuzzer::startPattern(BuzzerPattern pattern, uint32_t nowMs) {
   } else if (pattern == BuzzerPattern::LONG) {
     beepCount = 1;
     onMs = BUZZER_LONG_ON_MS;
+    gapMs = 0;
+  } else if (pattern == BuzzerPattern::RECOVERY_LONG) {
+    beepCount = 1;
+    onMs = BUZZER_RECOVERY_LONG_ON_MS;
     gapMs = 0;
   } else if (pattern == BuzzerPattern::DOUBLE) {
     beepCount = 2;

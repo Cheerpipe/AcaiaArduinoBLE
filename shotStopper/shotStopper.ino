@@ -28,6 +28,7 @@
 #include <math.h>
 #include "ShotStopperNetwork.h"
 #include "ShotStopperPersistence.h"
+#include "ShotStopperRecovery.h"
 #if __has_include(<esp_coexist.h>)
 #include <esp_coexist.h>
 #define SHOT_STOPPER_HAS_COEX 1
@@ -48,6 +49,7 @@
 #include "ShotStopperIndicators.h"
 #endif
 #include "ShotStopperResetGuard.h"
+#include "ShotStopperRecoveryGesture.h"
 #include "ShotStopperSafety.h"
 #include "ShotStopperShotLog.h"
 #include "ShotStopperLastShot.h"
@@ -6830,6 +6832,161 @@ void initializeRelaySafetyStateAfterBoot() {
   portEXIT_CRITICAL(&relayMux);
 }
 
+#ifndef SHOT_STOPPER_HOST_TEST
+void serviceBootRecoverySafety() {
+  serviceRelaySafety();
+  localBuzzer.service(millis());
+  if (!feedCurrentTaskWatchdog()) {
+    reportTaskWatchdogFault();
+    tripRelaySafety(RelaySafetyFault::TASK_WATCHDOG_FAILURE);
+  }
+  serviceSafetyHeartbeat(false);
+}
+
+void waitForRecoveryBuzzer() {
+  while (localBuzzer.busy()) {
+    serviceBootRecoverySafety();
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+}
+
+void holdFailedBootRecovery() {
+  (void)localBuzzer.request(BuzzerPattern::RECOVERY_ERROR);
+  waitForRecoveryBuzzer();
+  for (;;) {
+    // Persistence did not reach a verified state. Do not expose a partially
+    // reset controller and never permit CN9 to close. A later power cycle
+    // retries the durable intent before RF startup.
+    serviceBootRecoverySafety();
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+bool verifyFactorySettings(const PersistedSettings &settings) {
+  return validPersistedSettings(settings) && !settings.staConfigured &&
+         !settings.lkgValid && passwordIsFactoryDefault(settings) &&
+         settings.preferredScaleMac[0] == '\0' &&
+         settings.preferredScaleName[0] == '\0';
+}
+
+bool applyBootRecoveryOperation(RecoveryOperation operation) {
+  if (operation == RecoveryOperation::NETWORK_ACCESS_RESET) {
+    return resetPersistedNetworkAccess(persistedSettings);
+  }
+  if (operation != RecoveryOperation::FACTORY_RESET) {
+    return false;
+  }
+
+  // All steps are idempotent. Clear independent stores first and publish the
+  // verified factory settings last. The durable intent remains until every
+  // store, including BLE Companion, has been verified.
+  if (!shotLog.clear() || !clearLastShot()) {
+    return false;
+  }
+  if (!resetPersistedSettingsToFactory(persistedSettings)) {
+    return false;
+  }
+  if (!resetBleCompanionSettings(bleCompanionPersistedSettings)) {
+    return false;
+  }
+
+  PersistedSettings verifiedSettings;
+  BleCompanionPersistedSettings verifiedBle;
+  const bool shotLogVerified = shotLog.load() && shotLog.count() == 0;
+  const bool lastShotVerified =
+      lastShotStore.load() && !lastShotStore.get().valid;
+  return loadPersistedSettings(verifiedSettings) &&
+         verifyFactorySettings(verifiedSettings) &&
+         loadBleCompanionSettings(verifiedBle) && verifiedBle.enabled == 1 &&
+         shotLogVerified && lastShotVerified;
+}
+
+void completeBootRecovery(RecoveryOperation operation) {
+  if (!saveRecoveryIntent(operation) ||
+      !applyBootRecoveryOperation(operation) || !clearRecoveryIntent()) {
+    holdFailedBootRecovery();
+  }
+
+  const BuzzerPattern success =
+      operation == RecoveryOperation::FACTORY_RESET
+          ? BuzzerPattern::RECOVERY_FACTORY_OK
+          : BuzzerPattern::RECOVERY_NETWORK_OK;
+  (void)localBuzzer.request(success);
+  waitForRecoveryBuzzer();
+  // Preserve the final 50 ms pause specified by the recovery cue before the
+  // reset cuts power to the buzzer output.
+  const uint32_t pauseStartedAtMs = millis();
+  while (static_cast<uint32_t>(millis() - pauseStartedAtMs) <
+         BUZZER_RECOVERY_PULSE_GAP_MS) {
+    serviceBootRecoverySafety();
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+  ESP.restart();
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+void resumePendingBootRecovery() {
+  RecoveryIntent intent;
+  if (loadRecoveryIntent(intent)) {
+    completeBootRecovery(static_cast<RecoveryOperation>(intent.operation));
+  }
+  if (recoveryIntentRecordPresent()) {
+    // A malformed/torn intent cannot safely identify which destructive
+    // operation was requested. Keep CN9 open for explicit service.
+    holdFailedBootRecovery();
+  }
+}
+
+bool bootPaddleHeldOnStably() {
+  if (!readRawPaddleOn()) {
+    return false;
+  }
+  const uint32_t startedAtMs = millis();
+  while (static_cast<uint32_t>(millis() - startedAtMs) <
+         PADDLE_DEBOUNCE_MS) {
+    if (!readRawPaddleOn()) {
+      return false;
+    }
+    serviceBootRecoverySafety();
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+  return readRawPaddleOn();
+}
+
+void maybeRunBootRecoveryGesture() {
+  const bool powerOnReset = currentSafetyResetIsPowerOn();
+  const bool paddleStablyOn = powerOnReset && bootPaddleHeldOnStably();
+  if (!recoveryGestureEntryAllowed(powerOnReset, paddleStablyOn)) {
+    return;
+  }
+
+  RecoveryGestureRecognizer recognizer;
+  recognizer.begin(millis());
+  (void)localBuzzer.request(BuzzerPattern::RECOVERY_LONG);
+
+  for (;;) {
+    updatePaddleInput();
+    const RecoveryGestureResult result = recognizer.update(
+        millis(), paddleOn, paddleTurnedOn, paddleTurnedOff);
+    if (result == RecoveryGestureResult::NETWORK_ACCESS_RESET) {
+      completeBootRecovery(RecoveryOperation::NETWORK_ACCESS_RESET);
+    }
+    if (result == RecoveryGestureResult::FACTORY_RESET) {
+      completeBootRecovery(RecoveryOperation::FACTORY_RESET);
+    }
+    if (result == RecoveryGestureResult::TIMED_OUT) {
+      (void)localBuzzer.request(BuzzerPattern::RECOVERY_LONG);
+      waitForRecoveryBuzzer();
+      return;
+    }
+    serviceBootRecoverySafety();
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+}
+#endif
+
 // ---------------------------------------------------------------------------
 // Arduino entry points
 // ---------------------------------------------------------------------------
@@ -6864,6 +7021,13 @@ void setup() {
   if (EXTERNAL_SAFETY_HARDWARE_PRESENT && readCn9FeedbackClosed()) {
     tripRelaySafety(RelaySafetyFault::FEEDBACK_STUCK_CLOSED);
   }
+
+#ifndef SHOT_STOPPER_HOST_TEST
+  // A pending destructive operation always resumes before normal storage,
+  // BLE, Wi-Fi or HTTP startup. A new gesture is accepted only on cold power.
+  resumePendingBootRecovery();
+  maybeRunBootRecoveryGesture();
+#endif
 
   Serial.begin(SERIAL_BAUD);
 #if SHOT_STOPPER_ENABLE_ALED == 1

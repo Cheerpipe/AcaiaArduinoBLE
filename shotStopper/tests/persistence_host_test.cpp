@@ -1,6 +1,8 @@
 #define SHOT_STOPPER_PERSISTENCE_HOST_TEST
 #include "../ShotStopperPersistence.h"
 #include "../ShotStopperBleCompanionPersistence.h"
+#include "../ShotStopperRecovery.h"
+#include "../ShotStopperRecoveryGesture.h"
 #include "../ShotStopperShotLog.h"
 #include "../ShotStopperLastShot.h"
 
@@ -715,6 +717,173 @@ void p49_ble_companion_corruption_falls_back_and_reset_enables() {
   CHECK(loaded.enabled == 1);
 }
 
+RecoveryGestureResult recoveryEdge(RecoveryGestureRecognizer &recognizer,
+                                   uint32_t atMs, bool paddleOn) {
+  return recognizer.update(atMs, paddleOn, paddleOn, !paddleOn);
+}
+
+void p50_recovery_three_cycles_confirm_network_reset() {
+  CHECK(recoveryGestureEntryAllowed(true, true));
+  CHECK(!recoveryGestureEntryAllowed(false, true));
+  CHECK(!recoveryGestureEntryAllowed(true, false));
+  RecoveryGestureRecognizer recognizer;
+  recognizer.begin(0);
+  CHECK(recoveryEdge(recognizer, 100, false) == RecoveryGestureResult::NONE);
+  CHECK(recoveryEdge(recognizer, 200, true) == RecoveryGestureResult::NONE);
+  CHECK(recoveryEdge(recognizer, 300, false) == RecoveryGestureResult::NONE);
+  CHECK(recoveryEdge(recognizer, 400, true) == RecoveryGestureResult::NONE);
+  CHECK(recoveryEdge(recognizer, 500, false) == RecoveryGestureResult::NONE);
+  CHECK(recoveryEdge(recognizer, 600, true) == RecoveryGestureResult::NONE);
+  CHECK(recognizer.update(3599, true, false, false) ==
+        RecoveryGestureResult::NONE);
+  CHECK(recognizer.update(3600, true, false, false) ==
+        RecoveryGestureResult::NETWORK_ACCESS_RESET);
+}
+
+void p51_recovery_five_cycles_upgrade_factory_candidate() {
+  RecoveryGestureRecognizer recognizer;
+  recognizer.begin(0);
+  for (uint32_t cycle = 0; cycle < 5; ++cycle) {
+    CHECK(recoveryEdge(recognizer, 100 + cycle * 200, false) ==
+          RecoveryGestureResult::NONE);
+    CHECK(recoveryEdge(recognizer, 200 + cycle * 200, true) ==
+          RecoveryGestureResult::NONE);
+  }
+  CHECK(recognizer.completedCycles == 5);
+  CHECK(recognizer.update(3999, true, false, false) ==
+        RecoveryGestureResult::NONE);
+  CHECK(recognizer.update(4000, true, false, false) ==
+        RecoveryGestureResult::FACTORY_RESET);
+}
+
+void p52_recovery_rejects_four_slow_and_late_confirmation() {
+  RecoveryGestureRecognizer recognizer;
+  recognizer.begin(0);
+  for (uint32_t cycle = 0; cycle < 4; ++cycle) {
+    (void)recoveryEdge(recognizer, 100 + cycle * 200, false);
+    (void)recoveryEdge(recognizer, 200 + cycle * 200, true);
+  }
+  CHECK(recognizer.update(5101, true, false, false) ==
+        RecoveryGestureResult::NONE);
+  CHECK(!recognizer.attemptActive);
+
+  recognizer.begin(0);
+  for (uint32_t cycle = 0; cycle < 6; ++cycle) {
+    (void)recoveryEdge(recognizer, 100 + cycle * 200, false);
+    (void)recoveryEdge(recognizer, 200 + cycle * 200, true);
+  }
+  CHECK(!recognizer.attemptActive);
+  CHECK(recognizer.update(5000, true, false, false) ==
+        RecoveryGestureResult::NONE);
+
+  (void)recoveryEdge(recognizer, 10000, false);
+  (void)recoveryEdge(recognizer, 16000, true);
+  CHECK(recognizer.completedCycles == 0);
+  CHECK(!recognizer.attemptActive);
+
+  recognizer.begin(0);
+  (void)recoveryEdge(recognizer, 58000, false);
+  (void)recoveryEdge(recognizer, 58200, true);
+  (void)recoveryEdge(recognizer, 58400, false);
+  (void)recoveryEdge(recognizer, 58600, true);
+  (void)recoveryEdge(recognizer, 58800, false);
+  (void)recoveryEdge(recognizer, 59000, true);
+  CHECK(recognizer.update(59999, true, false, false) ==
+        RecoveryGestureResult::NONE);
+  CHECK(recognizer.update(60000, true, false, false) ==
+        RecoveryGestureResult::TIMED_OUT);
+}
+
+void p53_recovery_boundaries_and_millis_wraparound() {
+  RecoveryGestureRecognizer recognizer;
+  recognizer.begin(0);
+  (void)recoveryEdge(recognizer, 0, false);
+  (void)recoveryEdge(recognizer, 1000, true);
+  (void)recoveryEdge(recognizer, 2000, false);
+  (void)recoveryEdge(recognizer, 3000, true);
+  (void)recoveryEdge(recognizer, 4000, false);
+  (void)recoveryEdge(recognizer, 5000, true);
+  CHECK(recognizer.update(8000, true, false, false) ==
+        RecoveryGestureResult::NETWORK_ACCESS_RESET);
+
+  constexpr uint32_t base = UINT32_MAX - 1000U;
+  recognizer.begin(base);
+  (void)recoveryEdge(recognizer, base + 100U, false);
+  (void)recoveryEdge(recognizer, base + 200U, true);
+  (void)recoveryEdge(recognizer, base + 300U, false);
+  (void)recoveryEdge(recognizer, base + 400U, true);
+  (void)recoveryEdge(recognizer, base + 500U, false);
+  (void)recoveryEdge(recognizer, base + 600U, true);
+  CHECK(recognizer.update(base + 3600U, true, false, false) ==
+        RecoveryGestureResult::NETWORK_ACCESS_RESET);
+}
+
+void p54_recovery_intent_round_trip_corruption_and_clear() {
+  resetHostPersistence();
+  CHECK(saveRecoveryIntent(RecoveryOperation::FACTORY_RESET));
+  CHECK(recoveryIntentRecordPresent());
+  RecoveryIntent intent;
+  CHECK(loadRecoveryIntent(intent));
+  CHECK(intent.operation ==
+        static_cast<uint8_t>(RecoveryOperation::FACTORY_RESET));
+  CHECK(persistence_host::corrupt(RECOVERY_NAMESPACE, RECOVERY_INTENT_KEY,
+                                  offsetof(RecoveryIntent, checksum)));
+  CHECK(!loadRecoveryIntent(intent));
+  CHECK(recoveryIntentRecordPresent());
+  CHECK(clearRecoveryIntent());
+  CHECK(!recoveryIntentRecordPresent());
+
+  persistence_host::failNextWrite = true;
+  CHECK(!saveRecoveryIntent(RecoveryOperation::NETWORK_ACCESS_RESET));
+}
+
+void p55_network_access_reset_preserves_non_network_settings() {
+  resetHostPersistence();
+  PersistedSettings settings;
+  CHECK(initializeDefaultSettings(settings));
+  settings.runtime.goalWeightG = 41;
+  strcpy(settings.preferredScaleMac, "AA:BB:CC:DD:EE:FF");
+  strcpy(settings.preferredScaleName, "Lunar");
+  settings.staConfigured = true;
+  settings.staOpen = false;
+  strcpy(settings.staSsid, "CafeLAN");
+  strcpy(settings.staPassword, "CafePass1");
+  settings.staIpMode = static_cast<uint8_t>(StaIpMode::STATIC);
+  settings.staIp[0] = 192;
+  settings.staIp[1] = 168;
+  settings.staIp[2] = 10;
+  settings.staIp[3] = 50;
+  settings.staNetmask[0] = 255;
+  settings.staNetmask[1] = 255;
+  settings.staNetmask[2] = 255;
+  settings.staGateway[0] = 192;
+  settings.staGateway[1] = 168;
+  settings.staGateway[2] = 10;
+  settings.staGateway[3] = 1;
+  settings.staDns1[0] = 1;
+  settings.staDns1[1] = 1;
+  settings.staDns1[2] = 1;
+  settings.staDns1[3] = 1;
+  settings.lkgValid = true;
+  settings.lkgOpen = false;
+  strcpy(settings.lkgSsid, "OldCafeLAN");
+  strcpy(settings.lkgPassword, "OldCafe1");
+  settings.lkgIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  CHECK(setAccessPointPassword(settings, "NewAccess1"));
+  finalizePersistedSettings(settings);
+  CHECK(savePersistedSettings(settings));
+
+  PersistedSettings reset;
+  CHECK(resetPersistedNetworkAccess(reset));
+  CHECK(!reset.staConfigured);
+  CHECK(!reset.lkgValid);
+  CHECK(reset.staIpMode == static_cast<uint8_t>(StaIpMode::DHCP));
+  CHECK(passwordIsFactoryDefault(reset));
+  CHECK(reset.runtime.goalWeightG == 41);
+  CHECK(strcmp(reset.preferredScaleMac, "AA:BB:CC:DD:EE:FF") == 0);
+  CHECK(strcmp(reset.preferredScaleName, "Lunar") == 0);
+}
+
 struct TestCase {
   const char *id;
   void (*function)();
@@ -748,6 +917,12 @@ const TestCase tests[] = {
     {"P29", p29_last_shot_persists_and_clears},
     {"P48", p48_ble_companion_defaults_and_dual_slot_round_trip},
     {"P49", p49_ble_companion_corruption_falls_back_and_reset_enables},
+    {"P50", p50_recovery_three_cycles_confirm_network_reset},
+    {"P51", p51_recovery_five_cycles_upgrade_factory_candidate},
+    {"P52", p52_recovery_rejects_four_slow_and_late_confirmation},
+    {"P53", p53_recovery_boundaries_and_millis_wraparound},
+    {"P54", p54_recovery_intent_round_trip_corruption_and_clear},
+    {"P55", p55_network_access_reset_preserves_non_network_settings},
 };
 
 }  // namespace

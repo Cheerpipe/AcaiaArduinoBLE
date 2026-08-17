@@ -316,6 +316,18 @@ name, default WPA2 password, and step-by-step first connection.
 - **Factory reset** erases Wi-Fi, settings, calibration, shot history, and
   restores the AP/UI password to **`Micra1234`**, then restarts.
 
+### Emergency recovery
+
+If Wi-Fi, BLE, Web UI and USB/serial access are unavailable, power the
+controller with the physical paddle held **ON**. The local recovery window
+keeps CN9 open for 60 seconds. Three complete `OFF→ON` cycles in 5 seconds,
+followed by 3 seconds without moving the paddle, restore Wi-Fi/AP/UI access;
+five cycles followed by the same confirmation perform a full factory reset.
+
+The factory gesture permanently erases settings, presets, calibration and
+shot history. Follow the timings and examples in
+[Emergency recovery with the paddle](docs/EMERGENCY_RECOVERY.md).
+
 **Diagnostics** (Admin panel + Log panel + API):
 
 - Paddle state, CN9 relay state, CN9 safety supervisor (state, fault, watchdog,

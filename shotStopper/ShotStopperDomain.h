@@ -281,7 +281,11 @@ enum class BuzzerPattern : uint8_t {
   ECHO = 11,
   MORSE = 12,
   SNAP = 13,
-  ECHO_INVERTED = 14
+  ECHO_INVERTED = 14,
+  RECOVERY_LONG = 15,
+  RECOVERY_NETWORK_OK = 16,
+  RECOVERY_FACTORY_OK = 17,
+  RECOVERY_ERROR = 18
 };
 
 inline bool buzzerPatternIsPulseTrain(BuzzerPattern pattern) {
@@ -297,7 +301,10 @@ inline bool buzzerPatternIsSequence(BuzzerPattern pattern) {
          pattern == BuzzerPattern::ECHO ||
          pattern == BuzzerPattern::ECHO_INVERTED ||
          pattern == BuzzerPattern::MORSE ||
-         pattern == BuzzerPattern::SNAP;
+         pattern == BuzzerPattern::SNAP ||
+         pattern == BuzzerPattern::RECOVERY_NETWORK_OK ||
+         pattern == BuzzerPattern::RECOVERY_FACTORY_OK ||
+         pattern == BuzzerPattern::RECOVERY_ERROR;
 }
 
 inline bool parseBuzzerPatternId(const char *id, BuzzerPattern &out) {

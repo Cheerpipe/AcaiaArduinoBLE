@@ -25,6 +25,10 @@ restarts and the monitor session may drop.
 Destructive commands need the same gate as the Web UI: physical paddle
 **OFF**, CN9 open, state **Ready**, no active cycle.
 
+If USB/serial is also unavailable, use the
+[paddle emergency recovery procedure](EMERGENCY_RECOVERY.md). It works before
+Wi-Fi and BLE startup and keeps CN9 open throughout the operation.
+
 Always allowed (including during a cycle):
 
 - `HELP`, `HELLO`
