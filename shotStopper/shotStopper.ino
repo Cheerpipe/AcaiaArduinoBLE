@@ -195,7 +195,6 @@ constexpr uint8_t CN9_FEEDBACK_CLOSED_LEVEL = LOW;
 
 constexpr uint32_t SAFETY_HEARTBEAT_TOGGLE_MS = 50;
 constexpr uint32_t CN9_FEEDBACK_SETTLE_MS = 100;
-constexpr uint32_t RESET_RECOVERY_OFF_DWELL_MS = 1000;
 
 static_assert(PADDLE_GPIO != RELAY_GPIO,
               "Paddle and relay must use different GPIOs");
@@ -692,8 +691,6 @@ uint32_t safetyHeartbeatToggledAtMs = 0;
 volatile bool safeRestartRequested = false;
 uint32_t bootStartedAtMs = 0;
 SafetyResetSnapshot safetyResetStatus;
-bool resetRecoverySawPaddleOn = false;
-uint32_t resetRecoveryOffStartedAtMs = 0;
 
 struct ScaleLinkSnapshot {
   ScaleLinkState state;
@@ -1512,6 +1509,15 @@ void openRelayElectricalFromIsr() {
 }
 #endif
 
+#ifndef SHOT_STOPPER_HOST_TEST
+void IRAM_ATTR shotStopperPanicHandler(arduino_panic_info_t *, void *) {
+  // The Arduino core invokes this before its normal panic/reboot path. Keep
+  // it allocation-free and flash-independent: only de-energize K1 through
+  // the same direct-register path used by the independent safety timer.
+  openRelayElectricalFromIsr();
+}
+#endif
+
 void IRAM_ATTR independentSafetyTimerCallback(void *) {
   portENTER_CRITICAL_ISR(&relayMux);
   if (relaySafetyState == RelaySafetyState::ARMING ||
@@ -1764,35 +1770,6 @@ bool consumeOperationalLimitTrip() {
 }
 
 void serviceRelaySafety() {
-  if (safetyResetStatus.recoveryRequired) {
-    const bool physicalPaddleOn =
-        digitalRead(PADDLE_GPIO) == PADDLE_ACTIVE_LEVEL;
-    if (physicalPaddleOn) {
-      resetRecoverySawPaddleOn = true;
-      resetRecoveryOffStartedAtMs = 0;
-    } else if (resetRecoverySawPaddleOn) {
-      if (resetRecoveryOffStartedAtMs == 0) {
-        resetRecoveryOffStartedAtMs = millis();
-      } else if (elapsedMs(resetRecoveryOffStartedAtMs) >=
-                     RESET_RECOVERY_OFF_DWELL_MS &&
-                 taskWatchdogReady && relaySafetyTimersReady &&
-                 !criticalTaskWatchdogFault &&
-                 (!EXTERNAL_SAFETY_HARDWARE_PRESENT ||
-                  !readCn9FeedbackClosed())) {
-        portENTER_CRITICAL(&relayMux);
-        if (relaySafetyState == RelaySafetyState::LOCKOUT &&
-            (relaySafetyFault == RelaySafetyFault::RESET_DURING_CLOSE ||
-             relaySafetyFault == RelaySafetyFault::UNSAFE_RESET ||
-             relaySafetyFault == RelaySafetyFault::BOOT_LOOP)) {
-          relaySafetyState = RelaySafetyState::OPEN;
-          relaySafetyFault = RelaySafetyFault::NONE;
-          completeLocalResetRecovery(safetyResetStatus);
-        }
-        portEXIT_CRITICAL(&relayMux);
-      }
-    }
-  }
-
   if (criticalTaskWatchdogFault) {
     tripRelaySafety(RelaySafetyFault::TASK_WATCHDOG_FAILURE);
     safeRestartRequested = true;
@@ -6839,6 +6816,20 @@ void updateStatusIndicators() {
 }
 #endif
 
+void initializeRelaySafetyStateAfterBoot() {
+  portENTER_CRITICAL(&relayMux);
+  relaySafetyState = platformClockReady && relaySafetyTimersReady &&
+                             taskWatchdogReady
+                         ? RelaySafetyState::OPEN
+                         : RelaySafetyState::LOCKOUT;
+  relaySafetyFault =
+      !platformClockReady || !relaySafetyTimersReady
+          ? RelaySafetyFault::INITIALIZATION_FAILED
+          : (!taskWatchdogReady ? RelaySafetyFault::WATCHDOG_UNAVAILABLE
+                                : RelaySafetyFault::NONE);
+  portEXIT_CRITICAL(&relayMux);
+}
+
 // ---------------------------------------------------------------------------
 // Arduino entry points
 // ---------------------------------------------------------------------------
@@ -6856,6 +6847,9 @@ void setup() {
   }
   pinMode(RELAY_GPIO, OUTPUT);
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
+#ifndef SHOT_STOPPER_HOST_TEST
+  set_arduino_panic_handler(shotStopperPanicHandler, nullptr);
+#endif
   safetyResetStatus = beginSafetyResetGuard();
 
   localBuzzer.begin(BUZZER_GPIO);
@@ -6865,25 +6859,7 @@ void setup() {
   relaySafetyTimersReady = initializeRelaySafetyTimer();
   taskWatchdogReady =
       configureTaskWatchdog() && subscribeCurrentTaskToWatchdog();
-  portENTER_CRITICAL(&relayMux);
-  relaySafetyState = platformClockReady && relaySafetyTimersReady &&
-                             taskWatchdogReady &&
-                             !safetyResetStatus.recoveryRequired
-                         ? RelaySafetyState::OPEN
-                         : RelaySafetyState::LOCKOUT;
-  relaySafetyFault =
-      !platformClockReady || !relaySafetyTimersReady
-          ? RelaySafetyFault::INITIALIZATION_FAILED
-          : (!taskWatchdogReady
-                 ? RelaySafetyFault::WATCHDOG_UNAVAILABLE
-                 : (safetyResetStatus.resetDuringClose
-                        ? RelaySafetyFault::RESET_DURING_CLOSE
-                        : (safetyResetStatus.bootLoopDetected
-                               ? RelaySafetyFault::BOOT_LOOP
-                               : (safetyResetStatus.unsafeReset
-                                      ? RelaySafetyFault::UNSAFE_RESET
-                                      : RelaySafetyFault::NONE))));
-  portEXIT_CRITICAL(&relayMux);
+  initializeRelaySafetyStateAfterBoot();
 
   if (EXTERNAL_SAFETY_HARDWARE_PRESENT && readCn9FeedbackClosed()) {
     tripRelaySafety(RelaySafetyFault::FEEDBACK_STUCK_CLOSED);

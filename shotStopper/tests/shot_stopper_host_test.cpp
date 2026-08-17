@@ -240,8 +240,6 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   persistenceReady = true;
   bleStackReady = true;
   safetyResetStatus = SafetyResetSnapshot{};
-  resetRecoverySawPaddleOn = false;
-  resetRecoveryOffStartedAtMs = 0;
   firmwareInitializationComplete = true;
   statusIndicatorsReady = false;
   lastPublishedIndicatorFrame = StatusIndicatorFrame{};
@@ -767,9 +765,9 @@ void t13_reset_path_starts_with_relay_open() {
   CHECK(hostPinLevel[RELAY_GPIO] == RELAY_OPEN_LEVEL);
   CHECK(hostRelayOpenWrites >= 2);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
-  CHECK(getRelaySafetySnapshot().state == RelaySafetyState::LOCKOUT);
-  CHECK(getRelaySafetySnapshot().fault ==
-        RelaySafetyFault::RESET_DURING_CLOSE);
+  CHECK(getRelaySafetySnapshot().state == RelaySafetyState::OPEN);
+  CHECK(getRelaySafetySnapshot().fault == RelaySafetyFault::NONE);
+  CHECK(!getRelaySafetySnapshot().resetRecoveryRequired);
 }
 
 void t14_automatic_stop_stays_open_while_paddle_on() {
@@ -1526,73 +1524,41 @@ void r18_watchdog_fault_opens_cn9_and_requests_safe_restart() {
   CHECK(hostPinLevel[RELAY_GPIO] == RELAY_OPEN_LEVEL);
 }
 
-void r19_reset_during_close_requires_local_on_off_recovery() {
+void r19_reset_during_close_reopens_without_recovery_lockout() {
   resetHarness(false, false);
   recordRelayCommandedClosed(true);
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
   safetyResetStatus = beginSafetyResetGuard();
-  relaySafetyState = RelaySafetyState::LOCKOUT;
-  relaySafetyFault = RelaySafetyFault::RESET_DURING_CLOSE;
+  initializeRelaySafetyStateAfterBoot();
 
   CHECK(safetyResetStatus.resetDuringClose);
-  CHECK(safetyResetStatus.recoveryRequired);
-  serviceRelaySafety();
-  CHECK(relaySafetyState == RelaySafetyState::LOCKOUT);
-
-  hostPinLevel[PADDLE_GPIO] = PADDLE_ACTIVE_LEVEL;
-  serviceRelaySafety();
-  hostPinLevel[PADDLE_GPIO] = !PADDLE_ACTIVE_LEVEL;
-  ++hostMillis;
-  serviceRelaySafety();
-  hostMillis += RESET_RECOVERY_OFF_DWELL_MS;
-  serviceRelaySafety();
-
+  CHECK(safetyResetStatus.unsafeReset);
+  CHECK(!safetyResetStatus.recoveryRequired);
   CHECK(relaySafetyState == RelaySafetyState::OPEN);
   CHECK(relaySafetyFault == RelaySafetyFault::NONE);
-  CHECK(!safetyResetStatus.recoveryRequired);
-  CHECK(safetyResetStatus.unsafeResetCount == 0);
+  CHECK(hostPinLevel[RELAY_GPIO] == RELAY_OPEN_LEVEL);
+  CHECK(safetyResetRecord.relayMarker == SAFETY_RELAY_OPEN_MARKER);
 }
 
-void r19b_webui_stays_configurable_during_local_lockout_recovery() {
+void r19b_panic_boot_is_ready_for_webui_and_next_cn9_cycle() {
   resetHarness(false, false);
   reachReadyFromBoot();
-  ControlStatusSnapshot gated = {};
-  gated.state = StopperState::READY;
-  gated.resetRecoveryRequired = true;
-  CHECK(controlAllowsConfiguration(gated));
-  gated.safetyState = RelaySafetyState::LOCKOUT;
-  CHECK(controlAllowsConfiguration(gated));
-
+  hostSafetyResetReasonCode = 4;
+  hostSafetyResetReasonUnsafe = true;
   recordRelayCommandedClosed(true);
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
   safetyResetStatus = beginSafetyResetGuard();
-  relaySafetyState = RelaySafetyState::LOCKOUT;
-  relaySafetyFault = RelaySafetyFault::RESET_DURING_CLOSE;
-  CHECK(safetyResetStatus.recoveryRequired);
+  initializeRelaySafetyStateAfterBoot();
+
+  CHECK(safetyResetStatus.unsafeReset);
+  CHECK(!safetyResetStatus.recoveryRequired);
+  CHECK(relaySafetyState == RelaySafetyState::OPEN);
   CHECK(stopperState == StopperState::READY);
   CHECK(controlAllowsConfigurationNow());
 
-  WebCommand config;
-  config.type = WebCommandType::APPLY_CONFIG;
-  config.requestId = 81;
-  config.config = runtimeConfig;
-  const uint32_t revisionBefore = runtimeConfig.revision;
-  processWebCommand(config);
-  CHECK(runtimeConfig.revision == revisionBefore + 1);
-  CHECK(safetyResetStatus.recoveryRequired);
-  CHECK(relaySafetyState == RelaySafetyState::LOCKOUT);
-  CHECK(!getRelaySafetySnapshot().closed);
-
-  hostPinLevel[PADDLE_GPIO] = PADDLE_ACTIVE_LEVEL;
-  serviceRelaySafety();
-  hostPinLevel[PADDLE_GPIO] = !PADDLE_ACTIVE_LEVEL;
-  ++hostMillis;
-  serviceRelaySafety();
-  hostMillis += RESET_RECOVERY_OFF_DWELL_MS;
-  serviceRelaySafety();
-  CHECK(relaySafetyState == RelaySafetyState::OPEN);
-  CHECK(!safetyResetStatus.recoveryRequired);
-  CHECK(controlAllowsConfigurationNow());
+  CHECK(setCn9Closed(true, runtimeConfig.operationalWallMs));
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(setCn9Closed(false));
 }
 
 void r20_three_unsafe_resets_are_latched_as_a_boot_loop() {
@@ -1606,7 +1572,7 @@ void r20_three_unsafe_resets_are_latched_as_a_boot_loop() {
     CHECK(reset.unsafeResetCount == count);
   }
   CHECK(reset.bootLoopDetected);
-  CHECK(reset.recoveryRequired);
+  CHECK(!reset.recoveryRequired);
 }
 
 void w01_default_runtime_configuration_is_valid() {
@@ -6506,8 +6472,8 @@ const TestCase testCases[] = {
     {"R16", r16_timeout_during_arm_transaction_can_never_close_cn9},
     {"R17", r17_gptimer_arm_failure_prevents_relay_energization},
     {"R18", r18_watchdog_fault_opens_cn9_and_requests_safe_restart},
-    {"R19", r19_reset_during_close_requires_local_on_off_recovery},
-    {"R19b", r19b_webui_stays_configurable_during_local_lockout_recovery},
+    {"R19", r19_reset_during_close_reopens_without_recovery_lockout},
+    {"R19b", r19b_panic_boot_is_ready_for_webui_and_next_cn9_cycle},
     {"R20", r20_three_unsafe_resets_are_latched_as_a_boot_loop},
     {"R21", r21_automatic_control_requires_fresh_weight},
     {"R22", r22_confirmed_implausible_weight_does_not_stop},

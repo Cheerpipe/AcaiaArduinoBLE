@@ -69,8 +69,6 @@ void resetSafety() {
   safeRestartRequested = false;
   platformClockReady = true;
   safetyResetStatus = SafetyResetSnapshot{};
-  resetRecoverySawPaddleOn = false;
-  resetRecoveryOffStartedAtMs = 0;
 
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
   pinMode(RELAY_GPIO, OUTPUT);

@@ -412,8 +412,8 @@ Watchdog** subscription. `status_indicator` does **not** subscribe to the TWDT
   IRAM handler, `esp_timer`, supervisor deadline).
 - Optional **external heartbeat + CN9 feedback** for a second K2 barrier
   (compile-time GPIO pins).
-- Redundant RTC relay-command log; unsafe reset during CLOSE or repeated boot
-  loops require **local paddle recovery** (ON then stable OFF).
+- Redundant RTC relay-command log records whether CN9 was commanded closed;
+  every boot forces CN9 open before initialization and starts normally.
 - Optional two independent **WS2812B** pixels (`SHOT_STOPPER_ENABLE_ALED=1`):
   scale/BLE health and stopper workflow / safety state (diagnostic only, not
   part of CN9 decisions).
@@ -810,12 +810,13 @@ flash cache availability.
 
 Before K1 is energized, the CLOSE command is recorded in RTC memory as a value
 and its complement; OPEN is recorded after opening. A WDT reset, panic,
-brownout, power glitch, CPU lockup, or reset during CLOSE boots into `LOCKOUT`.
-Three consecutive unsafe resets are diagnosed as `BOOT_LOOP`. The Web UI and
-configuration remain available during recovery, but Web access cannot rearm
-CN9 or start flow: recovery requires physically moving the paddle to ON and
-then holding it stably OFF for one second while timers, watchdog, and feedback
-are healthy.
+brownout, power glitch, CPU lockup, or reset during CLOSE is retained for
+diagnostics, but does not latch the next boot. The Arduino panic callback opens
+CN9 immediately through the IRAM GPIO path; `setup()` drives it OPEN again
+before initializing Serial, storage, BLE, Wi-Fi, or the safety timers. Once
+those subsystems initialize normally, CN9 and the Web UI are immediately
+available under their regular runtime rules; no local recovery gesture is
+required.
 
 These firmware defenses reduce lockups and races, but a reset cannot open a
 welded contact or repair a shorted relay transistor. Containing those faults

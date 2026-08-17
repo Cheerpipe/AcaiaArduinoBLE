@@ -49,7 +49,7 @@ Para detalle técnico completo, consulta el [README principal](../README.md).
 
 | Pregunta | Respuesta |
 | --- | --- |
-| **CN9 quedó bloqueado / pide “paddle OFF”.** | Tras reset inseguro o fallo, el firmware puede entrar en **REQUIRES_OFF** o **LOCKOUT**. Recuperación: mover el paddle a **ON** y luego mantener **OFF estable ~1 s**. La Web no puede rearmar CN9 sin condiciones seguras. |
+| **¿Qué ocurre después de un panic o watchdog reset?** | El reinicio fuerza CN9 a **OPEN** antes de inicializar el firmware y luego arranca normalmente: no bloquea CN9 ni la Web UI y no exige una maniobra local de recuperación. Los fallos activos de hardware, feedback, timers o watchdog sí mantienen su `LOCKOUT` independiente. |
 | **¿Cómo sé por qué terminó un shot?** | En el **historial de shots**: `cut_type` (`auto`, `manual`, `limit`) y `stop_detail` (`normal_target`, `extended_max_weight`, `extended_min_time`, `slow_max_time`, `slow_min_weight`, `auto_to_manual`, etc.). El panel de diagnóstico y `GET /api/v1/log` amplían detalle. |
 | **El LED de escala parpadea amarillo pero “está conectada”.** | Amarillo lento = enlace BLE presente pero **worker o stream de peso obsoleto**. No confundir con verde sólido (stream fresco). El comportamiento de CN9 lo gobierna la máquina de estados, no el LED. |
 | **¿Es seguro confiar solo en el relé del ESP32?** | **No** como garantía física absoluta. El firmware incluye watchdogs, cierre transaccional y tope de 60 s, pero un relé soldado o un GPIO corto requieren **barrera K2 externa** opcional (heartbeat + feedback aislado). Ver [Watchdog and CN9 safety](../README.md#watchdog-and-cn9-safety). |

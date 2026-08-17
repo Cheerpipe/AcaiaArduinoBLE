@@ -160,20 +160,16 @@ inline SafetyResetSnapshot beginSafetyResetGuard() {
           : (snapshot.unsafeReset ? previousCount : 0);
   snapshot.bootLoopDetected =
       snapshot.unsafeResetCount >= SAFETY_BOOT_LOOP_THRESHOLD;
-  snapshot.recoveryRequired = snapshot.unsafeReset;
+  // Reset history is diagnostic only. setup() has already forced the relay
+  // output OPEN, so a panic or reset-during-close must not latch the next
+  // boot or require a local recovery gesture.
+  snapshot.recoveryRequired = false;
 
   // The physical relay has already been driven OPEN by setup() before this
   // function is called. Publish that safe fact while retaining crash count.
   initializeSafetyResetRecord(SAFETY_RELAY_OPEN_MARKER,
                               snapshot.unsafeResetCount);
   return snapshot;
-}
-
-inline void completeLocalResetRecovery(SafetyResetSnapshot &snapshot) {
-  snapshot.unsafeResetCount = 0;
-  snapshot.recoveryRequired = false;
-  snapshot.bootLoopDetected = false;
-  initializeSafetyResetRecord(SAFETY_RELAY_OPEN_MARKER, 0);
 }
 
 #ifdef SHOT_STOPPER_HOST_TEST
