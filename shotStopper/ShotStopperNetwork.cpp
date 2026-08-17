@@ -2608,6 +2608,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/control/restart", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/factory-reset", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/network", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/network/scan", HTTP_GET, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/network/scan", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/access-point/password", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/admin/ble-compat", HTTP_PUT, ownedApiHandler);
@@ -4820,6 +4821,11 @@ esp_err_t ShotStopperNetwork::wifiScanStartHandler(httpd_req_t *request) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; scan was not started.");
   }
+  
+  portENTER_CRITICAL(&self.dataMux_);
+  self.scan_.state = WifiScanState::QUEUED;
+  portEXIT_CRITICAL(&self.dataMux_);
+  
   return self.sendAccepted(request, command.requestId,
                            "\"state\":\"QUEUED\"");
 }
