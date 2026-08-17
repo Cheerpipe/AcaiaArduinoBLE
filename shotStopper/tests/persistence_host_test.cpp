@@ -70,6 +70,7 @@ void p01_defaults_are_valid() {
         static_cast<uint8_t>(PaddleMode::NATURAL));
   CHECK(settings.runtime.alertOutputChannel ==
         static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL));
+  CHECK(!settings.runtime.soundAlertsMuted);
   CHECK(DEFAULT_ALERT_OUTPUT_CHANNEL ==
         (BUZZER_SUPPORT_ENABLED ? AlertOutputChannel::BUZZER_ONLY
                                 : AlertOutputChannel::SCALE_ONLY));
@@ -104,12 +105,14 @@ void p02_newest_valid_slot_is_loaded() {
   const uint32_t firstRevision = settings.storageRevision;
   settings.runtime.goalWeightG = 47;
   settings.runtime.maxRecoveryWeightG = 55.0f;
+  settings.runtime.soundAlertsMuted = true;
   CHECK(savePersistedSettings(settings));
   CHECK(settings.storageRevision == firstRevision + 1);
 
   PersistedSettings loaded;
   CHECK(loadPersistedSettings(loaded));
   CHECK(loaded.runtime.goalWeightG == 47);
+  CHECK(loaded.runtime.soundAlertsMuted);
 }
 
 void p02b_save_uses_ram_revision_when_slots_unreadable() {
@@ -417,6 +420,38 @@ void p47_rejects_non_current_schema_blob() {
   CHECK(!loadPersistedSettings(loaded));
 }
 
+void p48_migrates_v3_settings_with_alerts_enabled() {
+  resetHostPersistence();
+  PersistedSettings legacy;
+  CHECK(initializeDefaultSettings(legacy));
+  legacy.storageRevision = 7;
+  legacy.schemaVersion = LEGACY_CONFIG_SCHEMA_VERSION;
+
+  uint8_t bytes[sizeof(legacy)] = {};
+  memcpy(bytes, &legacy, sizeof(bytes));
+  // This was padding in v3 and may contain any persisted value.
+  bytes[offsetof(PersistedSettings, runtime) +
+        offsetof(RuntimeConfig, soundAlertsMuted)] = 0xA5U;
+  const uint32_t checksum =
+      crc32(bytes, offsetof(PersistedSettings, checksum));
+  memcpy(bytes + offsetof(PersistedSettings, checksum), &checksum,
+         sizeof(checksum));
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, bytes,
+                           sizeof(bytes));
+
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(!loaded.runtime.soundAlertsMuted);
+  CHECK(loaded.storageRevision == 8);
+  CHECK(validPersistedSettings(loaded));
+
+  PersistedSettings reloaded;
+  CHECK(loadPersistedSettings(reloaded));
+  CHECK(reloaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(!reloaded.runtime.soundAlertsMuted);
+}
+
 void p46_ring_retain_log_level_persists_round_trip() {
   resetHostPersistence();
   PersistedSettings settings;
@@ -695,6 +730,7 @@ const TestCase tests[] = {
     {"P10", p10_auto_to_manual_guard_trend_and_validation},
     {"P12", p12_shot_log_persists_compact_blob},
     {"P47", p47_rejects_non_current_schema_blob},
+    {"P48", p48_migrates_v3_settings_with_alerts_enabled},
     {"P46", p46_ring_retain_log_level_persists_round_trip},
     {"P43", p43_scale_history_upsert_and_lru},
     {"P44", p44_scale_history_canonicalizes_mac_case},

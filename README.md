@@ -165,7 +165,7 @@ Legacy Shot Stopper workflow for automatic brew-by-weight:
 
 ### Shot presets
 
-Brew settings live in **named presets** (factory **Single** / **Double**, plus customs). The active preset supplies goal weight, BBW/guards, learned stop offset and its baseline, and A→M samples. Changing preset persists only the active id (no copy-on-select). Manage presets under **Settings → Brew** (dense cards: New · Duplicate · Load · Save · Delete; rename on the card). **New** seeds firmware Double defaults (not the saved Double in NVS). **Home → Quick Settings** has **Brew by weight** (session Manual), plus **No-scale BBW** (machine), **Fast extraction guard**, **Slow extraction guard**, and **A→M time guard**. Guard switches persist immediately (machine config for No-scale; active preset for the other three) and become read-only when Brew by weight is off. Machine/scale, alerts, Wi‑Fi, and password stay outside the recipe.
+Brew settings live in **named presets** (factory **Single** / **Double**, plus customs). The active preset supplies goal weight, BBW/guards, learned stop offset and its baseline, and A→M samples. Changing preset persists only the active id (no copy-on-select). Manage presets under **Settings → Brew** (dense cards: New · Duplicate · Load · Save · Delete; rename on the card). **New** seeds firmware Double defaults (not the saved Double in NVS). **Home → Quick Settings** has **Brew by weight** (session Manual), plus **No-scale BBW** (machine), **Fast extraction guard**, **Slow extraction guard**, **A→M time guard**, and the machine-level **Alerts** master switch. Guard switches persist immediately (machine config for No-scale; active preset for the other three) and become read-only when Brew by weight is off; Alerts remains editable independently. Machine/scale, alerts, Wi‑Fi, and password stay outside the recipe.
 
 ### Brew and weight settings
 
@@ -222,6 +222,7 @@ routed by **Output channel** when a local buzzer is compiled in.
 
 | Setting | What it does |
 | --- | --- |
+| **Sound alerts** | Master alert switch (default ON). Off silences operational alerts on both buzzer and scale while preserving the individual alert settings. |
 | **Output channel** | Shown only with `SHOT_STOPPER_ENABLE_BUZZER`. Default is **Buzzer only** when a local buzzer is compiled in, and **Scale only** without buzzer support. **Buzzer only**: all alert sound via the local buzzer (for a silent scale). **Scale only**: scale path only; scale-incapable triples are muted. **Scale priority**: scale when connected/able, else buzzer; never both for one event. In Buzzer only (and Scale priority when the scale is not usable), tare/start/stop sounds follow CN9/paddle/retare immediately and do not wait for the BLE round-trip. |
 | **Beep when coffee starts** | One beep on first coffee drops during an automatic shot (default ON; ignored when Brew by weight is off). |
 | **Paddle-off reminder** | Repeat beeps while the **physical paddle stays ON** and **CN9 is open** (default ON). |

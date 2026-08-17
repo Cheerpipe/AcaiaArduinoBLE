@@ -3215,8 +3215,14 @@ AlertOutputChannel currentAlertOutputChannel() {
   return effectiveAlertOutputChannel(runtimeConfig.alertOutputChannel);
 }
 
+bool soundAlertsEnabled() { return !runtimeConfig.soundAlertsMuted; }
+
 void applyBookooConnectBeepPolicy() {
   if (!scaleIsBookooGeneric() || !scale.supportsIndependentBeep()) {
+    return;
+  }
+  if (!soundAlertsEnabled()) {
+    (void)scale.setBeepLevel(0);
     return;
   }
   const AlertOutputChannel channel = currentAlertOutputChannel();
@@ -3234,13 +3240,25 @@ void applyBookooConnectBeepPolicy() {
 }
 
 void requestBookooSilenceIfConfigured() {
-  if (!runtimeConfig.bookooMuteOnBuzzerOnly) {
+  if (!soundAlertsEnabled()) {
+    (void)enqueueScaleDebugCommand(BookooDebugAction::VOLUME, 0);
     return;
   }
-  if (currentAlertOutputChannel() != AlertOutputChannel::BUZZER_ONLY) {
-    return;
+  if (runtimeConfig.bookooMuteOnBuzzerOnly &&
+      currentAlertOutputChannel() == AlertOutputChannel::BUZZER_ONLY) {
+    (void)enqueueScaleDebugCommand(BookooDebugAction::VOLUME, 0);
   }
-  (void)enqueueScaleDebugCommand(BookooDebugAction::VOLUME, 0);
+}
+
+void requestBookooAlertVolumeRestore() {
+  const AlertOutputChannel channel = currentAlertOutputChannel();
+  if (soundAlertsEnabled() && runtimeConfig.bookooConnectBeepLevel >= 1 &&
+      runtimeConfig.bookooConnectBeepLevel <= BOOKOO_BEEP_LEVEL_MAX &&
+      (channel == AlertOutputChannel::SCALE_ONLY ||
+       channel == AlertOutputChannel::SCALE_PRIORITY)) {
+    (void)enqueueScaleDebugCommand(BookooDebugAction::VOLUME,
+                                   runtimeConfig.bookooConnectBeepLevel);
+  }
 }
 
 bool alertEventScaleCapable(AlertEvent event) {
@@ -3281,7 +3299,7 @@ void stopPulseTrains() {
 }
 
 bool emitLocalAlertBuzzer(BuzzerPattern pattern) {
-  if (!BUZZER_SUPPORT_ENABLED || !localBuzzer.ready) {
+  if (!soundAlertsEnabled() || !BUZZER_SUPPORT_ENABLED || !localBuzzer.ready) {
     return false;
   }
   if (buzzerPatternIsPulseTrain(pattern)) {
@@ -3311,6 +3329,9 @@ bool queueScaleIndependentAlert(AlertEvent event, uint32_t cycleId) {
 
 // Independent / multi-tone alerts: first drop, paddle, completion, triples.
 bool emitAlert(AlertEvent event, uint32_t cycleId) {
+  if (!soundAlertsEnabled()) {
+    return false;
+  }
   const AlertOutputChannel channel = currentAlertOutputChannel();
   const bool scaleCapable = alertEventScaleCapable(event);
   BuzzerPattern buzzerPattern = BuzzerPattern::SINGLE;
@@ -3354,7 +3375,7 @@ bool emitAlert(AlertEvent event, uint32_t cycleId) {
 }
 
 bool commandAlertUsesBuzzer() {
-  if (!BUZZER_SUPPORT_ENABLED || !localBuzzer.ready) {
+  if (!soundAlertsEnabled() || !BUZZER_SUPPORT_ENABLED || !localBuzzer.ready) {
     return false;
   }
   const AlertOutputChannel channel = currentAlertOutputChannel();
@@ -3380,6 +3401,9 @@ void emitImmediateCommandAlertIfBuzzer() {
 // scale dropped while the ATT write was in flight.
 void emitCommandAlert(AlertEvent event, bool commandAttempted,
                       bool writeSucceeded, bool commandFeedbackExpected) {
+  if (!soundAlertsEnabled()) {
+    return;
+  }
   const AlertOutputChannel channel = currentAlertOutputChannel();
   if (channel == AlertOutputChannel::BUZZER_ONLY) {
     return;
@@ -3489,6 +3513,9 @@ bool takeScaleCompletionBeep() {
 }
 
 void scheduleScaleCompletionBeep() {
+  if (!soundAlertsEnabled()) {
+    return;
+  }
   scaleCompletionBeepScheduled = true;
   scaleCompletionBeepDueAtMs = millis() + SCALE_COMPLETION_BEEP_DELAY_MS;
 }
@@ -3500,13 +3527,29 @@ void cancelScaleCompletionBeep() {
   portEXIT_CRITICAL(&scaleBeepMux);
 }
 
+void cancelOperationalAlerts() {
+  cancelScaleCompletionBeep();
+  cancelScalePaddleReturnReminderBeep();
+  portENTER_CRITICAL(&scaleBeepMux);
+  scaleBeepPending = false;
+  scaleBeepCycleId = 0;
+  portEXIT_CRITICAL(&scaleBeepMux);
+  if (localBuzzer.pending != BuzzerPattern::NONE) {
+    localBuzzer.stopIf(localBuzzer.pending);
+  }
+  if (localBuzzer.active != BuzzerPattern::NONE) {
+    localBuzzer.stopIf(localBuzzer.active);
+  }
+}
+
 void serviceExtendedPulseAlert() {
   const uint8_t rate = session.slowExtractionExtended
                            ? runtimeConfig.buzzerSlowExtendedPulseRate
                            : runtimeConfig.buzzerExtendedPulseRate;
   const BuzzerPattern pattern = buzzerPatternForExtendedPulseRate(rate);
   const bool want =
-      BUZZER_SUPPORT_ENABLED && localBuzzer.ready && session.active &&
+      soundAlertsEnabled() && BUZZER_SUPPORT_ENABLED && localBuzzer.ready &&
+      session.active &&
       (session.extractionExtended || session.slowExtractionExtended) &&
       pattern != BuzzerPattern::NONE &&
       currentAlertOutputChannel() != AlertOutputChannel::SCALE_ONLY;
@@ -3527,6 +3570,10 @@ void serviceExtendedPulseAlert() {
 }
 
 void serviceScaleCompletionBeep() {
+  if (!soundAlertsEnabled()) {
+    cancelScaleCompletionBeep();
+    return;
+  }
   if (!scaleCompletionBeepScheduled) {
     return;
   }
@@ -3566,7 +3613,8 @@ void servicePaddleReturnReminder() {
       break;
   }
   const bool shouldRemind =
-      runtimeConfig.paddleReturnReminderBeep && paddleOnCn9Off && outputUsable;
+      soundAlertsEnabled() && runtimeConfig.paddleReturnReminderBeep &&
+      paddleOnCn9Off && outputUsable;
   if (!shouldRemind) {
     paddleReturnReminderActive = false;
     paddleReturnReminderLastAtMs = 0;
@@ -5137,13 +5185,20 @@ void queueRuntimePersist(int32_t reasonBits) {
 }
 
 void commitLiveRuntimeConfig(const RuntimeConfig &composed, int32_t reasonBits) {
+  const bool alertsWereEnabled = soundAlertsEnabled();
   runtimeConfig = composed;
+  if (!soundAlertsEnabled()) {
+    cancelOperationalAlerts();
+  }
   serialLogLevel = serialLogLevelFromRuntime(runtimeConfig);
   ringRetainLogLevel =
       static_cast<LogLevel>(runtimeConfig.ringRetainLogLevel);
   addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED,
                 static_cast<int32_t>(runtimeConfig.revision));
   requestBookooSilenceIfConfigured();
+  if (!alertsWereEnabled && soundAlertsEnabled()) {
+    requestBookooAlertVolumeRestore();
+  }
   queueRuntimePersist(reasonBits);
 #ifndef SHOT_STOPPER_HOST_TEST
   networkManager.syncLiveRuntime(runtimeConfig, &presetBank);
@@ -5437,6 +5492,7 @@ void processWebCommand(const WebCommand &command) {
       candidate.canTareStartTimer = command.config.canTareStartTimer;
       candidate.scaleTimerStopExtraDelayMs =
           command.config.scaleTimerStopExtraDelayMs;
+      candidate.soundAlertsMuted = command.config.soundAlertsMuted;
       candidate.firstDropBeep = command.config.firstDropBeep;
       candidate.paddleReturnReminderBeep = command.config.paddleReturnReminderBeep;
       candidate.paddleReturnReminderIntervalMs =

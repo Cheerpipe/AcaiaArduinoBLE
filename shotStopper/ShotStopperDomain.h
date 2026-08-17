@@ -12,7 +12,8 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 3;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 4;
+constexpr uint32_t LEGACY_CONFIG_SCHEMA_VERSION = 3;
 constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
 constexpr size_t PREFERRED_SCALE_NAME_CAPACITY = 32;
 constexpr size_t SCALE_HISTORY_CAPACITY = 8;
@@ -799,6 +800,8 @@ struct RuntimeConfig {
   bool firstDropBeep = true;
   // Remind the user to release the physical paddle after CN9 has opened.
   bool paddleReturnReminderBeep = true;
+  // Persisted as of schema v4. Schema-v3 records are migrated with alerts on.
+  bool soundAlertsMuted = false;
   uint32_t paddleReturnReminderIntervalMs =
       DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
   uint32_t paddleReturnReminderMaxDurationMs =

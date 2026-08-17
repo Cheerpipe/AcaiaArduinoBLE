@@ -3331,12 +3331,13 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   if (ok && page == StatusPage::Home) {
     ok = statusJsonAppend(
         &used,
-        ",\"brewByWeight\":%s,\"goalWeightG\":%u,"
+        ",\"soundAlertsEnabled\":%s,\"brewByWeight\":%s,\"goalWeightG\":%u,"
         "\"operationalWallMs\":%lu,\"minBrewTimeMs\":%lu,\"maxBrewTimeMs\":%lu,"
         "\"minRecoveryWeightG\":%.1f,\"maxRecoveryWeightG\":%.1f,"
         "\"fastExtractionGuardEnabled\":%s,\"slowExtractionGuardEnabled\":%s,"
         "\"autoToManualGuardEnabled\":%s,\"avoidBbwShotWithoutScale\":%s,"
         "\"scaleMacCacheMode\":\"%s\"",
+        control.config.soundAlertsMuted ? "false" : "true",
         control.config.timerOnly ? "false" : "true",
         static_cast<unsigned>(control.config.goalWeightG),
         static_cast<unsigned long>(control.config.operationalWallMs),
@@ -3355,7 +3356,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         ",\"goalWeightG\":%u,\"weightOffsetG\":%.2f,"
         "\"weightOffsetBaselineG\":%.2f,\"autoTare\":%s,\"brewByWeight\":%s,"
         "\"canTareStartTimer\":%s,\"scaleTimerStopExtraDelayMs\":%lu,"
-        "\"firstDropBeep\":%s,\"paddleReturnReminderBeep\":%s,"
+        "\"soundAlertsEnabled\":%s,\"firstDropBeep\":%s,"
+        "\"paddleReturnReminderBeep\":%s,"
         "\"paddleReturnReminderIntervalMs\":%lu,"
         "\"paddleReturnReminderMaxDurationMs\":%lu,\"paddleMode\":\"%s\","
         "\"buzzerScaleLostBeep\":%s,\"buzzerAutoToManualGuardEndBeep\":%s,"
@@ -3384,6 +3386,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.config.timerOnly ? "false" : "true",
         control.config.canTareStartTimer ? "true" : "false",
         static_cast<unsigned long>(control.config.scaleTimerStopExtraDelayMs),
+        control.config.soundAlertsMuted ? "false" : "true",
         control.config.firstDropBeep ? "true" : "false",
         control.config.paddleReturnReminderBeep ? "true" : "false",
         static_cast<unsigned long>(
@@ -4026,12 +4029,14 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   bool brewByWeight = !candidate.timerOnly;
   bool baseRevisionPresent = false;
   uint32_t baseRevision = 0;
+  bool soundAlertsEnabled = !candidate.soundAlertsMuted;
   char customNtp[NTP_SERVER_HOST_CAPACITY] = {};
   memcpy(customNtp, candidate.ntpServerCustom, sizeof(customNtp));
   static const char *const fields[] = {
       "baseRevision", "goalWeightG", "rinseGestureMs", "rinseDurationMs",
       "operationalWallMs", "autoTare", "brewByWeight", "canTareStartTimer",
-      "scaleTimerStopExtraDelayMs", "firstDropBeep", "paddleReturnReminderBeep",
+      "scaleTimerStopExtraDelayMs", "soundAlertsEnabled", "firstDropBeep",
+      "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
       "paddleMode", "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
       "buzzerManualNoScaleBeep", "buzzerScaleConnectedBeep",
@@ -4094,6 +4099,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
              !jsonUint32(root, "scaleTimerStopExtraDelayMs",
                          candidate.scaleTimerStopExtraDelayMs)) {
     parseError = "scaleTimerStopExtraDelayMs must be an integer (milliseconds).";
+  } else if (jsonFieldPresent(root, "soundAlertsEnabled") &&
+             !jsonBoolean(root, "soundAlertsEnabled", soundAlertsEnabled)) {
+    parseError = "soundAlertsEnabled must be a boolean.";
   } else if (jsonFieldPresent(root, "firstDropBeep") &&
              !jsonBoolean(root, "firstDropBeep", candidate.firstDropBeep)) {
     parseError = "firstDropBeep must be a boolean.";
@@ -4284,6 +4292,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   if (brewByWeightPresent) {
     candidate.timerOnly = !brewByWeight;
   }
+  candidate.soundAlertsMuted = !soundAlertsEnabled;
   memcpy(candidate.ntpServerCustom, customNtp, sizeof(candidate.ntpServerCustom));
   memset(customNtp, 0, sizeof(customNtp));
   const RuntimeConfig effective =

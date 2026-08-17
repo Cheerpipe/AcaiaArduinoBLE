@@ -1613,6 +1613,7 @@ void w01_default_runtime_configuration_is_valid() {
         DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS);
   CHECK(config.firstDropBeep);
   CHECK(config.paddleReturnReminderBeep);
+  CHECK(!config.soundAlertsMuted);
   CHECK(config.buzzerScaleLostBeep);
   CHECK(config.buzzerAutoToManualGuardEndBeep);
   CHECK(config.buzzerManualNoScaleBeep);
@@ -3269,6 +3270,47 @@ void w74_apply_config_enabling_mute_sends_silence_only_in_buzzer_only() {
   processWebCommand(update);
   CHECK(!scaleDebugPending);
   CHECK(scale.commandLog.empty());
+}
+
+void w74b_sound_alert_master_mutes_and_cancels_all_routes() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_ONLY);
+  CHECK(emitAlert(AlertEvent::FIRST_DROP, 7));
+  CHECK(scaleBeepPending);
+
+  WebCommand update;
+  update.type = WebCommandType::APPLY_CONFIG;
+  update.config = runtimeConfig;
+  update.config.soundAlertsMuted = true;
+  processWebCommand(update);
+  CHECK(runtimeConfig.soundAlertsMuted);
+  CHECK(!scaleBeepPending);
+  CHECK(!scaleCompletionBeepScheduled);
+  CHECK(!emitAlert(AlertEvent::FIRST_DROP, 8));
+  CHECK(!scaleBeepPending);
+
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  const uint32_t accepted = localBuzzer.acceptedRequests;
+  emitImmediateCommandAlertIfBuzzer();
+  CHECK(localBuzzer.acceptedRequests == accepted);
+  scheduleScaleCompletionBeep();
+  CHECK(!scaleCompletionBeepScheduled);
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  CHECK(emitAlert(AlertEvent::SCALE_CONNECTED));
+  CHECK(localBuzzer.busy());
+  update = WebCommand{};
+  update.type = WebCommandType::APPLY_CONFIG;
+  update.config = runtimeConfig;
+  update.config.soundAlertsMuted = true;
+  processWebCommand(update);
+  CHECK(!localBuzzer.busy());
 }
 
 void w75_bookoo_discovery_connect_applies_beep_policy() {
@@ -6463,6 +6505,7 @@ const TestCase testCases[] = {
     {"W72", w72_bookoo_connect_skips_disabled_volume_and_non_bookoo},
     {"W73", w73_apply_config_buzzer_only_sends_bookoo_silence},
     {"W74", w74_apply_config_enabling_mute_sends_silence_only_in_buzzer_only},
+    {"W74b", w74b_sound_alert_master_mutes_and_cancels_all_routes},
     {"W75", w75_bookoo_discovery_connect_applies_beep_policy},
     {"W76", w76_buzzer_only_start_beeps_at_cn9_not_ble_result},
     {"W77", w77_scale_priority_disconnected_beeps_on_cn9_without_ble},

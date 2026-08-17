@@ -64,6 +64,17 @@ struct PersistedSettings {
   uint32_t checksum = 0;
 };
 
+struct PersistedSettingsHeader {
+  uint32_t magic = 0;
+  uint32_t schemaVersion = 0;
+  uint32_t structureSize = 0;
+  uint32_t storageRevision = 0;
+};
+
+static_assert(offsetof(PersistedSettings, storageRevision) + sizeof(uint32_t) ==
+                  sizeof(PersistedSettingsHeader),
+              "PersistedSettings header layout changed");
+
 static_assert(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET,
               "PersistedSettings exceeds NVS dual-slot budget");
 
@@ -214,6 +225,31 @@ inline bool verifyAdminPassword(const PersistedSettings &settings,
 inline uint32_t persistedSettingsChecksum(const PersistedSettings &settings) {
   return crc32(reinterpret_cast<const uint8_t *>(&settings),
                offsetof(PersistedSettings, checksum));
+}
+
+// Schema v3 occupied the byte now used by soundAlertsMuted as alignment
+// padding. Read v3 as raw bytes so that byte is never interpreted as a bool
+// before migration normalizes it.
+struct LegacyPersistedSettingsBytes {
+  uint8_t bytes[sizeof(PersistedSettings)] = {};
+};
+
+inline LegacyPersistedSettingsBytes &legacyPersistedSettingsScratch() {
+  static LegacyPersistedSettingsBytes scratch = {};
+  return scratch;
+}
+
+inline bool validLegacyPersistedSettingsBytes(
+    const LegacyPersistedSettingsBytes &legacy) {
+  PersistedSettingsHeader header = {};
+  memcpy(&header, legacy.bytes, sizeof(header));
+  uint32_t checksum = 0;
+  memcpy(&checksum, legacy.bytes + offsetof(PersistedSettings, checksum),
+         sizeof(checksum));
+  return header.magic == PERSISTED_SETTINGS_MAGIC &&
+         header.schemaVersion == LEGACY_CONFIG_SCHEMA_VERSION &&
+         header.structureSize == sizeof(PersistedSettings) &&
+         checksum == crc32(legacy.bytes, offsetof(PersistedSettings, checksum));
 }
 
 inline void clearStaAddressFields(PersistedSettings &settings) {
@@ -392,6 +428,34 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
   return true;
 }
 
+inline bool readLegacySettingsSlot(Preferences &preferences, const char *key,
+                                   PersistedSettings &settings) {
+  if (preferences.getBytesLength(key) != sizeof(PersistedSettings)) {
+    return false;
+  }
+  LegacyPersistedSettingsBytes &legacy = legacyPersistedSettingsScratch();
+  memset(legacy.bytes, 0, sizeof(legacy.bytes));
+  if (preferences.getBytes(key, legacy.bytes, sizeof(legacy.bytes)) !=
+          sizeof(legacy.bytes) ||
+      !validLegacyPersistedSettingsBytes(legacy)) {
+    return false;
+  }
+
+  // Do not deserialize the old padding byte as bool. Normalize it first, then
+  // validate the resulting v4 value object.
+  legacy.bytes[offsetof(PersistedSettings, runtime) +
+               offsetof(RuntimeConfig, soundAlertsMuted)] = 0;
+  memcpy(&settings, legacy.bytes, sizeof(settings));
+  settings.schemaVersion = CONFIG_SCHEMA_VERSION;
+  settings.structureSize = sizeof(PersistedSettings);
+  settings.runtime.soundAlertsMuted = false;
+  settings.checksum = 0;
+  settings.checksum = persistedSettingsChecksum(settings);
+  return validPersistedSettings(settings);
+}
+
+inline bool savePersistedSettings(PersistedSettings &settings);
+
 inline bool loadPersistedSettings(PersistedSettings &settings) {
   Preferences preferences;
   if (!preferences.begin(SETTINGS_NAMESPACE, true)) {
@@ -401,25 +465,45 @@ inline bool loadPersistedSettings(PersistedSettings &settings) {
   PersistedSettings &second = persistedSettingsScratch(1);
   first = PersistedSettings{};
   second = PersistedSettings{};
-  const bool firstValid = readSettingsSlot(preferences, SETTINGS_SLOT_A, first);
-  const bool secondValid = readSettingsSlot(preferences, SETTINGS_SLOT_B, second);
+  bool firstMigrated = false;
+  bool secondMigrated = false;
+  bool firstValid = readSettingsSlot(preferences, SETTINGS_SLOT_A, first);
+  if (!firstValid) {
+    firstValid = readLegacySettingsSlot(preferences, SETTINGS_SLOT_A, first);
+    firstMigrated = firstValid;
+  }
+  bool secondValid = readSettingsSlot(preferences, SETTINGS_SLOT_B, second);
+  if (!secondValid) {
+    secondValid = readLegacySettingsSlot(preferences, SETTINGS_SLOT_B, second);
+    secondMigrated = secondValid;
+  }
   preferences.end();
 
   if (!firstValid && !secondValid) {
     return false;
   }
+  bool selectedMigrated = false;
   if (!firstValid) {
     settings = second;
+    selectedMigrated = secondMigrated;
   } else if (!secondValid) {
     settings = first;
+    selectedMigrated = firstMigrated;
   } else {
     const int32_t revisionDelta =
         static_cast<int32_t>(second.storageRevision - first.storageRevision);
     if (revisionDelta > 0) {
       settings = second;
+      selectedMigrated = secondMigrated;
     } else {
       settings = first;
+      selectedMigrated = firstMigrated;
     }
+  }
+  if (selectedMigrated) {
+    // Best effort: boot with the migrated configuration even if NVS cannot be
+    // written now; the next successful save will retry it.
+    (void)savePersistedSettings(settings);
   }
   return true;
 }

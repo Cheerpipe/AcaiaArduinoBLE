@@ -114,6 +114,7 @@ if (!ui.includes('function rangeCheck(') ||
   throw new Error('UI/API must expose specific validation ranges, inline errors, and field-aware config errors');
 }
 if (!network.includes('"firstDropBeep"') ||
+    !network.includes('"soundAlertsEnabled"') ||
     !network.includes('"paddleReturnReminderBeep"') ||
     !network.includes('"buzzerScaleLostBeep"') ||
     !network.includes('"buzzerAutoToManualGuardEndBeep"') ||
@@ -192,6 +193,15 @@ if (!network.includes('"firstDropBeep"') ||
     !firmware.includes('BUZZER_GPIO') ||
     !firmware.includes('servicePaddleReturnReminder')) {
   throw new Error('Scale beep settings must be configurable end-to-end');
+}
+
+if (!ui.includes('id="soundAlertsEnabled"') ||
+    !ui.includes('id="homeSoundAlertsEnabled"') ||
+    !ui.includes('soundAlertsEnabled:$(\'soundAlertsEnabled\').checked') ||
+    !ui.includes('p.soundAlertsEnabled=$(\'homeSoundAlertsEnabled\').checked') ||
+    !ui.includes("k!=='soundAlertsEnabled'") ||
+    !ui.includes("typeof c.soundAlertsEnabled==='boolean'")) {
+  throw new Error('Sound alerts must be mirrored by Settings and Home patch controls');
 }
 if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0') ||
     !domain.includes('BUZZER_ACTIVE_DRIVE = SHOT_STOPPER_ENABLE_BUZZER == 2') ||
@@ -595,6 +605,10 @@ if (!ui.includes('<legend>Brew</legend>') ||
         html.indexOf('id="homeFastExtractionGuardEnabled"') ||
     html.indexOf('id="homeFastExtractionGuardEnabled"') >
         html.indexOf('id="homePresetBlock"') ||
+    html.indexOf('id="homeFastExtractionGuardEnabled"') >
+        html.indexOf('id="homeSoundAlertsEnabled"') ||
+    html.indexOf('id="homeSoundAlertsEnabled"') >
+        html.indexOf('id="homePresetBlock"') ||
     html.indexOf('id="homeFastExtractionGuardEnabled"') > html.indexOf('id="shotPanel"') ||
     !html.includes('>No-scale BBW<span') ||
     !html.includes('>Fast extraction guard<span') ||
@@ -627,11 +641,11 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes("'fastExtractionGuardEnabled',1)") ||
     !ui.includes("'slowExtractionGuardEnabled',1)") ||
     !ui.includes("'autoToManualGuardEnabled',1)") ||
-    !ui.includes('el.disabled=!controlsMutable||!on||pend') ||
+    !ui.includes('el.disabled=!controlsMutable||off||pend') ||
     ui.includes('el.disabled=!controlsMutable||!on||pend||!!homeSwitchPending[h]') ||
     !ui.includes('homeFlushBusy') ||
     !ui.includes('scheduleHomeGuardFlush()') ||
-    !ui.includes("classList.toggle('fieldOff',!on)") ||
+    !ui.includes("classList.toggle('fieldOff',off)") ||
     !ui.includes('$(\'homeBrewByWeight\').disabled=!controlsMutable||pend') ||
     !css.includes('.switchRow.switchPending') ||
     !css.includes('.homeSwitchGrid') ||
@@ -1171,6 +1185,14 @@ for (const field of forbiddenResponseFields) {
       statusFormat.includes('"' + field + '"')) {
     throw new Error(`Secret field exposed by status JSON: ${field}`);
   }
+}
+const soundAlertStatusFields =
+    statusFormat.match(/\\"soundAlertsEnabled\\":%s/g) || [];
+if (soundAlertStatusFields.length !== 2 ||
+    !statusFormat.includes('page == StatusPage::Home') ||
+    !statusFormat.includes('page == StatusPage::Settings')) {
+  throw new Error(
+      'soundAlertsEnabled must be projected only by status/home and status/settings');
 }
 // Shared status envelope: firmware/bootId/mutable/liveShot/ringRetain only.
 // NTP → admin; serialDebug/diagnostics → diagnostic; buzzerSupported → settings.
