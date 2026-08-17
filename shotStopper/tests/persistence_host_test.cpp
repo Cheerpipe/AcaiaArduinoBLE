@@ -1,5 +1,6 @@
 #define SHOT_STOPPER_PERSISTENCE_HOST_TEST
 #include "../ShotStopperPersistence.h"
+#include "../ShotStopperBleCompanionPersistence.h"
 #include "../ShotStopperShotLog.h"
 #include "../ShotStopperLastShot.h"
 
@@ -681,6 +682,39 @@ void p16_static_ip_address_validation() {
         static_cast<uint8_t>(StaConfigState::CONFIRMED));
 }
 
+void p48_ble_companion_defaults_and_dual_slot_round_trip() {
+  resetHostPersistence();
+  BleCompanionPersistedSettings settings;
+  CHECK(settings.enabled == 1);
+  CHECK(saveBleCompanionSettings(settings));
+  CHECK(settings.revision == 1);
+  settings.enabled = 0;
+  CHECK(saveBleCompanionSettings(settings));
+  CHECK(settings.revision == 2);
+  BleCompanionPersistedSettings loaded;
+  CHECK(loadBleCompanionSettings(loaded));
+  CHECK(loaded.enabled == 0);
+  CHECK(loaded.revision == 2);
+  CHECK(validBleCompanionSettings(loaded));
+}
+
+void p49_ble_companion_corruption_falls_back_and_reset_enables() {
+  resetHostPersistence();
+  BleCompanionPersistedSettings settings;
+  CHECK(saveBleCompanionSettings(settings));
+  settings.enabled = 0;
+  CHECK(saveBleCompanionSettings(settings));
+  CHECK(persistence_host::corrupt(SETTINGS_NAMESPACE, BLE_COMPANION_SLOT_B,
+                                  offsetof(BleCompanionPersistedSettings,
+                                           checksum)));
+  BleCompanionPersistedSettings loaded;
+  CHECK(loadBleCompanionSettings(loaded));
+  CHECK(loaded.enabled == 1);
+  CHECK(loaded.revision == 1);
+  CHECK(resetBleCompanionSettings(loaded));
+  CHECK(loaded.enabled == 1);
+}
+
 struct TestCase {
   const char *id;
   void (*function)();
@@ -712,6 +746,8 @@ const TestCase tests[] = {
     {"P18", p18_shot_log_keeps_history_when_inactive_slot_write_fails},
     {"P19", p19_shot_log_weight_sentinel_allows_int16_max},
     {"P29", p29_last_shot_persists_and_clears},
+    {"P48", p48_ble_companion_defaults_and_dual_slot_round_trip},
+    {"P49", p49_ble_companion_corruption_falls_back_and_reset_enables},
 };
 
 }  // namespace

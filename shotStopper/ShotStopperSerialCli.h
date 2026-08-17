@@ -42,6 +42,9 @@ enum class SerialCliVerb : uint8_t {
   HEALTH,
   SCALE_STATUS,
   NTP_STATUS,
+  BLE_COMPAT_ENABLE,
+  BLE_COMPAT_DISABLE,
+  BLE_COMPAT_STATUS,
   UNKNOWN,
   LINE_TOO_LONG,
   INVALID_ARGS
@@ -95,6 +98,9 @@ inline const char *serialCliVerbName(SerialCliVerb verb) {
     case SerialCliVerb::HEALTH: return "HEALTH";
     case SerialCliVerb::SCALE_STATUS: return "SCALE_STATUS";
     case SerialCliVerb::NTP_STATUS: return "NTP_STATUS";
+    case SerialCliVerb::BLE_COMPAT_ENABLE: return "BLE_COMPAT_ENABLE";
+    case SerialCliVerb::BLE_COMPAT_DISABLE: return "BLE_COMPAT_DISABLE";
+    case SerialCliVerb::BLE_COMPAT_STATUS: return "BLE_COMPAT_STATUS";
     case SerialCliVerb::UNKNOWN: return "UNKNOWN";
     case SerialCliVerb::LINE_TOO_LONG: return "LINE_TOO_LONG";
     case SerialCliVerb::INVALID_ARGS: return "INVALID_ARGS";
@@ -337,6 +343,15 @@ inline bool serialCliParseLine(const char *line, SerialCliRequest &request) {
   if (serialCliEqualsIgnoreCase(verb, "ntp_status")) {
     return requireNoArgs(SerialCliVerb::NTP_STATUS);
   }
+  if (serialCliEqualsIgnoreCase(verb, "ble_compat_enable")) {
+    return requireNoArgs(SerialCliVerb::BLE_COMPAT_ENABLE);
+  }
+  if (serialCliEqualsIgnoreCase(verb, "ble_compat_disable")) {
+    return requireNoArgs(SerialCliVerb::BLE_COMPAT_DISABLE);
+  }
+  if (serialCliEqualsIgnoreCase(verb, "ble_compat_status")) {
+    return requireNoArgs(SerialCliVerb::BLE_COMPAT_STATUS);
+  }
 
   if (serialCliEqualsIgnoreCase(verb, "set_ap_password")) {
     if (argCount != 1) {
@@ -450,6 +465,15 @@ inline void serialCliPrintHelp() {
   Serial.println("HEALTH  heap, loop gap, cpu load, task stacks  e.g. HEALTH");
   Serial.println("SCALE_STATUS  BLE scale link dump  e.g. SCALE_STATUS");
   Serial.println("NTP_STATUS  wall clock and NTP dump  e.g. NTP_STATUS");
+  Serial.println(
+      "BLE_COMPAT_ENABLE  enable Companion on next boot  e.g. "
+      "BLE_COMPAT_ENABLE");
+  Serial.println(
+      "BLE_COMPAT_DISABLE  disable Companion on next boot  e.g. "
+      "BLE_COMPAT_DISABLE");
+  Serial.println(
+      "BLE_COMPAT_STATUS  dump Companion BLE state  e.g. "
+      "BLE_COMPAT_STATUS");
 }
 
 inline const char *serialCliWifiModeName(uint8_t mode) {

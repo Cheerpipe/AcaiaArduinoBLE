@@ -35,6 +35,10 @@
 #endif
 
 #include "ShotStopperDomain.h"
+#include "ShotStopperBleCompanion.h"
+#if !defined(SHOT_STOPPER_HOST_TEST)
+#include "ShotStopperBleCompanionPersistence.h"
+#endif
 #include "ShotStopperBuzzer.h"
 #include "ShotStopperPresets.h"
 #include "ShotStopperSerialCli.h"
@@ -53,6 +57,8 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <new>
+#include <stdlib.h>
 
 using namespace shotstopper;
 
@@ -71,6 +77,12 @@ constexpr uint32_t SCALE_ATT_TIMEOUT_MS = 1000;
 constexpr uint32_t SCALE_COMPLETION_BEEP_DELAY_MS = 200;
 constexpr size_t SCALE_COMMAND_QUEUE_LENGTH = 12;
 constexpr size_t SCALE_EVENT_QUEUE_LENGTH = 64;
+constexpr size_t BLE_COMPANION_REQUEST_QUEUE_LENGTH = 8;
+constexpr size_t BLE_COMPANION_RESULT_QUEUE_LENGTH = 8;
+// Measured high-water headroom with the full Companion profile is over 6 KiB.
+// Keep roughly 3 KiB spare while returning scarce internal RAM to LwIP/httpd.
+constexpr uint32_t SCALE_WORKER_TASK_STACK_SIZE = 5120;
+constexpr uint32_t SETTINGS_PERSIST_TASK_STACK_SIZE = 6144;
 constexpr uint32_t SCALE_STOP_RETRY_INTERVAL_MS = 250;
 constexpr uint32_t SCALE_STOP_RETRY_WINDOW_MS = 5000;
 constexpr uint8_t SCALE_STOP_MAX_ATTEMPTS = 3;
@@ -473,6 +485,20 @@ struct MaintenanceLease {
 // ---------------------------------------------------------------------------
 
 AcaiaArduinoBLE scale(DEBUG);
+#if !defined(SHOT_STOPPER_HOST_TEST)
+ShotStopperBleCompanion *bleCompanion = nullptr;
+BleCompanionPersistedSettings bleCompanionPersistedSettings;
+#endif
+BleCompanionRuntimeSnapshot bleCompanionRuntimeSnapshot;
+BleCompanionStatusSnapshot bleCompanionStatusSnapshot;
+
+bool bleCompanionProfileAllocated() {
+#if !defined(SHOT_STOPPER_HOST_TEST)
+  return bleCompanion != nullptr;
+#else
+  return false;
+#endif
+}
 
 StopperState stopperState = StopperState::REQUIRES_OFF;
 ShotTrajectory shot;
@@ -510,6 +536,8 @@ TaskHandle_t scaleWorkerTaskHandle = nullptr;
 QueueHandle_t scaleCommandQueue = nullptr;
 QueueHandle_t scaleEventQueue = nullptr;
 QueueHandle_t webCommandQueue = nullptr;
+QueueHandle_t bleCompanionRequestQueue = nullptr;
+QueueHandle_t bleCompanionResultQueue = nullptr;
 portMUX_TYPE scaleLinkMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE scalePreferredMacMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE scaleBeepMux = portMUX_INITIALIZER_UNLOCKED;
@@ -517,6 +545,7 @@ portMUX_TYPE scaleDebugMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE scaleCriticalEventMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE scaleWeightEventMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE webStatusMux = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE bleCompanionMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE debugLogMux = portMUX_INITIALIZER_UNLOCKED;
 ScaleLinkState scaleLinkState = ScaleLinkState::DISCONNECTED;
 uint32_t scaleDisconnectSequence = 0;
@@ -945,9 +974,79 @@ void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
   persistLastShotSnapshot(last);
 }
 
+bool controlAllowsConfigurationNow();
+RuntimeConfig effectiveRuntimeConfig();
+ScaleLinkSnapshot getScaleLinkSnapshot();
+bool scaleLinkAvailable(const ScaleLinkSnapshot &snapshot);
+
 bool enqueueWebCommand(const WebCommand &command) {
   return webCommandQueue != nullptr &&
          xQueueSend(webCommandQueue, &command, 0) == pdTRUE;
+}
+
+bool enqueueBleCompanionRequest(const BleCompanionRequest &request) {
+  return bleCompanionRequestQueue != nullptr &&
+         xQueueSend(bleCompanionRequestQueue, &request, 0) == pdTRUE;
+}
+
+void copyBleCompanionRuntimeSnapshot(BleCompanionRuntimeSnapshot &output) {
+  portENTER_CRITICAL(&bleCompanionMux);
+  output = bleCompanionRuntimeSnapshot;
+  portEXIT_CRITICAL(&bleCompanionMux);
+}
+
+void publishBleCompanionStatus(BleCompanionStatusSnapshot status) {
+  portENTER_CRITICAL(&bleCompanionMux);
+  status.configuredEnabled =
+      bleCompanionRuntimeSnapshot.configuredEnabled;
+  status.restartRequired =
+      status.configuredEnabled != status.enabled;
+  bleCompanionStatusSnapshot = status;
+  portEXIT_CRITICAL(&bleCompanionMux);
+}
+
+BleCompanionStatusSnapshot copyBleCompanionStatus() {
+  BleCompanionStatusSnapshot output;
+  portENTER_CRITICAL(&bleCompanionMux);
+  output = bleCompanionStatusSnapshot;
+  portEXIT_CRITICAL(&bleCompanionMux);
+  return output;
+}
+
+void publishBleCompanionRuntimeSnapshot() {
+  static uint32_t lastPublishedMs = 0;
+  const uint32_t nowMs = millis();
+  if (lastPublishedMs != 0 &&
+      static_cast<uint32_t>(nowMs - lastPublishedMs) < 25U) {
+    return;
+  }
+  lastPublishedMs = nowMs;
+  BleCompanionRuntimeSnapshot next;
+  next.configurationAllowed = controlAllowsConfigurationNow();
+  const RuntimeConfig effective = effectiveRuntimeConfig();
+  next.brewByWeight = !effective.timerOnly;
+  next.goalWeightG = effective.goalWeightG;
+  next.autoTare = effective.autoTare;
+  next.bbwProtectionMs = effective.bbwProtectionMs;
+  next.operationalWallMs = effective.operationalWallMs;
+  next.dripDelayMs = effective.dripDelayMs;
+  next.scaleConnected =
+      getScaleLinkSnapshot().state == ScaleLinkState::CONNECTED;
+  next.shotActive = session.active;
+#if !defined(SHOT_STOPPER_HOST_TEST)
+  const NetworkStatusSnapshot network = networkManager.snapshot();
+  next.apActive = network.apActive;
+  strncpy(next.wifiSsid, network.staSsid, sizeof(next.wifiSsid) - 1);
+  strncpy(next.wifiIp, network.staIp, sizeof(next.wifiIp) - 1);
+#endif
+  portENTER_CRITICAL(&bleCompanionMux);
+  // Active state is immutable until reboot; the configured state may change
+  // through Admin/CLI and is applied only by the next boot.
+  next.enabled = bleCompanionStatusSnapshot.enabled;
+  next.configuredEnabled =
+      bleCompanionStatusSnapshot.configuredEnabled;
+  bleCompanionRuntimeSnapshot = next;
+  portEXIT_CRITICAL(&bleCompanionMux);
 }
 
 RuntimeConfig effectiveRuntimeConfig() {
@@ -4136,11 +4235,69 @@ void scaleWorkerTask(void *) {
     reportTaskWatchdogFault();
   }
 
+#if !defined(SHOT_STOPPER_HOST_TEST)
+  bleStackReady = BLE.begin();
+  if (!bleStackReady) {
+    addDebugEvent(DebugCategory::SCALE, DebugCode::INITIALIZATION_FAILED,
+                  BOOT_SUBSYSTEM_BLE);
+    logEmit(LogLevel::ERROR, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+            BOOT_SUBSYSTEM_BLE, 0);
+    scaleWorkerTaskHandle = nullptr;
+    vTaskDelete(nullptr);
+    return;
+  }
+  // ArduinoBLE defaults ATT operations to five seconds. Bound every central
+  // operation owned by this task so scale-staleness telemetry remains useful.
+  BLE.setTimeout(SCALE_ATT_TIMEOUT_MS);
+  logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
+          BOOT_SUBSYSTEM_BLE, 1);
+  BleCompanionRuntimeSnapshot initialBleSnapshot;
+  copyBleCompanionRuntimeSnapshot(initialBleSnapshot);
+  if (bleCompanionProfileAllocated()) {
+    bleCompanion->begin(enqueueBleCompanionRequest);
+    publishBleCompanionStatus(bleCompanion->status());
+  } else {
+    BleCompanionStatusSnapshot inactiveStatus;
+    inactiveStatus.stackReady = true;
+    inactiveStatus.apActive = initialBleSnapshot.apActive;
+    if (initialBleSnapshot.configuredEnabled) {
+      inactiveStatus.lastReject =
+          BleCompanionRejectReason::ALLOCATION_FAILED;
+    }
+    publishBleCompanionStatus(inactiveStatus);
+  }
+#endif
+
   for (;;) {
     // The control task treats a connected link with no worker progress as
     // unavailable, preventing stale prediction data from ending a shot.
     markScaleWorkerProgress();
     BLE.poll();
+
+#if !defined(SHOT_STOPPER_HOST_TEST)
+    if (bleCompanion != nullptr) {
+      BleCompanionResult bleResult;
+      while (bleCompanionResultQueue != nullptr &&
+             xQueueReceive(bleCompanionResultQueue, &bleResult, 0) == pdTRUE) {
+        bleCompanion->noteResult(bleResult);
+      }
+      BleCompanionRuntimeSnapshot bleSnapshot;
+      copyBleCompanionRuntimeSnapshot(bleSnapshot);
+      bleCompanion->service(bleSnapshot, millis());
+      publishBleCompanionStatus(bleCompanion->status());
+    } else {
+      BleCompanionRuntimeSnapshot bleSnapshot;
+      copyBleCompanionRuntimeSnapshot(bleSnapshot);
+      BleCompanionStatusSnapshot inactiveStatus;
+      inactiveStatus.stackReady = true;
+      inactiveStatus.apActive = bleSnapshot.apActive;
+      if (bleSnapshot.configuredEnabled) {
+        inactiveStatus.lastReject =
+            BleCompanionRejectReason::ALLOCATION_FAILED;
+      }
+      publishBleCompanionStatus(inactiveStatus);
+    }
+#endif
 
     // Packet timeout / remote-drop detection must not wait behind beeps or
     // queued commands. Bookoo has no heartbeat; silence is the only watchdog.
@@ -4202,7 +4359,16 @@ bool initializeScaleWorker() {
       xQueueCreate(SCALE_COMMAND_QUEUE_LENGTH, sizeof(ScaleCommand));
   scaleEventQueue = xQueueCreate(SCALE_EVENT_QUEUE_LENGTH,
                                  sizeof(ScaleEvent));
-  if (scaleCommandQueue == nullptr || scaleEventQueue == nullptr) {
+  if (bleCompanionProfileAllocated()) {
+    bleCompanionRequestQueue = xQueueCreate(BLE_COMPANION_REQUEST_QUEUE_LENGTH,
+                                            sizeof(BleCompanionRequest));
+    bleCompanionResultQueue = xQueueCreate(BLE_COMPANION_RESULT_QUEUE_LENGTH,
+                                           sizeof(BleCompanionResult));
+  }
+  if (scaleCommandQueue == nullptr || scaleEventQueue == nullptr ||
+      (bleCompanionProfileAllocated() &&
+       (bleCompanionRequestQueue == nullptr ||
+        bleCompanionResultQueue == nullptr))) {
     if (scaleCommandQueue != nullptr) {
       vQueueDelete(scaleCommandQueue);
       scaleCommandQueue = nullptr;
@@ -4211,16 +4377,33 @@ bool initializeScaleWorker() {
       vQueueDelete(scaleEventQueue);
       scaleEventQueue = nullptr;
     }
+    if (bleCompanionRequestQueue != nullptr) {
+      vQueueDelete(bleCompanionRequestQueue);
+      bleCompanionRequestQueue = nullptr;
+    }
+    if (bleCompanionResultQueue != nullptr) {
+      vQueueDelete(bleCompanionResultQueue);
+      bleCompanionResultQueue = nullptr;
+    }
     return false;
   }
 
-  if (xTaskCreatePinnedToCore(scaleWorkerTask, "scale_worker", 8192, nullptr,
+  if (xTaskCreatePinnedToCore(scaleWorkerTask, "scale_worker",
+                              SCALE_WORKER_TASK_STACK_SIZE, nullptr,
                               tskIDLE_PRIORITY + 1, &scaleWorkerTaskHandle,
                               CONTROL_TASK_CORE) != pdPASS) {
     vQueueDelete(scaleCommandQueue);
     vQueueDelete(scaleEventQueue);
     scaleCommandQueue = nullptr;
     scaleEventQueue = nullptr;
+    if (bleCompanionRequestQueue != nullptr) {
+      vQueueDelete(bleCompanionRequestQueue);
+    }
+    if (bleCompanionResultQueue != nullptr) {
+      vQueueDelete(bleCompanionResultQueue);
+    }
+    bleCompanionRequestQueue = nullptr;
+    bleCompanionResultQueue = nullptr;
     scaleWorkerTaskHandle = nullptr;
     return false;
   }
@@ -5043,8 +5226,7 @@ bool controlAllowsConfigurationNow() {
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   return stopperState == StopperState::READY && !session.active &&
          !relay.closed && !paddleOn && !rawPaddleOn &&
-         !maintenanceLease.active && !safetyResetStatus.recoveryRequired &&
-         relay.state != RelaySafetyState::LOCKOUT;
+         !maintenanceLease.active;
 }
 
 void beginWebRinse() {
@@ -5363,6 +5545,8 @@ void serviceRuntimePersistence() {
 #endif
 }
 
+bool persistBleCompanionEnabled(bool enabled);
+
 void completeMaintenanceLease(const WebCommand &result) {
   if (!maintenanceLease.active ||
       result.maintenanceLeaseId != maintenanceLease.id) {
@@ -5378,6 +5562,10 @@ void completeMaintenanceLease(const WebCommand &result) {
       runtimePersistReasonBits = 0;
     }
     requestBookooSilenceIfConfigured();
+  }
+  if (result.succeeded &&
+      maintenanceLease.command.type == WebCommandType::FACTORY_RESET) {
+    (void)persistBleCompanionEnabled(true);
   }
   if (!result.succeeded &&
       maintenanceLease.command.type == WebCommandType::PERSIST_RUNTIME &&
@@ -5406,6 +5594,8 @@ void rejectWebCommand(const WebCommand &command) {
                 static_cast<int32_t>(command.type));
   reportControlCommandResult(command, CommandResultState::FAILED);
 }
+
+bool persistBleCompanionEnabled(bool enabled);
 
 void processWebCommand(const WebCommand &command) {
   switch (command.type) {
@@ -5771,6 +5961,20 @@ void processWebCommand(const WebCommand &command) {
         rejectWebCommand(command);
       }
       return;
+
+    case WebCommandType::BLE_COMPAT_ENABLE:
+    case WebCommandType::BLE_COMPAT_DISABLE: {
+      const bool enabled =
+          command.type == WebCommandType::BLE_COMPAT_ENABLE;
+      if (!persistBleCompanionEnabled(enabled)) {
+        rejectWebCommand(command);
+        return;
+      }
+      addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED,
+                    enabled ? 1 : 0);
+      reportControlCommandResult(command, CommandResultState::PERSISTED);
+      return;
+    }
   }
 }
 
@@ -5782,6 +5986,192 @@ void processWebCommands() {
   WebCommand command;
   if (xQueueReceive(webCommandQueue, &command, 0) == pdTRUE) {
     processWebCommand(command);
+  }
+}
+
+void reportBleCompanionResult(const BleCompanionRequest &request,
+                              bool accepted,
+                              BleCompanionRejectReason reason) {
+  BleCompanionResult result;
+  result.sequence = request.sequence;
+  result.accepted = accepted;
+  result.reason = accepted ? BleCompanionRejectReason::NONE : reason;
+  if (bleCompanionResultQueue != nullptr) {
+    (void)xQueueSend(bleCompanionResultQueue, &result, 0);
+  }
+}
+
+bool persistBleCompanionEnabled(bool enabled) {
+#if !defined(SHOT_STOPPER_HOST_TEST)
+  if ((bleCompanionPersistedSettings.enabled != 0) != enabled) {
+    BleCompanionPersistedSettings candidate = bleCompanionPersistedSettings;
+    candidate.enabled = enabled ? 1 : 0;
+    if (!saveBleCompanionSettings(candidate)) {
+      return false;
+    }
+    bleCompanionPersistedSettings = candidate;
+  }
+#endif
+  portENTER_CRITICAL(&bleCompanionMux);
+  bleCompanionStatusSnapshot.configuredEnabled = enabled;
+  bleCompanionStatusSnapshot.restartRequired =
+      enabled != bleCompanionStatusSnapshot.enabled;
+  bleCompanionRuntimeSnapshot.configuredEnabled = enabled;
+  portEXIT_CRITICAL(&bleCompanionMux);
+  return true;
+}
+
+bool applyBleCompanionRecipeRequest(const BleCompanionRequest &request) {
+  RuntimeConfig candidateRuntime = runtimeConfig;
+  ShotPresetBank candidateBank = presetBank;
+  ensureShotPresetBank(candidateBank, candidateRuntime.retareWindowMs,
+                       candidateRuntime.autoRetare);
+  ShotPreset &candidatePreset = mutableActiveShotPreset(candidateBank);
+  uint32_t milliseconds = 0;
+
+  switch (request.type) {
+    case BleCompanionRequestType::SET_BREW_BY_WEIGHT:
+      if (request.value > 1) return false;
+      candidatePreset.brewByWeight = request.value != 0;
+      break;
+    case BleCompanionRequestType::SET_GOAL_WEIGHT:
+      candidatePreset.goalWeightG = request.value;
+      break;
+    case BleCompanionRequestType::SET_AUTO_TARE:
+      if (request.value > 1) return false;
+      candidateRuntime.autoTare = request.value != 0;
+      break;
+    case BleCompanionRequestType::SET_BBW_PROTECTION_SECONDS:
+      bleCompanionSecondsToMs(request.value, milliseconds);
+      candidatePreset.bbwProtectionMs = milliseconds;
+      break;
+    case BleCompanionRequestType::SET_OPERATIONAL_WALL_SECONDS:
+      bleCompanionSecondsToMs(request.value, milliseconds);
+      candidatePreset.operationalWallMs = milliseconds;
+      break;
+    case BleCompanionRequestType::SET_DRIP_DELAY_SECONDS:
+      bleCompanionSecondsToMs(request.value, milliseconds);
+      candidateRuntime.dripDelayMs = milliseconds;
+      break;
+    default:
+      return false;
+  }
+
+  const RuntimeConfig composed =
+      composeEffectiveConfig(candidateRuntime, candidateBank);
+  if (validateRuntimeConfig(composed) != ConfigValidationError::NONE ||
+      !validateShotPresetBank(candidateBank, candidateRuntime.retareWindowMs,
+                              candidateRuntime.autoRetare)) {
+    return false;
+  }
+  const RuntimeConfig currentEffective = effectiveRuntimeConfig();
+  if (memcmp(&candidateBank, &presetBank, sizeof(candidateBank)) == 0 &&
+      memcmp(&composed, &currentEffective, sizeof(composed)) == 0) {
+    return true;
+  }
+  presetBank = candidateBank;
+  RuntimeConfig committed = composed;
+  committed.revision = runtimeConfig.revision + 1;
+  if (committed.revision == 0) {
+    committed.revision = 1;
+  }
+  commitLiveRuntimeConfig(committed, RUNTIME_PERSIST_REASON_USER);
+  return true;
+}
+
+void processBleCompanionRequests() {
+  if (bleCompanionRequestQueue == nullptr) {
+    return;
+  }
+  BleCompanionRequest request;
+  if (xQueueReceive(bleCompanionRequestQueue, &request, 0) != pdTRUE) {
+    return;
+  }
+
+  if (!copyBleCompanionStatus().enabled) {
+    reportBleCompanionResult(request, false,
+                             BleCompanionRejectReason::SUPPORT_DISABLED);
+    return;
+  }
+
+  if (request.type == BleCompanionRequestType::SET_AP_ENABLED) {
+    if (request.value > 1) {
+      reportBleCompanionResult(request, false,
+                               BleCompanionRejectReason::INVALID_VALUE);
+      return;
+    }
+    WebCommand command;
+    command.type = request.value != 0 ? WebCommandType::AP_START
+                                      : WebCommandType::AP_STOP;
+    command.requestId = request.sequence;
+    const bool queued = enqueueWebCommand(command);
+    reportBleCompanionResult(
+        request, queued, queued ? BleCompanionRejectReason::NONE
+                                : BleCompanionRejectReason::QUEUE_FULL);
+    return;
+  }
+
+  if (!controlAllowsConfigurationNow()) {
+    reportBleCompanionResult(request, false,
+                             BleCompanionRejectReason::NOT_READY);
+    return;
+  }
+
+  switch (request.type) {
+    case BleCompanionRequestType::SET_BREW_BY_WEIGHT:
+    case BleCompanionRequestType::SET_GOAL_WEIGHT:
+    case BleCompanionRequestType::SET_AUTO_TARE:
+    case BleCompanionRequestType::SET_BBW_PROTECTION_SECONDS:
+    case BleCompanionRequestType::SET_OPERATIONAL_WALL_SECONDS:
+    case BleCompanionRequestType::SET_DRIP_DELAY_SECONDS: {
+      const bool accepted = applyBleCompanionRecipeRequest(request);
+      reportBleCompanionResult(
+          request, accepted,
+          accepted ? BleCompanionRejectReason::NONE
+                   : BleCompanionRejectReason::INVALID_VALUE);
+      return;
+    }
+    case BleCompanionRequestType::SAVE_WIFI: {
+      if (!validWifiSsid(request.ssid) ||
+          !validWifiPassword(request.openNetwork ? "" : request.password,
+                             request.openNetwork)) {
+        reportBleCompanionResult(request, false,
+                                 BleCompanionRejectReason::INVALID_VALUE);
+        return;
+      }
+      WebCommand command;
+      command.type = WebCommandType::SAVE_NETWORK;
+      command.requestId = request.sequence;
+      strncpy(command.ssid, request.ssid, sizeof(command.ssid) - 1);
+      command.openNetwork = request.openNetwork;
+      if (!request.openNetwork) {
+        strncpy(command.password, request.password,
+                sizeof(command.password) - 1);
+      }
+      const bool queued = enqueueWebCommand(command);
+      memset(command.password, 0, sizeof(command.password));
+      reportBleCompanionResult(
+          request, queued, queued ? BleCompanionRejectReason::NONE
+                                  : BleCompanionRejectReason::QUEUE_FULL);
+      return;
+    }
+    case BleCompanionRequestType::REBOOT: {
+      if (request.value != 1) {
+        reportBleCompanionResult(request, false,
+                                 BleCompanionRejectReason::INVALID_PAYLOAD);
+        return;
+      }
+      WebCommand command;
+      command.type = WebCommandType::RESTART;
+      command.requestId = request.sequence;
+      const bool queued = enqueueWebCommand(command);
+      reportBleCompanionResult(
+          request, queued, queued ? BleCompanionRejectReason::NONE
+                                  : BleCompanionRejectReason::QUEUE_FULL);
+      return;
+    }
+    case BleCompanionRequestType::SET_AP_ENABLED:
+      return;
   }
 }
 
@@ -5923,6 +6313,19 @@ void publishControlStatus() {
   next.noScaleShotGuardArmed = noScaleShotGuardArmed;
   next.configPersistPending = runtimePersistPending;
   next.configPersistFailed = runtimePersistFailed;
+  {
+    const BleCompanionStatusSnapshot ble = copyBleCompanionStatus();
+    next.bleCompanionEnabled = ble.configuredEnabled;
+    next.bleCompanionActive = ble.enabled;
+    next.bleCompanionRestartRequired = ble.restartRequired;
+    next.bleCompanionStackReady = ble.stackReady;
+    next.bleCompanionAdvertising = ble.advertising;
+    next.bleCompanionConnected = ble.connected;
+    next.bleCompanionProtocolVersion = ble.protocolVersion;
+    next.bleCompanionAcceptedWrites = ble.acceptedWrites;
+    next.bleCompanionRejectedWrites = ble.rejectedWrites;
+    next.bleCompanionLastReject = static_cast<uint8_t>(ble.lastReject);
+  }
 #ifndef SHOT_STOPPER_HOST_TEST
   portENTER_CRITICAL(&settingsPersistMux);
   next.configPersistPending =
@@ -6139,6 +6542,33 @@ void serialCliPrintLiveNtpStatus() {
   serialCliPrintNtpStatus(dump);
 }
 
+void serialCliPrintBleCompanionStatus() {
+  const BleCompanionStatusSnapshot ble = copyBleCompanionStatus();
+  Serial.println("BLE_COMPAT_STATUS");
+  Serial.print("configuredEnabled=");
+  Serial.println(ble.configuredEnabled ? 1 : 0);
+  Serial.print("activeThisBoot=");
+  Serial.println(ble.enabled ? 1 : 0);
+  Serial.print("restartRequired=");
+  Serial.println(ble.restartRequired ? 1 : 0);
+  Serial.print("stackReady=");
+  Serial.println(ble.stackReady ? 1 : 0);
+  Serial.print("advertising=");
+  Serial.println(ble.advertising ? 1 : 0);
+  Serial.print("connected=");
+  Serial.println(ble.connected ? 1 : 0);
+  Serial.print("protocol=");
+  Serial.println(ble.protocolVersion);
+  Serial.print("apActive=");
+  Serial.println(ble.apActive ? 1 : 0);
+  Serial.print("acceptedWrites=");
+  Serial.println(ble.acceptedWrites);
+  Serial.print("rejectedWrites=");
+  Serial.println(ble.rejectedWrites);
+  Serial.print("lastReject=");
+  Serial.println(bleCompanionRejectReasonName(ble.lastReject));
+}
+
 void serialCliPrintLiveLogDump() {
   DebugEvent events[DEBUG_EVENT_CAPACITY] = {};
   const size_t count = copyDebugEvents(0, events, DEBUG_EVENT_CAPACITY);
@@ -6315,6 +6745,18 @@ void dispatchSerialCliRequest(SerialCliRequest &request) {
     case SerialCliVerb::NTP_STATUS:
       serialCliPrintLiveNtpStatus();
       return;
+    case SerialCliVerb::BLE_COMPAT_ENABLE:
+    case SerialCliVerb::BLE_COMPAT_DISABLE: {
+      WebCommand command;
+      command.type = request.verb == SerialCliVerb::BLE_COMPAT_ENABLE
+                         ? WebCommandType::BLE_COMPAT_ENABLE
+                         : WebCommandType::BLE_COMPAT_DISABLE;
+      serialCliQueueCommand(command, request.verb);
+      return;
+    }
+    case SerialCliVerb::BLE_COMPAT_STATUS:
+      serialCliPrintBleCompanionStatus();
+      return;
   }
 }
 
@@ -6468,6 +6910,31 @@ void setup() {
       }
     }
   }
+  if (!loadBleCompanionSettings(bleCompanionPersistedSettings)) {
+    bleCompanionPersistedSettings = BleCompanionPersistedSettings{};
+    if (!saveBleCompanionSettings(bleCompanionPersistedSettings)) {
+      addDebugEvent(DebugCategory::CONFIG, DebugCode::INITIALIZATION_FAILED,
+                    BOOT_SUBSYSTEM_SETTINGS_SAVE);
+    }
+  }
+  const bool bleCompanionConfigured =
+      bleCompanionPersistedSettings.enabled != 0;
+  bleCompanionStatusSnapshot.configuredEnabled = bleCompanionConfigured;
+  bleCompanionRuntimeSnapshot.configuredEnabled = bleCompanionConfigured;
+  if (bleCompanionConfigured) {
+    void *storage = malloc(sizeof(ShotStopperBleCompanion));
+    if (storage != nullptr) {
+      bleCompanion = new (storage) ShotStopperBleCompanion();
+      bleCompanionRuntimeSnapshot.enabled = true;
+    } else {
+      bleCompanionStatusSnapshot.lastReject =
+          BleCompanionRejectReason::ALLOCATION_FAILED;
+      addDebugEvent(DebugCategory::SCALE, DebugCode::INITIALIZATION_FAILED,
+                    BOOT_SUBSYSTEM_BLE);
+    }
+  }
+  bleCompanionStatusSnapshot.restartRequired =
+      bleCompanionConfigured != bleCompanionRuntimeSnapshot.enabled;
   if (settingsLoaded) {
     runtimeConfig = persistedSettings.runtime;
     presetBank = persistedSettings.presets;
@@ -6566,28 +7033,10 @@ void setup() {
                     static_cast<float>(runtimeConfig.goalWeightG)),
                 weightToCentigrams(runtimeConfig.weightOffsetG));
 
-  bleStackReady = BLE.begin();
-  if (bleStackReady) {
-    // ArduinoBLE defaults ATT operations to five seconds. Keep the BLE owner
-    // isolated, but also bound connect/discovery/subscribe/write waits so its
-    // watchdog and stream-staleness telemetry react promptly.
-    BLE.setTimeout(SCALE_ATT_TIMEOUT_MS);
-  }
-  if (!bleStackReady) {
-    addDebugEvent(DebugCategory::SCALE, DebugCode::INITIALIZATION_FAILED,
-                  BOOT_SUBSYSTEM_BLE);
-    logEmit(LogLevel::ERROR, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
-            BOOT_SUBSYSTEM_BLE, 0);
-  } else {
-    logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
-            BOOT_SUBSYSTEM_BLE, 1);
-  }
-
-  if (bleStackReady && !initializeScaleWorker()) {
+  if (!initializeScaleWorker()) {
     logEmit(LogLevel::ERROR, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
             BOOT_SUBSYSTEM_SCALE_WORKER, 0);
-    bleStackReady = false;
-  } else if (bleStackReady) {
+  } else {
     logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
             BOOT_SUBSYSTEM_SCALE_WORKER, 1);
   }
@@ -6607,7 +7056,8 @@ void setup() {
       xQueueCreate(1, sizeof(SettingsPersistRequest));
   if (settingsPersistQueue == nullptr ||
       xTaskCreatePinnedToCore(
-          settingsPersistTask, "settings_persist", 8192, nullptr,
+          settingsPersistTask, "settings_persist",
+          SETTINGS_PERSIST_TASK_STACK_SIZE, nullptr,
           tskIDLE_PRIORITY, &settingsPersistTaskHandle,
           CONTROL_TASK_CORE) != pdPASS) {
     settingsPersistTaskHandle = nullptr;
@@ -6776,12 +7226,14 @@ void loop() {
   serviceSerialCli();
   serviceMaintenanceCancellation();
   serviceControlCommandResult();
+  processBleCompanionRequests();
   processWebCommands();
   serviceControlCommandResult();
   serviceRuntimePersistence();
   servicePreferredScaleMacPersistence();
   serviceMaintenanceLease();
   publishControlStatus();
+  publishBleCompanionRuntimeSnapshot();
 #if SHOT_STOPPER_ENABLE_ALED == 1
   updateStatusIndicators();
 #endif

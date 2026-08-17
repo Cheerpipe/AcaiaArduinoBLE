@@ -39,6 +39,8 @@ constexpr const char *STATUS_CONFLICT = "409 Conflict";
 constexpr const char *STATUS_NOT_FOUND = "404 Not Found";
 constexpr const char *STATUS_UNPROCESSABLE = "422 Unprocessable Entity";
 constexpr const char *STATUS_UNAVAILABLE = "503 Service Unavailable";
+constexpr uint32_t NETWORK_MANAGER_TASK_STACK_SIZE = 7168;
+constexpr uint32_t HTTP_SERVER_TASK_STACK_SIZE = 10240;
 
 const char *scaleDisconnectReasonName(uint8_t reason) {
   // Mirrors AcaiaDisconnectReason without coupling the network task to the
@@ -616,7 +618,8 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
   ntpConfigRevision_ = settings_.runtime.revision;
   g_wallClock.reset();
   // Pin beside the Wi-Fi/LwIP stacks on PRO_CPU (core 0).
-  if (xTaskCreatePinnedToCore(taskEntry, "network_manager", 10240, this,
+  if (xTaskCreatePinnedToCore(taskEntry, "network_manager",
+                              NETWORK_MANAGER_TASK_STACK_SIZE, this,
                               tskIDLE_PRIORITY + 1, &taskHandle_,
                               0) != pdPASS) {
     instance_ = nullptr;
@@ -2540,7 +2543,7 @@ bool ShotStopperNetwork::startHttpServer() {
   }
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.task_priority = tskIDLE_PRIORITY + 1;
-  config.stack_size = 12288;
+  config.stack_size = HTTP_SERVER_TASK_STACK_SIZE;
   // Web UI serializes API traffic (DEVICE_MAX_INFLIGHT, default 1). Reserve
   // headroom for the HTML/JS/CSS boot burst plus LRU/TCP close. ESP-IDF uses
   // (max_open_sockets + 3) LWIP sockets total.
@@ -2550,7 +2553,7 @@ bool ShotStopperNetwork::startHttpServer() {
   config.max_open_sockets = 6;
   // Keep one slot of headroom above the owned API routes; /api/v1/ui/unlock
   // is registered separately because it establishes the explicit override.
-  config.max_uri_handlers = 35;
+  config.max_uri_handlers = 36;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
   // the IDF default (1024) is enough most of the time but intermittent
   // long browser headers have returned 431 Request Header Fields Too Large.
@@ -2601,7 +2604,8 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/factory-reset", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/network", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/network/scan", HTTP_POST, ownedApiHandler) &&
-      registerHandler(server_, "/api/v1/access-point/password", HTTP_POST, ownedApiHandler);
+      registerHandler(server_, "/api/v1/access-point/password", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/admin/ble-compat", HTTP_PUT, ownedApiHandler);
   if (!registered ||
       httpd_register_err_handler(server_, HTTPD_404_NOT_FOUND,
                                  notFoundHandler) != ESP_OK) {
@@ -2651,8 +2655,6 @@ const char *configLockReason(const ControlStatusSnapshot &status) {
   if (status.relayClosed) return "cn9_closed";
   if (status.physicalPaddleOn) return "paddle_on";
   if (status.maintenanceLeaseActive) return "maintenance";
-  if (status.resetRecoveryRequired) return "safety_recovery";
-  if (status.safetyState == RelaySafetyState::LOCKOUT) return "safety_lockout";
   if (status.state != StopperState::READY) return "not_ready";
   return "none";
 }
@@ -2821,6 +2823,7 @@ esp_err_t ShotStopperNetwork::ownedApiHandler(httpd_req_t *request) {
   }
   if (apiUriMatches(request->uri, "/api/v1/network")) return networkHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/access-point/password")) return apPasswordHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/admin/ble-compat")) return bleCompatHandler(request);
   return sendError(request, STATUS_NOT_FOUND, "NOT_FOUND", "Unknown API route.");
 }
 
@@ -3428,7 +3431,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"rssi\":%s,\"signalQualityPct\":%s,"
         "\"configuredIp\":\"%s\",\"configuredNetmask\":\"%s\","
         "\"configuredGateway\":\"%s\",\"configuredDns1\":\"%s\","
-        "\"configuredDns2\":\"%s\"}",
+        "\"configuredDns2\":\"%s\"},"
+        "\"bleCompanion\":{\"enabled\":%s,\"active\":%s,"
+        "\"restartRequired\":%s,\"stackReady\":%s,"
+        "\"advertising\":%s,\"connected\":%s,\"protocolVersion\":%u,"
+        "\"acceptedWrites\":%lu,\"rejectedWrites\":%lu,"
+        "\"lastReject\":\"%s\"}",
         network.apActive ? "true" : "false", network.apIp,
         static_cast<unsigned>(network.apClients),
         network.wifiConfigured ? "true" : "false", safeStaSsid,
@@ -3438,7 +3446,18 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(network.confirmRemainingMs), staRssiJson,
         staSignalQualityJson, network.configuredIp, network.configuredNetmask,
         network.configuredGateway, network.configuredDns1,
-        network.configuredDns2);
+        network.configuredDns2,
+        control.bleCompanionEnabled ? "true" : "false",
+        control.bleCompanionActive ? "true" : "false",
+        control.bleCompanionRestartRequired ? "true" : "false",
+        control.bleCompanionStackReady ? "true" : "false",
+        control.bleCompanionAdvertising ? "true" : "false",
+        control.bleCompanionConnected ? "true" : "false",
+        static_cast<unsigned>(control.bleCompanionProtocolVersion),
+        static_cast<unsigned long>(control.bleCompanionAcceptedWrites),
+        static_cast<unsigned long>(control.bleCompanionRejectedWrites),
+        bleCompanionRejectReasonName(static_cast<BleCompanionRejectReason>(
+            control.bleCompanionLastReject)));
   } else if (ok && page == StatusPage::Diagnostic) {
     // Lean diagnostic snapshot: metrics + log controls only (no STA address
     // form fields; those stay on status/admin).
@@ -4892,6 +4911,38 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
                      "Nothing was saved.");
   }
   memset(command.password, 0, sizeof(command.password));
+  return self.sendAccepted(request, command.requestId);
+}
+
+esp_err_t ShotStopperNetwork::bleCompatHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  char body[REQUEST_BODY_CAPACITY] = {};
+  if (!readJsonBody(request, body)) {
+    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
+                     "A JSON request is required.");
+  }
+  cJSON *root = cJSON_Parse(body);
+  bool enabled = false;
+  static const char *const fields[] = {"enabled"};
+  const bool parsed =
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
+      jsonBoolean(root, "enabled", enabled);
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  memset(body, 0, sizeof(body));
+  if (!parsed) {
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_BLE_CONFIG",
+                     "enabled must be a boolean.");
+  }
+  WebCommand command;
+  command.type = enabled ? WebCommandType::BLE_COMPAT_ENABLE
+                         : WebCommandType::BLE_COMPAT_DISABLE;
+  command.requestId = self.allocateRequestId();
+  if (!self.callbacks_.enqueueWebCommand(command)) {
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
+                     "BLE Companion state was not changed.");
+  }
   return self.sendAccepted(request, command.requestId);
 }
 

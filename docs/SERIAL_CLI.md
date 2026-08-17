@@ -127,6 +127,9 @@ persist.
 | `HEALTH` | none | Heap, loop gap, task stacks, CPU load, current and peak temperature, alert latches |
 | `SCALE_STATUS` | none | BLE scale link, preferred MAC/name, weight freshness |
 | `NTP_STATUS` | none | Wall clock / NTP state. Notes if STA is down |
+| `BLE_COMPAT_ENABLE` | none | Enables the ShotStopper Companion GATT profile on the next boot; restart required |
+| `BLE_COMPAT_DISABLE` | none | Disables the Companion GATT profile on the next boot so its RAM is not allocated; restart required |
+| `BLE_COMPAT_STATUS` | none | Configured next-boot state, active-this-boot state, restart requirement, protocol, advertising, client/AP state, and write counters |
 
 ## Shot history
 

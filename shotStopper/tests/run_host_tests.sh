@@ -13,6 +13,7 @@ external_safety_sanitized=${TMPDIR:-/tmp}/shot_stopper_external_safety_host_test
 remote_policy_binary=${TMPDIR:-/tmp}/shot_stopper_remote_policy_host_test
 active_buzzer_binary=${TMPDIR:-/tmp}/shot_stopper_host_test_active_buzzer
 firmware_file="$test_dir/../shotStopper.ino"
+ble_companion_file="$test_dir/../ShotStopperBleCompanion.h"
 cxx=${CXX:-c++}
 
 "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
@@ -84,16 +85,23 @@ done
 
 echo "Legacy three-channel RGB LED path: absent"
 
-for removed_ble_config in 'BLEService weightService' \
-  'BLEByteCharacteristic weightCharacteristic' '0x0FFE' '0xFF11' \
-  PUBLISH_GOAL GOAL_UPDATE processGoalWeightUpdate; do
-  if grep -n "$removed_ble_config" "$firmware_file"; then
-    echo "Removed BLE configuration remains in firmware: $removed_ble_config" >&2
+for required_ble_config in '00000000-0000-0000-0000-000000000FFE' \
+  BLE_COMPANION_PROTOCOL_VERSION '00000000-0000-0000-0000-00000000FF10' \
+  '00000000-0000-0000-0000-00000000FF11' '00000000-0000-0000-0000-00000000FF12' \
+  '00000000-0000-0000-0000-00000000FF13' '00000000-0000-0000-0000-00000000FF14' \
+  '00000000-0000-0000-0000-00000000FF15' '00000000-0000-0000-0000-00000000FF16' \
+  '00000000-0000-0000-0000-00000000FF17' '00000000-0000-0000-0000-00000000FF18' \
+  '00000000-0000-0000-0000-00000000FF19' '00000000-0000-0000-0000-00000000FF20' \
+  '00000000-0000-0000-0000-00000000FF21' '00000000-0000-0000-0000-00000000FF22' \
+  '00000000-0000-0000-0000-00000000FF23' '00000000-0000-0000-0000-00000000FF24' \
+  '00000000-0000-0000-0000-00000000FF25' '00000000-0000-0000-0000-00000000FF26'; do
+  if ! grep -n "$required_ble_config" "$ble_companion_file" >/dev/null; then
+    echo "Required BLE Companion contract is missing: $required_ble_config" >&2
     exit 1
   fi
 done
 
-echo "BLE configuration peripheral: absent"
+echo "BLE Companion v2 characteristics: present"
 
 if command -v node >/dev/null 2>&1; then
   if [ ! -d "$repo_root/node_modules/terser" ]; then

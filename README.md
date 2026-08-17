@@ -355,6 +355,27 @@ name, default WPA2 password, and step-by-step first connection.
   build (when authenticated). Monitoring, diagnostics, and configuration work
   without the flag. Physical paddle always has priority.
 
+### ShotStopper Companion BLE
+
+The stopper also exposes the Tater Mazer-compatible service `0FFE` as a BLE
+peripheral while remaining a BLE central for the scale. It advertises as
+`shotStopper` and reports Companion protocol v2. Supported characteristics
+cover brew-by-weight settings, target weight, auto tare, timing limits, drip
+delay, scale/shot status, Wi-Fi provisioning, IP status, restart, and temporary
+SoftAP control. `FF21` is an inert OTA compatibility stub; this firmware does
+not start BLE OTA.
+
+Companion BLE is enabled by default and can be configured from **Admin → BLE
+Companion** or with `BLE_COMPAT_DISABLE`. Enable/disable changes apply only on
+the next boot: when disabled at boot the GATT profile and its characteristics
+are never constructed, so their RAM is available to Wi-Fi/httpd while the BLE
+central used by the scale remains active. Admin and `BLE_COMPAT_STATUS` expose
+configured, active-this-boot, and restart-required states separately. The app
+protocol has no pairing, so Wi-Fi passwords are write-only and the service
+should be disabled when this compatibility surface is not needed. Setting and
+restart writes are rejected unless the stopper is Ready; AP start/stop remains
+available independently and never changes the boot preference.
+
 ### Scale support
 
 Scale compatibility depends on the
@@ -790,9 +811,11 @@ flash cache availability.
 Before K1 is energized, the CLOSE command is recorded in RTC memory as a value
 and its complement; OPEN is recorded after opening. A WDT reset, panic,
 brownout, power glitch, CPU lockup, or reset during CLOSE boots into `LOCKOUT`.
-Three consecutive unsafe resets are diagnosed as `BOOT_LOOP`. Web access cannot
-rearm it: recovery requires physically moving the paddle to ON and then holding
-it stably OFF for one second while timers, watchdog, and feedback are healthy.
+Three consecutive unsafe resets are diagnosed as `BOOT_LOOP`. The Web UI and
+configuration remain available during recovery, but Web access cannot rearm
+CN9 or start flow: recovery requires physically moving the paddle to ON and
+then holding it stably OFF for one second while timers, watchdog, and feedback
+are healthy.
 
 These firmware defenses reduce lockups and races, but a reset cannot open a
 welded contact or repair a shorted relay transistor. Containing those faults

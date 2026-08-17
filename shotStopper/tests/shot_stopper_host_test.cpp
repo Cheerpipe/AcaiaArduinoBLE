@@ -45,12 +45,16 @@ void deleteHostResources() {
   delete scaleCommandQueue;
   delete scaleEventQueue;
   delete webCommandQueue;
+  delete bleCompanionRequestQueue;
+  delete bleCompanionResultQueue;
   delete statusIndicatorQueue;
   delete relaySafetyTimer;
   delete operationalLimitTimer;
   scaleCommandQueue = nullptr;
   scaleEventQueue = nullptr;
   webCommandQueue = nullptr;
+  bleCompanionRequestQueue = nullptr;
+  bleCompanionResultQueue = nullptr;
   statusIndicatorQueue = nullptr;
   statusIndicatorTaskHandle = nullptr;
   relaySafetyTimer = nullptr;
@@ -117,6 +121,11 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   serialLogLevel = LogLevel::NONE;
   ringRetainLogLevel = LogLevel::INFO;
   publishedControlStatus = ControlStatusSnapshot{};
+  bleCompanionRuntimeSnapshot = BleCompanionRuntimeSnapshot{};
+  bleCompanionRuntimeSnapshot.enabled = true;
+  bleCompanionStatusSnapshot = BleCompanionStatusSnapshot{};
+  bleCompanionStatusSnapshot.enabled = true;
+  bleCompanionStatusSnapshot.configuredEnabled = true;
   maintenanceLease = MaintenanceLease{};
   maintenanceCancellationCommand = WebCommand{};
   maintenanceCancellationPending = false;
@@ -244,9 +253,17 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
       xQueueCreate(SCALE_EVENT_QUEUE_LENGTH, sizeof(ScaleEvent));
   webCommandQueue =
       xQueueCreate(WEB_COMMAND_QUEUE_LENGTH, sizeof(WebCommand));
+  bleCompanionRequestQueue =
+      xQueueCreate(BLE_COMPANION_REQUEST_QUEUE_LENGTH,
+                   sizeof(BleCompanionRequest));
+  bleCompanionResultQueue =
+      xQueueCreate(BLE_COMPANION_RESULT_QUEUE_LENGTH,
+                   sizeof(BleCompanionResult));
   CHECK(scaleCommandQueue != nullptr);
   CHECK(scaleEventQueue != nullptr);
   CHECK(webCommandQueue != nullptr);
+  CHECK(bleCompanionRequestQueue != nullptr);
+  CHECK(bleCompanionResultQueue != nullptr);
   CHECK(initializeRelaySafetyTimer());
   relaySafetyTimersReady = true;
 
@@ -1536,16 +1553,15 @@ void r19_reset_during_close_requires_local_on_off_recovery() {
   CHECK(safetyResetStatus.unsafeResetCount == 0);
 }
 
-void r19b_restart_rejected_until_local_lockout_recovery() {
+void r19b_webui_stays_configurable_during_local_lockout_recovery() {
   resetHarness(false, false);
   reachReadyFromBoot();
   ControlStatusSnapshot gated = {};
   gated.state = StopperState::READY;
   gated.resetRecoveryRequired = true;
-  CHECK(!controlAllowsConfiguration(gated));
-  gated.resetRecoveryRequired = false;
+  CHECK(controlAllowsConfiguration(gated));
   gated.safetyState = RelaySafetyState::LOCKOUT;
-  CHECK(!controlAllowsConfiguration(gated));
+  CHECK(controlAllowsConfiguration(gated));
 
   recordRelayCommandedClosed(true);
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
@@ -1554,25 +1570,18 @@ void r19b_restart_rejected_until_local_lockout_recovery() {
   relaySafetyFault = RelaySafetyFault::RESET_DURING_CLOSE;
   CHECK(safetyResetStatus.recoveryRequired);
   CHECK(stopperState == StopperState::READY);
-  CHECK(!controlAllowsConfigurationNow());
+  CHECK(controlAllowsConfigurationNow());
 
-  WebCommand restart;
-  restart.type = WebCommandType::RESTART;
-  restart.requestId = 81;
-  processWebCommand(restart);
-  CHECK(!maintenanceLease.active);
-  CHECK(hostLastForwardedNetworkCommand.requestId == 81);
-  CHECK(hostLastForwardedNetworkCommand.resultState ==
-        CommandResultState::FAILED);
-
-  WebCommand factory;
-  factory.type = WebCommandType::FACTORY_RESET;
-  factory.requestId = 82;
-  processWebCommand(factory);
-  CHECK(!maintenanceLease.active);
-  CHECK(hostLastForwardedNetworkCommand.requestId == 82);
-  CHECK(hostLastForwardedNetworkCommand.resultState ==
-        CommandResultState::FAILED);
+  WebCommand config;
+  config.type = WebCommandType::APPLY_CONFIG;
+  config.requestId = 81;
+  config.config = runtimeConfig;
+  const uint32_t revisionBefore = runtimeConfig.revision;
+  processWebCommand(config);
+  CHECK(runtimeConfig.revision == revisionBefore + 1);
+  CHECK(safetyResetStatus.recoveryRequired);
+  CHECK(relaySafetyState == RelaySafetyState::LOCKOUT);
+  CHECK(!getRelaySafetySnapshot().closed);
 
   hostPinLevel[PADDLE_GPIO] = PADDLE_ACTIVE_LEVEL;
   serviceRelaySafety();
@@ -5241,6 +5250,12 @@ void sc05_serial_cli_parser_covers_supported_commands() {
   CHECK(request.verb == SerialCliVerb::SCALE_STATUS);
   CHECK(serialCliParseLine("NTP_STATUS", request));
   CHECK(request.verb == SerialCliVerb::NTP_STATUS);
+  CHECK(serialCliParseLine("BLE_COMPAT_ENABLE", request));
+  CHECK(request.verb == SerialCliVerb::BLE_COMPAT_ENABLE);
+  CHECK(serialCliParseLine("BLE_COMPAT_DISABLE", request));
+  CHECK(request.verb == SerialCliVerb::BLE_COMPAT_DISABLE);
+  CHECK(serialCliParseLine("BLE_COMPAT_STATUS", request));
+  CHECK(request.verb == SerialCliVerb::BLE_COMPAT_STATUS);
   CHECK(!serialCliParseLine("HELP extra", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(!serialCliParseLine("REBOOT extra", request));
@@ -5269,6 +5284,108 @@ void sc06_serial_cli_feed_completes_on_crlf() {
     }
   }
   CHECK(ready);
+}
+
+void bc01_ble_companion_validates_and_applies_recipe_writes() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  BleCompanionRequest request;
+  request.sequence = 41;
+  request.type = BleCompanionRequestType::SET_GOAL_WEIGHT;
+  request.value = 42;
+  CHECK(enqueueBleCompanionRequest(request));
+  processBleCompanionRequests();
+  BleCompanionResult result;
+  CHECK(xQueueReceive(bleCompanionResultQueue, &result, 0) == pdTRUE);
+  CHECK(result.accepted);
+  CHECK(effectiveRuntimeConfig().goalWeightG == 42);
+
+  request.sequence = 42;
+  request.value = 5;
+  CHECK(enqueueBleCompanionRequest(request));
+  processBleCompanionRequests();
+  CHECK(xQueueReceive(bleCompanionResultQueue, &result, 0) == pdTRUE);
+  CHECK(!result.accepted);
+  CHECK(result.reason == BleCompanionRejectReason::INVALID_VALUE);
+  CHECK(effectiveRuntimeConfig().goalWeightG == 42);
+}
+
+void bc02_ble_companion_rejects_config_while_active_but_allows_ap() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  session.active = true;
+  stopperState = StopperState::BREW;
+
+  BleCompanionRequest request;
+  request.sequence = 51;
+  request.type = BleCompanionRequestType::SET_AUTO_TARE;
+  request.value = 0;
+  CHECK(enqueueBleCompanionRequest(request));
+  processBleCompanionRequests();
+  BleCompanionResult result;
+  CHECK(xQueueReceive(bleCompanionResultQueue, &result, 0) == pdTRUE);
+  CHECK(!result.accepted);
+  CHECK(result.reason == BleCompanionRejectReason::NOT_READY);
+
+  request.sequence = 52;
+  request.type = BleCompanionRequestType::SET_AP_ENABLED;
+  request.value = 1;
+  CHECK(enqueueBleCompanionRequest(request));
+  processBleCompanionRequests();
+  CHECK(xQueueReceive(bleCompanionResultQueue, &result, 0) == pdTRUE);
+  CHECK(result.accepted);
+  WebCommand queued;
+  CHECK(xQueueReceive(webCommandQueue, &queued, 0) == pdTRUE);
+  CHECK(queued.type == WebCommandType::AP_START);
+}
+
+void bc03_ble_companion_rejects_legacy_reset_bbw_value() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.autoRetare = true;
+  runtimeConfig.retareWindowMs = DEFAULT_RETARE_WINDOW_MS;
+  const uint32_t original = effectiveRuntimeConfig().bbwProtectionMs;
+  BleCompanionRequest request;
+  request.sequence = 61;
+  request.type = BleCompanionRequestType::SET_BBW_PROTECTION_SECONDS;
+  request.value = 3;
+  CHECK(enqueueBleCompanionRequest(request));
+  processBleCompanionRequests();
+  BleCompanionResult result;
+  CHECK(xQueueReceive(bleCompanionResultQueue, &result, 0) == pdTRUE);
+  CHECK(!result.accepted);
+  CHECK(result.reason == BleCompanionRejectReason::INVALID_VALUE);
+  CHECK(effectiveRuntimeConfig().bbwProtectionMs == original);
+}
+
+void bc04_ble_companion_enablement_is_next_boot_only() {
+  resetHarness(false, false);
+  CHECK(copyBleCompanionStatus().enabled);
+  CHECK(copyBleCompanionStatus().configuredEnabled);
+  CHECK(!copyBleCompanionStatus().restartRequired);
+
+  CHECK(persistBleCompanionEnabled(false));
+  const BleCompanionStatusSnapshot pendingDisable =
+      copyBleCompanionStatus();
+  CHECK(pendingDisable.enabled);
+  CHECK(!pendingDisable.configuredEnabled);
+  CHECK(pendingDisable.restartRequired);
+  BleCompanionRuntimeSnapshot runtime;
+  copyBleCompanionRuntimeSnapshot(runtime);
+  CHECK(runtime.enabled);
+  CHECK(!runtime.configuredEnabled);
+  publishControlStatus();
+  ControlStatusSnapshot control;
+  copyControlStatus(control);
+  CHECK(!control.bleCompanionEnabled);
+  CHECK(control.bleCompanionActive);
+  CHECK(control.bleCompanionRestartRequired);
+
+  CHECK(persistBleCompanionEnabled(true));
+  const BleCompanionStatusSnapshot canceled = copyBleCompanionStatus();
+  CHECK(canceled.enabled);
+  CHECK(canceled.configuredEnabled);
+  CHECK(!canceled.restartRequired);
 }
 
 void sc07_reset_ap_password_and_clear_wifi_queue() {
@@ -6390,7 +6507,7 @@ const TestCase testCases[] = {
     {"R17", r17_gptimer_arm_failure_prevents_relay_energization},
     {"R18", r18_watchdog_fault_opens_cn9_and_requests_safe_restart},
     {"R19", r19_reset_during_close_requires_local_on_off_recovery},
-    {"R19b", r19b_restart_rejected_until_local_lockout_recovery},
+    {"R19b", r19b_webui_stays_configurable_during_local_lockout_recovery},
     {"R20", r20_three_unsafe_resets_are_latched_as_a_boot_loop},
     {"R21", r21_automatic_control_requires_fresh_weight},
     {"R22", r22_confirmed_implausible_weight_does_not_stop},
@@ -6614,6 +6731,10 @@ const TestCase testCases[] = {
     {"SC14", sc14_network_actions_queue_without_ready},
     {"SC15", sc15_status_printers_use_dump_views},
     {"SC16", sc16_debug_status_and_log_dump},
+    {"BC01", bc01_ble_companion_validates_and_applies_recipe_writes},
+    {"BC02", bc02_ble_companion_rejects_config_while_active_but_allows_ap},
+    {"BC03", bc03_ble_companion_rejects_legacy_reset_bbw_value},
+    {"BC04", bc04_ble_companion_enablement_is_next_boot_only},
 };
 
 }  // namespace

@@ -1801,6 +1801,8 @@ enum class WebCommandType : uint8_t {
   WEBUI_START,
   WEBUI_STOP,
   WEBUI_RESTART,
+  BLE_COMPAT_ENABLE,
+  BLE_COMPAT_DISABLE,
   MAINTENANCE_COMPLETE
 };
 
@@ -1843,6 +1845,8 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::WEBUI_START: return "start Web UI";
     case WebCommandType::WEBUI_STOP: return "stop Web UI";
     case WebCommandType::WEBUI_RESTART: return "restart Web UI";
+    case WebCommandType::BLE_COMPAT_ENABLE: return "enable BLE Companion";
+    case WebCommandType::BLE_COMPAT_DISABLE: return "disable BLE Companion";
     case WebCommandType::MAINTENANCE_COMPLETE:
       return "maintenance result";
   }
@@ -2094,13 +2098,25 @@ struct ControlStatusSnapshot {
   bool noScaleShotGuardArmed = true;
   bool configPersistPending = false;
   bool configPersistFailed = false;
+  bool bleCompanionEnabled = true;
+  bool bleCompanionActive = false;
+  bool bleCompanionRestartRequired = false;
+  bool bleCompanionStackReady = false;
+  bool bleCompanionAdvertising = false;
+  bool bleCompanionConnected = false;
+  uint8_t bleCompanionProtocolVersion = 2;
+  uint32_t bleCompanionAcceptedWrites = 0;
+  uint32_t bleCompanionRejectedWrites = 0;
+  uint8_t bleCompanionLastReject = 0;
 };
 
 inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {
+  // Relay safety is enforced independently when CN9 is armed. A safety
+  // lockout must keep the relay open, but it must not lock the WebUI or
+  // prevent recovery-time configuration and diagnostics.
   return status.state == StopperState::READY && !status.activeCycle &&
          !status.relayClosed && !status.physicalPaddleOn &&
-         !status.maintenanceLeaseActive && !status.resetRecoveryRequired &&
-         status.safetyState != RelaySafetyState::LOCKOUT;
+         !status.maintenanceLeaseActive;
 }
 
 enum class DebugCategory : uint8_t {

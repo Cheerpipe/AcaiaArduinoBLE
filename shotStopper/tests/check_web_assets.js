@@ -47,8 +47,8 @@ if (htmlBytes > 40960) {
 if (jsBytes > 81920) {
   throw new Error('Web UI JS source exceeds the 80 KiB authoring budget');
 }
-if (htmlBytes + jsBytes > 114688) {
-  throw new Error('Web UI HTML+JS source exceeds the 112 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 116736) {
+  throw new Error('Web UI HTML+JS source exceeds the 114 KiB combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -201,6 +201,18 @@ if (!ui.includes('id="soundAlertsEnabled"') ||
     !ui.includes("k!=='soundAlertsEnabled'") ||
     !ui.includes("typeof c.soundAlertsEnabled==='boolean'")) {
   throw new Error('Sound alerts must be mirrored by Settings and Home patch controls');
+}
+
+if (!ui.includes('bleCompanionEnabled') ||
+    !ui.includes('/api/v1/admin/ble-compat') ||
+    !ui.includes("method:'PUT'") ||
+    !ui.includes('active this boot') ||
+    !ui.includes('restart required') ||
+    !network.includes('bleCompanion') ||
+    !network.includes('restartRequired') ||
+    !network.includes('WebCommandType::BLE_COMPAT_ENABLE') ||
+    !networkHeader.includes('bleCompatHandler')) {
+  throw new Error('BLE Companion Admin controls must be wired end-to-end');
 }
 if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0') ||
     !domain.includes('BUZZER_ACTIVE_DRIVE = SHOT_STOPPER_ENABLE_BUZZER == 2') ||
@@ -1106,10 +1118,17 @@ if (!ui.includes('setMutable(!!s.configMutable||!!s.webUiOverrideActive)') ||
     !ui.includes('Unsafe WebUI override active')) {
   throw new Error('Web UI must expose the confirmed configuration-lock override flow');
 }
+if (network.includes('return "safety_recovery"') ||
+    network.includes('return "safety_lockout"') ||
+    ui.includes("safety_recovery:'safety recovery'") ||
+    ui.includes("safety_lockout:'safety lockout'")) {
+  throw new Error('Safety recovery must not lock the WebUI');
+}
 if (!ui.includes("webShot=s.controlSource==='web'&&s.virtualPaddleOn") ||
-    !ui.includes('remoteReady&&(canControl||webShot)') ||
+    !ui.includes("s.safety.recoveryRequired||s.safety.state==='LOCKOUT'") ||
+    !ui.includes('remoteReady&&relayStartReady&&(canControl||webShot)') ||
     !ui.includes("$('stopButton').disabled=!s.relayClosed")) {
-  throw new Error('CN9-closed Actions must permit Stop and Web paddle-off only');
+  throw new Error('CN9 Actions must preserve Stop while inhibiting unsafe starts');
 }
 if (!network.includes('/api/v1/status/home') ||
     !network.includes('/api/v1/status/settings') ||

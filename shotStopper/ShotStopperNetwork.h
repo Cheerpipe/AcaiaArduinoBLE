@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ShotStopperDomain.h"
+#include "ShotStopperBleCompanion.h"
 #include "ShotStopperPersistence.h"
 #include "ShotStopperShotLog.h"
 #include "ShotStopperTime.h"
@@ -316,6 +317,7 @@ class ShotStopperNetwork {
   static esp_err_t wifiScanStartHandler(httpd_req_t *request);
   static esp_err_t wifiScanStatusHandler(httpd_req_t *request);
   static esp_err_t apPasswordHandler(httpd_req_t *request);
+  static esp_err_t bleCompatHandler(httpd_req_t *request);
 
   static esp_err_t sendJson(httpd_req_t *request, const char *status,
                             const char *json);
