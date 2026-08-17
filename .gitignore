@@ -65,6 +65,7 @@ node_modules/
 # Host-test and coverage outputs
 coverage/
 reports/static-analysis/
+reports/gcc-analyzer/
 *.gcda
 *.gcno
 *.gcov

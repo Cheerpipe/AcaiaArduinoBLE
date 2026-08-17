@@ -990,6 +990,19 @@ repository-relative output directory when needed:
 ./scripts/static_report build/esp32s3 reports/analysis-esp32s3
 ```
 
+For a deeper analysis using the actual Xtensa GCC toolchain, run:
+
+```sh
+./scripts/gcc_analyzer
+```
+
+This recompiles the firmware with `-fanalyzer`, replacing
+`reports/gcc-analyzer/gcc-analyzer.txt` on each run. The main report retains
+only diagnostics whose main location is code in this repository; the full
+compiler log is available as `gcc-analyzer-raw.txt` for troubleshooting.
+Unlike `static_report`, it does compile the firmware and exits non-zero when
+the filtered report contains an analyzer diagnostic.
+
 Initialize its configuration only if one does not already exist, then add the
 ESP32 board index:
 
@@ -1081,6 +1094,7 @@ argumentos usan la misma configuración de desarrollo: puerto
 | `./scripts/upload` | `./scripts/upload [ruta_serial] [arquitectura]` | Sube el binario existente de `build/<arquitectura>`; no recompila. |
 | `./scripts/monitor` | `./scripts/monitor [ruta_serial] [velocidad]` | Abre el monitor serie. |
 | `./scripts/static_report` | `./scripts/static_report [build_dir] [output_dir]` | Ejecuta Cppcheck sobre una compilation database existente y guarda el reporte. No compila. |
+| `./scripts/gcc_analyzer` | `./scripts/gcc_analyzer [ruta_serial arquitectura [flags...]]` | Compila con GCC `-fanalyzer` y guarda el reporte en `reports/gcc-analyzer/`. |
 | `./scripts/bsum` | `./scripts/bsum [ruta_serial arquitectura velocidad [flags...]]` | Wrapper que ejecuta build, static report, upload y monitor. Si el análisis encuentra diagnósticos, no carga el firmware. Sin argumentos conserva los defaults de cada script; si se pasan argumentos, ruta, arquitectura y velocidad son obligatorias; los flags se aplican solo a build. |
 
 Las arquitecturas admitidas son `esp32` y `esp32s3`. Cada script recibe
@@ -1095,6 +1109,7 @@ argumentos posicionales y muestra ayuda con `help`, `--help` o `-h`:
 ./scripts/build
 ./scripts/upload
 ./scripts/monitor
+./scripts/gcc_analyzer
 
 # Build, static report, upload y monitor en una sola orden
 ./scripts/bsum
