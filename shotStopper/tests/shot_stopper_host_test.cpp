@@ -5026,7 +5026,8 @@ void n02_ntp_hostname_validation() {
   CHECK(!validNtpHostname("bad space"));
 }
 
-void n03_unsynced_retry_is_one_minute() {
+void n03_unsynced_retry_is_fifteen_seconds() {
+  CHECK(NTP_UNSYNCED_RETRY_MS == 15'000U);
   CHECK(ntpRetryDelayMs(0) == NTP_UNSYNCED_RETRY_MS);
   CHECK(ntpRetryDelayMs(5) == NTP_UNSYNCED_RETRY_MS);
 }
@@ -6675,7 +6676,7 @@ const TestCase testCases[] = {
     {"H02", h02_hwmon_cpu_load_uses_idle_and_ema},
     {"N01", n01_wall_clock_tracks_utc_from_anchor},
     {"N02", n02_ntp_hostname_validation},
-    {"N03", n03_unsynced_retry_is_one_minute},
+    {"N03", n03_unsynced_retry_is_fifteen_seconds},
     {"N04", n04_brew_start_requests_ntp_when_unsynced},
     {"N05", n05_rinse_start_requests_ntp_when_unsynced},
     {"N06", n06_synced_clock_skips_activity_ntp_request},
