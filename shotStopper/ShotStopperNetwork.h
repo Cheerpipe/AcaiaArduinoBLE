@@ -170,6 +170,7 @@ class ShotStopperNetwork {
   // literals; keep headroom above the wire payload.
   static constexpr size_t REQUEST_BODY_CAPACITY = 2048;
   static constexpr size_t LOG_BATCH_SIZE = 48;
+  static constexpr size_t WEB_UI_CLIENT_ID_CAPACITY = 25;
 
   static ShotStopperNetwork *instance_;
 
@@ -180,6 +181,7 @@ class ShotStopperNetwork {
   SemaphoreHandle_t statusResponseMux_ = nullptr;
   httpd_handle_t server_ = nullptr;
   portMUX_TYPE dataMux_ = portMUX_INITIALIZER_UNLOCKED;
+  char activeWebUiClientId_[WEB_UI_CLIENT_ID_CAPACITY] = {};
   NetworkStatusSnapshot status_ = {};
   WifiScanSnapshot scan_ = {};
   bool startupComplete_ = false;
@@ -288,6 +290,8 @@ class ShotStopperNetwork {
   static esp_err_t jsHandler(httpd_req_t *request);
   static esp_err_t cssHandler(httpd_req_t *request);
   static esp_err_t notFoundHandler(httpd_req_t *request, httpd_err_code_t error);
+  static esp_err_t claimHandler(httpd_req_t *request);
+  static esp_err_t ownedApiHandler(httpd_req_t *request);
   static esp_err_t statusHandler(httpd_req_t *request);
   static esp_err_t logHandler(httpd_req_t *request);
   static esp_err_t shotsHandler(httpd_req_t *request);
@@ -318,6 +322,7 @@ class ShotStopperNetwork {
   static bool readJsonBody(httpd_req_t *request,
                            char body[REQUEST_BODY_CAPACITY]);
   static bool requireJsonContentType(httpd_req_t *request);
+  bool requireActiveWebUiClient(httpd_req_t *request);
   static const char *stateLabel(StopperState state);
   static const char *controlSourceName(ControlSource source);
   static const char *endReasonName(EndReason reason);

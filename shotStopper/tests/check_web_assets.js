@@ -109,7 +109,6 @@ if (!ui.includes('function rangeCheck(') ||
     !network.includes('Max recovery must be from 10 to 200 g.') ||
     !network.includes('Fast guard requires max recovery') ||
     !network.includes('SSID must be 1–32 characters.') ||
-    !network.includes('Current password is incorrect.') ||
     !network.includes('configValidationErrorName(error)')) {
   throw new Error('UI/API must expose specific validation ranges, inline errors, and field-aware config errors');
 }
@@ -1017,41 +1016,53 @@ const expected = new Map([
   ['GET /settings', 'rootHandler'],
   ['GET /app.js', 'jsHandler'],
   ['GET /app.css', 'cssHandler'],
-  ['POST /api/v1/login', 'loginHandler'],
-  ['POST /api/v1/logout', 'logoutHandler'],
-  ['GET /api/v1/status/home', 'statusHandler'],
-  ['GET /api/v1/status/settings', 'statusHandler'],
-  ['GET /api/v1/status/admin', 'statusHandler'],
-  ['GET /api/v1/status/diagnostic', 'statusHandler'],
-  ['GET /api/v1/log', 'logHandler'],
-  ['POST /api/v1/config', 'configHandler'],
-  ['POST /api/v1/scale/preferred/clear', 'preferredScaleClearHandler'],
-  ['POST /api/v1/scale/preferred/select', 'preferredScaleSelectHandler'],
-  ['POST /api/v1/presets', 'presetsHandler'],
-  ['POST /api/v1/calibration/reset', 'resetCalibrationHandler'],
-  ['POST /api/v1/calibration/reset-guard-samples', 'resetGuardSamplesHandler'],
-  ['POST /api/v1/control/paddle', 'paddleHandler'],
-  ['POST /api/v1/control/rinse', 'rinseHandler'],
-  ['POST /api/v1/control/stop', 'stopHandler'],
-  ['POST /api/v1/control/restart', 'restartHandler'],
-  ['POST /api/v1/factory-reset', 'factoryResetHandler'],
-  ['GET /api/v1/shots', 'shotsHandler'],
-  ['POST /api/v1/shots/clear', 'shotsClearHandler'],
-  ['POST /api/v1/shots/delete', 'shotsDeleteHandler'],
-  ['POST /api/v1/last-shot/clear', 'lastShotClearHandler'],
-  ['POST /api/v1/time/sync', 'timeSyncHandler'],
-  ['POST /api/v1/network', 'networkHandler'],
-  ['POST /api/v1/network/scan', 'wifiScanStartHandler'],
-  ['GET /api/v1/network/scan', 'wifiScanStatusHandler'],
-  ['POST /api/v1/access-point/password', 'apPasswordHandler'],
+  ['POST /api/v1/ui/claim', 'claimHandler'],
+  ['GET /api/v1/status/home', 'ownedApiHandler'],
+  ['GET /api/v1/status/settings', 'ownedApiHandler'],
+  ['GET /api/v1/status/admin', 'ownedApiHandler'],
+  ['GET /api/v1/status/diagnostic', 'ownedApiHandler'],
+  ['GET /api/v1/log', 'ownedApiHandler'],
+  ['POST /api/v1/config', 'ownedApiHandler'],
+  ['POST /api/v1/scale/preferred/clear', 'ownedApiHandler'],
+  ['POST /api/v1/scale/preferred/select', 'ownedApiHandler'],
+  ['POST /api/v1/presets', 'ownedApiHandler'],
+  ['POST /api/v1/calibration/reset', 'ownedApiHandler'],
+  ['POST /api/v1/calibration/reset-guard-samples', 'ownedApiHandler'],
+  ['POST /api/v1/control/paddle', 'ownedApiHandler'],
+  ['POST /api/v1/control/rinse', 'ownedApiHandler'],
+  ['POST /api/v1/control/stop', 'ownedApiHandler'],
+  ['POST /api/v1/control/restart', 'ownedApiHandler'],
+  ['POST /api/v1/factory-reset', 'ownedApiHandler'],
+  ['GET /api/v1/shots', 'ownedApiHandler'],
+  ['POST /api/v1/shots/clear', 'ownedApiHandler'],
+  ['POST /api/v1/shots/delete', 'ownedApiHandler'],
+  ['POST /api/v1/last-shot/clear', 'ownedApiHandler'],
+  ['POST /api/v1/time/sync', 'ownedApiHandler'],
+  ['POST /api/v1/network', 'ownedApiHandler'],
+  ['POST /api/v1/network/scan', 'ownedApiHandler'],
+  ['GET /api/v1/network/scan', 'ownedApiHandler'],
+  ['POST /api/v1/access-point/password', 'ownedApiHandler'],
 ]);
 
 const maxSocketsMatch = network.match(/max_open_sockets\s*=\s*(\d+)/);
-if (!maxSocketsMatch || Number(maxSocketsMatch[1]) < 8) {
-  throw new Error('HTTP server must allow at least 8 open sockets for two Web UI windows');
+if (!maxSocketsMatch || Number(maxSocketsMatch[1]) !== 6) {
+  throw new Error('HTTP server must reserve exactly 6 open sockets for the single-owner WebUI');
 }
-if (!network.includes('backlog_conn = 8')) {
-  throw new Error('HTTP server backlog must accommodate two Web UI boot bursts');
+if (!network.includes('backlog_conn = 6')) {
+  throw new Error('HTTP server backlog must be limited to 6 for the single-owner WebUI');
+}
+if (!network.includes('/api/v1/ui/claim') ||
+    !network.includes('X-WebUI-Client') ||
+    !network.includes('requireActiveWebUiClient') ||
+    !network.includes('UI_CLAIM_REQUIRED') ||
+    !network.includes('UI_TAKEN_OVER')) {
+  throw new Error('WebUI APIs must enforce the exclusive client claim');
+}
+if (!ui.includes('function claimWebUiOwnership()') ||
+    !ui.includes('function deactivateWebUi()') ||
+    !ui.includes('Take control') ||
+    !ui.includes('X-WebUI-Client')) {
+  throw new Error('Revoked WebUI windows must become passive and offer Take control');
 }
 if (!ui.includes('function applyCommonStatus(s){setMutable(!s.relayClosed)')) {
   throw new Error('Web UI mutability must be controlled only by relayClosed');

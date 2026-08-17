@@ -2545,14 +2545,14 @@ bool ShotStopperNetwork::startHttpServer() {
   // Two browser windows can briefly request HTML, CSS, and JS in parallel.
   // Keep enough client slots for that boot burst while responses still close
   // promptly to limit the ESP's steady-state socket use.
-  config.max_open_sockets = 8;
+  config.max_open_sockets = 6;
   config.max_uri_handlers = 33;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
   // the IDF default (1024) is enough most of the time but intermittent
   // long browser headers have returned 431 Request Header Fields Too Large.
   config.max_req_hdr_len = 2048;
   config.max_resp_headers = 12;
-  config.backlog_conn = 8;
+  config.backlog_conn = 6;
   config.lru_purge_enable = true;
   // Keep stuck clients from occupying sockets under BLE/Wi-Fi coex stalls.
   config.recv_wait_timeout = 2;
@@ -2572,51 +2572,31 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/settings", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/app.js", HTTP_GET, jsHandler) &&
       registerHandler(server_, "/app.css", HTTP_GET, cssHandler) &&
-      registerHandler(server_, "/api/v1/status/home", HTTP_GET,
-                      statusHandler) &&
-      registerHandler(server_, "/api/v1/status/settings", HTTP_GET,
-                      statusHandler) &&
-      registerHandler(server_, "/api/v1/status/admin", HTTP_GET,
-                      statusHandler) &&
-      registerHandler(server_, "/api/v1/status/diagnostic", HTTP_GET,
-                      statusHandler) &&
-      registerHandler(server_, "/api/v1/log", HTTP_GET, logHandler) &&
-      registerHandler(server_, "/api/v1/shots", HTTP_GET, shotsHandler) &&
-      registerHandler(server_, "/api/v1/shots/clear", HTTP_POST,
-                      shotsClearHandler) &&
-      registerHandler(server_, "/api/v1/shots/delete", HTTP_POST,
-                      shotsDeleteHandler) &&
-      registerHandler(server_, "/api/v1/last-shot/clear", HTTP_POST,
-                      lastShotClearHandler) &&
-      registerHandler(server_, "/api/v1/time/sync", HTTP_POST,
-                      timeSyncHandler) &&
-      registerHandler(server_, "/api/v1/config", HTTP_POST, configHandler) &&
-      registerHandler(server_, "/api/v1/scale/preferred/clear", HTTP_POST,
-                      preferredScaleClearHandler) &&
-      registerHandler(server_, "/api/v1/scale/preferred/select", HTTP_POST,
-                      preferredScaleSelectHandler) &&
-      registerHandler(server_, "/api/v1/presets", HTTP_POST, presetsHandler) &&
-      registerHandler(server_, "/api/v1/calibration/reset", HTTP_POST,
-                      resetCalibrationHandler) &&
-      registerHandler(server_, "/api/v1/calibration/reset-guard-samples",
-                      HTTP_POST, resetGuardSamplesHandler) &&
-      registerHandler(server_, "/api/v1/control/paddle", HTTP_POST,
-                      paddleHandler) &&
-      registerHandler(server_, "/api/v1/control/rinse", HTTP_POST,
-                      rinseHandler) &&
-      registerHandler(server_, "/api/v1/control/stop", HTTP_POST,
-                      stopHandler) &&
-      registerHandler(server_, "/api/v1/control/restart", HTTP_POST,
-                      restartHandler) &&
-      registerHandler(server_, "/api/v1/factory-reset", HTTP_POST,
-                      factoryResetHandler) &&
-      registerHandler(server_, "/api/v1/network", HTTP_POST, networkHandler) &&
-      registerHandler(server_, "/api/v1/network/scan", HTTP_POST,
-                      wifiScanStartHandler) &&
-      registerHandler(server_, "/api/v1/network/scan", HTTP_GET,
-                      wifiScanStatusHandler) &&
-      registerHandler(server_, "/api/v1/access-point/password", HTTP_POST,
-                      apPasswordHandler);
+      registerHandler(server_, "/api/v1/ui/claim", HTTP_POST, claimHandler) &&
+      registerHandler(server_, "/api/v1/status/home", HTTP_GET, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/status/settings", HTTP_GET, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/status/admin", HTTP_GET, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/status/diagnostic", HTTP_GET, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/log", HTTP_GET, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/shots", HTTP_GET, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/shots/clear", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/shots/delete", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/last-shot/clear", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/time/sync", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/config", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/scale/preferred/clear", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/scale/preferred/select", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/presets", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/calibration/reset", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/calibration/reset-guard-samples", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/control/paddle", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/control/rinse", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/control/stop", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/control/restart", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/factory-reset", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/network", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/network/scan", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/access-point/password", HTTP_POST, ownedApiHandler);
   if (!registered ||
       httpd_register_err_handler(server_, HTTPD_404_NOT_FOUND,
                                  notFoundHandler) != ESP_OK) {
@@ -2655,6 +2635,118 @@ esp_err_t ShotStopperNetwork::sendError(httpd_req_t *request,
   snprintf(body, sizeof(body), "{\"error\":\"%s\",\"message\":\"%s\"}",
            error, message);
   return sendJson(request, status, body);
+}
+
+namespace {
+
+constexpr const char *WEB_UI_CLIENT_HEADER = "X-WebUI-Client";
+
+bool apiUriMatches(const char *uri, const char *path) {
+  if (uri == nullptr || path == nullptr) {
+    return false;
+  }
+  const size_t length = strlen(path);
+  return strncmp(uri, path, length) == 0 &&
+         (uri[length] == '\0' || uri[length] == '?');
+}
+
+bool readWebUiClientId(httpd_req_t *request, char *output,
+                       size_t capacity) {
+  if (request == nullptr || output == nullptr || capacity < 2) {
+    return false;
+  }
+  const size_t length =
+      httpd_req_get_hdr_value_len(request, WEB_UI_CLIENT_HEADER);
+  if (length < 16 || length + 1 > capacity) {
+    return false;
+  }
+  if (httpd_req_get_hdr_value_str(request, WEB_UI_CLIENT_HEADER, output,
+                                   capacity) != ESP_OK) {
+    return false;
+  }
+  for (size_t index = 0; index < length; ++index) {
+    const char character = output[index];
+    if (!((character >= '0' && character <= '9') ||
+          (character >= 'a' && character <= 'f'))) {
+      output[0] = '\0';
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
+esp_err_t ShotStopperNetwork::claimHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  char clientId[WEB_UI_CLIENT_ID_CAPACITY] = {};
+  if (!readWebUiClientId(request, clientId, sizeof(clientId))) {
+    return sendError(request, STATUS_BAD_REQUEST, "UI_CLIENT_INVALID",
+                     "X-WebUI-Client must be a 16-24 character lowercase hex id.");
+  }
+  portENTER_CRITICAL(&self.dataMux_);
+  memcpy(self.activeWebUiClientId_, clientId, sizeof(clientId));
+  portEXIT_CRITICAL(&self.dataMux_);
+  memset(clientId, 0, sizeof(clientId));
+  return sendJson(request, STATUS_OK, "{\"active\":true}");
+}
+
+bool ShotStopperNetwork::requireActiveWebUiClient(httpd_req_t *request) {
+  char clientId[WEB_UI_CLIENT_ID_CAPACITY] = {};
+  if (!readWebUiClientId(request, clientId, sizeof(clientId))) {
+    sendError(request, STATUS_CONFLICT, "UI_CLAIM_REQUIRED",
+              "Claim WebUI control before using this API.");
+    return false;
+  }
+  bool active = false;
+  portENTER_CRITICAL(&dataMux_);
+  active = activeWebUiClientId_[0] != '\0' &&
+           strcmp(activeWebUiClientId_, clientId) == 0;
+  portEXIT_CRITICAL(&dataMux_);
+  memset(clientId, 0, sizeof(clientId));
+  if (!active) {
+    sendError(request, STATUS_CONFLICT, "UI_TAKEN_OVER",
+              "Another WebUI window has taken control.");
+    return false;
+  }
+  return true;
+}
+
+esp_err_t ShotStopperNetwork::ownedApiHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.requireActiveWebUiClient(request)) {
+    return ESP_OK;
+  }
+  if (apiUriMatches(request->uri, "/api/v1/status/home") ||
+      apiUriMatches(request->uri, "/api/v1/status/settings") ||
+      apiUriMatches(request->uri, "/api/v1/status/admin") ||
+      apiUriMatches(request->uri, "/api/v1/status/diagnostic")) {
+    return statusHandler(request);
+  }
+  if (apiUriMatches(request->uri, "/api/v1/log")) return logHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/shots")) return shotsHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/shots/clear")) return shotsClearHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/shots/delete")) return shotsDeleteHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/last-shot/clear")) return lastShotClearHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/time/sync")) return timeSyncHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/config")) return configHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/scale/preferred/clear")) return preferredScaleClearHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/scale/preferred/select")) return preferredScaleSelectHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/presets")) return presetsHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/calibration/reset")) return resetCalibrationHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/calibration/reset-guard-samples")) return resetGuardSamplesHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/control/paddle")) return paddleHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/control/rinse")) return rinseHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/control/stop")) return stopHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/control/restart")) return restartHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/factory-reset")) return factoryResetHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/network/scan")) {
+    return request->method == HTTP_GET ? wifiScanStatusHandler(request)
+                                       : wifiScanStartHandler(request);
+  }
+  if (apiUriMatches(request->uri, "/api/v1/network")) return networkHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/access-point/password")) return apPasswordHandler(request);
+  return sendError(request, STATUS_NOT_FOUND, "NOT_FOUND", "Unknown API route.");
 }
 
 bool ShotStopperNetwork::requireJsonContentType(httpd_req_t *request) {
