@@ -1,0 +1,4 @@
+# Suppress diagnostics emitted from Arduino dependencies that are transitively
+# included by the firmware. Code under the repository root remains in scope.
+*:**/Arduino15/**
+*:**/Arduino/libraries/**
