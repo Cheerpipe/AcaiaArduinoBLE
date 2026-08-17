@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Build, upload, and monitor Shot Stopper in one command.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Uso: ./scripts/bum [ruta_serial arquitectura velocidad [flags_de_compilacion...]]
+
+Ejecuta, en orden: build, upload y monitor.
+
+Sin argumentos invoca cada script sin parámetros, por lo que conserva sus
+valores por defecto.
+
+Si se indica ruta_serial, arquitectura y velocidad son obligatorias. Los flags
+restantes se envían únicamente a build.
+
+Arquitecturas admitidas: esp32, esp32s3.
+
+Ejemplos:
+  ./scripts/bum
+  ./scripts/bum /dev/cu.usbserial-0001 esp32 115200
+  ./scripts/bum /dev/cu.usbmodem01 esp32s3 115200 -DSHOT_STOPPER_ENABLE_ALED=1
+EOF
+}
+
+if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  if [[ $# -ne 1 ]]; then
+    usage >&2
+    exit 2
+  fi
+  usage
+  exit 0
+fi
+
+if [[ $# -eq 0 ]]; then
+  args=()
+elif [[ $# -lt 3 ]]; then
+  echo "Ruta serial, arquitectura y velocidad son obligatorias cuando se pasan argumentos." >&2
+  usage >&2
+  exit 2
+else
+  args=("$@")
+fi
+
+root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$root"
+
+if [[ ${#args[@]} -eq 0 ]]; then
+  ./scripts/build
+  ./scripts/upload
+  exec ./scripts/monitor
+fi
+
+if [[ ${#args[@]} -eq 3 ]]; then
+  ./scripts/build "${args[0]}" "${args[1]}"
+else
+  ./scripts/build "${args[0]}" "${args[1]}" "${args[@]:3}"
+fi
+./scripts/upload "${args[0]}" "${args[1]}"
+exec ./scripts/monitor "${args[0]}" "${args[2]}"
