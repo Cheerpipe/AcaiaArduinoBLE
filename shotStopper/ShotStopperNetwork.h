@@ -277,7 +277,9 @@ class ShotStopperNetwork {
   void finishWifiScan(int16_t resultCount, uint32_t now);
   void serviceSessions(uint32_t now);
   void processAcceptedCommands();
+  void processAcceptedMaintenanceCommand(uint32_t now);
   bool processAcceptedCommand(const WebCommand &command);
+  bool processPersistedCommand(const WebCommand &command);
   void publishConfiguredAddressStatus();
   void armPendingConfirmWindow(uint32_t now);
   void clearPendingConfirmWindow();
@@ -293,6 +295,9 @@ class ShotStopperNetwork {
   void lifecycleLogf(const char *fmt, ...);
   void refreshExtendedStatus(uint32_t now);
   bool handleCliNetworkAction(const WebCommand &command, uint32_t now);
+  bool handleCliWifiAction(const WebCommand &command, uint32_t now);
+  bool handleCliApAction(const WebCommand &command, uint32_t now);
+  bool handleCliWebUiAction(const WebCommand &command, uint32_t now);
   void printActionSnapshot(const char *command, bool ok);
   void noteCliNetworkProgress();
 

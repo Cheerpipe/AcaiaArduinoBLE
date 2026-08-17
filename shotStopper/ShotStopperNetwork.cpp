@@ -837,8 +837,6 @@ void ShotStopperNetwork::taskLoop() {
 
 void ShotStopperNetwork::service() {
   const uint32_t now = millis();
-  ControlStatusSnapshot control;
-  callbacks_.copyControlStatus(control);
 
   // Drain CLI link mutations even when SoftAP/HTTP startup is still failing.
   // A successful AP_START / WIFI_CONNECT can mark startup complete and skip
@@ -903,8 +901,10 @@ void ShotStopperNetwork::service() {
   portEXIT_CRITICAL(&dataMux_);
   refreshExtendedStatus(now);
 
-  callbacks_.copyControlStatus(control);
-  const bool safeForNetworkChange = controlAllowsConfiguration(control);
+  // Copy the large control snapshot only after command processing has
+  // returned. Keeping it in this frame while httpd_stop() enters LwIP used to
+  // consume another ~1.8 KiB of the network task stack.
+  const bool safeForNetworkChange = controlAllowsNetworkMutation();
   if (apRestartPending_ && safeForNetworkChange &&
       static_cast<uint32_t>(now - restartRequestedAtMs_) >= RESTART_DELAY_MS) {
     apRestartPending_ = false;
@@ -1907,6 +1907,13 @@ void ShotStopperNetwork::processAcceptedCommands() {
     return;
   }
 
+  // Maintenance commands need a large ControlStatusSnapshot. Keep that
+  // object in a separate frame so CLI actions such as WEBUI_RESTART do not
+  // carry it into httpd_stop() and LwIP.
+  processAcceptedMaintenanceCommand(now);
+}
+
+void ShotStopperNetwork::processAcceptedMaintenanceCommand(uint32_t now) {
   ControlStatusSnapshot control;
   callbacks_.copyControlStatus(control);
   const bool matchingLease =
@@ -1995,6 +2002,24 @@ bool ShotStopperNetwork::enqueueMaintenanceCompletion(
 }
 
 bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
+  if (isCliNetworkAction(command.type)) {
+    return handleCliNetworkAction(command, millis());
+  }
+  if (command.type == WebCommandType::START_WIFI_SCAN) {
+    portENTER_CRITICAL(&dataMux_);
+    scan_ = WifiScanSnapshot{};
+    scan_.state = WifiScanState::QUEUED;
+    scan_.updatedAtMs = millis();
+    scanRequested_ = true;
+    scanMaintenanceLeaseId_ = command.maintenanceLeaseId;
+    scanRequestId_ = command.requestId;
+    portEXIT_CRITICAL(&dataMux_);
+    return true;
+  }
+  return processPersistedCommand(command);
+}
+
+bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
   PersistedSettings next = settingsCopy();
   bool persist = false;
   bool factoryReset = false;
@@ -2117,17 +2142,6 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
       log(DebugCategory::SECURITY, DebugCode::RESTART_REQUESTED);
       break;
 
-    case WebCommandType::START_WIFI_SCAN:
-      portENTER_CRITICAL(&dataMux_);
-      scan_ = WifiScanSnapshot{};
-      scan_.state = WifiScanState::QUEUED;
-      scan_.updatedAtMs = millis();
-      scanRequested_ = true;
-      scanMaintenanceLeaseId_ = command.maintenanceLeaseId;
-      scanRequestId_ = command.requestId;
-      portEXIT_CRITICAL(&dataMux_);
-      return true;
-
     case WebCommandType::WIFI_CONNECT:
     case WebCommandType::WIFI_DISCONNECT:
     case WebCommandType::WIFI_RESTART:
@@ -2136,7 +2150,8 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
     case WebCommandType::WEBUI_START:
     case WebCommandType::WEBUI_STOP:
     case WebCommandType::WEBUI_RESTART:
-      return handleCliNetworkAction(command, millis());
+    case WebCommandType::START_WIFI_SCAN:
+      return false;
 
     default:
       return false;
@@ -2185,6 +2200,25 @@ bool ShotStopperNetwork::handleCliNetworkAction(const WebCommand &command,
                                                 uint32_t now) {
   refreshExtendedStatus(now);
   switch (command.type) {
+    case WebCommandType::WIFI_CONNECT:
+    case WebCommandType::WIFI_DISCONNECT:
+    case WebCommandType::WIFI_RESTART:
+      return handleCliWifiAction(command, now);
+    case WebCommandType::AP_START:
+    case WebCommandType::AP_STOP:
+      return handleCliApAction(command, now);
+    case WebCommandType::WEBUI_START:
+    case WebCommandType::WEBUI_STOP:
+    case WebCommandType::WEBUI_RESTART:
+      return handleCliWebUiAction(command, now);
+    default:
+      return false;
+  }
+}
+
+bool ShotStopperNetwork::handleCliWifiAction(const WebCommand &command,
+                                             uint32_t now) {
+  switch (command.type) {
     case WebCommandType::WIFI_CONNECT: {
       const PersistedSettings settings = settingsCopy();
       if (!settings.staConfigured) {
@@ -2231,7 +2265,6 @@ bool ShotStopperNetwork::handleCliNetworkAction(const WebCommand &command,
         return true;
       }
       staReconnectHeld_ = false;
-      WiFi.disconnect(false, false);
       stopNtp();
       staNtpEligibleAtMs_ = 0;
       g_wallClock.markDisabled();
@@ -2245,6 +2278,14 @@ bool ShotStopperNetwork::handleCliNetworkAction(const WebCommand &command,
       printActionSnapshot("WIFI_RESTART", true);
       return true;
     }
+    default:
+      return false;
+  }
+}
+
+bool ShotStopperNetwork::handleCliApAction(const WebCommand &command,
+                                           uint32_t now) {
+  switch (command.type) {
     case WebCommandType::AP_START: {
       apStartHeld_ = false;
       apKeepRequested_ = true;
@@ -2270,6 +2311,15 @@ bool ShotStopperNetwork::handleCliNetworkAction(const WebCommand &command,
       printActionSnapshot("AP_STOP", true);
       return true;
     }
+    default:
+      return false;
+  }
+}
+
+bool ShotStopperNetwork::handleCliWebUiAction(const WebCommand &command,
+                                              uint32_t now) {
+  (void)now;
+  switch (command.type) {
     case WebCommandType::WEBUI_START: {
       httpStartHeld_ = false;
       if (server_ != nullptr) {
