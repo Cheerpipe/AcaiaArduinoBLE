@@ -952,6 +952,47 @@ to validate Web UI assets. Optional coverage requires LLVM (`llvm-profdata` and
 arduino-cli version
 ```
 
+### Optional static analysis (recommended)
+
+[`clang-tidy`](https://clang.llvm.org/extra/clang-tidy/) and
+[`Cppcheck`](https://cppcheck.sourceforge.io/) are recommended optional tools
+for static analysis of the C++ firmware. They are compatible with the Arduino
+build because `arduino-cli` generates the compilation database they use. On
+macOS with [Homebrew](https://brew.sh/), install them with:
+
+```sh
+brew install llvm cppcheck
+```
+
+Homebrew keeps `clang-tidy` in LLVM's own bin directory. Add it to `PATH` for
+the current shell, or add the same line to `~/.zshrc` to keep it permanently:
+
+```sh
+export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+```
+
+After building a variant (for example, `./scripts/build`), its
+`build/esp32/compile_commands.json` supplies the target-specific include paths
+and defines to both tools. Limit analysis to this repository's source files,
+rather than the Arduino core or installed third-party libraries, to avoid
+irrelevant diagnostics.
+
+Run both analyzers with the following script:
+
+```sh
+./scripts/static_analysis
+```
+
+It does **not** compile the firmware: the selected build must already exist.
+By default it reads `build/esp32/compile_commands.json`, deletes the previous
+`reports/static-analysis/` directory, and replaces it with `clang-tidy.txt`,
+`cppcheck.txt`, and a small run summary. Pass a build variant and, optionally,
+another repository-relative output directory when needed:
+
+```sh
+./scripts/static_analysis build/esp32s3 reports/analysis-esp32s3
+```
+
 Initialize its configuration only if one does not already exist, then add the
 ESP32 board index:
 

@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Run static analysis against an existing Arduino CLI compilation database.
+# This script deliberately never builds the firmware.
+set -uo pipefail
+
+readonly ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+readonly DEFAULT_BUILD_DIR="build/esp32"
+readonly DEFAULT_OUTPUT_DIR="reports/static-analysis"
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/static_analysis [build_dir] [output_dir]
+
+Run clang-tidy and Cppcheck using an existing Arduino CLI compilation database.
+The output directory is deleted and recreated on every run. This script never
+compiles the firmware; run ./scripts/build separately first.
+
+Defaults:
+  build_dir:  build/esp32
+  output_dir: reports/static-analysis
+
+Examples:
+  ./scripts/static_analysis
+  ./scripts/static_analysis build/esp32s3
+  ./scripts/static_analysis build/esp32 reports/analysis-esp32
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ $# -gt 2 ]]; then
+  usage >&2
+  exit 2
+fi
+
+build_dir="${1:-$DEFAULT_BUILD_DIR}"
+output_dir="${2:-$DEFAULT_OUTPUT_DIR}"
+
+case "$build_dir" in
+  /*) build_path="$build_dir" ;;
+  *) build_path="$ROOT/$build_dir" ;;
+esac
+
+# Keep the destructive cleanup strictly inside the repository.
+case "$output_dir" in
+  /*|*'..'*)
+    echo "La carpeta de salida debe ser una ruta relativa dentro del repositorio." >&2
+    exit 2
+    ;;
+esac
+output_path="$ROOT/$output_dir"
+compile_commands="$build_path/compile_commands.json"
+
+for tool in clang-tidy cppcheck; do
+  command -v "$tool" >/dev/null 2>&1 || {
+    echo "No se encontró $tool en PATH." >&2
+    exit 127
+  }
+done
+
+if [[ ! -f "$compile_commands" ]]; then
+  echo "No existe $compile_commands." >&2
+  echo "Compila primero la variante elegida (por ejemplo, ./scripts/build)." >&2
+  exit 1
+fi
+
+source_files=()
+while IFS= read -r source_file; do
+  source_files+=("$source_file")
+done < <(find "$ROOT/shotStopper" "$ROOT/libraries/AcaiaArduinoBLE" \
+  -type f -name '*.cpp' -print | sort)
+
+if [[ ${#source_files[@]} -eq 0 ]]; then
+  echo "No se encontraron archivos C++ para analizar." >&2
+  exit 1
+fi
+
+rm -rf "$output_path"
+mkdir -p "$output_path"
+
+printf 'Build database: %s\n' "$compile_commands" > "$output_path/README.txt"
+printf 'Generated: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >> "$output_path/README.txt"
+
+echo "Ejecutando clang-tidy..."
+clang-tidy -p "$build_path" \
+  "${source_files[@]}" \
+  --header-filter='^(shotStopper|libraries/AcaiaArduinoBLE)/.*' \
+  --checks='-*,clang-analyzer-*,bugprone-*' \
+  2>&1 | tee "$output_path/clang-tidy.txt"
+clang_tidy_status=${PIPESTATUS[0]}
+
+echo "Ejecutando Cppcheck..."
+cppcheck \
+  --project="$compile_commands" \
+  --enable=warning,performance,portability \
+  --inconclusive \
+  --error-exitcode=1 \
+  2>&1 | tee "$output_path/cppcheck.txt"
+cppcheck_status=${PIPESTATUS[0]}
+
+printf '\nclang-tidy exit status: %d\nCppcheck exit status: %d\n' \
+  "$clang_tidy_status" "$cppcheck_status" | tee -a "$output_path/README.txt"
+
+echo "Reportes guardados en $output_dir/"
+if [[ $clang_tidy_status -ne 0 || $cppcheck_status -ne 0 ]]; then
+  echo "El análisis terminó con diagnósticos o un error; revisa los reportes." >&2
+  exit 1
+fi
