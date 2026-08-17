@@ -894,8 +894,7 @@ void ShotStopperNetwork::service() {
       networkSnapshot.staIp[0] != '\0';
   serviceNtp(now, staConnected);
 
-  const NetworkStatusSnapshot network = networkSnapshot;
-  const uint8_t apClients = network.apActive
+  const uint8_t apClients = networkSnapshot.apActive
                                 ? static_cast<uint8_t>(
                                       WiFi.softAPgetStationNum())
                                 : 0;

@@ -10,7 +10,7 @@ inline void seedAutoToManualSamples(ShotPreset &preset) {
 }
 
 inline void fillDoubleFirmwareDefaults(ShotPreset &preset) {
-  memset(&preset, 0, sizeof(preset));
+  preset = ShotPreset{};
   preset.brewByWeight = true;
   preset.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
   preset.operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
@@ -55,7 +55,7 @@ inline void fillFactoryDoublePreset(ShotPreset &preset) {
 }
 
 inline void seedDefaultShotPresetBank(ShotPresetBank &bank) {
-  memset(&bank, 0, sizeof(bank));
+  bank = ShotPresetBank{};
   bank.count = 2;
   bank.activeId = FACTORY_PRESET_ID_DOUBLE;
   bank.nextId = 3;
@@ -482,7 +482,7 @@ inline bool duplicateShotPreset(ShotPresetBank &bank, uint8_t sourceId,
   slot.isFactory = false;
   if (!makeDuplicatePresetName(bank, source->name, slot.name,
                                SHOT_PRESET_NAME_CAPACITY)) {
-    memset(&slot, 0, sizeof(slot));
+    slot = ShotPreset{};
     bank.nextId = savedNextId;
     return false;
   }
@@ -524,7 +524,7 @@ inline bool deleteShotPreset(ShotPresetBank &bank, uint8_t id) {
     bank.presets[i] = bank.presets[i + 1];
   }
   --bank.count;
-  memset(&bank.presets[bank.count], 0, sizeof(bank.presets[bank.count]));
+  bank.presets[bank.count] = ShotPreset{};
   if (bank.activeId == id) {
     bank.activeId = bank.presets[0].id;
   }

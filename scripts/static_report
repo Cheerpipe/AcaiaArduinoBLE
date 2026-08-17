@@ -10,7 +10,7 @@ readonly SUPPRESSIONS_FILE="$ROOT/scripts/cppcheck-suppressions.txt"
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/static_analysis [build_dir] [output_dir]
+Usage: ./scripts/static_report [build_dir] [output_dir]
 
 Run Cppcheck using an existing Arduino CLI compilation database.
 The output directory is deleted and recreated on every run. This script never
@@ -21,9 +21,9 @@ Defaults:
   output_dir: reports/static-analysis
 
 Examples:
-  ./scripts/static_analysis
-  ./scripts/static_analysis build/esp32s3
-  ./scripts/static_analysis build/esp32 reports/analysis-esp32
+  ./scripts/static_report
+  ./scripts/static_report build/esp32s3
+  ./scripts/static_report build/esp32 reports/analysis-esp32
 EOF
 }
 

@@ -982,7 +982,7 @@ class ShotLog {
     return slot == 0 ? SHOT_LOG_KEY_A : SHOT_LOG_KEY_B;
   }
 
-  ShotLogStore store_;
+  ShotLogStore store_{};
 
 #if defined(SHOT_STOPPER_HOST_TEST)
   static ShotLogStore hostStorage_;

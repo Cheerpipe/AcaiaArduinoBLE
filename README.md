@@ -977,7 +977,7 @@ scope because it is a local library versioned here.
 Run Cppcheck with the following script:
 
 ```sh
-./scripts/static_analysis
+./scripts/static_report
 ```
 
 It does **not** compile the firmware: the selected build must already exist.
@@ -987,7 +987,7 @@ a small run summary. Pass a build variant and, optionally, another
 repository-relative output directory when needed:
 
 ```sh
-./scripts/static_analysis build/esp32s3 reports/analysis-esp32s3
+./scripts/static_report build/esp32s3 reports/analysis-esp32s3
 ```
 
 Initialize its configuration only if one does not already exist, then add the
@@ -1080,7 +1080,8 @@ argumentos usan la misma configuración de desarrollo: puerto
 | `./scripts/build` | `./scripts/build [ruta_serial] [arquitectura] [flags...]` | Genera la versión y Web UI, compila y deja el resultado en `build/<arquitectura>`. La ruta serial se incluye para mantener una interfaz uniforme, pero no se usa para compilar. |
 | `./scripts/upload` | `./scripts/upload [ruta_serial] [arquitectura]` | Sube el binario existente de `build/<arquitectura>`; no recompila. |
 | `./scripts/monitor` | `./scripts/monitor [ruta_serial] [velocidad]` | Abre el monitor serie. |
-| `./scripts/bum` | `./scripts/bum [ruta_serial arquitectura velocidad [flags...]]` | Wrapper que ejecuta build, upload y monitor. Sin argumentos conserva los defaults de cada script; si se pasan argumentos, ruta, arquitectura y velocidad son obligatorias; los flags se aplican solo a build. |
+| `./scripts/static_report` | `./scripts/static_report [build_dir] [output_dir]` | Ejecuta Cppcheck sobre una compilation database existente y guarda el reporte. No compila. |
+| `./scripts/bsum` | `./scripts/bsum [ruta_serial arquitectura velocidad [flags...]]` | Wrapper que ejecuta build, static report, upload y monitor. Si el análisis encuentra diagnósticos, no carga el firmware. Sin argumentos conserva los defaults de cada script; si se pasan argumentos, ruta, arquitectura y velocidad son obligatorias; los flags se aplican solo a build. |
 
 Las arquitecturas admitidas son `esp32` y `esp32s3`. Cada script recibe
 argumentos posicionales y muestra ayuda con `help`, `--help` o `-h`:
@@ -1095,17 +1096,17 @@ argumentos posicionales y muestra ayuda con `help`, `--help` o `-h`:
 ./scripts/upload
 ./scripts/monitor
 
-# Build, upload y monitor en una sola orden
-./scripts/bum
+# Build, static report, upload y monitor en una sola orden
+./scripts/bsum
 
 ./scripts/build /dev/cu.usbmodem01 esp32s3 -DSHOT_STOPPER_ENABLE_ALED=1
 ./scripts/upload /dev/cu.usbmodem01 esp32s3
 ./scripts/monitor /dev/cu.usbmodem01 115200
 
-./scripts/bum /dev/cu.usbmodem01 esp32s3 115200 -DSHOT_STOPPER_ENABLE_ALED=1
+./scripts/bsum /dev/cu.usbmodem01 esp32s3 115200 -DSHOT_STOPPER_ENABLE_ALED=1
 
 ./scripts/build help
-./scripts/bum --help
+./scripts/bsum --help
 ```
 
 From the repository root, install Node deps if needed, generate the version and
