@@ -75,6 +75,11 @@ ScaleFixture makeScale(scale_type type) {
             fixture.read = fixture.write;
             fixture.read->subscribable = true;
             break;
+        case ECLAIR:
+            fixture.peripheral->localName = "ECLAIR";
+            writeUuid = WRITE_CHAR_ECLAIR;
+            readUuid = READ_CHAR_ECLAIR;
+            break;
     }
 
     fixture.write->uuid = writeUuid;
@@ -127,6 +132,22 @@ void notify(const ScaleFixture& fixture, const std::vector<byte>& packet) {
     fixture.read->value = packet;
     fixture.read->forcedReadLength = -1;
     fixture.read->updated = true;
+}
+
+std::vector<byte> eclairPacket(int32_t milligrams, uint32_t timerMs) {
+    std::vector<byte> packet(10, 0);
+    packet[0] = 'W';
+    const uint32_t rawWeight = static_cast<uint32_t>(milligrams);
+    for (int i = 0; i < 4; ++i) {
+        packet[1 + i] = static_cast<byte>(rawWeight >> (i * 8));
+        packet[5 + i] = static_cast<byte>(timerMs >> (i * 8));
+    }
+    byte checksum = 0;
+    for (int i = 1; i <= 8; ++i) {
+        checksum ^= packet[i];
+    }
+    packet[9] = checksum;
+    return packet;
 }
 
 void testScanDiagnostics() {
@@ -394,6 +415,66 @@ void testFelicitaAsciiValidation() {
     CHECK(scale.rejectedPacketCount() == 1);
 }
 
+void testEclairProtocol() {
+    resetFake();
+    ScaleFixture fixture = makeScale(ECLAIR);
+    AcaiaArduinoBLE scale(false);
+    CHECK(scale.init());
+    CHECK(std::strcmp(scale.connectedProtocolName(), "atomheart_eclair") == 0);
+    CHECK(fixture.write->writes.empty());
+    CHECK(!scale.heartbeatRequired());
+    CHECK(!scale.supportsTareStartTimer());
+    CHECK(!scale.supportsIndependentBeep());
+    CHECK(!scale.supportsCommandFeedback());
+    CHECK(!scale.tareStartTimer());
+    CHECK(!scale.beepWithoutStateChange());
+    CHECK(!scale.setBeepLevel(0));
+
+    CHECK(scale.tare());
+    CHECK(scale.startTimer());
+    CHECK(scale.stopTimer());
+    CHECK(scale.resetTimer());
+    CHECK(fixture.write->writes.size() == 4);
+    CHECK(fixture.write->writes[0] == std::vector<byte>({0x54, 0x01, 0x01}));
+    CHECK(fixture.write->writes[1] == std::vector<byte>({0x53, 0x01, 0x01}));
+    CHECK(fixture.write->writes[2] == std::vector<byte>({0x45, 0x01, 0x01}));
+    CHECK(fixture.write->writes[3] == std::vector<byte>({0x52, 0x01, 0x01}));
+
+    notify(fixture, eclairPacket(-12345, 65432));
+    CHECK(scale.newWeightAvailable());
+    CHECK(std::fabs(scale.getWeight() + 12.345f) < 0.001f);
+    CHECK(scale.hasTimer());
+    CHECK(scale.getTimerMs() == 65432UL);
+
+    std::vector<byte> invalidChecksum = eclairPacket(1000, 100);
+    invalidChecksum[9] ^= 0xff;
+    notify(fixture, invalidChecksum);
+    CHECK(!scale.newWeightAvailable());
+    CHECK(scale.rejectedPacketCount() == 1);
+
+    std::vector<byte> invalidHeader = eclairPacket(1000, 100);
+    invalidHeader[0] = 'X';
+    notify(fixture, invalidHeader);
+    CHECK(!scale.newWeightAvailable());
+    CHECK(scale.rejectedPacketCount() == 2);
+
+    notify(fixture, eclairPacket(10000001, 100));
+    CHECK(!scale.newWeightAvailable());
+    CHECK(scale.rejectedPacketCount() == 3);
+}
+
+void testDirectedEclairDiscoveryWithoutName() {
+    resetFake();
+    ScaleFixture fixture = makeScale(ECLAIR);
+    fixture.peripheral->address = "aa:bb:cc:dd:ee:ff";
+    fixture.peripheral->localName.clear();
+    AcaiaArduinoBLE scale(false);
+    CHECK(scale.startScan("AA:BB:CC:DD:EE:FF"));
+    CHECK(scale.pollScan());
+    CHECK(scale.isConnected());
+    CHECK(std::strcmp(scale.connectedProtocolName(), "atomheart_eclair") == 0);
+}
+
 void testCapabilitiesAndWriteCleanup() {
     resetFake();
     ScaleFixture acaia = makeScale(NEW);
@@ -646,6 +727,8 @@ int main() {
     testFirstPacketAndSteadyStateTimeouts();
     testAcaiaValidationAndDebugBounds();
     testFelicitaAsciiValidation();
+    testEclairProtocol();
+    testDirectedEclairDiscoveryWithoutName();
     testCapabilitiesAndWriteCleanup();
     testOldAndGenericPacketValidation();
     testScaleTimerParsing();

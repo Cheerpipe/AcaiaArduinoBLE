@@ -53,6 +53,10 @@ static const byte START_TIMER_FELICITA[1] = {0x52};
 static const byte STOP_TIMER_FELICITA[1] = {0x53};
 static const byte RESET_TIMER_FELICITA[1] = {0x43};
 static const byte WEIGHT_TIMER_MODE_FELICITA[1] = {0x32};
+static const byte TARE_ECLAIR[3] = {0x54, 0x01, 0x01};
+static const byte START_TIMER_ECLAIR[3] = {0x53, 0x01, 0x01};
+static const byte STOP_TIMER_ECLAIR[3] = {0x45, 0x01, 0x01};
+static const byte RESET_TIMER_ECLAIR[3] = {0x52, 0x01, 0x01};
 
 static const int MAX_BLE_PACKET_LENGTH = 20;
 static const byte GENERIC_PRODUCT = 0x03;
@@ -67,6 +71,21 @@ void fillGenericCommand(byte out[6], byte data1, byte data2, byte data3) {
     out[3] = data2;
     out[4] = data3;
     out[5] = static_cast<byte>(out[0] ^ out[1] ^ out[2] ^ out[3] ^ out[4]);
+}
+
+uint8_t xorBytes(const byte data[], int length) {
+    uint8_t result = 0;
+    for (int i = 0; i < length; ++i) {
+        result ^= data[i];
+    }
+    return result;
+}
+
+uint32_t readUint32LittleEndian(const byte data[]) {
+    return static_cast<uint32_t>(data[0]) |
+           (static_cast<uint32_t>(data[1]) << 8) |
+           (static_cast<uint32_t>(data[2]) << 16) |
+           (static_cast<uint32_t>(data[3]) << 24);
 }
 
 uint32_t elapsedSince(uint32_t timestamp) {
@@ -378,6 +397,15 @@ bool AcaiaArduinoBLE::completeConnection(BLEDevice& peripheral) {
                     configured = configureCharacteristics(
                         peripheral, FELICITA, WRITE_CHAR_FELICITA,
                         READ_CHAR_FELICITA);
+                } else {
+                    BLECharacteristic eclairCandidate =
+                        peripheral.characteristic(READ_CHAR_ECLAIR);
+                    if (eclairCandidate && eclairCandidate.canSubscribe()) {
+                        Serial.println("AtomHeart Eclair detected");
+                        configured = configureCharacteristics(
+                            peripheral, ECLAIR, WRITE_CHAR_ECLAIR,
+                            READ_CHAR_ECLAIR);
+                    }
                 }
             }
         }
@@ -496,6 +524,9 @@ bool AcaiaArduinoBLE::tare() {
     } else if (_type == FELICITA) {
         command = TARE_FELICITA;
         length = sizeof(TARE_FELICITA);
+    } else if (_type == ECLAIR) {
+        command = TARE_ECLAIR;
+        length = sizeof(TARE_ECLAIR);
     }
 
     const bool ok = writeCommand(command, length);
@@ -512,6 +543,9 @@ bool AcaiaArduinoBLE::startTimer() {
     } else if (_type == FELICITA) {
         command = START_TIMER_FELICITA;
         length = sizeof(START_TIMER_FELICITA);
+    } else if (_type == ECLAIR) {
+        command = START_TIMER_ECLAIR;
+        length = sizeof(START_TIMER_ECLAIR);
     }
 
     const bool ok = writeCommand(command, length);
@@ -529,6 +563,9 @@ bool AcaiaArduinoBLE::stopTimer() {
     } else if (_type == FELICITA) {
         command = STOP_TIMER_FELICITA;
         length = sizeof(STOP_TIMER_FELICITA);
+    } else if (_type == ECLAIR) {
+        command = STOP_TIMER_ECLAIR;
+        length = sizeof(STOP_TIMER_ECLAIR);
     }
 
     const bool ok = writeCommand(command, length);
@@ -546,6 +583,9 @@ bool AcaiaArduinoBLE::resetTimer() {
     } else if (_type == FELICITA) {
         command = RESET_TIMER_FELICITA;
         length = sizeof(RESET_TIMER_FELICITA);
+    } else if (_type == ECLAIR) {
+        command = RESET_TIMER_ECLAIR;
+        length = sizeof(RESET_TIMER_ECLAIR);
     }
 
     const bool ok = writeCommand(command, length);
@@ -578,6 +618,13 @@ bool AcaiaArduinoBLE::beep() {
 
 bool AcaiaArduinoBLE::supportsIndependentBeep() const {
     return _connected && _type == GENERIC;
+}
+
+bool AcaiaArduinoBLE::supportsCommandFeedback() const {
+    // Keep the established behavior for existing protocols. Eclair's public
+    // protocol documents no audible feedback for its tare/timer commands, so
+    // callers must provide the fallback alert themselves.
+    return _connected && _type != ECLAIR;
 }
 
 bool AcaiaArduinoBLE::beepWithoutStateChange() {
@@ -653,6 +700,7 @@ const char* AcaiaArduinoBLE::connectedProtocolName() const {
         case NEW: return "acaia";
         case GENERIC: return "bookoo_generic";
         case FELICITA: return "felicita";
+        case ECLAIR: return "atomheart_eclair";
     }
     return "unknown";
 }
@@ -751,6 +799,8 @@ bool AcaiaArduinoBLE::supportedPacketLength(int length) const {
             return length == 20;
         case FELICITA:
             return length == 18;
+        case ECLAIR:
+            return length == 10;
     }
     return false;
 }
@@ -766,6 +816,8 @@ bool AcaiaArduinoBLE::parseWeightPacket(const byte data[], int length,
             return parseGenericPacket(data, length, weight);
         case FELICITA:
             return parseFelicitaPacket(data, length, weight);
+        case ECLAIR:
+            return parseEclairPacket(data, length, weight);
     }
     return false;
 }
@@ -814,6 +866,8 @@ bool AcaiaArduinoBLE::parseTimerPacket(const byte data[], int length,
             }
             return false;
         }
+        case ECLAIR:
+            return parseEclairTimerPacket(data, length, timerMs);
         case OLD:
             break;
     }
@@ -900,6 +954,27 @@ bool AcaiaArduinoBLE::parseFelicitaPacket(const byte data[], int length,
         weight = -weight;
     }
     return validWeight(weight);
+}
+
+bool AcaiaArduinoBLE::parseEclairPacket(const byte data[], int length,
+                                         float& weight) const {
+    if (length != 10 || data[0] != 'W' || xorBytes(data + 1, 8) != data[9]) {
+        return false;
+    }
+    const int32_t milligrams = static_cast<int32_t>(
+        readUint32LittleEndian(data + 1));
+    weight = static_cast<float>(milligrams) / 1000.0f;
+    return validWeight(weight);
+}
+
+bool AcaiaArduinoBLE::parseEclairTimerPacket(const byte data[], int length,
+                                              uint32_t& timerMs) const {
+    float ignoredWeight = 0.0f;
+    if (!parseEclairPacket(data, length, ignoredWeight)) {
+        return false;
+    }
+    timerMs = readUint32LittleEndian(data + 5);
+    return true;
 }
 
 bool AcaiaArduinoBLE::validAcaiaChecksum(const byte data[],
@@ -1069,7 +1144,8 @@ bool AcaiaArduinoBLE::isScaleName(const char *name) const {
     return strncmp(name, "CINCO", 5) == 0 || strncmp(name, "ACAIA", 5) == 0 ||
            strncmp(name, "PYXIS", 5) == 0 || strncmp(name, "LUNAR", 5) == 0 ||
            strncmp(name, "PEARL", 5) == 0 || strncmp(name, "PROCH", 5) == 0 ||
-           strncmp(name, "BOOKO", 5) == 0 || strncmp(name, "FELIC", 5) == 0;
+           strncmp(name, "BOOKO", 5) == 0 || strncmp(name, "FELIC", 5) == 0 ||
+           strncmp(name, "ECLAI", 5) == 0;
 }
 
 void AcaiaArduinoBLE::exploreService(BLEService service) {

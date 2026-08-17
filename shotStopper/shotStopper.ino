@@ -309,7 +309,7 @@ bool emitAlert(AlertEvent event, uint32_t cycleId = 0);
 bool commandAlertUsesBuzzer();
 void emitImmediateCommandAlertIfBuzzer();
 void emitCommandAlert(AlertEvent event, bool commandAttempted,
-                      bool writeSucceeded);
+                      bool writeSucceeded, bool commandFeedbackExpected);
 
 enum class TimerStopResult : uint8_t {
   NOT_REQUIRED,
@@ -445,6 +445,7 @@ struct ScaleCommand {
   uint32_t cycleId = 0;
   bool autoTare = false;
   bool canTareStartTimer = false;
+  bool commandFeedbackExpected = false;
 };
 
 struct ScaleEvent {
@@ -457,6 +458,7 @@ struct ScaleEvent {
   bool commandAttempted = false;
   bool writeSucceeded = false;
   bool usedCombinedTareStart = false;
+  bool commandFeedbackExpected = false;
 };
 
 struct MaintenanceLease {
@@ -1836,6 +1838,7 @@ bool requestRemoteTimerStart() {
   command.cycleId = session.id;
   command.autoTare = session.config.autoTare;
   command.canTareStartTimer = session.config.canTareStartTimer;
+  command.commandFeedbackExpected = scale.supportsCommandFeedback();
   session.timerStartCommandQueued = enqueueScaleCommand(command);
   session.remoteTimerMayBeRunning = session.timerStartCommandQueued;
   return session.timerStartCommandQueued;
@@ -1849,6 +1852,7 @@ bool requestRemoteRetare() {
   command.type = ScaleCommandType::TARE_ONLY;
   command.cycleId = session.id;
   command.autoTare = true;
+  command.commandFeedbackExpected = scale.supportsCommandFeedback();
   return enqueueScaleCommand(command);
 }
 
@@ -1863,6 +1867,7 @@ bool tryQueueRemoteTimerStop() {
   ScaleCommand command;
   command.type = ScaleCommandType::STOP_TIMER;
   command.cycleId = session.id;
+  command.commandFeedbackExpected = scale.supportsCommandFeedback();
   ++session.stopTimerAttempts;
   session.stopTimerLastAttemptMs = millis();
   if (!enqueueScaleCommand(command)) {
@@ -3038,6 +3043,7 @@ void executeScaleStartCommand(const ScaleCommand &command) {
   ScaleEvent event;
   event.type = ScaleEventType::TIMER_START_RESULT;
   event.cycleId = command.cycleId;
+  event.commandFeedbackExpected = command.commandFeedbackExpected;
 
   if (scale.isConnected()) {
     if (command.canTareStartTimer && command.autoTare &&
@@ -3067,6 +3073,7 @@ void executeScaleStopCommand(const ScaleCommand &command) {
   ScaleEvent event;
   event.type = ScaleEventType::TIMER_STOP_RESULT;
   event.cycleId = command.cycleId;
+  event.commandFeedbackExpected = command.commandFeedbackExpected;
 
   if (scale.isConnected()) {
     // A failed start write may only mean its ATT response was lost. Attempting
@@ -3083,6 +3090,7 @@ void executeScaleTareCommand(const ScaleCommand &command) {
   ScaleEvent event;
   event.type = ScaleEventType::TARE_RESULT;
   event.cycleId = command.cycleId;
+  event.commandFeedbackExpected = command.commandFeedbackExpected;
 
   if (scale.isConnected()) {
     event.commandAttempted = true;
@@ -3283,7 +3291,7 @@ bool emitLocalAlertBuzzer(BuzzerPattern pattern) {
 }
 
 bool queueScaleIndependentAlert(AlertEvent event, uint32_t cycleId) {
-  if (!scaleAvailable()) {
+  if (!scaleAvailable() || !scale.supportsIndependentBeep()) {
     return false;
   }
   switch (event) {
@@ -3354,7 +3362,7 @@ bool commandAlertUsesBuzzer() {
     return true;
   }
   if (channel == AlertOutputChannel::SCALE_PRIORITY) {
-    return !scaleAvailable();
+    return !scaleAvailable() || !scale.supportsCommandFeedback();
   }
   return false;
 }
@@ -3371,13 +3379,18 @@ void emitImmediateCommandAlertIfBuzzer() {
 // SCALE_PRIORITY still falls back here if the write missed, even if the
 // scale dropped while the ATT write was in flight.
 void emitCommandAlert(AlertEvent event, bool commandAttempted,
-                      bool writeSucceeded) {
+                      bool writeSucceeded, bool commandFeedbackExpected) {
   const AlertOutputChannel channel = currentAlertOutputChannel();
   if (channel == AlertOutputChannel::BUZZER_ONLY) {
     return;
   }
   if (channel == AlertOutputChannel::SCALE_ONLY) {
     (void)event;
+    return;
+  }
+  if (!commandFeedbackExpected) {
+    // Eclair has no documented audible confirmation for tare/timer commands.
+    // The local alert was already emitted at the physical control event.
     return;
   }
   if (!commandAttempted || !writeSucceeded) {
@@ -4263,7 +4276,8 @@ void processScaleWorkerEvents() {
         }
         emitCommandAlert(event.usedCombinedTareStart ? AlertEvent::TARE_START
                                                      : AlertEvent::START_TIMER,
-                         event.commandAttempted, event.writeSucceeded);
+                         event.commandAttempted, event.writeSucceeded,
+                         event.commandFeedbackExpected);
         serialTracef(LogLevel::DEBUG, "Remote timer start write: %s",
                      event.writeSucceeded ? "successful" : "failed/skipped");
         addDebugEvent(DebugCategory::SCALE,
@@ -4284,7 +4298,7 @@ void processScaleWorkerEvents() {
           resetDirectStopConfirmation();
         }
         emitCommandAlert(AlertEvent::TARE, event.commandAttempted,
-                         event.writeSucceeded);
+                         event.writeSucceeded, event.commandFeedbackExpected);
         break;
 
       case ScaleEventType::TIMER_STOP_RESULT:
@@ -4297,7 +4311,7 @@ void processScaleWorkerEvents() {
                                           : TimerStopResult::WRITE_FAILED);
         }
         emitCommandAlert(AlertEvent::STOP_TIMER, event.commandAttempted,
-                         event.writeSucceeded);
+                         event.writeSucceeded, event.commandFeedbackExpected);
         // Structured SCALE_TIMER_STOP_* events cover Serial when enabled.
         addDebugEvent(DebugCategory::SCALE,
                       event.writeSucceeded ? DebugCode::SCALE_TIMER_STOP_OK

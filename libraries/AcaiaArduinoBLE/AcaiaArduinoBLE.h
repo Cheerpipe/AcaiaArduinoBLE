@@ -11,7 +11,7 @@
 #ifndef AcaiaArduinoBLE_h
 #define AcaiaArduinoBLE_h
 
-#define LIBRARY_VERSION                 "3.6.0"
+#define LIBRARY_VERSION                 "3.7.0"
 #define WRITE_CHAR_OLD_VERSION          "2a80"
 #define READ_CHAR_OLD_VERSION           "2a80"
 #define WRITE_CHAR_NEW_VERSION          "49535343-8841-43f4-a8d4-ecbe34729bb3"
@@ -20,6 +20,8 @@
 #define READ_CHAR_GENERIC               "ff11"
 #define WRITE_CHAR_FELICITA             "ffe1"
 #define READ_CHAR_FELICITA              "ffe1"
+#define WRITE_CHAR_ECLAIR               "4F9A45BA-8E1B-4E07-E157-0814D393B968"
+#define READ_CHAR_ECLAIR                "AD736C5F-BBC9-1F96-D304-CB5D5F41E160"
 #define HEARTBEAT_PERIOD_MS              2750UL
 #define FIRST_PACKET_TIMEOUT_MS          5000UL
 #define MAX_PACKET_PERIOD_MS             5000UL
@@ -37,7 +39,8 @@ enum scale_type {
     OLD,     // Lunar (pre-2021)
     NEW,     // Lunar (2021), Pyxis
     GENERIC, // Bookoo Themis, Decent, etc. (ff11/ff12)
-    FELICITA // Felicita Arc (ffe1)
+    FELICITA, // Felicita Arc (ffe1)
+    ECLAIR    // AtomHeart Eclair
 };
 
 enum class AcaiaDisconnectReason : uint8_t {
@@ -102,6 +105,9 @@ class AcaiaArduinoBLE {
         // succeeds on protocols with an independent buzzer command.
         bool beep();
         bool supportsIndependentBeep() const;
+        // True when normal tare/timer commands are known to provide their own
+        // audible confirmation. Eclair does not document this feedback.
+        bool supportsCommandFeedback() const;
         bool beepWithoutStateChange();
         // Bookoo/generic only. Opcode 0x02; level 0 mutes, 1–5 set volume.
         bool setBeepLevel(uint8_t level);
@@ -150,6 +156,10 @@ class AcaiaArduinoBLE {
                                 float& weight) const;
         bool parseFelicitaPacket(const byte data[], int length,
                                  float& weight) const;
+        bool parseEclairPacket(const byte data[], int length,
+                               float& weight) const;
+        bool parseEclairTimerPacket(const byte data[], int length,
+                                    uint32_t& timerMs) const;
         bool validAcaiaChecksum(const byte data[], int length) const;
         bool validWeight(float weight) const;
         bool supportedPacketLength(int length) const;

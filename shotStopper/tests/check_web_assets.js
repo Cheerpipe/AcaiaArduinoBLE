@@ -525,6 +525,15 @@ if (!html.includes('<summary>Tare</summary>') ||
     !ui.includes("d.parentElement.closest('details')")) {
   throw new Error('Machine settings must split Tare and Scales, with Bookoo/Acaia/Felicita subgroups');
 }
+if (!html.includes('<summary>AtomHeart Eclair</summary>') ||
+    !html.includes('Eclair does not expose configurable volume, beep, mode, or combined tare-and-start commands.') ||
+    html.indexOf('<summary>AtomHeart Eclair</summary>') <
+        html.indexOf('<summary>Felicita</summary>') ||
+    html.indexOf('<summary>AtomHeart Eclair</summary>') >
+        html.indexOf('<summary>Alerts</summary>') ||
+    html.includes('id="eclair')) {
+  throw new Error('Machine settings must include an informational AtomHeart Eclair subgroup without settings');
+}
 if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('<legend>Machine and scale</legend>') ||
     !ui.includes('<legend>Security and connectivity</legend>') ||

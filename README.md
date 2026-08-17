@@ -186,6 +186,7 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | **Bookoo combined command** | Use the scale’s combined tare + start-timer command (requires auto tare; default ON). |
 | **Mute scale in Buzzer only** | Bookoo/generic: when enabled (default ON), send silence (volume 0) on connect/reconnect, when Output channel is saved as Buzzer only, and when this option is turned on. Applies only in **Buzzer only**. |
 | **Scale volume** | Bookoo/generic: on connect/reconnect, set scale volume 1–5 (default 4) or Disabled. Applies only in **Scale only** and **Scale priority**. |
+| **AtomHeart Eclair** | Informational brand section. Eclair uses the normal tare/timer commands and exposes no configurable volume, beep, mode, combined tare-and-start command, or documented command sound. In **Buzzer only** and **Scale priority**, its alerts use the local buzzer; **Scale only** omits unsupported sounds. |
 | **Automatic retare** | Allow one late-cup retare during the retare window (default ON). |
 | **Retare window (s)** | Time after shot start to detect and retare a late-placed cup (default 4 s). |
 | **Minimum cup weight (g)** | Stable load threshold that qualifies as a cup for retare (default 10 g). |
@@ -365,7 +366,8 @@ copy under `libraries/AcaiaArduinoBLE/` and aims to stay aligned with upstream
 releases, new scale types, and protocol fixes as they land in that repository.
 
 - Local **AcaiaArduinoBLE** library (vendored in-repo) for **Acaia** (legacy and
-  current), **Bookoo/generic**, and **Felicita** scales over BLE central.
+  current), **Bookoo/generic**, **Felicita**, and **AtomHeart Eclair** scales
+  over BLE central.
 - Dedicated **`scale_worker`** FreeRTOS task isolates BLE polling, connection
   retries, tare/start/stop commands, and beeps from the control loop via
   bounded command and event queues.

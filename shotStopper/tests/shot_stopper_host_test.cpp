@@ -2180,8 +2180,8 @@ void w31_unsupported_scale_never_uses_tare_as_a_beep() {
   advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
   simulateFirstDrops();
-  CHECK(scaleBeepPending);
-  CHECK(executePendingScaleBrewBeep());
+  CHECK(!scaleBeepPending);
+  CHECK(!executePendingScaleBrewBeep());
   CHECK(scale.beepCalls == 0);
   CHECK(scale.tareStartTimerCalls == 1);
   CHECK(scale.tareCalls == 0);
@@ -3402,6 +3402,90 @@ void w81_scale_priority_failed_start_falls_back_after_disconnect() {
   CHECK(localBuzzer.acceptedRequests == before + 1);
   CHECK(executeNextScaleCommand());
   CHECK(localBuzzer.acceptedRequests == before + 2);
+}
+
+void configureEclairCapabilities() {
+  strncpy(scale.connectedProtocol, "atomheart_eclair",
+          sizeof(scale.connectedProtocol) - 1);
+  scale.connectedProtocol[sizeof(scale.connectedProtocol) - 1] = '\0';
+  scale.tareStartTimerSupported = false;
+  scale.independentBeepSupported = false;
+  scale.commandFeedbackSupported = false;
+}
+
+void w94_eclair_scale_priority_uses_local_alerts() {
+  resetHarness(false, true);
+  configureEclairCapabilities();
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+  runtimeConfig.bbwProtectionMs = minimumBbwProtectionMs(runtimeConfig);
+  reachReadyFromBoot();
+  const uint32_t startAlerts = localBuzzer.acceptedRequests;
+  startCycle();
+  CHECK(localBuzzer.acceptedRequests == startAlerts + 1);
+  CHECK(executeNextScaleCommand());
+  CHECK(scale.commandLog.size() == 3);
+  CHECK(scale.commandLog[0] == "resetTimer");
+  CHECK(scale.commandLog[1] == "startTimer");
+  CHECK(scale.commandLog[2] == "tare");
+  CHECK(scale.beepCalls == 0);
+  CHECK(scale.setBeepLevelCalls == 0);
+  establishPostTareBaseline();
+  advanceToBrew();
+  drainLocalBuzzer();
+
+  const uint32_t retareAlerts = localBuzzer.acceptedRequests;
+  CHECK(requestRemoteRetare());
+  emitImmediateCommandAlertIfBuzzer();
+  CHECK(localBuzzer.acceptedRequests == retareAlerts + 1);
+  CHECK(commandCount(ScaleCommandType::TARE_ONLY) == 1);
+
+  drainLocalBuzzer();
+  const uint32_t firstDropAlerts = localBuzzer.acceptedRequests;
+  simulateFirstDrops();
+  CHECK(localBuzzer.acceptedRequests == firstDropAlerts + 1);
+  CHECK(!scaleBeepPending);
+  CHECK(scale.beepCalls == 0);
+}
+
+void w95_eclair_scale_only_omits_unsupported_alerts() {
+  resetHarness(false, true);
+  configureEclairCapabilities();
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_ONLY);
+  reachReadyFromBoot();
+  const uint32_t alerts = localBuzzer.acceptedRequests;
+  startCycle();
+  CHECK(localBuzzer.acceptedRequests == alerts);
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+  advanceToBrew();
+  simulateFirstDrops();
+  CHECK(localBuzzer.acceptedRequests == alerts);
+  CHECK(!scaleBeepPending);
+  CHECK(scale.beepCalls == 0);
+  CHECK(scale.setBeepLevelCalls == 0);
+}
+
+void w97_eclair_buzzer_only_never_queues_scale_beeps() {
+  resetHarness(false, true);
+  configureEclairCapabilities();
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  reachReadyFromBoot();
+  const uint32_t startAlerts = localBuzzer.acceptedRequests;
+  startCycle();
+  CHECK(localBuzzer.acceptedRequests == startAlerts + 1);
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+  advanceToBrew();
+  drainLocalBuzzer();
+  const uint32_t firstDropAlerts = localBuzzer.acceptedRequests;
+  simulateFirstDrops();
+  CHECK(localBuzzer.acceptedRequests == firstDropAlerts + 1);
+  CHECK(!scaleBeepPending);
+  CHECK(scale.beepCalls == 0);
+  CHECK(scale.setBeepLevelCalls == 0);
 }
 
 void setHostPreferredScaleMac(const char *mac) {
@@ -6386,6 +6470,9 @@ const TestCase testCases[] = {
     {"W79", w79_buzzer_only_stop_beeps_before_timer_stop_result},
     {"W80", w80_buzzer_only_retare_beeps_before_tare_result},
     {"W81", w81_scale_priority_failed_start_falls_back_after_disconnect},
+    {"W94", w94_eclair_scale_priority_uses_local_alerts},
+    {"W95", w95_eclair_scale_only_omits_unsupported_alerts},
+    {"W97", w97_eclair_buzzer_only_never_queues_scale_beeps},
     {"W82", w82_pulse_train_loops_until_deadline_or_stopIf},
     {"W83", w83_web_buzzer_test_pulse_uses_same_train_for_3s},
     {"W84", w84_pulse_train_yields_to_triple},

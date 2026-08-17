@@ -1,5 +1,5 @@
 # AcaiaArduinoBLE
-Acaia / Bookoo / Felicita Scale Gateway using the ArduinoBLE library for esp32-based devices.
+Acaia / Bookoo / Felicita / AtomHeart Eclair Scale Gateway using the ArduinoBLE library for esp32-based devices.
 This is an Arduino Library which can be found in the Arduino IDE Library Manager.
 
 ## Scale Compatibility
@@ -14,6 +14,7 @@ This is an Arduino Library which can be found in the Arduino IDE Library Manager
 | Bookoo | Themis  Mini | ----                       | v1.0.5   | Great | Yes | Yes | Yes
 | Bookoo | Themis Ultra  | ----                 | ----   | Great | Yes | Yes | Yes
 | Felicita | Arc   | ----                       | ----   | ---- | Yes | Yes | Yes
+| AtomHeart | Eclair | ----                      | v2.1.0 | Testing | Yes | Yes | Yes
 
 
 ## Requirements
@@ -154,8 +155,13 @@ The following variables at the top of the shotStopper.ino file can be configured
 
 Bookoo/generic scales also expose `setBeepLevel(0–5)` (0 mutes) and
 `beepWithoutStateChange()`, which sends level 1. Both succeed only when that
-protocol is detected; they never use tare as a substitute on Acaia or Felicita
+protocol is detected; they never use tare as a substitute on Acaia, Felicita, or Eclair
 scales.
+
+AtomHeart Eclair supports tare and timer control, but its known protocol has
+no independent beep, volume, mute, combined tare-and-start, or documented
+audible command-feedback capability. Applications should route alerts to a
+local buzzer when one is available instead of using tare as a sound command.
 
 ## Demo
 
@@ -177,6 +183,8 @@ You can find a demo on Youtube:
 
 ☑ Bookoo
 
+☑ AtomHeart Eclair
+
 
 ## Bugs/Missing
 1. Tare command is less reliable than pressing the tare button for pyxis
@@ -190,5 +198,7 @@ In addition to some minor notes from [pyacaia](https://github.com/lucapinello/py
 Felicita Arc support contributions from baettigp and A-TWJ
 
 Bookoo contributions from philgood and same31
+
+AtomHeart Eclair protocol information from AtomHeart-Lang
 
 lunar 2019 contributions from jniebuhr

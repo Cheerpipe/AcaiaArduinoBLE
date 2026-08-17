@@ -359,6 +359,9 @@ class AcaiaArduinoBLE {
   bool supportsIndependentBeep() const {
     return connected && independentBeepSupported;
   }
+  bool supportsCommandFeedback() const {
+    return connected && commandFeedbackSupported;
+  }
   bool beepWithoutStateChange() {
     commandLog.push_back("beepWithoutStateChange");
     ++beepCalls;
@@ -434,6 +437,7 @@ class AcaiaArduinoBLE {
   bool tareStartTimerSucceeds = true;
   bool tareStartTimerSupported = true;
   bool independentBeepSupported = true;
+  bool commandFeedbackSupported = true;
   bool beepSucceeds = true;
   bool heartbeatSucceeds = true;
   bool heartbeatRequiredValue = false;
