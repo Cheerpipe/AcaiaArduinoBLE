@@ -69,7 +69,7 @@ reboot. Automatic SoftAP from boot is still torn down when STA comes up.
 | --- | --- | --- |
 | `SET_WIFI` | `<ssid> [password]` | Saves home Wi-Fi and restarts. Omit password if open. Quote spaces. Safety gate |
 | `CLEAR_WIFI` | none | Forgets saved STA only; restarts (safety gate) |
-| `RESET_NETWORK_UI` | none | Forgets STA and restores AP/UI password `Micra1234`; restarts (safety gate) |
+| `RESET_NETWORK_AP` | none | Forgets STA and restores AP password `Micra1234`; restarts (safety gate) |
 
 ## STA link (no NVS change)
 
@@ -87,8 +87,8 @@ reboot. Automatic SoftAP from boot is still torn down when STA comes up.
 | `AP_START` | none | Raises SoftAP (`MicraShotStopperAP` at `192.168.4.1`). Stays up if STA is connected. Does not start HTTP if `WEBUI_STOP` is held |
 | `AP_STOP` | none | Stops SoftAP and holds auto-raise. HTTP stays if STA is up |
 | `AP_STATUS` | none | Dumps SoftAP state (never the password) |
-| `SET_AP_PASSWORD` | `<password>` | Sets AP/UI password (8–63 chars, not `Micra1234`). Safety gate |
-| `RESET_AP_PASSWORD` | none | Restores AP/UI password `Micra1234`. STA unchanged. Safety gate |
+| `SET_AP_PASSWORD` | `<password>` | Sets WPA2 password of the AP (8–63 chars, not `Micra1234`). Safety gate |
+| `RESET_AP_PASSWORD` | none | Restores AP password `Micra1234`. STA unchanged. Safety gate |
 
 ## Web UI
 

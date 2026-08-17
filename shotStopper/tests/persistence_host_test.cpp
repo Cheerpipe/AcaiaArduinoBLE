@@ -61,7 +61,7 @@ void p01_defaults_are_valid() {
   }
   CHECK(validPersistedSettings(settings));
   CHECK(passwordIsFactoryDefault(settings));
-  CHECK(verifyAdminPassword(settings, DEFAULT_AP_PASSWORD));
+  CHECK(passwordIsFactoryDefault(settings));
   CHECK(settings.preferredScaleMac[0] == '\0');
   CHECK(settings.preferredScaleName[0] == '\0');
   CHECK(settings.runtime.scaleMacCacheMode ==
@@ -184,11 +184,11 @@ void p05_password_change_updates_hash() {
   resetHostPersistence();
   PersistedSettings settings;
   CHECK(initializeDefaultSettings(settings));
-  CHECK(!refreshAuthentication(settings, DEFAULT_AP_PASSWORD));
-  CHECK(refreshAuthentication(settings, "NuevaClaveSegura"));
+  CHECK(!setAccessPointPassword(settings, DEFAULT_AP_PASSWORD));
+  CHECK(setAccessPointPassword(settings, "NuevaClaveSegura"));
   finalizePersistedSettings(settings);
   CHECK(validPersistedSettings(settings));
-  CHECK(verifyAdminPassword(settings, "NuevaClaveSegura"));
+  CHECK(strcmp(settings.apPassword, "NuevaClaveSegura") == 0);
   CHECK(!passwordIsFactoryDefault(settings));
 }
 

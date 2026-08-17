@@ -20,7 +20,7 @@ enum class SerialCliVerb : uint8_t {
   SET_WIFI,
   CLEAR_SHOTS,
   CLEAR_WIFI,
-  RESET_NETWORK_UI,
+  RESET_NETWORK_AP,
   SERIAL_DEBUG_ON,
   SERIAL_DEBUG_OFF,
   DEBUG_FULL,
@@ -73,7 +73,7 @@ inline const char *serialCliVerbName(SerialCliVerb verb) {
     case SerialCliVerb::SET_WIFI: return "SET_WIFI";
     case SerialCliVerb::CLEAR_SHOTS: return "CLEAR_SHOTS";
     case SerialCliVerb::CLEAR_WIFI: return "CLEAR_WIFI";
-    case SerialCliVerb::RESET_NETWORK_UI: return "RESET_NETWORK_UI";
+    case SerialCliVerb::RESET_NETWORK_AP: return "RESET_NETWORK_AP";
     case SerialCliVerb::SERIAL_DEBUG_ON: return "SERIAL_DEBUG_ON";
     case SerialCliVerb::SERIAL_DEBUG_OFF: return "SERIAL_DEBUG_OFF";
     case SerialCliVerb::DEBUG_FULL: return "DEBUG_FULL";
@@ -271,8 +271,8 @@ inline bool serialCliParseLine(const char *line, SerialCliRequest &request) {
   if (serialCliEqualsIgnoreCase(verb, "clear_wifi")) {
     return requireNoArgs(SerialCliVerb::CLEAR_WIFI);
   }
-  if (serialCliEqualsIgnoreCase(verb, "reset_network_ui")) {
-    return requireNoArgs(SerialCliVerb::RESET_NETWORK_UI);
+  if (serialCliEqualsIgnoreCase(verb, "reset_network_ap")) {
+    return requireNoArgs(SerialCliVerb::RESET_NETWORK_AP);
   }
   if (serialCliEqualsIgnoreCase(verb, "serial_debug_on")) {
     return requireNoArgs(SerialCliVerb::SERIAL_DEBUG_ON);
@@ -346,7 +346,7 @@ inline bool serialCliParseLine(const char *line, SerialCliRequest &request) {
     }
     if (!validAccessPointPassword(args[0])) {
       request.verb = SerialCliVerb::INVALID_ARGS;
-      request.error = "AP/UI password must be 8-63 characters";
+      request.error = "AP password must be 8-63 characters";
       return true;
     }
     if (strcmp(args[0], "Micra1234") == 0) {
@@ -399,13 +399,13 @@ inline void serialCliPrintHelp() {
   Serial.println("HELLO  probe CLI  e.g. HELLO");
   Serial.println("REBOOT  restart firmware  e.g. REBOOT");
   Serial.println(
-      "FACTORY_RESET  wipe Wi-Fi, settings, shots; AP/UI password Micra1234; "
+      "FACTORY_RESET  wipe Wi-Fi, settings, shots; AP password Micra1234; "
       "restart  e.g. FACTORY_RESET");
   Serial.println(
-      "RESET_AP_PASSWORD  restore AP/UI password Micra1234 (STA Wi-Fi "
+      "RESET_AP_PASSWORD  restore AP password Micra1234 (STA Wi-Fi "
       "unchanged)  e.g. RESET_AP_PASSWORD");
   Serial.println(
-      "SET_AP_PASSWORD <password>  set AP/UI password (8-63 chars, not "
+      "SET_AP_PASSWORD <password>  set AP password (8-63 chars, not "
       "Micra1234)  e.g. SET_AP_PASSWORD password1234");
   Serial.println(
       "SET_WIFI <ssid> [password]  save STA Wi-Fi (DHCP) and restart; omit "
@@ -413,8 +413,8 @@ inline void serialCliPrintHelp() {
   Serial.println("CLEAR_WIFI  forget STA Wi-Fi only; restart  e.g. CLEAR_WIFI");
   Serial.println("CLEAR_SHOTS  clear shot history  e.g. CLEAR_SHOTS");
   Serial.println(
-      "RESET_NETWORK_UI  forget STA Wi-Fi and restore AP/UI password "
-      "Micra1234; restart  e.g. RESET_NETWORK_UI");
+      "RESET_NETWORK_AP  forget STA Wi-Fi and restore AP password "
+      "Micra1234; restart  e.g. RESET_NETWORK_AP");
   Serial.println(
       "SERIAL_DEBUG_ON  enable USB debug traces (any time)  e.g. "
       "SERIAL_DEBUG_ON");
@@ -502,7 +502,6 @@ struct SerialCliNetworkDump {
   bool networkActive = false;
   bool apActive = false;
   bool httpActive = false;
-  bool uiAuthenticated = false;
   bool wifiConfigured = false;
   bool staOpen = false;
   bool staLinkMetricsValid = false;
@@ -518,7 +517,6 @@ struct SerialCliNetworkDump {
   uint8_t wifiMode = 0;
   uint8_t channel = 0;
   uint8_t scanState = 0;
-  uint8_t sessionCount = 0;
   uint8_t ntpState = 0;
   int8_t staRssi = 0;
   uint8_t staSignalQualityPct = 0;
@@ -528,7 +526,6 @@ struct SerialCliNetworkDump {
   uint32_t taskStackMinWords = 0;
   uint32_t startupFailures = 0;
   uint32_t lastCommandRequestId = 0;
-  uint32_t lastAuthAgeMs = 0;
   uint32_t staConnectAgeMs = 0;
   uint32_t staReconnectAgeMs = 0;
   CommandResultState lastCommandState = CommandResultState::NONE;
@@ -695,12 +692,6 @@ inline void serialCliPrintWebuiStatus(const SerialCliNetworkDump &dump) {
   Serial.println(dump.httpActive ? "true" : "false");
   Serial.print("networkActive=");
   Serial.println(dump.networkActive ? "true" : "false");
-  Serial.print("authenticated=");
-  Serial.println(dump.uiAuthenticated ? "true" : "false");
-  Serial.print("sessions=");
-  Serial.println(static_cast<unsigned>(dump.sessionCount));
-  Serial.print("lastAuthAgeMs=");
-  Serial.println(static_cast<unsigned long>(dump.lastAuthAgeMs));
   Serial.print("bindSta=");
   Serial.println(dump.staIp[0] != '\0' ? dump.staIp : "-");
   Serial.print("bindAp=");

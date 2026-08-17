@@ -366,16 +366,6 @@ const char *ntpPresetId(uint8_t preset) {
   }
 }
 
-bool constantTimeTokenEqual(const char *left, const char *right,
-                            size_t capacity) {
-  uint8_t difference = 0;
-  for (size_t index = 0; index < capacity; ++index) {
-    difference |= static_cast<uint8_t>(left[index]) ^
-                  static_cast<uint8_t>(right[index]);
-  }
-  return difference == 0;
-}
-
 void formatIp(const IPAddress &ip, char output[16]) {
   snprintf(output, 16, "%u.%u.%u.%u", static_cast<unsigned>(ip[0]),
            static_cast<unsigned>(ip[1]), static_cast<unsigned>(ip[2]),
@@ -758,26 +748,6 @@ uint32_t ShotStopperNetwork::allocateRequestId() {
   return id == 0 ? 1 : id;
 }
 
-uint32_t ShotStopperNetwork::allocateSessionId() {
-  portENTER_CRITICAL(&dataMux_);
-  const uint32_t id = nextSessionId_++;
-  if (nextSessionId_ == 0) {
-    nextSessionId_ = 1;
-  }
-  portEXIT_CRITICAL(&dataMux_);
-  return id == 0 ? 1 : id;
-}
-
-uint32_t ShotStopperNetwork::allocateControlLeaseId() {
-  portENTER_CRITICAL(&dataMux_);
-  const uint32_t id = nextControlLeaseId_++;
-  if (nextControlLeaseId_ == 0) {
-    nextControlLeaseId_ = 1;
-  }
-  portEXIT_CRITICAL(&dataMux_);
-  return id == 0 ? 1 : id;
-}
-
 void ShotStopperNetwork::recordCommandResult(
     uint32_t requestId, CommandResultState state) {
   if (requestId == 0 || requestId >= 0x80000000UL) {
@@ -879,11 +849,10 @@ void ShotStopperNetwork::service() {
   }
   portEXIT_CRITICAL(&dataMux_);
   if (confirmRequested) {
-    confirmPendingNetwork("authenticated request");
+    confirmPendingNetwork("public WebUI request");
   }
   serviceStaState(now);
   serviceWifiScan(now);
-  serviceSessions(now);
 
   const NetworkStatusSnapshot networkSnapshot = snapshot();
   const bool staConnected =
@@ -1327,11 +1296,6 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
       keepHttp || (wantHttp && apReady && startHttpServer());
   networkStartedAtMs_ = now;
   portENTER_CRITICAL(&dataMux_);
-  if (!keepHttp) {
-    everAuthenticated_ = false;
-    lastAuthenticatedAtMs_ = now;
-    status_.uiAuthenticated = false;
-  }
   status_.networkActive = apReady && httpReady;
   status_.apActive = apReady;
   status_.apClients = 0;
@@ -1378,13 +1342,11 @@ void ShotStopperNetwork::stopNetwork() {
   WiFi.softAPdisconnect(true);
   WiFi.disconnect(false, false);
   WiFi.mode(WIFI_OFF);
-  invalidateAllSessions();
   portENTER_CRITICAL(&dataMux_);
   scanRequested_ = false;
   scan_ = WifiScanSnapshot{};
   status_.networkActive = false;
   status_.apActive = false;
-  status_.uiAuthenticated = false;
   status_.apClients = 0;
   status_.staState = status_.wifiConfigured ? StaState::DISCONNECTED
                                             : StaState::NOT_CONFIGURED;
@@ -1795,46 +1757,6 @@ void ShotStopperNetwork::finishWifiScan(int16_t resultCount, uint32_t now) {
   }
 }
 
-void ShotStopperNetwork::serviceSessions(uint32_t now) {
-  bool anyAuthenticated = false;
-  uint8_t expiredSessions = 0;
-  portENTER_CRITICAL(&dataMux_);
-  for (WebSession &session : sessions_) {
-    if (!session.active) {
-      continue;
-    }
-    // Remember-me sessions keep the token for SESSION_REMEMBER_MS from login.
-    // Other sessions expire after UI_GRACE_MS without authenticated activity
-    // (status/shots touch or mutating authenticate()).
-    const bool expired =
-        session.rememberMe
-            ? static_cast<uint32_t>(now - session.createdAtMs) >=
-                  SESSION_REMEMBER_MS
-            : static_cast<uint32_t>(now - session.lastHeartbeatMs) >=
-                  UI_GRACE_MS;
-    if (expired) {
-      session.active = false;
-      memset(session.token, 0, sizeof(session.token));
-      memset(session.csrf, 0, sizeof(session.csrf));
-      ++expiredSessions;
-      continue;
-    }
-    anyAuthenticated = true;
-  }
-  status_.uiAuthenticated = anyAuthenticated;
-  portEXIT_CRITICAL(&dataMux_);
-  if (expiredSessions > 0) {
-    log(DebugCategory::WEB, DebugCode::UI_EXPIRED, expiredSessions);
-  }
-
-  // SoftAP stays up when raised (boot/bootstrap or AP_START); there is no idle SoftAP shutdown
-  // timer. Sessions still expire via UI_GRACE_MS / remember-me above. After a prior
-  // STA CONNECTED, link loss does not auto-raise SoftAP.
-  portENTER_CRITICAL(&dataMux_);
-  status_.windowRemainingMs = 0;
-  portEXIT_CRITICAL(&dataMux_);
-}
-
 void ShotStopperNetwork::processAcceptedCommands() {
   if (acceptedCommandQueue_ == nullptr) {
     return;
@@ -1987,7 +1909,7 @@ bool ShotStopperNetwork::enqueueMaintenanceCompletion(
                            command.type == WebCommandType::FORGET_NETWORK ||
                            command.type == WebCommandType::CHANGE_AP_PASSWORD ||
                            command.type == WebCommandType::RESET_AP_PASSWORD ||
-                           command.type == WebCommandType::RESET_NETWORK_UI ||
+                           command.type == WebCommandType::RESET_NETWORK_AP ||
                            command.type == WebCommandType::FACTORY_RESET ||
                            command.type == WebCommandType::RESTART
                        ? CommandResultState::PERSISTED
@@ -2023,7 +1945,6 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
   PersistedSettings next = settingsCopy();
   bool persist = false;
   bool factoryReset = false;
-  bool authenticationChanged = false;
   switch (command.type) {
     case WebCommandType::PERSIST_RUNTIME:
       if (command.persistPresets && callbacks_.copyPresetBank != nullptr) {
@@ -2088,28 +2009,26 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
       break;
 
     case WebCommandType::CHANGE_AP_PASSWORD:
-      if (!refreshAuthentication(next, command.password)) {
+      if (!setAccessPointPassword(next, command.password)) {
         log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
         return false;
       }
       persist = true;
-      authenticationChanged = true;
       apRestartPending_ = snapshot().apActive;
       break;
 
     case WebCommandType::RESET_AP_PASSWORD:
-      if (!initializeDefaultAuthentication(next)) {
+      if (!initializeDefaultAccessPointPassword(next)) {
         return false;
       }
       persist = true;
-      authenticationChanged = true;
       apRestartPending_ = snapshot().apActive;
       log(DebugCategory::SECURITY, DebugCode::AP_PASSWORD_RESET);
       break;
 
-    case WebCommandType::RESET_NETWORK_UI:
+    case WebCommandType::RESET_NETWORK_AP:
       clearStaNetwork(next);
-      if (!initializeDefaultAuthentication(next)) {
+      if (!initializeDefaultAccessPointPassword(next)) {
         return false;
       }
       persist = true;
@@ -2131,7 +2050,6 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
         callbacks_.clearLastShot();
       }
       factoryReset = true;
-      authenticationChanged = true;
       restartPending_ = true;
       log(DebugCategory::SECURITY, DebugCode::FACTORY_RESET);
       break;
@@ -2189,9 +2107,8 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
         static_cast<int32_t>(next.runtime.revision));
   }
 
-  if (restartPending_ || apRestartPending_ || authenticationChanged) {
+  if (restartPending_ || apRestartPending_) {
     restartRequestedAtMs_ = millis();
-    invalidateAllSessions();
   }
   return true;
 }
@@ -2459,12 +2376,6 @@ void ShotStopperNetwork::noteCliNetworkProgress() {
 }
 
 void ShotStopperNetwork::refreshExtendedStatus(uint32_t now) {
-  uint8_t sessions = 0;
-  for (size_t index = 0; index < SESSION_COUNT; ++index) {
-    if (sessions_[index].active) {
-      ++sessions;
-    }
-  }
   const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(now);
   const wl_status_t wifiStatus = WiFi.status();
   const bool staConnected = wifiStatus == WL_CONNECTED;
@@ -2480,7 +2391,6 @@ void ShotStopperNetwork::refreshExtendedStatus(uint32_t now) {
   status_.wifiMode = wifiMode;
   status_.channel = channel;
   status_.wifiStatus = static_cast<int32_t>(wifiStatus);
-  status_.sessionCount = sessions;
   status_.staReconnectHeld = staReconnectHeld_;
   status_.apStartHeld = apStartHeld_;
   status_.httpStartHeld = httpStartHeld_;
@@ -2488,9 +2398,6 @@ void ShotStopperNetwork::refreshExtendedStatus(uint32_t now) {
   status_.scanState = static_cast<uint8_t>(scan_.state);
   status_.ntpState = static_cast<uint8_t>(timeStatus.state);
   status_.ntpMayArm = ntpArm;
-  status_.lastAuthAgeMs =
-      everAuthenticated_ ? static_cast<uint32_t>(now - lastAuthenticatedAtMs_)
-                         : 0;
   status_.staConnectAgeMs =
       staConnectStartedAtMs_ != 0
           ? static_cast<uint32_t>(now - staConnectStartedAtMs_)
@@ -2635,14 +2542,17 @@ bool ShotStopperNetwork::startHttpServer() {
   // Web UI serializes API traffic (DEVICE_MAX_INFLIGHT, default 1). Reserve
   // headroom for the HTML/JS/CSS boot burst plus LRU/TCP close. ESP-IDF uses
   // (max_open_sockets + 3) LWIP sockets total.
-  config.max_open_sockets = 5;
-  config.max_uri_handlers = 35;
+  // Two browser windows can briefly request HTML, CSS, and JS in parallel.
+  // Keep enough client slots for that boot burst while responses still close
+  // promptly to limit the ESP's steady-state socket use.
+  config.max_open_sockets = 8;
+  config.max_uri_handlers = 33;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
   // the IDF default (1024) is enough most of the time but intermittent
-  // authenticated POSTs have returned 431 Request Header Fields Too Large.
+  // long browser headers have returned 431 Request Header Fields Too Large.
   config.max_req_hdr_len = 2048;
   config.max_resp_headers = 12;
-  config.backlog_conn = 5;
+  config.backlog_conn = 8;
   config.lru_purge_enable = true;
   // Keep stuck clients from occupying sockets under BLE/Wi-Fi coex stalls.
   config.recv_wait_timeout = 2;
@@ -2662,8 +2572,6 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/settings", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/app.js", HTTP_GET, jsHandler) &&
       registerHandler(server_, "/app.css", HTTP_GET, cssHandler) &&
-      registerHandler(server_, "/api/v1/login", HTTP_POST, loginHandler) &&
-      registerHandler(server_, "/api/v1/logout", HTTP_POST, logoutHandler) &&
       registerHandler(server_, "/api/v1/status/home", HTTP_GET,
                       statusHandler) &&
       registerHandler(server_, "/api/v1/status/settings", HTTP_GET,
@@ -2725,190 +2633,6 @@ void ShotStopperNetwork::stopHttpServer() {
   }
 }
 
-void ShotStopperNetwork::randomHex(char output[TOKEN_HEX_CAPACITY]) {
-  static constexpr char digits[] = "0123456789abcdef";
-  uint8_t random[TOKEN_BYTES] = {};
-  esp_fill_random(random, sizeof(random));
-  for (size_t index = 0; index < sizeof(random); ++index) {
-    output[index * 2] = digits[random[index] >> 4U];
-    output[index * 2 + 1] = digits[random[index] & 0x0FU];
-  }
-  output[TOKEN_HEX_CAPACITY - 1] = '\0';
-}
-
-bool ShotStopperNetwork::createSession(char token[TOKEN_HEX_CAPACITY],
-                                       char csrf[TOKEN_HEX_CAPACITY],
-                                       bool rememberMe) {
-  randomHex(token);
-  randomHex(csrf);
-  const uint32_t now = millis();
-  bool created = false;
-  bool replaced = false;
-  uint32_t replacedSessionId = 0;
-  const uint32_t newSessionId = allocateSessionId();
-  portENTER_CRITICAL(&dataMux_);
-  size_t sessionIndex = SESSION_COUNT;
-  uint32_t oldestHeartbeat = 0;
-  for (size_t index = 0; index < SESSION_COUNT; ++index) {
-    const WebSession &session = sessions_[index];
-    if (!session.active) {
-      sessionIndex = index;
-      break;
-    }
-    if (sessionIndex == SESSION_COUNT ||
-        static_cast<int32_t>(session.lastHeartbeatMs - oldestHeartbeat) < 0) {
-      sessionIndex = index;
-      oldestHeartbeat = session.lastHeartbeatMs;
-    }
-  }
-  if (sessionIndex < SESSION_COUNT) {
-    replaced = sessions_[sessionIndex].active;
-    replacedSessionId = sessions_[sessionIndex].id;
-    WebSession &session = sessions_[sessionIndex];
-    session = WebSession{};
-    session.active = true;
-    session.rememberMe = rememberMe;
-    session.id = newSessionId;
-    session.createdAtMs = now;
-    session.lastHeartbeatMs = now;
-    memcpy(session.token, token, sizeof(session.token));
-    memcpy(session.csrf, csrf, sizeof(session.csrf));
-    created = true;
-    everAuthenticated_ = true;
-    lastAuthenticatedAtMs_ = now;
-    status_.uiAuthenticated = true;
-  }
-  portEXIT_CRITICAL(&dataMux_);
-  if (replaced) {
-    // A bounded session set must not prevent a legitimate new login. The
-    // least recently active client is invalidated before issuing the new
-    // credentials, so it cannot retain control privileges.
-    log(DebugCategory::SECURITY, DebugCode::UI_REPLACED);
-    requestStopForSession(replacedSessionId);
-  }
-  if (created) {
-    requestPendingNetworkConfirm();
-  }
-  return created;
-}
-
-bool ShotStopperNetwork::authenticate(httpd_req_t *request, bool requireCsrf,
-                                      size_t *sessionIndex) {
-  char token[TOKEN_HEX_CAPACITY] = {};
-  char csrf[TOKEN_HEX_CAPACITY] = {};
-  if (httpd_req_get_hdr_value_len(request, "X-Session-Token") !=
-          TOKEN_HEX_CAPACITY - 1 ||
-      httpd_req_get_hdr_value_str(request, "X-Session-Token", token,
-                                  sizeof(token)) != ESP_OK) {
-    return false;
-  }
-  if (requireCsrf &&
-      (httpd_req_get_hdr_value_len(request, "X-CSRF-Token") !=
-           TOKEN_HEX_CAPACITY - 1 ||
-       httpd_req_get_hdr_value_str(request, "X-CSRF-Token", csrf,
-                                   sizeof(csrf)) != ESP_OK)) {
-    return false;
-  }
-
-  bool accepted = false;
-  const uint32_t now = millis();
-  portENTER_CRITICAL(&dataMux_);
-  for (size_t index = 0; index < SESSION_COUNT; ++index) {
-    WebSession &session = sessions_[index];
-    if (session.active &&
-        constantTimeTokenEqual(session.token, token, sizeof(token)) &&
-        (!requireCsrf ||
-         constantTimeTokenEqual(session.csrf, csrf, sizeof(csrf)))) {
-      if (sessionIndex != nullptr) {
-        *sessionIndex = index;
-      }
-      session.lastHeartbeatMs = now;
-      lastAuthenticatedAtMs_ = now;
-      status_.uiAuthenticated = true;
-      accepted = true;
-      break;
-    }
-  }
-  portEXIT_CRITICAL(&dataMux_);
-  if (accepted) {
-    requestPendingNetworkConfirm();
-  }
-  return accepted;
-}
-
-void ShotStopperNetwork::touchSessionIfPresent(httpd_req_t *request) {
-  // Read-only routes (status/shots) do not require auth but refresh UI_GRACE
-  // when the browser still presents a valid session token.
-  (void)authenticate(request, false);
-}
-
-void ShotStopperNetwork::invalidateSession(size_t index, DebugCode code) {
-  if (index >= SESSION_COUNT) {
-    return;
-  }
-  uint32_t invalidatedSessionId = 0;
-  portENTER_CRITICAL(&dataMux_);
-  invalidatedSessionId = sessions_[index].id;
-  sessions_[index] = WebSession{};
-  portEXIT_CRITICAL(&dataMux_);
-  requestStopForSession(invalidatedSessionId);
-  log(DebugCategory::WEB, code);
-}
-
-void ShotStopperNetwork::invalidateAllSessions() {
-  ControlStatusSnapshot control;
-  callbacks_.copyControlStatus(control);
-  portENTER_CRITICAL(&dataMux_);
-  for (WebSession &session : sessions_) {
-    session = WebSession{};
-  }
-  status_.uiAuthenticated = false;
-  portEXIT_CRITICAL(&dataMux_);
-  if (control.activeCycle && control.source == ControlSource::WEB) {
-    requestStopForSession(control.webSessionId);
-  }
-}
-
-void ShotStopperNetwork::requestStopForSession(uint32_t webSessionId) {
-  if (webSessionId == 0) {
-    return;
-  }
-  ControlStatusSnapshot control;
-  callbacks_.copyControlStatus(control);
-  if (!control.activeCycle || control.source != ControlSource::WEB ||
-      control.webSessionId != webSessionId) {
-    return;
-  }
-  WebCommand stop;
-  stop.type = WebCommandType::STOP_HEARTBEAT;
-  stop.requestId = allocateRequestId();
-  stop.webSessionId = webSessionId;
-  stop.controlLeaseId = control.controlLeaseId;
-  (void)callbacks_.enqueueWebCommand(stop);
-}
-
-bool ShotStopperNetwork::loginRateLimited(uint32_t now) {
-  portENTER_CRITICAL(&dataMux_);
-  if (static_cast<uint32_t>(now - loginWindowStartedAtMs_) >= 60000) {
-    loginWindowStartedAtMs_ = now;
-    loginAttemptsInWindow_ = 0;
-  }
-  const bool limited = loginAttemptsInWindow_ >= 5;
-  portEXIT_CRITICAL(&dataMux_);
-  return limited;
-}
-
-void ShotStopperNetwork::recordFailedLoginAttempt(uint32_t now) {
-  portENTER_CRITICAL(&dataMux_);
-  if (static_cast<uint32_t>(now - loginWindowStartedAtMs_) >= 60000) {
-    loginWindowStartedAtMs_ = now;
-    loginAttemptsInWindow_ = 0;
-  }
-  if (loginAttemptsInWindow_ < 255) {
-    ++loginAttemptsInWindow_;
-  }
-  portEXIT_CRITICAL(&dataMux_);
-}
 
 esp_err_t ShotStopperNetwork::sendJson(httpd_req_t *request,
                                        const char *status,
@@ -3080,73 +2804,6 @@ esp_err_t ShotStopperNetwork::notFoundHandler(httpd_req_t *request,
   return httpd_resp_send(request, nullptr, 0);
 }
 
-esp_err_t ShotStopperNetwork::loginHandler(httpd_req_t *request) {
-  ShotStopperNetwork &self = *instance_;
-  const uint32_t now = millis();
-  char body[REQUEST_BODY_CAPACITY] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "A bounded JSON body is required.");
-  }
-  cJSON *root = cJSON_Parse(body);
-  char password[WIFI_PASSWORD_CAPACITY] = {};
-  bool rememberMe = false;
-  static const char *const fields[] = {"password", "rememberMe"};
-  bool parsed = root != nullptr &&
-                jsonHasOnlyUniqueFields(root, fields, 2) &&
-                jsonString(root, "password", password, sizeof(password),
-                           false);
-  if (parsed &&
-      cJSON_GetObjectItemCaseSensitive(root, "rememberMe") != nullptr) {
-    parsed = jsonBoolean(root, "rememberMe", rememberMe);
-  }
-  if (root != nullptr) {
-    cJSON_Delete(root);
-  }
-  memset(body, 0, sizeof(body));
-  if (!parsed) {
-    memset(password, 0, sizeof(password));
-    self.log(DebugCategory::WEB, DebugCode::WEB_COMMAND_REJECTED);
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "A bounded JSON body is required.");
-  }
-  if (self.loginRateLimited(now)) {
-    memset(password, 0, sizeof(password));
-    return sendError(request, STATUS_TOO_MANY, "LOGIN_RATE_LIMITED",
-                     "Too many attempts; wait one minute.");
-  }
-  if (!verifyAdminPassword(self.settingsCopy(), password)) {
-    memset(password, 0, sizeof(password));
-    self.recordFailedLoginAttempt(now);
-    self.log(DebugCategory::WEB, DebugCode::WEB_COMMAND_REJECTED);
-    return sendError(request, STATUS_UNAUTHORIZED, "INVALID_CREDENTIALS",
-                     "Incorrect password.");
-  }
-  memset(password, 0, sizeof(password));
-
-  char token[TOKEN_HEX_CAPACITY] = {};
-  char csrf[TOKEN_HEX_CAPACITY] = {};
-  if (!self.createSession(token, csrf, rememberMe)) {
-    return sendError(request, STATUS_UNAVAILABLE, "SESSION_LIMIT",
-                     "Could not create the session.");
-  }
-  char response[160] = {};
-  snprintf(response, sizeof(response),
-           "{\"token\":\"%s\",\"csrf\":\"%s\"}", token, csrf);
-  self.log(DebugCategory::WEB, DebugCode::UI_LOGIN);
-  return sendJson(request, STATUS_OK, response);
-}
-
-esp_err_t ShotStopperNetwork::logoutHandler(httpd_req_t *request) {
-  ShotStopperNetwork &self = *instance_;
-  size_t sessionIndex = 0;
-  if (!self.authenticate(request, true, &sessionIndex)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
-  self.invalidateSession(sessionIndex, DebugCode::UI_LOGOUT);
-  return sendJson(request, STATUS_OK, "{\"ok\":true}");
-}
 
 const char *ShotStopperNetwork::stateLabel(StopperState state) {
   switch (state) {
@@ -3236,11 +2893,8 @@ const char *ShotStopperNetwork::wifiScanStateName(WifiScanState state) {
 
 esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  // Status intentionally has no authentication requirement. It is the
-  // read-only landing view and contains no credentials, session material, or
-  // actionable state. Every mutating route remains authenticated.
-  // Refresh UI_GRACE when the browser still presents a valid session token.
-  self.touchSessionIfPresent(request);
+  // The WebUI and every API route are deliberately public.
+  self.requestPendingNetworkConfirm();
 
   const StatusPage page = parseStatusPage(request->uri);
   if (page == StatusPage::Unknown) {
@@ -3701,8 +3355,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
 esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   // The bounded diagnostic log is intentionally public like Status. It emits
-  // only fixed enum-derived messages and numeric arguments; credentials,
-  // session material and request payloads are never included.
+  // only fixed enum-derived messages and numeric arguments; credentials and
+  // request payloads are never included.
   uint32_t after = 0;
   const size_t queryLength = httpd_req_get_url_query_len(request);
   if (queryLength > 0 && queryLength < 64) {
@@ -3800,7 +3454,6 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  self.touchSessionIfPresent(request);
   ControlStatusSnapshot control;
   self.callbacks_.copyControlStatus(control);
   static ShotLogRecord records[SHOT_LOG_CAPACITY];
@@ -3912,10 +3565,6 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::shotsClearHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -3957,10 +3606,6 @@ esp_err_t ShotStopperNetwork::shotsClearHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::lastShotClearHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -4002,10 +3647,6 @@ esp_err_t ShotStopperNetwork::lastShotClearHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -4043,10 +3684,6 @@ esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::timeSyncHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -4060,10 +3697,6 @@ esp_err_t ShotStopperNetwork::timeSyncHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -4374,10 +4007,6 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::preferredScaleClearHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -4398,10 +4027,6 @@ esp_err_t ShotStopperNetwork::preferredScaleClearHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::preferredScaleSelectHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -4456,10 +4081,6 @@ esp_err_t ShotStopperNetwork::preferredScaleSelectHandler(httpd_req_t *request) 
 
 esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -4579,10 +4200,6 @@ esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::resetCalibrationHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -4618,10 +4235,6 @@ esp_err_t ShotStopperNetwork::resetCalibrationHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::resetGuardSamplesHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -4657,11 +4270,6 @@ esp_err_t ShotStopperNetwork::resetGuardSamplesHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  size_t sessionIndex = 0;
-  if (!self.authenticate(request, true, &sessionIndex)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   char body[REQUEST_BODY_CAPACITY] = {};
   if (!readJsonBody(request, body)) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
@@ -4686,16 +4294,9 @@ esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
     return sendError(request, "403 Forbidden", "REMOTE_CONTROL_DISABLED",
                      "Remote CN9 actuation is disabled in this firmware build.");
   }
-  uint32_t webSessionId = 0;
-  portENTER_CRITICAL(&self.dataMux_);
-  if (sessionIndex < SESSION_COUNT && self.sessions_[sessionIndex].active) {
-    webSessionId = self.sessions_[sessionIndex].id;
-  }
-  portEXIT_CRITICAL(&self.dataMux_);
   const bool allowed = on ? controlAllowsConfiguration(status)
                           : (status.activeCycle &&
-                             status.source == ControlSource::WEB &&
-                             status.webSessionId == webSessionId);
+                             status.source == ControlSource::WEB);
   if (!allowed) {
     return sendError(request, STATUS_CONFLICT, "CONTROL_STATE_CONFLICT",
                      "The current state does not allow that action.");
@@ -4703,9 +4304,6 @@ esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
   WebCommand command;
   command.type = on ? WebCommandType::PADDLE_ON : WebCommandType::PADDLE_OFF;
   command.requestId = self.allocateRequestId();
-  command.webSessionId = webSessionId;
-  command.controlLeaseId =
-      on ? self.allocateControlLeaseId() : status.controlLeaseId;
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control queue is full.");
@@ -4715,11 +4313,6 @@ esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::rinseHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  size_t sessionIndex = 0;
-  if (!self.authenticate(request, true, &sessionIndex)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!REMOTE_CN9_CONTROL_ENABLED) {
@@ -4733,12 +4326,6 @@ esp_err_t ShotStopperNetwork::rinseHandler(httpd_req_t *request) {
   WebCommand command;
   command.type = WebCommandType::RINSE;
   command.requestId = self.allocateRequestId();
-  portENTER_CRITICAL(&self.dataMux_);
-  if (sessionIndex < SESSION_COUNT && self.sessions_[sessionIndex].active) {
-    command.webSessionId = self.sessions_[sessionIndex].id;
-  }
-  portEXIT_CRITICAL(&self.dataMux_);
-  command.controlLeaseId = self.allocateControlLeaseId();
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control queue is full.");
@@ -4748,10 +4335,6 @@ esp_err_t ShotStopperNetwork::rinseHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::stopHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!status.activeCycle || !status.relayClosed) {
@@ -4770,10 +4353,6 @@ esp_err_t ShotStopperNetwork::stopHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::restartHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -4793,10 +4372,6 @@ esp_err_t ShotStopperNetwork::restartHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::factoryResetHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -4841,10 +4416,6 @@ esp_err_t ShotStopperNetwork::factoryResetHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   char body[REQUEST_BODY_CAPACITY] = {};
@@ -5021,10 +4592,6 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::wifiScanStartHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -5046,10 +4613,6 @@ esp_err_t ShotStopperNetwork::wifiScanStartHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::wifiScanStatusHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, false)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session.");
-  }
   WifiScanSnapshot scan;
   portENTER_CRITICAL(&self.dataMux_);
   scan = self.scan_;
@@ -5093,10 +4656,6 @@ esp_err_t ShotStopperNetwork::wifiScanStatusHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.authenticate(request, true)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "UNAUTHORIZED",
-                     "Invalid session or CSRF token.");
-  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!controlAllowsConfiguration(status)) {
@@ -5105,7 +4664,6 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
                      "The password cannot be changed while a cycle is active.");
   }
   char body[REQUEST_BODY_CAPACITY] = {};
-  char currentPassword[WIFI_PASSWORD_CAPACITY] = {};
   WebCommand command;
   command.type = WebCommandType::CHANGE_AP_PASSWORD;
   command.requestId = self.allocateRequestId();
@@ -5114,11 +4672,9 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
                      "A JSON request is required.");
   }
   cJSON *root = cJSON_Parse(body);
-  static const char *const fields[] = {"currentPassword", "newPassword"};
+  static const char *const fields[] = {"newPassword"};
   const bool parsed =
-      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 2) &&
-      jsonString(root, "currentPassword", currentPassword,
-                 sizeof(currentPassword), false) &&
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
       jsonString(root, "newPassword", command.password,
                  sizeof(command.password), false);
   if (root != nullptr) {
@@ -5126,17 +4682,9 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
   }
   memset(body, 0, sizeof(body));
   if (!parsed) {
-    memset(currentPassword, 0, sizeof(currentPassword));
     memset(command.password, 0, sizeof(command.password));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_AP_PASSWORD",
-                     "Current and new password fields are required.");
-  }
-  const bool currentValid = verifyAdminPassword(self.settingsCopy(), currentPassword);
-  memset(currentPassword, 0, sizeof(currentPassword));
-  if (!currentValid) {
-    memset(command.password, 0, sizeof(command.password));
-    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_AP_PASSWORD",
-                     "Current password is incorrect.");
+                     "A new password field is required.");
   }
   if (!validAccessPointPassword(command.password)) {
     memset(command.password, 0, sizeof(command.password));

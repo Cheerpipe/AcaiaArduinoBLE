@@ -351,8 +351,6 @@ struct CycleSession {
   uint8_t thresholdConfirmations = 0;
   uint8_t recoveryConfirmations = 0;
   uint32_t id = 0;
-  uint32_t webSessionId = 0;
-  uint32_t controlLeaseId = 0;
   uint32_t scaleDisconnectSequenceAtStart = 0;
   uint32_t weightSequenceAtStart = 0;
   uint32_t connectionGenerationAtStart = 0;
@@ -4374,8 +4372,7 @@ void processScaleWorkerEvents() {
 // State machine
 // ---------------------------------------------------------------------------
 
-void resetSessionForNewCycle(ControlSource source, uint32_t webSessionId = 0,
-                             uint32_t controlLeaseId = 0) {
+void resetSessionForNewCycle(ControlSource source) {
   session = CycleSession{};
   session.id = nextCycleId++;
   if (nextCycleId == 0) {
@@ -4383,8 +4380,6 @@ void resetSessionForNewCycle(ControlSource source, uint32_t webSessionId = 0,
   }
   session.active = true;
   session.source = source;
-  session.webSessionId = webSessionId;
-  session.controlLeaseId = controlLeaseId;
 #if defined(SHOT_STOPPER_HOST_TEST)
   // Host tests mutate RuntimeConfig brew fields directly; keep the active
   // preset (compose source of truth) aligned before snapshotting a cycle.
@@ -4405,8 +4400,7 @@ void resetSessionForNewCycle(ControlSource source, uint32_t webSessionId = 0,
 }
 
 void maybeRequestNtpSyncOnActivity();
-bool beginRinseCycle(ControlSource source, uint32_t webSessionId = 0,
-                     uint32_t controlLeaseId = 0);
+bool beginRinseCycle(ControlSource source);
 void enterRinse();
 
 void armNoScaleShotGuard() {
@@ -4478,9 +4472,7 @@ void serviceNoScaleShotGuard() {
   }
 }
 
-void beginCycle(ControlSource source = ControlSource::PHYSICAL,
-                uint32_t webSessionId = 0,
-                uint32_t controlLeaseId = 0) {
+void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   maybeEmitManualNoScaleBeep();
   if (noScaleShotGuardWouldBlock()) {
     if (source == ControlSource::PHYSICAL) {
@@ -4496,7 +4488,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL,
   flushPendingScaleTimerStopNow();
   cancelPendingFinalize("Previous drip analysis cancelled by a new cycle");
 
-  resetSessionForNewCycle(source, webSessionId, controlLeaseId);
+  resetSessionForNewCycle(source);
   session.startedAtMs = millis();
   session.cn9ClosedAtMs = 0;
   session.scaleStartLagCaptured = false;
@@ -4624,13 +4616,12 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   transitionTo(nextState);
 }
 
-bool beginRinseCycle(ControlSource source, uint32_t webSessionId,
-                     uint32_t controlLeaseId) {
+bool beginRinseCycle(ControlSource source) {
   flushPendingScaleTimerStopNow();
   cancelPendingFinalize(source == ControlSource::WEB
                             ? "Previous drip analysis cancelled by a web rinse"
                             : "Previous drip analysis cancelled by a rinse");
-  resetSessionForNewCycle(source, webSessionId, controlLeaseId);
+  resetSessionForNewCycle(source);
   session.startedAtMs = millis();
   session.cn9ClosedAtMs = 0;
   session.scaleStartLagCaptured = false;
@@ -5055,8 +5046,8 @@ bool controlAllowsConfigurationNow() {
          relay.state != RelaySafetyState::LOCKOUT;
 }
 
-void beginWebRinse(uint32_t webSessionId, uint32_t controlLeaseId) {
-  if (!beginRinseCycle(ControlSource::WEB, webSessionId, controlLeaseId)) {
+void beginWebRinse() {
+  if (!beginRinseCycle(ControlSource::WEB)) {
     return;
   }
   session.rinseStartedAtMs = session.startedAtMs;
@@ -5156,7 +5147,7 @@ void serviceMaintenanceLease() {
         forwardedType == WebCommandType::FORGET_NETWORK ||
         forwardedType == WebCommandType::CHANGE_AP_PASSWORD ||
         forwardedType == WebCommandType::RESET_AP_PASSWORD ||
-        forwardedType == WebCommandType::RESET_NETWORK_UI ||
+        forwardedType == WebCommandType::RESET_NETWORK_AP ||
         forwardedType == WebCommandType::RESTART) {
       hostLastFlushedRuntime = runtimeConfig;
       hostLastFlushedPresets = presetBank;
@@ -5416,13 +5407,6 @@ void processWebCommand(const WebCommand &command) {
     case WebCommandType::STOP:
     case WebCommandType::STOP_HEARTBEAT:
     case WebCommandType::PADDLE_OFF:
-      if (command.type == WebCommandType::PADDLE_OFF &&
-          (command.webSessionId == 0 || command.controlLeaseId == 0 ||
-           command.webSessionId != session.webSessionId ||
-           command.controlLeaseId != session.controlLeaseId)) {
-        rejectWebCommand(command);
-        return;
-      }
       if (!session.active || !getRelaySafetySnapshot().closed ||
           (command.type == WebCommandType::PADDLE_OFF &&
            session.source != ControlSource::WEB)) {
@@ -5445,15 +5429,12 @@ void processWebCommand(const WebCommand &command) {
       return;
 
     case WebCommandType::PADDLE_ON:
-      if (!REMOTE_CN9_CONTROL_ENABLED || command.webSessionId == 0 ||
-          command.controlLeaseId == 0 ||
-          !controlAllowsConfigurationNow()) {
+      if (!REMOTE_CN9_CONTROL_ENABLED || !controlAllowsConfigurationNow()) {
         rejectWebCommand(command);
         return;
       }
       virtualPaddleOn = true;
-      beginCycle(ControlSource::WEB, command.webSessionId,
-                 command.controlLeaseId);
+      beginCycle(ControlSource::WEB);
       if (!session.active) {
         virtualPaddleOn = false;
         reportControlCommandResult(command, CommandResultState::FAILED);
@@ -5465,13 +5446,11 @@ void processWebCommand(const WebCommand &command) {
       return;
 
     case WebCommandType::RINSE:
-      if (!REMOTE_CN9_CONTROL_ENABLED || command.webSessionId == 0 ||
-          command.controlLeaseId == 0 ||
-          !controlAllowsConfigurationNow()) {
+      if (!REMOTE_CN9_CONTROL_ENABLED || !controlAllowsConfigurationNow()) {
         rejectWebCommand(command);
         return;
       }
-      beginWebRinse(command.webSessionId, command.controlLeaseId);
+      beginWebRinse();
       if (!session.active) {
         reportControlCommandResult(command, CommandResultState::FAILED);
         return;
@@ -5682,7 +5661,7 @@ void processWebCommand(const WebCommand &command) {
     case WebCommandType::CHANGE_AP_PASSWORD:
     case WebCommandType::RESET_AP_PASSWORD:
     case WebCommandType::RESTART:
-    case WebCommandType::RESET_NETWORK_UI:
+    case WebCommandType::RESET_NETWORK_AP:
     case WebCommandType::FACTORY_RESET:
       if (!controlAllowsConfigurationNow()) {
         rejectWebCommand(command);
@@ -5816,8 +5795,6 @@ void publishControlStatus() {
   next.source = session.active ? session.source : ControlSource::NONE;
   next.cycleId = session.active ? session.id : 0;
   next.bootId = shotLog.bootId();
-  next.webSessionId = session.active ? session.webSessionId : 0;
-  next.controlLeaseId = session.active ? session.controlLeaseId : 0;
   next.maintenanceLeaseActive = maintenanceLease.active;
   next.maintenanceLeaseId = maintenanceLease.active ? maintenanceLease.id : 0;
   next.maintenanceStartedAtMs =
@@ -6022,7 +5999,6 @@ void serialCliFillNetworkDump(SerialCliNetworkDump &dump) {
   dump.networkActive = snap.networkActive;
   dump.apActive = snap.apActive;
   dump.httpActive = snap.httpActive;
-  dump.uiAuthenticated = snap.uiAuthenticated;
   dump.wifiConfigured = snap.wifiConfigured;
   dump.staOpen = snap.staOpen;
   dump.staLinkMetricsValid = snap.staLinkMetricsValid;
@@ -6038,7 +6014,6 @@ void serialCliFillNetworkDump(SerialCliNetworkDump &dump) {
   dump.wifiMode = snap.wifiMode;
   dump.channel = snap.channel;
   dump.scanState = snap.scanState;
-  dump.sessionCount = snap.sessionCount;
   dump.ntpState = snap.ntpState;
   dump.staRssi = snap.staRssi;
   dump.staSignalQualityPct = snap.staSignalQualityPct;
@@ -6048,7 +6023,6 @@ void serialCliFillNetworkDump(SerialCliNetworkDump &dump) {
   dump.taskStackMinWords = snap.taskStackMinWords;
   dump.startupFailures = snap.startupFailures;
   dump.lastCommandRequestId = snap.lastCommandRequestId;
-  dump.lastAuthAgeMs = snap.lastAuthAgeMs;
   dump.staConnectAgeMs = snap.staConnectAgeMs;
   dump.staReconnectAgeMs = snap.staReconnectAgeMs;
   dump.lastCommandState = snap.lastCommandState;
@@ -6246,9 +6220,9 @@ void dispatchSerialCliRequest(SerialCliRequest &request) {
       serialCliQueueIfSafe(command, request.verb);
       return;
     }
-    case SerialCliVerb::RESET_NETWORK_UI: {
+    case SerialCliVerb::RESET_NETWORK_AP: {
       WebCommand command;
-      command.type = WebCommandType::RESET_NETWORK_UI;
+      command.type = WebCommandType::RESET_NETWORK_AP;
       serialCliQueueIfSafe(command, request.verb);
       return;
     }

@@ -7,12 +7,10 @@
 #include "tests/persistence_host_stubs.h"
 #else
 #include <Preferences.h>
-#include <esp_random.h>
 #include <esp_task_wdt.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
-#include <mbedtls/sha256.h>
 #endif
 
 namespace shotstopper {
@@ -21,10 +19,6 @@ constexpr uint32_t PERSISTED_SETTINGS_MAGIC = 0x53544F50U;  // "STOP"
 constexpr const char *SETTINGS_NAMESPACE = "shotstopper";
 constexpr const char *SETTINGS_SLOT_A = "settingsA";
 constexpr const char *SETTINGS_SLOT_B = "settingsB";
-constexpr size_t AUTH_SALT_LENGTH = 16;
-constexpr size_t AUTH_HASH_LENGTH = 32;
-// ~1k SHA-256 rounds: strong enough for SoftAP offline guessing, cheap on ESP32.
-constexpr uint16_t AUTH_HASH_ITERATIONS = 1000;
 constexpr const char *DEFAULT_AP_PASSWORD = "Micra1234";
 
 struct PersistedSettings {
@@ -56,8 +50,6 @@ struct PersistedSettings {
   uint8_t lkgDns1[4] = {};
   uint8_t lkgDns2[4] = {};
   char apPassword[WIFI_PASSWORD_CAPACITY] = {};
-  uint8_t authSalt[AUTH_SALT_LENGTH] = {};
-  uint8_t authHash[AUTH_HASH_LENGTH] = {};
   char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
   char preferredScaleName[PREFERRED_SCALE_NAME_CAPACITY] = {};
   ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY] = {};
@@ -78,71 +70,6 @@ static_assert(offsetof(PersistedSettings, storageRevision) + sizeof(uint32_t) ==
 static_assert(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET,
               "PersistedSettings exceeds NVS dual-slot budget");
 
-inline bool sha256Bytes(const uint8_t *data, size_t length,
-                        uint8_t output[AUTH_HASH_LENGTH]) {
-  mbedtls_sha256_context context;
-  mbedtls_sha256_init(&context);
-  const bool success =
-      mbedtls_sha256_starts(&context, 0) == 0 &&
-      mbedtls_sha256_update(&context, data, length) == 0 &&
-      mbedtls_sha256_finish(&context, output) == 0;
-  mbedtls_sha256_free(&context);
-  return success;
-}
-
-// Legacy single-pass SHA-256(salt || password). Kept for verifying older NVS.
-inline bool calculatePasswordHashLegacy(const uint8_t salt[AUTH_SALT_LENGTH],
-                                        const char *password,
-                                        uint8_t output[AUTH_HASH_LENGTH]) {
-  size_t passwordLength = 0;
-  if (!boundedCString(password, WIFI_PASSWORD_CAPACITY, &passwordLength)) {
-    return false;
-  }
-
-  mbedtls_sha256_context context;
-  mbedtls_sha256_init(&context);
-  bool success = mbedtls_sha256_starts(&context, 0) == 0 &&
-                 mbedtls_sha256_update(&context, salt, AUTH_SALT_LENGTH) == 0 &&
-                 mbedtls_sha256_update(
-                     &context, reinterpret_cast<const uint8_t *>(password),
-                     passwordLength) == 0 &&
-                 mbedtls_sha256_finish(&context, output) == 0;
-  mbedtls_sha256_free(&context);
-  return success;
-}
-
-// Iterated SHA-256: H0 = SHA256(salt || password), Hi = SHA256(Hi-1 || salt).
-// Avoids mbedtls PBKDF2/HMAC deps while remaining cheap on ESP32.
-inline bool calculatePasswordHash(const uint8_t salt[AUTH_SALT_LENGTH],
-                                  const char *password,
-                                  uint8_t output[AUTH_HASH_LENGTH]) {
-  size_t passwordLength = 0;
-  if (!boundedCString(password, WIFI_PASSWORD_CAPACITY, &passwordLength)) {
-    return false;
-  }
-
-  uint8_t block[AUTH_SALT_LENGTH + WIFI_PASSWORD_CAPACITY] = {};
-  memcpy(block, salt, AUTH_SALT_LENGTH);
-  memcpy(block + AUTH_SALT_LENGTH, password, passwordLength);
-  if (!sha256Bytes(block, AUTH_SALT_LENGTH + passwordLength, output)) {
-    memset(block, 0, sizeof(block));
-    return false;
-  }
-  memset(block, 0, sizeof(block));
-
-  uint8_t roundInput[AUTH_HASH_LENGTH + AUTH_SALT_LENGTH] = {};
-  for (uint16_t round = 1; round < AUTH_HASH_ITERATIONS; ++round) {
-    memcpy(roundInput, output, AUTH_HASH_LENGTH);
-    memcpy(roundInput + AUTH_HASH_LENGTH, salt, AUTH_SALT_LENGTH);
-    if (!sha256Bytes(roundInput, sizeof(roundInput), output)) {
-      memset(roundInput, 0, sizeof(roundInput));
-      return false;
-    }
-  }
-  memset(roundInput, 0, sizeof(roundInput));
-  return true;
-}
-
 inline bool constantTimeEqual(const uint8_t *left, const uint8_t *right,
                               size_t length) {
   uint8_t difference = 0;
@@ -150,24 +77,6 @@ inline bool constantTimeEqual(const uint8_t *left, const uint8_t *right,
     difference |= left[index] ^ right[index];
   }
   return difference == 0;
-}
-
-inline bool passwordHashMatches(const uint8_t salt[AUTH_SALT_LENGTH],
-                                const char *password,
-                                const uint8_t stored[AUTH_HASH_LENGTH]) {
-  uint8_t candidate[AUTH_HASH_LENGTH] = {};
-  if (calculatePasswordHash(salt, password, candidate) &&
-      constantTimeEqual(stored, candidate, AUTH_HASH_LENGTH)) {
-    memset(candidate, 0, sizeof(candidate));
-    return true;
-  }
-  if (calculatePasswordHashLegacy(salt, password, candidate) &&
-      constantTimeEqual(stored, candidate, AUTH_HASH_LENGTH)) {
-    memset(candidate, 0, sizeof(candidate));
-    return true;
-  }
-  memset(candidate, 0, sizeof(candidate));
-  return false;
 }
 
 inline bool isFactoryDefaultPassword(const char *password) {
@@ -188,8 +97,8 @@ inline bool passwordIsFactoryDefault(const PersistedSettings &settings) {
   return isFactoryDefaultPassword(settings.apPassword);
 }
 
-inline bool refreshAuthentication(PersistedSettings &settings,
-                                  const char *newPassword) {
+inline bool setAccessPointPassword(PersistedSettings &settings,
+                                   const char *newPassword) {
   if (!validAccessPointPassword(newPassword)) {
     return false;
   }
@@ -199,27 +108,17 @@ inline bool refreshAuthentication(PersistedSettings &settings,
   }
   memset(settings.apPassword, 0, sizeof(settings.apPassword));
   strncpy(settings.apPassword, newPassword, sizeof(settings.apPassword) - 1);
-  esp_fill_random(settings.authSalt, sizeof(settings.authSalt));
-  return calculatePasswordHash(settings.authSalt, settings.apPassword,
-                               settings.authHash);
+  return true;
 }
 
-inline bool initializeDefaultAuthentication(PersistedSettings &settings) {
-  // Factory boot keeps the published SoftAP / Web UI password.
+inline bool initializeDefaultAccessPointPassword(PersistedSettings &settings) {
   if (!validAccessPointPassword(DEFAULT_AP_PASSWORD)) {
     return false;
   }
   memset(settings.apPassword, 0, sizeof(settings.apPassword));
   strncpy(settings.apPassword, DEFAULT_AP_PASSWORD,
           sizeof(settings.apPassword) - 1);
-  esp_fill_random(settings.authSalt, sizeof(settings.authSalt));
-  return calculatePasswordHash(settings.authSalt, settings.apPassword,
-                               settings.authHash);
-}
-
-inline bool verifyAdminPassword(const PersistedSettings &settings,
-                                const char *candidate) {
-  return passwordHashMatches(settings.authSalt, candidate, settings.authHash);
+  return true;
 }
 
 inline uint32_t persistedSettingsChecksum(const PersistedSettings &settings) {
@@ -227,29 +126,94 @@ inline uint32_t persistedSettingsChecksum(const PersistedSettings &settings) {
                offsetof(PersistedSettings, checksum));
 }
 
-// Schema v3 occupied the byte now used by soundAlertsMuted as alignment
-// padding. Read v3 as raw bytes so that byte is never interpreted as a bool
-// before migration normalizes it.
-struct LegacyPersistedSettingsBytes {
-  uint8_t bytes[sizeof(PersistedSettings)] = {};
+inline void finalizePersistedSettings(PersistedSettings &settings);
+
+// Schema v4 stored legacy access material immediately after the AP password.
+// Keep its exact layout only for one-way migration to v5.
+struct PersistedSettingsV4 {
+  uint32_t magic = PERSISTED_SETTINGS_MAGIC;
+  uint32_t schemaVersion = 4;
+  uint32_t structureSize = 0;
+  uint32_t storageRevision = 0;
+  RuntimeConfig runtime = {};
+  ShotPresetBank presets = {};
+  bool staConfigured = false;
+  bool staOpen = false;
+  char staSsid[WIFI_SSID_CAPACITY] = {};
+  char staPassword[WIFI_PASSWORD_CAPACITY] = {};
+  uint8_t staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  uint8_t staIp[4] = {};
+  uint8_t staNetmask[4] = {};
+  uint8_t staGateway[4] = {};
+  uint8_t staDns1[4] = {};
+  uint8_t staDns2[4] = {};
+  uint8_t staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  bool lkgValid = false;
+  bool lkgOpen = false;
+  char lkgSsid[WIFI_SSID_CAPACITY] = {};
+  char lkgPassword[WIFI_PASSWORD_CAPACITY] = {};
+  uint8_t lkgIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  uint8_t lkgIp[4] = {};
+  uint8_t lkgNetmask[4] = {};
+  uint8_t lkgGateway[4] = {};
+  uint8_t lkgDns1[4] = {};
+  uint8_t lkgDns2[4] = {};
+  char apPassword[WIFI_PASSWORD_CAPACITY] = {};
+  uint8_t authSalt[16] = {};
+  uint8_t authHash[32] = {};
+  char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+  char preferredScaleName[PREFERRED_SCALE_NAME_CAPACITY] = {};
+  ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY] = {};
+  uint32_t checksum = 0;
 };
 
-inline LegacyPersistedSettingsBytes &legacyPersistedSettingsScratch() {
-  static LegacyPersistedSettingsBytes scratch = {};
-  return scratch;
+inline bool validPersistedSettingsV4(const PersistedSettingsV4 &legacy) {
+  return legacy.magic == PERSISTED_SETTINGS_MAGIC &&
+         (legacy.schemaVersion == LEGACY_CONFIG_SCHEMA_VERSION ||
+          legacy.schemaVersion == OLDEST_CONFIG_SCHEMA_VERSION) &&
+         legacy.structureSize == sizeof(PersistedSettingsV4) &&
+         legacy.checksum == crc32(reinterpret_cast<const uint8_t *>(&legacy),
+                                  offsetof(PersistedSettingsV4, checksum));
 }
 
-inline bool validLegacyPersistedSettingsBytes(
-    const LegacyPersistedSettingsBytes &legacy) {
-  PersistedSettingsHeader header = {};
-  memcpy(&header, legacy.bytes, sizeof(header));
-  uint32_t checksum = 0;
-  memcpy(&checksum, legacy.bytes + offsetof(PersistedSettings, checksum),
-         sizeof(checksum));
-  return header.magic == PERSISTED_SETTINGS_MAGIC &&
-         header.schemaVersion == LEGACY_CONFIG_SCHEMA_VERSION &&
-         header.structureSize == sizeof(PersistedSettings) &&
-         checksum == crc32(legacy.bytes, offsetof(PersistedSettings, checksum));
+inline void migratePersistedSettingsV4(const PersistedSettingsV4 &legacy,
+                                       PersistedSettings &settings) {
+  settings = PersistedSettings{};
+  settings.storageRevision = legacy.storageRevision;
+  settings.runtime = legacy.runtime;
+  settings.presets = legacy.presets;
+  settings.staConfigured = legacy.staConfigured;
+  settings.staOpen = legacy.staOpen;
+  memcpy(settings.staSsid, legacy.staSsid, sizeof(settings.staSsid));
+  memcpy(settings.staPassword, legacy.staPassword, sizeof(settings.staPassword));
+  settings.staIpMode = legacy.staIpMode;
+  memcpy(settings.staIp, legacy.staIp, sizeof(settings.staIp));
+  memcpy(settings.staNetmask, legacy.staNetmask, sizeof(settings.staNetmask));
+  memcpy(settings.staGateway, legacy.staGateway, sizeof(settings.staGateway));
+  memcpy(settings.staDns1, legacy.staDns1, sizeof(settings.staDns1));
+  memcpy(settings.staDns2, legacy.staDns2, sizeof(settings.staDns2));
+  settings.staConfigState = legacy.staConfigState;
+  settings.lkgValid = legacy.lkgValid;
+  settings.lkgOpen = legacy.lkgOpen;
+  memcpy(settings.lkgSsid, legacy.lkgSsid, sizeof(settings.lkgSsid));
+  memcpy(settings.lkgPassword, legacy.lkgPassword, sizeof(settings.lkgPassword));
+  settings.lkgIpMode = legacy.lkgIpMode;
+  memcpy(settings.lkgIp, legacy.lkgIp, sizeof(settings.lkgIp));
+  memcpy(settings.lkgNetmask, legacy.lkgNetmask, sizeof(settings.lkgNetmask));
+  memcpy(settings.lkgGateway, legacy.lkgGateway, sizeof(settings.lkgGateway));
+  memcpy(settings.lkgDns1, legacy.lkgDns1, sizeof(settings.lkgDns1));
+  memcpy(settings.lkgDns2, legacy.lkgDns2, sizeof(settings.lkgDns2));
+  memcpy(settings.apPassword, legacy.apPassword, sizeof(settings.apPassword));
+  memcpy(settings.preferredScaleMac, legacy.preferredScaleMac,
+         sizeof(settings.preferredScaleMac));
+  memcpy(settings.preferredScaleName, legacy.preferredScaleName,
+         sizeof(settings.preferredScaleName));
+  memcpy(settings.scaleHistory, legacy.scaleHistory, sizeof(settings.scaleHistory));
+  // v3 used this byte as padding; normalize it before validation.
+  if (legacy.schemaVersion == OLDEST_CONFIG_SCHEMA_VERSION) {
+    settings.runtime.soundAlertsMuted = false;
+  }
+  finalizePersistedSettings(settings);
 }
 
 inline void clearStaAddressFields(PersistedSettings &settings) {
@@ -381,8 +345,7 @@ inline bool validPersistedSettings(const PersistedSettings &settings) {
       !validPersistedStaNetwork(settings)) {
     return false;
   }
-  return passwordHashMatches(settings.authSalt, settings.apPassword,
-                             settings.authHash);
+  return true;
 }
 
 inline void finalizePersistedSettings(PersistedSettings &settings) {
@@ -430,27 +393,15 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
 
 inline bool readLegacySettingsSlot(Preferences &preferences, const char *key,
                                    PersistedSettings &settings) {
-  if (preferences.getBytesLength(key) != sizeof(PersistedSettings)) {
+  if (preferences.getBytesLength(key) != sizeof(PersistedSettingsV4)) {
     return false;
   }
-  LegacyPersistedSettingsBytes &legacy = legacyPersistedSettingsScratch();
-  memset(legacy.bytes, 0, sizeof(legacy.bytes));
-  if (preferences.getBytes(key, legacy.bytes, sizeof(legacy.bytes)) !=
-          sizeof(legacy.bytes) ||
-      !validLegacyPersistedSettingsBytes(legacy)) {
+  PersistedSettingsV4 legacy = {};
+  if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy) ||
+      !validPersistedSettingsV4(legacy)) {
     return false;
   }
-
-  // Do not deserialize the old padding byte as bool. Normalize it first, then
-  // validate the resulting v4 value object.
-  legacy.bytes[offsetof(PersistedSettings, runtime) +
-               offsetof(RuntimeConfig, soundAlertsMuted)] = 0;
-  memcpy(&settings, legacy.bytes, sizeof(settings));
-  settings.schemaVersion = CONFIG_SCHEMA_VERSION;
-  settings.structureSize = sizeof(PersistedSettings);
-  settings.runtime.soundAlertsMuted = false;
-  settings.checksum = 0;
-  settings.checksum = persistedSettingsChecksum(settings);
+  migratePersistedSettingsV4(legacy, settings);
   return validPersistedSettings(settings);
 }
 
@@ -621,7 +572,7 @@ inline bool savePersistedSettings(PersistedSettings &settings) {
 
 inline bool initializeDefaultSettings(PersistedSettings &settings) {
   settings = PersistedSettings{};
-  if (!initializeDefaultAuthentication(settings)) {
+  if (!initializeDefaultAccessPointPassword(settings)) {
     return false;
   }
   finalizePersistedSettings(settings);

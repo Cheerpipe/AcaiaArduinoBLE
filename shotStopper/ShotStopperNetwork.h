@@ -48,7 +48,6 @@ struct WifiScanSnapshot {
 struct NetworkStatusSnapshot {
   bool networkActive = false;
   bool apActive = false;
-  bool uiAuthenticated = false;
   bool wifiConfigured = false;
   bool staOpen = false;
   bool staLinkMetricsValid = false;
@@ -74,10 +73,8 @@ struct NetworkStatusSnapshot {
   uint8_t wifiMode = 0;
   uint8_t channel = 0;
   uint8_t scanState = 0;
-  uint8_t sessionCount = 0;
   uint8_t ntpState = 0;
   int32_t wifiStatus = 6;
-  uint32_t lastAuthAgeMs = 0;
   uint32_t staConnectAgeMs = 0;
   uint32_t staReconnectAgeMs = 0;
   char apIp[16] = "192.168.4.1";
@@ -156,8 +153,6 @@ class ShotStopperNetwork {
   void mergePreferredScaleMac(PersistedSettings &settings);
   void overlayLiveShotSettings(PersistedSettings &settings);
   bool serialDebugEnabled() const;
-  static constexpr uint32_t UI_GRACE_MS = 180000;
-  static constexpr uint32_t SESSION_REMEMBER_MS = 7UL * 24UL * 60UL * 60UL * 1000UL;
   static constexpr uint32_t STA_CONNECT_TIMEOUT_MS = 15000;
   static constexpr uint32_t STA_RECOVERY_ATTEMPT_MS = 60000;
   static constexpr uint32_t STA_CONFIRM_TIMEOUT_MS = 180000;
@@ -171,23 +166,10 @@ class ShotStopperNetwork {
   static constexpr uint32_t HTTP_RETRY_MS = 1000;
   static constexpr uint32_t HEALTH_TELEMETRY_INTERVAL_MS = 5000;
   static constexpr uint8_t COMMAND_MAX_ATTEMPTS = 5;
-  static constexpr size_t SESSION_COUNT = 2;
-  static constexpr size_t TOKEN_BYTES = 16;
-  static constexpr size_t TOKEN_HEX_CAPACITY = TOKEN_BYTES * 2 + 1;
   // Machine config JSON is ~1 KiB and grows with NTP custom / bool false
   // literals; keep headroom above the wire payload.
   static constexpr size_t REQUEST_BODY_CAPACITY = 2048;
   static constexpr size_t LOG_BATCH_SIZE = 48;
-
-  struct WebSession {
-    bool active = false;
-    bool rememberMe = false;
-    uint32_t id = 0;
-    uint32_t createdAtMs = 0;
-    uint32_t lastHeartbeatMs = 0;
-    char token[TOKEN_HEX_CAPACITY] = {};
-    char csrf[TOKEN_HEX_CAPACITY] = {};
-  };
 
   static ShotStopperNetwork *instance_;
 
@@ -198,7 +180,6 @@ class ShotStopperNetwork {
   SemaphoreHandle_t statusResponseMux_ = nullptr;
   httpd_handle_t server_ = nullptr;
   portMUX_TYPE dataMux_ = portMUX_INITIALIZER_UNLOCKED;
-  WebSession sessions_[SESSION_COUNT] = {};
   NetworkStatusSnapshot status_ = {};
   WifiScanSnapshot scan_ = {};
   bool startupComplete_ = false;
@@ -206,7 +187,6 @@ class ShotStopperNetwork {
   // is boot/bootstrap only; never cleared by startStation / pending revert.
   bool staEverConnected_ = false;
   bool scanRequested_ = false;
-  bool everAuthenticated_ = false;
   bool restartPending_ = false;
   bool apRestartPending_ = false;
   bool acceptedCommandPending_ = false;
@@ -228,18 +208,13 @@ class ShotStopperNetwork {
   uint32_t lastTaskProgressAtMs_ = 0;
   uint32_t taskStackMinWords_ = 0;
   uint32_t nextRequestId_ = 1;
-  uint32_t nextSessionId_ = 1;
-  uint32_t nextControlLeaseId_ = 1;
   uint32_t scanMaintenanceLeaseId_ = 0;
   uint32_t scanRequestId_ = 0;
   uint32_t networkStartedAtMs_ = 0;
-  uint32_t lastAuthenticatedAtMs_ = 0;
   uint32_t staConnectStartedAtMs_ = 0;
   uint32_t staReconnectAttemptAtMs_ = 0;
   uint32_t staConfirmDeadlineMs_ = 0;
   uint32_t restartRequestedAtMs_ = 0;
-  uint32_t loginWindowStartedAtMs_ = 0;
-  uint8_t loginAttemptsInWindow_ = 0;
   bool ntpStarted_ = false;
   bool ntpRearmPending_ = false;
   bool ntpManualSyncPending_ = false;
@@ -275,7 +250,6 @@ class ShotStopperNetwork {
   void serviceStaState(uint32_t now);
   void serviceWifiScan(uint32_t now);
   void finishWifiScan(int16_t resultCount, uint32_t now);
-  void serviceSessions(uint32_t now);
   void processAcceptedCommands();
   void processAcceptedMaintenanceCommand(uint32_t now);
   bool processAcceptedCommand(const WebCommand &command);
@@ -301,14 +275,6 @@ class ShotStopperNetwork {
   void printActionSnapshot(const char *command, bool ok);
   void noteCliNetworkProgress();
 
-  bool authenticate(httpd_req_t *request, bool requireCsrf,
-                    size_t *sessionIndex = nullptr);
-  void touchSessionIfPresent(httpd_req_t *request);
-  bool createSession(char token[TOKEN_HEX_CAPACITY],
-                     char csrf[TOKEN_HEX_CAPACITY], bool rememberMe);
-  void invalidateSession(size_t index, DebugCode code);
-  void invalidateAllSessions();
-  void requestStopForSession(uint32_t webSessionId);
   bool enqueueMaintenanceCompletion(const WebCommand &command,
                                     bool succeeded,
                                     CommandResultState failureState =
@@ -317,18 +283,11 @@ class ShotStopperNetwork {
   esp_err_t sendAccepted(httpd_req_t *request, uint32_t requestId,
                          const char *extraJson = nullptr);
   uint32_t allocateRequestId();
-  uint32_t allocateSessionId();
-  uint32_t allocateControlLeaseId();
-  bool loginRateLimited(uint32_t now);
-  void recordFailedLoginAttempt(uint32_t now);
-  static void randomHex(char output[TOKEN_HEX_CAPACITY]);
 
   static esp_err_t rootHandler(httpd_req_t *request);
   static esp_err_t jsHandler(httpd_req_t *request);
   static esp_err_t cssHandler(httpd_req_t *request);
   static esp_err_t notFoundHandler(httpd_req_t *request, httpd_err_code_t error);
-  static esp_err_t loginHandler(httpd_req_t *request);
-  static esp_err_t logoutHandler(httpd_req_t *request);
   static esp_err_t statusHandler(httpd_req_t *request);
   static esp_err_t logHandler(httpd_req_t *request);
   static esp_err_t shotsHandler(httpd_req_t *request);

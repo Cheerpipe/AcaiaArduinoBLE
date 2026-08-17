@@ -641,12 +641,12 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes("'fastExtractionGuardEnabled',1)") ||
     !ui.includes("'slowExtractionGuardEnabled',1)") ||
     !ui.includes("'autoToManualGuardEnabled',1)") ||
-    !ui.includes('el.disabled=!controlsMutable||off||pend') ||
-    ui.includes('el.disabled=!controlsMutable||!on||pend||!!homeSwitchPending[h]') ||
+    !ui.includes('el.disabled=!controlsMutable||off') ||
+    ui.includes('el.disabled=!controlsMutable||off||pend') ||
     !ui.includes('homeFlushBusy') ||
     !ui.includes('scheduleHomeGuardFlush()') ||
     !ui.includes("classList.toggle('fieldOff',off)") ||
-    !ui.includes('$(\'homeBrewByWeight\').disabled=!controlsMutable||pend') ||
+    !ui.includes('$(\'homeBrewByWeight\').disabled=!controlsMutable') ||
     !css.includes('.switchRow.switchPending') ||
     !css.includes('.homeSwitchGrid') ||
     !css.includes('justify-content:flex-start') ||
@@ -1047,8 +1047,23 @@ const expected = new Map([
 ]);
 
 const maxSocketsMatch = network.match(/max_open_sockets\s*=\s*(\d+)/);
-if (!maxSocketsMatch || Number(maxSocketsMatch[1]) < 5) {
-  throw new Error('HTTP server must allow at least 5 open sockets for Web UI boot + API');
+if (!maxSocketsMatch || Number(maxSocketsMatch[1]) < 8) {
+  throw new Error('HTTP server must allow at least 8 open sockets for two Web UI windows');
+}
+if (!network.includes('backlog_conn = 8')) {
+  throw new Error('HTTP server backlog must accommodate two Web UI boot bursts');
+}
+if (!ui.includes('function applyCommonStatus(s){setMutable(!s.relayClosed)')) {
+  throw new Error('Web UI mutability must be controlled only by relayClosed');
+}
+if (!ui.includes("webShot=s.controlSource==='web'&&s.virtualPaddleOn") ||
+    !ui.includes('remoteReady&&(canControl||webShot)') ||
+    !ui.includes("$('stopButton').disabled=!s.relayClosed")) {
+  throw new Error('CN9-closed Actions must permit Stop and Web paddle-off only');
+}
+if (ui.includes('s.configMutable&&pauseMs<=0') ||
+    ui.includes('true&&s.configMutable')) {
+  throw new Error('Web UI controls must not use firmware mutability as a visual lock');
 }
 if (!network.includes('/api/v1/status/home') ||
     !network.includes('/api/v1/status/settings') ||

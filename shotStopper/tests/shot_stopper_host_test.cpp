@@ -533,8 +533,6 @@ WebCommand webControlCommand(WebCommandType type) {
   WebCommand command;
   command.type = type;
   command.requestId = 1;
-  command.webSessionId = 11;
-  command.controlLeaseId = 17;
   return command;
 }
 
@@ -3928,7 +3926,7 @@ void w89_restart_flush_includes_live_and_aborts_on_fail() {
   CHECK(hostLastFlushedRuntime.revision == liveRevision);
 }
 
-void r24_web_control_lease_owner_is_enforced() {
+void r24_web_control_is_available_without_session_owner() {
   resetHarness(false, false);
   reachReadyFromBoot();
   processWebCommand(webControlCommand(WebCommandType::PADDLE_ON));
@@ -3936,11 +3934,10 @@ void r24_web_control_lease_owner_is_enforced() {
   CHECK(session.source == ControlSource::WEB);
   CHECK(getRelaySafetySnapshot().closed);
 
-  WebCommand wrongOwner = webControlCommand(WebCommandType::PADDLE_OFF);
-  wrongOwner.webSessionId += 1;
-  processWebCommand(wrongOwner);
-  CHECK(session.active);
-  CHECK(getRelaySafetySnapshot().closed);
+  WebCommand paddleOff = webControlCommand(WebCommandType::PADDLE_OFF);
+  processWebCommand(paddleOff);
+  CHECK(!session.active);
+  CHECK(!getRelaySafetySnapshot().closed);
 
   WebCommand emergencyStop;
   emergencyStop.type = WebCommandType::STOP;
@@ -5162,8 +5159,8 @@ void sc05_serial_cli_parser_covers_supported_commands() {
   CHECK(request.verb == SerialCliVerb::RESET_AP_PASSWORD);
   CHECK(serialCliParseLine("CLEAR_WIFI", request));
   CHECK(request.verb == SerialCliVerb::CLEAR_WIFI);
-  CHECK(serialCliParseLine("RESET_NETWORK_UI", request));
-  CHECK(request.verb == SerialCliVerb::RESET_NETWORK_UI);
+  CHECK(serialCliParseLine("RESET_NETWORK_AP", request));
+  CHECK(request.verb == SerialCliVerb::RESET_NETWORK_AP);
   CHECK(serialCliParseLine("SERIAL_DEBUG_ON", request));
   CHECK(request.verb == SerialCliVerb::SERIAL_DEBUG_ON);
   CHECK(serialCliParseLine("SERIAL_DEBUG_OFF", request));
@@ -5309,12 +5306,12 @@ void sc10_help_prints_one_line_per_command() {
   CHECK(serialTxContains("HELLO  probe CLI"));
   CHECK(serialTxContains("REBOOT  restart firmware"));
   CHECK(serialTxContains("FACTORY_RESET  wipe Wi-Fi"));
-  CHECK(serialTxContains("RESET_AP_PASSWORD  restore AP/UI password"));
+  CHECK(serialTxContains("RESET_AP_PASSWORD  restore AP password"));
   CHECK(serialTxContains("SET_AP_PASSWORD <password>"));
   CHECK(serialTxContains("SET_WIFI <ssid> [password]"));
   CHECK(serialTxContains("CLEAR_WIFI  forget STA Wi-Fi"));
   CHECK(serialTxContains("CLEAR_SHOTS  clear shot history"));
-  CHECK(serialTxContains("RESET_NETWORK_UI  forget STA Wi-Fi"));
+  CHECK(serialTxContains("RESET_NETWORK_AP  forget STA Wi-Fi"));
   CHECK(serialTxContains("SERIAL_DEBUG_ON  enable USB debug"));
   CHECK(serialTxContains("SERIAL_DEBUG_OFF  disable USB debug"));
   CHECK(serialTxContains("DEBUG_FULL  serial debug + ring DEBUG"));
@@ -6360,7 +6357,7 @@ const TestCase testCases[] = {
     {"R21", r21_automatic_control_requires_fresh_weight},
     {"R22", r22_confirmed_implausible_weight_does_not_stop},
     {"R23", r23_maintenance_is_canceled_fail_open_by_physical_paddle},
-    {"R24", r24_web_control_lease_owner_is_enforced},
+    {"R24", r24_web_control_is_available_without_session_owner},
     {"R25", r25_critical_scale_mailbox_never_blocks_and_keeps_latest},
     {"R26", r26_remote_timer_stop_retries_after_full_queue},
     {"R27", r27_platform_clock_failure_prevents_cn9_close},

@@ -12,8 +12,9 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 4;
-constexpr uint32_t LEGACY_CONFIG_SCHEMA_VERSION = 3;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 5;
+constexpr uint32_t LEGACY_CONFIG_SCHEMA_VERSION = 4;
+constexpr uint32_t OLDEST_CONFIG_SCHEMA_VERSION = 3;
 constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
 constexpr size_t PREFERRED_SCALE_NAME_CAPACITY = 32;
 constexpr size_t SCALE_HISTORY_CAPACITY = 8;
@@ -1771,7 +1772,7 @@ enum class WebCommandType : uint8_t {
   CHANGE_AP_PASSWORD,
   RESET_AP_PASSWORD,
   RESTART,
-  RESET_NETWORK_UI,
+  RESET_NETWORK_AP,
   FACTORY_RESET,
   CLEAR_SHOT_LOG,
   CLEAR_PREFERRED_SCALE,
@@ -1809,9 +1810,9 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::FORGET_NETWORK: return "forget STA network";
     case WebCommandType::CHANGE_AP_PASSWORD: return "change AP password";
     case WebCommandType::RESET_AP_PASSWORD:
-      return "restore AP/UI password";
+      return "restore AP password";
     case WebCommandType::RESTART: return "restart";
-    case WebCommandType::RESET_NETWORK_UI: return "recover network/UI";
+    case WebCommandType::RESET_NETWORK_AP: return "recover network/AP";
     case WebCommandType::FACTORY_RESET: return "restore factory settings";
     case WebCommandType::CLEAR_SHOT_LOG: return "clear shot history";
     case WebCommandType::CLEAR_PREFERRED_SCALE:
@@ -1876,8 +1877,6 @@ struct WebCommand {
   WebCommandType type = WebCommandType::STOP;
   uint32_t requestId = 0;
   uint32_t maintenanceLeaseId = 0;
-  uint32_t webSessionId = 0;
-  uint32_t controlLeaseId = 0;
   RuntimeConfig config = {};
   // PRESET_OP payload (keep small — no full bank on the queue element).
   uint8_t presetAction = 0;
@@ -2005,8 +2004,6 @@ struct ControlStatusSnapshot {
   ControlSource source = ControlSource::NONE;
   uint32_t cycleId = 0;
   uint32_t bootId = 0;
-  uint32_t webSessionId = 0;
-  uint32_t controlLeaseId = 0;
   bool maintenanceLeaseActive = false;
   uint32_t maintenanceLeaseId = 0;
   uint32_t maintenanceStartedAtMs = 0;
@@ -2154,10 +2151,6 @@ enum class DebugCode : uint8_t {
   WIFI_SCAN_COMPLETE,
   WIFI_SCAN_ERROR,
   WIFI_SCAN_CANCELED,
-  UI_LOGIN,
-  UI_LOGOUT,
-  UI_EXPIRED,
-  UI_REPLACED,
   WEB_PADDLE_ON,
   WEB_PADDLE_OFF,
   WEB_RINSE,
@@ -2424,8 +2417,6 @@ inline LogLevel debugCodeDefaultLevel(DebugCode code) {
     case DebugCode::WIFI_SCAN_ERROR:
     case DebugCode::WIFI_SCAN_CANCELED:
     case DebugCode::TIME_SYNC_FAIL:
-    case DebugCode::UI_EXPIRED:
-    case DebugCode::UI_REPLACED:
     case DebugCode::WEB_COMMAND_REJECTED:
     case DebugCode::COMMAND_RETRY:
     case DebugCode::OPERATIONAL_LIMIT:
@@ -2444,8 +2435,6 @@ inline LogLevel debugCodeDefaultLevel(DebugCode code) {
     case DebugCode::STA_CONNECTING:
     case DebugCode::WIFI_SCAN_STARTED:
     case DebugCode::WIFI_SCAN_COMPLETE:
-    case DebugCode::UI_LOGIN:
-    case DebugCode::UI_LOGOUT:
     case DebugCode::WEB_COMMAND_ACCEPTED:
     case DebugCode::MAINTENANCE_RESERVED:
     case DebugCode::MAINTENANCE_COMPLETED:
@@ -2563,10 +2552,6 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::WIFI_SCAN_ERROR: return "WiFi scan failed";
     case DebugCode::WIFI_SCAN_CANCELED:
       return "WiFi scan canceled for active control";
-    case DebugCode::UI_LOGIN: return "web session opened";
-    case DebugCode::UI_LOGOUT: return "web session closed";
-    case DebugCode::UI_EXPIRED: return "web session expired";
-    case DebugCode::UI_REPLACED: return "web session replaced by newer login";
     case DebugCode::WEB_PADDLE_ON: return "paddle web on";
     case DebugCode::WEB_PADDLE_OFF: return "paddle web off";
     case DebugCode::WEB_RINSE: return "rinse web started";
@@ -2575,7 +2560,7 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::WEB_STOP: return "web safe stop";
     case DebugCode::RESTART_REQUESTED: return "restart requested";
     case DebugCode::NETWORK_RESET: return "network settings reset";
-    case DebugCode::AP_PASSWORD_RESET: return "AP/UI password restored";
+    case DebugCode::AP_PASSWORD_RESET: return "AP password restored";
     case DebugCode::FACTORY_RESET: return "factory settings restored";
     case DebugCode::MAINTENANCE_RESERVED:
       return "maintenance lease reserved";

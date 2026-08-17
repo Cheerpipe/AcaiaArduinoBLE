@@ -259,7 +259,7 @@ buzzer support, Output channel and the triple checkboxes are hidden.
 ### Web UI, Wi-Fi, and API
 
 See [Factory credentials (first use)](#factory-credentials-first-use) for AP
-name, default passwords, and step-by-step first connection.
+name, default WPA2 password, and step-by-step first connection.
 
 - Fully **embedded Web UI** SPA with routes (`/`, `/presets`, `/settings`,
   `/history`, `/admin`, `/debug`, `/log`): same-origin assets only (no CDN). Authoring
@@ -284,14 +284,10 @@ name, default passwords, and step-by-step first connection.
   and SoftAP is not re-raised automatically on later drops. After logout,
   sessions still expire by UI grace / remember-me rules; SoftAP itself is not
   torn down for idle UI.
-- **Public read-only** home (shot + status), shot history, diagnostic log,
-  settings preview, and firmware version footer without signing in.
-- Authenticated session (factory password **`Micra1234`** — same as the AP;
-  changeable from the Web UI or USB serial CLI) unlocks configuration, Wi-Fi
-  scan/save, calibration reset, factory reset, Stop, and Restart. Up to **2**
-  concurrent web sessions. Login responses include a CSRF token
-  (`X-CSRF-Token` on mutating requests); repeated failed logins return
-  `429 LOGIN_RATE_LIMITED`.
+- The Web UI and REST API are public to any client that can reach the device.
+  This includes configuration, controls, Wi-Fi changes, maintenance and
+  diagnostics; operational safety gates still apply. In STA mode, use a
+  trusted network because there is no Web UI login.
 - **Live shot panel:** current/goal weight, progress bar, elapsed time, first
   drop, retare state, shot type, scale protocol, and **last-shot** guard state
   for extraction (`Off` / `On` / extended), A→M (`Off` / `Idle` / `Armed` /
@@ -704,8 +700,8 @@ independent of whether the guard is enabled or which limit mode is selected:
 ## Factory credentials (first use)
 
 On a fresh flash (or after **factory reset**), use these defaults to reach the
-controller over Wi‑Fi. The **same password** protects the fallback access point
-and the Web UI login.
+controller over Wi‑Fi. The password protects only the fallback WPA2 access
+point; the Web UI has no login.
 
 | | Value |
 | --- | --- |
