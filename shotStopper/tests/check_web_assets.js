@@ -927,6 +927,8 @@ if (!ui.includes('id="staIpMode"') ||
     !ui.includes('keep=!!savedStaSsid') ||
     !ui.includes("savedStaSsid=n.wifiConfigured&&n.ssid?n.ssid:''") ||
     !ui.includes('function formatNetworkStatus(n)') ||
+    !ui.includes("n.staState==='CONNECTED'&&typeof n.channel==='number'&&n.channel>0") ||
+    !ui.includes("' — channel '+n.channel") ||
     !ui.includes("signalQualityPct") ||
     !ui.includes("n.rssi") ||
     !ui.includes('signal ') ||
@@ -945,6 +947,7 @@ if (!ui.includes('id="staIpMode"') ||
     !network.includes('\\"ssid\\"') ||
     !network.includes('\\"rssi\\"') ||
     !network.includes('\\"signalQualityPct\\"') ||
+    !network.includes('\\"channel\\"') ||
     !network.includes('wifiRssiToSignalQualityPct') ||
     !network.includes('staLinkMetricsValid') ||
     !network.includes('WiFi.RSSI()') ||
@@ -1284,7 +1287,7 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
       leanMarker, statusFormat.indexOf('if (ok) {', leanMarker));
   for (const field of [
     'apActive', 'apIp', 'apClients', 'wifiConfigured', 'ssid', 'staState',
-    'staIp', 'ipMode', 'configState', 'confirmRemainingMs', 'rssi',
+    'channel', 'staIp', 'ipMode', 'configState', 'confirmRemainingMs', 'rssi',
     'signalQualityPct', 'utcSec', 'lastSyncAgeMs', 'nextRetryInMs',
     'activeServer', 'maintenance', 'persistPending', 'uptimeMs', 'hwmon',
     'freeHeapBytes', 'minimumFreeHeapBytes', 'largestFreeHeapBlockBytes',

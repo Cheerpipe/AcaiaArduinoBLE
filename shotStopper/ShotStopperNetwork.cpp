@@ -3218,6 +3218,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   char scaleTimer[32] = "null";
   char staRssiJson[16] = "null";
   char staSignalQualityJson[16] = "null";
+  char staChannelJson[8] = "null";
   if (control.currentWeightValid) {
     snprintf(currentWeight, sizeof(currentWeight), "%.2f",
              static_cast<double>(control.currentWeightG));
@@ -3239,6 +3240,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
              static_cast<int>(network.staRssi));
     snprintf(staSignalQualityJson, sizeof(staSignalQualityJson), "%u",
              static_cast<unsigned>(network.staSignalQualityPct));
+  }
+  if (network.staState == StaState::CONNECTED && network.channel != 0) {
+    snprintf(staChannelJson, sizeof(staChannelJson), "%u",
+             static_cast<unsigned>(network.channel));
   }
 
   char safeNtpCustom[NTP_SERVER_HOST_CAPACITY] = {};
@@ -3565,7 +3570,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         &used,
         ",\"network\":{\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
         "\"wifiConfigured\":%s,\"ssid\":\"%s\","
-        "\"staState\":\"%s\",\"staIp\":\"%s\",\"ipMode\":\"%s\","
+        "\"staState\":\"%s\",\"channel\":%s,\"staIp\":\"%s\",\"ipMode\":\"%s\","
         "\"configState\":\"%s\",\"confirmRemainingMs\":%lu,"
         "\"rssi\":%s,\"signalQualityPct\":%s},"
         "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
@@ -3588,7 +3593,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         network.apActive ? "true" : "false", network.apIp,
         static_cast<unsigned>(network.apClients),
         network.wifiConfigured ? "true" : "false", safeStaSsid,
-        staStateName(network.staState), network.staIp,
+        staStateName(network.staState), staChannelJson, network.staIp,
         staIpModeName(network.staIpMode),
         staConfigStateName(network.staConfigState),
         static_cast<unsigned long>(network.confirmRemainingMs), staRssiJson,
