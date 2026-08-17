@@ -527,6 +527,7 @@ void p24_preset_bank_size_and_crud_budgets() {
                   DEFAULT_MIN_RECOVERY_WEIGHT_G) < 0.001f);
   CHECK(bank.presets[0].maxBrewTimeMs == DEFAULT_MAX_BREW_TIME_MS);
   CHECK(bank.presets[1].slowExtractionGuardEnabled);
+  CHECK(bank.presets[1].minBrewTimeMs == FACTORY_SINGLE_MIN_BREW_TIME_MS);
   CHECK(std::fabs(bank.presets[1].minRecoveryWeightG -
                   FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G) < 0.001f);
   CHECK(bank.presets[1].maxBrewTimeMs == FACTORY_SINGLE_MAX_BREW_TIME_MS);

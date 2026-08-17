@@ -60,3 +60,8 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 
 .logSep{border:0;border-top:1px solid #ccc;margin:1rem 0}
 @media(prefers-color-scheme:dark){.logSep{border-top-color:#555}}
+#configLockBanner{position:sticky;top:0;z-index:4;margin:0 0 .5rem;padding:.55rem .65rem;border-radius:.2rem;border-left:4px solid;display:flex;align-items:center;justify-content:space-between;gap:.7rem;font-weight:600}
+#configLockBanner.hidden{display:none}
+#configLockBanner.lockOrange{background:#fff4e5;border-color:#c76b00;color:#8a4b00}
+#configLockBanner.lockYellow{background:#fffbe6;border-color:#b08a00;color:#735b00}
+.btnGlyph.btnUnlock{background:#d97706;color:#fff;border-left-color:#9a4b00;box-shadow:inset 0 0 0 1px #9a4b00}

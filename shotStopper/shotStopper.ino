@@ -5105,7 +5105,7 @@ void serviceMaintenanceCancellation() {
 
 bool beginMaintenanceLease(const WebCommand &networkCommand,
                            bool applyRuntimeOnSuccess) {
-  if (!controlAllowsConfigurationNow()) {
+  if (!controlAllowsConfigurationNow() && !networkCommand.unsafeWebUiOverride) {
     return false;
   }
   setCn9Closed(false);
@@ -5124,6 +5124,10 @@ bool beginMaintenanceLease(const WebCommand &networkCommand,
                 static_cast<int32_t>(maintenanceLease.id),
                 static_cast<int32_t>(networkCommand.type));
   return true;
+}
+
+bool webCommandAllowsUnsafeConfiguration(const WebCommand &command) {
+  return controlAllowsConfigurationNow() || command.unsafeWebUiOverride;
 }
 
 void serviceMaintenanceLease() {
@@ -5429,7 +5433,7 @@ void processWebCommand(const WebCommand &command) {
       return;
 
     case WebCommandType::PADDLE_ON:
-      if (!REMOTE_CN9_CONTROL_ENABLED || !controlAllowsConfigurationNow()) {
+      if (!REMOTE_CN9_CONTROL_ENABLED || !webCommandAllowsUnsafeConfiguration(command)) {
         rejectWebCommand(command);
         return;
       }
@@ -5446,7 +5450,7 @@ void processWebCommand(const WebCommand &command) {
       return;
 
     case WebCommandType::RINSE:
-      if (!REMOTE_CN9_CONTROL_ENABLED || !controlAllowsConfigurationNow()) {
+      if (!REMOTE_CN9_CONTROL_ENABLED || !webCommandAllowsUnsafeConfiguration(command)) {
         rejectWebCommand(command);
         return;
       }
@@ -5461,7 +5465,7 @@ void processWebCommand(const WebCommand &command) {
       return;
 
     case WebCommandType::APPLY_CONFIG: {
-      if (!controlAllowsConfigurationNow()) {
+      if (!webCommandAllowsUnsafeConfiguration(command)) {
         rejectWebCommand(command);
         return;
       }
@@ -5545,7 +5549,7 @@ void processWebCommand(const WebCommand &command) {
     }
 
     case WebCommandType::RESET_WEIGHT_OFFSET: {
-      if (!controlAllowsConfigurationNow()) {
+      if (!webCommandAllowsUnsafeConfiguration(command)) {
         rejectWebCommand(command);
         return;
       }
@@ -5564,7 +5568,7 @@ void processWebCommand(const WebCommand &command) {
     }
 
     case WebCommandType::RESET_AUTO_TO_MANUAL_GUARD_SAMPLES: {
-      if (!controlAllowsConfigurationNow()) {
+      if (!webCommandAllowsUnsafeConfiguration(command)) {
         rejectWebCommand(command);
         return;
       }
@@ -5586,7 +5590,7 @@ void processWebCommand(const WebCommand &command) {
     }
 
     case WebCommandType::PRESET_OP: {
-      if (!controlAllowsConfigurationNow()) {
+      if (!webCommandAllowsUnsafeConfiguration(command)) {
         rejectWebCommand(command);
         return;
       }
@@ -5663,7 +5667,7 @@ void processWebCommand(const WebCommand &command) {
     case WebCommandType::RESTART:
     case WebCommandType::RESET_NETWORK_AP:
     case WebCommandType::FACTORY_RESET:
-      if (!controlAllowsConfigurationNow()) {
+      if (!webCommandAllowsUnsafeConfiguration(command)) {
         rejectWebCommand(command);
         return;
       }
@@ -5681,7 +5685,7 @@ void processWebCommand(const WebCommand &command) {
       return;
 
     case WebCommandType::CLEAR_PREFERRED_SCALE:
-      if (!controlAllowsConfigurationNow()) {
+      if (!webCommandAllowsUnsafeConfiguration(command)) {
         rejectWebCommand(command);
         return;
       }
@@ -5691,7 +5695,7 @@ void processWebCommand(const WebCommand &command) {
       return;
 
     case WebCommandType::SELECT_PREFERRED_SCALE:
-      if (!controlAllowsConfigurationNow()) {
+      if (!webCommandAllowsUnsafeConfiguration(command)) {
         rejectWebCommand(command);
         return;
       }
@@ -5714,7 +5718,7 @@ void processWebCommand(const WebCommand &command) {
       return;
 
     case WebCommandType::BUZZER_TEST: {
-      if (!controlAllowsConfigurationNow()) {
+      if (!webCommandAllowsUnsafeConfiguration(command)) {
         rejectWebCommand(command);
         return;
       }

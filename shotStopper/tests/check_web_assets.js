@@ -44,8 +44,8 @@ const jsBytes = Buffer.byteLength(js, 'utf8');
 if (htmlBytes > 40960) {
   throw new Error('Web UI HTML source exceeds the 40 KiB authoring budget');
 }
-if (jsBytes > 75776) {
-  throw new Error('Web UI JS source exceeds the 74 KiB authoring budget');
+if (jsBytes > 81920) {
+  throw new Error('Web UI JS source exceeds the 80 KiB authoring budget');
 }
 if (htmlBytes + jsBytes > 114688) {
   throw new Error('Web UI HTML+JS source exceeds the 112 KiB combined authoring budget');
@@ -1060,21 +1060,41 @@ if (!network.includes('/api/v1/ui/claim') ||
 }
 if (!ui.includes('function claimWebUiOwnership()') ||
     !ui.includes('function deactivateWebUi()') ||
-    !ui.includes('Take control') ||
+    !ui.includes('Reactivate') ||
     !ui.includes('X-WebUI-Client')) {
-  throw new Error('Revoked WebUI windows must become passive and offer Take control');
+  throw new Error('Inactive WebUI windows must become passive and offer Reactivate');
 }
-if (!ui.includes('function applyCommonStatus(s){setMutable(!s.relayClosed)')) {
-  throw new Error('Web UI mutability must be controlled only by relayClosed');
+if (!ui.includes('const WEB_UI_INACTIVITY_MS=15*60*1000') ||
+    !ui.includes('function resetWebUiInactivity()') ||
+    !ui.includes('function webUiPollingActive()') ||
+    !ui.includes('function noteWebUiInteraction(event)') ||
+    !ui.includes("document.addEventListener('pointerdown',noteWebUiInteraction,true)") ||
+    !ui.includes("document.addEventListener('keydown',noteWebUiInteraction,true)") ||
+    ui.includes("addEventListener('scroll',noteWebUiInteraction")) {
+  throw new Error('WebUI inactivity must expire after 15 minutes of direct control interaction, never scrolling');
+}
+if (!ui.includes('This WebUI window is inactive. Reactivate to continue.') ||
+    !network.includes('This WebUI window is inactive. Reactivate to continue.') ||
+    ui.includes('Another WebUI window controls this device.') ||
+    network.includes('Another WebUI window has taken control.')) {
+  throw new Error('WebUI inactive notice must be neutral and offer Reactivate');
+}
+if (!ui.includes('clearTimeout(webUiInactivityTimer)') ||
+    !ui.includes('clearTimeout(scanTimer)') ||
+    !ui.includes('stopViewPolls()') ||
+    !ui.includes('if(!webUiPollingActive())throw new Error')) {
+  throw new Error('WebUI inactivity must cancel poll timers and block further API calls');
+}
+if (!ui.includes('setMutable(!!s.configMutable||!!s.webUiOverrideActive)') ||
+    !ui.includes('configLockReason') || !ui.includes('webUiOverrideActive') ||
+    !ui.includes('/api/v1/ui/unlock') || !ui.includes('UNSAFE_WEBUI_OVERRIDE') ||
+    !ui.includes('Unsafe WebUI override active')) {
+  throw new Error('Web UI must expose the confirmed configuration-lock override flow');
 }
 if (!ui.includes("webShot=s.controlSource==='web'&&s.virtualPaddleOn") ||
     !ui.includes('remoteReady&&(canControl||webShot)') ||
     !ui.includes("$('stopButton').disabled=!s.relayClosed")) {
   throw new Error('CN9-closed Actions must permit Stop and Web paddle-off only');
-}
-if (ui.includes('s.configMutable&&pauseMs<=0') ||
-    ui.includes('true&&s.configMutable')) {
-  throw new Error('Web UI controls must not use firmware mutability as a visual lock');
 }
 if (!network.includes('/api/v1/status/home') ||
     !network.includes('/api/v1/status/settings') ||

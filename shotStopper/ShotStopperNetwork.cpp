@@ -2546,7 +2546,9 @@ bool ShotStopperNetwork::startHttpServer() {
   // Keep enough client slots for that boot burst while responses still close
   // promptly to limit the ESP's steady-state socket use.
   config.max_open_sockets = 6;
-  config.max_uri_handlers = 33;
+  // Keep one slot of headroom above the owned API routes; /api/v1/ui/unlock
+  // is registered separately because it establishes the explicit override.
+  config.max_uri_handlers = 35;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
   // the IDF default (1024) is enough most of the time but intermittent
   // long browser headers have returned 431 Request Header Fields Too Large.
@@ -2573,6 +2575,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/app.js", HTTP_GET, jsHandler) &&
       registerHandler(server_, "/app.css", HTTP_GET, cssHandler) &&
       registerHandler(server_, "/api/v1/ui/claim", HTTP_POST, claimHandler) &&
+      registerHandler(server_, "/api/v1/ui/unlock", HTTP_POST, unlockHandler) &&
       registerHandler(server_, "/api/v1/status/home", HTTP_GET, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/status/settings", HTTP_GET, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/status/admin", HTTP_GET, ownedApiHandler) &&
@@ -2641,6 +2644,17 @@ namespace {
 
 constexpr const char *WEB_UI_CLIENT_HEADER = "X-WebUI-Client";
 
+const char *configLockReason(const ControlStatusSnapshot &status) {
+  if (status.activeCycle) return "active_shot";
+  if (status.relayClosed) return "cn9_closed";
+  if (status.physicalPaddleOn) return "paddle_on";
+  if (status.maintenanceLeaseActive) return "maintenance";
+  if (status.resetRecoveryRequired) return "safety_recovery";
+  if (status.safetyState == RelaySafetyState::LOCKOUT) return "safety_lockout";
+  if (status.state != StopperState::READY) return "not_ready";
+  return "none";
+}
+
 bool apiUriMatches(const char *uri, const char *path) {
   if (uri == nullptr || path == nullptr) {
     return false;
@@ -2686,9 +2700,68 @@ esp_err_t ShotStopperNetwork::claimHandler(httpd_req_t *request) {
   }
   portENTER_CRITICAL(&self.dataMux_);
   memcpy(self.activeWebUiClientId_, clientId, sizeof(clientId));
+  self.webUiOverrideActive_ = false;
   portEXIT_CRITICAL(&self.dataMux_);
   memset(clientId, 0, sizeof(clientId));
   return sendJson(request, STATUS_OK, "{\"active\":true}");
+}
+
+esp_err_t ShotStopperNetwork::unlockHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.requireActiveWebUiClient(request)) return ESP_OK;
+  char body[REQUEST_BODY_CAPACITY] = {};
+  if (!readJsonBody(request, body)) {
+    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
+                     "An explicit confirmation is required.");
+  }
+  cJSON *root = cJSON_Parse(body);
+  char confirmation[32] = {};
+  static const char *const fields[] = {"confirm"};
+  const bool confirmed = root != nullptr &&
+                         jsonHasOnlyUniqueFields(root, fields, 1) &&
+                         jsonString(root, "confirm", confirmation,
+                                    sizeof(confirmation), false) &&
+                         strcmp(confirmation, "UNSAFE_WEBUI_OVERRIDE") == 0;
+  if (root != nullptr) cJSON_Delete(root);
+  memset(body, 0, sizeof(body));
+  memset(confirmation, 0, sizeof(confirmation));
+  if (!confirmed) {
+    return sendError(request, STATUS_UNPROCESSABLE, "UNLOCK_NOT_CONFIRMED",
+                     "The unsafe WebUI override was not explicitly confirmed.");
+  }
+  portENTER_CRITICAL(&self.dataMux_);
+  self.webUiOverrideActive_ = true;
+  portEXIT_CRITICAL(&self.dataMux_);
+  return sendJson(request, STATUS_OK, "{\"unlocked\":true}");
+}
+
+bool ShotStopperNetwork::webUiOverrideAllowed(httpd_req_t *request) {
+  char clientId[WEB_UI_CLIENT_ID_CAPACITY] = {};
+  if (!readWebUiClientId(request, clientId, sizeof(clientId))) return false;
+  bool allowed = false;
+  portENTER_CRITICAL(&dataMux_);
+  allowed = webUiOverrideActive_ && activeWebUiClientId_[0] != '\0' &&
+            strcmp(activeWebUiClientId_, clientId) == 0;
+  portEXIT_CRITICAL(&dataMux_);
+  memset(clientId, 0, sizeof(clientId));
+  return allowed;
+}
+
+bool ShotStopperNetwork::webUiConfigurationAllowed(
+    httpd_req_t *request, const ControlStatusSnapshot &status) {
+  if (controlAllowsConfiguration(status)) {
+    clearWebUiOverrideIfSafe(status);
+    return true;
+  }
+  return webUiOverrideAllowed(request);
+}
+
+void ShotStopperNetwork::clearWebUiOverrideIfSafe(
+    const ControlStatusSnapshot &status) {
+  if (!controlAllowsConfiguration(status)) return;
+  portENTER_CRITICAL(&dataMux_);
+  webUiOverrideActive_ = false;
+  portEXIT_CRITICAL(&dataMux_);
 }
 
 bool ShotStopperNetwork::requireActiveWebUiClient(httpd_req_t *request) {
@@ -2706,7 +2779,7 @@ bool ShotStopperNetwork::requireActiveWebUiClient(httpd_req_t *request) {
   memset(clientId, 0, sizeof(clientId));
   if (!active) {
     sendError(request, STATUS_CONFLICT, "UI_TAKEN_OVER",
-              "Another WebUI window has taken control.");
+              "This WebUI window is inactive. Reactivate to continue.");
     return false;
   }
   return true;
@@ -3004,6 +3077,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
 
   ControlStatusSnapshot control;
   self.callbacks_.copyControlStatus(control);
+  self.clearWebUiOverrideIfSafe(control);
+  const bool configMutable = controlAllowsConfiguration(control);
+  const bool webUiOverrideActive = self.webUiOverrideAllowed(request);
   const NetworkStatusSnapshot network = self.snapshot();
   const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(millis());
 
@@ -3097,10 +3173,11 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   // is appended below so home/settings polls stay lean.
   bool ok = statusJsonAppend(
       &used,
-      "{\"firmwareVersion\":\"%s\",\"bootId\":%lu,\"configMutable\":%s,\"liveShot\":%s",
+      "{\"firmwareVersion\":\"%s\",\"bootId\":%lu,\"configMutable\":%s,\"webUiOverrideActive\":%s,\"configLockReason\":\"%s\",\"liveShot\":%s",
       safeFirmwareVersion,
       static_cast<unsigned long>(control.bootId),
-      controlAllowsConfiguration(control) ? "true" : "false",
+      configMutable ? "true" : "false",
+      webUiOverrideActive ? "true" : "false", configLockReason(control),
       liveShot ? "true" : "false");
   if (ok && page == StatusPage::Settings) {
     ok = statusJsonAppend(&used, ",\"buzzerSupported\":%s",
@@ -3659,7 +3736,7 @@ esp_err_t ShotStopperNetwork::shotsClearHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Stop the cycle, switch the physical paddle OFF, and wait for Ready before clearing shot history.");
@@ -3700,7 +3777,7 @@ esp_err_t ShotStopperNetwork::lastShotClearHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Stop the cycle, switch the physical paddle OFF, and wait for Ready before clearing the last shot.");
@@ -3741,7 +3818,7 @@ esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Stop the cycle, switch the physical paddle OFF, and wait for Ready before deleting shot records.");
@@ -3778,7 +3855,7 @@ esp_err_t ShotStopperNetwork::timeSyncHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Stop the cycle, switch the physical paddle OFF, and wait for Ready before syncing the clock.");
@@ -3791,7 +3868,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Configuration is locked while a cycle is active.");
@@ -4089,6 +4166,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   WebCommand command;
   command.type = WebCommandType::APPLY_CONFIG;
   command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   command.config = candidate;
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
@@ -4101,7 +4179,7 @@ esp_err_t ShotStopperNetwork::preferredScaleClearHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "The paired scale cannot be forgotten while a cycle "
@@ -4110,6 +4188,7 @@ esp_err_t ShotStopperNetwork::preferredScaleClearHandler(httpd_req_t *request) {
   WebCommand command;
   command.type = WebCommandType::CLEAR_PREFERRED_SCALE;
   command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; nothing was cleared.");
@@ -4121,7 +4200,7 @@ esp_err_t ShotStopperNetwork::preferredScaleSelectHandler(httpd_req_t *request) 
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "The preferred scale cannot be changed while a cycle "
@@ -4162,6 +4241,7 @@ esp_err_t ShotStopperNetwork::preferredScaleSelectHandler(httpd_req_t *request) 
   WebCommand command;
   command.type = WebCommandType::SELECT_PREFERRED_SCALE;
   command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   strncpy(command.scaleSelectMac, mac, sizeof(command.scaleSelectMac) - 1);
   strncpy(command.scaleSelectName, name, sizeof(command.scaleSelectName) - 1);
   if (!self.callbacks_.enqueueWebCommand(command)) {
@@ -4175,7 +4255,7 @@ esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Presets are locked while a cycle is active.");
@@ -4195,6 +4275,7 @@ esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
   WebCommand command;
   command.type = WebCommandType::PRESET_OP;
   command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   command.config = status.config;
 
   if (root == nullptr || !jsonString(root, "action", action, sizeof(action),
@@ -4294,7 +4375,7 @@ esp_err_t ShotStopperNetwork::resetCalibrationHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Calibration is locked while a cycle is active.");
@@ -4318,6 +4399,7 @@ esp_err_t ShotStopperNetwork::resetCalibrationHandler(httpd_req_t *request) {
   WebCommand command;
   command.type = WebCommandType::RESET_WEIGHT_OFFSET;
   command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; calibration was not reset.");
@@ -4329,7 +4411,7 @@ esp_err_t ShotStopperNetwork::resetGuardSamplesHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Guard samples are locked while a cycle is active.");
@@ -4353,6 +4435,7 @@ esp_err_t ShotStopperNetwork::resetGuardSamplesHandler(httpd_req_t *request) {
   WebCommand command;
   command.type = WebCommandType::RESET_AUTO_TO_MANUAL_GUARD_SAMPLES;
   command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; guard samples were not reset.");
@@ -4386,7 +4469,7 @@ esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
     return sendError(request, "403 Forbidden", "REMOTE_CONTROL_DISABLED",
                      "Remote CN9 actuation is disabled in this firmware build.");
   }
-  const bool allowed = on ? controlAllowsConfiguration(status)
+  const bool allowed = on ? self.webUiConfigurationAllowed(request, status)
                           : (status.activeCycle &&
                              status.source == ControlSource::WEB);
   if (!allowed) {
@@ -4396,6 +4479,7 @@ esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
   WebCommand command;
   command.type = on ? WebCommandType::PADDLE_ON : WebCommandType::PADDLE_OFF;
   command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control queue is full.");
@@ -4411,13 +4495,14 @@ esp_err_t ShotStopperNetwork::rinseHandler(httpd_req_t *request) {
     return sendError(request, "403 Forbidden", "REMOTE_CONTROL_DISABLED",
                      "Remote CN9 actuation is disabled in this firmware build.");
   }
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT, "CONTROL_STATE_CONFLICT",
                      "Rinse can only start from Ready.");
   }
   WebCommand command;
   command.type = WebCommandType::RINSE;
   command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control queue is full.");
@@ -4447,7 +4532,7 @@ esp_err_t ShotStopperNetwork::restartHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Stop the cycle and wait for Ready before restarting.");
@@ -4455,6 +4540,7 @@ esp_err_t ShotStopperNetwork::restartHandler(httpd_req_t *request) {
   WebCommand command;
   command.type = WebCommandType::RESTART;
   command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control queue is full.");
@@ -4466,7 +4552,7 @@ esp_err_t ShotStopperNetwork::factoryResetHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Stop the cycle, switch the physical paddle OFF, and wait for Ready before restoring factory settings.");
@@ -4498,6 +4584,7 @@ esp_err_t ShotStopperNetwork::factoryResetHandler(httpd_req_t *request) {
   WebCommand command;
   command.type = WebCommandType::FACTORY_RESET;
   command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; no settings were erased.");
@@ -4519,6 +4606,7 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
   char action[16] = {};
   WebCommand command;
   command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   static const char *const forgetFields[] = {"action"};
   static const char *const confirmFields[] = {"action"};
   static const char *const saveFields[] = {
@@ -4551,7 +4639,7 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
       }
     }
   } else if (parsed && strcmp(action, "forget") == 0) {
-    if (!controlAllowsConfiguration(status)) {
+    if (!self.webUiConfigurationAllowed(request, status)) {
       if (root != nullptr) {
         cJSON_Delete(root);
       }
@@ -4567,7 +4655,7 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
       networkError = "Forget request must include only action=\"forget\".";
     }
   } else if (parsed && strcmp(action, "save") == 0) {
-    if (!controlAllowsConfiguration(status)) {
+    if (!self.webUiConfigurationAllowed(request, status)) {
       if (root != nullptr) {
         cJSON_Delete(root);
       }
@@ -4686,7 +4774,7 @@ esp_err_t ShotStopperNetwork::wifiScanStartHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Wi-Fi scanning is available only while Ready.");
@@ -4695,6 +4783,7 @@ esp_err_t ShotStopperNetwork::wifiScanStartHandler(httpd_req_t *request) {
   WebCommand command;
   command.type = WebCommandType::START_WIFI_SCAN;
   command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; scan was not started.");
@@ -4750,7 +4839,7 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!controlAllowsConfiguration(status)) {
+  if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "The password cannot be changed while a cycle is active.");
@@ -4759,6 +4848,7 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
   WebCommand command;
   command.type = WebCommandType::CHANGE_AP_PASSWORD;
   command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   if (!readJsonBody(request, body)) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "A JSON request is required.");

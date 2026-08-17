@@ -1004,7 +1004,7 @@ constexpr uint8_t FACTORY_PRESET_ID_DOUBLE = 2;
 constexpr float FACTORY_SINGLE_WEIGHT_OFFSET_G = 0.5f;
 constexpr uint8_t FACTORY_SINGLE_GOAL_WEIGHT_G = 18;
 constexpr float FACTORY_SINGLE_MAX_RECOVERY_WEIGHT_G = 20.0f;
-constexpr uint32_t FACTORY_SINGLE_MIN_BREW_TIME_MS = 16000;
+constexpr uint32_t FACTORY_SINGLE_MIN_BREW_TIME_MS = 28000;
 constexpr float FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G = 34.0f;
 constexpr uint32_t FACTORY_SINGLE_MAX_BREW_TIME_MS = 44000;
 
@@ -1876,6 +1876,10 @@ enum class CommandResultState : uint8_t {
 struct WebCommand {
   WebCommandType type = WebCommandType::STOP;
   uint32_t requestId = 0;
+  // Set only by the network task after an explicitly confirmed WebUI unlock.
+  // It never changes relay safety; it only permits this queued WebUI command
+  // to bypass the normal configuration-state gate.
+  bool unsafeWebUiOverride = false;
   uint32_t maintenanceLeaseId = 0;
   RuntimeConfig config = {};
   // PRESET_OP payload (keep small — no full bank on the queue element).
