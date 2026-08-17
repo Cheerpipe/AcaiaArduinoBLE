@@ -39,7 +39,12 @@ constexpr const char *STATUS_CONFLICT = "409 Conflict";
 constexpr const char *STATUS_NOT_FOUND = "404 Not Found";
 constexpr const char *STATUS_UNPROCESSABLE = "422 Unprocessable Entity";
 constexpr const char *STATUS_UNAVAILABLE = "503 Service Unavailable";
-constexpr uint32_t NETWORK_MANAGER_TASK_STACK_SIZE = 7168;
+// PersistedSettings is ≤ PERSISTED_SETTINGS_NVS_BUDGET (3072 B).
+// processPersistedCommand() keeps one copy on the stack, and its callees
+// (settingsCopy, resetPersistedSettingsToFactory, savePersistedSettings) add
+// further frames.  7 168 was too small and triggered a stack-canary watchpoint
+// crash on FACTORY_RESET via the serial CLI.  12 288 gives comfortable headroom.
+constexpr uint32_t NETWORK_MANAGER_TASK_STACK_SIZE = 12288;
 constexpr uint32_t HTTP_SERVER_TASK_STACK_SIZE = 10240;
 
 const char *scaleDisconnectReasonName(uint8_t reason) {
