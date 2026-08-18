@@ -221,7 +221,7 @@ class ShotStopperBleCompanion {
     status_.lastReject = result.reason;
   }
 
-  BleCompanionStatusSnapshot status() const { return status_; }
+  const BleCompanionStatusSnapshot &status() const { return status_; }
 
  private:
   bool enqueue(BleCompanionRequest &request) {
