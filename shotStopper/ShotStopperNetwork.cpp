@@ -3432,7 +3432,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         &used,
         ",\"network\":{\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
         "\"wifiConfigured\":%s,\"ssid\":\"%s\",\"open\":%s,"
-        "\"staState\":\"%s\",\"staIp\":\"%s\",\"ipMode\":\"%s\","
+        "\"staState\":\"%s\",\"channel\":%s,\"staIp\":\"%s\",\"ipMode\":\"%s\","
         "\"configState\":\"%s\",\"confirmRemainingMs\":%lu,"
         "\"rssi\":%s,\"signalQualityPct\":%s,"
         "\"configuredIp\":\"%s\",\"configuredNetmask\":\"%s\","
@@ -3447,7 +3447,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned>(network.apClients),
         network.wifiConfigured ? "true" : "false", safeStaSsid,
         network.staOpen ? "true" : "false", staStateName(network.staState),
-        network.staIp, staIpModeName(network.staIpMode),
+        staChannelJson, network.staIp, staIpModeName(network.staIpMode),
         staConfigStateName(network.staConfigState),
         static_cast<unsigned long>(network.confirmRemainingMs), staRssiJson,
         staSignalQualityJson, network.configuredIp, network.configuredNetmask,
