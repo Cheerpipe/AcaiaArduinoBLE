@@ -498,11 +498,21 @@ void p24_preset_bank_size_and_crud_budgets() {
   CHECK(std::fabs(bank.presets[0].minRecoveryWeightG -
                   DEFAULT_MIN_RECOVERY_WEIGHT_G) < 0.001f);
   CHECK(bank.presets[0].maxBrewTimeMs == DEFAULT_MAX_BREW_TIME_MS);
+  CHECK(bank.presets[1].fastExtractionGuardEnabled);
   CHECK(bank.presets[1].slowExtractionGuardEnabled);
   CHECK(bank.presets[1].minBrewTimeMs == FACTORY_SINGLE_MIN_BREW_TIME_MS);
   CHECK(std::fabs(bank.presets[1].minRecoveryWeightG -
                   FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G) < 0.001f);
   CHECK(bank.presets[1].maxBrewTimeMs == FACTORY_SINGLE_MAX_BREW_TIME_MS);
+
+  ShotPresetBank resetBank = bank;
+  ShotPreset *single = mutableShotPreset(resetBank, FACTORY_PRESET_ID_SINGLE);
+  CHECK(single != nullptr);
+  single->fastExtractionGuardEnabled = false;
+  single->slowExtractionGuardEnabled = false;
+  CHECK(restoreFactoryShotPresetValues(resetBank, FACTORY_PRESET_ID_SINGLE));
+  CHECK(findShotPreset(resetBank, FACTORY_PRESET_ID_SINGLE)->fastExtractionGuardEnabled);
+  CHECK(findShotPreset(resetBank, FACTORY_PRESET_ID_SINGLE)->slowExtractionGuardEnabled);
 
   // Legacy Single-then-Double banks reorder on ensure.
   ShotPresetBank legacy;

@@ -36,9 +36,11 @@ inline void fillDoubleFirmwareDefaults(ShotPreset &preset) {
 inline void fillFactorySinglePreset(ShotPreset &preset) {
   fillDoubleFirmwareDefaults(preset);
   preset.id = FACTORY_PRESET_ID_SINGLE;
+  preset.operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
+  preset.bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
+  preset.brewByWeight = true;
   preset.isFactory = true;
   strncpy(preset.name, "Single", SHOT_PRESET_NAME_CAPACITY - 1);
-  preset.fastExtractionGuardEnabled = true;
   preset.goalWeightG = FACTORY_SINGLE_GOAL_WEIGHT_G;
   preset.maxRecoveryWeightG = FACTORY_SINGLE_MAX_RECOVERY_WEIGHT_G;
   preset.minBrewTimeMs = FACTORY_SINGLE_MIN_BREW_TIME_MS;
@@ -46,6 +48,16 @@ inline void fillFactorySinglePreset(ShotPreset &preset) {
   preset.maxBrewTimeMs = FACTORY_SINGLE_MAX_BREW_TIME_MS;
   preset.weightOffsetBaselineG = FACTORY_SINGLE_WEIGHT_OFFSET_G;
   preset.weightOffsetG = FACTORY_SINGLE_WEIGHT_OFFSET_G;
+  // Business rule: Single preset defaults keep both extraction guards enabled.
+  preset.fastExtractionGuardEnabled = true;
+  preset.slowExtractionGuardEnabled = true;
+  preset.autoToManualGuardEnabled = true;
+  preset.autoToManualGuardLimitMode =
+      static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
+  preset.autoToManualGuardManualLimitMs =
+      DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
+  preset.autoToManualGuardBaselineMs =
+      DEFAULT_AUTO_TO_MANUAL_GUARD_BASELINE_MS;
 }
 
 inline void fillFactoryDoublePreset(ShotPreset &preset) {
@@ -541,6 +553,8 @@ inline bool restoreFactoryShotPresetValues(ShotPresetBank &bank, uint8_t id) {
   memcpy(name, preset->name, sizeof(name));
   if (id == FACTORY_PRESET_ID_SINGLE) {
     fillFactorySinglePreset(*preset);
+    preset->fastExtractionGuardEnabled = true;
+    preset->slowExtractionGuardEnabled = true;
   } else if (id == FACTORY_PRESET_ID_DOUBLE) {
     fillFactoryDoublePreset(*preset);
   } else {
