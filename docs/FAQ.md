@@ -1,8 +1,8 @@
-# Preguntas frecuentes (FAQ)
+# Frequently Asked Questions (FAQ)
 
-Comportamientos automáticos, límites de seguridad y dudas habituales al usar **Micra Shot Stopper**. Los valores por defecto corresponden a un firmware recién flasheado o tras **factory reset**.
+Automatic behaviors, safety limits, and common questions about using the **Micra Shot Stopper**. Default values correspond to a freshly flashed firmware or after a **factory reset**.
 
-Para detalle técnico completo, consulta el [README principal](../README.md).
+For complete technical details, see the [main README](../README.md).
 
 ## Comportamiento del shot y la balanza
 

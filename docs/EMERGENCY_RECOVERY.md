@@ -1,148 +1,146 @@
-# Recuperación de emergencia con el paddle
+# Emergency Recovery with Paddle
 
-Este procedimiento permite recuperar el Micra Shot Stopper cuando no hay
-acceso por Web UI, Wi-Fi, BLE ni USB/serie. No requiere que la balanza esté
-encendida o conectada.
+This procedure allows you to recover the Micra Shot Stopper when there is no
+access via Web UI, Wi-Fi, BLE, or USB/serial. It does not require the scale to
+be powered on or connected.
 
-> **Seguridad:** durante la recuperación, el firmware mantiene CN9 abierto y
-> no permite iniciar una extracción ni un rinse. No intentes preparar café
-> hasta que el procedimiento termine y el controlador vuelva a arrancar.
+> **Safety:** During recovery, the firmware keeps CN9 open and does not allow
+> starting an extraction or rinse. Do not attempt to make coffee until the
+> procedure completes and the controller restarts.
 
-## Elegir el procedimiento
+## Choosing the Procedure
 
-| Procedimiento | Gesto | Borra | Conserva |
+| Procedure | Gesture | Erases | Preserves |
 | --- | --- | --- | --- |
-| Recuperar acceso | `OFF→ON ×3` | Wi-Fi STA, IP estática, red last-known-good y contraseña del AP/Web UI | Configuración de máquina, presets, calibración, escalas e historial |
-| Factory reset | `OFF→ON ×5` | Toda la configuración, red, calibración, escalas, BLE Companion, historial y último shot | Solo el firmware instalado |
+| Recover access | `OFF→ON ×3` | Wi-Fi STA, static IP, last-known-good network, AP/Web UI password | Machine configuration, presets, calibration, scales, and history |
+| Factory reset | `OFF→ON ×5` | All configuration, network, calibration, scales, BLE Companion, history, and last shot | Firmware only |
 
-Después de cualquiera de los dos procedimientos, el acceso local vuelve a:
+After either procedure, local access returns to:
 
-- Red: **`MicraShotStopperAP`**
-- Contraseña del AP y Web UI: **`Micra1234`**
-- Dirección: **`http://192.168.4.1`**
+- Network: **`MicraShotStopperAP`**
+- AP and Web UI password: **`Micra1234`**
+- Address: **`http://192.168.4.1`**
 
-Las contraseñas distinguen mayúsculas de minúsculas.
+Passwords are case-sensitive.
 
-## Antes de comenzar
+## Before You Begin
 
-Un ciclo significa mover el paddle completamente de **OFF a ON**. El
-controlador debe encender inicialmente con el paddle en **ON**; esa posición
-inicial no cuenta como un ciclo.
+One cycle means moving the paddle completely from **OFF to ON**. The
+controller must initially power on with the paddle in **ON**; that initial
+position does not count as a cycle.
 
-- Haz todos los movimientos del gesto en menos de 5 segundos.
-- Después del último ON, no muevas el paddle durante 3 segundos.
-- El modo de recuperación dura 60 segundos en total.
-- Si el firmware se compiló sin buzzer, los mismos pasos funcionan sin sonido.
+- Perform all gesture movements in less than 5 seconds.
+- After the last ON, do not move the paddle for 3 seconds.
+- Recovery mode lasts 60 seconds total.
+- If the firmware was compiled without a buzzer, the same steps work silently.
 
-## Recuperar Wi-Fi, AP y contraseña
+## Recover Wi-Fi, AP, and Password
 
-Este procedimiento no borra recetas, ajustes de la máquina ni historial.
+This procedure does not erase recipes, machine settings, or history.
 
-1. Desenergiza el Shot Stopper.
-2. Lleva el paddle a **ON**.
-3. Energiza el Shot Stopper manteniendo el paddle en ON.
-4. Espera el beep continuo de 1,5 segundos que anuncia el modo de recuperación.
-5. Dentro de los 60 segundos, realiza tres ciclos completos en menos de 5
-   segundos:
+1. Power off the Shot Stopper.
+2. Move the paddle to **ON**.
+3. Power on the Shot Stopper while holding the paddle ON.
+4. Wait for a continuous beep lasting 1.5 seconds that announces recovery mode.
+5. Within 60 seconds, perform three complete cycles in less than 5 seconds:
 
    ```text
-   Posición inicial: ON
+   Initial position: ON
    OFF → ON → OFF → ON → OFF → ON
-          ciclo 1    ciclo 2    ciclo 3
+        cycle 1   cycle 2   cycle 3
    ```
 
-6. Deja el paddle inmóvil en ON durante 3 segundos.
-7. Tres pulsos cortos confirman que los datos de acceso fueron restaurados.
-8. Espera el reinicio y conecta a `MicraShotStopperAP` con `Micra1234`.
+6. Keep the paddle still on ON for 3 seconds.
+7. Three short beeps confirm that access credentials were restored.
+8. Wait for the restart and connect to `MicraShotStopperAP` with `Micra1234`.
 
-Ejemplo de tiempos válidos:
+Example of valid timing:
 
 ```text
-0,0 s  primer OFF
-0,5 s  primer ON
-1,0 s  segundo OFF
-1,5 s  segundo ON
-2,0 s  tercer OFF
-2,5 s  tercer ON
-5,5 s  termina la confirmación inmóvil; reset de acceso
+0.0 s  first OFF
+0.5 s  first ON
+1.0 s  second OFF
+1.5 s  second ON
+2.0 s  third OFF
+2.5 s  third ON
+5.5 s  static confirmation ends; access reset
 ```
 
-## Ejecutar un factory reset
+## Perform a Factory Reset
 
-> **Advertencia:** este procedimiento elimina presets, configuración,
-> calibración aprendida, redes, escalas e historial. No se puede deshacer.
+> **Warning:** This procedure erases presets, configuration, learned
+> calibration, networks, scales, BLE Companion, history, and last shot. It
+> cannot be undone.
 
-1. Desenergiza el Shot Stopper.
-2. Lleva el paddle a **ON**.
-3. Energiza el Shot Stopper manteniendo el paddle en ON.
-4. Espera el beep continuo de 1,5 segundos.
-5. Dentro de los 60 segundos, realiza cinco ciclos completos en menos de 5
-   segundos:
+1. Power off the Shot Stopper.
+2. Move the paddle to **ON**.
+3. Power on the Shot Stopper while holding the paddle ON.
+4. Wait for a continuous beep lasting 1.5 seconds.
+5. Within 60 seconds, perform five complete cycles in less than 5 seconds:
 
    ```text
-   Posición inicial: ON
+   Initial position: ON
    OFF → ON → OFF → ON → OFF → ON → OFF → ON → OFF → ON
-          ciclo 1    ciclo 2    ciclo 3    ciclo 4    ciclo 5
+        cycle 1   cycle 2   cycle 3   cycle 4   cycle 5
    ```
 
-6. Deja el paddle inmóvil en ON durante 3 segundos.
-7. Cinco pulsos cortos confirman el factory reset.
-8. Espera el reinicio y realiza la puesta en marcha desde
-   `http://192.168.4.1`.
+6. Keep the paddle still on ON for 3 seconds.
+7. Five short beeps confirm the factory reset.
+8. Wait for the restart and perform setup from `http://192.168.4.1`.
 
-Ejemplo de tiempos válidos:
+Example of valid timing:
 
 ```text
-0,0 s  primer OFF
-0,4 s  primer ON
-0,8 s  segundo OFF
-1,2 s  segundo ON
-1,6 s  tercer OFF
-2,0 s  tercer ON
-2,4 s  cuarto OFF
-2,8 s  cuarto ON
-3,2 s  quinto OFF
-3,6 s  quinto ON
-6,6 s  termina la confirmación inmóvil; factory reset
+0.0 s  first OFF
+0.4 s  first ON
+0.8 s  second OFF
+1.2 s  second ON
+1.6 s  third OFF
+2.0 s  third ON
+2.4 s  fourth OFF
+2.8 s  fourth ON
+3.2 s  fifth OFF
+3.6 s  fifth ON
+6.6 s  static confirmation ends; factory reset
 ```
 
-Los primeros tres ciclos del gesto largo se parecen al gesto corto. No hay
-riesgo de que se aplique prematuramente: cualquier movimiento reinicia la
-espera de confirmación, y el firmware decide solo después de 3 segundos sin
-movimientos.
+The first three cycles of the long gesture resemble the short gesture. There is
+no risk of premature application: any movement restarts the confirmation wait,
+and the firmware decides only after 3 seconds without motion.
 
-## Cancelar sin borrar datos
+## Cancel Without Erasing Data
 
-Deja de mover el paddle y permite que expire la ventana total de 60 segundos.
-Un beep de 1,5 segundos anuncia la salida. Lleva después el paddle a OFF; el
-firmware continuará su arranque normal y CN9 seguirá abierto hasta detectar
-ese OFF estable.
+Stop moving the paddle and allow the total 60-second window to expire. A beep
+lasting 1.5 seconds announces the exit. Then move the paddle to OFF; the
+firmware continues normal startup and CN9 stays open until it detects a stable
+OFF.
 
-También puedes cortar la energía antes de que finalicen los 3 segundos de
-confirmación. Si el borrado ya había comenzado, una intención persistente hará
-que el siguiente arranque complete la operación de forma segura.
+You can also cut power before the 3-second confirmation ends. If the erase had
+already begun, persistent intent will cause the next startup to complete the
+operation safely.
 
-## Errores habituales
+## Common Mistakes
 
-- **Arrancar con paddle OFF:** inicia normalmente; no entra en recuperación.
-- **Moverlo demasiado lento:** si los ciclos toman más de 5 segundos, el
-  intento se invalida. Puedes volver a intentarlo dentro de los 60 segundos.
-- **Hacer cuatro ciclos:** no corresponde a ningún comando y no borra datos.
-- **Mover durante los 3 segundos:** reinicia la confirmación o convierte el
-  gesto corto en el largo si se completan cinco ciclos a tiempo.
-- **Agotar los 60 segundos:** el modo termina sin ejecutar un reset.
-- **No escuchar beeps:** el build puede no incluir buzzer. Cuenta los
-  movimientos y tiempos igualmente.
+- **Starting with paddle OFF:** Starts normally; does not enter recovery mode.
+- **Moving too slowly:** If cycles take more than 5 seconds, the attempt is
+  invalidated. You can retry within the 60-second window.
+- **Performing four cycles:** Does not correspond to any command and does not
+  erase data.
+- **Moving during the 3 seconds:** Restarts the confirmation or converts the
+  short gesture into the long gesture if five cycles complete in time.
+- **Exhausting the 60 seconds:** Recovery mode exits without executing a reset.
+- **Not hearing beeps:** The build may not include a buzzer. Count movements
+  and timings anyway.
 
-## Si no reinicia o no aparece el AP
+## If It Does Not Restart or AP Does Not Appear
 
-1. Espera al menos 20 segundos después de la confirmación.
-2. Comprueba que el paddle esté en OFF y vuelve a energizar el controlador.
-3. Busca `MicraShotStopperAP`; el intento STA inicial puede demorar su
-   aparición aproximadamente 15 segundos.
-4. Si se oye un patrón largo-corto-largo y no continúa el arranque, hubo un
-   fallo de almacenamiento. CN9 permanece abierto. Corta y restablece energía
-   para reintentar automáticamente la operación pendiente.
-5. Si el problema persiste, usa el [CLI USB](SERIAL_CLI.md) o reflashea el
-   firmware antes de conectar CN9 nuevamente.
+1. Wait at least 20 seconds after confirmation.
+2. Verify that the paddle is OFF and power the controller back on.
+3. Look for `MicraShotStopperAP`; the initial STA attempt may delay its
+   appearance by approximately 15 seconds.
+4. If you hear a long-short-long pattern and startup does not continue, there
+   was a storage failure. CN9 stays open. Cut and restore power to
+   automatically retry the pending operation.
+5. If the issue persists, use the [USB CLI](SERIAL_CLI.md) or reflash the
+   firmware before connecting CN9 again.
 
