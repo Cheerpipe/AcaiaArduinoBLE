@@ -258,6 +258,7 @@ if (html.indexOf('<summary>Brew by Weight</summary>') >
     !ui.includes('requireCupToStart:$(\'requireCupToStart\')') ||
     !ui.includes("cupPresentWeightG:number('cupPresentWeightG')") ||
     !ui.includes("cupRemovedWeightG:number('cupRemovedWeightG')") ||
+    !ui.includes("'requireCupToStart','cupPresentWeightG','cupRemovedWeightG'") ||
     !network.includes('cupProtectionEnabled') ||
     !network.includes('stopIfCupRemoved') ||
     !network.includes('requireCupToStart') ||
@@ -511,7 +512,8 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !ui.includes('stopIfCupRemoved:$(\'stopIfCupRemoved\')') ||
     !ui.includes('requireCupToStart:$(\'requireCupToStart\')') ||
     !ui.includes("cupPresentWeightG:number('cupPresentWeightG')") ||
-    !ui.includes("cupRemovedWeightG:number('cupRemovedWeightG')")) {
+    !ui.includes("cupRemovedWeightG:number('cupRemovedWeightG')") ||
+    !ui.includes("'requireCupToStart','cupPresentWeightG','cupRemovedWeightG'")) {
   throw new Error('Auto-to-manual time guard must be wired in config UI, live panel, shots API, and routes');
 }
 if (!html.includes('<summary>Paddle</summary>') ||

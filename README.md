@@ -1,8 +1,10 @@
 # Micra Shot Stopper
 
 ESP32-S3 firmware that controls the CN9 paddle circuit of a La Marzocco Micra
-through an isolated relay contact and uses a compatible Bluetooth Low Energy
-scale to automate an extraction by weight.
+through an isolated relay contact and uses a Bluetooth Low Energy scale to
+automate an extraction by weight. It is **dedicated to the Micra** and was
+**designed primarily for a Bookoo scale** (Themis Mini/Ultra). Other compatible
+BLE scales still work through the vendored AcaiaArduinoBLE library.
 
 The Micra physical paddle **does not connect to CN9**: it connects only between
 the configured ESP32-S3 GPIO and GND. The relay COM/NO contact is the controller's
@@ -29,7 +31,7 @@ dependency.
 
 | | Original AcaiaArduinoBLE stopper | Micra Shot Stopper |
 | --- | --- | --- |
-| **Scope** | Generic, intended to work on several machines | Dedicated to the Micra and its independent paddle |
+| **Scope** | Generic, intended to work on several machines | Dedicated to the Micra and its independent paddle; designed primarily for Bookoo |
 | **Architecture** | Simple, mostly single-threaded | FreeRTOS tasks, queues, and isolation between control, BLE, and network |
 | **Features** | Minimal brew-by-weight stop | Rich workflow: retare, BBW protection, rinse, shot history, Web UI, diagnostics, safety layers |
 | **Config** | Bluetooth app; basic settings | Web UI — feature-rich, full control, presets, and shot history |
@@ -424,9 +426,10 @@ Scale compatibility depends on the
 copy under `libraries/AcaiaArduinoBLE/` and aims to stay aligned with upstream
 releases, new scale types, and protocol fixes as they land in that repository.
 
-- Local **AcaiaArduinoBLE** library (vendored in-repo) for **Acaia** (legacy and
-  current), **Bookoo/generic**, **Felicita**, and **AtomHeart Eclair** scales
-  over BLE central.
+- Daily development, defaults, and Bookoo-specific settings (combined tare +
+  start-timer, volume, mute in Buzzer only) assume a **Bookoo** Themis Mini or
+  Ultra. **Acaia** (legacy and current), **Felicita**, and **AtomHeart Eclair**
+  remain supported through the same vendored **AcaiaArduinoBLE** library.
 - Dedicated **`scale_worker`** FreeRTOS task isolates BLE polling, connection
   retries, tare/start/stop commands, and beeps from the control loop via
   bounded command and event queues.
