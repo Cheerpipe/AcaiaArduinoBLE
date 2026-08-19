@@ -3086,6 +3086,8 @@ const char *ShotStopperNetwork::endReasonName(EndReason reason) {
       return "SLOW_EXTRACTION_MIN_WEIGHT";
     case EndReason::AUTO_TO_MANUAL_GUARD:
       return "AUTO_TO_MANUAL_GUARD";
+    case EndReason::CUP_REMOVED:
+      return "CUP_REMOVED";
   }
   return "UNKNOWN";
 }
@@ -3266,7 +3268,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"operationalWallMs\":%lu,\"minBrewTimeMs\":%lu,\"maxBrewTimeMs\":%lu,"
         "\"minRecoveryWeightG\":%.1f,\"maxRecoveryWeightG\":%.1f,"
         "\"fastExtractionGuardEnabled\":%s,\"slowExtractionGuardEnabled\":%s,"
-        "\"autoToManualGuardEnabled\":%s,\"avoidBbwShotWithoutScale\":%s,"
+        "\"autoToManualGuardEnabled\":%s,\"cupProtectionEnabled\":%s,"
+        "\"stopIfCupRemoved\":%s,\"requireCupToStart\":%s,"
+        "\"avoidBbwShotWithoutScale\":%s,"
         "\"scaleMacCacheMode\":\"%s\"",
         control.config.soundAlertsMuted ? "false" : "true",
         control.config.timerOnly ? "false" : "true",
@@ -3279,6 +3283,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.config.fastExtractionGuardEnabled ? "true" : "false",
         control.config.slowExtractionGuardEnabled ? "true" : "false",
         control.config.autoToManualGuardEnabled ? "true" : "false",
+        control.config.cupProtectionEnabled ? "true" : "false",
+        control.config.stopIfCupRemoved ? "true" : "false",
+        control.config.requireCupToStart ? "true" : "false",
         control.config.avoidBbwShotWithoutScale ? "true" : "false",
         scaleMacCacheModeId(control.config.scaleMacCacheMode));
   } else if (ok && page == StatusPage::Settings) {
@@ -3308,7 +3315,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"autoToManualGuardLimitMode\":\"%s\","
         "\"autoToManualGuardManualLimitMs\":%lu,"
         "\"autoToManualGuardBaselineMs\":%lu,"
-        "\"autoToManualGuardTrendMs\":%lu,\"scaleMacCacheMode\":\"%s\","
+        "\"autoToManualGuardTrendMs\":%lu,\"cupProtectionEnabled\":%s,"
+        "\"stopIfCupRemoved\":%s,\"requireCupToStart\":%s,\"scaleMacCacheMode\":\"%s\","
         "\"bookooMuteOnBuzzerOnly\":%s,\"bookooConnectBeepLevel\":%u,"
         "\"avoidBbwShotWithoutScale\":%s,\"lastShotCooldownMs\":%lu",
         static_cast<unsigned>(control.config.goalWeightG),
@@ -3356,6 +3364,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.config.autoToManualGuardManualLimitMs),
         static_cast<unsigned long>(control.config.autoToManualGuardBaselineMs),
         static_cast<unsigned long>(control.autoToManualGuardTrendMs),
+        control.config.cupProtectionEnabled ? "true" : "false",
+        control.config.stopIfCupRemoved ? "true" : "false",
+        control.config.requireCupToStart ? "true" : "false",
         scaleMacCacheModeId(control.config.scaleMacCacheMode),
         control.config.bookooMuteOnBuzzerOnly ? "true" : "false",
         static_cast<unsigned>(control.config.bookooConnectBeepLevel),
@@ -4430,7 +4441,13 @@ esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
           !jsonUint32(root, "autoToManualGuardManualLimitMs",
                       command.config.autoToManualGuardManualLimitMs) ||
           !jsonUint32(root, "autoToManualGuardBaselineMs",
-                      command.config.autoToManualGuardBaselineMs)) {
+                      command.config.autoToManualGuardBaselineMs) ||
+          !jsonBoolean(root, "cupProtectionEnabled",
+                       command.config.cupProtectionEnabled) ||
+          !jsonBoolean(root, "stopIfCupRemoved",
+                       command.config.stopIfCupRemoved) ||
+          !jsonBoolean(root, "requireCupToStart",
+                       command.config.requireCupToStart)) {
         parseError = "save requires the full Brew recipe field set.";
       } else {
         command.config.timerOnly = !brewByWeight;

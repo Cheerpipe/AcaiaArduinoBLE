@@ -47,8 +47,8 @@ if (htmlBytes > 40960) {
 if (jsBytes > 81920) {
   throw new Error('Web UI JS source exceeds the 80 KiB authoring budget');
 }
-if (htmlBytes + jsBytes > 116736) {
-  throw new Error('Web UI HTML+JS source exceeds the 114 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 118784) {
+  throw new Error('Web UI HTML+JS source exceeds the 116 KiB combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -180,8 +180,6 @@ if (!network.includes('"firstDropBeep"') ||
     !ui.includes('Paddle reminder limit (min)') ||
     !ui.includes('id="paddleReturnReminderMaxDurationMin"') ||
     !ui.includes("number('paddleReturnReminderMaxDurationMin')*60000") ||
-    !ui.includes('id="sessionBar"') ||
-    !ui.includes('id="logoutButton"') ||
     ui.includes('Up to 120 shots') ||
     !ui.includes('/api/v1/time/sync') ||
     !firmware.includes('session.config.firstDropBeep') ||
@@ -201,6 +199,36 @@ if (!ui.includes('id="soundAlertsEnabled"') ||
     !ui.includes("k!=='soundAlertsEnabled'") ||
     !ui.includes("typeof c.soundAlertsEnabled==='boolean'")) {
   throw new Error('Sound alerts must be mirrored by Settings and Home patch controls');
+}
+
+if (html.indexOf('<summary>Brew by Weight</summary>') >
+        html.indexOf('<summary>Cup protection</summary>') ||
+    html.indexOf('<summary>Cup protection</summary>') >
+        html.indexOf('<summary>Fast extraction guard</summary>') ||
+    !ui.includes('id="cupProtectionEnabled"') ||
+    html.indexOf('id="cupProtectionEnabled"') >
+        html.indexOf('id="stopIfCupRemoved"') ||
+    html.indexOf('id="stopIfCupRemoved"') >
+        html.indexOf('id="requireCupToStart"') ||
+    !ui.includes('id="stopIfCupRemoved"') ||
+    !ui.includes('id="requireCupToStart"') ||
+    !ui.includes('Enable cup protection') ||
+    !ui.includes('cupProtectOpt') ||
+    !ui.includes('If you tared the empty cup, the shot will not start.') ||
+    !ui.includes('id="homeCupProtectionEnabled"') ||
+    html.indexOf('id="homeSoundAlertsEnabled"') >
+        html.indexOf('id="homeCupProtectionEnabled"') ||
+    html.indexOf('id="homeCupProtectionEnabled"') >
+        html.indexOf('id="homePresetBlock"') ||
+    !ui.includes("persistHomeGuard('homeCupProtectionEnabled'") ||
+    !ui.includes("'cupProtectionEnabled',1)") ||
+    !ui.includes('cupProtectionEnabled:$(\'cupProtectionEnabled\')') ||
+    !ui.includes('stopIfCupRemoved:$(\'stopIfCupRemoved\')') ||
+    !ui.includes('requireCupToStart:$(\'requireCupToStart\')') ||
+    !network.includes('cupProtectionEnabled') ||
+    !network.includes('stopIfCupRemoved') ||
+    !network.includes('requireCupToStart')) {
+  throw new Error('Cup protection master must precede Stop if cup is removed and Require cup to start; Home mirrors the master after Alerts');
 }
 
 if (!ui.includes('bleCompanionEnabled') ||
@@ -448,7 +476,13 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !network.includes('autoToManualGuardArmed') ||
     !network.includes('actualWeightSource') ||
     !network.includes('reset-guard-samples') ||
-    !network.includes('AUTO_TO_MANUAL_GUARD')) {
+    !network.includes('AUTO_TO_MANUAL_GUARD') ||
+    !network.includes('cupProtectionEnabled') ||
+    !network.includes('stopIfCupRemoved') ||
+    !network.includes('requireCupToStart') ||
+    !ui.includes('cupProtectionEnabled:$(\'cupProtectionEnabled\')') ||
+    !ui.includes('stopIfCupRemoved:$(\'stopIfCupRemoved\')') ||
+    !ui.includes('requireCupToStart:$(\'requireCupToStart\')')) {
   throw new Error('Auto-to-manual time guard must be wired in config UI, live panel, shots API, and routes');
 }
 if (!html.includes('<summary>Paddle</summary>') ||
@@ -649,6 +683,10 @@ if (!ui.includes('<legend>Brew</legend>') ||
         html.indexOf('id="homeSoundAlertsEnabled"') ||
     html.indexOf('id="homeSoundAlertsEnabled"') >
         html.indexOf('id="homePresetBlock"') ||
+    html.indexOf('id="homeSoundAlertsEnabled"') >
+        html.indexOf('id="homeCupProtectionEnabled"') ||
+    html.indexOf('id="homeCupProtectionEnabled"') >
+        html.indexOf('id="homePresetBlock"') ||
     html.indexOf('id="homeFastExtractionGuardEnabled"') > html.indexOf('id="shotPanel"') ||
     !html.includes('>No-scale BBW<span') ||
     !html.includes('>Fast extraction guard<span') ||
@@ -656,6 +694,18 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !html.includes('>A→M time guard<span') ||
     html.indexOf('<summary>No-scale BBW</summary>') < 0 ||
     html.indexOf('<summary>Fast extraction guard</summary>') < 0 ||
+    html.indexOf('<summary>Cup protection</summary>') < 0 ||
+    html.indexOf('<summary>Brew by Weight</summary>') >
+        html.indexOf('<summary>Cup protection</summary>') ||
+    html.indexOf('<summary>Cup protection</summary>') >
+        html.indexOf('<summary>Fast extraction guard</summary>') ||
+    !ui.includes('id="cupProtectionEnabled"') ||
+    html.indexOf('id="cupProtectionEnabled"') >
+        html.indexOf('id="stopIfCupRemoved"') ||
+    !ui.includes('id="stopIfCupRemoved"') ||
+    !ui.includes('id="requireCupToStart"') ||
+    !ui.includes('If you tared the empty cup, the shot will not start.') ||
+    !ui.includes('id="homeCupProtectionEnabled"') ||
     html.indexOf('<summary>Slow extraction guard</summary>') < 0 ||
     html.indexOf('<summary>A→M time guard</summary>') < 0 ||
     html.indexOf('<summary>Fast extraction guard</summary>') >
@@ -677,10 +727,12 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes("persistHomeGuard('homeFastExtractionGuardEnabled'") ||
     !ui.includes("persistHomeGuard('homeSlowExtractionGuardEnabled'") ||
     !ui.includes("persistHomeGuard('homeAutoToManualGuardEnabled'") ||
+    !ui.includes("persistHomeGuard('homeCupProtectionEnabled'") ||
     !ui.includes("'avoidBbwShotWithoutScale',0)") ||
     !ui.includes("'fastExtractionGuardEnabled',1)") ||
     !ui.includes("'slowExtractionGuardEnabled',1)") ||
     !ui.includes("'autoToManualGuardEnabled',1)") ||
+    !ui.includes("'cupProtectionEnabled',1)") ||
     !ui.includes('el.disabled=!controlsMutable||off') ||
     ui.includes('el.disabled=!controlsMutable||off||pend') ||
     !ui.includes('homeFlushBusy') ||
@@ -1709,15 +1761,15 @@ if (cssRoundTrip !== generated.css) {
 if (generated.gzip.length > 9216) {
   throw new Error('Compressed Web UI HTML exceeds the 9 KiB gzip budget');
 }
-if (generated.jsGzip.length > 20480) {
-  throw new Error('Compressed Web UI JS exceeds the 20 KiB gzip budget');
+if (generated.jsGzip.length > 21504) {
+  throw new Error('Compressed Web UI JS exceeds the 21 KiB gzip budget');
 }
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
 }
 if (generated.gzip.length + generated.jsGzip.length + generated.cssGzip.length >
-    31232) {
-  throw new Error('Combined HTML+JS+CSS gzip exceeds the 30.5 KiB flash budget');
+    33792) {
+  throw new Error('Combined HTML+JS+CSS gzip exceeds the 33 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {

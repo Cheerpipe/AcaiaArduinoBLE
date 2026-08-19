@@ -293,6 +293,7 @@ enum class AlertEvent : uint8_t {
   SCALE_LOST,
   ATM_END,
   MANUAL_NO_SCALE,
+  CUP_START_BLOCKED,
   EXTENDED_PULSE,
   SCALE_CONNECTED
 };
@@ -398,6 +399,11 @@ struct CycleSession {
   uint8_t activePresetId = 0;
   bool paddlePromotedToNatural = false;
   bool originalBbwHardMaxArmed = false;
+  bool cupRemovedArmed = false;
+  bool cupRemovedPending = false;
+  uint8_t cupRemovedConfirmations = 0;
+  uint32_t lastCupRemovedAtMs = 0;
+  uint32_t lastCupRemovedPacketSequence = 0;
 };
 
 struct PendingShotFinalize {
@@ -504,6 +510,8 @@ uint32_t noScaleShotGuardActivityAtMs = 0;
 bool noScaleShotGuardScaleWasAvailable = false;
 bool noScaleShotGuardHold = false;
 uint32_t noScaleShotGuardHoldAtMs = 0;
+bool cupStartGuardHold = false;
+uint32_t cupStartGuardHoldAtMs = 0;
 
 float currentWeight = 0.0f;
 uint32_t currentWeightReceivedAtMs = 0;
@@ -2455,6 +2463,54 @@ bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
 void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
                               uint32_t packetSequence);
 
+void considerCupRemovedSample(float weight, uint32_t receivedAtMs,
+                              uint32_t packetSequence) {
+  if (!session.active || stopperState != StopperState::BREW ||
+      session.config.timerOnly || !session.config.cupProtectionEnabled ||
+      !session.config.stopIfCupRemoved || !session.startedWithScale) {
+    return;
+  }
+  if (session.awaitingPostTareBaseline) {
+    if (isfinite(weight) && weight > CUP_REMOVED_WEIGHT_G) {
+      session.cupRemovedArmed = true;
+    }
+    session.cupRemovedConfirmations = 0;
+    session.lastCupRemovedAtMs = 0;
+    session.lastCupRemovedPacketSequence = 0;
+    return;
+  }
+  if (!isfinite(weight) || weight > CUP_REMOVED_WEIGHT_G) {
+    session.cupRemovedArmed = true;
+    session.cupRemovedConfirmations = 0;
+    session.lastCupRemovedAtMs = 0;
+    session.lastCupRemovedPacketSequence = 0;
+    return;
+  }
+  if (!session.cupRemovedArmed) {
+    return;
+  }
+
+  const bool consecutive = session.cupRemovedConfirmations > 0 &&
+      static_cast<int32_t>(receivedAtMs - session.lastCupRemovedAtMs) >= 0 &&
+      static_cast<uint32_t>(receivedAtMs - session.lastCupRemovedAtMs) <=
+          DIRECT_STOP_CONFIRMATION_WINDOW_MS &&
+      (packetSequence == 0 || session.lastCupRemovedPacketSequence == 0 ||
+       packetSequence == session.lastCupRemovedPacketSequence + 1U);
+  session.cupRemovedConfirmations = consecutive
+      ? static_cast<uint8_t>(session.cupRemovedConfirmations + 1U)
+      : 1U;
+  session.lastCupRemovedAtMs = receivedAtMs;
+  session.lastCupRemovedPacketSequence = packetSequence;
+
+  if (session.cupRemovedConfirmations < DIRECT_STOP_CONFIRMATION_SAMPLES) {
+    return;
+  }
+  session.cupRemovedPending = true;
+  addDebugEvent(DebugCategory::SCALE, DebugCode::CUP_REMOVED_CONFIRMED,
+                weightToCentigrams(weight),
+                static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+}
+
 bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
                                       uint32_t packetSequence,
                                       uint32_t connectionGeneration) {
@@ -2473,6 +2529,8 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
       packetSequence = 1;
     }
   }
+
+  considerCupRemovedSample(weight, receivedAtMs, packetSequence);
 
   if (session.active && session.startedWithScale) {
     if (retareWindowOpen() &&
@@ -3340,6 +3398,7 @@ bool alertEventScaleCapable(AlertEvent event) {
     case AlertEvent::SCALE_LOST:
     case AlertEvent::ATM_END:
     case AlertEvent::MANUAL_NO_SCALE:
+    case AlertEvent::CUP_START_BLOCKED:
     case AlertEvent::EXTENDED_PULSE:
     case AlertEvent::SCALE_CONNECTED:
       return false;
@@ -3416,6 +3475,8 @@ bool emitAlert(AlertEvent event, uint32_t cycleId) {
   } else if (event == AlertEvent::ATM_END ||
              event == AlertEvent::MANUAL_NO_SCALE) {
     buzzerPattern = BuzzerPattern::TRIPLE;
+  } else if (event == AlertEvent::CUP_START_BLOCKED) {
+    buzzerPattern = BuzzerPattern::DOUBLE;
   } else if (event == AlertEvent::COMPLETION_EXTRA) {
     buzzerPattern = BuzzerPattern::LONG;
   } else if (event == AlertEvent::EXTENDED_PULSE) {
@@ -3563,6 +3624,7 @@ bool shotCompletionGetsLongBeep(EndReason reason) {
     case EndReason::SLOW_EXTRACTION_MAX_TIME:
     case EndReason::SLOW_EXTRACTION_MIN_WEIGHT:
     case EndReason::AUTO_TO_MANUAL_GUARD:
+    case EndReason::CUP_REMOVED:
       return true;
     default:
       return false;
@@ -4632,6 +4694,41 @@ void serviceNoScaleShotGuard() {
   }
 }
 
+bool cupStartGuardWouldBlock() {
+  const RuntimeConfig effective = effectiveRuntimeConfig();
+  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
+  const bool scaleUsable =
+      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
+  return effective.cupProtectionEnabled && effective.requireCupToStart &&
+         !effective.timerOnly && scaleUsable && currentWeight <= 0.0f;
+}
+
+void serviceCupStartGuard() {
+  if (!cupStartGuardHold) {
+    return;
+  }
+  const RuntimeConfig effective = effectiveRuntimeConfig();
+  if (!effective.cupProtectionEnabled || !effective.requireCupToStart ||
+      effective.timerOnly) {
+    cupStartGuardHold = false;
+    return;
+  }
+  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
+  const bool scaleUsable =
+      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
+  if (scaleUsable && currentWeight > 0.0f) {
+    cupStartGuardHold = false;
+    return;
+  }
+  if (rawPaddleOn &&
+      elapsedMs(cupStartGuardHoldAtMs) > runtimeConfig.rinseGestureMs) {
+    cupStartGuardHold = false;
+    addDebugEvent(DebugCategory::STATE, DebugCode::CUP_START_GUARD_BLOCKED,
+                  weightToCentigrams(currentWeight));
+    emitAlert(AlertEvent::CUP_START_BLOCKED);
+  }
+}
+
 void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   maybeEmitManualNoScaleBeep();
   if (noScaleShotGuardWouldBlock()) {
@@ -4644,6 +4741,20 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
     return;
   }
   noScaleShotGuardHold = false;
+
+  if (cupStartGuardWouldBlock()) {
+    if (source == ControlSource::PHYSICAL) {
+      cupStartGuardHold = true;
+      cupStartGuardHoldAtMs = millis();
+      return;
+    }
+    cupStartGuardHold = false;
+    addDebugEvent(DebugCategory::STATE, DebugCode::CUP_START_GUARD_BLOCKED,
+                  weightToCentigrams(currentWeight));
+    emitAlert(AlertEvent::CUP_START_BLOCKED);
+    return;
+  }
+  cupStartGuardHold = false;
 
   flushPendingScaleTimerStopNow();
   cancelPendingFinalize("Previous drip analysis cancelled by a new cycle");
@@ -5116,10 +5227,15 @@ void stateMachineTask() {
       if (paddleTurnedOn) {
         beginCycle(ControlSource::PHYSICAL);
       }
-      if (paddleTurnedOff && noScaleShotGuardHold &&
-          elapsedMs(noScaleShotGuardHoldAtMs) <=
-              runtimeConfig.rinseGestureMs) {
+      if (paddleTurnedOff &&
+          ((noScaleShotGuardHold &&
+            elapsedMs(noScaleShotGuardHoldAtMs) <=
+                runtimeConfig.rinseGestureMs) ||
+           (cupStartGuardHold &&
+            elapsedMs(cupStartGuardHoldAtMs) <=
+                runtimeConfig.rinseGestureMs))) {
         noScaleShotGuardHold = false;
+        cupStartGuardHold = false;
         if (!beginRinseCycle(ControlSource::PHYSICAL)) {
           return;
         }
@@ -5154,6 +5270,14 @@ void stateMachineTask() {
 
       expirePostTareBaselineIfNeeded();
       serviceBbwProtectionPhases();
+
+      if (session.cupRemovedPending) {
+        const StopperState afterCupRemoved =
+            (paddleOn || rawPaddleOn) ? StopperState::REQUIRES_OFF
+                                      : StopperState::READY;
+        finalizeCycle(EndReason::CUP_REMOVED, afterCupRemoved);
+        return;
+      }
 
       if ((session.weightControlState == WeightControlState::ACTIVE ||
            session.weightControlState == WeightControlState::VALIDATING) &&
@@ -7391,6 +7515,7 @@ void loop() {
   // priority is preserved without adding a full event backlog to this loop.
   processScaleWorkerEvents();
   serviceNoScaleShotGuard();
+  serviceCupStartGuard();
   stateMachineTask();
   servicePaddleReturnReminder();
   serviceExtendedPulseAlert();

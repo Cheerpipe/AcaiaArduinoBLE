@@ -116,6 +116,8 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   noScaleShotGuardScaleWasAvailable = false;
   noScaleShotGuardHold = false;
   noScaleShotGuardHoldAtMs = 0;
+  cupStartGuardHold = false;
+  cupStartGuardHoldAtMs = 0;
   debugLog.clear();
   lastReportedLogOverwritten = 0;
   serialLogLevel = LogLevel::NONE;
@@ -284,6 +286,8 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
            sizeof(preset.autoToManualGuardSamplesDs));
   }
   runtimeConfig = composeEffectiveConfig(runtimeConfig, presetBank);
+  runtimeConfig.requireCupToStart = false;
+  mutableActiveShotPreset(presetBank).requireCupToStart = false;
 }
 
 void verifySafetyInvariants() {
@@ -1616,6 +1620,9 @@ void w01_default_runtime_configuration_is_valid() {
         0.001f);
   CHECK(config.maxBrewTimeMs == DEFAULT_MAX_BREW_TIME_MS);
   CHECK(config.avoidBbwShotWithoutScale);
+  CHECK(config.cupProtectionEnabled);
+  CHECK(config.stopIfCupRemoved);
+  CHECK(config.requireCupToStart);
   CHECK(config.lastShotCooldownMs == DEFAULT_LAST_SHOT_COOLDOWN_MS);
   CHECK(config.dripDelayMs == DEFAULT_DRIP_DELAY_MS);
   CHECK(!config.serialDebugOutput);
@@ -2328,6 +2335,26 @@ void w50b_buzzer_phase_timer_holds_triple_rhythm_without_loop() {
   hostMillis += BUZZER_BEEP_ON_MS;
   hostServiceEspTimer(localBuzzer.phaseTimer);
   CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  hostMillis += BUZZER_BEEP_GAP_MS;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  hostMillis += BUZZER_BEEP_ON_MS;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  CHECK(!localBuzzer.busy());
+}
+
+void w50e_buzzer_phase_timer_holds_double_as_truncated_triple() {
+  resetHarness(false, false);
+  CHECK(localBuzzer.request(BuzzerPattern::DOUBLE));
+  CHECK(localBuzzer.beepCount == 2);
+  CHECK(localBuzzer.onMs == BUZZER_BEEP_ON_MS);
+  CHECK(localBuzzer.gapMs == BUZZER_BEEP_GAP_MS);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+  hostMillis += BUZZER_BEEP_ON_MS;
+  hostServiceEspTimer(localBuzzer.phaseTimer);
+  CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
+  CHECK(localBuzzer.busy());
   hostMillis += BUZZER_BEEP_GAP_MS;
   hostServiceEspTimer(localBuzzer.phaseTimer);
   CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
@@ -4293,6 +4320,8 @@ void w25c_ring_retain_none_skips_ring_and_error_filters() {
 void r41_negative_weight_in_range_starts_automatic_cycle() {
   resetHarness(false, true);
   reachReadyFromBoot();
+  runtimeConfig.requireCupToStart = false;
+  mutableActiveShotPreset(presetBank).requireCupToStart = false;
   currentWeight = -236.0f;
   currentWeightReceivedAtMs = hostMillis;
   currentWeightSequence = 1;
@@ -4300,6 +4329,276 @@ void r41_negative_weight_in_range_starts_automatic_cycle() {
   CHECK(session.startedWithScale);
   CHECK(session.awaitingPostTareBaseline);
   CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
+}
+
+void enableCupStartGuardForTest() {
+  runtimeConfig.cupProtectionEnabled = true;
+  runtimeConfig.requireCupToStart = true;
+  mutableActiveShotPreset(presetBank).cupProtectionEnabled = true;
+  mutableActiveShotPreset(presetBank).requireCupToStart = true;
+}
+
+void attemptBlockedCupStart() {
+  CHECK(stopperState == StopperState::READY);
+  const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
+  setRawPaddle(true);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(!session.active);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(cupStartGuardHold);
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps);
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(!session.active);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(!cupStartGuardHold);
+  CHECK(debugEventExists(DebugCode::CUP_START_GUARD_BLOCKED));
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+}
+
+void cp01_zero_pre_tare_weight_blocks_brew() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableCupStartGuardForTest();
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  attemptBlockedCupStart();
+}
+
+void cp02_negative_pre_tare_weight_blocks_brew() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableCupStartGuardForTest();
+  currentWeight = -50.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  attemptBlockedCupStart();
+}
+
+void cp03_positive_pre_tare_weight_starts_brew() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableCupStartGuardForTest();
+  currentWeight = 80.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.active);
+}
+
+void cp04_require_cup_off_allows_zero_start() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  CHECK(stopperState == StopperState::BREW);
+}
+
+void cp05_rinse_without_cup_still_starts() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableCupStartGuardForTest();
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
+  const uint32_t rawOnAt = hostMillis;
+  setRawPaddle(true);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(cupStartGuardHold);
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps);
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(!cupStartGuardHold);
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps);
+}
+
+void cp06_cup_removed_stops_during_bbw_protection() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  currentWeight = 80.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  advanceToBrew();
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(!session.bbwProtectionEnded);
+  publishWeight(-80.0f, hostMillis, 1, 40);
+  publishWeight(-81.0f, hostMillis + 1, 1, 41);
+  runLoopAfter(1);
+  CHECK(session.endReason == EndReason::CUP_REMOVED);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(debugEventExists(DebugCode::CUP_REMOVED_CONFIRMED));
+  CHECK(shotLogStopDetailFromEndReason(EndReason::CUP_REMOVED, true, false) ==
+        ShotLogStopDetail::CUP_REMOVED);
+  CHECK(shotLogCutFromEndReason(EndReason::CUP_REMOVED) == ShotLogCut::AUTO);
+}
+
+void cp07_zero_after_tare_does_not_stop() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  currentWeight = 80.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  advanceToBrew();
+  publishWeight(0.0f, hostMillis, 1, 50);
+  publishWeight(0.1f, hostMillis + 1, 1, 51);
+  runLoopAfter(1);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.endReason == EndReason::NONE);
+}
+
+void cp08_stop_if_cup_removed_off_keeps_negative_weight() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.stopIfCupRemoved = false;
+  mutableActiveShotPreset(presetBank).stopIfCupRemoved = false;
+  currentWeight = 80.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  advanceToBrew();
+  publishWeight(-80.0f, hostMillis, 1, 40);
+  publishWeight(-81.0f, hostMillis + 1, 1, 41);
+  runLoopAfter(1);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.endReason == EndReason::NONE);
+}
+
+void cp09_blocked_cup_start_is_silent_when_alerts_off() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableCupStartGuardForTest();
+  runtimeConfig.soundAlertsMuted = true;
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
+  setRawPaddle(true);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  CHECK(debugEventExists(DebugCode::CUP_START_GUARD_BLOCKED));
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps);
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+}
+
+void cp10_web_paddle_blocks_cup_start_with_double_beep() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableCupStartGuardForTest();
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
+  processWebCommand(webControlCommand(WebCommandType::PADDLE_ON));
+  CHECK(stopperState == StopperState::READY);
+  CHECK(!session.active);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(debugEventExists(DebugCode::CUP_START_GUARD_BLOCKED));
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
+}
+
+void cp11_master_off_allows_zero_pre_tare_start() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableCupStartGuardForTest();
+  runtimeConfig.cupProtectionEnabled = false;
+  mutableActiveShotPreset(presetBank).cupProtectionEnabled = false;
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.active);
+}
+
+void cp12_master_off_does_not_stop_on_negative_weight() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.cupProtectionEnabled = false;
+  mutableActiveShotPreset(presetBank).cupProtectionEnabled = false;
+  currentWeight = 80.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  advanceToBrew();
+  publishWeight(-80.0f, hostMillis, 1, 40);
+  publishWeight(-81.0f, hostMillis + 1, 1, 41);
+  runLoopAfter(1);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.endReason == EndReason::NONE);
+}
+
+void cp13_pre_tare_negative_packets_do_not_abort() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.requireCupToStart = false;
+  mutableActiveShotPreset(presetBank).requireCupToStart = false;
+  currentWeight = -236.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  CHECK(session.awaitingPostTareBaseline);
+  publishWeight(-236.0f, hostMillis, 1, 2);
+  publishWeight(-236.0f, hostMillis + 1, 1, 3);
+  runLoopAfter(1);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.endReason == EndReason::NONE);
+  CHECK(session.awaitingPostTareBaseline);
+  establishPostTareBaseline();
+  CHECK(!session.awaitingPostTareBaseline);
+  publishWeight(-0.2f, hostMillis, 1, 10);
+  publishWeight(-0.2f, hostMillis + 1, 1, 11);
+  runLoopAfter(1);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.endReason == EndReason::NONE);
+  publishWeight(-80.0f, hostMillis, 1, 40);
+  publishWeight(-81.0f, hostMillis + 1, 1, 41);
+  runLoopAfter(1);
+  CHECK(session.endReason == EndReason::CUP_REMOVED);
+}
+
+void cp14_post_tare_noise_does_not_stop() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  currentWeight = 80.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  advanceToBrew();
+  publishWeight(-0.2f, hostMillis, 1, 50);
+  publishWeight(-0.2f, hostMillis + 1, 1, 51);
+  runLoopAfter(1);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.endReason == EndReason::NONE);
+}
+
+void cp15_timer_only_ignores_negative_weight() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.timerOnly = true;
+  currentWeight = 80.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  CHECK(session.config.timerOnly);
+  publishWeight(-80.0f, hostMillis, 1, 40);
+  publishWeight(-81.0f, hostMillis + 1, 1, 41);
+  runLoopAfter(1);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.endReason == EndReason::NONE);
 }
 
 void r42_weight_below_automation_min_stays_manual() {
@@ -6698,6 +6997,21 @@ const TestCase testCases[] = {
     {"R34", r34_suspended_control_recovers_after_three_attributed_samples},
     {"R35", r35_connected_without_weight_stream_is_not_available_indicator},
     {"R41", r41_negative_weight_in_range_starts_automatic_cycle},
+    {"CP01", cp01_zero_pre_tare_weight_blocks_brew},
+    {"CP02", cp02_negative_pre_tare_weight_blocks_brew},
+    {"CP03", cp03_positive_pre_tare_weight_starts_brew},
+    {"CP04", cp04_require_cup_off_allows_zero_start},
+    {"CP05", cp05_rinse_without_cup_still_starts},
+    {"CP06", cp06_cup_removed_stops_during_bbw_protection},
+    {"CP07", cp07_zero_after_tare_does_not_stop},
+    {"CP08", cp08_stop_if_cup_removed_off_keeps_negative_weight},
+    {"CP09", cp09_blocked_cup_start_is_silent_when_alerts_off},
+    {"CP10", cp10_web_paddle_blocks_cup_start_with_double_beep},
+    {"CP11", cp11_master_off_allows_zero_pre_tare_start},
+    {"CP12", cp12_master_off_does_not_stop_on_negative_weight},
+    {"CP13", cp13_pre_tare_negative_packets_do_not_abort},
+    {"CP14", cp14_post_tare_noise_does_not_stop},
+    {"CP15", cp15_timer_only_ignores_negative_weight},
     {"R42", r42_weight_below_automation_min_stays_manual},
     {"R43", r43_post_tare_baseline_accepts_zero_after_pre_tare_weight},
     {"R54", r54_post_tare_baseline_keeps_weight_control},
@@ -6772,6 +7086,7 @@ const TestCase testCases[] = {
     {"W44", w44_paddle_return_reminder_stops_after_fifteen_minutes},
     {"W50", w50_local_buzzer_plays_triple_pattern_non_blocking},
     {"W50b", w50b_buzzer_phase_timer_holds_triple_rhythm_without_loop},
+    {"W50e", w50e_buzzer_phase_timer_holds_double_as_truncated_triple},
     {"W50c", w50c_buzzer_phase_timer_advances_despite_loop_stall},
     {"W50d", w50d_recovery_buzzer_patterns_have_exact_timings},
     {"W51", w51_local_buzzer_echo_inverted_on_scale_lost_during_bbw},

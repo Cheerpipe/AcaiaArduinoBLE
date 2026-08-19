@@ -52,6 +52,7 @@ enum class ShotLogStopDetail : uint8_t {
   AUTO_TO_MANUAL = 4,
   SLOW_MAX_TIME = 5,
   SLOW_MIN_WEIGHT = 6,
+  CUP_REMOVED = 7,
   OTHER = 255
 };
 
@@ -95,6 +96,7 @@ inline const char *shotLogStopDetailName(ShotLogStopDetail detail) {
     case ShotLogStopDetail::AUTO_TO_MANUAL: return "auto_to_manual";
     case ShotLogStopDetail::SLOW_MAX_TIME: return "slow_max_time";
     case ShotLogStopDetail::SLOW_MIN_WEIGHT: return "slow_min_weight";
+    case ShotLogStopDetail::CUP_REMOVED: return "cup_removed";
     case ShotLogStopDetail::OTHER: return "other";
   }
   return "unknown";
@@ -122,6 +124,8 @@ inline ShotLogStopDetail shotLogStopDetailFromEndReason(
       return ShotLogStopDetail::SLOW_MIN_WEIGHT;
     case EndReason::AUTO_TO_MANUAL_GUARD:
       return ShotLogStopDetail::AUTO_TO_MANUAL;
+    case EndReason::CUP_REMOVED:
+      return ShotLogStopDetail::CUP_REMOVED;
     case EndReason::SCALE_THRESHOLD:
     case EndReason::WEIGHT_ANOMALY:
       return extractionExtended && extractionGuardEnabled
@@ -158,6 +162,7 @@ inline ShotLogCut shotLogCutFromEndReason(EndReason reason) {
     case EndReason::FAST_EXTRACTION_MIN_TIME:
     case EndReason::SLOW_EXTRACTION_MAX_TIME:
     case EndReason::SLOW_EXTRACTION_MIN_WEIGHT:
+    case EndReason::CUP_REMOVED:
       return ShotLogCut::AUTO;
     case EndReason::PADDLE:
     case EndReason::WEB_STOP:

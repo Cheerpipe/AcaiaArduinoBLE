@@ -12,7 +12,7 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 6;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 8;
 constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
 constexpr size_t PREFERRED_SCALE_NAME_CAPACITY = 32;
 constexpr size_t SCALE_HISTORY_CAPACITY = 8;
@@ -245,6 +245,8 @@ constexpr float MAX_AUTOMATION_WEIGHT_SLEW_G_PER_S = 100.0f;
 constexpr float AUTOMATION_WEIGHT_SLEW_ALLOWANCE_G = 20.0f;
 constexpr float POST_TARE_BASELINE_MAX_ABS_G = 50.0f;
 constexpr uint32_t POST_TARE_BASELINE_GRACE_MS = 2000;
+// Ignore tare noise around 0; a lifted cup drops several grams below this.
+constexpr float CUP_REMOVED_WEIGHT_G = -2.0f;
 constexpr float MAX_PARSED_WEIGHT_G = 10000.0f;
 constexpr uint8_t DIRECT_STOP_CONFIRMATION_SAMPLES = 2;
 constexpr uint8_t WEIGHT_RECOVERY_CONFIRMATION_SAMPLES = 3;
@@ -642,7 +644,8 @@ enum class EndReason : uint8_t {
   FAST_EXTRACTION_MIN_TIME = 14,
   SLOW_EXTRACTION_MAX_TIME = 15,
   SLOW_EXTRACTION_MIN_WEIGHT = 16,
-  AUTO_TO_MANUAL_GUARD = 17
+  AUTO_TO_MANUAL_GUARD = 17,
+  CUP_REMOVED = 18
 };
 
 enum class AutoToManualGuardLimitMode : uint8_t {
@@ -875,6 +878,9 @@ struct RuntimeConfig {
       static_cast<uint8_t>(ScaleMacCacheMode::FULL);
   bool bookooMuteOnBuzzerOnly = true;
   uint8_t bookooConnectBeepLevel = DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL;
+  bool cupProtectionEnabled = true;
+  bool stopIfCupRemoved = true;
+  bool requireCupToStart = true;
   bool avoidBbwShotWithoutScale = true;
   uint32_t lastShotCooldownMs = DEFAULT_LAST_SHOT_COOLDOWN_MS;
   // USB debug spew (paddle/CN9/Wi-Fi traces). CLI replies stay independent.
@@ -923,6 +929,9 @@ struct CycleConfigSnapshot {
       static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
   uint32_t autoToManualGuardManualLimitMs =
       DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
+  bool cupProtectionEnabled = true;
+  bool stopIfCupRemoved = true;
+  bool requireCupToStart = true;
   uint16_t autoToManualGuardSamplesDs[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT] = {
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
@@ -969,6 +978,9 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.autoToManualGuardLimitMode = config.autoToManualGuardLimitMode;
   snapshot.autoToManualGuardManualLimitMs =
       config.autoToManualGuardManualLimitMs;
+  snapshot.cupProtectionEnabled = config.cupProtectionEnabled;
+  snapshot.stopIfCupRemoved = config.stopIfCupRemoved;
+  snapshot.requireCupToStart = config.requireCupToStart;
   memcpy(snapshot.autoToManualGuardSamplesDs, config.autoToManualGuardSamplesDs,
          sizeof(snapshot.autoToManualGuardSamplesDs));
   return snapshot;
@@ -1116,6 +1128,9 @@ struct ShotPreset {
       DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
   uint32_t autoToManualGuardBaselineMs =
       DEFAULT_AUTO_TO_MANUAL_GUARD_BASELINE_MS;
+  bool cupProtectionEnabled = true;
+  bool stopIfCupRemoved = true;
+  bool requireCupToStart = true;
   uint16_t autoToManualGuardSamplesDs[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT] = {
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
@@ -2258,6 +2273,8 @@ enum class DebugCode : uint8_t {
   NO_SCALE_SHOT_GUARD_BLOCKED,
   NO_SCALE_SHOT_GUARD_ARMED,
   NO_SCALE_SHOT_GUARD_CONSUMED,
+  CUP_START_GUARD_BLOCKED,
+  CUP_REMOVED_CONFIRMED,
   RINSE_CLASSIFIED,
   SYSTEM_LOG_OVERRUN,
   AP_PASSWORD_RESET,
@@ -2723,6 +2740,10 @@ inline const char *debugCodeName(DebugCode code) {
       return "no-scale BBW guard armed";
     case DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED:
       return "no-scale BBW guard consumed";
+    case DebugCode::CUP_START_GUARD_BLOCKED:
+      return "brew blocked: cup required";
+    case DebugCode::CUP_REMOVED_CONFIRMED:
+      return "shot stopped: cup removed";
     case DebugCode::RINSE_CLASSIFIED: return "rinse classified";
     case DebugCode::SYSTEM_LOG_OVERRUN: return "diagnostic log overrun";
     case DebugCode::HEALTH_HEAP_LOW: return "health heap low";
@@ -2856,6 +2877,7 @@ inline const char *endReasonDebugName(EndReason reason) {
     case EndReason::SLOW_EXTRACTION_MIN_WEIGHT:
       return "slow extraction min weight";
     case EndReason::AUTO_TO_MANUAL_GUARD: return "auto-to-manual time guard";
+    case EndReason::CUP_REMOVED: return "cup removed";
   }
   return "unknown";
 }
@@ -2906,6 +2928,12 @@ inline bool formatLifecycleDebugMessage(const DebugEvent &event, char *message,
       return true;
     case DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED:
       snprintf(message, capacity, "no-scale BBW guard consumed");
+      return true;
+    case DebugCode::CUP_START_GUARD_BLOCKED:
+      snprintf(message, capacity, "brew blocked: cup required");
+      return true;
+    case DebugCode::CUP_REMOVED_CONFIRMED:
+      snprintf(message, capacity, "shot stopped: cup removed");
       return true;
     case DebugCode::CYCLE_ENDED:
       snprintf(message, capacity, "cycle ended by %s",

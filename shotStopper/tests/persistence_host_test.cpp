@@ -85,6 +85,9 @@ void p01_defaults_are_valid() {
   CHECK(settings.runtime.buzzerSlowExtendedPulseRate ==
         static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE));
   CHECK(settings.runtime.avoidBbwShotWithoutScale);
+  CHECK(settings.runtime.cupProtectionEnabled);
+  CHECK(settings.runtime.stopIfCupRemoved);
+  CHECK(settings.runtime.requireCupToStart);
   CHECK(settings.runtime.lastShotCooldownMs == DEFAULT_LAST_SHOT_COOLDOWN_MS);
   CHECK(settings.runtime.dripDelayMs == DEFAULT_DRIP_DELAY_MS);
   CHECK(!settings.runtime.serialDebugOutput);
@@ -110,6 +113,12 @@ void p02_newest_valid_slot_is_loaded() {
   settings.runtime.goalWeightG = 47;
   settings.runtime.maxRecoveryWeightG = 55.0f;
   settings.runtime.soundAlertsMuted = true;
+  settings.runtime.cupProtectionEnabled = false;
+  settings.runtime.stopIfCupRemoved = false;
+  settings.runtime.requireCupToStart = false;
+  settings.presets.presets[0].cupProtectionEnabled = false;
+  settings.presets.presets[0].stopIfCupRemoved = false;
+  settings.presets.presets[0].requireCupToStart = false;
   CHECK(savePersistedSettings(settings));
   CHECK(settings.storageRevision == firstRevision + 1);
 
@@ -117,6 +126,12 @@ void p02_newest_valid_slot_is_loaded() {
   CHECK(loadPersistedSettings(loaded));
   CHECK(loaded.runtime.goalWeightG == 47);
   CHECK(loaded.runtime.soundAlertsMuted);
+  CHECK(!loaded.runtime.cupProtectionEnabled);
+  CHECK(!loaded.runtime.stopIfCupRemoved);
+  CHECK(!loaded.runtime.requireCupToStart);
+  CHECK(!loaded.presets.presets[0].cupProtectionEnabled);
+  CHECK(!loaded.presets.presets[0].stopIfCupRemoved);
+  CHECK(!loaded.presets.presets[0].requireCupToStart);
 }
 
 void p02b_save_uses_ram_revision_when_slots_unreadable() {
@@ -498,12 +513,31 @@ void p24_preset_bank_size_and_crud_budgets() {
   CHECK(std::fabs(bank.presets[0].minRecoveryWeightG -
                   DEFAULT_MIN_RECOVERY_WEIGHT_G) < 0.001f);
   CHECK(bank.presets[0].maxBrewTimeMs == DEFAULT_MAX_BREW_TIME_MS);
+  CHECK(bank.presets[0].cupProtectionEnabled);
+  CHECK(bank.presets[0].stopIfCupRemoved);
+  CHECK(bank.presets[0].requireCupToStart);
   CHECK(bank.presets[1].fastExtractionGuardEnabled);
   CHECK(bank.presets[1].slowExtractionGuardEnabled);
   CHECK(bank.presets[1].minBrewTimeMs == FACTORY_SINGLE_MIN_BREW_TIME_MS);
   CHECK(std::fabs(bank.presets[1].minRecoveryWeightG -
                   FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G) < 0.001f);
   CHECK(bank.presets[1].maxBrewTimeMs == FACTORY_SINGLE_MAX_BREW_TIME_MS);
+
+  {
+    ShotPreset recipe{};
+    RuntimeConfig cfg{};
+    cfg.cupProtectionEnabled = false;
+    cfg.stopIfCupRemoved = false;
+    cfg.requireCupToStart = false;
+    copyUserRecipeFromConfig(cfg, recipe);
+    CHECK(!recipe.cupProtectionEnabled);
+    CHECK(!recipe.stopIfCupRemoved);
+    CHECK(!recipe.requireCupToStart);
+    applyShotPresetToConfig(recipe, cfg, false);
+    CHECK(!cfg.cupProtectionEnabled);
+    CHECK(!cfg.stopIfCupRemoved);
+    CHECK(!cfg.requireCupToStart);
+  }
 
   ShotPresetBank resetBank = bank;
   ShotPreset *single = mutableShotPreset(resetBank, FACTORY_PRESET_ID_SINGLE);
