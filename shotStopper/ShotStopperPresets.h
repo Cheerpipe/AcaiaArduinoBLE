@@ -32,7 +32,9 @@ inline void fillDoubleFirmwareDefaults(ShotPreset &preset) {
       DEFAULT_AUTO_TO_MANUAL_GUARD_BASELINE_MS;
   preset.cupProtectionEnabled = true;
   preset.stopIfCupRemoved = true;
-  preset.requireCupToStart = true;
+  preset.requireCupToStart = false;
+  preset.cupPresentWeightG = DEFAULT_CUP_PRESENT_WEIGHT_G;
+  preset.cupRemovedWeightG = DEFAULT_CUP_REMOVED_WEIGHT_G;
   seedAutoToManualSamples(preset);
 }
 
@@ -154,6 +156,8 @@ inline bool validateShotPresetRecipe(const ShotPreset &preset,
   probe.autoToManualGuardLimitMode = preset.autoToManualGuardLimitMode;
   probe.autoToManualGuardManualLimitMs = preset.autoToManualGuardManualLimitMs;
   probe.autoToManualGuardBaselineMs = preset.autoToManualGuardBaselineMs;
+  probe.cupPresentWeightG = preset.cupPresentWeightG;
+  probe.cupRemovedWeightG = preset.cupRemovedWeightG;
   probe.autoRetare = machineAutoRetare;
   probe.retareWindowMs = machineRetareWindowMs;
   // Machine defaults for fields validateRuntimeConfig still checks.
@@ -343,6 +347,8 @@ inline void applyShotPresetToConfig(const ShotPreset &preset,
   config.cupProtectionEnabled = preset.cupProtectionEnabled;
   config.stopIfCupRemoved = preset.stopIfCupRemoved;
   config.requireCupToStart = preset.requireCupToStart;
+  config.cupPresentWeightG = preset.cupPresentWeightG;
+  config.cupRemovedWeightG = preset.cupRemovedWeightG;
   memcpy(config.autoToManualGuardSamplesDs, preset.autoToManualGuardSamplesDs,
          sizeof(config.autoToManualGuardSamplesDs));
   config.timerOnly = sessionManual ? true : !preset.brewByWeight;
@@ -376,6 +382,8 @@ inline void copyUserRecipeFromConfig(const RuntimeConfig &config,
   preset.cupProtectionEnabled = config.cupProtectionEnabled;
   preset.stopIfCupRemoved = config.stopIfCupRemoved;
   preset.requireCupToStart = config.requireCupToStart;
+  preset.cupPresentWeightG = config.cupPresentWeightG;
+  preset.cupRemovedWeightG = config.cupRemovedWeightG;
 }
 
 inline bool allocateShotPresetId(ShotPresetBank &bank, uint8_t &outId) {
@@ -603,6 +611,8 @@ inline void migrateRecipeFromRuntimeToBank(const RuntimeConfig &runtime,
   dbl->cupProtectionEnabled = runtime.cupProtectionEnabled;
   dbl->stopIfCupRemoved = runtime.stopIfCupRemoved;
   dbl->requireCupToStart = runtime.requireCupToStart;
+  dbl->cupPresentWeightG = runtime.cupPresentWeightG;
+  dbl->cupRemovedWeightG = runtime.cupRemovedWeightG;
   dbl->brewByWeight = !runtime.timerOnly;
 }
 

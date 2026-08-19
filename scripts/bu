@@ -21,7 +21,7 @@ Sin argumentos, build y upload usan n16r8 y el primer /dev/cu.usbmodem<número>.
 Ejemplos:
   ./scripts/bu
   ./scripts/bu /dev/cu.usbmodem2101 n16r8
-  ./scripts/bu /dev/cu.usbmodem2101 n8r4 -DSHOT_STOPPER_ENABLE_ALED=1
+  ./scripts/bu /dev/cu.usbmodem2101 n8r4 -DSHOT_STOPPER_ENABLE_BUZZER=1
 EOF
 }
 

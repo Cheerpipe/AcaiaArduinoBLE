@@ -12,7 +12,7 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 8;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 10;
 constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
 constexpr size_t PREFERRED_SCALE_NAME_CAPACITY = 32;
 constexpr size_t SCALE_HISTORY_CAPACITY = 8;
@@ -246,7 +246,12 @@ constexpr float AUTOMATION_WEIGHT_SLEW_ALLOWANCE_G = 20.0f;
 constexpr float POST_TARE_BASELINE_MAX_ABS_G = 50.0f;
 constexpr uint32_t POST_TARE_BASELINE_GRACE_MS = 2000;
 // Ignore tare noise around 0; a lifted cup drops several grams below this.
-constexpr float CUP_REMOVED_WEIGHT_G = -2.0f;
+constexpr float DEFAULT_CUP_REMOVED_WEIGHT_G = -3.0f;
+constexpr float MIN_CUP_REMOVED_WEIGHT_G = -50.0f;
+constexpr float MAX_CUP_REMOVED_WEIGHT_G = -0.1f;
+constexpr float DEFAULT_CUP_PRESENT_WEIGHT_G = 3.0f;
+constexpr float MIN_CUP_PRESENT_WEIGHT_G = 0.1f;
+constexpr float MAX_CUP_PRESENT_WEIGHT_G = 50.0f;
 constexpr float MAX_PARSED_WEIGHT_G = 10000.0f;
 constexpr uint8_t DIRECT_STOP_CONFIRMATION_SAMPLES = 2;
 constexpr uint8_t WEIGHT_RECOVERY_CONFIRMATION_SAMPLES = 3;
@@ -556,13 +561,6 @@ inline BuzzerPattern buzzerPatternForExtendedPulseRate(uint8_t rate) {
   return BuzzerPattern::NONE;
 }
 
-#ifndef SHOT_STOPPER_ENABLE_ALED
-#define SHOT_STOPPER_ENABLE_ALED 0
-#endif
-
-static_assert(SHOT_STOPPER_ENABLE_ALED == 0 || SHOT_STOPPER_ENABLE_ALED == 1,
-              "SHOT_STOPPER_ENABLE_ALED must be 0 or 1");
-
 enum class StopperState : uint8_t {
   REQUIRES_OFF,
   READY,
@@ -833,6 +831,8 @@ struct RuntimeConfig {
   bool buzzerAutoToManualGuardEndBeep = true;
   bool buzzerManualNoScaleBeep = true;
   bool buzzerScaleConnectedBeep = true;
+  // Onboard GPIO LED HIGH while a BLE scale is connected (machine/alerts).
+  bool scaleConnectedLed = true;
   uint8_t buzzerExtendedPulseRate =
       static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE);
   uint8_t buzzerSlowExtendedPulseRate =
@@ -880,7 +880,9 @@ struct RuntimeConfig {
   uint8_t bookooConnectBeepLevel = DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL;
   bool cupProtectionEnabled = true;
   bool stopIfCupRemoved = true;
-  bool requireCupToStart = true;
+  bool requireCupToStart = false;
+  float cupPresentWeightG = DEFAULT_CUP_PRESENT_WEIGHT_G;
+  float cupRemovedWeightG = DEFAULT_CUP_REMOVED_WEIGHT_G;
   bool avoidBbwShotWithoutScale = true;
   uint32_t lastShotCooldownMs = DEFAULT_LAST_SHOT_COOLDOWN_MS;
   // USB debug spew (paddle/CN9/Wi-Fi traces). CLI replies stay independent.
@@ -931,7 +933,9 @@ struct CycleConfigSnapshot {
       DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
   bool cupProtectionEnabled = true;
   bool stopIfCupRemoved = true;
-  bool requireCupToStart = true;
+  bool requireCupToStart = false;
+  float cupPresentWeightG = DEFAULT_CUP_PRESENT_WEIGHT_G;
+  float cupRemovedWeightG = DEFAULT_CUP_REMOVED_WEIGHT_G;
   uint16_t autoToManualGuardSamplesDs[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT] = {
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
@@ -981,6 +985,8 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.cupProtectionEnabled = config.cupProtectionEnabled;
   snapshot.stopIfCupRemoved = config.stopIfCupRemoved;
   snapshot.requireCupToStart = config.requireCupToStart;
+  snapshot.cupPresentWeightG = config.cupPresentWeightG;
+  snapshot.cupRemovedWeightG = config.cupRemovedWeightG;
   memcpy(snapshot.autoToManualGuardSamplesDs, config.autoToManualGuardSamplesDs,
          sizeof(snapshot.autoToManualGuardSamplesDs));
   return snapshot;
@@ -1028,7 +1034,9 @@ enum class ConfigValidationError : uint8_t {
   LAST_SHOT_COOLDOWN,
   DRIP_DELAY,
   RING_RETAIN_LOG_LEVEL,
-  PADDLE_MODE
+  PADDLE_MODE,
+  CUP_PRESENT_WEIGHT,
+  CUP_REMOVED_WEIGHT
 };
 
 constexpr size_t MAX_SHOT_PRESETS = 8;
@@ -1130,7 +1138,9 @@ struct ShotPreset {
       DEFAULT_AUTO_TO_MANUAL_GUARD_BASELINE_MS;
   bool cupProtectionEnabled = true;
   bool stopIfCupRemoved = true;
-  bool requireCupToStart = true;
+  bool requireCupToStart = false;
+  float cupPresentWeightG = DEFAULT_CUP_PRESENT_WEIGHT_G;
+  float cupRemovedWeightG = DEFAULT_CUP_REMOVED_WEIGHT_G;
   uint16_t autoToManualGuardSamplesDs[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT] = {
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
       AUTO_TO_MANUAL_GUARD_DEFAULT_SAMPLE_DS,
@@ -1146,7 +1156,7 @@ struct ShotPresetBank {
   ShotPreset presets[MAX_SHOT_PRESETS] = {};
 };
 
-static_assert(sizeof(ShotPreset) <= 128, "ShotPreset too large");
+static_assert(sizeof(ShotPreset) <= 136, "ShotPreset too large");
 static_assert(sizeof(ShotPresetBank) <= 1100, "ShotPresetBank too large");
 
 inline uint32_t effectiveRetareWindowMs(const RuntimeConfig &config) {
@@ -1320,6 +1330,16 @@ inline ConfigValidationError validateRuntimeConfig(
   if (!validPaddleMode(config.paddleMode)) {
     return ConfigValidationError::PADDLE_MODE;
   }
+  if (!isfinite(config.cupPresentWeightG) ||
+      config.cupPresentWeightG < MIN_CUP_PRESENT_WEIGHT_G ||
+      config.cupPresentWeightG > MAX_CUP_PRESENT_WEIGHT_G) {
+    return ConfigValidationError::CUP_PRESENT_WEIGHT;
+  }
+  if (!isfinite(config.cupRemovedWeightG) ||
+      config.cupRemovedWeightG < MIN_CUP_REMOVED_WEIGHT_G ||
+      config.cupRemovedWeightG > MAX_CUP_REMOVED_WEIGHT_G) {
+    return ConfigValidationError::CUP_REMOVED_WEIGHT;
+  }
   if (config.fastExtractionGuardEnabled) {
     if (!isfinite(config.maxRecoveryWeightG) ||
         config.maxRecoveryWeightG < MIN_MAX_RECOVERY_WEIGHT_G ||
@@ -1435,6 +1455,10 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "ringRetainLogLevel";
     case ConfigValidationError::PADDLE_MODE:
       return "paddleMode";
+    case ConfigValidationError::CUP_PRESENT_WEIGHT:
+      return "cupPresentWeightG";
+    case ConfigValidationError::CUP_REMOVED_WEIGHT:
+      return "cupRemovedWeightG";
   }
   return "unknown";
 }
@@ -2310,7 +2334,6 @@ constexpr int32_t BOOT_SUBSYSTEM_TASK_WDT = 6;
 constexpr int32_t BOOT_SUBSYSTEM_SCALE_WORKER = 7;
 constexpr int32_t BOOT_SUBSYSTEM_WEB_QUEUE = 8;
 constexpr int32_t BOOT_SUBSYSTEM_NETWORK = 9;
-constexpr int32_t BOOT_SUBSYSTEM_INDICATORS = 10;
 constexpr int32_t BOOT_SUBSYSTEM_PSRAM = 11;
 
 struct DebugEvent {
@@ -2591,7 +2614,6 @@ inline const char *bootSubsystemName(int32_t subsystem) {
     case BOOT_SUBSYSTEM_SCALE_WORKER: return "scale_worker";
     case BOOT_SUBSYSTEM_WEB_QUEUE: return "web_queue";
     case BOOT_SUBSYSTEM_NETWORK: return "network";
-    case BOOT_SUBSYSTEM_INDICATORS: return "indicators";
     case BOOT_SUBSYSTEM_PSRAM: return "psram";
   }
   return "unknown";

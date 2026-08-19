@@ -21,7 +21,7 @@ Sin argumentos, cada script usa n16r8 y el primer /dev/cu.usbmodem<número>.
 Ejemplos:
   ./scripts/bum
   ./scripts/bum /dev/cu.usbmodem2101 n16r8 115200
-  ./scripts/bum /dev/cu.usbmodem2101 n8r4 115200 -DSHOT_STOPPER_ENABLE_ALED=1
+  ./scripts/bum /dev/cu.usbmodem2101 n8r4 115200 -DSHOT_STOPPER_ENABLE_BUZZER=1
 EOF
 }
 

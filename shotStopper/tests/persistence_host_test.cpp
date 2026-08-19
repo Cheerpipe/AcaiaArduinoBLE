@@ -87,13 +87,18 @@ void p01_defaults_are_valid() {
   CHECK(settings.runtime.avoidBbwShotWithoutScale);
   CHECK(settings.runtime.cupProtectionEnabled);
   CHECK(settings.runtime.stopIfCupRemoved);
-  CHECK(settings.runtime.requireCupToStart);
+  CHECK(!settings.runtime.requireCupToStart);
+  CHECK(std::fabs(settings.runtime.cupPresentWeightG -
+                  DEFAULT_CUP_PRESENT_WEIGHT_G) < 0.001f);
+  CHECK(std::fabs(settings.runtime.cupRemovedWeightG -
+                  DEFAULT_CUP_REMOVED_WEIGHT_G) < 0.001f);
   CHECK(settings.runtime.lastShotCooldownMs == DEFAULT_LAST_SHOT_COOLDOWN_MS);
   CHECK(settings.runtime.dripDelayMs == DEFAULT_DRIP_DELAY_MS);
   CHECK(!settings.runtime.serialDebugOutput);
   CHECK(settings.runtime.ringRetainLogLevel ==
         static_cast<uint8_t>(LogLevel::NONE));
   CHECK(settings.runtime.buzzerScaleConnectedBeep);
+  CHECK(settings.runtime.scaleConnectedLed);
   CHECK(validPreferredScaleMac(settings.preferredScaleMac));
   CHECK(validPreferredScaleName(settings.preferredScaleName));
   CHECK(validPreferredScaleName("Pearl-S"));
@@ -115,10 +120,14 @@ void p02_newest_valid_slot_is_loaded() {
   settings.runtime.soundAlertsMuted = true;
   settings.runtime.cupProtectionEnabled = false;
   settings.runtime.stopIfCupRemoved = false;
-  settings.runtime.requireCupToStart = false;
+  settings.runtime.requireCupToStart = true;
+  settings.runtime.cupPresentWeightG = 4.5f;
+  settings.runtime.cupRemovedWeightG = -6.0f;
   settings.presets.presets[0].cupProtectionEnabled = false;
   settings.presets.presets[0].stopIfCupRemoved = false;
-  settings.presets.presets[0].requireCupToStart = false;
+  settings.presets.presets[0].requireCupToStart = true;
+  settings.presets.presets[0].cupPresentWeightG = 4.5f;
+  settings.presets.presets[0].cupRemovedWeightG = -6.0f;
   CHECK(savePersistedSettings(settings));
   CHECK(settings.storageRevision == firstRevision + 1);
 
@@ -128,10 +137,15 @@ void p02_newest_valid_slot_is_loaded() {
   CHECK(loaded.runtime.soundAlertsMuted);
   CHECK(!loaded.runtime.cupProtectionEnabled);
   CHECK(!loaded.runtime.stopIfCupRemoved);
-  CHECK(!loaded.runtime.requireCupToStart);
+  CHECK(loaded.runtime.requireCupToStart);
+  CHECK(std::fabs(loaded.runtime.cupPresentWeightG - 4.5f) < 0.001f);
+  CHECK(std::fabs(loaded.runtime.cupRemovedWeightG - (-6.0f)) < 0.001f);
   CHECK(!loaded.presets.presets[0].cupProtectionEnabled);
   CHECK(!loaded.presets.presets[0].stopIfCupRemoved);
-  CHECK(!loaded.presets.presets[0].requireCupToStart);
+  CHECK(loaded.presets.presets[0].requireCupToStart);
+  CHECK(std::fabs(loaded.presets.presets[0].cupPresentWeightG - 4.5f) < 0.001f);
+  CHECK(std::fabs(loaded.presets.presets[0].cupRemovedWeightG - (-6.0f)) <
+        0.001f);
 }
 
 void p02b_save_uses_ram_revision_when_slots_unreadable() {
@@ -499,7 +513,7 @@ void p44_scale_history_canonicalizes_mac_case() {
 }
 
 void p24_preset_bank_size_and_crud_budgets() {
-  CHECK(sizeof(ShotPreset) <= 128);
+  CHECK(sizeof(ShotPreset) <= 136);
   CHECK(sizeof(ShotPresetBank) <= 1100);
   CHECK(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET);
   CHECK(sizeof(WebCommand) <= 512);
@@ -515,7 +529,11 @@ void p24_preset_bank_size_and_crud_budgets() {
   CHECK(bank.presets[0].maxBrewTimeMs == DEFAULT_MAX_BREW_TIME_MS);
   CHECK(bank.presets[0].cupProtectionEnabled);
   CHECK(bank.presets[0].stopIfCupRemoved);
-  CHECK(bank.presets[0].requireCupToStart);
+  CHECK(!bank.presets[0].requireCupToStart);
+  CHECK(std::fabs(bank.presets[0].cupPresentWeightG -
+                  DEFAULT_CUP_PRESENT_WEIGHT_G) < 0.001f);
+  CHECK(std::fabs(bank.presets[0].cupRemovedWeightG -
+                  DEFAULT_CUP_REMOVED_WEIGHT_G) < 0.001f);
   CHECK(bank.presets[1].fastExtractionGuardEnabled);
   CHECK(bank.presets[1].slowExtractionGuardEnabled);
   CHECK(bank.presets[1].minBrewTimeMs == FACTORY_SINGLE_MIN_BREW_TIME_MS);
@@ -528,15 +546,21 @@ void p24_preset_bank_size_and_crud_budgets() {
     RuntimeConfig cfg{};
     cfg.cupProtectionEnabled = false;
     cfg.stopIfCupRemoved = false;
-    cfg.requireCupToStart = false;
+    cfg.requireCupToStart = true;
+    cfg.cupPresentWeightG = 5.0f;
+    cfg.cupRemovedWeightG = -8.0f;
     copyUserRecipeFromConfig(cfg, recipe);
     CHECK(!recipe.cupProtectionEnabled);
     CHECK(!recipe.stopIfCupRemoved);
-    CHECK(!recipe.requireCupToStart);
+    CHECK(recipe.requireCupToStart);
+    CHECK(std::fabs(recipe.cupPresentWeightG - 5.0f) < 0.001f);
+    CHECK(std::fabs(recipe.cupRemovedWeightG - (-8.0f)) < 0.001f);
     applyShotPresetToConfig(recipe, cfg, false);
     CHECK(!cfg.cupProtectionEnabled);
     CHECK(!cfg.stopIfCupRemoved);
-    CHECK(!cfg.requireCupToStart);
+    CHECK(cfg.requireCupToStart);
+    CHECK(std::fabs(cfg.cupPresentWeightG - 5.0f) < 0.001f);
+    CHECK(std::fabs(cfg.cupRemovedWeightG - (-8.0f)) < 0.001f);
   }
 
   ShotPresetBank resetBank = bank;

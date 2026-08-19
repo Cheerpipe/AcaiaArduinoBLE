@@ -76,7 +76,8 @@ done
 
 echo "Legacy Micra-incompatible paths: absent"
 
-for removed_led_path in LED_RED_PIN LED_BLUE_PIN LED_GREEN_PIN 'analogWrite('; do
+for removed_led_path in LED_RED_PIN LED_BLUE_PIN LED_GREEN_PIN 'analogWrite(' \
+    SHOT_STOPPER_ENABLE_ALED rgbLedWrite status_indicator WS2812; do
   if grep -n "$removed_led_path" "$firmware_file"; then
     echo "Removed discrete RGB LED path remains in firmware: $removed_led_path" >&2
     exit 1

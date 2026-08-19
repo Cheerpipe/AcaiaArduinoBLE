@@ -4,7 +4,6 @@
 #ifndef SHOT_STOPPER_ENABLE_BUZZER
 #define SHOT_STOPPER_ENABLE_BUZZER 1
 #endif
-#define SHOT_STOPPER_ENABLE_ALED 1
 
 #include <cstdint>
 #include <cstdlib>
@@ -47,7 +46,6 @@ void deleteHostResources() {
   delete webCommandQueue;
   delete bleCompanionRequestQueue;
   delete bleCompanionResultQueue;
-  delete statusIndicatorQueue;
   delete relaySafetyTimer;
   delete operationalLimitTimer;
   scaleCommandQueue = nullptr;
@@ -55,8 +53,6 @@ void deleteHostResources() {
   webCommandQueue = nullptr;
   bleCompanionRequestQueue = nullptr;
   bleCompanionResultQueue = nullptr;
-  statusIndicatorQueue = nullptr;
-  statusIndicatorTaskHandle = nullptr;
   relaySafetyTimer = nullptr;
   operationalLimitTimer = nullptr;
   independentSafetyTimer.resetForHost();
@@ -243,9 +239,8 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   bleStackReady = true;
   safetyResetStatus = SafetyResetSnapshot{};
   firmwareInitializationComplete = true;
-  statusIndicatorsReady = false;
-  lastPublishedIndicatorFrame = StatusIndicatorFrame{};
-  indicatorFramePublished = false;
+  scaleConnectedLedInitialized = false;
+  lastScaleConnectedLedOn = false;
 
   scaleCommandQueue =
       xQueueCreate(SCALE_COMMAND_QUEUE_LENGTH, sizeof(ScaleCommand));
@@ -1598,6 +1593,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.buzzerAutoToManualGuardEndBeep);
   CHECK(config.buzzerManualNoScaleBeep);
   CHECK(config.buzzerScaleConnectedBeep);
+  CHECK(config.scaleConnectedLed);
   CHECK(config.buzzerExtendedPulseRate ==
         static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE));
   CHECK(config.buzzerSlowExtendedPulseRate ==
@@ -1622,7 +1618,9 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.avoidBbwShotWithoutScale);
   CHECK(config.cupProtectionEnabled);
   CHECK(config.stopIfCupRemoved);
-  CHECK(config.requireCupToStart);
+  CHECK(!config.requireCupToStart);
+  CHECK(fabsf(config.cupPresentWeightG - DEFAULT_CUP_PRESENT_WEIGHT_G) < 0.001f);
+  CHECK(fabsf(config.cupRemovedWeightG - DEFAULT_CUP_REMOVED_WEIGHT_G) < 0.001f);
   CHECK(config.lastShotCooldownMs == DEFAULT_LAST_SHOT_COOLDOWN_MS);
   CHECK(config.dripDelayMs == DEFAULT_DRIP_DELAY_MS);
   CHECK(!config.serialDebugOutput);
@@ -1739,6 +1737,30 @@ void w03_runtime_timing_relations_are_transactional() {
   CHECK(parsePaddleMode("auto", parsedPaddle));
   CHECK(parsedPaddle == static_cast<uint8_t>(PaddleMode::AUTO));
   CHECK(!parsePaddleMode("legacy", parsedPaddle));
+  config = RuntimeConfig{};
+  config.cupPresentWeightG = 0.0f;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::CUP_PRESENT_WEIGHT);
+  config = RuntimeConfig{};
+  config.cupPresentWeightG = MIN_CUP_PRESENT_WEIGHT_G - 0.1f;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::CUP_PRESENT_WEIGHT);
+  config = RuntimeConfig{};
+  config.cupPresentWeightG = MAX_CUP_PRESENT_WEIGHT_G + 0.1f;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::CUP_PRESENT_WEIGHT);
+  config = RuntimeConfig{};
+  config.cupRemovedWeightG = 0.0f;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::CUP_REMOVED_WEIGHT);
+  config = RuntimeConfig{};
+  config.cupRemovedWeightG = MAX_CUP_REMOVED_WEIGHT_G + 0.1f;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::CUP_REMOVED_WEIGHT);
+  config = RuntimeConfig{};
+  config.cupRemovedWeightG = MIN_CUP_REMOVED_WEIGHT_G - 0.1f;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::CUP_REMOVED_WEIGHT);
 }
 
 void w04_wifi_credentials_have_strict_bounds() {
@@ -4202,13 +4224,12 @@ void r34_suspended_control_recovers_after_three_attributed_samples() {
   CHECK(session.weightControlState == WeightControlState::ACTIVE);
 }
 
-void r35_connected_without_weight_stream_is_not_available_indicator() {
+void r35_connected_without_weight_stream_is_not_available() {
   resetHarness(false, true);
   reachReadyFromBoot();
   observedWeightSequence = 0;
   scaleWorkerTaskHandle = reinterpret_cast<TaskHandle_t>(1);
   CHECK(getScaleLinkSnapshot().state == ScaleLinkState::CONNECTED);
-  CHECK(currentScaleIndicatorCondition() == ScaleIndicatorCondition::STALE);
   publishControlStatus();
   ControlStatusSnapshot status;
   copyControlStatus(status);
@@ -4225,11 +4246,8 @@ void r35_connected_without_weight_stream_is_not_available_indicator() {
   CHECK(!status.currentWeightValid);
 
   publishWeight(10.0f);
-  CHECK(currentScaleIndicatorCondition() ==
-        ScaleIndicatorCondition::AVAILABLE);
   setScaleConnected(false);
   setScaleConnected(true);
-  CHECK(currentScaleIndicatorCondition() == ScaleIndicatorCondition::STALE);
   publishControlStatus();
   copyControlStatus(status);
   CHECK(!status.currentWeightValid);
@@ -4599,6 +4617,96 @@ void cp15_timer_only_ignores_negative_weight() {
   runLoopAfter(1);
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.endReason == EndReason::NONE);
+}
+
+void cp16_small_negative_noise_does_not_stop() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  currentWeight = 80.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  advanceToBrew();
+  publishWeight(-2.9f, hostMillis, 1, 60);
+  publishWeight(-2.9f, hostMillis + 1, 1, 61);
+  runLoopAfter(1);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.endReason == EndReason::NONE);
+}
+
+void cp17_weight_at_removed_threshold_stops() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  currentWeight = 80.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  advanceToBrew();
+  publishWeight(-3.0f, hostMillis, 1, 70);
+  publishWeight(-3.1f, hostMillis + 1, 1, 71);
+  runLoopAfter(1);
+  CHECK(session.endReason == EndReason::CUP_REMOVED);
+}
+
+void cp18_custom_removed_threshold_is_honored() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.cupRemovedWeightG = -10.0f;
+  mutableActiveShotPreset(presetBank).cupRemovedWeightG = -10.0f;
+  currentWeight = 80.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  advanceToBrew();
+  publishWeight(-5.0f, hostMillis, 1, 80);
+  publishWeight(-5.0f, hostMillis + 1, 1, 81);
+  runLoopAfter(1);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.endReason == EndReason::NONE);
+  publishWeight(-10.0f, hostMillis + 2, 1, 82);
+  publishWeight(-10.1f, hostMillis + 3, 1, 83);
+  runLoopAfter(1);
+  CHECK(session.endReason == EndReason::CUP_REMOVED);
+}
+
+void cp19_weight_below_present_threshold_blocks_brew() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableCupStartGuardForTest();
+  currentWeight = 2.9f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  attemptBlockedCupStart();
+}
+
+void cp20_weight_at_present_threshold_starts_brew() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableCupStartGuardForTest();
+  currentWeight = 3.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.active);
+}
+
+void cp21_custom_present_threshold_is_honored() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableCupStartGuardForTest();
+  runtimeConfig.cupPresentWeightG = 8.0f;
+  mutableActiveShotPreset(presetBank).cupPresentWeightG = 8.0f;
+  currentWeight = 7.9f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  attemptBlockedCupStart();
+  currentWeight = 8.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 2;
+  startCycle();
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.active);
 }
 
 void r42_weight_below_automation_min_stays_manual() {
@@ -5016,146 +5124,27 @@ void r46_range_rejection_emits_specific_debug_code() {
                         weightToCentigrams(MIN_AUTOMATION_WEIGHT_G)));
 }
 
-void w38_scale_indicator_states_are_unambiguous() {
-  const IndicatorSignal starting =
-      scaleIndicatorSignal(ScaleIndicatorCondition::STARTING);
-  const IndicatorSignal available =
-      scaleIndicatorSignal(ScaleIndicatorCondition::AVAILABLE);
-  const IndicatorSignal disconnected =
-      scaleIndicatorSignal(ScaleIndicatorCondition::DISCONNECTED);
-  const IndicatorSignal stale =
-      scaleIndicatorSignal(ScaleIndicatorCondition::STALE);
-  const IndicatorSignal fault =
-      scaleIndicatorSignal(ScaleIndicatorCondition::FAULT);
+void w38_scale_connected_led_tracks_link_and_setting() {
+  resetHarness(false, false);
+  initializeScaleConnectedLed();
+  CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == LOW);
+  CHECK(runtimeConfig.scaleConnectedLed);
 
-  CHECK(starting.color == INDICATOR_BLUE);
-  CHECK(starting.pattern == IndicatorPattern::SLOW_BLINK);
-  CHECK(available.color == INDICATOR_GREEN);
-  CHECK(available.pattern == IndicatorPattern::SOLID);
-  CHECK(disconnected.color == INDICATOR_RED);
-  CHECK(disconnected.pattern == IndicatorPattern::SOLID);
-  CHECK(stale.color == INDICATOR_YELLOW);
-  CHECK(stale.pattern == IndicatorPattern::SLOW_BLINK);
-  CHECK(fault.color == INDICATOR_RED);
-  CHECK(fault.pattern == IndicatorPattern::FAST_BLINK);
-}
+  setScaleConnected(true);
+  serviceScaleConnectedLed();
+  CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == HIGH);
 
-void w39_automatic_stopper_palette_encodes_workflow() {
-  const auto signalFor = [](StopperState state) {
-    return stopperIndicatorSignal(state, RelaySafetyState::OPEN, true, false,
-                                  false);
-  };
+  setScaleConnected(false);
+  serviceScaleConnectedLed();
+  CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == LOW);
 
-  CHECK(signalFor(StopperState::READY).color == INDICATOR_GREEN);
-  CHECK(signalFor(StopperState::READY).pattern == IndicatorPattern::SOLID);
-  CHECK(signalFor(StopperState::BREW).pattern ==
-        IndicatorPattern::SLOW_BLINK);
-  CHECK(signalFor(StopperState::RINSE).pattern ==
-        IndicatorPattern::FAST_BLINK);
-}
+  setScaleConnected(true);
+  serviceScaleConnectedLed();
+  CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == HIGH);
 
-void w40_manual_and_timer_only_palette_is_salmon() {
-  const auto signalFor = [](StopperState state) {
-    return stopperIndicatorSignal(state, RelaySafetyState::OPEN, true, false,
-                                  true);
-  };
-
-  CHECK(signalFor(StopperState::READY).color == INDICATOR_SALMON);
-  CHECK(signalFor(StopperState::READY).pattern == IndicatorPattern::SOLID);
-  CHECK(signalFor(StopperState::BREW).color == INDICATOR_SALMON);
-  CHECK(signalFor(StopperState::BREW).pattern ==
-        IndicatorPattern::SLOW_BLINK);
-  CHECK(signalFor(StopperState::RINSE).color == INDICATOR_SALMON);
-  CHECK(signalFor(StopperState::RINSE).pattern ==
-        IndicatorPattern::FAST_BLINK);
-
-  const IndicatorSignal noScale = stopperIndicatorSignal(
-      StopperState::MANUAL_NO_SCALE, RelaySafetyState::OPEN, true, false,
-      false);
-  CHECK(noScale.color == INDICATOR_SALMON);
-  CHECK(noScale.pattern == IndicatorPattern::SLOW_BLINK);
-}
-
-void w41_safety_and_action_states_override_operating_palette() {
-  const IndicatorSignal boot = stopperIndicatorSignal(
-      StopperState::REQUIRES_OFF, RelaySafetyState::BOOT_SAFE, false, false,
-      false);
-  CHECK(boot.color == INDICATOR_BLUE);
-  CHECK(boot.pattern == IndicatorPattern::SLOW_BLINK);
-
-  const IndicatorSignal unavailable = stopperIndicatorSignal(
-      StopperState::READY, RelaySafetyState::OPEN, false, false, false);
-  CHECK(unavailable.color == INDICATOR_RED);
-  CHECK(unavailable.pattern == IndicatorPattern::FAST_BLINK);
-
-  const IndicatorSignal tripped = stopperIndicatorSignal(
-      StopperState::READY, RelaySafetyState::TRIPPED, true, false, false);
-  CHECK(tripped.color == INDICATOR_RED);
-  CHECK(tripped.pattern == IndicatorPattern::FAST_BLINK);
-
-  const IndicatorSignal locked = stopperIndicatorSignal(
-      StopperState::READY, RelaySafetyState::LOCKOUT, true, false, false);
-  CHECK(locked.color == INDICATOR_RED);
-  CHECK(locked.pattern == IndicatorPattern::FAST_BLINK);
-
-  const IndicatorSignal maintenance = stopperIndicatorSignal(
-      StopperState::READY, RelaySafetyState::OPEN, true, true, false);
-  CHECK(maintenance.color == INDICATOR_BLUE);
-  CHECK(maintenance.pattern == IndicatorPattern::SLOW_BLINK);
-
-  const IndicatorSignal requiresOff = stopperIndicatorSignal(
-      StopperState::REQUIRES_OFF, RelaySafetyState::OPEN, true, false, true);
-  CHECK(requiresOff.color == INDICATOR_AMBER);
-  CHECK(requiresOff.pattern == IndicatorPattern::SLOW_BLINK);
-}
-
-void w42_indicator_blink_periods_are_deterministic() {
-  const IndicatorSignal slow = {INDICATOR_GREEN,
-                                IndicatorPattern::SLOW_BLINK};
-  CHECK(renderIndicatorSignal(slow, 0) == INDICATOR_GREEN);
-  CHECK(renderIndicatorSignal(slow, INDICATOR_SLOW_HALF_PERIOD_MS - 1) ==
-        INDICATOR_GREEN);
-  CHECK(renderIndicatorSignal(slow, INDICATOR_SLOW_HALF_PERIOD_MS) ==
-        INDICATOR_OFF);
-  CHECK(renderIndicatorSignal(slow, INDICATOR_SLOW_HALF_PERIOD_MS * 2) ==
-        INDICATOR_GREEN);
-
-  const IndicatorSignal medium = {INDICATOR_GREEN,
-                                  IndicatorPattern::MEDIUM_BLINK};
-  CHECK(renderIndicatorSignal(medium, INDICATOR_MEDIUM_HALF_PERIOD_MS) ==
-        INDICATOR_OFF);
-  const IndicatorSignal fast = {INDICATOR_GREEN,
-                                IndicatorPattern::FAST_BLINK};
-  CHECK(renderIndicatorSignal(fast, INDICATOR_FAST_HALF_PERIOD_MS) ==
-        INDICATOR_OFF);
-  CHECK(renderIndicatorSignal({INDICATOR_GREEN, IndicatorPattern::SOLID},
-                              std::numeric_limits<uint32_t>::max()) ==
-        INDICATOR_GREEN);
-}
-
-void w43_manual_palette_tracks_timer_only_and_scale_loss() {
-  resetHarness(false, true);
-  stopperState = StopperState::READY;
-  runtimeConfig.timerOnly = false;
-  currentWeightSequence = 1;
-  currentWeightReceivedAtMs = hostMillis;
-  CHECK(!stopperUsesManualIndicatorPalette());
-
-  runtimeConfig.timerOnly = true;
-  CHECK(stopperUsesManualIndicatorPalette());
-
-  runtimeConfig.timerOnly = false;
-  setScaleLinkState(ScaleLinkState::DISCONNECTED);
-  CHECK(stopperUsesManualIndicatorPalette());
-
-  session.active = true;
-  session.config.timerOnly = false;
-  session.startedWithScale = true;
-  session.scaleWasLost = false;
-  session.weightControlState = WeightControlState::ACTIVE;
-  CHECK(!stopperUsesManualIndicatorPalette());
-  session.weightControlState = WeightControlState::SUSPENDED;
-  CHECK(stopperUsesManualIndicatorPalette());
+  runtimeConfig.scaleConnectedLed = false;
+  serviceScaleConnectedLed();
+  CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == LOW);
 }
 
 void s01_shot_log_filters_short_and_rinse() {
@@ -6995,7 +6984,7 @@ const TestCase testCases[] = {
     {"R32", r32_old_connection_generation_cannot_update_weight},
     {"R33", r33_weight_mailbox_keeps_latest_and_reports_gap},
     {"R34", r34_suspended_control_recovers_after_three_attributed_samples},
-    {"R35", r35_connected_without_weight_stream_is_not_available_indicator},
+    {"R35", r35_connected_without_weight_stream_is_not_available},
     {"R41", r41_negative_weight_in_range_starts_automatic_cycle},
     {"CP01", cp01_zero_pre_tare_weight_blocks_brew},
     {"CP02", cp02_negative_pre_tare_weight_blocks_brew},
@@ -7012,6 +7001,12 @@ const TestCase testCases[] = {
     {"CP13", cp13_pre_tare_negative_packets_do_not_abort},
     {"CP14", cp14_post_tare_noise_does_not_stop},
     {"CP15", cp15_timer_only_ignores_negative_weight},
+    {"CP16", cp16_small_negative_noise_does_not_stop},
+    {"CP17", cp17_weight_at_removed_threshold_stops},
+    {"CP18", cp18_custom_removed_threshold_is_honored},
+    {"CP19", cp19_weight_below_present_threshold_blocks_brew},
+    {"CP20", cp20_weight_at_present_threshold_starts_brew},
+    {"CP21", cp21_custom_present_threshold_is_honored},
     {"R42", r42_weight_below_automation_min_stays_manual},
     {"R43", r43_post_tare_baseline_accepts_zero_after_pre_tare_weight},
     {"R54", r54_post_tare_baseline_keeps_weight_control},
@@ -7077,12 +7072,7 @@ const TestCase testCases[] = {
     {"W35", w35_status_reports_the_live_physical_paddle_gpio},
     {"W36", w36_paddle_return_reminder_beeps_at_configured_interval_only_while_open},
     {"W37", w37_factory_reset_is_rejected_while_control_is_active},
-    {"W38", w38_scale_indicator_states_are_unambiguous},
-    {"W39", w39_automatic_stopper_palette_encodes_workflow},
-    {"W40", w40_manual_and_timer_only_palette_is_salmon},
-    {"W41", w41_safety_and_action_states_override_operating_palette},
-    {"W42", w42_indicator_blink_periods_are_deterministic},
-    {"W43", w43_manual_palette_tracks_timer_only_and_scale_loss},
+    {"W38", w38_scale_connected_led_tracks_link_and_setting},
     {"W44", w44_paddle_return_reminder_stops_after_fifteen_minutes},
     {"W50", w50_local_buzzer_plays_triple_pattern_non_blocking},
     {"W50b", w50b_buzzer_phase_timer_holds_triple_rhythm_without_loop},

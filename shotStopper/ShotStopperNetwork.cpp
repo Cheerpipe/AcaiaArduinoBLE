@@ -283,6 +283,10 @@ const char *configValidationMessage(ConfigValidationError error) {
              "debug.";
     case ConfigValidationError::PADDLE_MODE:
       return "Paddle mode must be auto, natural or original.";
+    case ConfigValidationError::CUP_PRESENT_WEIGHT:
+      return "Cup-present threshold must be from 0.1 to 50 g.";
+    case ConfigValidationError::CUP_REMOVED_WEIGHT:
+      return "Cup-removed threshold must be from -50 to -0.1 g.";
   }
   return "Invalid configuration.";
 }
@@ -3270,6 +3274,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"fastExtractionGuardEnabled\":%s,\"slowExtractionGuardEnabled\":%s,"
         "\"autoToManualGuardEnabled\":%s,\"cupProtectionEnabled\":%s,"
         "\"stopIfCupRemoved\":%s,\"requireCupToStart\":%s,"
+        "\"cupPresentWeightG\":%.1f,\"cupRemovedWeightG\":%.1f,"
         "\"avoidBbwShotWithoutScale\":%s,"
         "\"scaleMacCacheMode\":\"%s\"",
         control.config.soundAlertsMuted ? "false" : "true",
@@ -3286,6 +3291,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.config.cupProtectionEnabled ? "true" : "false",
         control.config.stopIfCupRemoved ? "true" : "false",
         control.config.requireCupToStart ? "true" : "false",
+        static_cast<double>(control.config.cupPresentWeightG),
+        static_cast<double>(control.config.cupRemovedWeightG),
         control.config.avoidBbwShotWithoutScale ? "true" : "false",
         scaleMacCacheModeId(control.config.scaleMacCacheMode));
   } else if (ok && page == StatusPage::Settings) {
@@ -3301,6 +3308,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"paddleReturnReminderMaxDurationMs\":%lu,\"paddleMode\":\"%s\","
         "\"buzzerScaleLostBeep\":%s,\"buzzerAutoToManualGuardEndBeep\":%s,"
         "\"buzzerManualNoScaleBeep\":%s,\"buzzerScaleConnectedBeep\":%s,"
+        "\"scaleConnectedLed\":%s,"
         "\"buzzerExtendedPulseRate\":\"%s\","
         "\"buzzerSlowExtendedPulseRate\":\"%s\","
         "\"alertOutputChannel\":\"%s\",\"rinseGestureMs\":%lu,"
@@ -3316,7 +3324,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"autoToManualGuardManualLimitMs\":%lu,"
         "\"autoToManualGuardBaselineMs\":%lu,"
         "\"autoToManualGuardTrendMs\":%lu,\"cupProtectionEnabled\":%s,"
-        "\"stopIfCupRemoved\":%s,\"requireCupToStart\":%s,\"scaleMacCacheMode\":\"%s\","
+        "\"stopIfCupRemoved\":%s,\"requireCupToStart\":%s,"
+        "\"cupPresentWeightG\":%.1f,\"cupRemovedWeightG\":%.1f,"
+        "\"scaleMacCacheMode\":\"%s\","
         "\"bookooMuteOnBuzzerOnly\":%s,\"bookooConnectBeepLevel\":%u,"
         "\"avoidBbwShotWithoutScale\":%s,\"lastShotCooldownMs\":%lu",
         static_cast<unsigned>(control.config.goalWeightG),
@@ -3339,6 +3349,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.config.buzzerAutoToManualGuardEndBeep ? "true" : "false",
         control.config.buzzerManualNoScaleBeep ? "true" : "false",
         control.config.buzzerScaleConnectedBeep ? "true" : "false",
+        control.config.scaleConnectedLed ? "true" : "false",
         extendedPulseRateId(control.config.buzzerExtendedPulseRate),
         extendedPulseRateId(control.config.buzzerSlowExtendedPulseRate),
         alertOutputChannelId(control.config.alertOutputChannel),
@@ -3367,6 +3378,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.config.cupProtectionEnabled ? "true" : "false",
         control.config.stopIfCupRemoved ? "true" : "false",
         control.config.requireCupToStart ? "true" : "false",
+        static_cast<double>(control.config.cupPresentWeightG),
+        static_cast<double>(control.config.cupRemovedWeightG),
         scaleMacCacheModeId(control.config.scaleMacCacheMode),
         control.config.bookooMuteOnBuzzerOnly ? "true" : "false",
         static_cast<unsigned>(control.config.bookooConnectBeepLevel),
@@ -3985,8 +3998,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   static const char *const fields[] = {
       "baseRevision", "goalWeightG", "rinseGestureMs", "rinseDurationMs",
       "operationalWallMs", "autoTare", "brewByWeight", "canTareStartTimer",
-      "scaleTimerStopExtraDelayMs", "dripDelayMs", "soundAlertsEnabled",
-      "firstDropBeep",
+      "scaleTimerStopExtraDelayMs",       "dripDelayMs", "soundAlertsEnabled",
+      "firstDropBeep", "scaleConnectedLed",
       "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
       "paddleMode", "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
@@ -4059,6 +4072,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (jsonFieldPresent(root, "firstDropBeep") &&
              !jsonBoolean(root, "firstDropBeep", candidate.firstDropBeep)) {
     parseError = "firstDropBeep must be a boolean.";
+  } else if (jsonFieldPresent(root, "scaleConnectedLed") &&
+             !jsonBoolean(root, "scaleConnectedLed",
+                          candidate.scaleConnectedLed)) {
+    parseError = "scaleConnectedLed must be a boolean.";
   } else if (jsonFieldPresent(root, "paddleReturnReminderBeep") &&
              !jsonBoolean(root, "paddleReturnReminderBeep",
                           candidate.paddleReturnReminderBeep)) {
@@ -4447,7 +4464,11 @@ esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
           !jsonBoolean(root, "stopIfCupRemoved",
                        command.config.stopIfCupRemoved) ||
           !jsonBoolean(root, "requireCupToStart",
-                       command.config.requireCupToStart)) {
+                       command.config.requireCupToStart) ||
+          !jsonFloat(root, "cupPresentWeightG",
+                     command.config.cupPresentWeightG) ||
+          !jsonFloat(root, "cupRemovedWeightG",
+                     command.config.cupRemovedWeightG)) {
         parseError = "save requires the full Brew recipe field set.";
       } else {
         command.config.timerOnly = !brewByWeight;

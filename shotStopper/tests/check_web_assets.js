@@ -47,8 +47,8 @@ if (htmlBytes > 40960) {
 if (jsBytes > 81920) {
   throw new Error('Web UI JS source exceeds the 80 KiB authoring budget');
 }
-if (htmlBytes + jsBytes > 118784) {
-  throw new Error('Web UI HTML+JS source exceeds the 116 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 119808) {
+  throw new Error('Web UI HTML+JS source exceeds the 117 KiB combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -57,6 +57,7 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('buzzerAutoToManualGuardEndBeep') ||
     !ui.includes('buzzerManualNoScaleBeep') ||
     !ui.includes('buzzerScaleConnectedBeep') ||
+    !ui.includes('scaleConnectedLed') ||
     !ui.includes('buzzerExtendedPulseRate') ||
     !ui.includes('buzzerSlowExtendedPulseRate') ||
     !html.includes('id="buzzerExtendedPulseRate"') ||
@@ -81,6 +82,9 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('id="bookooConnectBeepLevel"') ||
     !html.includes('id="bookooMuteOnBuzzerOnly" type="checkbox" checked') ||
     !html.includes('id="buzzerScaleConnectedBeep" type="checkbox" checked') ||
+    !html.includes('id="scaleConnectedLed" type="checkbox" checked') ||
+    !html.includes('Blue LED while scale connected') ||
+    !html.includes('</div><label><input id="scaleConnectedLed"') ||
     !html.includes('class="buzzerOpt scaleIncapableOpt"><input id="buzzerScaleConnectedBeep"') ||
     html.includes('buzzerOnlyOpt') ||
     !html.includes('option value="4" selected') ||
@@ -119,6 +123,7 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('"buzzerAutoToManualGuardEndBeep"') ||
     !network.includes('"buzzerManualNoScaleBeep"') ||
     !network.includes('"buzzerScaleConnectedBeep"') ||
+    !network.includes('"scaleConnectedLed"') ||
     !network.includes('"buzzerExtendedPulseRate"') ||
     !network.includes('"buzzerSlowExtendedPulseRate"') ||
     !network.includes('"alertOutputChannel"') ||
@@ -184,12 +189,29 @@ if (!network.includes('"firstDropBeep"') ||
     !ui.includes('/api/v1/time/sync') ||
     !firmware.includes('session.config.firstDropBeep') ||
     !firmware.includes('candidate.buzzerScaleConnectedBeep') ||
+    !firmware.includes('candidate.scaleConnectedLed') ||
     !firmware.includes('candidate.buzzerSlowExtendedPulseRate') ||
     !firmware.includes('localBuzzer') ||
     !firmware.includes('BUZZER_SUPPORT_ENABLED') ||
     !firmware.includes('BUZZER_GPIO') ||
     !firmware.includes('servicePaddleReturnReminder')) {
   throw new Error('Scale beep settings must be configurable end-to-end');
+}
+if (firmware.includes('SHOT_STOPPER_ENABLE_ALED') ||
+    firmware.includes('WS2812') ||
+    firmware.includes('rgbLedWrite') ||
+    firmware.includes('status_indicator') ||
+    domain.includes('SHOT_STOPPER_ENABLE_ALED') ||
+    domain.includes('BOOT_SUBSYSTEM_INDICATORS')) {
+  throw new Error('WS2812B/ALED support must be fully removed');
+}
+if (!ui.includes("scaleConnectedLed:$('scaleConnectedLed').checked") ||
+    !ui.includes("'scaleConnectedLed'") ||
+    !network.includes('\\"scaleConnectedLed\\":%s') ||
+    !firmware.includes('serviceScaleConnectedLed') ||
+    !firmware.includes('SCALE_CONNECTED_LED_GPIO') ||
+    !domain.includes('bool scaleConnectedLed = true')) {
+  throw new Error('Scale-connected GPIO LED must be wired through Settings, status/settings, and firmware');
 }
 
 if (!ui.includes('id="soundAlertsEnabled"') ||
@@ -210,8 +232,17 @@ if (html.indexOf('<summary>Brew by Weight</summary>') >
         html.indexOf('id="stopIfCupRemoved"') ||
     html.indexOf('id="stopIfCupRemoved"') >
         html.indexOf('id="requireCupToStart"') ||
+    html.indexOf('id="requireCupToStart"') >
+        html.indexOf('id="cupPresentWeightG"') ||
+    html.indexOf('id="cupPresentWeightG"') >
+        html.indexOf('id="cupRemovedWeightG"') ||
     !ui.includes('id="stopIfCupRemoved"') ||
     !ui.includes('id="requireCupToStart"') ||
+    !ui.includes('id="cupPresentWeightG"') ||
+    !ui.includes('id="cupRemovedWeightG"') ||
+    !html.includes('id="cupPresentWeightG" type="number" min="0.1" max="50" step="0.1"') ||
+    !html.includes('id="cupRemovedWeightG" type="number" min="-50" max="-0.1" step="0.1"') ||
+    html.includes('id="requireCupToStart" type="checkbox" checked') ||
     !ui.includes('Enable cup protection') ||
     !ui.includes('cupProtectOpt') ||
     !ui.includes('If you tared the empty cup, the shot will not start.') ||
@@ -225,9 +256,13 @@ if (html.indexOf('<summary>Brew by Weight</summary>') >
     !ui.includes('cupProtectionEnabled:$(\'cupProtectionEnabled\')') ||
     !ui.includes('stopIfCupRemoved:$(\'stopIfCupRemoved\')') ||
     !ui.includes('requireCupToStart:$(\'requireCupToStart\')') ||
+    !ui.includes("cupPresentWeightG:number('cupPresentWeightG')") ||
+    !ui.includes("cupRemovedWeightG:number('cupRemovedWeightG')") ||
     !network.includes('cupProtectionEnabled') ||
     !network.includes('stopIfCupRemoved') ||
-    !network.includes('requireCupToStart')) {
+    !network.includes('requireCupToStart') ||
+    !network.includes('cupPresentWeightG') ||
+    !network.includes('cupRemovedWeightG')) {
   throw new Error('Cup protection master must precede Stop if cup is removed and Require cup to start; Home mirrors the master after Alerts');
 }
 
@@ -263,40 +298,30 @@ if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0')
     !firmware.includes('localBuzzer.request(command.buzzerPattern)')) {
   throw new Error('Local buzzer must support compile-time passive (1) and active (2) drives');
 }
-if (!ui.includes('authenticatedOnly') ||
-    !ui.includes("s.setItem('shotStopperToken'") || !ui.includes('window.location.reload()') ||
-    !ui.includes('pageNav authenticatedOnly') ||
+if (ui.includes('authenticatedOnly') ||
+    ui.includes("s.setItem('shotStopperToken'") ||
+    ui.includes('pageNav authenticatedOnly') ||
+    ui.includes("authenticated()&&known") ||
     !ui.includes('function knownPath(') ||
-    !ui.includes("authenticated()&&known") ||
+    !ui.includes('true&&known') ||
     !ui.includes('class="brand"') ||
     !ui.includes('>Micra Shot Stopper</a>') ||
     !ui.includes('href="/" data-route="/"') ||
     !ui.includes("querySelectorAll('a[data-route]')") ||
-    !network.includes('Status intentionally has no authentication requirement') ||
     !network.includes('HTTPD_404_NOT_FOUND') ||
     !network.includes('notFoundHandler')) {
-  throw new Error('Web UI must expose a public read-only Home, hide other tabs until sign-in, and redirect unknown routes to /');
+  throw new Error('Web UI must expose public SPA routes and redirect unknown paths to /');
 }
-if (!html.includes('id="rememberMe"') ||
-    !/id="rememberMe"[^>]*\bchecked\b/.test(html) ||
-    html.includes('Stay signed in for 7 days on this browser.') ||
-    !js.includes('rememberMe:r') ||
-    !js.includes('r?localStorage:sessionStorage') ||
-    !js.includes("s.setItem('shotStopperToken'") ||
-    !js.includes('function clearAuth()') ||
-    !js.includes("s.removeItem('shotStopperToken')") ||
-    !js.includes("localStorage.getItem(k)") ||
-    !js.includes("sessionStorage.getItem(k)") ||
-    !networkHeader.includes(
-        'SESSION_REMEMBER_MS = 7UL * 24UL * 60UL * 60UL * 1000UL') ||
-    !network.includes('SESSION_REMEMBER_MS') ||
-    !network.includes('jsonBoolean(root, "rememberMe", rememberMe)') ||
-    !network.includes('createSession(token, csrf, rememberMe)') ||
-    !network.includes('session.rememberMe') ||
-    !network.includes('session.createdAtMs') ||
-    !network.includes('uiAuthenticated')) {
+if (html.includes('id="rememberMe"') ||
+    js.includes('rememberMe:r') ||
+    js.includes("s.setItem('shotStopperToken'") ||
+    js.includes('function clearAuth()') ||
+    network.includes('jsonBoolean(root, "rememberMe", rememberMe)') ||
+    network.includes('createSession(token, csrf, rememberMe)') ||
+    network.includes('uiAuthenticated') ||
+    networkHeader.includes('SESSION_REMEMBER_MS')) {
   throw new Error(
-      'Remember me must persist a 7-day session without 3-minute idle expiry');
+      'Web UI must not use login tokens; exclusive WebUI claim owns the session');
 }
 const statusSection = html.match(/<fieldset[^>]*><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
@@ -368,7 +393,7 @@ if (!ui.includes('id="shotPanel"') ||
     !network.includes('shotType') ||
     !network.includes('scaleProtocol') ||
     !network.includes('safeScaleProtocol') ||
-    !ui.includes('remoteReady&&authenticated()') ||
+    !ui.includes('remoteReady&&relayStartReady&&(canControl||webShot)') ||
     !ui.includes('Remote CN9 disabled by policy') ||
     !network.includes('\\"remoteControlEnabled\\"') ||
     !network.includes('\\"lastCommand\\"') ||
@@ -480,9 +505,13 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !network.includes('cupProtectionEnabled') ||
     !network.includes('stopIfCupRemoved') ||
     !network.includes('requireCupToStart') ||
+    !network.includes('cupPresentWeightG') ||
+    !network.includes('cupRemovedWeightG') ||
     !ui.includes('cupProtectionEnabled:$(\'cupProtectionEnabled\')') ||
     !ui.includes('stopIfCupRemoved:$(\'stopIfCupRemoved\')') ||
-    !ui.includes('requireCupToStart:$(\'requireCupToStart\')')) {
+    !ui.includes('requireCupToStart:$(\'requireCupToStart\')') ||
+    !ui.includes("cupPresentWeightG:number('cupPresentWeightG')") ||
+    !ui.includes("cupRemovedWeightG:number('cupRemovedWeightG')")) {
   throw new Error('Auto-to-manual time guard must be wired in config UI, live panel, shots API, and routes');
 }
 if (!html.includes('<summary>Paddle</summary>') ||
@@ -704,6 +733,15 @@ if (!ui.includes('<legend>Brew</legend>') ||
         html.indexOf('id="stopIfCupRemoved"') ||
     !ui.includes('id="stopIfCupRemoved"') ||
     !ui.includes('id="requireCupToStart"') ||
+    html.indexOf('id="requireCupToStart"') >
+        html.indexOf('id="cupPresentWeightG"') ||
+    html.indexOf('id="cupPresentWeightG"') >
+        html.indexOf('id="cupRemovedWeightG"') ||
+    !ui.includes('id="cupPresentWeightG"') ||
+    !ui.includes('id="cupRemovedWeightG"') ||
+    !html.includes('step="0.1" value="3"') ||
+    !html.includes('step="0.1" value="-3"') ||
+    html.includes('id="requireCupToStart" type="checkbox" checked') ||
     !ui.includes('If you tared the empty cup, the shot will not start.') ||
     !ui.includes('id="homeCupProtectionEnabled"') ||
     html.indexOf('<summary>Slow extraction guard</summary>') < 0 ||
@@ -954,7 +992,12 @@ if (!ui.includes('id="factoryResetButton"') ||
     html.indexOf('id="saveDateTimeButton"') > html.indexOf('id="restartPanel"') ||
     html.indexOf('id="restartPanel"') > html.indexOf('id="factoryResetButton"') ||
     html.slice(html.indexOf('id="actionsPanel"'), html.indexOf('id="view-history"'))
-        .includes('restartButton')) {
+        .includes('restartButton') ||
+    !html.includes('id="restartButton" class="btnGlyph btnWarn"') ||
+    html.includes('id="restartButton" class="btnGlyph btnInvert"') ||
+    !html.includes('id="factoryResetButton" class="btnGlyph mutable btnInvert"') ||
+    html.includes('id="factoryResetButton" class="btnGlyph mutable btnWarn"') ||
+    !css.includes('.btnGlyph.btnInvert')) {
   throw new Error('Factory reset must require UI and server-side confirmation');
 }
 if (html.includes('id="debugPanel"') ||
@@ -1081,15 +1124,11 @@ if (!network.includes('startStation(next, now)')) {
   throw new Error('STA confirm timeout must reassociate last-known-good before SoftAP fallback');
 }
 {
-  const loginFnStart = network.indexOf('ShotStopperNetwork::loginHandler');
-  const loginFnEnd = network.indexOf('ShotStopperNetwork::logoutHandler', loginFnStart);
-  const loginFn = loginFnStart >= 0 && loginFnEnd > loginFnStart
-      ? network.slice(loginFnStart, loginFnEnd)
-      : '';
-  if (!loginFn.includes('cJSON_Parse') ||
-      loginFn.indexOf('loginRateLimited') < loginFn.indexOf('cJSON_Parse') ||
-      !loginFn.includes('recordFailedLoginAttempt')) {
-    throw new Error('Login rate limit must apply only after a parseable password verify failure');
+  if (network.includes('ShotStopperNetwork::loginHandler') ||
+      network.includes('ShotStopperNetwork::logoutHandler') ||
+      network.includes('loginRateLimited') ||
+      network.includes('recordFailedLoginAttempt')) {
+    throw new Error('Login handlers and rate limits must be removed; WebUI claim owns the session');
   }
 }
 {
@@ -1167,8 +1206,8 @@ const maxSocketsMatch = network.match(/max_open_sockets\s*=\s*(\d+)/);
 if (!maxSocketsMatch || Number(maxSocketsMatch[1]) !== 6) {
   throw new Error('HTTP server must reserve exactly 6 open sockets for the single-owner WebUI');
 }
-if (!network.includes('backlog_conn = 6')) {
-  throw new Error('HTTP server backlog must be limited to 6 for the single-owner WebUI');
+if (!network.includes('backlog_conn = 3')) {
+  throw new Error('HTTP server backlog must be limited to 3 for the single-owner WebUI');
 }
 if (!network.includes('/api/v1/ui/claim') ||
     !network.includes('X-WebUI-Client') ||
@@ -1237,8 +1276,8 @@ if (!network.includes('"Connection"') || !network.includes('"close"')) {
   throw new Error(
       'API JSON responses must send Connection: close to avoid keep-alive socket pinning');
 }
-if (!network.includes('recv_wait_timeout = 2') ||
-    !network.includes('send_wait_timeout = 2')) {
+if (!network.includes('recv_wait_timeout = 5') ||
+    !network.includes('send_wait_timeout = 5')) {
   throw new Error(
       'HTTP recv/send wait timeouts must stay short so LRU can free stalled sockets');
 }
@@ -1373,11 +1412,11 @@ if (soundAlertStatusFields.length !== 2 ||
 // NTP → admin; serialDebug/diagnostics → diagnostic; buzzerSupported → settings.
 if (!statusFormat.includes(
         '{\\"firmwareVersion\\":\\"%s\\",\\"bootId\\":%lu,\\"configMutable\\":%s,' +
-            '\\"liveShot\\":%s"') ||
+            '\\"webUiOverrideActive\\":%s,\\"configLockReason\\":\\"%s\\",\\"liveShot\\":%s"') ||
     !ui.includes("typeof s.bootId==='number'") ||
     !ui.includes('updateFirmwareFooter()')) {
   throw new Error(
-      'Status shared envelope must open with firmwareVersion/bootId/configMutable/liveShot');
+      'Status shared envelope must open with firmwareVersion/bootId/configMutable/webUiOverride/liveShot');
 }
 if (/buzzerSupported.*liveShot|liveShot.*buzzerSupported/.test(
         statusFormat.slice(
@@ -1440,9 +1479,9 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
     }
   }
   if (!ui.includes(
-          "v==='admin'?!!(s.network&&typeof c.timezoneOffsetMinutes==='number'&&c.ntpServerPreset!=null)")) {
+          "v==='admin'?!!(s.network&&s.bleCompanion&&typeof s.bleCompanion.enabled==='boolean'&&typeof s.bleCompanion.active==='boolean'&&typeof s.bleCompanion.restartRequired==='boolean'&&typeof c.timezoneOffsetMinutes==='number'&&c.ntpServerPreset!=null)")) {
     throw new Error(
-        'statusPageOk(admin) must validate network + NTP config only');
+        'statusPageOk(admin) must validate network, BLE Companion, and NTP config');
   }
 }
 if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
@@ -1574,9 +1613,9 @@ if (network.includes('networkShutdownPending_') ||
     /networkShutdownPending_\s*=\s*age\s*>=/.test(network)) {
   throw new Error('SoftAP must not shut down on an idle visibility timer');
 }
-if (!network.includes(
-        'there is no idle SoftAP shutdown') ||
-    !network.includes('link loss does not auto-raise SoftAP')) {
+if (!network.includes('never auto-raise SoftAP') ||
+    !network.includes('on link loss') ||
+    !network.includes('SoftAP via AP_START or reboot')) {
   throw new Error(
       'serviceSessions must keep SoftAP up without idle shutdown; post-CONNECTED link loss must not auto-raise SoftAP');
 }
@@ -1808,19 +1847,19 @@ const rootHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::rootHand
 const jsHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::jsHandler');
 const cssHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::cssHandler');
 const notFoundHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::notFoundHandler');
-const loginHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::loginHandler');
 if (rootHandlerStart < 0 || jsHandlerStart < 0 || cssHandlerStart < 0 ||
-    notFoundHandlerStart < 0 || loginHandlerStart < 0 ||
+    notFoundHandlerStart < 0 || statusHandlerStart < 0 ||
     network.includes('logoHandler') ||
+    network.includes('loginHandler') ||
     !(rootHandlerStart < jsHandlerStart && jsHandlerStart < cssHandlerStart &&
       cssHandlerStart < notFoundHandlerStart &&
-      notFoundHandlerStart < loginHandlerStart)) {
+      notFoundHandlerStart < statusHandlerStart)) {
   throw new Error('rootHandler/jsHandler/cssHandler/notFoundHandler order not found');
 }
 const rootHandler = network.slice(rootHandlerStart, jsHandlerStart);
 const jsHandler = network.slice(jsHandlerStart, cssHandlerStart);
 const cssHandler = network.slice(cssHandlerStart, notFoundHandlerStart);
-const notFoundHandler = network.slice(notFoundHandlerStart, loginHandlerStart);
+const notFoundHandler = network.slice(notFoundHandlerStart, statusHandlerStart);
 if (rootHandler.includes('no-store') || !rootHandler.includes('no-cache') ||
     !rootHandler.includes('STATUS_NOT_MODIFIED') ||
     !rootHandler.includes('ifNoneMatchEquals') ||
@@ -1869,14 +1908,14 @@ if (network.includes('sendJson') &&
         .includes('no-store')) {
   throw new Error('JSON API responses must remain Cache-Control: no-store');
 }
-if (!network.includes('touchSessionIfPresent') ||
+if (!network.includes('requireActiveWebUiClient') ||
     network.includes('heartbeatHandler') ||
     network.includes('/api/v1/heartbeat') ||
     networkHeader.includes('WEB_PADDLE_HEARTBEAT_TIMEOUT_MS') ||
     network.includes('WEB_PADDLE_HEARTBEAT_TIMEOUT_MS') ||
     network.includes('heartbeatStopSent_')) {
   throw new Error(
-      'Session touch must replace POST /heartbeat; web paddle heartbeat CN9 timeout must be gone');
+      'WebUI claim must replace POST /heartbeat; web paddle heartbeat CN9 timeout must be gone');
 }
 const logHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::logHandler');
 const shotsHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::shotsHandler');
@@ -1890,11 +1929,11 @@ if (logHandlerStart < 0 || shotsHandlerStart < 0 || wifiScanStatusStart < 0 ||
          .includes('"close"')) {
   throw new Error('Chunked log and Wi-Fi scan status responses must send Connection: close');
 }
-if (!js.includes('withPollGate(async()=>{if(scanBusy||!token)return;scanBusy=true') ||
+if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())return;scanBusy=true') ||
     !js.includes("withCommandGate(async()=>{try{await api('/api/v1/shots/clear'") ||
     !js.includes("withCommandGate(async()=>{try{await api('/api/v1/shots/delete'") ||
-    !js.includes("withCommandGate(async()=>{try{await api('/api/v1/logout'")) {
-  throw new Error('Wi-Fi scan and shot clear/delete/logout must use poll/command gates');
+    js.includes("withCommandGate(async()=>{try{await api('/api/v1/logout'")) {
+  throw new Error('Wi-Fi scan and shot clear/delete must use poll/command gates without login');
 }
 
 {

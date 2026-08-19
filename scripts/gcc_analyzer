@@ -34,7 +34,7 @@ $(shotstopper_arch_help)
 Ejemplos:
   ./scripts/gcc_analyzer
   ./scripts/gcc_analyzer /dev/cu.usbmodem2101 n16r8
-  ./scripts/gcc_analyzer /dev/cu.usbmodem2101 n8r4 -DSHOT_STOPPER_ENABLE_ALED=1
+  ./scripts/gcc_analyzer /dev/cu.usbmodem2101 n8r4 -DSHOT_STOPPER_ENABLE_BUZZER=1
 EOF
 }
 

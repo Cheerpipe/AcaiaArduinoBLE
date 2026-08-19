@@ -259,6 +259,7 @@ routed by **Output channel** when a local buzzer is compiled in.
 | **Scale lost** | Echo inverted on the local buzzer when the scale disconnects (idle or during a shot). Shown with buzzer support; disabled when Output channel is Scale only. |
 | **ATM / manual-no-scale** | Triple beeps on the local buzzer when A→M ends or when BBW needs a scale that is missing. Shown with buzzer support; disabled when Output channel is Scale only. |
 | **Scale connected** | Distinctive echo when a scale connects or reconnects. Buzzer only or Scale priority (always local buzzer; default ON). |
+| **Blue LED while scale connected** | Onboard GPIO1 LED HIGH while a scale is BLE-connected (default ON). Independent of Sound alerts. |
 | **Extended shot pulse** | Local-buzzer pulses while Fast extraction guard keeps the shot running past the normal BBW cut. Dropdown: Disabled, Slow, Medium, **Fast (default)**, Rapid. Shown with buzzer support; disabled when Output channel is Scale only. |
 | **Slow extended pulse** | Same rate dropdown for Slow extraction guard (past max brew time until min recovery weight). Default Fast. |
 
@@ -436,14 +437,12 @@ Work is split so paddle/CN9 timing never waits on BLE or HTTP:
 
 | Task | Role |
 | --- | --- |
-| **`loopTask` (Arduino `loop`)** | Paddle debounce, state machine, CN9 arm/open, weight-stop logic, shot logging, web command dispatch, safety supervisor feed. |
+| **`loopTask` (Arduino `loop`)** | Paddle debounce, state machine, CN9 arm/open, weight-stop logic, shot logging, web command dispatch, safety supervisor feed, scale-connected GPIO LED. |
 | **`scale_worker`** | BLE connection, weight stream, scale commands and beeps. |
 | **`network_manager`** | Wi-Fi STA/AP, HTTP server, NTP, NVS writes for config/network. |
-| **`status_indicator`** | WS2812B LED updates via a one-slot mailbox (never blocks control). Only built when `SHOT_STOPPER_ENABLE_ALED=1`. |
 
 `loopTask`, `scale_worker`, and `network_manager` each register a **5 s Task
-Watchdog** subscription. `status_indicator` does **not** subscribe to the TWDT
-(it only drives LEDs).
+Watchdog** subscription.
 
 ### Safety and indicators
 
@@ -453,9 +452,9 @@ Watchdog** subscription. `status_indicator` does **not** subscribe to the TWDT
   (compile-time GPIO pins).
 - Redundant RTC relay-command log records whether CN9 was commanded closed;
   every boot forces CN9 open before initialization and starts normally.
-- Optional two independent **WS2812B** pixels (`SHOT_STOPPER_ENABLE_ALED=1`):
-  scale/BLE health and stopper workflow / safety state (diagnostic only, not
-  part of CN9 decisions).
+- Optional onboard **GPIO LED** (default GPIO 1, active HIGH) while a scale is
+  BLE-connected; toggle from **Settings → Alerts**. Diagnostic only, not part
+  of CN9 decisions.
 - **Host tests** for workflow, persistence, safety, remote policy, BLE library,
   and embedded Web UI asset validation.
 
@@ -491,11 +490,13 @@ channel routes to the buzzer) go through that setting. Debug
 short/long/double/triple, Slow/Medium/Fast/Rapid (3 s), and
 Chime/Swing/Echo/Echo inverted/Morse/Snap buttons play the same catalog as the live alerts.
 
-## Optional hardware: WS2812B status LEDs (ALED)
+## Optional hardware: scale-connected GPIO LED
 
-Compile with `-DSHOT_STOPPER_ENABLE_ALED=1` to include the addressable-LED
-driver, GPIOs, and `status_indicator` task. Default builds (`=0` or omit the
-flag) compile without LED support. See [WS2812B status indicators](#ws2812b-status-indicators).
+The default pin map drives an active-HIGH LED on **GPIO 1** while a BLE scale
+is connected. Turn it off from **Settings → Machine and scale → Alerts → Blue
+LED while scale connected**. Override the pin at compile time with
+`-DSHOT_STOPPER_SCALE_CONNECTED_LED_GPIO`. See
+[Scale-connected LED](#scale-connected-led).
 
 ## Repository structure
 
@@ -780,7 +781,7 @@ Passwords are **case-sensitive** (`M` uppercase, rest lowercase).
 
 ### Connect on first boot (no home Wi‑Fi saved yet)
 
-1. Power the ESP32-S3 and wait for boot (scale LED activity is normal).
+1. Power the ESP32-S3 and wait for boot (the GPIO1 LED stays off until a scale connects).
 2. On your phone or laptop, open Wi‑Fi settings and join **`MicraShotStopperAP`**
    using password **`Micra1234`**.
 3. Open a browser to **`http://192.168.4.1`**. Status, live shot, history, and
@@ -837,7 +838,7 @@ notes:
 
 The firmware configures the ESP-IDF Task Watchdog with a 5-second timeout and
 `trigger_panic=true`. It subscribes `loopTask`, `scale_worker`, and
-`network_manager` separately; `status_indicator` is not subscribed. No task
+`network_manager` separately. No task
 feeds another task's watchdog. A registration or feed failure inhibits new
 closes, opens CN9, and requests a restart from the control loop. Compilation
 fails unless the core enables TWDT panic, IWDT, reboot after panic, and an
@@ -893,13 +894,13 @@ stuck LOW, absent, or out of frequency; a second relay controlled directly by
 the same GPIO does not provide this barrier.
 
 The selected FQBN automatically defines the matching pin block in
-`shotStopper.ino`. With `-DSHOT_STOPPER_ENABLE_ALED=1`, the two status LEDs are
-independent one-pixel WS2812B devices, each with its own data GPIO:
+`shotStopper.ino`. An active-HIGH **scale-connected LED** on GPIO 1 is part of
+the default map:
 
-| Module | Script arch | FQBN extras | Paddle | Relay | Scale LED | Stopper LED |
-| --- | --- | --- | ---: | ---: | ---: | ---: |
-| ESP32-S3 N8R4 (8 MB flash, 4 MB QSPI PSRAM) | `n8r4` | `PSRAM=enabled,FlashSize=8M,PartitionScheme=default_8MB` | GPIO 21 | GPIO 38 | GPIO 48 | GPIO 47 |
-| ESP32-S3 N16R8 (16 MB flash, 8 MB OPI PSRAM) | `n16r8` | `PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB` | GPIO 21 | GPIO 38 | GPIO 48 | GPIO 47 |
+| Module | Script arch | FQBN extras | Paddle | Relay | Scale LED |
+| --- | --- | --- | ---: | ---: | ---: |
+| ESP32-S3 N8R4 (8 MB flash, 4 MB QSPI PSRAM) | `n8r4` | `PSRAM=enabled,FlashSize=8M,PartitionScheme=default_8MB` | GPIO 21 | GPIO 38 | GPIO 1 |
+| ESP32-S3 N16R8 (16 MB flash, 8 MB OPI PSRAM) | `n16r8` | `PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB` | GPIO 21 | GPIO 38 | GPIO 1 |
 
 Classic ESP32 Dev Module and Arduino Nano ESP32 are **not supported**. Both S3
 variants share the same GPIO map; choose `n8r4` or `n16r8` so flash size and
@@ -910,72 +911,24 @@ the control path.
 Before energizing CN9, verify every pin for the specific board and the active
 polarity of the relay module.
 
-### WS2812B status indicators
+### Scale-connected LED
 
-Requires `-DSHOT_STOPPER_ENABLE_ALED=1`. Without that flag the driver, LED
-GPIOs, and `status_indicator` task are not compiled.
+The firmware drives a simple active-HIGH GPIO LED (default **GPIO 1**) from the
+control loop: **HIGH** while a BLE scale is connected and **Settings → Alerts
+→ Blue LED while scale connected** is on; **LOW** otherwise. There is no
+addressable RGB (WS2812) driver and no extra FreeRTOS task. The LED is
+diagnostic only and is never part of the CN9 safety decision.
 
-A WS2812B is a digital addressable RGB LED controlled through one data line;
-it is not an analog LED. This firmware uses two separately wired pixels:
-
-- **Scale LED:** BLE subsystem and scale-link health.
-- **Stopper LED:** workflow, operating mode, maintenance, and CN9 safety.
-
-The default brightness is 32 of 255. The LED task is isolated from the control
-loop behind a one-item overwrite mailbox: indicator transmission cannot make
-the safety loop wait, and old visual states cannot form a backlog. LEDs are
-diagnostic only and are never part of the CN9 safety decision.
-
-| Scale LED | Meaning |
-| --- | --- |
-| Slow blue blink | Firmware is starting |
-| Solid green | Scale connected, worker responsive, and weight stream fresh |
-| Solid red | Scale disconnected |
-| Slow yellow blink | BLE link is connected but worker or weight stream is stale |
-| Fast red blink | BLE subsystem or scale worker unavailable |
-
-| Stopper workflow | Automatic palette | Manual/timer-only palette |
-| --- | --- | --- |
-| Ready | Solid green | Solid salmon |
-| Qualifying paddle ON | Medium green blink | Medium salmon blink |
-| Brewing | Slow green blink | Slow salmon blink |
-| Rinsing | Fast green blink | Fast salmon blink |
-
-Stopper safety and action states override both operating palettes:
-
-| Stopper LED | Meaning |
-| --- | --- |
-| Slow amber blink | Physical paddle must return to OFF |
-| Slow blue blink | Boot-safe initialization or maintenance reservation |
-| Fast red blink | Safety lockout, safety trip, watchdog fault, or safety subsystem unavailable |
-
-Slow, medium, and fast use equal ON/OFF phases of 750, 300, and 125 ms,
-respectively. Typical combinations: green + solid green = scale connected and
-ready for automatic operation; green + slow green = automatic brewing; salmon
-palette = timer-only or manual-no-scale mode; red + any = scale disconnected.
-
-An ESP32-S3 chip does not guarantee an onboard RGB LED. Even Espressif's own
-ESP32-S3-DevKitC-1 revisions differ: the initial revision connects an
-addressable RGB LED to GPIO 48, while revision 1.1 uses GPIO 38. Both revisions
-may be encountered. GPIO 38 is already the default relay output in this
-project, so the revision 1.1 onboard LED **must not** be used with the default
-pin map; use two external pixels on verified free pins instead. The original
-Mazer V3 firmware's GPIO 46/45/47 common-anode RGB mapping describes that
-specific Shot Stopper hardware, not every ESP32-S3 board.
-
-Override the status data pins and brightness at compile time (ALED must be
-enabled). The pins must be distinct, output-capable, and different from paddle,
-relay, heartbeat, and feedback GPIOs:
+Override the pin at compile time. It must be output-capable and distinct from
+paddle, relay, buzzer, heartbeat, and feedback GPIOs:
 
 ```sh
 ./scripts/build /dev/cu.usbmodem2101 n16r8 \
-  -Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_ALED=1 \
-  -DSHOT_STOPPER_SCALE_LED_GPIO=4 -DSHOT_STOPPER_STOPPER_LED_GPIO=5 \
-  -DSHOT_STOPPER_LED_BRIGHTNESS=32
+  -Werror=deprecated-copy -DSHOT_STOPPER_SCALE_CONNECTED_LED_GPIO=1
 ```
 
-GPIO 4 and GPIO 5 above are examples only. Verify the schematic, strapping
-requirements, relay integration, and physical board before selecting them.
+GPIO 1 is the board default. Verify the schematic, strapping requirements,
+relay integration, and physical board before selecting another pin.
 
 ### Enable external heartbeat and feedback
 
@@ -1000,7 +953,7 @@ The README [compile examples](#compile) enable remote CN9 actuation with
 `-DSHOT_STOPPER_ENABLE_REMOTE_CN9=1`. Omit that flag for local-only builds.
 
 The firmware checks at compile time that both pins differ from paddle, relay,
-and LED pins, and that the heartbeat uses an output-capable GPIO. This does not
+and the scale-connected LED pin, and that the heartbeat uses an output-capable GPIO. This does not
 replace review of pinout, boot strapping pins, schematics, or electrical
 measurements on the actual board.
 
@@ -1182,11 +1135,11 @@ y muestra ayuda con `help`, `--help` o `-h`:
 # Build, static report, upload y monitor en una sola orden
 ./scripts/bsum
 
-./scripts/build /dev/cu.usbmodem2101 n8r4 -DSHOT_STOPPER_ENABLE_ALED=1
+./scripts/build /dev/cu.usbmodem2101 n8r4 -DSHOT_STOPPER_ENABLE_BUZZER=1
 ./scripts/upload /dev/cu.usbmodem2101 n8r4
 ./scripts/monitor /dev/cu.usbmodem2101 115200
 
-./scripts/bsum /dev/cu.usbmodem2101 n8r4 115200 -DSHOT_STOPPER_ENABLE_ALED=1
+./scripts/bsum /dev/cu.usbmodem2101 n8r4 115200 -DSHOT_STOPPER_ENABLE_BUZZER=1
 
 ./scripts/build help
 ./scripts/bsum --help
@@ -1203,7 +1156,7 @@ mkdir -p build/n16r8
 arduino-cli compile \
   --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashMode=qio,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc \
   --warnings all \
-  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=1 -DSHOT_STOPPER_ENABLE_ALED=1' \
+  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=1' \
   --library libraries/AcaiaArduinoBLE \
   --build-path build/n16r8 \
   shotStopper
@@ -1219,10 +1172,6 @@ even without this flag. Use remote actuation only on a trusted network.
 `-DSHOT_STOPPER_ENABLE_BUZZER=1` enables a **passive** piezo (LEDC 2700 Hz).
 Use `=2` for an **active** buzzer (GPIO HIGH/LOW). Alerts and debug beeps are
 the same either way. Omit the flag or set `=0` for builds without that hardware.
-
-`-DSHOT_STOPPER_ENABLE_ALED=1` enables the two WS2812B status pixels and the
-`status_indicator` task. Omit it (or set `=0`) for builds without addressable
-LEDs.
 
 N16R8 uses the normal 16 MB OTA scheme `app3M_fat9M_16MB` (**3 MB** app slot
 × 2). N8R4 uses `default_8MB` (**~3.2 MB** × 2). The 4 MB `default` table only

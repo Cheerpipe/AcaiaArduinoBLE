@@ -18,9 +18,6 @@
 #include <AcaiaArduinoBLE.h>
 #include <EEPROM.h>
 #include <driver/gpio.h>
-#if SHOT_STOPPER_ENABLE_ALED == 1
-#include <esp32-hal-rgb-led.h>
-#endif
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <soc/gpio_reg.h>
@@ -45,9 +42,6 @@
 #include "ShotStopperSerialCli.h"
 #include "ShotStopperVersion.h"
 #include "ShotStopperHardwareTimer.h"
-#if SHOT_STOPPER_ENABLE_ALED == 1
-#include "ShotStopperIndicators.h"
-#endif
 #include "ShotStopperResetGuard.h"
 #include "ShotStopperRecoveryGesture.h"
 #include "ShotStopperSafety.h"
@@ -94,21 +88,9 @@ constexpr uint32_t RUNTIME_PERSIST_RETRY_MS = 500;
 constexpr uint32_t RUNTIME_PERSIST_DEBOUNCE_MS = 300;
 constexpr uint32_t SETTINGS_PERSIST_IDLE_WAIT_MS = 1000;
 constexpr uint32_t HEALTH_TELEMETRY_INTERVAL_MS = 5000;
-#if SHOT_STOPPER_ENABLE_ALED == 1
-constexpr uint32_t STATUS_INDICATOR_TASK_STACK_SIZE = 3072;
-#endif
 // Pin control/BLE/LED work with Arduino loopTask on APP_CPU (core 1).
 // network_manager is pinned to PRO_CPU (core 0) in ShotStopperNetwork.cpp.
 constexpr BaseType_t CONTROL_TASK_CORE = 1;
-
-#if SHOT_STOPPER_ENABLE_ALED == 1
-#ifndef SHOT_STOPPER_LED_BRIGHTNESS
-#define SHOT_STOPPER_LED_BRIGHTNESS 32
-#endif
-
-constexpr uint8_t STATUS_INDICATOR_BRIGHTNESS =
-    SHOT_STOPPER_LED_BRIGHTNESS;
-#endif
 
 constexpr bool DEBUG = false;
 
@@ -128,13 +110,8 @@ constexpr bool DEBUG = false;
 #if defined(ARDUINO_ESP32S3_DEV)
 constexpr uint8_t PADDLE_GPIO = 21;
 constexpr uint8_t RELAY_GPIO = 2;
-#if SHOT_STOPPER_ENABLE_ALED == 1
-#ifndef SHOT_STOPPER_SCALE_LED_GPIO
-#define SHOT_STOPPER_SCALE_LED_GPIO 48
-#endif
-#ifndef SHOT_STOPPER_STOPPER_LED_GPIO
-#define SHOT_STOPPER_STOPPER_LED_GPIO 47
-#endif
+#ifndef SHOT_STOPPER_SCALE_CONNECTED_LED_GPIO
+#define SHOT_STOPPER_SCALE_CONNECTED_LED_GPIO 1
 #endif
 #ifndef SHOT_STOPPER_BUZZER_GPIO
 #define SHOT_STOPPER_BUZZER_GPIO 14
@@ -143,11 +120,8 @@ constexpr uint8_t RELAY_GPIO = 2;
 #error "Unsupported board: Shot Stopper requires ESP32-S3"
 #endif
 
-#if SHOT_STOPPER_ENABLE_ALED == 1
-constexpr uint8_t SCALE_STATUS_LED_GPIO = SHOT_STOPPER_SCALE_LED_GPIO;
-constexpr uint8_t STOPPER_STATUS_LED_GPIO =
-    SHOT_STOPPER_STOPPER_LED_GPIO;
-#endif
+constexpr uint8_t SCALE_CONNECTED_LED_GPIO =
+    SHOT_STOPPER_SCALE_CONNECTED_LED_GPIO;
 constexpr uint8_t BUZZER_GPIO = SHOT_STOPPER_BUZZER_GPIO;
 
 constexpr uint8_t PADDLE_ACTIVE_LEVEL = LOW;
@@ -189,32 +163,15 @@ static_assert(RELAY_CLOSED_LEVEL != RELAY_OPEN_LEVEL,
 static_assert((RELAY_OPEN_LEVEL == LOW || RELAY_OPEN_LEVEL == HIGH) &&
                   (RELAY_CLOSED_LEVEL == LOW || RELAY_CLOSED_LEVEL == HIGH),
               "Relay levels must be LOW or HIGH");
-#if SHOT_STOPPER_ENABLE_ALED == 1
-static_assert(SHOT_STOPPER_LED_BRIGHTNESS > 0 &&
-                  SHOT_STOPPER_LED_BRIGHTNESS <= 255,
-              "WS2812B brightness must be between 1 and 255");
-static_assert(SCALE_STATUS_LED_GPIO != STOPPER_STATUS_LED_GPIO,
-              "Scale and stopper WS2812B LEDs require distinct data GPIOs");
-static_assert(SCALE_STATUS_LED_GPIO != RELAY_GPIO &&
-                  SCALE_STATUS_LED_GPIO != PADDLE_GPIO &&
-                  STOPPER_STATUS_LED_GPIO != RELAY_GPIO &&
-                  STOPPER_STATUS_LED_GPIO != PADDLE_GPIO,
-              "WS2812B data GPIOs must not share paddle or relay GPIOs");
+static_assert(SCALE_CONNECTED_LED_GPIO != PADDLE_GPIO &&
+                  SCALE_CONNECTED_LED_GPIO != RELAY_GPIO,
+              "Scale-connected LED GPIO must not share paddle or relay GPIOs");
 static_assert(BUZZER_GPIO != PADDLE_GPIO && BUZZER_GPIO != RELAY_GPIO &&
-                  BUZZER_GPIO != SCALE_STATUS_LED_GPIO &&
-                  BUZZER_GPIO != STOPPER_STATUS_LED_GPIO,
+                  BUZZER_GPIO != SCALE_CONNECTED_LED_GPIO,
               "Buzzer GPIO must be distinct from paddle, relay, and LED GPIOs");
-#else
-static_assert(BUZZER_GPIO != PADDLE_GPIO && BUZZER_GPIO != RELAY_GPIO,
-              "Buzzer GPIO must be distinct from paddle and relay GPIOs");
-#endif
 #ifndef SHOT_STOPPER_HOST_TEST
-#if SHOT_STOPPER_ENABLE_ALED == 1
-static_assert(GPIO_IS_VALID_OUTPUT_GPIO(SCALE_STATUS_LED_GPIO),
-              "Scale WS2812B must use a valid output-capable GPIO");
-static_assert(GPIO_IS_VALID_OUTPUT_GPIO(STOPPER_STATUS_LED_GPIO),
-              "Stopper WS2812B must use a valid output-capable GPIO");
-#endif
+static_assert(GPIO_IS_VALID_OUTPUT_GPIO(SCALE_CONNECTED_LED_GPIO),
+              "Scale-connected LED must use a valid output-capable GPIO");
 static_assert(!BUZZER_SUPPORT_ENABLED ||
                   GPIO_IS_VALID_OUTPUT_GPIO(BUZZER_GPIO),
               "Buzzer must use a valid output-capable GPIO");
@@ -226,13 +183,9 @@ static_assert(SAFETY_HEARTBEAT_GPIO != RELAY_GPIO &&
                   CN9_FEEDBACK_GPIO != PADDLE_GPIO &&
                   CN9_FEEDBACK_GPIO != SAFETY_HEARTBEAT_GPIO,
               "Safety GPIOs must be unique");
-#if SHOT_STOPPER_ENABLE_ALED == 1
-static_assert(SAFETY_HEARTBEAT_GPIO != SCALE_STATUS_LED_GPIO &&
-                  SAFETY_HEARTBEAT_GPIO != STOPPER_STATUS_LED_GPIO &&
-                  CN9_FEEDBACK_GPIO != SCALE_STATUS_LED_GPIO &&
-                  CN9_FEEDBACK_GPIO != STOPPER_STATUS_LED_GPIO,
-              "Safety GPIOs must not share a WS2812B data pin");
-#endif
+static_assert(SAFETY_HEARTBEAT_GPIO != SCALE_CONNECTED_LED_GPIO &&
+                  CN9_FEEDBACK_GPIO != SCALE_CONNECTED_LED_GPIO,
+              "Safety GPIOs must not share the scale-connected LED pin");
 static_assert(BUZZER_GPIO != SAFETY_HEARTBEAT_GPIO &&
                   BUZZER_GPIO != CN9_FEEDBACK_GPIO,
               "Buzzer GPIO must be distinct from safety GPIOs");
@@ -703,18 +656,8 @@ struct ScaleLinkSnapshot {
   char protocolName[20];
 };
 
-#if SHOT_STOPPER_ENABLE_ALED == 1
-struct StatusIndicatorFrame {
-  IndicatorColor scale;
-  IndicatorColor stopper;
-};
-
-QueueHandle_t statusIndicatorQueue = nullptr;
-TaskHandle_t statusIndicatorTaskHandle = nullptr;
-bool statusIndicatorsReady = false;
-StatusIndicatorFrame lastPublishedIndicatorFrame;
-bool indicatorFramePublished = false;
-#endif
+bool scaleConnectedLedInitialized = false;
+bool lastScaleConnectedLedOn = false;
 
 // ---------------------------------------------------------------------------
 // Utility helpers
@@ -1331,68 +1274,24 @@ void transitionTo(StopperState nextState) {
                 static_cast<int32_t>(nextState));
 }
 
-#if SHOT_STOPPER_ENABLE_ALED == 1
-IndicatorColor applyIndicatorBrightness(const IndicatorColor &color) {
-  const auto scaleChannel = [](uint8_t channel) {
-    return static_cast<uint8_t>(
-        (static_cast<uint16_t>(channel) * STATUS_INDICATOR_BRIGHTNESS +
-         127U) /
-        255U);
-  };
-  return {scaleChannel(color.red), scaleChannel(color.green),
-          scaleChannel(color.blue)};
+void initializeScaleConnectedLed() {
+  digitalWrite(SCALE_CONNECTED_LED_GPIO, LOW);
+  pinMode(SCALE_CONNECTED_LED_GPIO, OUTPUT);
+  digitalWrite(SCALE_CONNECTED_LED_GPIO, LOW);
+  lastScaleConnectedLedOn = false;
+  scaleConnectedLedInitialized = true;
 }
 
-void writeWs2812b(uint8_t pin, const IndicatorColor &color) {
-  const IndicatorColor limited = applyIndicatorBrightness(color);
-  rgbLedWrite(pin, limited.red, limited.green, limited.blue);
+void serviceScaleConnectedLed() {
+  const bool on = runtimeConfig.scaleConnectedLed &&
+                  getScaleLinkSnapshot().state == ScaleLinkState::CONNECTED;
+  if (scaleConnectedLedInitialized && on == lastScaleConnectedLedOn) {
+    return;
+  }
+  digitalWrite(SCALE_CONNECTED_LED_GPIO, on ? HIGH : LOW);
+  lastScaleConnectedLedOn = on;
+  scaleConnectedLedInitialized = true;
 }
-
-void statusIndicatorTask(void *) {
-  StatusIndicatorFrame applied;
-  bool appliedOnce = false;
-  for (;;) {
-    StatusIndicatorFrame requested;
-    if (xQueueReceive(statusIndicatorQueue, &requested, portMAX_DELAY) !=
-        pdTRUE) {
-      continue;
-    }
-    if (!appliedOnce || requested.scale != applied.scale) {
-      writeWs2812b(SCALE_STATUS_LED_GPIO, requested.scale);
-    }
-    if (!appliedOnce || requested.stopper != applied.stopper) {
-      writeWs2812b(STOPPER_STATUS_LED_GPIO, requested.stopper);
-    }
-    applied = requested;
-    appliedOnce = true;
-  }
-}
-
-bool initializeStatusIndicators() {
-  statusIndicatorQueue = xQueueCreate(1, sizeof(StatusIndicatorFrame));
-  if (statusIndicatorQueue == nullptr) {
-    return false;
-  }
-  const StatusIndicatorFrame off = {INDICATOR_OFF, INDICATOR_OFF};
-  if (xQueueOverwrite(statusIndicatorQueue, &off) != pdPASS) {
-    vQueueDelete(statusIndicatorQueue);
-    statusIndicatorQueue = nullptr;
-    return false;
-  }
-  if (xTaskCreatePinnedToCore(statusIndicatorTask, "status_indicator",
-                              STATUS_INDICATOR_TASK_STACK_SIZE, nullptr,
-                              tskIDLE_PRIORITY + 1, &statusIndicatorTaskHandle,
-                              CONTROL_TASK_CORE) != pdPASS) {
-    vQueueDelete(statusIndicatorQueue);
-    statusIndicatorQueue = nullptr;
-    statusIndicatorTaskHandle = nullptr;
-    return false;
-  }
-  lastPublishedIndicatorFrame = off;
-  indicatorFramePublished = true;
-  return true;
-}
-#endif
 
 // ---------------------------------------------------------------------------
 // Relay and independent hard limit
@@ -2471,7 +2370,7 @@ void considerCupRemovedSample(float weight, uint32_t receivedAtMs,
     return;
   }
   if (session.awaitingPostTareBaseline) {
-    if (isfinite(weight) && weight > CUP_REMOVED_WEIGHT_G) {
+    if (isfinite(weight) && weight > session.config.cupRemovedWeightG) {
       session.cupRemovedArmed = true;
     }
     session.cupRemovedConfirmations = 0;
@@ -2479,7 +2378,7 @@ void considerCupRemovedSample(float weight, uint32_t receivedAtMs,
     session.lastCupRemovedPacketSequence = 0;
     return;
   }
-  if (!isfinite(weight) || weight > CUP_REMOVED_WEIGHT_G) {
+  if (!isfinite(weight) || weight > session.config.cupRemovedWeightG) {
     session.cupRemovedArmed = true;
     session.cupRemovedConfirmations = 0;
     session.lastCupRemovedAtMs = 0;
@@ -4700,7 +4599,8 @@ bool cupStartGuardWouldBlock() {
   const bool scaleUsable =
       scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
   return effective.cupProtectionEnabled && effective.requireCupToStart &&
-         !effective.timerOnly && scaleUsable && currentWeight <= 0.0f;
+         !effective.timerOnly && scaleUsable &&
+         currentWeight < effective.cupPresentWeightG;
 }
 
 void serviceCupStartGuard() {
@@ -4716,7 +4616,7 @@ void serviceCupStartGuard() {
   const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
   const bool scaleUsable =
       scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
-  if (scaleUsable && currentWeight > 0.0f) {
+  if (scaleUsable && currentWeight >= effective.cupPresentWeightG) {
     cupStartGuardHold = false;
     return;
   }
@@ -5791,6 +5691,7 @@ void processWebCommand(const WebCommand &command) {
       candidate.buzzerManualNoScaleBeep = command.config.buzzerManualNoScaleBeep;
       candidate.buzzerScaleConnectedBeep =
           command.config.buzzerScaleConnectedBeep;
+      candidate.scaleConnectedLed = command.config.scaleConnectedLed;
       candidate.buzzerExtendedPulseRate = command.config.buzzerExtendedPulseRate;
       candidate.buzzerSlowExtendedPulseRate =
           command.config.buzzerSlowExtendedPulseRate;
@@ -6909,68 +6810,6 @@ void serviceSerialCli() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Status indication
-// ---------------------------------------------------------------------------
-
-#if SHOT_STOPPER_ENABLE_ALED == 1
-ScaleIndicatorCondition currentScaleIndicatorCondition() {
-  if (!firmwareInitializationComplete) {
-    return ScaleIndicatorCondition::STARTING;
-  }
-  if (!bleStackReady || scaleWorkerTaskHandle == nullptr) {
-    return ScaleIndicatorCondition::FAULT;
-  }
-  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
-  if (scaleLink.state == ScaleLinkState::DISCONNECTED) {
-    return ScaleIndicatorCondition::DISCONNECTED;
-  }
-  return scaleLinkAvailable(scaleLink) && observedWeightIsFresh()
-             ? ScaleIndicatorCondition::AVAILABLE
-             : ScaleIndicatorCondition::STALE;
-}
-
-bool stopperUsesManualIndicatorPalette() {
-  if (stopperState == StopperState::MANUAL_NO_SCALE) {
-    return true;
-  }
-  if (session.active) {
-    return session.config.timerOnly || !session.startedWithScale ||
-           session.weightControlState != WeightControlState::ACTIVE;
-  }
-  return runtimeConfig.timerOnly || !scaleAvailable() ||
-         !currentWeightIsFresh();
-}
-
-void updateStatusIndicators() {
-  if (!statusIndicatorsReady || statusIndicatorQueue == nullptr) {
-    return;
-  }
-
-  const uint32_t now = millis();
-  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
-  const IndicatorSignal scaleSignal =
-      scaleIndicatorSignal(currentScaleIndicatorCondition());
-  const IndicatorSignal stopperSignal = stopperIndicatorSignal(
-      stopperState, relay.state,
-      relay.watchdogReady && relay.timersReady &&
-          !criticalTaskWatchdogFault,
-      maintenanceLease.active, stopperUsesManualIndicatorPalette());
-  const StatusIndicatorFrame requested = {
-      renderIndicatorSignal(scaleSignal, now),
-      renderIndicatorSignal(stopperSignal, now)};
-  if (indicatorFramePublished &&
-      requested.scale == lastPublishedIndicatorFrame.scale &&
-      requested.stopper == lastPublishedIndicatorFrame.stopper) {
-    return;
-  }
-  if (xQueueOverwrite(statusIndicatorQueue, &requested) == pdPASS) {
-    lastPublishedIndicatorFrame = requested;
-    indicatorFramePublished = true;
-  }
-}
-#endif
-
 void initializeRelaySafetyStateAfterBoot() {
   portENTER_CRITICAL(&relayMux);
   relaySafetyState = platformClockReady && relaySafetyTimersReady &&
@@ -7157,6 +6996,7 @@ void setup() {
   }
   pinMode(RELAY_GPIO, OUTPUT);
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
+  initializeScaleConnectedLed();
 #ifndef SHOT_STOPPER_HOST_TEST
   set_arduino_panic_handler(shotStopperPanicHandler, nullptr);
 #endif
@@ -7183,10 +7023,6 @@ void setup() {
 #endif
 
   Serial.begin(SERIAL_BAUD);
-#if SHOT_STOPPER_ENABLE_ALED == 1
-  statusIndicatorsReady = initializeStatusIndicators();
-  updateStatusIndicators();
-#endif
 
   persistenceReady = EEPROM.begin(EEPROM_SIZE);
 #ifndef SHOT_STOPPER_HOST_TEST
@@ -7286,15 +7122,6 @@ void setup() {
   logEmit(psramFound() ? LogLevel::INFO : LogLevel::CRITICAL,
           DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM, BOOT_SUBSYSTEM_PSRAM,
           psramFound() ? 1 : 0);
-#endif
-#if SHOT_STOPPER_ENABLE_ALED == 1
-  if (!statusIndicatorsReady) {
-    logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
-            BOOT_SUBSYSTEM_INDICATORS, 0);
-  } else {
-    logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
-            BOOT_SUBSYSTEM_INDICATORS, 1);
-  }
 #endif
   if (safetyResetStatus.recoveryRequired) {
     addDebugEvent(DebugCategory::SECURITY, DebugCode::SAFETY_LOCKOUT_ACTIVE);
@@ -7400,9 +7227,7 @@ void setup() {
 
   addDebugEvent(DebugCategory::BOOT, DebugCode::BOOT_READY);
   firmwareInitializationComplete = true;
-#if SHOT_STOPPER_ENABLE_ALED == 1
-  updateStatusIndicators();
-#endif
+  serviceScaleConnectedLed();
 }
 
 void serviceHealthThresholdAlerts(uint32_t intervalMaxGapMs) {
@@ -7536,9 +7361,7 @@ void loop() {
   serviceMaintenanceLease();
   publishControlStatus();
   publishBleCompanionRuntimeSnapshot();
-#if SHOT_STOPPER_ENABLE_ALED == 1
-  updateStatusIndicators();
-#endif
+  serviceScaleConnectedLed();
   if (!feedCurrentTaskWatchdog()) {
     reportTaskWatchdogFault();
     tripRelaySafety(RelaySafetyFault::TASK_WATCHDOG_FAILURE);
