@@ -211,6 +211,7 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | **Slow extraction guard** | **On by default**. See [Slow extraction guard](#slow-extraction-guard). |
 | **Auto-to-manual time guard** | **On by default**. See [Auto-to-manual time guard](#auto-to-manual-time-guard). |
 | **Automatic tare** | Send an initial tare when an automatic shot starts (default ON). |
+| **Post-tare grace (s)** | Machine-level (**Settings → Machine and scale → Tare**). After a tare (start or late-cup retare), wait this long for the scale to report ~0 g before using weight for first drop and stop. Default **2 s**; 0.5–10 s. Inactive when Automatic tare is off. |
 | **Brew by weight** | **On by default**. Stop the shot by scale weight. Off keeps tare/timer but disables weight stop, BBW protection, automatic retare, and offset learning (same as the former Timer only setting). |
 | **Bookoo combined command** | Use the scale’s combined tare + start-timer command (requires auto tare; default ON). |
 | **Mute scale in Buzzer only** | Bookoo/generic: when enabled (default ON), send silence (volume 0) on connect/reconnect, when Output channel is saved as Buzzer only, and when this option is turned on. Applies only in **Buzzer only**. |
@@ -234,8 +235,6 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 
 Additional fixed protections (not separately configurable):
 
-- **Post-tare baseline grace (2 s):** after a tare, weight must settle within
-  ±50 g before the stream is trusted for stop decisions.
 - **Direct threshold stop:** two fresh samples at `target − learned offset`
   after BBW protection ends.
 - **Predictive stop:** linear regression over recent accepted samples can stop
@@ -592,8 +591,8 @@ BBW protection run in parallel from shot start and do not delay that entry.
    a second tare without restarting the shot timer.
 2. **BBW protection / pre-arm** (always active for automatic BBW): runs for the
    configured timeout from shot start. Automatic stop by weight is inhibited
-   while retare or BBW protection still blocks. First drops beep and log but
-   do not end this window.
+   while BBW protection still blocks. First drops beep and log independently of
+   retare; they do not end this window.
 3. **Brew by weight**: after both windows end, weight stop is armed
    immediately (same predicted-weight tool as every other recipe weight cut).
 

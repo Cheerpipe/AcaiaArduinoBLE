@@ -334,8 +334,6 @@ struct CycleSession {
   uint8_t retareStabilitySamples = 0;
   uint32_t retareStabilityStartedAtMs = 0;
   uint32_t retareLastSampleAtMs = 0;
-  float retareFlowLastWeightG = 0.0f;
-  bool retareFlowSampleValid = false;
   uint8_t firstDropConfirmations = 0;
   uint32_t firstDropLastAtMs = 0;
   uint32_t firstDropLastPacketSequence = 0;
@@ -1995,11 +1993,14 @@ void requestFirstDropBeep() {
   }
 }
 
+bool retareWindowOpen();
+
 void notifyRetareFlowDetected(uint32_t receivedAtMs) {
+  if (!retareWindowOpen()) {
+    return;
+  }
   if (session.retareFlowFirstDetectedAtMs == 0) {
     session.retareFlowFirstDetectedAtMs = receivedAtMs;
-    recordFirstDropTimestamp(receivedAtMs);
-    requestFirstDropBeep();
     addDebugEvent(DebugCategory::SCALE, DebugCode::FIRST_DROP_DURING_RETARE,
                   static_cast<int32_t>(session.id),
                   static_cast<int32_t>(elapsedMs(session.startedAtMs)));
@@ -2052,13 +2053,7 @@ bool bbwWeightStopInhibited() {
   if (!bbwAutomaticScaleSession()) {
     return false;
   }
-  if (retareWindowOpen()) {
-    return true;
-  }
-  if (bbwProtectionActive()) {
-    return true;
-  }
-  return false;
+  return bbwProtectionActive();
 }
 
 bool withinRinseGestureWindow() {
@@ -2072,20 +2067,20 @@ void resetRetareStabilityStreak() {
 }
 
 void onFirstDropsDetected(uint32_t receivedAtMs) {
-  if (retareWindowOpen()) {
-    return;
-  }
   recordFirstDropTimestamp(receivedAtMs);
   requestFirstDropBeep();
+  notifyRetareFlowDetected(receivedAtMs);
 }
 
 void performAutomaticRetare() {
   if (session.retarePerformed || session.retareDisabled || !retareWindowOpen()) {
     return;
   }
+  if (!requestRemoteRetare()) {
+    return;
+  }
   session.retarePerformed = true;
   resetRetareStabilityStreak();
-  (void)requestRemoteRetare();
   emitImmediateCommandAlertIfBuzzer();
   markRetareEnded(millis());
 }
@@ -2147,9 +2142,6 @@ void initializeBbwProtection() {
   session.firstDropsBeepSent = false;
   session.retareCandidateWeightG = 0.0f;
   resetRetareStabilityStreak();
-  session.retareFlowLastWeightG = 0.0f;
-  session.retareFlowSampleValid = false;
-  session.retareFlowFirstDetectedAtMs = 0;
   session.firstDropConfirmations = 0;
   session.firstDropLastAtMs = 0;
   session.firstDropLastPacketSequence = 0;
@@ -2191,11 +2183,15 @@ void rejectScaleSample(DebugCode code, float weightG, float referenceG = 0.0f) {
 void armPostTareBaselineWindow() {
   session.awaitingPostTareBaseline = true;
   session.postTareBaselineDeadlineMs =
-      session.startedAtMs + POST_TARE_BASELINE_GRACE_MS;
+      millis() + session.config.postTareBaselineGraceMs;
   session.hasWeightAnchor = false;
   session.recoveryConfirmations = 0;
   session.recoveryLastAtMs = 0;
   session.recoveryLastPacketSequence = 0;
+  resetWeightTrend();
+  if (session.weightControlState == WeightControlState::VALIDATING) {
+    setWeightControlState(WeightControlState::ACTIVE);
+  }
 }
 
 void expirePostTareBaselineIfNeeded() {
@@ -2210,7 +2206,7 @@ void expirePostTareBaselineIfNeeded() {
   addDebugEvent(DebugCategory::SCALE,
                 DebugCode::SCALE_POST_TARE_BASELINE_TIMEOUT,
                 static_cast<int32_t>(session.id),
-                static_cast<int32_t>(POST_TARE_BASELINE_GRACE_MS));
+                static_cast<int32_t>(session.config.postTareBaselineGraceMs));
 }
 
 void enterFastExtractionExtended(float weightG, uint32_t atMs) {
@@ -2432,9 +2428,7 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
   considerCupRemovedSample(weight, receivedAtMs, packetSequence);
 
   if (session.active && session.startedWithScale) {
-    if (retareWindowOpen() &&
-        (!session.awaitingPostTareBaseline ||
-         weight >= session.config.minimumCupWeightG) &&
+    if (retareWindowOpen() && !session.awaitingPostTareBaseline &&
         weight >= MIN_AUTOMATION_WEIGHT_G &&
         weight <= MAX_AUTOMATION_WEIGHT_G) {
       considerRetareCupCandidate(weight, receivedAtMs);
@@ -2604,6 +2598,9 @@ void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
     return;
   }
   if (!session.scaleBaselineReady) {
+    if (fabsf(weight) > POST_TARE_BASELINE_MAX_ABS_G) {
+      return;
+    }
     session.scaleBaselineG = weight;
     session.scaleBaselineReady = true;
     return;
@@ -2616,33 +2613,6 @@ void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
   const float firstDropMaxWeightG =
       static_cast<float>(session.config.goalWeightG) * 0.5f;
   if (weight >= firstDropMaxWeightG) {
-    session.firstDropConfirmations = 0;
-    return;
-  }
-  if (retareWindowOpen() &&
-      deltaFromBaseline >= session.config.minimumCupWeightG) {
-    session.firstDropConfirmations = 0;
-    return;
-  }
-  if (retareWindowOpen() &&
-      deltaFromBaseline >= session.config.minimumCupWeightG * 0.5f) {
-    session.firstDropConfirmations = 0;
-    return;
-  }
-  if (retareWindowOpen()) {
-    if (!session.retareFlowSampleValid) {
-      session.retareFlowLastWeightG = weight;
-      session.retareFlowSampleValid = true;
-      session.firstDropConfirmations = 0;
-      return;
-    }
-    const float step = weight - session.retareFlowLastWeightG;
-    session.retareFlowLastWeightG = weight;
-    if (step > session.config.retareStabilityToleranceG * 2.0f || step < 0.0f) {
-      session.firstDropConfirmations = 0;
-      return;
-    }
-    notifyRetareFlowDetected(receivedAtMs);
     session.firstDropConfirmations = 0;
     return;
   }
@@ -5673,6 +5643,7 @@ void processWebCommand(const WebCommand &command) {
       // Machine/workflow fields only. Recipe authority stays on the active preset.
       RuntimeConfig candidate = runtimeConfig;
       candidate.autoTare = command.config.autoTare;
+      candidate.postTareBaselineGraceMs = command.config.postTareBaselineGraceMs;
       candidate.canTareStartTimer = command.config.canTareStartTimer;
       candidate.scaleTimerStopExtraDelayMs =
           command.config.scaleTimerStopExtraDelayMs;

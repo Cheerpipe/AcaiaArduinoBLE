@@ -94,6 +94,8 @@ void p01_defaults_are_valid() {
                   DEFAULT_CUP_REMOVED_WEIGHT_G) < 0.001f);
   CHECK(settings.runtime.lastShotCooldownMs == DEFAULT_LAST_SHOT_COOLDOWN_MS);
   CHECK(settings.runtime.dripDelayMs == DEFAULT_DRIP_DELAY_MS);
+  CHECK(settings.runtime.postTareBaselineGraceMs ==
+        DEFAULT_POST_TARE_BASELINE_GRACE_MS);
   CHECK(!settings.runtime.serialDebugOutput);
   CHECK(settings.runtime.ringRetainLogLevel ==
         static_cast<uint8_t>(LogLevel::NONE));

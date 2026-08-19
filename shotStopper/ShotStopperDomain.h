@@ -12,7 +12,7 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 10;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 11;
 constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
 constexpr size_t PREFERRED_SCALE_NAME_CAPACITY = 32;
 constexpr size_t SCALE_HISTORY_CAPACITY = 8;
@@ -244,7 +244,9 @@ constexpr float MAX_AUTOMATION_WEIGHT_G = 1000.0f;
 constexpr float MAX_AUTOMATION_WEIGHT_SLEW_G_PER_S = 100.0f;
 constexpr float AUTOMATION_WEIGHT_SLEW_ALLOWANCE_G = 20.0f;
 constexpr float POST_TARE_BASELINE_MAX_ABS_G = 50.0f;
-constexpr uint32_t POST_TARE_BASELINE_GRACE_MS = 2000;
+constexpr uint32_t DEFAULT_POST_TARE_BASELINE_GRACE_MS = 2000;
+constexpr uint32_t MIN_POST_TARE_BASELINE_GRACE_MS = 500;
+constexpr uint32_t MAX_POST_TARE_BASELINE_GRACE_MS = 10000;
 // Ignore tare noise around 0; a lifted cup drops several grams below this.
 constexpr float DEFAULT_CUP_REMOVED_WEIGHT_G = -3.0f;
 constexpr float MIN_CUP_REMOVED_WEIGHT_G = -50.0f;
@@ -810,6 +812,7 @@ struct RuntimeConfig {
   // Seed for Reset learned stop offset; factory default remains 1.5 g.
   float weightOffsetBaselineG = DEFAULT_WEIGHT_OFFSET_G;
   bool autoTare = true;
+  uint32_t postTareBaselineGraceMs = DEFAULT_POST_TARE_BASELINE_GRACE_MS;
   // Internal polarity: true disables weight stop. UI/API brewByWeight is the inverse.
   bool timerOnly = false;
   bool canTareStartTimer = true;
@@ -898,6 +901,7 @@ struct CycleConfigSnapshot {
   uint8_t goalWeightG = DEFAULT_GOAL_WEIGHT_G;
   float weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
   bool autoTare = true;
+  uint32_t postTareBaselineGraceMs = DEFAULT_POST_TARE_BASELINE_GRACE_MS;
   bool timerOnly = false;
   bool canTareStartTimer = true;
   uint32_t scaleTimerStopExtraDelayMs = DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS;
@@ -950,6 +954,7 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.goalWeightG = config.goalWeightG;
   snapshot.weightOffsetG = config.weightOffsetG;
   snapshot.autoTare = config.autoTare;
+  snapshot.postTareBaselineGraceMs = config.postTareBaselineGraceMs;
   snapshot.timerOnly = config.timerOnly;
   snapshot.canTareStartTimer = config.canTareStartTimer;
   snapshot.scaleTimerStopExtraDelayMs = config.scaleTimerStopExtraDelayMs;
@@ -1012,6 +1017,7 @@ enum class ConfigValidationError : uint8_t {
   PADDLE_REMINDER_MAX_DURATION,
   TIMING_RELATION,
   COMBINED_TARE_REQUIRES_AUTOTARE,
+  POST_TARE_BASELINE_GRACE,
   SCALE_TIMER_STOP_EXTRA_DELAY,
   TIMEZONE_OFFSET,
   NTP_SERVER_PRESET,
@@ -1271,6 +1277,10 @@ inline ConfigValidationError validateRuntimeConfig(
   if (config.canTareStartTimer && !config.autoTare) {
     return ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE;
   }
+  if (config.postTareBaselineGraceMs < MIN_POST_TARE_BASELINE_GRACE_MS ||
+      config.postTareBaselineGraceMs > MAX_POST_TARE_BASELINE_GRACE_MS) {
+    return ConfigValidationError::POST_TARE_BASELINE_GRACE;
+  }
   if (config.scaleTimerStopExtraDelayMs < MIN_SCALE_TIMER_STOP_EXTRA_DELAY_MS ||
       config.scaleTimerStopExtraDelayMs > MAX_SCALE_TIMER_STOP_EXTRA_DELAY_MS) {
     return ConfigValidationError::SCALE_TIMER_STOP_EXTRA_DELAY;
@@ -1409,6 +1419,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
     case ConfigValidationError::TIMING_RELATION: return "timingRelation";
     case ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE:
       return "canTareStartTimer";
+    case ConfigValidationError::POST_TARE_BASELINE_GRACE:
+      return "postTareBaselineGraceMs";
     case ConfigValidationError::SCALE_TIMER_STOP_EXTRA_DELAY:
       return "scaleTimerStopExtraDelayMs";
     case ConfigValidationError::TIMEZONE_OFFSET:

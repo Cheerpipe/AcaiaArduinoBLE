@@ -1584,6 +1584,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.rinseGestureMs == 1000);
   CHECK(config.minBrewTimeMs == 28000);
   CHECK(config.canTareStartTimer);
+  CHECK(config.postTareBaselineGraceMs == DEFAULT_POST_TARE_BASELINE_GRACE_MS);
   CHECK(config.scaleTimerStopExtraDelayMs ==
         DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS);
   CHECK(config.firstDropBeep);
@@ -1685,6 +1686,19 @@ void w03_runtime_timing_relations_are_transactional() {
   config.autoTare = false;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE);
+  config = RuntimeConfig{};
+  config.postTareBaselineGraceMs = MIN_POST_TARE_BASELINE_GRACE_MS - 1;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::POST_TARE_BASELINE_GRACE);
+  config = RuntimeConfig{};
+  config.postTareBaselineGraceMs = MAX_POST_TARE_BASELINE_GRACE_MS + 1;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::POST_TARE_BASELINE_GRACE);
+  config = RuntimeConfig{};
+  config.postTareBaselineGraceMs = MIN_POST_TARE_BASELINE_GRACE_MS;
+  CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
+  config.postTareBaselineGraceMs = MAX_POST_TARE_BASELINE_GRACE_MS;
+  CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
   config = RuntimeConfig{};
   config.scaleTimerStopExtraDelayMs = MAX_SCALE_TIMER_STOP_EXTRA_DELAY_MS + 1;
   CHECK(validateRuntimeConfig(config) ==
@@ -3892,12 +3906,14 @@ void w86_config_applies_to_ram_immediately_and_coalesces() {
   first.config = runtimeConfig;
   first.config.avoidBbwShotWithoutScale = !originalAvoid;
   first.config.dripDelayMs = 4200;
+  first.config.postTareBaselineGraceMs = 3500;
   processWebCommand(first);
   CHECK(!maintenanceLease.active);
   CHECK(runtimeConfig.avoidBbwShotWithoutScale == !originalAvoid);
   CHECK(runtimeConfig.lastShotCooldownMs == originalCooldown);
   CHECK(runtimeConfig.autoTare == originalAutoTare);
   CHECK(runtimeConfig.dripDelayMs == 4200);
+  CHECK(runtimeConfig.postTareBaselineGraceMs == 3500);
   CHECK(runtimeConfig.revision == firstRevision + 1);
   CHECK(runtimePersistPending);
 
@@ -5098,6 +5114,84 @@ void rs05_coffee_during_min_duration_wait_skips_retare() {
   CHECK(session.flowDuringRetare);
   CHECK(session.firstDropMs != 0);
   CHECK(session.retareFlowFirstDetectedAtMs != 0);
+}
+
+void rt11_late_retare_records_first_drops_and_keeps_weight_control() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.autoRetare = true;
+  runtimeConfig.firstDropBeep = true;
+  runtimeConfig.bbwProtectionMs = minimumBbwProtectionMs(runtimeConfig);
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+  advanceToBrew();
+  uint32_t keepAliveSequence = 40;
+  while (elapsedMs(session.startedAtMs) <
+         runtimeConfig.postTareBaselineGraceMs + 500) {
+    publishWeight(0.0f, hostMillis, 1, keepAliveSequence++);
+    runLoopAfter(200);
+  }
+  CHECK(retareWindowOpen());
+  publishStableCupWeight(150.0f, 10);
+  CHECK(session.retarePerformed);
+  CHECK(executeNextScaleCommand());
+  CHECK(session.awaitingPostTareBaseline);
+  CHECK(!session.scaleBaselineReady);
+  publishWeight(150.0f, hostMillis + 50, 1, 20);
+  CHECK(session.awaitingPostTareBaseline);
+  CHECK(!session.scaleBaselineReady);
+  CHECK(session.firstDropMs == 0);
+  const uint32_t settledAtMs = hostMillis + 100;
+  publishWeight(0.0f, settledAtMs, 1, 21);
+  CHECK(!session.awaitingPostTareBaseline);
+  CHECK(session.scaleBaselineReady);
+  CHECK(session.weightControlState == WeightControlState::ACTIVE);
+  publishWeight(0.35f, settledAtMs + 50, 1, 30);
+  publishWeight(0.40f, settledAtMs + 150, 1, 31);
+  publishWeight(0.45f, settledAtMs + 250, 1, 32);
+  CHECK(session.firstDropMs != 0);
+  CHECK(scaleBeepPending);
+  CHECK(session.weightControlState == WeightControlState::ACTIVE);
+  CHECK(!session.flowDuringRetare);
+}
+
+void rt12_early_retare_then_first_drops_are_recorded() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.autoRetare = true;
+  runtimeConfig.firstDropBeep = true;
+  runtimeConfig.bbwProtectionMs = minimumBbwProtectionMs(runtimeConfig);
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+  CHECK(!session.awaitingPostTareBaseline);
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  publishStableCupWeight(150.0f, 10);
+  CHECK(session.retarePerformed);
+  CHECK(executeNextScaleCommand());
+  CHECK(session.awaitingPostTareBaseline);
+  publishWeight(0.0f, hostMillis + 50, 1, 20);
+  CHECK(!session.awaitingPostTareBaseline);
+  simulateFirstDrops(0.0f, 30);
+  CHECK(session.firstDropMs != 0);
+  CHECK(scaleBeepPending);
+  CHECK(session.weightControlState == WeightControlState::ACTIVE);
+}
+
+void rt13_auto_tare_off_skips_automatic_retare() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.autoRetare = true;
+  runtimeConfig.autoTare = false;
+  runtimeConfig.bbwProtectionMs = minimumBbwProtectionMs(runtimeConfig);
+  startCycle();
+  CHECK(retareWindowOpen());
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  publishStableCupWeight(150.0f, 10);
+  CHECK(!session.retarePerformed);
+  CHECK(commandCount(ScaleCommandType::TARE_ONLY) == 0);
+  CHECK(retareWindowOpen());
 }
 
 void r45_slew_rejection_emits_specific_debug_code() {
@@ -7023,6 +7117,9 @@ const TestCase testCases[] = {
     {"RT07", rt07_auto_retare_off_skips_retare_window},
     {"RT09", rt09_coffee_during_retare_beep_on_first_drop_not_at_retare_end},
     {"RT10", rt10_first_drops_beep_during_bbw_protection},
+    {"RT11", rt11_late_retare_records_first_drops_and_keeps_weight_control},
+    {"RT12", rt12_early_retare_then_first_drops_are_recorded},
+    {"RT13", rt13_auto_tare_off_skips_automatic_retare},
     {"RS01", rs01_fast_samples_wait_for_min_duration},
     {"RS02", rs02_slow_samples_meet_min_duration_at_third_sample},
     {"RS03", rs03_broken_streak_before_min_duration_does_not_retare},

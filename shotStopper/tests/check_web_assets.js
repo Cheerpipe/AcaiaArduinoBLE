@@ -44,11 +44,11 @@ const jsBytes = Buffer.byteLength(js, 'utf8');
 if (htmlBytes > 40960) {
   throw new Error('Web UI HTML source exceeds the 40 KiB authoring budget');
 }
-if (jsBytes > 81920) {
-  throw new Error('Web UI JS source exceeds the 80 KiB authoring budget');
+if (jsBytes > 82944) {
+  throw new Error('Web UI JS source exceeds the 81 KiB authoring budget');
 }
-if (htmlBytes + jsBytes > 119808) {
-  throw new Error('Web UI HTML+JS source exceeds the 117 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 120832) {
+  throw new Error('Web UI HTML+JS source exceeds the 118 KiB combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -572,6 +572,10 @@ if (!html.includes('<summary>Tare</summary>') ||
     html.indexOf('<summary>Scales</summary>') >
         html.indexOf('<summary>Alerts</summary>') ||
     html.indexOf('id="autoTare"') > html.indexOf('<summary>Scales</summary>') ||
+    html.indexOf('id="postTareBaselineGraceS"') <
+        html.indexOf('id="autoTare"') ||
+    html.indexOf('id="postTareBaselineGraceS"') >
+        html.indexOf('id="autoRetare"') ||
     html.indexOf('id="autoRetare"') > html.indexOf('<summary>Scales</summary>') ||
     html.indexOf('id="retareWindowS"') > html.indexOf('<summary>Scales</summary>') ||
     html.indexOf('id="minimumCupWeightG"') >
@@ -630,6 +634,19 @@ if (!html.includes('<summary>Tare</summary>') ||
         html.indexOf('<summary>Alerts</summary>') ||
     !ui.includes("d.parentElement.closest('details')")) {
   throw new Error('Machine settings must split Tare and Scales, with Bookoo/Acaia/Felicita subgroups');
+}
+if (!html.includes('id="postTareBaselineGraceS" type="number" min="0.5" max="10" step="0.1"') ||
+    !ui.includes("rangeCheck('postTareBaselineGraceS',0.5,10,'Post-tare grace',{unit:'s'})") ||
+    !ui.includes("postTareBaselineGraceMs:sToMs('postTareBaselineGraceS')") ||
+    !ui.includes("['postTareBaselineGraceS','postTareBaselineGraceMs']") ||
+    !ui.includes("apply('tareOpt',!$('autoTare').checked)") ||
+    !ui.includes("$('autoTare').onchange=()=>{updateConfigGroups();markConfigDirty()}") ||
+    !ui.includes("typeof c.postTareBaselineGraceMs==='number'") ||
+    !network.includes('\\"postTareBaselineGraceMs\\":%lu') ||
+    !network.includes('Post-tare grace must be from 0.5 to 10 s.') ||
+    !network.includes('candidate.postTareBaselineGraceMs') ||
+    !firmware.includes('session.config.postTareBaselineGraceMs')) {
+  throw new Error('Post-tare grace must be wired through Tare settings, status/settings, and firmware');
 }
 if (!ui.includes("rangeCheck('dripDelayS',0,10,'Drip delay',{unit:'s'})") ||
     !ui.includes("dripDelayMs:sToMs('dripDelayS')") ||

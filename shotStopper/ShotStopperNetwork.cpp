@@ -229,6 +229,8 @@ const char *configValidationMessage(ConfigValidationError error) {
              "window, and BBW protection each ≤ Max BBW time.";
     case ConfigValidationError::COMBINED_TARE_REQUIRES_AUTOTARE:
       return "The Bookoo combined command requires automatic tare.";
+    case ConfigValidationError::POST_TARE_BASELINE_GRACE:
+      return "Post-tare grace must be from 0.5 to 10 s.";
     case ConfigValidationError::SCALE_TIMER_STOP_EXTRA_DELAY:
       return "Scale timer stop extra delay must be from 0 to 1000 ms.";
     case ConfigValidationError::TIMEZONE_OFFSET:
@@ -3299,7 +3301,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
     ok = statusJsonAppend(
         &used,
         ",\"goalWeightG\":%u,\"weightOffsetG\":%.2f,"
-        "\"weightOffsetBaselineG\":%.2f,\"autoTare\":%s,\"brewByWeight\":%s,"
+        "\"weightOffsetBaselineG\":%.2f,\"autoTare\":%s,"
+        "\"postTareBaselineGraceMs\":%lu,\"brewByWeight\":%s,"
         "\"canTareStartTimer\":%s,\"scaleTimerStopExtraDelayMs\":%lu,"
         "\"dripDelayMs\":%lu,"
         "\"soundAlertsEnabled\":%s,\"firstDropBeep\":%s,"
@@ -3333,6 +3336,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<double>(control.config.weightOffsetG),
         static_cast<double>(control.config.weightOffsetBaselineG),
         control.config.autoTare ? "true" : "false",
+        static_cast<unsigned long>(control.config.postTareBaselineGraceMs),
         control.config.timerOnly ? "false" : "true",
         control.config.canTareStartTimer ? "true" : "false",
         static_cast<unsigned long>(control.config.scaleTimerStopExtraDelayMs),
@@ -3997,7 +4001,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   memcpy(customNtp, candidate.ntpServerCustom, sizeof(customNtp));
   static const char *const fields[] = {
       "baseRevision", "goalWeightG", "rinseGestureMs", "rinseDurationMs",
-      "operationalWallMs", "autoTare", "brewByWeight", "canTareStartTimer",
+      "operationalWallMs", "autoTare", "postTareBaselineGraceMs",
+      "brewByWeight", "canTareStartTimer",
       "scaleTimerStopExtraDelayMs",       "dripDelayMs", "soundAlertsEnabled",
       "firstDropBeep", "scaleConnectedLed",
       "paddleReturnReminderBeep",
@@ -4052,6 +4057,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (jsonFieldPresent(root, "autoTare") &&
              !jsonBoolean(root, "autoTare", candidate.autoTare)) {
     parseError = "autoTare must be a boolean.";
+  } else if (jsonFieldPresent(root, "postTareBaselineGraceMs") &&
+             !jsonUint32(root, "postTareBaselineGraceMs",
+                         candidate.postTareBaselineGraceMs)) {
+    parseError = "postTareBaselineGraceMs must be an integer (milliseconds).";
   } else if (jsonFieldPresent(root, "brewByWeight") &&
              !jsonBoolean(root, "brewByWeight", brewByWeight)) {
     parseError = "brewByWeight must be a boolean.";
