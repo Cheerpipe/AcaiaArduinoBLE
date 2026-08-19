@@ -36,7 +36,8 @@ On Arduino-ESP32 **3.3.6+**, `initArduino()` releases BLE controller RAM unless
 a linked translation unit includes `esp32-hal-alloc-ble-mem.h`. Native
 `BLE`/`SimpleBLE` do; ArduinoBLE does not. The include is kept commented in
 this tree while the app stays on **3.3.3** (on 3.3.11 it fixed BLE but starved
-the Web UI heap on ESP32 without PSRAM).
+the Web UI heap on boards without PSRAM). Shot Stopper now requires ESP32-S3
+with PSRAM; revisit the include when moving cores.
 
 ## Robust connection behavior
 
@@ -99,7 +100,7 @@ When compiling the bundled example from a checkout, include the repository as
 a library explicitly:
 
 ```sh
-arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all \
+arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashMode=qio,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc --warnings all \
   --library libraries/AcaiaArduinoBLE shotStopper
 ```
 

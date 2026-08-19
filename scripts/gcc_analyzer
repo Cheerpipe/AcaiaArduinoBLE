@@ -2,18 +2,21 @@
 # Build the firmware with GCC's interprocedural static analyzer enabled.
 set -uo pipefail
 
-readonly DEFAULT_PORT="/dev/cu.usbserial-0001"
-readonly DEFAULT_ARCH="esp32"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/shotstopper_board.sh
+source "$SCRIPT_DIR/shotstopper_board.sh"
+
+readonly DEFAULT_ARCH="$SHOTSTOPPER_DEFAULT_ARCH"
 readonly DEFAULT_FLAGS=(
   -Werror=deprecated-copy
   -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1
   -DSHOT_STOPPER_ENABLE_BUZZER=2
 )
-readonly ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+readonly ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 readonly OUTPUT_DIR="reports/gcc-analyzer"
 
 usage() {
-  cat <<'EOF'
+  cat <<EOF
 Uso: ./scripts/gcc_analyzer [ruta_serial arquitectura [flags_de_compilacion...]]
 
 Compila Shot Stopper con GCC -fanalyzer y guarda el resultado filtrado en
@@ -26,12 +29,12 @@ Sin argumentos usa la configuración de desarrollo de build. Si se indica una
 ruta serial, la arquitectura también es obligatoria. Los flags adicionales se
 añaden a los flags de desarrollo y al análisis.
 
-Arquitecturas admitidas: esp32, esp32s3.
+$(shotstopper_arch_help)
 
 Ejemplos:
   ./scripts/gcc_analyzer
-  ./scripts/gcc_analyzer /dev/cu.usbserial-0001 esp32
-  ./scripts/gcc_analyzer /dev/cu.usbmodem01 esp32s3 -DSHOT_STOPPER_ENABLE_ALED=1
+  ./scripts/gcc_analyzer /dev/cu.usbmodem2101 n16r8
+  ./scripts/gcc_analyzer /dev/cu.usbmodem2101 n8r4 -DSHOT_STOPPER_ENABLE_ALED=1
 EOF
 }
 
@@ -45,7 +48,8 @@ if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 
 if [[ $# -eq 0 ]]; then
-  port="$DEFAULT_PORT"
+  shotstopper_resolve_port optional
+  port="${SHOTSTOPPER_PORT:-"(no detectado)"}"
   arch="$DEFAULT_ARCH"
   extra_flags=()
 elif [[ $# -eq 1 ]]; then
@@ -58,21 +62,17 @@ else
   extra_flags=("${@:3}")
 fi
 
-case "$arch" in
-  esp32|esp32s3) ;;
-  *)
-    echo "Arquitectura no admitida: $arch (usa esp32 o esp32s3)." >&2
-    exit 2
-    ;;
-esac
+if ! shotstopper_resolve_board "$arch"; then
+  exit 2
+fi
 
 cd "$ROOT"
 output_path="$ROOT/$OUTPUT_DIR"
 rm -rf "$output_path"
 mkdir -p "$output_path"
 
-echo "Ejecutando GCC -fanalyzer para $arch..."
-build_args=("$port" "$arch" "${DEFAULT_FLAGS[@]}")
+echo "Ejecutando GCC -fanalyzer para $SHOTSTOPPER_ARCH..."
+build_args=("$port" "$SHOTSTOPPER_ARCH" "${DEFAULT_FLAGS[@]}")
 if [[ ${#extra_flags[@]} -gt 0 ]]; then
   build_args+=("${extra_flags[@]}")
 fi
@@ -87,7 +87,7 @@ build_status=$?
 if [[ $build_status -ne 0 ]]; then
   cat "$raw_report" >&2
   printf 'Architecture: %s\nGCC analyzer exit status: %d\n' \
-    "$arch" "$build_status" > "$output_path/README.txt"
+    "$SHOTSTOPPER_ARCH" "$build_status" > "$output_path/README.txt"
   echo "La compilación falló; registro guardado en $OUTPUT_DIR/gcc-analyzer-raw.txt" >&2
   exit "$build_status"
 fi
@@ -114,7 +114,7 @@ if grep -q '\[-Wanalyzer-' "$report"; then
 fi
 
 printf 'Architecture: %s\nGCC analyzer exit status: %d\n' \
-  "$arch" "$analyzer_status" > "$output_path/README.txt"
+  "$SHOTSTOPPER_ARCH" "$analyzer_status" > "$output_path/README.txt"
 
 echo "Reporte guardado en $OUTPUT_DIR/"
 exit "$analyzer_status"

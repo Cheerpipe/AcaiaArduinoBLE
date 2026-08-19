@@ -14,12 +14,14 @@ valores por defecto.
 Si se indica ruta_serial, arquitectura y velocidad son obligatorias. Los flags
 restantes se envían únicamente a build.
 
-Arquitecturas admitidas: esp32, esp32s3.
+Arquitecturas admitidas: n8r4, n16r8 (alias: esp32s3 → n16r8).
+
+Sin argumentos, cada script usa n16r8 y el primer /dev/cu.usbmodem<número>.
 
 Ejemplos:
   ./scripts/bsum
-  ./scripts/bsum /dev/cu.usbserial-0001 esp32 115200
-  ./scripts/bsum /dev/cu.usbmodem01 esp32s3 115200 -DSHOT_STOPPER_ENABLE_ALED=1
+  ./scripts/bsum /dev/cu.usbmodem2101 n16r8 115200
+  ./scripts/bsum /dev/cu.usbmodem2101 n8r4 115200 -DSHOT_STOPPER_ENABLE_ALED=1
 EOF
 }
 
@@ -42,7 +44,11 @@ else
   args=("$@")
 fi
 
-root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/shotstopper_board.sh
+source "$SCRIPT_DIR/shotstopper_board.sh"
+
+root="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$root"
 
 if [[ ${#args[@]} -eq 0 ]]; then
@@ -52,11 +58,13 @@ if [[ ${#args[@]} -eq 0 ]]; then
   exec ./scripts/monitor
 fi
 
+shotstopper_resolve_board "${args[1]}"
+
 if [[ ${#args[@]} -eq 3 ]]; then
   ./scripts/build "${args[0]}" "${args[1]}"
 else
   ./scripts/build "${args[0]}" "${args[1]}" "${args[@]:3}"
 fi
-./scripts/static_report "build/${args[1]}"
+./scripts/static_report "$SHOTSTOPPER_BUILD_DIR"
 ./scripts/upload "${args[0]}" "${args[1]}"
 exec ./scripts/monitor "${args[0]}" "${args[2]}"

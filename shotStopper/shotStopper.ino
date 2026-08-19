@@ -1,7 +1,7 @@
 /*
   Shot Stopper for La Marzocco Micra
 
-  The Micra paddle is connected only to an ESP32 GPIO and GND. The stopper is
+  The Micra paddle is connected only to an ESP32-S3 GPIO and GND. The stopper is
   the sole controller of the Micra CN9 circuit through a normally-open relay.
 
   Paddle ON  (microswitch closed) -> GPIO LOW
@@ -56,6 +56,7 @@
 #include "ShotStopperTime.h"
 #include "ShotStopperWatchdog.h"
 #include "ShotStopperHwmon.h"
+#include "ShotStopperPsram.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -112,12 +113,21 @@ constexpr uint8_t STATUS_INDICATOR_BRIGHTNESS =
 constexpr bool DEBUG = false;
 
 // ---------------------------------------------------------------------------
-// Board hardware
+// Board hardware — ESP32-S3 only (N8R4 QSPI PSRAM or N16R8 OPI PSRAM)
 // ---------------------------------------------------------------------------
+
+#if !defined(SHOT_STOPPER_HOST_TEST)
+#if !defined(ARDUINO_ESP32S3_DEV)
+#error "Unsupported board: Shot Stopper requires ESP32-S3 (esp32:esp32:esp32s3)"
+#endif
+#if !defined(BOARD_HAS_PSRAM)
+#error "Shot Stopper requires PSRAM. Compile n8r4 (QSPI 4MB) or n16r8 (OPI 8MB)"
+#endif
+#endif
 
 #if defined(ARDUINO_ESP32S3_DEV)
 constexpr uint8_t PADDLE_GPIO = 21;
-constexpr uint8_t RELAY_GPIO = 38;
+constexpr uint8_t RELAY_GPIO = 10;
 #if SHOT_STOPPER_ENABLE_ALED == 1
 #ifndef SHOT_STOPPER_SCALE_LED_GPIO
 #define SHOT_STOPPER_SCALE_LED_GPIO 48
@@ -129,37 +139,8 @@ constexpr uint8_t RELAY_GPIO = 38;
 #ifndef SHOT_STOPPER_BUZZER_GPIO
 #define SHOT_STOPPER_BUZZER_GPIO 14
 #endif
-#elif defined(ARDUINO_NANO_ESP32)
-constexpr uint8_t PADDLE_GPIO = 10;
-constexpr uint8_t RELAY_GPIO = 11;
-#if SHOT_STOPPER_ENABLE_ALED == 1
-#ifndef SHOT_STOPPER_SCALE_LED_GPIO
-#define SHOT_STOPPER_SCALE_LED_GPIO 2
-#endif
-#ifndef SHOT_STOPPER_STOPPER_LED_GPIO
-#define SHOT_STOPPER_STOPPER_LED_GPIO 3
-#endif
-#endif
-#ifndef SHOT_STOPPER_BUZZER_GPIO
-#define SHOT_STOPPER_BUZZER_GPIO 5
-#endif
-#elif defined(ARDUINO_ESP32_DEV)
-// GPIO 27 supports INPUT_PULLUP for the paddle; GPIO 26 drives the relay.
-constexpr uint8_t PADDLE_GPIO = 27;
-constexpr uint8_t RELAY_GPIO = 26;
-#if SHOT_STOPPER_ENABLE_ALED == 1
-#ifndef SHOT_STOPPER_SCALE_LED_GPIO
-#define SHOT_STOPPER_SCALE_LED_GPIO 25
-#endif
-#ifndef SHOT_STOPPER_STOPPER_LED_GPIO
-#define SHOT_STOPPER_STOPPER_LED_GPIO 33
-#endif
-#endif
-#ifndef SHOT_STOPPER_BUZZER_GPIO
-#define SHOT_STOPPER_BUZZER_GPIO 32
-#endif
 #else
-#error "Unsupported board: configure explicit GPIO pins"
+#error "Unsupported board: Shot Stopper requires ESP32-S3"
 #endif
 
 #if SHOT_STOPPER_ENABLE_ALED == 1
@@ -641,6 +622,9 @@ uint32_t healthTelemetryAtMs = 0;
 uint32_t freeHeapBytes = 0;
 uint32_t minimumFreeHeapBytes = 0;
 uint32_t largestFreeHeapBlockBytes = 0;
+uint32_t psramSizeBytes = 0;
+uint32_t psramFreeBytes = 0;
+uint32_t psramLargestFreeBlockBytes = 0;
 bool healthHeapAlertLatched = false;
 bool healthStackAlertLatched = false;
 bool healthLoopGapAlertLatched = false;
@@ -869,17 +853,29 @@ void addDebugEvent(DebugCategory category, DebugCode code,
 
 size_t copyDebugEvents(uint32_t afterSequence, DebugEvent *output,
                        size_t capacity) {
-  size_t copied;
-  portENTER_CRITICAL(&debugLogMux);
-  copied = debugLog.copyAfter(afterSequence, output, capacity);
-  portEXIT_CRITICAL(&debugLogMux);
+  size_t copied = 0;
+  uint32_t after = afterSequence;
+  while (copied < capacity) {
+    DebugEvent event;
+    bool have = false;
+    portENTER_CRITICAL(&debugLogMux);
+    have = debugLog.copyFirstAfter(after, event);
+    portEXIT_CRITICAL(&debugLogMux);
+    if (!have) {
+      break;
+    }
+    output[copied++] = event;
+    after = event.sequence;
+  }
   return copied;
 }
 
 void copyControlStatus(ControlStatusSnapshot &output) {
+  ControlStatusSnapshot staging;
   portENTER_CRITICAL(&webStatusMux);
-  output = publishedControlStatus;
+  staging = publishedControlStatus;
   portEXIT_CRITICAL(&webStatusMux);
+  output = staging;
 }
 
 void reportTaskWatchdogFault() {
@@ -6226,6 +6222,9 @@ void publishControlStatus() {
   next.freeHeapBytes = freeHeapBytes;
   next.minimumFreeHeapBytes = minimumFreeHeapBytes;
   next.largestFreeHeapBlockBytes = largestFreeHeapBlockBytes;
+  next.psramSizeBytes = psramSizeBytes;
+  next.psramFreeBytes = psramFreeBytes;
+  next.psramLargestFreeBlockBytes = psramLargestFreeBlockBytes;
   next.hwmon = hwmonSnapshot;
   next.scaleEventsDropped = scaleEventsDropped;
   next.config = effectiveRuntimeConfig();
@@ -6454,6 +6453,9 @@ void serialCliPrintLiveHealth() {
   dump.freeHeapBytes = freeHeapBytes;
   dump.minimumFreeHeapBytes = minimumFreeHeapBytes;
   dump.largestFreeHeapBlockBytes = largestFreeHeapBlockBytes;
+  dump.psramSizeBytes = psramSizeBytes;
+  dump.psramFreeBytes = psramFreeBytes;
+  dump.psramLargestFreeBlockBytes = psramLargestFreeBlockBytes;
   dump.loopMaxGapMs = loopMaxGapMs;
   dump.healthIntervalMaxGapMs = healthIntervalMaxGapMs;
   dump.loopStackMinWords = loopStackMinWords;
@@ -6549,11 +6551,27 @@ void serialCliPrintBleCompanionStatus() {
 }
 
 void serialCliPrintLiveLogDump() {
-  DebugEvent events[DEBUG_EVENT_CAPACITY] = {};
-  const size_t count = copyDebugEvents(0, events, DEBUG_EVENT_CAPACITY);
+  if (session.active || cn9Closed) {
+    serialCliReply("ERR LOG dump deferred; CN9/cycle active");
+    return;
+  }
+  size_t count = 0;
+  portENTER_CRITICAL(&debugLogMux);
+  count = debugLog.countAfter(0);
+  portEXIT_CRITICAL(&debugLogMux);
   serialCliPrintLogDumpPreamble(count, ringRetainLogLevel);
-  for (size_t index = 0; index < count; ++index) {
-    writeSerialLogLine(events[index]);
+  uint32_t after = 0;
+  for (;;) {
+    DebugEvent event;
+    bool have = false;
+    portENTER_CRITICAL(&debugLogMux);
+    have = debugLog.copyFirstAfter(after, event);
+    portEXIT_CRITICAL(&debugLogMux);
+    if (!have) {
+      break;
+    }
+    after = event.sequence;
+    writeSerialLogLine(event);
   }
 }
 
@@ -7062,7 +7080,7 @@ void setup() {
   bleCompanionStatusSnapshot.configuredEnabled = bleCompanionConfigured;
   bleCompanionRuntimeSnapshot.configuredEnabled = bleCompanionConfigured;
   if (bleCompanionConfigured) {
-    void *storage = malloc(sizeof(ShotStopperBleCompanion));
+    void *storage = allocInternal(sizeof(ShotStopperBleCompanion));
     if (storage != nullptr) {
       bleCompanion = new (storage) ShotStopperBleCompanion();
       bleCompanionRuntimeSnapshot.enabled = true;
@@ -7129,6 +7147,11 @@ void setup() {
   logEmit(taskWatchdogReady ? LogLevel::INFO : LogLevel::CRITICAL,
           DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
           BOOT_SUBSYSTEM_TASK_WDT, taskWatchdogReady ? 1 : 0);
+#ifndef SHOT_STOPPER_HOST_TEST
+  logEmit(psramFound() ? LogLevel::INFO : LogLevel::CRITICAL,
+          DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM, BOOT_SUBSYSTEM_PSRAM,
+          psramFound() ? 1 : 0);
+#endif
 #if SHOT_STOPPER_ENABLE_ALED == 1
   if (!statusIndicatorsReady) {
     logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
@@ -7325,10 +7348,13 @@ void loop() {
     loopStackMinWords =
         static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
 #ifndef SHOT_STOPPER_HOST_TEST
-    freeHeapBytes = ESP.getFreeHeap();
-    minimumFreeHeapBytes = ESP.getMinFreeHeap();
-    largestFreeHeapBlockBytes =
-        heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    const HeapCapSnapshot heap = sampleHeapCaps();
+    freeHeapBytes = heap.internalFree;
+    minimumFreeHeapBytes = heap.internalMinimum;
+    largestFreeHeapBlockBytes = heap.internalLargest;
+    psramSizeBytes = heap.psramTotal;
+    psramFreeBytes = heap.psramFree;
+    psramLargestFreeBlockBytes = heap.psramLargest;
 #endif
     hwmonSnapshot = hwmon.sample(intervalMs > 0U ? intervalMs
                                                  : HEALTH_TELEMETRY_INTERVAL_MS);

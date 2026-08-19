@@ -1,5 +1,5 @@
 #define SHOT_STOPPER_HOST_TEST
-#define ARDUINO_ESP32_DEV
+#define ARDUINO_ESP32S3_DEV
 #define SHOT_STOPPER_ENABLE_REMOTE_CN9 1
 #ifndef SHOT_STOPPER_ENABLE_BUZZER
 #define SHOT_STOPPER_ENABLE_BUZZER 1
@@ -2030,6 +2030,13 @@ void w24_debug_ring_is_bounded_and_ordered() {
   CHECK(events[0].argument1 == 5);
   CHECK(events[copied - 1].argument1 ==
         static_cast<int32_t>(DEBUG_EVENT_CAPACITY + 4));
+  CHECK(ring.countAfter(0) == DEBUG_EVENT_CAPACITY);
+  DebugEvent first = {};
+  CHECK(ring.copyFirstAfter(0, first));
+  CHECK(first.argument1 == 5);
+  DebugEvent second = {};
+  CHECK(ring.copyFirstAfter(first.sequence, second));
+  CHECK(second.argument1 == 6);
 }
 
 void w25_weight_samples_do_not_fill_debug_log() {
@@ -5486,7 +5493,8 @@ void sc10_help_prints_one_line_per_command() {
   CHECK(serialTxContains("WEBUI_RESTART  bounce HTTP"));
   CHECK(serialTxContains("WEBUI_STATUS  dump HTTP"));
   CHECK(serialTxContains("NET_STATUS  WIFI + AP + WEBUI"));
-  CHECK(serialTxContains("LOG_DUMP  print RAM debug ring"));
+  CHECK(serialTxContains(
+      "LOG_DUMP  print RAM debug ring (deferred in brew/CN9)"));
   CHECK(serialTxContains("HEALTH  heap, loop gap, cpu load"));
   CHECK(serialTxContains("SCALE_STATUS  BLE scale link"));
   CHECK(serialTxContains("NTP_STATUS  wall clock"));
@@ -5600,6 +5608,9 @@ void sc15_status_printers_use_dump_views() {
   serialCliPrintHealth(health);
   CHECK(serialTxContains("HEALTH"));
   CHECK(serialTxContains("heapFree=80000"));
+  CHECK(serialTxContains("psramSize=0"));
+  CHECK(serialTxContains("psramFree=0"));
+  CHECK(serialTxContains("psramLargest=0"));
   CHECK(serialTxContains("stackNetwork=400"));
   CHECK(serialTxContains("cpuLoad5s=0.42"));
   CHECK(serialTxContains("cpuLoad1m=0.55"));
@@ -5658,6 +5669,11 @@ void sc16_debug_status_and_log_dump() {
   Serial.tx.clear();
   feedSerial("LOG_DUMP\n");
   CHECK(serialTxContains("log ring retain is none"));
+  startCycle();
+  Serial.tx.clear();
+  feedSerial("LOG_DUMP\n");
+  CHECK(serialTxContains("ERR LOG dump deferred; CN9/cycle active"));
+  CHECK(!serialTxContains("events="));
 }
 
 void s04_shot_log_remove_by_id() {

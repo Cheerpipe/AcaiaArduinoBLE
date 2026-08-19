@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly DEFAULT_PORT="/dev/cu.usbserial-0001"
-readonly DEFAULT_ARCH="esp32"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/shotstopper_board.sh
+source "$SCRIPT_DIR/shotstopper_board.sh"
+
+readonly DEFAULT_ARCH="$SHOTSTOPPER_DEFAULT_ARCH"
 
 usage() {
-  cat <<'EOF'
+  cat <<EOF
 Uso: ./scripts/upload [ruta_serial] [arquitectura]
 
 Sube automáticamente el binario ya compilado desde build/<arquitectura>.
@@ -14,15 +17,15 @@ Sin argumentos se usan todos los valores por defecto. Si se indica una ruta
 serial, la arquitectura también es obligatoria.
 
 Valores por defecto (sin argumentos):
-  ruta_serial:  /dev/cu.usbserial-0001
-  arquitectura: esp32
+  ruta_serial:  $SHOTSTOPPER_DEFAULT_PORT_HELP
+  arquitectura: $DEFAULT_ARCH
 
-Arquitecturas admitidas: esp32, esp32s3.
+$(shotstopper_arch_help)
 
 Ejemplos:
   ./scripts/upload
-  ./scripts/upload /dev/cu.usbserial-0001 esp32
-  ./scripts/upload /dev/cu.usbmodem01 esp32s3
+  ./scripts/upload /dev/cu.usbmodem2101 n16r8
+  ./scripts/upload /dev/cu.usbmodem2101 n8r4
 EOF
 }
 
@@ -41,7 +44,8 @@ if [[ $# -gt 2 ]]; then
 fi
 
 if [[ $# -eq 0 ]]; then
-  port="$DEFAULT_PORT"
+  shotstopper_resolve_port required || exit 1
+  port="$SHOTSTOPPER_PORT"
   arch="$DEFAULT_ARCH"
 elif [[ $# -eq 1 ]]; then
   echo "Falta la arquitectura después de la ruta serial." >&2
@@ -52,36 +56,25 @@ else
   arch="$2"
 fi
 
-case "$arch" in
-  esp32)
-    fqbn="esp32:esp32:esp32:PartitionScheme=min_spiffs"
-    build_dir="build/esp32"
-    ;;
-  esp32s3)
-    fqbn="esp32:esp32:esp32s3:PartitionScheme=min_spiffs"
-    build_dir="build/esp32s3"
-    ;;
-  *)
-    echo "Arquitectura no admitida: $arch (usa esp32 o esp32s3)." >&2
-    exit 2
-    ;;
-esac
+shotstopper_resolve_board "$arch"
 
 command -v arduino-cli >/dev/null 2>&1 || {
   echo "No se encontró arduino-cli en PATH." >&2
   exit 127
 }
 
-root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+root="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$root"
 
-if [[ ! -f "$build_dir/shotStopper.ino.bin" ]]; then
-  echo "No existe $build_dir/shotStopper.ino.bin. Ejecuta ./scripts/build primero." >&2
+if [[ ! -f "$SHOTSTOPPER_BUILD_DIR/shotStopper.ino.bin" ]]; then
+  echo "No existe $SHOTSTOPPER_BUILD_DIR/shotStopper.ino.bin. Ejecuta ./scripts/build primero." >&2
   exit 1
 fi
 
+echo "Subiendo $SHOTSTOPPER_ARCH por $port"
+
 arduino-cli upload \
-  --fqbn "$fqbn" \
+  --fqbn "$SHOTSTOPPER_FQBN" \
   --port "$port" \
-  --input-dir "$build_dir" \
+  --input-dir "$SHOTSTOPPER_BUILD_DIR" \
   shotStopper

@@ -1,11 +1,11 @@
 # Micra Shot Stopper
 
-ESP32 firmware that controls the CN9 paddle circuit of a La Marzocco Micra
+ESP32-S3 firmware that controls the CN9 paddle circuit of a La Marzocco Micra
 through an isolated relay contact and uses a compatible Bluetooth Low Energy
 scale to automate an extraction by weight.
 
 The Micra physical paddle **does not connect to CN9**: it connects only between
-the configured ESP32 GPIO and GND. The relay COM/NO contact is the controller's
+the configured ESP32-S3 GPIO and GND. The relay COM/NO contact is the controller's
 only connection to CN9. This lets the software read the paddle and control CN9
 independently.
 
@@ -446,7 +446,7 @@ The following items are planned but **not present in the current firmware**:
 Compile with `-DSHOT_STOPPER_ENABLE_BUZZER=1` (passive piezo) or `=2` (active
 buzzer) and wire the buzzer between `SHOT_STOPPER_BUZZER_GPIO` (board default, or
 override) and GND: marked **+** to the GPIO, unmarked pin to GND. Default GPIO
-is 32 (ESP32 Dev), 14 (ESP32-S3), or 5 (Nano ESP32).
+is 14.
 
 Identify the part with 3.3 V DC on `+` vs GND: a constant tone is **active**
 (`=2`); a click or silence is **passive** (`=1`). Beep on/gap durations are the
@@ -748,7 +748,7 @@ Passwords are **case-sensitive** (`M` uppercase, rest lowercase).
 
 ### Connect on first boot (no home Wi‑Fi saved yet)
 
-1. Power the ESP32 and wait for boot (scale LED activity is normal).
+1. Power the ESP32-S3 and wait for boot (scale LED activity is normal).
 2. On your phone or laptop, open Wi‑Fi settings and join **`MicraShotStopperAP`**
    using password **`Micra1234`**.
 3. Open a browser to **`http://192.168.4.1`**. Status, live shot, history, and
@@ -842,7 +842,7 @@ against relay or GPIO failures.
 
 ```mermaid
 flowchart LR
-  P[Micra physical paddle] -->|GPIO to GND| E[ESP32]
+  P[Micra physical paddle] -->|GPIO to GND| E[ESP32-S3]
   E -->|GPIO| D[Relay driver K1]
   D -->|COM/NO| K[Optional safety contact K2 NO]
   K -->|isolated dry-contact chain| C[Micra CN9]
@@ -854,8 +854,8 @@ flowchart LR
 ```
 
 Use a relay or contact with isolation and ratings suitable for CN9. Never
-connect CN9 to GND, VCC, or an ESP32 GPIO, and use COM/NO rather than NC.
-Feedback must also be isolated: do not electrically join CN9 and ESP32 GND.
+connect CN9 to GND, VCC, or an ESP32-S3 GPIO, and use COM/NO rather than NC.
+Feedback must also be isolated: do not electrically join CN9 and ESP32-S3 GND.
 The external detector must drive K2 OPEN when the heartbeat is stuck HIGH,
 stuck LOW, absent, or out of frequency; a second relay controlled directly by
 the same GPIO does not provide this barrier.
@@ -864,15 +864,19 @@ The selected FQBN automatically defines the matching pin block in
 `shotStopper.ino`. With `-DSHOT_STOPPER_ENABLE_ALED=1`, the two status LEDs are
 independent one-pixel WS2812B devices, each with its own data GPIO:
 
-| Board | FQBN | Paddle | Relay | Scale LED | Stopper LED |
-| --- | --- | ---: | ---: | ---: | ---: |
-| ESP32 Dev Module / DevKit V4 | `esp32:esp32:esp32` | GPIO 27 | GPIO 26 | GPIO 25 | GPIO 33 |
-| ESP32-S3 Dev Module | `esp32:esp32:esp32s3` | GPIO 21 | GPIO 38 | GPIO 48 | GPIO 47 |
+| Module | Script arch | FQBN extras | Paddle | Relay | Scale LED | Stopper LED |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| ESP32-S3 N8R4 (8 MB flash, 4 MB QSPI PSRAM) | `n8r4` | `PSRAM=enabled,FlashSize=8M,PartitionScheme=default_8MB` | GPIO 21 | GPIO 38 | GPIO 48 | GPIO 47 |
+| ESP32-S3 N16R8 (16 MB flash, 8 MB OPI PSRAM) | `n16r8` | `PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB` | GPIO 21 | GPIO 38 | GPIO 48 | GPIO 47 |
 
-The code also maps Arduino Nano ESP32 D10/D11 to paddle/relay and D2/D3 to
-external WS2812B data inputs when ALED is enabled. Its built-in common-anode RGB
-LED is not a WS2812B and is no longer used. Before energizing CN9, verify every
-pin for the specific board and the active polarity of the relay module.
+Classic ESP32 Dev Module and Arduino Nano ESP32 are **not supported**. Both S3
+variants share the same GPIO map; choose `n8r4` or `n16r8` so flash size and
+PSRAM bus (QSPI vs OPI) match the module. Scripts default to **`n16r8`**. The
+FQBN enables PSRAM at boot (`BOARD_HAS_PSRAM`); paddle, relay, and safety stay
+on internal SRAM. Using PSRAM for WebUI buffers is staged and must not run on
+the control path.
+Before energizing CN9, verify every pin for the specific board and the active
+polarity of the relay module.
 
 ### WS2812B status indicators
 
@@ -932,13 +936,10 @@ enabled). The pins must be distinct, output-capable, and different from paddle,
 relay, heartbeat, and feedback GPIOs:
 
 ```sh
-mkdir -p build/esp32-s3-custom-leds
-arduino-cli compile --fqbn esp32:esp32:esp32s3 --warnings all \
-  --build-property \
-  'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_ALED=1 -DSHOT_STOPPER_SCALE_LED_GPIO=4 -DSHOT_STOPPER_STOPPER_LED_GPIO=5 -DSHOT_STOPPER_LED_BRIGHTNESS=32' \
-  --library libraries/AcaiaArduinoBLE \
-  --build-path build/esp32-s3-custom-leds \
-  shotStopper
+./scripts/build /dev/cu.usbmodem2101 n16r8 \
+  -Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_ALED=1 \
+  -DSHOT_STOPPER_SCALE_LED_GPIO=4 -DSHOT_STOPPER_STOPPER_LED_GPIO=5 \
+  -DSHOT_STOPPER_LED_BRIGHTNESS=32
 ```
 
 GPIO 4 and GPIO 5 above are examples only. Verify the schematic, strapping
@@ -954,17 +955,13 @@ error:
 - `SHOT_STOPPER_CN9_FEEDBACK_GPIO`: isolated feedback input.
 - `SHOT_STOPPER_CN9_FEEDBACK_CLOSED_LEVEL`: optional; defaults to `LOW`.
 
-Example build for an ESP32 Dev Module where GPIO 16 and GPIO 17 were verified as
+Example build for an ESP32-S3 where GPIO 16 and GPIO 17 were verified as
 free and appropriate on the specific hardware:
 
 ```sh
-mkdir -p build/esp32-safety
-arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all \
-  --build-property \
-  'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_SAFETY_HEARTBEAT_GPIO=16 -DSHOT_STOPPER_CN9_FEEDBACK_GPIO=17' \
-  --library libraries/AcaiaArduinoBLE \
-  --build-path build/esp32-safety \
-  shotStopper
+./scripts/build /dev/cu.usbmodem2101 n16r8 \
+  -Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 \
+  -DSHOT_STOPPER_SAFETY_HEARTBEAT_GPIO=16 -DSHOT_STOPPER_CN9_FEEDBACK_GPIO=17
 ```
 
 The README [compile examples](#compile) enable remote CN9 actuation with
@@ -997,7 +994,7 @@ brew install cppcheck
 ```
 
 After building a variant (for example, `./scripts/build`), its
-`build/esp32/compile_commands.json` supplies the target-specific include paths
+`build/n16r8/compile_commands.json` supplies the target-specific include paths
 and defines to Cppcheck. Limit analysis to this repository's source files,
 rather than the Arduino core or installed third-party libraries, to avoid
 irrelevant diagnostics. The analysis script filters Cppcheck to the generated
@@ -1014,13 +1011,13 @@ Run Cppcheck with the following script:
 ```
 
 It does **not** compile the firmware: the selected build must already exist.
-By default it reads `build/esp32/compile_commands.json`, deletes the previous
+By default it reads `build/n16r8/compile_commands.json`, deletes the previous
 `reports/static-analysis/` directory, and replaces it with `cppcheck.txt` and
 a small run summary. Pass a build variant and, optionally, another
 repository-relative output directory when needed:
 
 ```sh
-./scripts/static_report build/esp32s3 reports/analysis-esp32s3
+./scripts/static_report build/n8r4 reports/analysis-n8r4
 ```
 
 For a deeper analysis using the actual Xtensa GCC toolchain, run:
@@ -1066,8 +1063,10 @@ This project is pinned to Arduino-ESP32 **3.3.3**. On **3.3.6+** the core
 frees BLE controller RAM at boot unless a translation unit includes
 `esp32-hal-alloc-ble-mem.h` (ArduinoBLE does not). That include is present but
 commented out in the vendored `AcaiaArduinoBLE` library: enabling it on 3.3.11
-restored `BLE.begin()` but left too little heap for the Web UI on ESP32
-without PSRAM. Revisit when moving cores or hardware.
+restored `BLE.begin()` but left too little internal heap for the Web UI on
+boards without PSRAM. Shot Stopper now requires ESP32-S3 with PSRAM; revisit
+the include when moving cores so BLE controller RAM and Web UI buffers can
+coexist.
 
 Idle discovery does not start or stop GAP every 1 s or 3 s. Those timers are
 retry (only when scan is down), a software tick for logs, and log throttle.
@@ -1108,7 +1107,7 @@ long-lived cache and the same ETag family. Use
 To verify a compiled binary without flashing:
 
 ```sh
-strings build/esp32/shotStopper.ino.bin | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\+'
+strings build/n16r8/shotStopper.ino.bin | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\+'
 ```
 
 ## Compile
@@ -1116,8 +1115,9 @@ strings build/esp32/shotStopper.ino.bin | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\+'
 ### Scripts de compilación, carga y monitor serie
 
 Los scripts de `scripts/` simplifican el flujo habitual. Ejecutados sin
-argumentos usan la misma configuración de desarrollo: puerto
-`/dev/cu.usbserial-0001`, arquitectura `esp32`, velocidad `115200` y los flags
+argumentos usan la misma configuración de desarrollo: el primer puerto
+`/dev/cu.usbmodem<número>` conectado, arquitectura `n16r8` (ESP32-S3, 16 MB
+flash, 8 MB OPI PSRAM), velocidad `115200` y los flags
 `-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1
 -DSHOT_STOPPER_ENABLE_BUZZER=2`.
 
@@ -1126,14 +1126,17 @@ argumentos usan la misma configuración de desarrollo: puerto
 | `./scripts/build` | `./scripts/build [ruta_serial] [arquitectura] [flags...]` | Genera la versión y Web UI, compila y deja el resultado en `build/<arquitectura>`. La ruta serial se incluye para mantener una interfaz uniforme, pero no se usa para compilar. |
 | `./scripts/upload` | `./scripts/upload [ruta_serial] [arquitectura]` | Sube el binario existente de `build/<arquitectura>`; no recompila. |
 | `./scripts/monitor` | `./scripts/monitor [ruta_serial] [velocidad]` | Abre el monitor serie. |
+| `./scripts/bu` | `./scripts/bu [ruta_serial arquitectura [flags...]]` | Wrapper: build y upload. |
+| `./scripts/bum` | `./scripts/bum [ruta_serial arquitectura velocidad [flags...]]` | Wrapper: build, upload y monitor. |
 | `./scripts/static_report` | `./scripts/static_report [build_dir] [output_dir]` | Ejecuta Cppcheck sobre una compilation database existente y guarda el reporte. No compila. |
 | `./scripts/gcc_analyzer` | `./scripts/gcc_analyzer [ruta_serial arquitectura [flags...]]` | Compila con GCC `-fanalyzer` y guarda el reporte en `reports/gcc-analyzer/`. |
 | `./scripts/bsum` | `./scripts/bsum [ruta_serial arquitectura velocidad [flags...]]` | Wrapper que ejecuta build, static report, upload y monitor. Si el análisis encuentra diagnósticos, no carga el firmware. Sin argumentos conserva los defaults de cada script; si se pasan argumentos, ruta, arquitectura y velocidad son obligatorias; los flags se aplican solo a build. |
 
-Las arquitecturas admitidas son `esp32` y `esp32s3`. Cada script recibe
-argumentos posicionales y muestra ayuda con `help`, `--help` o `-h`:
+Las arquitecturas admitidas son `n8r4` y `n16r8` (alias `esp32s3` → `n16r8`).
+El ESP32 clásico no está soportado. Cada script recibe argumentos posicionales
+y muestra ayuda con `help`, `--help` o `-h`:
 
-- Sin argumentos, los tres scripts usan todos sus valores por defecto.
+- Sin argumentos, los scripts usan todos sus valores por defecto.
 - En `build` y `upload`, si se indica `ruta_serial`, también se debe indicar
   `arquitectura`. Los flags de `build` son opcionales.
 - En `monitor`, la velocidad es opcional cuando se indica `ruta_serial`.
@@ -1147,32 +1150,35 @@ argumentos posicionales y muestra ayuda con `help`, `--help` o `-h`:
 # Build, static report, upload y monitor en una sola orden
 ./scripts/bsum
 
-./scripts/build /dev/cu.usbmodem01 esp32s3 -DSHOT_STOPPER_ENABLE_ALED=1
-./scripts/upload /dev/cu.usbmodem01 esp32s3
-./scripts/monitor /dev/cu.usbmodem01 115200
+./scripts/build /dev/cu.usbmodem2101 n8r4 -DSHOT_STOPPER_ENABLE_ALED=1
+./scripts/upload /dev/cu.usbmodem2101 n8r4
+./scripts/monitor /dev/cu.usbmodem2101 115200
 
-./scripts/bsum /dev/cu.usbmodem01 esp32s3 115200 -DSHOT_STOPPER_ENABLE_ALED=1
+./scripts/bsum /dev/cu.usbmodem2101 n8r4 115200 -DSHOT_STOPPER_ENABLE_ALED=1
 
 ./scripts/build help
 ./scripts/bsum --help
 ```
 
 From the repository root, install Node deps if needed, generate the version and
-Web UI headers, and build for an ESP32 DevKit V4 with:
+Web UI headers, and build for ESP32-S3 N16R8 with:
 
 ```sh
 npm install
 ./scripts/gen_version.sh
 node ./scripts/gen_web_ui.js
-mkdir -p build/esp32
+mkdir -p build/n16r8
 arduino-cli compile \
-  --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs \
+  --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashMode=qio,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc \
   --warnings all \
   --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=1 -DSHOT_STOPPER_ENABLE_ALED=1' \
   --library libraries/AcaiaArduinoBLE \
-  --build-path build/esp32 \
+  --build-path build/n16r8 \
   shotStopper
 ```
+
+For N8R4, use `PSRAM=enabled,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB`
+and `build/n8r4`, or `./scripts/build /dev/cu.usbmodem2101 n8r4`.
 
 `-DSHOT_STOPPER_ENABLE_REMOTE_CN9=1` exposes virtual paddle and remote quick
 rinse over the Web UI and API. **Stop** is always available when authenticated,
@@ -1186,38 +1192,18 @@ the same either way. Omit the flag or set `=0` for builds without that hardware.
 `status_indicator` task. Omit it (or set `=0`) for builds without addressable
 LEDs.
 
-The `min_spiffs` partition scheme gives a **1.9 MB** application slot. The
-default scheme only allows **1.25 MB** (`1310720` bytes); this firmware is
-larger than that limit and will not boot if compiled with the default
-partition table.
+N16R8 uses the normal 16 MB OTA scheme `app3M_fat9M_16MB` (**3 MB** app slot
+× 2). N8R4 uses `default_8MB` (**~3.2 MB** × 2). The 4 MB `default` table only
+allows **1.25 MB** and cannot hold this firmware; `min_spiffs` is not used.
 
-After compiling, verify the on-disk image fits when using the default OTA
-slot (optional sanity check):
-
-```sh
-wc -c < build/esp32/shotStopper.ino.bin
-```
-
-For the ESP32-S3 variant, generate the version and Web UI headers and use its
-FQBN and output directory. Use the same **`min_spiffs`** partition scheme as the
-classic ESP32 build:
+After compiling, verify the on-disk image fits the OTA slot (optional sanity
+check):
 
 ```sh
-npm install
-./scripts/gen_version.sh
-node ./scripts/gen_web_ui.js
-mkdir -p build/esp32-s3
-
-arduino-cli compile \
-  --fqbn esp32:esp32:esp32s3:PartitionScheme=min_spiffs \
-  --warnings all \
-  --build-property 'compiler.cpp.extra_flags=-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=1 -DSHOT_STOPPER_ENABLE_ALED=1' \
-  --library libraries/AcaiaArduinoBLE \
-  --build-path build/esp32-s3 \
-  shotStopper
+wc -c < build/n16r8/shotStopper.ino.bin
 ```
 
-## Upload to the ESP32
+## Upload to the ESP32-S3
 
 Connect the board and determine its port:
 
@@ -1225,19 +1211,20 @@ Connect the board and determine its port:
 arduino-cli board list
 ```
 
-After compiling, upload to an ESP32 DevKit by replacing the example port with
-the port used by your system:
+After compiling, upload by replacing the example port with the port used by
+your system. `./scripts/upload` (and `bu` / `bum` / `bsum`) pick the first
+`/dev/cu.usbmodem<número>` device when you omit the port. Use `n8r4` if that
+is the module on the board:
 
 ```sh
 arduino-cli upload \
-  --port /dev/cu.usbserial-0001 \
-  --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs \
-  --input-dir build/esp32 \
+  --port /dev/cu.usbmodem2101 \
+  --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashMode=qio,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc \
+  --input-dir build/n16r8 \
   shotStopper
 ```
 
-For ESP32-S3, change `--fqbn` (include `PartitionScheme=min_spiffs`) and
-`--input-dir` to match the compiled variant. The generated application image is named `shotStopper.ino.bin`.
+The generated application image is named `shotStopper.ino.bin`.
 `arduino-cli upload --input-dir` is recommended because it uploads the
 bootloader, partition table, and application at their correct offsets.
 
@@ -1249,19 +1236,20 @@ Connect the board over USB and list available ports:
 arduino-cli board list
 ```
 
-On macOS the port is usually `/dev/cu.usbserial-XXXX` (use the `cu.*` device,
-not `tty.*`, for monitoring). On Linux it is often `/dev/ttyUSB0` or
-`/dev/ttyACM0`.
+On macOS the native USB CDC port is usually `/dev/cu.usbmodemXXXX` (use the
+`cu.*` device, not `tty.*`, for monitoring). UART-bridge boards may still
+appear as `/dev/cu.usbserial-XXXX`. On Linux it is often `/dev/ttyACM0` or
+`/dev/ttyUSB0`.
 
 Open the monitor with `arduino-cli`, replacing the port with yours.
-Use **115200** for ESP32 boot messages and Shot Stopper logs and CLI (same
+Use **115200** for ESP32-S3 boot messages and Shot Stopper logs and CLI (same
 rate after the app starts). Commands are listed in
 [USB serial CLI](docs/SERIAL_CLI.md). Debug paddle/CN9/Wi-Fi traces are
 **off** by default; enable them from Debug (**Serial debug output**) or
 `SERIAL_DEBUG_ON`.
 
 ```sh
-arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200
+arduino-cli monitor -p /dev/cu.usbmodem2101 -c baudrate=115200
 ```
 
 You should see CLI replies immediately. With serial debug on, lines such as
@@ -1272,15 +1260,15 @@ Press **RST** on the board if the monitor was already open. Exit with
 ### Troubleshooting serial output
 
 Not every baud rate works on every board. The correct speed depends on the
-USB‑serial chip (CP2102, CH340, FTDI, native USB CDC), the ESP32 variant, and
+USB‑serial chip (CP2102, CH340, FTDI, native USB CDC), the ESP32-S3 module, and
 whether you are reading the **bootloader** or the **running firmware**. If the
 monitor shows garbage (random symbols and repeated characters), try another rate and press **RST** after
 each change.
 
 | Baud rate | Typical use |
 | --- | --- |
-| **115200** | Shot Stopper application logs and CLI (this firmware); also common ESP32 Arduino boot messages |
-| **74880** | ESP32 ROM bootloader right after reset |
+| **115200** | Shot Stopper application logs and CLI (this firmware); also ESP32-S3 USB CDC and UART boot messages |
+| **74880** | Classic ESP32 ROM bootloader only (not used on ESP32-S3) |
 | **57600** | Some CH340 / clone adapters and older sketches |
 | **38400** | Fallback on misconfigured or bridged setups |
 | **19200** | Rare; worth trying if nothing else is readable |
@@ -1289,7 +1277,7 @@ each change.
 Example — try another rate:
 
 ```sh
-arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=74880
+arduino-cli monitor -p /dev/cu.usbmodem2101 -c baudrate=115200
 ```
 
 If output is still unreadable at every rate:
@@ -1301,8 +1289,9 @@ If output is still unreadable at every rate:
 - Re-flash the firmware and watch **115200** or **74880** during reset for
   partition or boot errors.
 
-If you see `Image length … doesn't fit in partition length …`, recompile with
-`PartitionScheme=min_spiffs` (see [Compile](#compile)) and upload again.
+If you see `Image length … doesn't fit in partition length …`, confirm the
+FQBN matches the module (`app3M_fat9M_16MB` for N16R8, `default_8MB` for
+N8R4; see [Compile](#compile)) and upload again.
 
 ## Automated tests
 
@@ -1313,12 +1302,12 @@ npm install
 ./libraries/AcaiaArduinoBLE/tests/run_host_tests.sh
 ./shotStopper/tests/run_host_tests.sh
 node ./shotStopper/tests/check_web_assets.js
-node ./shotStopper/tests/check_firmware_size.js build/esp32/shotStopper.ino.bin
+node ./shotStopper/tests/check_firmware_size.js build/n16r8/shotStopper.ino.bin
 ```
 
-The firmware size check verifies the application binary fits the default OTA
-slot (`1310720` bytes). Skip it if you have not compiled yet, or pass another
-`.bin` path as the first argument.
+The firmware size check verifies the application binary fits the OTA app slot
+for that target (`3145728` bytes on N16R8, `3342336` on N8R4). Skip it if you
+have not compiled yet, or pass another `.bin` path as the first argument.
 
 To generate the stopper coverage report when LLVM is installed:
 

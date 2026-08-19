@@ -1,4 +1,5 @@
 #include "ShotStopperNetwork.h"
+#include "ShotStopperPsram.h"
 #include "ShotStopperSerialCli.h"
 #include "ShotStopperVersion.h"
 #include "ShotStopperWatchdog.h"
@@ -22,7 +23,23 @@ namespace shotstopper {
 
 WallClock g_wallClock;
 
+struct NetworkWorkBuf {
+  static constexpr size_t kStatusJson = 7680;
+  static constexpr size_t kPresetsJson = 2800;
+  static constexpr size_t kHistoryJson = 1400;
+  static constexpr size_t kJsonItem = 768;
+  char statusJson[kStatusJson];
+  char presetsJson[kPresetsJson];
+  char historyJson[kHistoryJson];
+  char jsonItem[kJsonItem];
+  DebugEvent logBatch[48];
+  ShotLogRecord shotRecords[SHOT_LOG_CAPACITY];
+  ControlStatusSnapshot control;
+};
+
 namespace {
+
+NetworkWorkBuf *g_work = nullptr;
 
 constexpr const char *AP_SSID = "MicraShotStopperAP";
 constexpr const char *AP_IP = "192.168.4.1";
@@ -438,10 +455,6 @@ esp_err_t sendJsonStringChunk(httpd_req_t *request, const char *value) {
   return httpd_resp_send_chunk(request, "\"", 1);
 }
 
-char g_statusResponseBuffer[7680];
-char g_presetsStatusJson[2800];
-char g_scaleHistoryJson[1400];
-
 void sanitizeJsonEmbed(const char *input, char *output, size_t capacity) {
   if (capacity == 0) {
     return;
@@ -504,16 +517,17 @@ StatusPage parseStatusPage(const char *uri) {
 }
 
 bool statusJsonAppend(size_t *used, const char *fmt, ...) {
-  if (used == nullptr || *used >= sizeof(g_statusResponseBuffer)) {
+  if (g_work == nullptr || used == nullptr ||
+      *used >= NetworkWorkBuf::kStatusJson) {
     return false;
   }
   va_list args;
   va_start(args, fmt);
-  const int n = vsnprintf(g_statusResponseBuffer + *used,
-                          sizeof(g_statusResponseBuffer) - *used, fmt, args);
+  const int n = vsnprintf(g_work->statusJson + *used,
+                          NetworkWorkBuf::kStatusJson - *used, fmt, args);
   va_end(args);
   if (n < 0 ||
-      static_cast<size_t>(n) >= sizeof(g_statusResponseBuffer) - *used) {
+      static_cast<size_t>(n) >= NetworkWorkBuf::kStatusJson - *used) {
     return false;
   }
   *used += static_cast<size_t>(n);
@@ -521,12 +535,16 @@ bool statusJsonAppend(size_t *used, const char *fmt, ...) {
 }
 
 void buildSlimPresetsJson(const ControlStatusSnapshot &control) {
-  g_presetsStatusJson[0] = '{';
-  g_presetsStatusJson[1] = '}';
-  g_presetsStatusJson[2] = 0;
+  if (g_work == nullptr) {
+    return;
+  }
+  char *buf = g_work->presetsJson;
+  const size_t cap = NetworkWorkBuf::kPresetsJson;
+  buf[0] = '{';
+  buf[1] = '}';
+  buf[2] = 0;
   size_t used = 0;
-  int n = snprintf(g_presetsStatusJson, sizeof(g_presetsStatusJson),
-                   "{\"activeId\":%u,\"items\":[",
+  int n = snprintf(buf, cap, "{\"activeId\":%u,\"items\":[",
                    static_cast<unsigned>(control.presets.activeId));
   if (n > 0) {
     used = static_cast<size_t>(n);
@@ -536,7 +554,7 @@ void buildSlimPresetsJson(const ControlStatusSnapshot &control) {
     char safeName[SHOT_PRESET_NAME_CAPACITY * 2] = {};
     sanitizeJsonEmbed(p.name, safeName, sizeof(safeName));
     n = snprintf(
-        g_presetsStatusJson + used, sizeof(g_presetsStatusJson) - used,
+        buf + used, cap - used,
         "%s{\"id\":%u,\"name\":\"%s\",\"isFactory\":%s,\"brewByWeight\":%s,"
         "\"goalWeightG\":%u,\"minBrewTimeMs\":%lu,\"maxRecoveryWeightG\":%.1f}",
         i == 0 ? "" : ",", static_cast<unsigned>(p.id), safeName,
@@ -544,25 +562,29 @@ void buildSlimPresetsJson(const ControlStatusSnapshot &control) {
         static_cast<unsigned>(p.goalWeightG),
         static_cast<unsigned long>(p.minBrewTimeMs),
         static_cast<double>(p.maxRecoveryWeightG));
-    if (n < 0 ||
-        static_cast<size_t>(n) >= sizeof(g_presetsStatusJson) - used) {
+    if (n < 0 || static_cast<size_t>(n) >= cap - used) {
       break;
     }
     used += static_cast<size_t>(n);
   }
-  if (used + 2 < sizeof(g_presetsStatusJson)) {
-    g_presetsStatusJson[used++] = ']';
-    g_presetsStatusJson[used++] = '}';
-    g_presetsStatusJson[used] = 0;
+  if (used + 2 < cap) {
+    buf[used++] = ']';
+    buf[used++] = '}';
+    buf[used] = 0;
   }
 }
 
 void buildScaleHistoryJson(const ControlStatusSnapshot &control) {
-  g_scaleHistoryJson[0] = '[';
-  g_scaleHistoryJson[1] = ']';
-  g_scaleHistoryJson[2] = 0;
+  if (g_work == nullptr) {
+    return;
+  }
+  char *buf = g_work->historyJson;
+  const size_t cap = NetworkWorkBuf::kHistoryJson;
+  buf[0] = '[';
+  buf[1] = ']';
+  buf[2] = 0;
   size_t used = 0;
-  int n = snprintf(g_scaleHistoryJson, sizeof(g_scaleHistoryJson), "[");
+  int n = snprintf(buf, cap, "[");
   if (n > 0) {
     used = static_cast<size_t>(n);
   }
@@ -576,19 +598,17 @@ void buildScaleHistoryJson(const ControlStatusSnapshot &control) {
     char safeName[PREFERRED_SCALE_NAME_CAPACITY * 2] = {};
     sanitizeJsonEmbed(entry.mac, safeMac, sizeof(safeMac));
     sanitizeJsonEmbed(entry.name, safeName, sizeof(safeName));
-    n = snprintf(g_scaleHistoryJson + used, sizeof(g_scaleHistoryJson) - used,
-                 "%s{\"mac\":\"%s\",\"name\":\"%s\"}", first ? "" : ",",
-                 safeMac, safeName);
-    if (n <= 0 ||
-        static_cast<size_t>(n) >= sizeof(g_scaleHistoryJson) - used) {
+    n = snprintf(buf + used, cap - used, "%s{\"mac\":\"%s\",\"name\":\"%s\"}",
+                 first ? "" : ",", safeMac, safeName);
+    if (n <= 0 || static_cast<size_t>(n) >= cap - used) {
       break;
     }
     used += static_cast<size_t>(n);
     first = false;
   }
-  if (used + 1 < sizeof(g_scaleHistoryJson)) {
-    g_scaleHistoryJson[used++] = ']';
-    g_scaleHistoryJson[used] = 0;
+  if (used + 1 < cap) {
+    buf[used++] = ']';
+    buf[used] = 0;
   }
 }
 
@@ -619,6 +639,12 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
     acceptedCommandQueue_ = nullptr;
     return false;
   }
+  workBuf_ = static_cast<NetworkWorkBuf *>(
+      allocExternalOrInternal(sizeof(NetworkWorkBuf)));
+  if (workBuf_ != nullptr) {
+    memset(workBuf_, 0, sizeof(*workBuf_));
+  }
+  g_work = workBuf_;
   instance_ = this;
   ntpConfigRevision_ = settings_.runtime.revision;
   g_wallClock.reset();
@@ -628,6 +654,9 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
                               tskIDLE_PRIORITY + 1, &taskHandle_,
                               0) != pdPASS) {
     instance_ = nullptr;
+    g_work = nullptr;
+    heapCapsFree(workBuf_);
+    workBuf_ = nullptr;
     vSemaphoreDelete(statusResponseMux_);
     statusResponseMux_ = nullptr;
     vQueueDelete(acceptedCommandQueue_);
@@ -636,6 +665,22 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
     return false;
   }
   return true;
+}
+
+bool ShotStopperNetwork::lockWorkBuf() {
+  if (workBuf_ == nullptr || statusResponseMux_ == nullptr) {
+    return false;
+  }
+  return xSemaphoreTake(statusResponseMux_, pdMS_TO_TICKS(1500)) == pdTRUE;
+}
+
+void ShotStopperNetwork::unlockWorkBuf() {
+  xSemaphoreGive(statusResponseMux_);
+}
+
+esp_err_t ShotStopperNetwork::workBufBusy(httpd_req_t *request) {
+  return sendError(request, STATUS_UNAVAILABLE, "STATUS_BUSY",
+                   "Status snapshot is busy; retry shortly.");
 }
 
 bool ShotStopperNetwork::enqueueAcceptedCommand(const WebCommand &command) {
@@ -3079,15 +3124,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
                      "Unknown status page; use /api/v1/status/{home|settings|admin|diagnostic}.");
   }
 
-  // Serialize builds: g_statusResponseBuffer / presets / scale history are
-  // process-wide and httpd serves multiple sockets concurrently.
-  if (self.statusResponseMux_ == nullptr ||
-      xSemaphoreTake(self.statusResponseMux_, pdMS_TO_TICKS(1500)) != pdTRUE) {
-    return sendError(request, "503 Service Unavailable", "STATUS_BUSY",
-                     "Status snapshot is busy; retry shortly.");
+  // JSON / snapshot work lives in one PSRAM (or internal fallback) blob.
+  if (!self.lockWorkBuf()) {
+    return self.workBufBusy(request);
   }
 
-  ControlStatusSnapshot control;
+  ControlStatusSnapshot &control = self.workBuf_->control;
   self.callbacks_.copyControlStatus(control);
   self.clearWebUiOverrideIfSafe(control);
   const bool configMutable = controlAllowsConfiguration(control);
@@ -3159,16 +3201,16 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   if (needPresets) {
     buildSlimPresetsJson(control);
   } else {
-    g_presetsStatusJson[0] = '{';
-    g_presetsStatusJson[1] = '}';
-    g_presetsStatusJson[2] = 0;
+    g_work->presetsJson[0] = '{';
+    g_work->presetsJson[1] = '}';
+    g_work->presetsJson[2] = 0;
   }
   if (needHistory) {
     buildScaleHistoryJson(control);
   } else {
-    g_scaleHistoryJson[0] = '[';
-    g_scaleHistoryJson[1] = ']';
-    g_scaleHistoryJson[2] = 0;
+    g_work->historyJson[0] = '[';
+    g_work->historyJson[1] = ']';
+    g_work->historyJson[2] = 0;
   }
 
   const uint32_t cycleFirstDropElapsedMs =
@@ -3383,7 +3425,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         observedWeight, scaleTimer, safePreferredScaleMac,
         safePreferredScaleName,
         static_cast<unsigned long>(control.scaleMacCachePauseRemainingMs),
-        g_presetsStatusJson, control.activeCycle ? "true" : "false",
+        g_work->presetsJson, control.activeCycle ? "true" : "false",
         activeCycleShotTypeLabel(control),
         control.cycleRetarePerformed ? "true" : "false",
         static_cast<unsigned long>(cycleFirstDropElapsedMs),
@@ -3425,7 +3467,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"presets\":%s",
         safePreferredScaleMac, safePreferredScaleName,
         static_cast<unsigned long>(control.scaleMacCachePauseRemainingMs),
-        g_scaleHistoryJson, g_presetsStatusJson);
+        g_work->historyJson, g_work->presetsJson);
   } else if (ok && page == StatusPage::Admin) {
     // Admin page: Wi-Fi/AP status + STA address form hydration only.
     // Diagnostics metrics live on status/diagnostic.
@@ -3482,6 +3524,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"health\":{\"uptimeMs\":%lu,\"loopMaxGapMs\":%lu,"
         "\"freeHeapBytes\":%lu,\"minimumFreeHeapBytes\":%lu,"
         "\"largestFreeHeapBlockBytes\":%lu,"
+        "\"psramSizeBytes\":%lu,\"psramFreeBytes\":%lu,"
+        "\"psramLargestFreeBlockBytes\":%lu,"
         "\"hwmon\":{\"cpuLoad5s\":%.2f,\"cpuLoad1m\":%.2f,\"cpuLoad5m\":%.2f,"
         "\"cpu0Busy\":%.2f,\"cpu1Busy\":%.2f,\"cpuLoadValid\":%s,"
         "\"tempValid\":%s,\"tempC\":%.1f,\"tempPeakC\":%.1f,"
@@ -3512,6 +3556,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.freeHeapBytes),
         static_cast<unsigned long>(control.minimumFreeHeapBytes),
         static_cast<unsigned long>(control.largestFreeHeapBlockBytes),
+        static_cast<unsigned long>(control.psramSizeBytes),
+        static_cast<unsigned long>(control.psramFreeBytes),
+        static_cast<unsigned long>(control.psramLargestFreeBlockBytes),
         static_cast<double>(control.hwmon.cpuLoad5s),
         static_cast<double>(control.hwmon.cpuLoad1m),
         static_cast<double>(control.hwmon.cpuLoad5m),
@@ -3542,12 +3589,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
     const esp_err_t tooLarge =
         sendError(request, "500 Internal Server Error", "STATUS_TOO_LARGE",
                   "Status snapshot exceeds its size limit.");
-    xSemaphoreGive(self.statusResponseMux_);
+    self.unlockWorkBuf();
     return tooLarge;
   }
   const esp_err_t sent =
-      sendJson(request, STATUS_OK, g_statusResponseBuffer);
-  xSemaphoreGive(self.statusResponseMux_);
+      sendJson(request, STATUS_OK, g_work->statusJson);
+  self.unlockWorkBuf();
   return sent;
 }
 
@@ -3571,94 +3618,95 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
     }
   }
 
-  DebugEvent events[LOG_BATCH_SIZE] = {};
-  const size_t count =
-      self.callbacks_.copyDebugEvents(after, events, LOG_BATCH_SIZE);
-  ControlStatusSnapshot control;
-  self.callbacks_.copyControlStatus(control);
+  if (!self.lockWorkBuf()) {
+    return self.workBufBusy(request);
+  }
+  NetworkWorkBuf &work = *self.workBuf_;
+  const size_t count = self.callbacks_.copyDebugEvents(
+      after, work.logBatch, LOG_BATCH_SIZE);
+  self.callbacks_.copyControlStatus(work.control);
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
   httpd_resp_set_hdr(request, "Cache-Control", "no-store");
   httpd_resp_set_hdr(request, "Connection", "close");
   char header[96] = {};
   snprintf(header, sizeof(header),
            "{\"dropped\":%lu,\"bootId\":%lu,\"events\":[",
-           static_cast<unsigned long>(control.debugEventsDropped),
-           static_cast<unsigned long>(control.bootId));
+           static_cast<unsigned long>(work.control.debugEventsDropped),
+           static_cast<unsigned long>(work.control.bootId));
   if (httpd_resp_send_chunk(request, header, HTTPD_RESP_USE_STRLEN) != ESP_OK) {
+    self.unlockWorkBuf();
     return ESP_FAIL;
   }
   for (size_t index = 0; index < count; ++index) {
+    const DebugEvent &event = work.logBatch[index];
     char message[128] = {};
-    if (events[index].code == DebugCode::BOOT_BANNER) {
+    if (event.code == DebugCode::BOOT_BANNER) {
       snprintf(message, sizeof(message), "Shot Stopper Micra %s (bootId=%ld)",
-               FW_VERSION, static_cast<long>(events[index].argument1));
-    } else if (events[index].code == DebugCode::STATE_TRANSITION &&
-        events[index].argument1 >=
+               FW_VERSION, static_cast<long>(event.argument1));
+    } else if (event.code == DebugCode::STATE_TRANSITION &&
+        event.argument1 >=
             static_cast<int32_t>(StopperState::REQUIRES_OFF) &&
-        events[index].argument1 <=
+        event.argument1 <=
             static_cast<int32_t>(StopperState::MANUAL_NO_SCALE) &&
-        events[index].argument2 >=
+        event.argument2 >=
             static_cast<int32_t>(StopperState::REQUIRES_OFF) &&
-        events[index].argument2 <=
+        event.argument2 <=
             static_cast<int32_t>(StopperState::MANUAL_NO_SCALE)) {
       snprintf(message, sizeof(message), "%s -> %s",
-               stopperStateName(
-                   static_cast<StopperState>(events[index].argument1)),
-               stopperStateName(
-                   static_cast<StopperState>(events[index].argument2)));
-    } else if ((events[index].code == DebugCode::WEB_COMMAND_ACCEPTED ||
-                events[index].code == DebugCode::WEB_COMMAND_REJECTED) &&
-               events[index].argument1 >=
+               stopperStateName(static_cast<StopperState>(event.argument1)),
+               stopperStateName(static_cast<StopperState>(event.argument2)));
+    } else if ((event.code == DebugCode::WEB_COMMAND_ACCEPTED ||
+                event.code == DebugCode::WEB_COMMAND_REJECTED) &&
+               event.argument1 >=
                    static_cast<int32_t>(WebCommandType::PADDLE_ON) &&
-               events[index].argument1 <=
+               event.argument1 <=
                    static_cast<int32_t>(
                        WebCommandType::MAINTENANCE_COMPLETE)) {
-      snprintf(message, sizeof(message), "%s: %s",
-               debugCodeName(events[index].code),
+      snprintf(message, sizeof(message), "%s: %s", debugCodeName(event.code),
                webCommandTypeName(
-                   static_cast<WebCommandType>(events[index].argument1)));
-    } else if (formatScaleSampleDebugMessage(events[index], message,
+                   static_cast<WebCommandType>(event.argument1)));
+    } else if (formatScaleSampleDebugMessage(event, message,
                                              sizeof(message))) {
-    } else if (formatPersistDebugMessage(events[index], message,
-                                         sizeof(message))) {
-    } else if (formatLifecycleDebugMessage(events[index], message,
-                                           sizeof(message))) {
+    } else if (formatPersistDebugMessage(event, message, sizeof(message))) {
+    } else if (formatLifecycleDebugMessage(event, message, sizeof(message))) {
     } else {
-      strncpy(message, debugCodeName(events[index].code),
-              sizeof(message) - 1);
+      strncpy(message, debugCodeName(event.code), sizeof(message) - 1);
     }
-    char item[320] = {};
-    snprintf(item, sizeof(item),
+    snprintf(work.jsonItem, NetworkWorkBuf::kJsonItem,
              "%s{\"sequence\":%lu,\"atMs\":%lu,\"wallSec\":%lu,"
              "\"level\":\"%s\",\"category\":\"%s\",\"code\":%u,"
              "\"message\":\"%s\",\"argument1\":%ld,\"argument2\":%ld}",
              index == 0 ? "" : ",",
-             static_cast<unsigned long>(events[index].sequence),
-             static_cast<unsigned long>(events[index].atMs),
-             static_cast<unsigned long>(events[index].wallSec),
-             logLevelName(events[index].level),
-             debugCategoryName(events[index].category),
-             static_cast<unsigned>(events[index].code),
-             message,
-             static_cast<long>(events[index].argument1),
-             static_cast<long>(events[index].argument2));
-    if (httpd_resp_send_chunk(request, item, HTTPD_RESP_USE_STRLEN) != ESP_OK) {
+             static_cast<unsigned long>(event.sequence),
+             static_cast<unsigned long>(event.atMs),
+             static_cast<unsigned long>(event.wallSec),
+             logLevelName(event.level), debugCategoryName(event.category),
+             static_cast<unsigned>(event.code), message,
+             static_cast<long>(event.argument1),
+             static_cast<long>(event.argument2));
+    if (httpd_resp_send_chunk(request, work.jsonItem, HTTPD_RESP_USE_STRLEN) !=
+        ESP_OK) {
+      self.unlockWorkBuf();
       return ESP_FAIL;
     }
   }
-  return httpd_resp_send_chunk(request, "]}", HTTPD_RESP_USE_STRLEN) == ESP_OK
-             ? httpd_resp_send_chunk(request, nullptr, 0)
-             : ESP_FAIL;
+  const bool ok =
+      httpd_resp_send_chunk(request, "]}", HTTPD_RESP_USE_STRLEN) == ESP_OK &&
+      httpd_resp_send_chunk(request, nullptr, 0) == ESP_OK;
+  self.unlockWorkBuf();
+  return ok ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  ControlStatusSnapshot control;
-  self.callbacks_.copyControlStatus(control);
-  static ShotLogRecord records[SHOT_LOG_CAPACITY];
+  if (!self.lockWorkBuf()) {
+    return self.workBufBusy(request);
+  }
+  NetworkWorkBuf &work = *self.workBuf_;
+  self.callbacks_.copyControlStatus(work.control);
   const size_t count =
       self.callbacks_.copyShotRecords != nullptr
-          ? self.callbacks_.copyShotRecords(records, SHOT_LOG_CAPACITY)
+          ? self.callbacks_.copyShotRecords(work.shotRecords, SHOT_LOG_CAPACITY)
           : 0;
 
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
@@ -3668,13 +3716,14 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
   char header[96] = {};
   snprintf(header, sizeof(header),
            "{\"bootId\":%lu,\"shots\":[",
-           static_cast<unsigned long>(control.bootId));
+           static_cast<unsigned long>(work.control.bootId));
   if (httpd_resp_send_chunk(request, header, HTTPD_RESP_USE_STRLEN) != ESP_OK) {
+    self.unlockWorkBuf();
     return ESP_FAIL;
   }
 
   for (size_t index = 0; index < count; ++index) {
-    const ShotLogRecord &record = records[index];
+    const ShotLogRecord &record = work.shotRecords[index];
     char actual[16] = "null";
     char errorG[16] = "null";
     char errorPct[16] = "null";
@@ -3714,8 +3763,7 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
       snprintf(targetEarly, sizeof(targetEarly), "%.1f",
                static_cast<double>(record.targetReachedEarlyDs) / 10.0);
     }
-    char item[760] = {};
-    snprintf(item, sizeof(item),
+    snprintf(work.jsonItem, NetworkWorkBuf::kJsonItem,
              "%s{\"id\":%lu,\"bootId\":%lu,\"endedAtMs\":%lu,"
              "\"hasWallTime\":%s,\"endedAtLocalSec\":%lu,"
              "\"endedAtUnixSec\":%lu,\"timezoneOffsetMinutesAtCommit\":%d,"
@@ -3754,13 +3802,17 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
              maxRecovery, minBrewTime, targetEarly,
              actualWeightSourceName(
                  static_cast<ActualWeightSource>(record.actualWeightSource)));
-    if (httpd_resp_send_chunk(request, item, HTTPD_RESP_USE_STRLEN) != ESP_OK) {
+    if (httpd_resp_send_chunk(request, work.jsonItem, HTTPD_RESP_USE_STRLEN) !=
+        ESP_OK) {
+      self.unlockWorkBuf();
       return ESP_FAIL;
     }
   }
-  return httpd_resp_send_chunk(request, "]}", HTTPD_RESP_USE_STRLEN) == ESP_OK
-             ? httpd_resp_send_chunk(request, nullptr, 0)
-             : ESP_FAIL;
+  const bool ok =
+      httpd_resp_send_chunk(request, "]}", HTTPD_RESP_USE_STRLEN) == ESP_OK &&
+      httpd_resp_send_chunk(request, nullptr, 0) == ESP_OK;
+  self.unlockWorkBuf();
+  return ok ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t ShotStopperNetwork::shotsClearHandler(httpd_req_t *request) {

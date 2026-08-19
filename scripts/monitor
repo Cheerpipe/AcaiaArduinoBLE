@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly DEFAULT_PORT="/dev/cu.usbserial-0001"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/shotstopper_board.sh
+source "$SCRIPT_DIR/shotstopper_board.sh"
+
 readonly DEFAULT_BAUDRATE="115200"
 
 usage() {
-  cat <<'EOF'
+  cat <<EOF
 Uso: ./scripts/monitor [ruta_serial] [velocidad]
 
 Inicia el monitor serie de Arduino CLI.
@@ -13,13 +16,13 @@ Inicia el monitor serie de Arduino CLI.
 La velocidad es opcional cuando se proporciona una ruta serial.
 
 Valores por defecto (sin argumentos):
-  ruta_serial: /dev/cu.usbserial-0001
-  velocidad:    115200
+  ruta_serial: $SHOTSTOPPER_DEFAULT_PORT_HELP
+  velocidad:    $DEFAULT_BAUDRATE
 
 Ejemplos:
   ./scripts/monitor
-  ./scripts/monitor /dev/cu.usbserial-0001
-  ./scripts/monitor /dev/cu.usbmodem01 74880
+  ./scripts/monitor /dev/cu.usbmodem2101
+  ./scripts/monitor /dev/cu.usbmodem2101 115200
 EOF
 }
 
@@ -37,7 +40,12 @@ if [[ $# -gt 2 ]]; then
   exit 2
 fi
 
-port="${1:-$DEFAULT_PORT}"
+if [[ $# -eq 0 ]]; then
+  shotstopper_resolve_port required || exit 1
+  port="$SHOTSTOPPER_PORT"
+else
+  port="$1"
+fi
 baudrate="${2:-$DEFAULT_BAUDRATE}"
 
 command -v arduino-cli >/dev/null 2>&1 || {
@@ -45,4 +53,5 @@ command -v arduino-cli >/dev/null 2>&1 || {
   exit 127
 }
 
+echo "Monitor serie en $port ($baudrate)"
 arduino-cli monitor --port "$port" --config "baudrate=$baudrate"

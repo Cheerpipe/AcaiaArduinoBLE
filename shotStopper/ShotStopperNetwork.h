@@ -111,6 +111,8 @@ inline int8_t clampWifiRssi(int32_t rssi) {
   return static_cast<int8_t>(rssi);
 }
 
+struct NetworkWorkBuf;
+
 struct NetworkBridgeCallbacks {
   void (*copyControlStatus)(ControlStatusSnapshot &output) = nullptr;
   bool (*enqueueWebCommand)(const WebCommand &command) = nullptr;
@@ -180,6 +182,7 @@ class ShotStopperNetwork {
   QueueHandle_t acceptedCommandQueue_ = nullptr;
   TaskHandle_t taskHandle_ = nullptr;
   SemaphoreHandle_t statusResponseMux_ = nullptr;
+  NetworkWorkBuf *workBuf_ = nullptr;
   httpd_handle_t server_ = nullptr;
   portMUX_TYPE dataMux_ = portMUX_INITIALIZER_UNLOCKED;
   char activeWebUiClientId_[WEB_UI_CLIENT_ID_CAPACITY] = {};
@@ -326,6 +329,9 @@ class ShotStopperNetwork {
   static bool readJsonBody(httpd_req_t *request,
                            char body[REQUEST_BODY_CAPACITY]);
   static bool requireJsonContentType(httpd_req_t *request);
+  bool lockWorkBuf();
+  void unlockWorkBuf();
+  esp_err_t workBufBusy(httpd_req_t *request);
   bool requireActiveWebUiClient(httpd_req_t *request);
   bool webUiOverrideAllowed(httpd_req_t *request);
   bool webUiConfigurationAllowed(httpd_req_t *request,

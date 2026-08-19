@@ -2071,6 +2071,9 @@ struct ControlStatusSnapshot {
   uint32_t freeHeapBytes = 0;
   uint32_t minimumFreeHeapBytes = 0;
   uint32_t largestFreeHeapBlockBytes = 0;
+  uint32_t psramSizeBytes = 0;
+  uint32_t psramFreeBytes = 0;
+  uint32_t psramLargestFreeBlockBytes = 0;
   uint32_t scaleEventsDropped = 0;
   RuntimeConfig config = {};
   ShotPresetBank presets = {};
@@ -2282,6 +2285,7 @@ constexpr int32_t BOOT_SUBSYSTEM_SCALE_WORKER = 7;
 constexpr int32_t BOOT_SUBSYSTEM_WEB_QUEUE = 8;
 constexpr int32_t BOOT_SUBSYSTEM_NETWORK = 9;
 constexpr int32_t BOOT_SUBSYSTEM_INDICATORS = 10;
+constexpr int32_t BOOT_SUBSYSTEM_PSRAM = 11;
 
 struct DebugEvent {
   uint32_t sequence = 0;
@@ -2345,6 +2349,40 @@ class DebugRingBuffer {
       }
     }
     return copied;
+  }
+
+  size_t countAfter(uint32_t afterSequence) const {
+    if (count_ == 0) {
+      return 0;
+    }
+    const size_t oldest =
+        (writeIndex_ + DEBUG_EVENT_CAPACITY - count_) % DEBUG_EVENT_CAPACITY;
+    size_t matching = 0;
+    for (size_t index = 0; index < count_; ++index) {
+      const DebugEvent &event =
+          events_[(oldest + index) % DEBUG_EVENT_CAPACITY];
+      if (static_cast<int32_t>(event.sequence - afterSequence) > 0) {
+        ++matching;
+      }
+    }
+    return matching;
+  }
+
+  bool copyFirstAfter(uint32_t afterSequence, DebugEvent &output) const {
+    if (count_ == 0) {
+      return false;
+    }
+    const size_t oldest =
+        (writeIndex_ + DEBUG_EVENT_CAPACITY - count_) % DEBUG_EVENT_CAPACITY;
+    for (size_t index = 0; index < count_; ++index) {
+      const DebugEvent &event =
+          events_[(oldest + index) % DEBUG_EVENT_CAPACITY];
+      if (static_cast<int32_t>(event.sequence - afterSequence) > 0) {
+        output = event;
+        return true;
+      }
+    }
+    return false;
   }
 
   uint32_t overwritten() const { return overwritten_; }
@@ -2528,6 +2566,7 @@ inline const char *bootSubsystemName(int32_t subsystem) {
     case BOOT_SUBSYSTEM_WEB_QUEUE: return "web_queue";
     case BOOT_SUBSYSTEM_NETWORK: return "network";
     case BOOT_SUBSYSTEM_INDICATORS: return "indicators";
+    case BOOT_SUBSYSTEM_PSRAM: return "psram";
   }
   return "unknown";
 }

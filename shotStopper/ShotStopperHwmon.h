@@ -5,10 +5,10 @@
 
 #ifdef ARDUINO
 #include <Arduino.h>
-#include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include "ShotStopperPsram.h"
 #endif
 
 namespace shotstopper {
@@ -76,8 +76,9 @@ class Hwmon {
     out.ramFreeBytes = 200000U;
     out.ramUsedBytes = out.ramTotalBytes - out.ramFreeBytes;
 #else
-    out.ramFreeBytes = static_cast<uint32_t>(ESP.getFreeHeap());
-    out.ramTotalBytes = static_cast<uint32_t>(ESP.getHeapSize());
+    const HeapCapSnapshot heap = sampleHeapCaps();
+    out.ramFreeBytes = heap.internalFree;
+    out.ramTotalBytes = heap.internalTotal;
     if (out.ramTotalBytes >= out.ramFreeBytes) {
       out.ramUsedBytes = out.ramTotalBytes - out.ramFreeBytes;
     }

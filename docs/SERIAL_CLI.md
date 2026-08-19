@@ -8,11 +8,13 @@ Do not type into a scrolling monitor if you cannot see what you send. Close
 any other serial client, then pipe the command:
 
 ```sh
-(sleep 4; printf 'HELP\n'; sleep 2) | arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200
+(sleep 4; printf 'HELP\n'; sleep 2) | arduino-cli monitor -p /dev/cu.usbmodem2101 -c baudrate=115200
 ```
 
 The `sleep 4` waits for the USB-serial chip to reopen (opening the port often
-resets the ESP32). Replace the port with yours from `arduino-cli board list`.
+resets the ESP32). Replace the example port with yours from
+`arduino-cli board list`, or use `./scripts/monitor`, which selects the first
+`/dev/cu.usbmodem<número>` device.
 
 Successful mutating commands print `OK queued …`, `OK …`, or a status dump.
 Rejections print `ERR …`. Passwords are never echoed.
@@ -127,7 +129,7 @@ persist.
 
 | Command | Parameters | Effect |
 | --- | --- | --- |
-| `LOG_DUMP` | none | Prints the RAM debug ring (oldest first). Says so if empty or retain is none |
+| `LOG_DUMP` | none | Prints the RAM debug ring (oldest first), one event at a time. Deferred while a cycle is active or CN9 is closed. Says so if empty or retain is none |
 | `HEALTH` | none | Heap, loop gap, task stacks, CPU load, current and peak temperature, alert latches |
 | `SCALE_STATUS` | none | BLE scale link, preferred MAC/name, weight freshness |
 | `NTP_STATUS` | none | Wall clock / NTP state. Notes if STA is down |

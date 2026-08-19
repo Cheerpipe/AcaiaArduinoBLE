@@ -3,8 +3,12 @@
 # This script deliberately never builds the firmware.
 set -uo pipefail
 
-readonly ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-readonly DEFAULT_BUILD_DIR="build/esp32"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/shotstopper_board.sh
+source "$SCRIPT_DIR/shotstopper_board.sh"
+
+readonly ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+readonly DEFAULT_BUILD_DIR="build/${SHOTSTOPPER_DEFAULT_ARCH}"
 readonly DEFAULT_OUTPUT_DIR="reports/static-analysis"
 readonly SUPPRESSIONS_FILE="$ROOT/scripts/cppcheck-suppressions.txt"
 
@@ -17,13 +21,13 @@ The output directory is deleted and recreated on every run. This script never
 compiles the firmware; run ./scripts/build separately first.
 
 Defaults:
-  build_dir:  build/esp32
+  build_dir:  build/n16r8
   output_dir: reports/static-analysis
 
 Examples:
   ./scripts/static_report
-  ./scripts/static_report build/esp32s3
-  ./scripts/static_report build/esp32 reports/analysis-esp32
+  ./scripts/static_report build/n8r4
+  ./scripts/static_report build/n16r8 reports/analysis-n16r8
 EOF
 }
 

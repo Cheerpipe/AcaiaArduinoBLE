@@ -747,12 +747,18 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes('id="hRamF"') ||
       !ui.includes('id="hHeapMin"') ||
       !ui.includes('id="hHeapLargest"') ||
+      !ui.includes('id="hPsramT"') ||
+      !ui.includes('id="hPsramF"') ||
+      !ui.includes('id="hPsramL"') ||
       !ui.includes('function updH(') ||
       !ui.includes('updH(s.health,s.safety)') ||
       !ui.includes('function applyDiagnosticStatus(') ||
       !ui.includes('h.uptimeMs') ||
       !ui.includes('h.minimumFreeHeapBytes') ||
       !ui.includes('h.largestFreeHeapBlockBytes') ||
+      !ui.includes('h.psramSizeBytes') ||
+      !ui.includes('h.psramFreeBytes') ||
+      !ui.includes('h.psramLargestFreeBlockBytes') ||
       !ui.includes("toFixed(1)+' KB'") ||
       !ui.includes('resetReasonCode') ||
       !ui.includes("RR[s.resetReasonCode]") ||
@@ -773,11 +779,17 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !network.includes('\\"uptimeMs\\"') ||
       !network.includes('\\"minimumFreeHeapBytes\\"') ||
       !network.includes('\\"largestFreeHeapBlockBytes\\"') ||
+      !network.includes('\\"psramSizeBytes\\"') ||
+      !network.includes('\\"psramFreeBytes\\"') ||
+      !network.includes('\\"psramLargestFreeBlockBytes\\"') ||
       !network.includes('\\"resetReasonCode\\"') ||
       !diagHtml.includes('id="diagnosticsPanel"') ||
       !diagHtml.includes('<legend>Diagnostics</legend>') ||
       !diagHtml.includes('<strong>Heap min</strong>') ||
       !diagHtml.includes('<strong>Heap largest</strong>') ||
+      !diagHtml.includes('<strong>PSRAM size</strong>') ||
+      !diagHtml.includes('<strong>PSRAM free</strong>') ||
+      !diagHtml.includes('<strong>PSRAM largest</strong>') ||
       diagHtml.includes('<details') ||
       diagHtml.includes('<summary>Diagnostics</summary>') ||
       !diagHtml.includes('id="currentTime"') ||
@@ -787,6 +799,9 @@ if (!ui.includes('<legend>Brew</legend>') ||
       diagHtml.indexOf('id="ntpStatus"') > diagHtml.indexOf('id="hWifi"') ||
       diagHtml.indexOf('id="hRamF"') > diagHtml.indexOf('id="hHeapMin"') ||
       diagHtml.indexOf('id="hHeapMin"') > diagHtml.indexOf('id="hHeapLargest"') ||
+      diagHtml.indexOf('id="hHeapLargest"') > diagHtml.indexOf('id="hPsramT"') ||
+      diagHtml.indexOf('id="hPsramT"') > diagHtml.indexOf('id="hPsramF"') ||
+      diagHtml.indexOf('id="hPsramF"') > diagHtml.indexOf('id="hPsramL"') ||
       adminHtml.includes('id="diagnosticsPanel"') ||
       adminHtml.includes('id="currentTime"') ||
       adminHtml.includes('<summary>Diagnostics</summary>') ||
@@ -1371,6 +1386,7 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'signalQualityPct', 'utcSec', 'lastSyncAgeMs', 'nextRetryInMs',
     'activeServer', 'maintenance', 'persistPending', 'uptimeMs', 'hwmon',
     'freeHeapBytes', 'minimumFreeHeapBytes', 'largestFreeHeapBlockBytes',
+    'psramSizeBytes', 'psramFreeBytes', 'psramLargestFreeBlockBytes',
     'resetReasonCode', 'packetGaps', 'rejectedPackets', 'reconnects',
     'eventsDropped', 'lastCommand'
   ]) {

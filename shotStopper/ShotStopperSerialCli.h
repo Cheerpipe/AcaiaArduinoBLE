@@ -461,7 +461,8 @@ inline void serialCliPrintHelp() {
   Serial.println("WEBUI_RESTART  bounce HTTP server  e.g. WEBUI_RESTART");
   Serial.println("WEBUI_STATUS  dump HTTP/Web UI state  e.g. WEBUI_STATUS");
   Serial.println("NET_STATUS  WIFI + AP + WEBUI status  e.g. NET_STATUS");
-  Serial.println("LOG_DUMP  print RAM debug ring  e.g. LOG_DUMP");
+  Serial.println(
+      "LOG_DUMP  print RAM debug ring (deferred in brew/CN9)  e.g. LOG_DUMP");
   Serial.println("HEALTH  heap, loop gap, cpu load, task stacks  e.g. HEALTH");
   Serial.println("SCALE_STATUS  BLE scale link dump  e.g. SCALE_STATUS");
   Serial.println("NTP_STATUS  wall clock and NTP dump  e.g. NTP_STATUS");
@@ -570,6 +571,9 @@ struct SerialCliHealthDump {
   uint32_t freeHeapBytes = 0;
   uint32_t minimumFreeHeapBytes = 0;
   uint32_t largestFreeHeapBlockBytes = 0;
+  uint32_t psramSizeBytes = 0;
+  uint32_t psramFreeBytes = 0;
+  uint32_t psramLargestFreeBlockBytes = 0;
   uint32_t loopMaxGapMs = 0;
   uint32_t healthIntervalMaxGapMs = 0;
   uint32_t loopStackMinWords = 0;
@@ -760,6 +764,12 @@ inline void serialCliPrintHealth(const SerialCliHealthDump &dump) {
   Serial.println(static_cast<unsigned long>(dump.minimumFreeHeapBytes));
   Serial.print("heapLargest=");
   Serial.println(static_cast<unsigned long>(dump.largestFreeHeapBlockBytes));
+  Serial.print("psramSize=");
+  Serial.println(static_cast<unsigned long>(dump.psramSizeBytes));
+  Serial.print("psramFree=");
+  Serial.println(static_cast<unsigned long>(dump.psramFreeBytes));
+  Serial.print("psramLargest=");
+  Serial.println(static_cast<unsigned long>(dump.psramLargestFreeBlockBytes));
   Serial.print("loopMaxGapMs=");
   Serial.println(static_cast<unsigned long>(dump.loopMaxGapMs));
   Serial.print("loopIntervalGapMs=");
