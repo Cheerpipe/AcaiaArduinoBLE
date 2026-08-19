@@ -733,13 +733,24 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes("'slowExtractionGuardEnabled',1)") ||
     !ui.includes("'autoToManualGuardEnabled',1)") ||
     !ui.includes("'cupProtectionEnabled',1)") ||
-    !ui.includes('el.disabled=!controlsMutable||off') ||
+    !ui.includes('el.disabled=!controlsMutable||u||off') ||
     ui.includes('el.disabled=!controlsMutable||off||pend') ||
     !ui.includes('homeFlushBusy') ||
     !ui.includes('scheduleHomeGuardFlush()') ||
     !ui.includes("classList.toggle('fieldOff',off)") ||
-    !ui.includes('$(\'homeBrewByWeight\').disabled=!controlsMutable') ||
+    !ui.includes('bbw.disabled=!controlsMutable||x') ||
+    !ui.includes('function homeSwitchUnset(') ||
+    !ui.includes("classList.add('swR')") ||
+    !ui.includes("typeof c[k]==='boolean'") ||
+    html.includes('id="homeBrewByWeight" type="checkbox" role="switch" aria-label="Brew by weight" checked') ||
+    html.includes('id="homeAvoidBbwShotWithoutScale" type="checkbox" role="switch" aria-label="No-scale BBW" checked') ||
+    html.includes('id="homeSoundAlertsEnabled" type="checkbox" role="switch" aria-label="Alerts" checked') ||
+    html.includes('id="homeCupProtectionEnabled" type="checkbox" role="switch" aria-label="Cup protection" checked') ||
     !css.includes('.switchRow.switchPending') ||
+    !css.includes('.homeSwitchGrid .switchRow:not(.swR) .slider') ||
+    !css.includes('.homeSwitchGrid .switchRow:not(.swR) .slider:before{display:none}') ||
+    !css.includes('.homeSwitchGrid .switchRow:not(.swR) .switchOn') ||
+    !css.includes('.homeSwitchGrid .switchRow:not(.swR) .slider,.homeSwitchGrid .switchRow:not(.swR) input:checked+.slider{background:#9ca3af}') ||
     !css.includes('.homeSwitchGrid') ||
     !css.includes('justify-content:flex-start') ||
     !css.includes('.homeSwitchGrid{') ||
