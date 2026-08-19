@@ -8,13 +8,12 @@
 // Arduino-ESP32 3.3.6+ releases BLE controller RAM at boot unless a linked
 // TU includes this header (native BLE/SimpleBLE do; ArduinoBLE does not).
 // Without it, BLE.begin() fails after HCI reset times out (~1s).
-// Commented while the project is pinned to 3.3.3. On 3.3.11 it restored BLE
-// but exhausted internal heap for the Web UI on boards without PSRAM.
-// Shot Stopper now requires ESP32-S3 with PSRAM; revisit this include when
-// moving cores so BLE controller RAM and Web UI buffers can coexist.
-// #if defined(ESP32) && __has_include("esp32-hal-alloc-ble-mem.h")
-// #include "esp32-hal-alloc-ble-mem.h"
-// #endif
+// Required on the pinned 3.3.11 core. Shot Stopper requires ESP32-S3 with
+// PSRAM so Web UI buffers can live in SPIRAM while the BLE controller stays
+// on internal SRAM.
+#if defined(ESP32) && __has_include("esp32-hal-alloc-ble-mem.h")
+#include "esp32-hal-alloc-ble-mem.h"
+#endif
 
 #include <math.h>
 #include <new>

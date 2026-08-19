@@ -34,10 +34,11 @@ residual risk and the required hardware/soak validation.
 
 On Arduino-ESP32 **3.3.6+**, `initArduino()` releases BLE controller RAM unless
 a linked translation unit includes `esp32-hal-alloc-ble-mem.h`. Native
-`BLE`/`SimpleBLE` do; ArduinoBLE does not. The include is kept commented in
-this tree while the app stays on **3.3.3** (on 3.3.11 it fixed BLE but starved
-the Web UI heap on boards without PSRAM). Shot Stopper now requires ESP32-S3
-with PSRAM; revisit the include when moving cores.
+`BLE`/`SimpleBLE` do; ArduinoBLE does not. This tree includes the header
+because Shot Stopper is pinned to **3.3.11** and requires ESP32-S3 with PSRAM
+so Web UI buffers can live in SPIRAM while the BLE controller stays on
+internal SRAM. After a core bump, run the BLE+Web UI hardware gate
+(M72 smoke, M73 short soak) in the Shot Stopper manual test plan.
 
 ## Robust connection behavior
 

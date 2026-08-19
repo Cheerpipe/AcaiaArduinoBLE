@@ -1078,7 +1078,7 @@ Install the toolchain and dependency versions validated by this project:
 
 ```sh
 arduino-cli core update-index
-arduino-cli core install esp32:esp32@3.3.3
+arduino-cli core install esp32:esp32@3.3.11
 arduino-cli lib install ArduinoBLE@2.1.0
 ./scripts/patch_arduinoble.sh
 ```
@@ -1091,14 +1091,14 @@ advertisement instead of aborting. The script is idempotent and also converts
 a leftover 100/30 patch. Set `ARDUINO_BLE_HOME` if ArduinoBLE is not in the
 default Arduino libraries path.
 
-This project is pinned to Arduino-ESP32 **3.3.3**. On **3.3.6+** the core
-frees BLE controller RAM at boot unless a translation unit includes
-`esp32-hal-alloc-ble-mem.h` (ArduinoBLE does not). That include is present but
-commented out in the vendored `AcaiaArduinoBLE` library: enabling it on 3.3.11
-restored `BLE.begin()` but left too little internal heap for the Web UI on
-boards without PSRAM. Shot Stopper now requires ESP32-S3 with PSRAM; revisit
-the include when moving cores so BLE controller RAM and Web UI buffers can
-coexist.
+This project is pinned to Arduino-ESP32 **3.3.11** (ESP-IDF 5.5.5). On
+**3.3.6+** the core frees BLE controller RAM at boot unless a translation
+unit includes `esp32-hal-alloc-ble-mem.h` (ArduinoBLE does not). The vendored
+`AcaiaArduinoBLE` library includes that header so `BLE.begin()` succeeds.
+Shot Stopper requires ESP32-S3 with PSRAM so Web UI buffers can live in
+SPIRAM while the BLE controller stays on internal SRAM. After a core bump,
+run the BLE+Web UI hardware gate in [Manual Test Plan](docs/MANUAL_TEST_PLAN.md)
+(M72 smoke, M73 short soak).
 
 Idle discovery does not start or stop GAP every 1 s or 3 s. Those timers are
 retry (only when scan is down), a software tick for logs, and log throttle.
