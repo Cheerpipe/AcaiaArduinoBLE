@@ -306,7 +306,7 @@ void verifySafetyInvariants() {
   }
   if (!paddleOn && !rawPaddleOn && stopperState != StopperState::RINSE &&
       session.source != ControlSource::WEB && relay.closed &&
-      !originalBbwSemanticsActive()) {
+      !originalBbwSemanticsActive() && !autoBbwSemanticsActive()) {
     std::cerr << "Safety invariant failed: stable paddle OFF has CN9 closed\n";
     ++failures;
   }
@@ -1729,6 +1729,8 @@ void w03_runtime_timing_relations_are_transactional() {
   CHECK(parsedPaddle == static_cast<uint8_t>(PaddleMode::NATURAL));
   CHECK(parsePaddleMode("original", parsedPaddle));
   CHECK(parsedPaddle == static_cast<uint8_t>(PaddleMode::ORIGINAL));
+  CHECK(parsePaddleMode("auto", parsedPaddle));
+  CHECK(parsedPaddle == static_cast<uint8_t>(PaddleMode::AUTO));
   CHECK(!parsePaddleMode("legacy", parsedPaddle));
 }
 
@@ -6458,6 +6460,132 @@ void pm11_original_bbw_release_honors_operational_wall() {
   CHECK(stopperState == StopperState::READY);
 }
 
+void pm12_auto_bbw_release_after_rinse_keeps_cn9_closed() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::AUTO);
+  startCycle();
+  advanceToBrew();
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(autoBbwSemanticsActive());
+  CHECK(!session.originalBbwHardMaxArmed);
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.active);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(autoBbwSemanticsActive());
+}
+
+void pm13_auto_bbw_hold_allows_auto_stop() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::AUTO);
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  shot.expectedEndS = 1.0f;
+  runLoopAfter(1000);
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void pm14_auto_bbw_off_on_off_stays_brewing() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::AUTO);
+  startCycle();
+  advanceToBrew();
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(autoBbwSemanticsActive());
+  setRawPaddle(true);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(!session.paddlePromotedToNatural);
+  CHECK(autoBbwSemanticsActive());
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(getRelaySafetySnapshot().closed);
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.active);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(autoBbwSemanticsActive());
+}
+
+void pm15_auto_no_scale_paddle_off_ends_shot() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::AUTO);
+  startCycle();
+  reachManualNoScaleState();
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void pm16_auto_timer_only_paddle_off_ends_shot() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::AUTO);
+  runtimeConfig.timerOnly = true;
+  startCycle();
+  advanceToBrew();
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(!autoBbwSemanticsActive());
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void pm17_auto_bbw_release_inside_rinse_is_rinse() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::AUTO);
+  const uint32_t rawOnAt = startCycle();
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(getRelaySafetySnapshot().closed);
+}
+
+void pm18_auto_bbw_auto_stop_with_paddle_off_goes_ready() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::AUTO);
+  startCycle();
+  advanceToBrew();
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::BREW);
+  endBbwProtectionForTests();
+  shot.expectedEndS = 1.0f;
+  runLoopAfter(1000);
+  loop();
+  CHECK(stopperState == StopperState::READY);
+  CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void pm19_apply_config_accepts_auto_paddle_mode() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  WebCommand update;
+  update.type = WebCommandType::APPLY_CONFIG;
+  update.config = runtimeConfig;
+  update.config.paddleMode = static_cast<uint8_t>(PaddleMode::AUTO);
+  processWebCommand(update);
+  CHECK(runtimeConfig.paddleMode == static_cast<uint8_t>(PaddleMode::AUTO));
+}
+
 using TestFunction = void (*)();
 
 struct TestCase {
@@ -6505,6 +6633,14 @@ const TestCase testCases[] = {
     {"PM09", pm09_apply_config_accepts_original_paddle_mode},
     {"PM10", pm10_original_bbw_hold_skips_operational_wall},
     {"PM11", pm11_original_bbw_release_honors_operational_wall},
+    {"PM12", pm12_auto_bbw_release_after_rinse_keeps_cn9_closed},
+    {"PM13", pm13_auto_bbw_hold_allows_auto_stop},
+    {"PM14", pm14_auto_bbw_off_on_off_stays_brewing},
+    {"PM15", pm15_auto_no_scale_paddle_off_ends_shot},
+    {"PM16", pm16_auto_timer_only_paddle_off_ends_shot},
+    {"PM17", pm17_auto_bbw_release_inside_rinse_is_rinse},
+    {"PM18", pm18_auto_bbw_auto_stop_with_paddle_off_goes_ready},
+    {"PM19", pm19_apply_config_accepts_auto_paddle_mode},
     {"R01", r01_transient_disconnect_suspends_weight_control},
     {"R02", r02_stalled_scale_worker_suspends_until_validated},
     {"R03", r03_non_finite_weights_cannot_corrupt_state_or_offset},

@@ -88,22 +88,23 @@ In short: **hard to build, easy to live with.**
 
 ## Paddle modes
 
-The firmware offers **two paddle operating modes**. Choose them in the Web UI
+The firmware offers **three paddle operating modes**. Choose them in the Web UI
 under **Settings → Machine and scale → Paddle** (`paddleMode`; machine-level,
-not per-preset). Default is **Natural**.
+not per-preset). Selector order is **Auto**, **Natural**, **Original**. Default
+is **Natural**.
 
-> **This is the main day-to-day choice.** Both modes still share quick rinse,
+> **This is the main day-to-day choice.** All modes still share quick rinse,
 > CN9 safety limits, and physical-paddle priority. They differ in whether
 > releasing the paddle mid-shot ends the brew or leaves brew-by-weight in
 > control.
 
-| | **Natural** (default) | **Original** |
-| --- | --- | --- |
-| **Feel** | Paddle = normal brew switch | Legacy [Tater Mazer Shot Stopper](https://github.com/tatemazer/AcaiaArduinoBLE) start gesture |
-| **ON** | Starts the extraction | Starts the extraction |
-| **OFF after rinse window** | Ends the shot and opens CN9 | **Keeps CN9 closed** on automatic BBW+scale shots; stopper finishes by weight |
-| **Early manual cut** | Move paddle **OFF** | Move paddle **ON** (promotes that shot to Natural), then **OFF** to cut |
-| **When it applies** | Always | Special hold/auto-stop rules only for **automatic brew-by-weight with a usable scale**; no-scale and timer-only behave like Natural |
+| | **Auto** | **Natural** (default) | **Original** |
+| --- | --- | --- | --- |
+| **Feel** | Automatic BBW finish; paddle ON/OFF switches subtype | Paddle = normal brew switch | Legacy [Tater Mazer Shot Stopper](https://github.com/tatemazer/AcaiaArduinoBLE) start gesture |
+| **ON** | Starts the extraction (auto-natural) | Starts the extraction | Starts the extraction |
+| **OFF after rinse window** | **Keeps CN9 closed** (auto-original) on automatic BBW+scale shots | Ends the shot and opens CN9 | **Keeps CN9 closed** on automatic BBW+scale shots; stopper finishes by weight |
+| **Early manual cut** | No paddle cut on BBW+scale (Stop remote / walls still apply). ON↔OFF only switches subtype | Move paddle **OFF** | Move paddle **ON** (promotes that shot to Natural), then **OFF** to cut |
+| **When it applies** | Subtype switch only for **automatic brew-by-weight with a usable scale**; no-scale and timer-only behave like Natural | Always | Special hold/auto-stop rules only for **automatic brew-by-weight with a usable scale**; no-scale and timer-only behave like Natural |
 
 ### Natural
 
@@ -141,14 +142,40 @@ Legacy Shot Stopper workflow for automatic brew-by-weight:
 - After an automatic weight stop with the paddle still ON, the usual
   paddle-return reminder still asks you to return the paddle to OFF.
 
+### Auto
+
+Automatic brew-by-weight finish **regardless of whether the paddle stays ON or
+OFF**. In one Auto shot the paddle only switches subtype (the saved mode stays
+Auto):
+
+1. Move the paddle **ON** to start. While it stays ON the shot is
+   **auto-natural**: Natural rules (weight / A→M / Max BBW time still cut with
+   the paddle ON; paddle-return reminder after CN9 opens), except OFF after the
+   rinse window does **not** end the shot.
+2. Move it **OFF** after the rinse gesture → **auto-original**: same as Original
+   with the paddle released (CN9 stays closed until automatic stop).
+3. Move it **ON** again → back to **auto-natural**. OFF again → auto-original.
+   You can switch back and forth in the same shot.
+4. A short ON→OFF inside the rinse gesture is still a **quick rinse**.
+
+**Particularities of Auto:**
+
+- Subtype switching applies only while the cycle is automatic BBW with a scale.
+  Without a usable scale, or with Brew by weight off (timer-only), paddle OFF
+  ends the shot like Natural.
+- Unlike Original, Auto does **not** hold off weight stop while the paddle is
+  ON, and ON does not promote to a one-way Natural cut on the next OFF.
+- After an automatic weight stop with the paddle still ON, the usual
+  paddle-return reminder still asks you to return the paddle to OFF.
+
 ## Main features
 
 ### Micra paddle and CN9 control
 
 - Independent read of the **physical paddle** (GPIO ↔ GND) and control of **CN9**
   through an isolated relay COM/NO contact.
-- Two configurable **[paddle modes](#paddle-modes)** — **Natural** (default) and
-  **Original** (legacy start-gesture BBW).
+- Three configurable **[paddle modes](#paddle-modes)** — **Auto**, **Natural**
+  (default), and **Original** (legacy start-gesture BBW).
 - Safe startup: CN9 stays open until a stable physical paddle OFF is detected
   (`REQUIRES_OFF` → `READY`).
 - Short-gesture **quick rinse** (configurable gesture time and rinse duration),
@@ -193,7 +220,7 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | **Retare stability** | Samples (default 3), tolerance (default 2.0 g), max sample gap (default 0.5 s), and min stable time (default 0.3 s) required before retare fires. |
 | **BBW protection (s)** | **Pre-arm / accidental-weight protection window** at shot start for automatic BBW: inhibits automatic weight stop until the timeout expires (default 12 s; minimum retare window + 3 s). Runs in parallel with retare and first-drop detection; first drops do not end this window. Skipped when Brew by weight is off. |
 | **Avoid BBW shot without scale** | **On by default**. Machine-level (Settings → Machine and scale, first group; not per-preset). With Brew by weight on and no usable scale, a paddle ON longer than the **quick rinse gesture** **does not close CN9**. A shorter ON→OFF is a rinse: CN9 closes and the guard goes **Idle**. The no-scale triple beep still plays on paddle ON (brew or rinse) whenever BBW is on and the scale is missing. The next start after a blocked shot or an Armed rinse runs as a manual no-scale shot. Re-arms on boot, when the scale becomes available, or after **Last shot cooldown**. |
-| **Paddle mode** | Machine-level (**Settings → Machine and scale → Paddle**). **Natural** (default) or **Original**. See [Paddle modes](#paddle-modes). |
+| **Paddle mode** | Machine-level (**Settings → Machine and scale → Paddle**). **Auto**, **Natural** (default), or **Original**. See [Paddle modes](#paddle-modes). |
 | **Always use this scale** | **On by default** (`scaleMacCacheMode=full`). Name-scan for compatible scales; when a preferred MAC is set, only that MAC is connected; other compatible advertisements are stored in history (up to 8) without connecting. Off connects the first compatible scale and does not lock preferred. |
 | **Preferred scale** | Dropdown of BLE-seen scales (history). Select which MAC is preferred, or **Clear preferred** (30 s discovery pause; history kept). |
 | **Drip delay** | Machine-level (**Settings → Machine and scale → Scales**). Wait after a shot ends before capturing the final post-drip weight used by Last Shot, history, offset learning, and eligible A→M samples (default 3.0 s; 0–10 s). A value of 0 finalizes on the next control loop without an intentional post-drip window. |
@@ -504,7 +531,7 @@ paddle OFF state before entering `READY`. From `READY`, moving the paddle to ON
 closes CN9 and starts a brew (or a manual cycle if scale automation is
 unavailable). Retare and BBW protection run in parallel from that moment.
 Paddle ON/OFF semantics for ending a shot depend on
-[paddle mode](#paddle-modes) (**Natural** vs **Original**).
+[paddle mode](#paddle-modes) (**Auto**, **Natural**, or **Original**).
 
 - Releasing the paddle within the rinse gesture time **demotes** the cycle to a
   rinse. CN9 remains closed for the configured rinse duration, and subsequent
@@ -518,6 +545,11 @@ Paddle ON/OFF semantics for ending a shot depend on
   leaves CN9 closed so the stopper can finish by weight; paddle ON again during
   that shot promotes it to Natural, then OFF cuts. Without scale automation or
   with timer-only, release behaves like Natural.
+- **Auto (automatic BBW + scale only):** releasing after the rinse window
+  leaves CN9 closed (auto-original). Paddle ON is auto-natural (weight stop
+  still cuts). ON and OFF switch subtype in the same shot; paddle does not end
+  the BBW shot. Without scale automation or with timer-only, release behaves
+  like Natural.
 - If the scale disconnects or its samples become stale during an automatic
   extraction, weight control is suspended. It recovers only on the current BLE
   generation after three coherent samples. Paddle OFF and timing limits remain

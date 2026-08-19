@@ -127,7 +127,7 @@ constexpr bool DEBUG = false;
 
 #if defined(ARDUINO_ESP32S3_DEV)
 constexpr uint8_t PADDLE_GPIO = 21;
-constexpr uint8_t RELAY_GPIO = 10;
+constexpr uint8_t RELAY_GPIO = 2;
 #if SHOT_STOPPER_ENABLE_ALED == 1
 #ifndef SHOT_STOPPER_SCALE_LED_GPIO
 #define SHOT_STOPPER_SCALE_LED_GPIO 48
@@ -151,8 +151,9 @@ constexpr uint8_t STOPPER_STATUS_LED_GPIO =
 constexpr uint8_t BUZZER_GPIO = SHOT_STOPPER_BUZZER_GPIO;
 
 constexpr uint8_t PADDLE_ACTIVE_LEVEL = LOW;
-constexpr uint8_t RELAY_CLOSED_LEVEL = LOW;
-constexpr uint8_t RELAY_OPEN_LEVEL = HIGH;
+// Active-HIGH relay: GPIO HIGH energizes the coil and closes NO.
+constexpr uint8_t RELAY_CLOSED_LEVEL = HIGH;
+constexpr uint8_t RELAY_OPEN_LEVEL = LOW;
 
 #if defined(SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO) != \
     defined(SHOT_STOPPER_CN9_FEEDBACK_GPIO)
@@ -4896,9 +4897,18 @@ bool paddleModeOriginal() {
          static_cast<uint8_t>(PaddleMode::ORIGINAL);
 }
 
+bool paddleModeAuto() {
+  return session.config.paddleMode == static_cast<uint8_t>(PaddleMode::AUTO);
+}
+
 bool originalBbwSemanticsActive() {
   return session.active && paddleModeOriginal() &&
          !session.paddlePromotedToNatural && session.startedWithScale &&
+         !session.config.timerOnly && stopperState == StopperState::BREW;
+}
+
+bool autoBbwSemanticsActive() {
+  return session.active && paddleModeAuto() && session.startedWithScale &&
          !session.config.timerOnly && stopperState == StopperState::BREW;
 }
 
@@ -4911,7 +4921,7 @@ void demoteActiveCycleToRinseOrEnd() {
     enterRinse();
     return;
   }
-  if (originalBbwSemanticsActive()) {
+  if (originalBbwSemanticsActive() || autoBbwSemanticsActive()) {
     return;
   }
   if (session.automaticEnabled) {
@@ -5130,7 +5140,8 @@ void stateMachineTask() {
 
     case StopperState::BREW:
       // Early paddle OFF demotes the brew to a rinse; otherwise ends the shot
-      // unless Original BBW semantics keep CN9 closed after the rinse window.
+      // unless Original or Auto BBW semantics keep CN9 closed after the rinse
+      // window.
       if (paddleTurnedOff) {
         demoteActiveCycleToRinseOrEnd();
         if (!session.active || stopperState != StopperState::BREW) {

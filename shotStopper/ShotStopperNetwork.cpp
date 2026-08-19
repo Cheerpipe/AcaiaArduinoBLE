@@ -282,7 +282,7 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "Ring log level must be none, critical, error, warning, info, or "
              "debug.";
     case ConfigValidationError::PADDLE_MODE:
-      return "Paddle mode must be natural or original.";
+      return "Paddle mode must be auto, natural or original.";
   }
   return "Invalid configuration.";
 }
@@ -4064,7 +4064,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
         "paddleReturnReminderMaxDurationMs must be an integer (milliseconds).";
   } else if (jsonFieldPresent(root, "paddleMode") &&
              !jsonPaddleMode(root, "paddleMode", candidate.paddleMode)) {
-    parseError = "paddleMode must be natural or original.";
+    parseError = "paddleMode must be auto, natural or original.";
   } else if (jsonFieldPresent(root, "buzzerScaleLostBeep") &&
              !jsonBoolean(root, "buzzerScaleLostBeep",
                           candidate.buzzerScaleLostBeep)) {

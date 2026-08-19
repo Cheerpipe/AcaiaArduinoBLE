@@ -453,24 +453,38 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
 }
 if (!html.includes('<summary>Paddle</summary>') ||
     !html.includes('id="paddleMode"') ||
+    !html.includes('<option value="auto">Auto</option>') ||
     !html.includes('<option value="natural">Natural</option>') ||
     !html.includes('<option value="original">Original</option>') ||
+    html.indexOf('<option value="auto">Auto</option>') >
+        html.indexOf('<option value="natural">Natural</option>') ||
+    html.indexOf('<option value="natural">Natural</option>') >
+        html.indexOf('<option value="original">Original</option>') ||
     !html.includes('<strong>Natural:</strong>') ||
     !html.includes('<strong>Original:</strong>') ||
+    !html.includes('<strong>Auto:</strong>') ||
+    html.indexOf('<strong>Natural:</strong>') >
+        html.indexOf('<strong>Original:</strong>') ||
+    html.indexOf('<strong>Original:</strong>') >
+        html.indexOf('<strong>Auto:</strong>') ||
     !html.includes('like a normal brew switch') ||
     !html.includes('original Tater Mazer Shot Stopper') ||
     !html.includes('move the paddle ON during the shot') ||
     !html.includes('Do not press the scale') ||
-    !ui.includes("paddleMode:['natural','original']") ||
+    !html.includes('auto-natural') ||
+    !html.includes('auto-original') ||
+    !ui.includes("paddleMode:['auto','natural','original']") ||
     !ui.includes("if($('paddleMode'))$('paddleMode').value=") ||
     !network.includes('"paddleMode"') ||
-    !network.includes('paddleMode must be natural or original.') ||
+    !network.includes('paddleMode must be auto, natural or original.') ||
     !network.includes('jsonPaddleMode') ||
     !firmware.includes('candidate.paddleMode = command.config.paddleMode') ||
+    !firmware.includes('autoBbwSemanticsActive()') ||
     !domain.includes('enum class PaddleMode') ||
     !domain.includes('NATURAL = 0') ||
-    !domain.includes('ORIGINAL = 1')) {
-  throw new Error('Machine Paddle mode must expose Natural/Original in UI, API, and APPLY_CONFIG');
+    !domain.includes('ORIGINAL = 1') ||
+    !domain.includes('AUTO = 2')) {
+  throw new Error('Machine Paddle mode must expose Auto/Natural/Original in UI, API, and APPLY_CONFIG');
 }
 if (!ui.includes('id="learnedOffsetG"') ||
     !ui.includes('id="weightOffsetBaselineG"') ||
