@@ -2564,11 +2564,11 @@ bool ShotStopperNetwork::startHttpServer() {
   // long browser headers have returned 431 Request Header Fields Too Large.
   config.max_req_hdr_len = 2048;
   config.max_resp_headers = 12;
-  config.backlog_conn = 6;
+  config.backlog_conn = 3;
   config.lru_purge_enable = true;
   // Keep stuck clients from occupying sockets under BLE/Wi-Fi coex stalls.
-  config.recv_wait_timeout = 2;
-  config.send_wait_timeout = 2;
+  config.recv_wait_timeout = 5;
+  config.send_wait_timeout = 5;
   if (httpd_start(&server_, &config) != ESP_OK) {
     server_ = nullptr;
     lifecycleLog("httpd_start failed");
@@ -2639,6 +2639,7 @@ esp_err_t ShotStopperNetwork::sendJson(httpd_req_t *request,
   // Close after each API response so keep-alive does not pin sockets on the
   // ESP while BLE/Wi-Fi coex delays responses.
   httpd_resp_set_hdr(request, "Connection", "close");
+  httpd_resp_set_hdr(request, "Access-Control-Allow-Origin", "*");
   return httpd_resp_send(request, json, HTTPD_RESP_USE_STRLEN);
 }
 
@@ -3663,6 +3664,7 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
   httpd_resp_set_hdr(request, "Cache-Control", "no-store");
   httpd_resp_set_hdr(request, "Connection", "close");
+  httpd_resp_set_hdr(request, "Access-Control-Allow-Origin", "*");  
   char header[96] = {};
   snprintf(header, sizeof(header),
            "{\"bootId\":%lu,\"shots\":[",
@@ -4841,6 +4843,7 @@ esp_err_t ShotStopperNetwork::wifiScanStatusHandler(httpd_req_t *request) {
   httpd_resp_set_hdr(request, "Cache-Control", "no-store");
   httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
   httpd_resp_set_hdr(request, "Connection", "close");
+  httpd_resp_set_hdr(request, "Access-Control-Allow-Origin", "*");
   char prefix[128] = {};
   snprintf(prefix, sizeof(prefix),
            "{\"state\":\"%s\",\"updatedAtMs\":%lu,\"networks\":[",
