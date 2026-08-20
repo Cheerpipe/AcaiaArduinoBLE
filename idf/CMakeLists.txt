@@ -1,6 +1,7 @@
 # Shot Stopper firmware built with ESP-IDF (Arduino-ESP32 as a component).
 # Production images still come from ./scripts/build (arduino-cli).
 cmake_minimum_required(VERSION 3.16)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 # Arduino FQBN parity: PSRAM + USB CDC on boot with Hardware CDC/JTAG

@@ -29,9 +29,11 @@ const APP_DESC_PROJECT_NAME_OFFSET = APP_DESC_OFFSET + 48;
 // corrupted artifact before megabytes go over the air.
 const IMAGE_HASH_APPENDED_OFFSET = 23;
 const IMAGE_HASH_BYTES = 32;
-// Arduino-ESP32 cores are all built by esp32-arduino-lib-builder, so every
-// sketch shares this project name. It proves the core family, not the sketch.
-const EXPECTED_PROJECT_NAME = 'arduino-lib-builder';
+// Arduino-ESP32 cores built by esp32-arduino-lib-builder share that project
+// name. Native IDF firmware (./scripts/build-idf) uses CMake project(shotstopper).
+// Either name proves a Shot Stopper-capable ESP32-S3 image; the tag below is
+// what identifies the sketch.
+const EXPECTED_PROJECT_NAMES = new Set(['arduino-lib-builder', 'shotstopper']);
 
 function readCString(buffer, offset, capacity) {
   const end = Math.min(offset + capacity, buffer.length);
@@ -101,7 +103,7 @@ function inspectImage(filePath) {
   }
   const projectName =
       readCString(buffer, APP_DESC_PROJECT_NAME_OFFSET, 32);
-  if (projectName !== EXPECTED_PROJECT_NAME) {
+  if (!EXPECTED_PROJECT_NAMES.has(projectName)) {
     problems.push(`project_name inesperado: '${projectName}'`);
   }
   if (buffer[IMAGE_HASH_APPENDED_OFFSET] !== 1) {

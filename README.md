@@ -1132,6 +1132,22 @@ vez basta con `./scripts/bum`.
 | `./scripts/gcc_analyzer` | `--arch` (`--flags` opcional) | Compila con GCC `-fanalyzer` y guarda el reporte en `reports/gcc-analyzer/`. |
 | `./scripts/bsum` | `--port`, `--arch`, `--speed` | Wrapper que ejecuta build, static report, upload y monitor. Si el análisis encuentra diagnósticos, no carga el firmware. |
 
+El pipeline ESP-IDF es experimental y **no sustituye** al de arduino-cli. Usa
+los mismos flags, `.shotstopper` y prompts; escribe en `build-idf/<arquitectura>`
+(`shotstopper.bin`) en lugar de `build/<arquitectura>`.
+
+| Script | Parámetros que necesita | Descripción |
+| --- | --- | --- |
+| `./scripts/build-idf` | `--arch` (`--flags` opcional) | Genera la versión y el Web UI, compila con ESP-IDF y deja el resultado en `build-idf/<arquitectura>`. |
+| `./scripts/upload-idf` | `--port`, `--arch` | Sube el binario existente de `build-idf/<arquitectura>`; no recompila ni abre el monitor. |
+| `./scripts/monitor-idf` | `--port`, `--speed` | Abre el monitor serie de IDF (Ctrl+] para salir). |
+| `./scripts/ota-idf` | `--arch`, `--host`, `--token` | Sube el binario IDF ya compilado al controlador por Wi-Fi. |
+| `./scripts/bu-idf` | `--port`, `--arch` | Wrapper: build-idf y upload-idf. |
+| `./scripts/bum-idf` | `--port`, `--arch`, `--speed` | Wrapper: build-idf, upload-idf y monitor-idf. |
+| `./scripts/bo-idf` | `--arch`, `--host`, `--token` | Wrapper: build-idf y ota-idf. |
+| `./scripts/static_report-idf` | `--arch` | Cppcheck sobre la compilation database de IDF. No compila. |
+| `./scripts/bsum-idf` | `--port`, `--arch`, `--speed` | Wrapper: build-idf, static_report-idf, upload-idf y monitor-idf. Si el análisis encuentra diagnósticos, no carga el firmware. |
+
 Parámetros con nombre, en forma larga y corta:
 
 | Flag | Variable de entorno | Significado |
@@ -1155,6 +1171,9 @@ ocurre con `SHOTSTOPPER_NONINTERACTIVE=1`.
 ```sh
 # Primera vez: pregunta lo que falte y lo recuerda
 ./scripts/bum
+
+# Pipeline ESP-IDF (experimental): mismos flags, escribe en build-idf/
+./scripts/bum-idf
 
 # Explícito
 ./scripts/build --arch n8r4 --flags "-DSHOT_STOPPER_ENABLE_BUZZER=1"

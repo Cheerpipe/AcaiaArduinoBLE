@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Build + OTA (ESP-IDF): compila y actualiza el controlador por Wi-Fi.
+set -euo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/shotstopper_board.sh
+source "$SCRIPT_DIR/shotstopper_board.sh"
+# shellcheck source=scripts/shotstopper_cli.sh
+source "$SCRIPT_DIR/shotstopper_cli.sh"
+
+usage() {
+  cat <<EOF
+Uso: ./scripts/bo-idf [flags]
+
+Ejecuta, en orden: build-idf y ota-idf. No hace falta cable USB.
+
+Parámetros que necesita: --arch, --host y --token. --flags es opcional.
+El token es la contraseña del punto de acceso MicraShotStopperAP.
+
+$(ss_flag_help)
+
+$(shotstopper_arch_help)
+
+Ejemplos:
+  ./scripts/bo-idf --arch n16r8 --host 192.168.1.50
+  ./scripts/bo-idf -a n8r4 -H 192.168.4.1
+EOF
+}
+
+ss_cli_parse "$@" || exit $?
+if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
+  usage
+  exit 0
+fi
+
+ss_cli_resolve "arch host token" "flags" || exit $?
+
+root="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+cd "$root"
+
+ss_cli_flags_for arch flags
+./scripts/build-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
+
+ss_cli_flags_for arch host
+ss_cli_export_secrets
+exec ./scripts/ota-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}

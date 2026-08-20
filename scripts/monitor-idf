@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Open the ESP-IDF serial monitor.
+set -euo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/shotstopper_board.sh
+source "$SCRIPT_DIR/shotstopper_board.sh"
+# shellcheck source=scripts/shotstopper_cli.sh
+source "$SCRIPT_DIR/shotstopper_cli.sh"
+# shellcheck source=scripts/shotstopper_idf.sh
+source "$SCRIPT_DIR/shotstopper_idf.sh"
+
+usage() {
+  cat <<EOF
+Uso: ./scripts/monitor-idf [flags]
+
+Inicia el monitor serie de ESP-IDF. Si .shotstopper (o --arch) tiene una
+arquitectura, usa el ELF de build-idf/<arquitectura> para decodificar
+backtraces. Salir: Ctrl+].
+
+Parámetros que necesita: --port y --speed.
+
+$(ss_flag_help)
+
+Ejemplos:
+  ./scripts/monitor-idf --port /dev/cu.usbmodem2101 --speed 115200
+  ./scripts/monitor-idf -p /dev/cu.usbmodem2101 -s 115200
+EOF
+}
+
+ss_cli_parse "$@" || exit $?
+if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
+  usage
+  exit 0
+fi
+
+ss_cli_resolve "port speed" || exit $?
+SS_IDF_QUIET=1
+ss_idf_source
+
+port="$(ss_get port)"
+speed="$(ss_get speed)"
+
+# Persist before exec: the monitor runs until the user stops it.
+ss_cli_save
+
+echo "Monitor serie en $port ($speed)"
+if ss_is_set arch; then
+  shotstopper_resolve_board "$(ss_get arch)" || exit 2
+  ss_idf_py_args
+  exec idf.py "${IDF_PY_ARGS[@]}" -p "$port" -b "$speed" monitor
+fi
+exec python "$IDF_PATH/tools/idf_monitor.py" -p "$port" -b "$speed"

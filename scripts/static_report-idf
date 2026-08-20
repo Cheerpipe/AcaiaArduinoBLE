@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Run Cppcheck against an existing ESP-IDF compilation database.
+# This script deliberately never builds the firmware.
+set -uo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/shotstopper_board.sh
+source "$SCRIPT_DIR/shotstopper_board.sh"
+# shellcheck source=scripts/shotstopper_cli.sh
+source "$SCRIPT_DIR/shotstopper_cli.sh"
+# shellcheck source=scripts/shotstopper_idf.sh
+source "$SCRIPT_DIR/shotstopper_idf.sh"
+
+readonly ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+readonly SUPPRESSIONS_FILE="$ROOT/scripts/cppcheck-suppressions.txt"
+
+usage() {
+  cat <<EOF
+Uso: ./scripts/static_report-idf [flags]
+
+Ejecuta Cppcheck sobre una base de compilación ya generada por ESP-IDF.
+La carpeta de salida se borra y se recrea en cada ejecución. Este script nunca
+compila el firmware; ejecuta ./scripts/build-idf por separado primero.
+
+Parámetros que necesita: --arch (de ahí sale build-idf/<arquitectura>).
+--build-dir y --output-dir son anulaciones puntuales: no se guardan.
+
+$(ss_flag_help)
+
+Ejemplos:
+  ./scripts/static_report-idf --arch n16r8
+  ./scripts/static_report-idf -a n8r4 -o reports/analysis-idf-n8r4
+EOF
+}
+
+ss_cli_parse "$@" || exit $?
+if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
+  usage
+  exit 0
+fi
+
+ss_cli_resolve "arch" || exit $?
+shotstopper_resolve_board "$(ss_get arch)" || exit 2
+ss_idf_resolve_paths
+
+if ss_is_set build_dir; then
+  build_dir="$(ss_get build_dir)"
+else
+  build_dir="build-idf/$SHOTSTOPPER_ARCH"
+fi
+if ss_is_set output_dir; then
+  output_dir="$(ss_get output_dir)"
+else
+  output_dir="reports/static-analysis"
+fi
+
+case "$build_dir" in
+  /*) build_path="$build_dir" ;;
+  *) build_path="$ROOT/$build_dir" ;;
+esac
+
+# Keep the destructive cleanup strictly inside the repository.
+case "$output_dir" in
+  /*|*'..'*)
+    echo "La carpeta de salida debe ser una ruta relativa dentro del repositorio." >&2
+    exit 2
+    ;;
+esac
+output_path="$ROOT/$output_dir"
+compile_commands="$build_path/compile_commands.json"
+
+for tool in cppcheck; do
+  command -v "$tool" >/dev/null 2>&1 || {
+    echo "No se encontró $tool en PATH." >&2
+    exit 127
+  }
+done
+
+if [[ ! -f "$compile_commands" ]]; then
+  echo "No existe $compile_commands." >&2
+  echo "Compila primero la variante elegida (por ejemplo, ./scripts/build-idf --arch $SHOTSTOPPER_ARCH)." >&2
+  exit 1
+fi
+
+if [[ ! -f "$SUPPRESSIONS_FILE" ]]; then
+  echo "No existe el archivo de supresiones $SUPPRESSIONS_FILE." >&2
+  exit 1
+fi
+
+rm -rf "$output_path"
+mkdir -p "$output_path"
+
+printf 'Build database: %s\n' "$compile_commands" > "$output_path/README.txt"
+printf 'Generated: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >> "$output_path/README.txt"
+
+echo "Ejecutando Cppcheck sobre $build_dir..."
+cppcheck \
+  --project="$compile_commands" \
+  --suppressions-list="$SUPPRESSIONS_FILE" \
+  --file-filter='*/shotStopper/*.cpp' \
+  --file-filter='*/shotStopper/*.ino' \
+  --file-filter='*/libraries/AcaiaArduinoBLE/*.cpp' \
+  --file-filter='*/idf/main/*.cpp' \
+  --file-filter='*/idf/components/AcaiaArduinoBLE/*.cpp' \
+  --enable=warning,performance,portability \
+  --inconclusive \
+  --error-exitcode=1 \
+  2>&1 | tee "$output_path/cppcheck.txt"
+cppcheck_status=${PIPESTATUS[0]}
+
+printf '\nCppcheck exit status: %d\n' "$cppcheck_status" | tee -a "$output_path/README.txt"
+
+echo "Reportes guardados en $output_dir/"
+if [[ $cppcheck_status -ne 0 ]]; then
+  echo "El análisis terminó con diagnósticos o un error; revisa los reportes." >&2
+  exit 1
+fi
+
+ss_cli_save

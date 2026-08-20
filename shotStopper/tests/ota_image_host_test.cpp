@@ -103,6 +103,17 @@ void testHeaderRejectsForeignProject() {
         OtaImageHeaderResult::WRONG_PROJECT);
 }
 
+void testHeaderAcceptsIdfProjectName() {
+  std::vector<uint8_t> image = makeValidHeader();
+  const char *idfName = shotstopper::OTA_EXPECTED_PROJECT_NAME_IDF;
+  std::memset(image.data() + shotstopper::OTA_APP_DESC_PROJECT_NAME_OFFSET, 0,
+              shotstopper::OTA_APP_DESC_NAME_BYTES);
+  std::memcpy(image.data() + shotstopper::OTA_APP_DESC_PROJECT_NAME_OFFSET,
+              idfName, std::strlen(idfName));
+  CHECK(validateOtaImageHeader(image.data(), image.size()) ==
+        OtaImageHeaderResult::OK);
+}
+
 void testTagBodyParsesEveryField() {
   const std::string tag = makeTag("n16r8", "1.2.3+abc1234", "16908291");
   const std::string body = tag.substr(tagPrefix().size());
@@ -305,6 +316,7 @@ int main() {
   testHeaderRejectsOtherChips();
   testHeaderRejectsMissingAppDescriptor();
   testHeaderRejectsForeignProject();
+  testHeaderAcceptsIdfProjectName();
   testTagBodyParsesEveryField();
   testTagBodyRejectsMalformedInput();
   testArchUsability();
