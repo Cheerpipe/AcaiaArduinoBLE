@@ -1,4 +1,5 @@
 #include "ShotStopperNetwork.h"
+#include "ShotStopperOta.h"
 #include "ShotStopperPsram.h"
 #include "ShotStopperSerialCli.h"
 #include "ShotStopperVersion.h"
@@ -28,10 +29,14 @@ struct NetworkWorkBuf {
   static constexpr size_t kPresetsJson = 2800;
   static constexpr size_t kHistoryJson = 1400;
   static constexpr size_t kJsonItem = 768;
+  // Worst case is ~493 B: the envelope with the longest state and lock reason,
+  // plus two fully populated tags at OTA_ARCH_CAPACITY + OTA_VERSION_CAPACITY.
+  static constexpr size_t kOtaJson = 640;
   char statusJson[kStatusJson];
   char presetsJson[kPresetsJson];
   char historyJson[kHistoryJson];
   char jsonItem[kJsonItem];
+  char otaJson[kOtaJson];
   DebugEvent logBatch[48];
   ShotLogRecord shotRecords[SHOT_LOG_CAPACITY];
   ControlStatusSnapshot control;
@@ -51,6 +56,12 @@ constexpr size_t WEB_UI_ETAG_CAPACITY = 64;
 constexpr size_t IF_NONE_MATCH_CAPACITY = 80;
 constexpr const char *STATUS_BAD_REQUEST = "400 Bad Request";
 constexpr const char *STATUS_UNAUTHORIZED = "401 Unauthorized";
+constexpr const char *STATUS_FORBIDDEN = "403 Forbidden";
+constexpr const char *STATUS_TOO_LARGE = "413 Content Too Large";
+constexpr const char *STATUS_SERVER_ERROR = "500 Internal Server Error";
+constexpr const char *OTA_TOKEN_HEADER = "X-OTA-Token";
+constexpr const char *OTA_ALLOW_DOWNGRADE_HEADER = "X-OTA-Allow-Downgrade";
+constexpr size_t OTA_STATUS_JSON_CAPACITY = NetworkWorkBuf::kOtaJson;
 constexpr const char *STATUS_TOO_MANY = "429 Too Many Requests";
 constexpr const char *STATUS_CONFLICT = "409 Conflict";
 constexpr const char *STATUS_NOT_FOUND = "404 Not Found";
@@ -899,6 +910,9 @@ void ShotStopperNetwork::service() {
           startupFailures_, static_cast<int32_t>(backoff));
     }
   }
+  // Confirmation and rollback of a pending image cannot wait for the network
+  // to come up: that is the very failure they exist to recover from.
+  serviceOtaRollback(now);
   if (!startupComplete_) {
     return;
   }
@@ -2099,7 +2113,9 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
 
     case WebCommandType::FACTORY_RESET:
       if (!resetPersistedSettingsToFactory(next)) {
-        restartPending_ = false;
+        if (!otaRollbackRestartPending_) {
+          restartPending_ = false;
+        }
         apRestartPending_ = false;
         log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
         return false;
@@ -2139,7 +2155,9 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
   if (persist) {
     overlayLiveShotSettings(next);
     if (!savePersistedSettings(next)) {
-      restartPending_ = false;
+      if (!otaRollbackRestartPending_) {
+        restartPending_ = false;
+      }
       apRestartPending_ = false;
       // NVS write failure is not a config validation reject. PERSIST_RUNTIME
       // failures are reported clearly when the maintenance lease completes.
@@ -2608,8 +2626,12 @@ bool ShotStopperNetwork::startHttpServer() {
   // promptly to limit the ESP's steady-state socket use.
   config.max_open_sockets = 6;
   // Keep one slot of headroom above the owned API routes; /api/v1/ui/unlock
-  // is registered separately because it establishes the explicit override.
-  config.max_uri_handlers = 36;
+  // and the four OTA routes are registered separately because they do not use
+  // the exclusive WebUI claim.
+  // Kept ahead of the number of routes actually registered. Exhausting this
+  // makes the last registerHandler fail, which tears down the whole Web UI, so
+  // check_web_assets.js fails the build before the margin is gone.
+  config.max_uri_handlers = 44;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
   // the IDF default (1024) is enough most of the time but intermittent
   // long browser headers have returned 431 Request Header Fields Too Large.
@@ -2662,7 +2684,11 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/network/scan", HTTP_GET, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/network/scan", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/access-point/password", HTTP_POST, ownedApiHandler) &&
-      registerHandler(server_, "/api/v1/admin/ble-compat", HTTP_PUT, ownedApiHandler);
+      registerHandler(server_, "/api/v1/admin/ble-compat", HTTP_PUT, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/ota", HTTP_GET, otaStatusHandler) &&
+      registerHandler(server_, "/api/v1/ota", HTTP_POST, otaUploadHandler) &&
+      registerHandler(server_, "/api/v1/ota/flash", HTTP_POST, otaFlashHandler) &&
+      registerHandler(server_, "/api/v1/ota/abort", HTTP_POST, otaAbortHandler);
   if (!registered ||
       httpd_register_err_handler(server_, HTTPD_404_NOT_FOUND,
                                  notFoundHandler) != ESP_OK) {
@@ -3535,6 +3561,11 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.bleCompanionRejectedWrites),
         bleCompanionRejectReasonName(static_cast<BleCompanionRejectReason>(
             control.bleCompanionLastReject)));
+    if (ok) {
+      self.buildOtaJson(g_work->otaJson, NetworkWorkBuf::kOtaJson, control);
+      ok = statusJsonAppend(&used, ",\"boardArch\":\"%s\",\"ota\":%s",
+                            FW_BOARD_ARCH_STRING, g_work->otaJson);
+    }
   } else if (ok && page == StatusPage::Diagnostic) {
     // Lean diagnostic snapshot: metrics + log controls only (no STA address
     // form fields; those stay on status/admin).
@@ -5057,6 +5088,445 @@ esp_err_t ShotStopperNetwork::bleCompatHandler(httpd_req_t *request) {
                      "BLE Companion state was not changed.");
   }
   return self.sendAccepted(request, command.requestId);
+}
+
+namespace {
+
+struct OtaTransfer {
+  ShotStopperNetwork *network = nullptr;
+  httpd_req_t *request = nullptr;
+};
+
+// Compared in constant time so a wrong token cannot be recovered one byte at a
+// time by measuring how long the rejection takes.
+bool otaTokensMatch(const char *candidate, const char *expected) {
+  const size_t candidateLength = strnlen(candidate, WIFI_PASSWORD_CAPACITY);
+  const size_t expectedLength = strnlen(expected, WIFI_PASSWORD_CAPACITY);
+  uint32_t difference =
+      static_cast<uint32_t>(candidateLength ^ expectedLength);
+  const size_t span =
+      candidateLength < expectedLength ? candidateLength : expectedLength;
+  for (size_t index = 0; index < span; ++index) {
+    difference |= static_cast<uint32_t>(
+        static_cast<uint8_t>(candidate[index]) ^
+        static_cast<uint8_t>(expected[index]));
+  }
+  return difference == 0 && expectedLength > 0;
+}
+
+const char *otaResultHttpStatus(OtaResult result) {
+  switch (result) {
+    case OtaResult::OK: return STATUS_OK;
+    case OtaResult::UNAVAILABLE:
+    case OtaResult::BUSY:
+    case OtaResult::PENDING_VERIFY:
+    case OtaResult::SAFETY_LOST:
+    case OtaResult::NO_IDENTITY:
+    case OtaResult::NOTHING_STAGED: return STATUS_CONFLICT;
+    case OtaResult::TOO_LARGE: return STATUS_TOO_LARGE;
+    case OtaResult::BAD_LENGTH:
+    case OtaResult::BAD_IMAGE:
+    case OtaResult::NO_TAG:
+    case OtaResult::ARCH_MISMATCH:
+    case OtaResult::DOWNGRADE: return STATUS_UNPROCESSABLE;
+    case OtaResult::RECEIVE_FAILED: return STATUS_BAD_REQUEST;
+    case OtaResult::WRITE_FAILED:
+    case OtaResult::VERIFY_FAILED:
+    case OtaResult::COMMIT_FAILED:
+    case OtaResult::NO_MEMORY:
+    case OtaResult::INTERNAL: return STATUS_SERVER_ERROR;
+  }
+  return STATUS_SERVER_ERROR;
+}
+
+const char *otaResultMessage(OtaResult result) {
+  switch (result) {
+    case OtaResult::OK: return "The firmware image was verified.";
+    case OtaResult::UNAVAILABLE:
+      return "This controller has no second firmware slot, so it cannot be "
+             "updated over Wi-Fi.";
+    case OtaResult::BUSY: return "Another firmware update is already running.";
+    case OtaResult::PENDING_VERIFY:
+      return "The running firmware has not been confirmed yet. Wait a moment "
+             "and try again.";
+    case OtaResult::BAD_LENGTH:
+      return "The upload is too small to be a firmware image.";
+    case OtaResult::TOO_LARGE:
+      return "The firmware image does not fit in the update slot.";
+    case OtaResult::RECEIVE_FAILED:
+      return "The upload was interrupted. The running firmware was not "
+             "touched.";
+    case OtaResult::BAD_IMAGE:
+      return "This file is not an ESP32-S3 application image.";
+    case OtaResult::NO_TAG:
+      return "This image is not a Shot Stopper build.";
+    case OtaResult::NO_IDENTITY:
+      return "The running firmware does not say which board it was built for, "
+             "so no image can be checked against it. Reflash over USB with "
+             "./scripts/build --arch <board> to update over Wi-Fi again.";
+    case OtaResult::ARCH_MISMATCH:
+      return "This image was built for a different controller board.";
+    case OtaResult::DOWNGRADE:
+      return "This image is older than the running firmware.";
+    case OtaResult::WRITE_FAILED:
+      return "The update slot could not be written. The running firmware was "
+             "not touched.";
+    case OtaResult::VERIFY_FAILED:
+      return "The uploaded image failed its checksum. Nothing was flashed.";
+    case OtaResult::SAFETY_LOST:
+      return "The machine started a cycle during the upload, so the update was "
+             "cancelled.";
+    case OtaResult::NOTHING_STAGED:
+      return "Upload and verify a firmware image first.";
+    case OtaResult::COMMIT_FAILED:
+      return "The bootloader refused the staged image. Nothing was changed.";
+    case OtaResult::NO_MEMORY:
+      return "Not enough memory to receive a firmware image right now.";
+    case OtaResult::INTERNAL:
+      return "This firmware cannot verify updates. Reflash over USB.";
+  }
+  return "The firmware update failed.";
+}
+
+void appendOtaTag(char *buffer, size_t capacity, size_t &used,
+                  const char *name, const OtaImageTag &tag, bool valid) {
+  if (used >= capacity) {
+    return;
+  }
+  int written = 0;
+  if (valid && tag.valid) {
+    written = snprintf(buffer + used, capacity - used,
+                       ",\"%s\":{\"arch\":\"%s\",\"version\":\"%s\","
+                       "\"packed\":%lu}",
+                       name, tag.arch, tag.version,
+                       static_cast<unsigned long>(tag.packed));
+  } else {
+    written = snprintf(buffer + used, capacity - used, ",\"%s\":null", name);
+  }
+  if (written > 0 && static_cast<size_t>(written) < capacity - used) {
+    used += static_cast<size_t>(written);
+  }
+}
+
+}  // namespace
+
+bool ShotStopperNetwork::authorizeOtaRequest(httpd_req_t *request) {
+  char token[WIFI_PASSWORD_CAPACITY] = {};
+  char expected[WIFI_PASSWORD_CAPACITY] = {};
+  const size_t length = httpd_req_get_hdr_value_len(request, OTA_TOKEN_HEADER);
+  bool authorized = false;
+  if (length > 0 && length + 1 <= sizeof(token) &&
+      httpd_req_get_hdr_value_str(request, OTA_TOKEN_HEADER, token,
+                                  sizeof(token)) == ESP_OK) {
+    portENTER_CRITICAL(&dataMux_);
+    memcpy(expected, settings_.apPassword, sizeof(expected));
+    portEXIT_CRITICAL(&dataMux_);
+    // A controller still on the published factory credential has no secret to
+    // authenticate with, so firmware updates stay closed until it is changed.
+    authorized = !isFactoryDefaultPassword(expected) &&
+                 otaTokensMatch(token, expected);
+  }
+  memset(token, 0, sizeof(token));
+  memset(expected, 0, sizeof(expected));
+  return authorized;
+}
+
+void ShotStopperNetwork::buildOtaJson(char *buffer, size_t capacity,
+                                      const ControlStatusSnapshot &control) {
+  if (buffer == nullptr || capacity == 0) {
+    return;
+  }
+  buffer[0] = '\0';
+  ShotStopperOta &ota = ShotStopperOta::instance();
+  const OtaStatusSnapshot ota_ = ota.snapshot();
+  const bool safe = controlAllowsConfiguration(control);
+  const NetworkStatusSnapshot network = snapshot();
+  int written = snprintf(
+      buffer, capacity,
+      "{\"available\":%s,\"state\":\"%s\",\"slotBytes\":%lu,"
+      "\"receivedBytes\":%lu,\"expectedBytes\":%lu,\"pendingVerify\":%s,"
+      "\"confirmed\":%s,\"safe\":%s,\"lockReason\":\"%s\","
+      "\"tokenRequired\":true,\"tokenAvailable\":%s,\"restartPending\":%s",
+      ota.available() ? "true" : "false",
+      ShotStopperOta::stateName(ota_.state),
+      static_cast<unsigned long>(ota_.slotBytes),
+      static_cast<unsigned long>(ota_.receivedBytes),
+      static_cast<unsigned long>(ota_.expectedBytes),
+      ota_.pendingVerify ? "true" : "false",
+      ota_.confirmed ? "true" : "false", safe ? "true" : "false",
+      configLockReason(control),
+      network.apPasswordFactory ? "false" : "true",
+      otaRestartPending_ ? "true" : "false");
+  if (written <= 0 || static_cast<size_t>(written) >= capacity) {
+    snprintf(buffer, capacity, "{\"available\":false}");
+    return;
+  }
+  // One byte is held back so the closing brace always has somewhere to go: an
+  // object left unclosed here is spliced into the admin status and would make
+  // the whole Admin page unparseable, taking unrelated settings down with it.
+  size_t used = static_cast<size_t>(written);
+  const size_t tagCapacity = capacity - 1;
+  appendOtaTag(buffer, tagCapacity, used, "running", ota.runningTag(),
+               ota.runningTag().valid);
+  appendOtaTag(buffer, tagCapacity, used, "staged", ota_.staged,
+               ota_.stagedValid);
+  if (used + 2 > capacity) {
+    snprintf(buffer, capacity, "{\"available\":false}");
+    return;
+  }
+  buffer[used++] = '}';
+  buffer[used] = '\0';
+}
+
+esp_err_t ShotStopperNetwork::sendOtaSnapshot(
+    httpd_req_t *request, const char *httpStatus,
+    const ControlStatusSnapshot &control) {
+  char body[OTA_STATUS_JSON_CAPACITY] = {};
+  buildOtaJson(body, sizeof(body), control);
+  return sendJson(request, httpStatus, body);
+}
+
+int ShotStopperNetwork::otaReadChunk(void *context, uint8_t *buffer,
+                                     size_t capacity) {
+  OtaTransfer *transfer = static_cast<OtaTransfer *>(context);
+  if (transfer == nullptr || transfer->request == nullptr) {
+    return -1;
+  }
+  // httpd's socket timeout is deliberately short so stuck clients release
+  // sockets; a few retries absorb the stalls that Wi-Fi/BLE coexistence adds
+  // without letting a genuinely dead peer hold the transfer open.
+  for (uint8_t attempt = 0; attempt < OTA_RECEIVE_ATTEMPTS; ++attempt) {
+    const int received = httpd_req_recv(
+        transfer->request, reinterpret_cast<char *>(buffer), capacity);
+    if (received > 0) {
+      return received;
+    }
+    if (received != HTTPD_SOCK_ERR_TIMEOUT) {
+      return -1;
+    }
+  }
+  return -1;
+}
+
+bool ShotStopperNetwork::otaTransferStillSafe(void *context) {
+  OtaTransfer *transfer = static_cast<OtaTransfer *>(context);
+  if (transfer == nullptr || transfer->network == nullptr) {
+    return false;
+  }
+  ControlStatusSnapshot control;
+  transfer->network->callbacks_.copyControlStatus(control);
+  return controlAllowsConfiguration(control);
+}
+
+void ShotStopperNetwork::otaTransferProgress(void *context, uint32_t received,
+                                             uint32_t expected) {
+  OtaTransfer *transfer = static_cast<OtaTransfer *>(context);
+  if (transfer == nullptr || transfer->network == nullptr) {
+    return;
+  }
+  transfer->network->actionLogf("ota: received %lu/%lu KiB",
+                                static_cast<unsigned long>(received / 1024U),
+                                static_cast<unsigned long>(expected / 1024U));
+}
+
+esp_err_t ShotStopperNetwork::otaStatusHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authorizeOtaRequest(request)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
+                     "Send the access point password in X-OTA-Token.");
+  }
+  ControlStatusSnapshot control;
+  self.callbacks_.copyControlStatus(control);
+  return self.sendOtaSnapshot(request, STATUS_OK, control);
+}
+
+esp_err_t ShotStopperNetwork::otaUploadHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  auto rejectUpload = [request](const char *status, const char *error,
+                                const char *message) {
+    const esp_err_t sent = sendError(request, status, error, message);
+    // ESP-IDF otherwise purges the unread body 32 bytes at a time on the
+    // only httpd task, so a 2 MB POST with a bad token would freeze the
+    // Web UI for tens of seconds. Closing the socket drops the rest.
+    if (request->content_len > 0) {
+      httpd_sess_trigger_close(request->handle,
+                               httpd_req_to_sockfd(request));
+    }
+    return sent;
+  };
+  if (!self.authorizeOtaRequest(request)) {
+    return rejectUpload(STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
+                        "Send the access point password in X-OTA-Token.");
+  }
+  ShotStopperOta &ota = ShotStopperOta::instance();
+
+  // A firmware update never honours the unsafe WebUI override: unlike a
+  // setting, it cannot be undone from the Web UI if the machine is mid-shot.
+  ControlStatusSnapshot control;
+  self.callbacks_.copyControlStatus(control);
+  if (!controlAllowsConfiguration(control)) {
+    return rejectUpload(STATUS_CONFLICT, "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                        "Stop the cycle and wait for Ready before updating "
+                        "firmware.");
+  }
+  if (self.otaRestartPending_) {
+    return rejectUpload(STATUS_CONFLICT, "OTA_RESTART_PENDING",
+                        "A firmware image is already flashed and waiting for "
+                        "the restart.");
+  }
+  if (request->content_len == 0) {
+    return sendError(request, STATUS_BAD_REQUEST, "OTA_LENGTH_REQUIRED",
+                     "A Content-Length is required.");
+  }
+
+  bool allowDowngrade = false;
+  char downgrade[8] = {};
+  const size_t downgradeLength =
+      httpd_req_get_hdr_value_len(request, OTA_ALLOW_DOWNGRADE_HEADER);
+  if (downgradeLength > 0 && downgradeLength + 1 <= sizeof(downgrade) &&
+      httpd_req_get_hdr_value_str(request, OTA_ALLOW_DOWNGRADE_HEADER,
+                                  downgrade, sizeof(downgrade)) == ESP_OK) {
+    allowDowngrade = strcmp(downgrade, "yes") == 0;
+  }
+
+  self.log(DebugCategory::NETWORK, DebugCode::OTA_UPLOAD_STARTED,
+           static_cast<int32_t>(request->content_len / 1024U));
+
+  OtaTransfer transfer;
+  transfer.network = &self;
+  transfer.request = request;
+  OtaStreamIo io;
+  io.read = otaReadChunk;
+  io.stillSafe = otaTransferStillSafe;
+  io.progress = otaTransferProgress;
+  io.context = &transfer;
+
+  const OtaResult result =
+      ota.stage(static_cast<uint32_t>(request->content_len), allowDowngrade,
+                io);
+  if (result != OtaResult::OK) {
+    const OtaStatusSnapshot failed = ota.snapshot();
+    self.log(DebugCategory::NETWORK, DebugCode::OTA_UPLOAD_REJECTED,
+             static_cast<int32_t>(result),
+             static_cast<int32_t>(failed.receivedBytes / 1024U));
+    return sendError(request, otaResultHttpStatus(result),
+                     ShotStopperOta::resultName(result),
+                     otaResultMessage(result));
+  }
+  const OtaStatusSnapshot staged = ota.snapshot();
+  self.log(DebugCategory::NETWORK, DebugCode::OTA_IMAGE_STAGED,
+           static_cast<int32_t>(staged.receivedBytes / 1024U),
+           static_cast<int32_t>(staged.staged.packed));
+  self.callbacks_.copyControlStatus(control);
+  return self.sendOtaSnapshot(request, STATUS_OK, control);
+}
+
+esp_err_t ShotStopperNetwork::otaFlashHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authorizeOtaRequest(request)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
+                     "Send the access point password in X-OTA-Token.");
+  }
+  ShotStopperOta &ota = ShotStopperOta::instance();
+  ControlStatusSnapshot control;
+  self.callbacks_.copyControlStatus(control);
+  if (!controlAllowsConfiguration(control)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "Stop the cycle and wait for Ready before flashing.");
+  }
+  if (self.otaRestartPending_) {
+    return sendError(request, STATUS_CONFLICT, "OTA_RESTART_PENDING",
+                     "The flashed image is already waiting for the restart.");
+  }
+  const OtaImageTag staged = ota.snapshot().staged;
+  const OtaResult result = ota.commit();
+  if (result != OtaResult::OK) {
+    return sendError(request, otaResultHttpStatus(result),
+                     ShotStopperOta::resultName(result),
+                     otaResultMessage(result));
+  }
+  self.log(DebugCategory::NETWORK, DebugCode::OTA_FLASH_COMMITTED,
+           static_cast<int32_t>(staged.packed));
+
+  // The restart runs through the ordinary maintenance lease, which opens CN9
+  // and waits for the machine to be idle before the reset.
+  WebCommand command;
+  command.type = WebCommandType::RESTART;
+  command.requestId = self.allocateRequestId();
+  if (!self.callbacks_.enqueueWebCommand(command)) {
+    // The boot slot is already switched, so the new firmware comes up on the
+    // next restart however it happens.
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
+                     "The image is flashed. Restart the controller to use it.");
+  }
+  self.otaRestartRequestedAtMs_ = millis();
+  self.otaRestartPending_ = true;
+  return self.sendOtaSnapshot(request, STATUS_ACCEPTED, control);
+}
+
+esp_err_t ShotStopperNetwork::otaAbortHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authorizeOtaRequest(request)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
+                     "Send the access point password in X-OTA-Token.");
+  }
+  ShotStopperOta::instance().discard();
+  ControlStatusSnapshot control;
+  self.callbacks_.copyControlStatus(control);
+  return self.sendOtaSnapshot(request, STATUS_OK, control);
+}
+
+void ShotStopperNetwork::serviceOtaRollback(uint32_t now) {
+  // A committed image boots on the next restart however it happens, so a
+  // restart the control task never granted must not leave the panel stuck
+  // claiming one is on the way.
+  if (otaRestartPending_ &&
+      static_cast<uint32_t>(now - otaRestartRequestedAtMs_) >=
+          OTA_RESTART_GIVE_UP_MS) {
+    otaRestartPending_ = false;
+    actionLog("ota: the restart never happened; restart manually to use the "
+              "flashed image");
+  }
+
+  ShotStopperOta &ota = ShotStopperOta::instance();
+  if (ota.runningImageRejected() || ota.runningImageConfirmed() || ota.busy()) {
+    return;
+  }
+  if (!ota.bootPendingVerify()) {
+    return;
+  }
+  // A listening HTTP server is the proof this build works: the boot sequence,
+  // the control task, Wi-Fi and the web stack all came up, so the machine can
+  // still be reached and updated again over the air. An image already marked
+  // invalid must never be flipped back, which is why the rejected_ check sits
+  // above.
+  if (startupComplete_ && server_ != nullptr &&
+      now >= OTA_CONFIRM_MIN_UPTIME_MS) {
+    if (ota.confirmRunningImage()) {
+      log(DebugCategory::NETWORK, DebugCode::OTA_IMAGE_CONFIRMED);
+      actionLog("ota: running image confirmed");
+    }
+    return;
+  }
+  if (now < OTA_CONFIRM_DEADLINE_MS) {
+    return;
+  }
+  if (!ota.rejectRunningImage()) {
+    // No other slot holds a bootable application. Restarting would leave the
+    // machine with nothing to run, so keep this image and make it permanent:
+    // it is demonstrably able to brew, it just cannot serve its Web UI.
+    ota.confirmRunningImage();
+    log(DebugCategory::NETWORK, DebugCode::OTA_ROLLBACK_FAILED);
+    actionLog("ota: rollback impossible; keeping the running image");
+    return;
+  }
+  log(DebugCategory::NETWORK, DebugCode::OTA_ROLLBACK_ARMED,
+      static_cast<int32_t>(now / 1000U));
+  actionLog("ota: no Web UI after the update; rolling back on restart");
+  otaRollbackRestartPending_ = true;
+  restartPending_ = true;
+  restartRequestedAtMs_ = now;
 }
 
 }  // namespace shotstopper

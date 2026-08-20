@@ -24,6 +24,7 @@
 #include <soc/soc.h>
 #include <math.h>
 #include "ShotStopperNetwork.h"
+#include "ShotStopperOta.h"
 #include "ShotStopperPersistence.h"
 #include "ShotStopperRecovery.h"
 #if __has_include(<esp_coexist.h>)
@@ -835,6 +836,16 @@ void reportTaskWatchdogFault() {
 void requestSafeRestart() {
   safeRestartRequested = true;
 }
+
+#ifndef SHOT_STOPPER_HOST_TEST
+// The Arduino core would otherwise cancel the bootloader rollback inside
+// initArduino(), before this firmware has proven it can do anything. Deferring
+// hands that decision to ShotStopperNetwork, which confirms the image only
+// after it has served its Web UI.
+extern "C" bool verifyRollbackLater() {
+  return true;
+}
+#endif
 
 size_t copyShotRecords(ShotLogRecord *output, size_t capacity) {
   return shotLog.copyNewestFirst(output, capacity);
@@ -7166,6 +7177,9 @@ void setup() {
   hwmonSnapshot = hwmon.sample(1);
   publishControlStatus();
 #ifndef SHOT_STOPPER_HOST_TEST
+  // Runs before the network task so the OTA slot pair and this boot's
+  // pending-verify state are known the first time the Web UI is served.
+  shotstopper::ShotStopperOta::instance().begin();
   if (settingsLoaded && webCommandQueue != nullptr) {
     NetworkBridgeCallbacks callbacks;
     callbacks.copyControlStatus = copyControlStatus;

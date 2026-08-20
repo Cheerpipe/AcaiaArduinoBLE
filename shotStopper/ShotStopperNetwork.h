@@ -162,6 +162,14 @@ class ShotStopperNetwork {
   static constexpr uint32_t STA_RECONNECT_INTERVAL_MS = 10000;
   static constexpr uint32_t WIFI_SCAN_TIMEOUT_MS = 20000;
   static constexpr uint32_t RESTART_DELAY_MS = 750;
+  // A freshly committed OTA image proves itself by serving its Web UI. Confirm
+  // no earlier than this so a crash during startup still rolls back...
+  static constexpr uint32_t OTA_CONFIRM_MIN_UPTIME_MS = 15000;
+  // ...and give up if HTTP never comes up, which would otherwise strand the
+  // machine on firmware that can no longer be updated over the air.
+  static constexpr uint32_t OTA_CONFIRM_DEADLINE_MS = 180000;
+  static constexpr uint8_t OTA_RECEIVE_ATTEMPTS = 3;
+  static constexpr uint32_t OTA_RESTART_GIVE_UP_MS = 300000;
   static constexpr uint32_t NETWORK_RETRY_MIN_MS = 1000;
   static constexpr uint32_t NETWORK_RETRY_MAX_MS = 30000;
   static constexpr uint32_t COMMAND_RETRY_MIN_MS = 250;
@@ -204,6 +212,9 @@ class ShotStopperNetwork {
   bool apStartHeld_ = false;
   bool apKeepRequested_ = false;
   bool httpStartHeld_ = false;
+  bool otaRestartPending_ = false;
+  bool otaRollbackRestartPending_ = false;
+  uint32_t otaRestartRequestedAtMs_ = 0;
   WebCommand acceptedCommand_ = {};
   WebCommand completionCommand_ = {};
   uint8_t acceptedCommandAttempts_ = 0;
@@ -321,6 +332,24 @@ class ShotStopperNetwork {
   static esp_err_t wifiScanStatusHandler(httpd_req_t *request);
   static esp_err_t apPasswordHandler(httpd_req_t *request);
   static esp_err_t bleCompatHandler(httpd_req_t *request);
+  // OTA routes authenticate with the access point password instead of the
+  // exclusive WebUI claim, so the command line client works without stealing
+  // control from an open browser window.
+  static esp_err_t otaStatusHandler(httpd_req_t *request);
+  static esp_err_t otaUploadHandler(httpd_req_t *request);
+  static esp_err_t otaFlashHandler(httpd_req_t *request);
+  static esp_err_t otaAbortHandler(httpd_req_t *request);
+
+  bool authorizeOtaRequest(httpd_req_t *request);
+  esp_err_t sendOtaSnapshot(httpd_req_t *request, const char *httpStatus,
+                            const ControlStatusSnapshot &control);
+  void buildOtaJson(char *buffer, size_t capacity,
+                    const ControlStatusSnapshot &control);
+  void serviceOtaRollback(uint32_t now);
+  static int otaReadChunk(void *context, uint8_t *buffer, size_t capacity);
+  static bool otaTransferStillSafe(void *context);
+  static void otaTransferProgress(void *context, uint32_t received,
+                                  uint32_t expected);
 
   static esp_err_t sendJson(httpd_req_t *request, const char *status,
                             const char *json);

@@ -6,43 +6,50 @@ set -uo pipefail
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 # shellcheck source=scripts/shotstopper_board.sh
 source "$SCRIPT_DIR/shotstopper_board.sh"
+# shellcheck source=scripts/shotstopper_cli.sh
+source "$SCRIPT_DIR/shotstopper_cli.sh"
 
 readonly ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
-readonly DEFAULT_BUILD_DIR="build/${SHOTSTOPPER_DEFAULT_ARCH}"
-readonly DEFAULT_OUTPUT_DIR="reports/static-analysis"
 readonly SUPPRESSIONS_FILE="$ROOT/scripts/cppcheck-suppressions.txt"
 
 usage() {
-  cat <<'EOF'
-Usage: ./scripts/static_report [build_dir] [output_dir]
+  cat <<EOF
+Uso: ./scripts/static_report [flags]
 
-Run Cppcheck using an existing Arduino CLI compilation database.
-The output directory is deleted and recreated on every run. This script never
-compiles the firmware; run ./scripts/build separately first.
+Ejecuta Cppcheck sobre una base de compilación ya generada por Arduino CLI.
+La carpeta de salida se borra y se recrea en cada ejecución. Este script nunca
+compila el firmware; ejecuta ./scripts/build por separado primero.
 
-Defaults:
-  build_dir:  build/n16r8
-  output_dir: reports/static-analysis
+Parámetros que necesita: --arch (de ahí sale build/<arquitectura>).
+--build-dir y --output-dir son anulaciones puntuales: no se guardan.
 
-Examples:
-  ./scripts/static_report
-  ./scripts/static_report build/n8r4
-  ./scripts/static_report build/n16r8 reports/analysis-n16r8
+$(ss_flag_help)
+
+Ejemplos:
+  ./scripts/static_report --arch n16r8
+  ./scripts/static_report -a n8r4 -o reports/analysis-n8r4
 EOF
 }
 
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+ss_cli_parse "$@" || exit $?
+if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
   usage
   exit 0
 fi
 
-if [[ $# -gt 2 ]]; then
-  usage >&2
-  exit 2
-fi
+ss_cli_resolve "arch" || exit $?
+shotstopper_resolve_board "$(ss_get arch)" || exit 2
 
-build_dir="${1:-$DEFAULT_BUILD_DIR}"
-output_dir="${2:-$DEFAULT_OUTPUT_DIR}"
+if ss_is_set build_dir; then
+  build_dir="$(ss_get build_dir)"
+else
+  build_dir="$SHOTSTOPPER_BUILD_DIR"
+fi
+if ss_is_set output_dir; then
+  output_dir="$(ss_get output_dir)"
+else
+  output_dir="reports/static-analysis"
+fi
 
 case "$build_dir" in
   /*) build_path="$build_dir" ;;
@@ -68,7 +75,7 @@ done
 
 if [[ ! -f "$compile_commands" ]]; then
   echo "No existe $compile_commands." >&2
-  echo "Compila primero la variante elegida (por ejemplo, ./scripts/build)." >&2
+  echo "Compila primero la variante elegida (por ejemplo, ./scripts/build --arch $SHOTSTOPPER_ARCH)." >&2
   exit 1
 fi
 
@@ -83,7 +90,7 @@ mkdir -p "$output_path"
 printf 'Build database: %s\n' "$compile_commands" > "$output_path/README.txt"
 printf 'Generated: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >> "$output_path/README.txt"
 
-echo "Ejecutando Cppcheck..."
+echo "Ejecutando Cppcheck sobre $build_dir..."
 cppcheck \
   --project="$compile_commands" \
   --suppressions-list="$SUPPRESSIONS_FILE" \
@@ -103,3 +110,5 @@ if [[ $cppcheck_status -ne 0 ]]; then
   echo "El análisis terminó con diagnósticos o un error; revisa los reportes." >&2
   exit 1
 fi
+
+ss_cli_save

@@ -44,11 +44,11 @@ const jsBytes = Buffer.byteLength(js, 'utf8');
 if (htmlBytes > 40960) {
   throw new Error('Web UI HTML source exceeds the 40 KiB authoring budget');
 }
-if (jsBytes > 82944) {
-  throw new Error('Web UI JS source exceeds the 81 KiB authoring budget');
+if (jsBytes > 90112) {
+  throw new Error('Web UI JS source exceeds the 88 KiB authoring budget');
 }
-if (htmlBytes + jsBytes > 120832) {
-  throw new Error('Web UI HTML+JS source exceeds the 118 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 131072) {
+  throw new Error('Web UI HTML+JS source exceeds the 128 KiB combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -1219,6 +1219,13 @@ const expected = new Map([
   ['POST /api/v1/network/scan', 'ownedApiHandler'],
   ['GET /api/v1/network/scan', 'ownedApiHandler'],
   ['POST /api/v1/access-point/password', 'ownedApiHandler'],
+  // OTA authenticates with the access point password instead of the exclusive
+  // WebUI claim, so a command line client can update firmware without stealing
+  // control from an open browser window.
+  ['GET /api/v1/ota', 'otaStatusHandler'],
+  ['POST /api/v1/ota', 'otaUploadHandler'],
+  ['POST /api/v1/ota/flash', 'otaFlashHandler'],
+  ['POST /api/v1/ota/abort', 'otaAbortHandler'],
 ]);
 
 const maxSocketsMatch = network.match(/max_open_sockets\s*=\s*(\d+)/);
@@ -1498,9 +1505,9 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
     }
   }
   if (!ui.includes(
-          "v==='admin'?!!(s.network&&s.bleCompanion&&typeof s.bleCompanion.enabled==='boolean'&&typeof s.bleCompanion.active==='boolean'&&typeof s.bleCompanion.restartRequired==='boolean'&&typeof c.timezoneOffsetMinutes==='number'&&c.ntpServerPreset!=null)")) {
+          "v==='admin'?!!(s.network&&s.bleCompanion&&typeof s.bleCompanion.enabled==='boolean'&&typeof s.bleCompanion.active==='boolean'&&typeof s.bleCompanion.restartRequired==='boolean'&&typeof c.timezoneOffsetMinutes==='number'&&c.ntpServerPreset!=null&&s.ota&&typeof s.ota.available==='boolean')")) {
     throw new Error(
-        'statusPageOk(admin) must validate network, BLE Companion, and NTP config');
+        'statusPageOk(admin) must validate network, BLE Companion, NTP config and OTA');
   }
 }
 if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
@@ -1830,15 +1837,15 @@ if (cssRoundTrip !== generated.css) {
 if (generated.gzip.length > 9216) {
   throw new Error('Compressed Web UI HTML exceeds the 9 KiB gzip budget');
 }
-if (generated.jsGzip.length > 21504) {
-  throw new Error('Compressed Web UI JS exceeds the 21 KiB gzip budget');
+if (generated.jsGzip.length > 23552) {
+  throw new Error('Compressed Web UI JS exceeds the 23 KiB gzip budget');
 }
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
 }
 if (generated.gzip.length + generated.jsGzip.length + generated.cssGzip.length >
-    33792) {
-  throw new Error('Combined HTML+JS+CSS gzip exceeds the 33 KiB flash budget');
+    36864) {
+  throw new Error('Combined HTML+JS+CSS gzip exceeds the 36 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
@@ -2015,6 +2022,176 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
   if (ignoredGuards.mode !== 'timerOnly' ||
       kinds(ignoredGuards.tSeg) !== 'idle') {
     throw new Error('Rule chart: guards must be ignored when BBW is off');
+  }
+}
+
+// Over-the-air update safety contract. The controller lives inside a closed
+// machine, so every rule below exists to keep a bad image from becoming the
+// boot image, and a bad boot from becoming permanent.
+{
+  const ota = fs.readFileSync(path.join(sketchDir, 'ShotStopperOta.cpp'), 'utf8');
+  const otaHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperOta.h'), 'utf8');
+  const otaImage = fs.readFileSync(
+    path.join(sketchDir, 'ShotStopperOtaImage.h'), 'utf8');
+  const version = fs.readFileSync(
+    path.join(sketchDir, 'ShotStopperVersion.h'), 'utf8');
+
+  // The transfer must target the spare slot, never the one that is executing.
+  if (!ota.includes('esp_ota_get_next_update_partition(nullptr)') ||
+      !ota.includes('target != running')) {
+    throw new Error('OTA must stage into the inactive slot only');
+  }
+  // Any early exit has to release the OTA handle; a leaked handle would keep
+  // the flash driver's state machine open until the next reboot.
+  if (!ota.includes('esp_ota_abort(handle)') || !ota.includes('esp_ota_end(handle)')) {
+    throw new Error('OTA must abort or end every esp_ota_begin handle');
+  }
+  // The boot selection changes in exactly one place, after re-reading the
+  // staged identity straight from flash.
+  if ((ota.match(/esp_ota_set_boot_partition\(/g) || []).length !== 1 ||
+      !/if \(!reconfirmStagedTag\(\)\) \{[\s\S]{0,400}?esp_ota_set_boot_partition\(target\)/
+          .test(ota)) {
+    throw new Error(
+      'OTA must re-verify the staged image immediately before switching the boot partition');
+  }
+  // Rolling back must never reboot on its own: CN9 has to be opened first.
+  if (ota.includes('esp_ota_mark_app_invalid_rollback_and_reboot') ||
+      ota.includes('ESP.restart') || ota.includes('esp_restart')) {
+    throw new Error('OTA must not restart the controller directly; CN9 is opened first');
+  }
+  if (!ota.includes('rejected_ = true') ||
+      !/if \(rejected_\) \{\s*return false;/.test(ota)) {
+    throw new Error(
+      'rejectRunningImage must record the rejection so confirmRunningImage cannot cancel it');
+  }
+  if (!css.includes('.otaProgress.hidden{display:none}') &&
+      !css.includes('.otaProgress.hidden { display: none }')) {
+    throw new Error('.otaProgress.hidden must override display:block so the bar can hide');
+  }
+  if (!ota.includes('esp_ota_check_rollback_is_possible()')) {
+    throw new Error(
+      'OTA must confirm a bootable alternative exists before arming a rollback');
+  }
+  // Running out of URI handler slots makes registration fail at runtime, which
+  // stops the HTTP server outright: no Web UI, and no way to update over the
+  // air. It is a silent runtime failure, so it has to be caught here.
+  {
+    const limit = network.match(/config\.max_uri_handlers = (\d+);/);
+    if (limit == null) {
+      throw new Error('Could not find config.max_uri_handlers');
+    }
+    const routes = (network.match(/registerHandler\(server_/g) || []).length;
+    if (routes >= Number(limit[1])) {
+      throw new Error(
+        `${routes} routes registered with max_uri_handlers=${limit[1]}; raise ` +
+        'the limit so registration keeps headroom');
+    }
+  }
+
+  // The OTA object is spliced into the admin status, so an unclosed brace here
+  // would make the whole Admin page unparseable, not just the OTA panel.
+  if (!/const size_t tagCapacity = capacity - 1;/.test(network) ||
+      !/if \(used \+ 2 > capacity\) \{\s*\n\s*snprintf\(buffer, capacity, "\{\\"available\\":false\}"\);/
+        .test(network)) {
+    throw new Error(
+      'buildOtaJson must reserve room for its closing brace and fall back to a ' +
+      'valid object when the OTA JSON does not fit');
+  }
+  // Recovering an image too broken to run any firmware code is the bootloader's
+  // job, so losing that configuration must break the build, not the machine.
+  for (const symbol of ['CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE',
+                        'CONFIG_APP_ROLLBACK_ENABLE',
+                        'CONFIG_BOOTLOADER_WDT_ENABLE']) {
+    if (!new RegExp(`#if !defined\\(${symbol}\\)\\s*\\n#error`).test(otaHeader)) {
+      throw new Error(`OTA header must fail the build when ${symbol} is missing`);
+    }
+  }
+  // A build that lost its identity marker could never be verified by the next
+  // one, and would also accept a foreign image.
+  if (!version.includes('FW_IMAGE_TAG_STRING') ||
+      !version.includes('FW_BOARD_ARCH_STRING') ||
+      !ota.includes('FW_IMAGE_TAG_STRING')) {
+    throw new Error('Firmware must embed the Shot Stopper OTA image tag');
+  }
+  // The needle is assembled at run time so a compiled image contains exactly
+  // one contiguous copy of the prefix: its own tag, never the search pattern.
+  if (otaImage.includes('"SHOTSTOPPER_FW_TAG_V1|"') ||
+      !otaImage.includes('OTA_TAG_PREFIX_PART_1') ||
+      !otaImage.includes('OTA_TAG_PREFIX_PART_2')) {
+    throw new Error('OTA tag prefix must stay split so it is not embedded contiguously');
+  }
+  if (!otaHeader.includes('PENDING_VERIFY') ||
+      !ota.includes('if (!confirmed_) {')) {
+    throw new Error(
+      'OTA must refuse to stage while the running image is still pending verification');
+  }
+
+  // The Arduino core would confirm the image inside initArduino(), before this
+  // firmware has proven anything.
+  if (!/extern "C" bool verifyRollbackLater\(\) \{\s*return true;/.test(firmware)) {
+    throw new Error('Firmware must defer OTA rollback verification to the network layer');
+  }
+  if (!firmware.includes('ShotStopperOta::instance().begin()')) {
+    throw new Error('Firmware must initialise the OTA module during setup');
+  }
+
+  // The unsafe WebUI override may relax settings, never a firmware update.
+  const otaHandlers = network.slice(network.indexOf('ShotStopperNetwork::otaStatusHandler'));
+  if (otaHandlers.includes('webUiOverrideAllowed') ||
+      otaHandlers.includes('webUiConfigurationAllowed')) {
+    throw new Error('OTA handlers must not honour the unsafe WebUI override');
+  }
+  if ((otaHandlers.match(/authorizeOtaRequest\(request\)/g) || []).length !== 4) {
+    throw new Error('Every OTA route must authenticate the request');
+  }
+  if (!network.includes('isFactoryDefaultPassword(expected)') ||
+      !network.includes('otaTokensMatch(token, expected)')) {
+    throw new Error(
+      'OTA authentication must reject the factory default password and compare in constant time');
+  }
+  if (!network.includes('serviceOtaRollback(now)') ||
+      !networkHeader.includes('OTA_CONFIRM_MIN_UPTIME_MS') ||
+      !networkHeader.includes('OTA_CONFIRM_DEADLINE_MS')) {
+    throw new Error('Network service must confirm or roll back a pending OTA image');
+  }
+  for (const code of [
+    'OTA_UPLOAD_STARTED', 'OTA_IMAGE_STAGED', 'OTA_UPLOAD_REJECTED',
+    'OTA_FLASH_COMMITTED', 'OTA_IMAGE_CONFIRMED', 'OTA_ROLLBACK_ARMED',
+    'OTA_ROLLBACK_FAILED'
+  ]) {
+    if (!domain.includes(`DebugCode::${code}`)) {
+      throw new Error(`Diagnostic log must report OTA event: ${code}`);
+    }
+  }
+
+  // Admin page layout: the update lives between Restart and Factory reset.
+  const restartAt = html.indexOf('id="restartPanel"');
+  const otaAt = html.indexOf('id="otaPanel"');
+  const factoryAt = html.indexOf('id="factoryResetButton"');
+  if (restartAt < 0 || otaAt < 0 || factoryAt < 0 ||
+      !(restartAt < otaAt && otaAt < factoryAt)) {
+    throw new Error('Admin OTA panel must sit between Restart and Factory reset');
+  }
+  for (const id of [
+    'otaStatus', 'otaRunning', 'otaStaged', 'otaToken', 'otaFile',
+    'otaProgress', 'otaVerifyButton', 'otaFlashButton', 'otaDiscardButton'
+  ]) {
+    if (!html.includes(`id="${id}"`)) {
+      throw new Error(`Admin OTA panel is missing control: ${id}`);
+    }
+  }
+  // Two steps: verify writes the spare slot, a separate button flashes it.
+  if (!js.includes("otaSend('/api/v1/ota',file") ||
+      !js.includes("otaSend('/api/v1/ota/flash'") ||
+      !js.includes("otaSend('/api/v1/ota/abort'") ||
+      !js.includes("$('otaFlashButton').disabled=!ready||!staged")) {
+    throw new Error('Web UI must upload/verify and flash as two separate steps');
+  }
+  if (!js.includes('X-OTA-Token')) {
+    throw new Error('Web UI must send the OTA token header');
+  }
+  if (!js.includes('!otaBusy&&Date.now()-lastStatusAt')) {
+    throw new Error('Web UI must pause status polling during a firmware transfer');
   }
 }
 

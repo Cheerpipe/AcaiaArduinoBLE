@@ -906,7 +906,8 @@ the default map:
 
 Classic ESP32 Dev Module and Arduino Nano ESP32 are **not supported**. Both S3
 variants share the same GPIO map; choose `n8r4` or `n16r8` so flash size and
-PSRAM bus (QSPI vs OPI) match the module. Scripts default to **`n16r8`**. The
+PSRAM bus (QSPI vs OPI) match the module. The scripts have no default board;
+`--arch` is asked once and then remembered. The
 FQBN enables PSRAM at boot (`BOARD_HAS_PSRAM`); paddle, relay, and safety stay
 on internal SRAM. Using PSRAM for WebUI buffers is staged and must not run on
 the control path.
@@ -925,8 +926,8 @@ Override the pin at compile time. It must be output-capable and distinct from
 paddle, relay, buzzer, heartbeat, and feedback GPIOs:
 
 ```sh
-./scripts/build /dev/cu.usbmodem2101 n16r8 \
-  -Werror=deprecated-copy -DSHOT_STOPPER_SCALE_CONNECTED_LED_GPIO=1
+./scripts/build --arch n16r8 \
+  --flags "-Werror=deprecated-copy -DSHOT_STOPPER_SCALE_CONNECTED_LED_GPIO=1"
 ```
 
 GPIO 1 is the board default. Verify the schematic, strapping requirements,
@@ -946,9 +947,9 @@ Example build for an ESP32-S3 where GPIO 16 and GPIO 17 were verified as
 free and appropriate on the specific hardware:
 
 ```sh
-./scripts/build /dev/cu.usbmodem2101 n16r8 \
-  -Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 \
-  -DSHOT_STOPPER_SAFETY_HEARTBEAT_GPIO=16 -DSHOT_STOPPER_CN9_FEEDBACK_GPIO=17
+./scripts/build --arch n16r8 \
+  --flags "-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 \
+-DSHOT_STOPPER_SAFETY_HEARTBEAT_GPIO=16 -DSHOT_STOPPER_CN9_FEEDBACK_GPIO=17"
 ```
 
 The README [compile examples](#compile) enable remote CN9 actuation with
@@ -1076,7 +1077,7 @@ then generate the version and gzip Web UI headers:
 
 ```sh
 npm install
-./scripts/gen_version.sh
+./scripts/gen_version.sh n16r8
 node ./scripts/gen_web_ui.js
 ```
 
@@ -1101,50 +1102,66 @@ strings build/n16r8/shotStopper.ino.bin | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\+'
 
 ### Scripts de compilación, carga y monitor serie
 
-Los scripts de `scripts/` simplifican el flujo habitual. Ejecutados sin
-argumentos usan la misma configuración de desarrollo: el primer puerto
-`/dev/cu.usbmodem<número>` conectado, arquitectura `n16r8` (ESP32-S3, 16 MB
-flash, 8 MB OPI PSRAM), velocidad `115200` y los flags
-`-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1
--DSHOT_STOPPER_ENABLE_BUZZER=2`.
+Los scripts de `scripts/` simplifican el flujo habitual. **Ningún script rellena
+en silencio lo que falte**: cada parámetro se toma, en este orden, del flag con
+nombre, de su variable de entorno, del archivo `.shotstopper` en la raíz del
+repositorio, o se pregunta en la terminal. En la pregunta, **Enter acepta el
+valor sugerido** entre corchetes: puerto USB detectado (o `/dev/cu.usbmodem2101`),
+arquitectura `n16r8`, velocidad `115200`, host `192.168.4.1`, token `Micra1234`,
+y los flags extra de desarrollo actuales (`-Werror=deprecated-copy`,
+`REMOTE_CN9`, buzzer activo). Después de una ejecución correcta los valores
+usados quedan guardados, así que la segunda vez basta con `./scripts/bum`.
 
-| Script | Uso | Descripción |
+| Script | Parámetros que necesita | Descripción |
 | --- | --- | --- |
-| `./scripts/build` | `./scripts/build [ruta_serial] [arquitectura] [flags...]` | Genera la versión y Web UI, compila y deja el resultado en `build/<arquitectura>`. La ruta serial se incluye para mantener una interfaz uniforme, pero no se usa para compilar. |
-| `./scripts/upload` | `./scripts/upload [ruta_serial] [arquitectura]` | Sube el binario existente de `build/<arquitectura>`; no recompila. |
-| `./scripts/monitor` | `./scripts/monitor [ruta_serial] [velocidad]` | Abre el monitor serie. |
-| `./scripts/bu` | `./scripts/bu [ruta_serial arquitectura [flags...]]` | Wrapper: build y upload. |
-| `./scripts/bum` | `./scripts/bum [ruta_serial arquitectura velocidad [flags...]]` | Wrapper: build, upload y monitor. |
-| `./scripts/static_report` | `./scripts/static_report [build_dir] [output_dir]` | Ejecuta Cppcheck sobre una compilation database existente y guarda el reporte. No compila. |
-| `./scripts/gcc_analyzer` | `./scripts/gcc_analyzer [ruta_serial arquitectura [flags...]]` | Compila con GCC `-fanalyzer` y guarda el reporte en `reports/gcc-analyzer/`. |
-| `./scripts/bsum` | `./scripts/bsum [ruta_serial arquitectura velocidad [flags...]]` | Wrapper que ejecuta build, static report, upload y monitor. Si el análisis encuentra diagnósticos, no carga el firmware. Sin argumentos conserva los defaults de cada script; si se pasan argumentos, ruta, arquitectura y velocidad son obligatorias; los flags se aplican solo a build. |
+| `./scripts/build` | `--arch` (`--flags` opcional) | Genera la versión y el Web UI, compila y deja el resultado en `build/<arquitectura>`. |
+| `./scripts/upload` | `--port`, `--arch` | Sube el binario existente de `build/<arquitectura>`; no recompila. |
+| `./scripts/monitor` | `--port`, `--speed` | Abre el monitor serie. |
+| `./scripts/ota` | `--arch`, `--host`, `--token` | Sube el binario ya compilado al controlador por Wi-Fi, lo verifica y lo deja arrancando. Sin cable USB. |
+| `./scripts/bu` | `--port`, `--arch` | Wrapper: build y upload. |
+| `./scripts/bum` | `--port`, `--arch`, `--speed` | Wrapper: build, upload y monitor. |
+| `./scripts/bo` | `--arch`, `--host`, `--token` | Wrapper: build y ota. |
+| `./scripts/static_report` | `--build-dir`, `--output-dir` | Ejecuta Cppcheck sobre una compilation database existente y guarda el reporte. No compila. |
+| `./scripts/gcc_analyzer` | `--arch` (`--flags` opcional) | Compila con GCC `-fanalyzer` y guarda el reporte en `reports/gcc-analyzer/`. |
+| `./scripts/bsum` | `--port`, `--arch`, `--speed` | Wrapper que ejecuta build, static report, upload y monitor. Si el análisis encuentra diagnósticos, no carga el firmware. |
 
-Las arquitecturas admitidas son `n8r4` y `n16r8` (alias `esp32s3` → `n16r8`).
-El ESP32 clásico no está soportado. Cada script recibe argumentos posicionales
-y muestra ayuda con `help`, `--help` o `-h`:
+Parámetros con nombre, en forma larga y corta:
 
-- Sin argumentos, los scripts usan todos sus valores por defecto.
-- En `build` y `upload`, si se indica `ruta_serial`, también se debe indicar
-  `arquitectura`. Los flags de `build` son opcionales.
-- En `monitor`, la velocidad es opcional cuando se indica `ruta_serial`.
+| Flag | Variable de entorno | Significado |
+| --- | --- | --- |
+| `-p`, `--port` | `SHOTSTOPPER_PORT` | Puerto serial, por ejemplo `/dev/cu.usbmodem2101`. |
+| `-a`, `--arch` | `SHOTSTOPPER_ARCH` | `n8r4` o `n16r8` (alias `esp32s3` → `n16r8`). |
+| `-s`, `--speed` | `SHOTSTOPPER_SPEED` | Velocidad del monitor serie, por ejemplo `115200`. |
+| `-H`, `--host` | `SHOTSTOPPER_HOST` | IP o nombre del controlador para OTA. |
+| `-t`, `--token` | `SHOTSTOPPER_OTA_TOKEN` | Token OTA: la contraseña del punto de acceso. |
+| `-f`, `--flags` | `SHOTSTOPPER_FLAGS` | Flags extra de compilación, en una sola cadena. |
+| `-b`, `--build-dir` | `SHOTSTOPPER_BUILD_DIR_OVERRIDE` | Carpeta de compilación (solo `static_report`). |
+| `-o`, `--output-dir` | `SHOTSTOPPER_OUTPUT_DIR` | Carpeta de reportes (solo `static_report`). |
+| `-h`, `--help` | — | Muestra la ayuda del script. |
+
+El archivo `.shotstopper` se crea con permisos `600` y está en `.gitignore`
+porque guarda el token OTA. Para una terminal sin TTY (CI), define las
+variables de entorno o pasa los flags: si falta algo, el script termina con un
+error que nombra los parámetros que faltan en lugar de preguntar. Lo mismo
+ocurre con `SHOTSTOPPER_NONINTERACTIVE=1`.
 
 ```sh
-./scripts/build
-./scripts/upload
-./scripts/monitor
-./scripts/gcc_analyzer
+# Primera vez: pregunta lo que falte y lo recuerda
+./scripts/bum
+
+# Explícito
+./scripts/build --arch n8r4 --flags "-DSHOT_STOPPER_ENABLE_BUZZER=1"
+./scripts/upload --port /dev/cu.usbmodem2101 --arch n8r4
+./scripts/monitor -p /dev/cu.usbmodem2101 -s 115200
 
 # Build, static report, upload y monitor en una sola orden
-./scripts/bsum
+./scripts/bsum -p /dev/cu.usbmodem2101 -a n8r4 -s 115200
 
-./scripts/build /dev/cu.usbmodem2101 n8r4 -DSHOT_STOPPER_ENABLE_BUZZER=1
-./scripts/upload /dev/cu.usbmodem2101 n8r4
-./scripts/monitor /dev/cu.usbmodem2101 115200
+# Actualización por Wi-Fi, sin cable
+./scripts/bo --arch n16r8 --host 192.168.1.50
 
-./scripts/bsum /dev/cu.usbmodem2101 n8r4 115200 -DSHOT_STOPPER_ENABLE_BUZZER=1
-
-./scripts/build help
-./scripts/bsum --help
+./scripts/build --help
+./scripts/bsum -h
 ```
 
 From the repository root, install Node deps if needed, generate the version and
@@ -1152,7 +1169,7 @@ Web UI headers, and build for ESP32-S3 N16R8 with:
 
 ```sh
 npm install
-./scripts/gen_version.sh
+./scripts/gen_version.sh n16r8
 node ./scripts/gen_web_ui.js
 mkdir -p build/n16r8
 arduino-cli compile \
@@ -1165,7 +1182,7 @@ arduino-cli compile \
 ```
 
 For N8R4, use `PSRAM=enabled,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB`
-and `build/n8r4`, or `./scripts/build /dev/cu.usbmodem2101 n8r4`.
+and `build/n8r4`, or `./scripts/build --arch n8r4`.
 
 `-DSHOT_STOPPER_ENABLE_REMOTE_CN9=1` exposes virtual paddle and remote quick
 rinse over the Web UI and API. **Stop** is always available when authenticated,
@@ -1195,9 +1212,8 @@ arduino-cli board list
 ```
 
 After compiling, upload by replacing the example port with the port used by
-your system. `./scripts/upload` (and `bu` / `bum` / `bsum`) pick the first
-`/dev/cu.usbmodem<número>` device when you omit the port. Use `n8r4` if that
-is the module on the board:
+your system. `./scripts/upload` (and `bu` / `bum` / `bsum`) ask for the port
+once and remember it. Use `n8r4` if that is the module on the board:
 
 ```sh
 arduino-cli upload \
@@ -1210,6 +1226,92 @@ arduino-cli upload \
 The generated application image is named `shotStopper.ino.bin`.
 `arduino-cli upload --input-dir` is recommended because it uploads the
 bootloader, partition table, and application at their correct offsets.
+
+## Update over Wi-Fi (OTA)
+
+Once the controller is installed inside the machine, USB is no longer
+convenient. Both partition tables carry **two application slots**, so a new
+build can be sent over Wi-Fi and the previous one stays intact as the fallback.
+
+```sh
+./scripts/bo --arch n16r8 --host 192.168.1.50
+```
+
+`bo` compiles and then runs `./scripts/ota`, which uploads
+`build/<arquitectura>/shotStopper.ino.bin`, waits for the controller to verify
+it, shows the identity it read back, and asks before flashing. The same thing
+is available from **Admin → Firmware update** in the Web UI, as two explicit
+steps: *Upload and verify* first, *Flash and restart* only after you have seen
+what was verified.
+
+The controller's IP is shown on the Web UI **Admin** and **Diagnostic** pages.
+In SoftAP mode it is always `192.168.4.1`.
+
+### What protects the machine
+
+An update must never leave a controller that cannot boot inside a closed
+machine, so the firmware refuses far more than it accepts:
+
+- **The running firmware is never overwritten.** The upload goes to the
+  inactive slot. A power cut, a lost Wi-Fi link, a browser tab closed
+  mid-transfer, or an outright wrong file all leave the working firmware
+  untouched and the boot selection unchanged.
+- **Nothing reaches flash until the header proves itself.** The first 288 bytes
+  must be an ESP32-S3 application image built against the Arduino core.
+- **The image must say it is a Shot Stopper build for this board.** Every build
+  embeds a marker with its board architecture and version. An `n8r4` image is
+  rejected by an `n16r8` controller, and vice versa, and a build older than the
+  running one is rejected unless the request explicitly allows a downgrade.
+- **The whole image is checksummed** before it is offered for flashing, and its
+  identity is read back **from flash** again immediately before the boot slot
+  is switched.
+- **Updates only run while the machine is idle.** CN9 open, no active cycle,
+  paddle off, state Ready. This is re-checked every 64 KiB during the transfer
+  and the update is cancelled if the machine stops being idle. The unsafe WebUI
+  override, which can relax ordinary settings, is never accepted here.
+- **The restart is the ordinary safe restart**: CN9 is opened first, and the
+  reset waits for the machine to be idle.
+- **A new firmware has to earn its place.** It boots on probation and is made
+  permanent only once it has been up for 15 s with its HTTP server listening,
+  which means the boot sequence, the control task, Wi-Fi and the web stack all
+  came up and the machine can be updated again over the air. If it panics,
+  hangs, or never brings up HTTP within 3 minutes, the previous slot comes
+  back. The one case where the new image is kept anyway is when no other slot
+  holds a bootable application, because restarting would then leave nothing to
+  run at all.
+- **Settings survive.** Wi-Fi credentials, configuration, calibration, presets,
+  and shot history live in NVS, which an update does not touch.
+
+Authentication uses the SoftAP password in an `X-OTA-Token` header. A
+controller still on the published factory password cannot be updated over the
+air at all: change it first from **Admin → AP password**.
+
+The relay's hard CN9 limit runs on a hardware timer whose interrupt handler
+lives in IRAM, so it stays armed even while flash is being written and the
+cache is disabled.
+
+Probation is enforced below the firmware, by the bootloader, which is what makes
+it survive a firmware that is broken enough not to run at all. It relies on
+three settings of the ESP32 Arduino core the build is compiled against, and the
+firmware refuses to compile without the watchdog ones:
+
+| Setting | Value | What it gives us |
+| --- | --- | --- |
+| `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` | `y` | A slot that resets before being marked valid is abandoned and the previous one is booted. |
+| `CONFIG_ESP_TASK_WDT_PANIC` | `y` | A task that stops responding panics and resets, which is what hands control back to the rollback above. |
+| `CONFIG_BOOTLOADER_WDT_TIME_MS` | `9000` | An image that hangs *before* reaching the firmware is still reset, and so still rolled back. |
+
+### If an update fails
+
+Nothing needs to be done: the controller keeps running the firmware it already
+had. The Web UI shows the reason, and the same event is recorded in the
+diagnostic log (`OTA upload rejected`, `OTA rollback armed`, …).
+
+A USB upload is always still possible and is the way out of any state. It
+writes `boot_app0.bin` at `0xe000` alongside the application, which resets the
+boot selection to the first slot, so `./scripts/upload` after any number of OTA
+updates lands on exactly the firmware you just built. See
+[Emergency recovery](docs/EMERGENCY_RECOVERY.md).
 
 ## Serial monitor
 

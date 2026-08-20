@@ -1,57 +1,47 @@
 #!/usr/bin/env bash
+# Open the Arduino CLI serial monitor.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 # shellcheck source=scripts/shotstopper_board.sh
 source "$SCRIPT_DIR/shotstopper_board.sh"
-
-readonly DEFAULT_BAUDRATE="115200"
+# shellcheck source=scripts/shotstopper_cli.sh
+source "$SCRIPT_DIR/shotstopper_cli.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/monitor [ruta_serial] [velocidad]
+Uso: ./scripts/monitor [flags]
 
 Inicia el monitor serie de Arduino CLI.
 
-La velocidad es opcional cuando se proporciona una ruta serial.
+Parámetros que necesita: --port y --speed.
 
-Valores por defecto (sin argumentos):
-  ruta_serial: $SHOTSTOPPER_DEFAULT_PORT_HELP
-  velocidad:    $DEFAULT_BAUDRATE
+$(ss_flag_help)
 
 Ejemplos:
-  ./scripts/monitor
-  ./scripts/monitor /dev/cu.usbmodem2101
-  ./scripts/monitor /dev/cu.usbmodem2101 115200
+  ./scripts/monitor --port /dev/cu.usbmodem2101 --speed 115200
+  ./scripts/monitor -p /dev/cu.usbmodem2101 -s 115200
 EOF
 }
 
-if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-  if [[ $# -ne 1 ]]; then
-    usage >&2
-    exit 2
-  fi
+ss_cli_parse "$@" || exit $?
+if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
   usage
   exit 0
 fi
 
-if [[ $# -gt 2 ]]; then
-  usage >&2
-  exit 2
-fi
-
-if [[ $# -eq 0 ]]; then
-  shotstopper_resolve_port required || exit 1
-  port="$SHOTSTOPPER_PORT"
-else
-  port="$1"
-fi
-baudrate="${2:-$DEFAULT_BAUDRATE}"
+ss_cli_resolve "port speed" || exit $?
 
 command -v arduino-cli >/dev/null 2>&1 || {
   echo "No se encontró arduino-cli en PATH." >&2
   exit 127
 }
 
-echo "Monitor serie en $port ($baudrate)"
-arduino-cli monitor --port "$port" --config "baudrate=$baudrate"
+port="$(ss_get port)"
+speed="$(ss_get speed)"
+
+# Persist before exec: the monitor runs until the user stops it.
+ss_cli_save
+
+echo "Monitor serie en $port ($speed)"
+exec arduino-cli monitor --port "$port" --config "baudrate=$speed"

@@ -2316,7 +2316,14 @@ enum class DebugCode : uint8_t {
   AP_PASSWORD_RESET,
   HEALTH_HEAP_LOW,
   HEALTH_STACK_LOW,
-  HEALTH_LOOP_GAP
+  HEALTH_LOOP_GAP,
+  OTA_UPLOAD_STARTED,
+  OTA_IMAGE_STAGED,
+  OTA_UPLOAD_REJECTED,
+  OTA_FLASH_COMMITTED,
+  OTA_IMAGE_CONFIRMED,
+  OTA_ROLLBACK_ARMED,
+  OTA_ROLLBACK_FAILED
 };
 
 // Health telemetry thresholds (observability only; never act on CN9).
@@ -2563,7 +2570,11 @@ inline LogLevel debugCodeDefaultLevel(DebugCode code) {
     case DebugCode::HEALTH_HEAP_LOW:
     case DebugCode::HEALTH_STACK_LOW:
     case DebugCode::HEALTH_LOOP_GAP:
+    case DebugCode::OTA_UPLOAD_REJECTED:
       return LogLevel::WARNING;
+    case DebugCode::OTA_ROLLBACK_ARMED:
+    case DebugCode::OTA_ROLLBACK_FAILED:
+      return LogLevel::CRITICAL;
     case DebugCode::SCALE_CONNECTING:
     case DebugCode::SCALE_TIMER_START_OK:
     case DebugCode::SCALE_TIMER_STOP_OK:
@@ -2783,6 +2794,13 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::HEALTH_HEAP_LOW: return "health heap low";
     case DebugCode::HEALTH_STACK_LOW: return "health stack low";
     case DebugCode::HEALTH_LOOP_GAP: return "health loop gap high";
+    case DebugCode::OTA_UPLOAD_STARTED: return "OTA upload started";
+    case DebugCode::OTA_IMAGE_STAGED: return "OTA image staged";
+    case DebugCode::OTA_UPLOAD_REJECTED: return "OTA upload rejected";
+    case DebugCode::OTA_FLASH_COMMITTED: return "OTA boot image switched";
+    case DebugCode::OTA_IMAGE_CONFIRMED: return "OTA image confirmed";
+    case DebugCode::OTA_ROLLBACK_ARMED: return "OTA rollback armed";
+    case DebugCode::OTA_ROLLBACK_FAILED: return "OTA rollback failed";
   }
   return "unknown";
 }
@@ -2991,6 +3009,30 @@ inline bool formatLifecycleDebugMessage(const DebugEvent &event, char *message,
       return true;
     case DebugCode::HEALTH_LOOP_GAP:
       snprintf(message, capacity, "health loop gap high max=%ld ms",
+               static_cast<long>(event.argument1));
+      return true;
+    case DebugCode::OTA_UPLOAD_STARTED:
+      snprintf(message, capacity, "OTA upload started size=%ld KiB",
+               static_cast<long>(event.argument1));
+      return true;
+    case DebugCode::OTA_IMAGE_STAGED:
+      snprintf(message, capacity, "OTA image staged size=%ld KiB packed=0x%08lx",
+               static_cast<long>(event.argument1),
+               static_cast<unsigned long>(event.argument2));
+      return true;
+    case DebugCode::OTA_UPLOAD_REJECTED:
+      snprintf(message, capacity, "OTA upload rejected reason=%ld at %ld KiB",
+               static_cast<long>(event.argument1),
+               static_cast<long>(event.argument2));
+      return true;
+    case DebugCode::OTA_FLASH_COMMITTED:
+      snprintf(message, capacity,
+               "OTA boot image switched packed=0x%08lx; restarting",
+               static_cast<unsigned long>(event.argument1));
+      return true;
+    case DebugCode::OTA_ROLLBACK_ARMED:
+      snprintf(message, capacity,
+               "OTA rollback armed after %ld s without a Web UI",
                static_cast<long>(event.argument1));
       return true;
     default:

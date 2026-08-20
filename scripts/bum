@@ -2,61 +2,44 @@
 # Build, upload, and monitor Shot Stopper in one command.
 set -euo pipefail
 
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/shotstopper_board.sh
+source "$SCRIPT_DIR/shotstopper_board.sh"
+# shellcheck source=scripts/shotstopper_cli.sh
+source "$SCRIPT_DIR/shotstopper_cli.sh"
+
 usage() {
-  cat <<'EOF'
-Uso: ./scripts/bum [ruta_serial arquitectura velocidad [flags_de_compilacion...]]
+  cat <<EOF
+Uso: ./scripts/bum [flags]
 
 Ejecuta, en orden: build, upload y monitor.
 
-Sin argumentos invoca cada script sin parámetros, por lo que conserva sus
-valores por defecto.
+Parámetros que necesita: --port, --arch y --speed. --flags es opcional.
 
-Si se indica ruta_serial, arquitectura y velocidad son obligatorias. Los flags
-restantes se envían únicamente a build.
-
-Arquitecturas admitidas: n8r4, n16r8 (alias: esp32s3 → n16r8).
-
-Sin argumentos, cada script usa n16r8 y el primer /dev/cu.usbmodem<número>.
+$(ss_flag_help)
 
 Ejemplos:
-  ./scripts/bum
-  ./scripts/bum /dev/cu.usbmodem2101 n16r8 115200
-  ./scripts/bum /dev/cu.usbmodem2101 n8r4 115200 -DSHOT_STOPPER_ENABLE_BUZZER=1
+  ./scripts/bum --port /dev/cu.usbmodem2101 --arch n16r8 --speed 115200
+  ./scripts/bum -p /dev/cu.usbmodem2101 -a n8r4 -s 115200
 EOF
 }
 
-if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-  if [[ $# -ne 1 ]]; then
-    usage >&2
-    exit 2
-  fi
+ss_cli_parse "$@" || exit $?
+if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
   usage
   exit 0
 fi
 
-if [[ $# -eq 0 ]]; then
-  args=()
-elif [[ $# -lt 3 ]]; then
-  echo "Ruta serial, arquitectura y velocidad son obligatorias cuando se pasan argumentos." >&2
-  usage >&2
-  exit 2
-else
-  args=("$@")
-fi
+ss_cli_resolve "port arch speed" "flags" || exit $?
 
-root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+root="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$root"
 
-if [[ ${#args[@]} -eq 0 ]]; then
-  ./scripts/build
-  ./scripts/upload
-  exec ./scripts/monitor
-fi
+ss_cli_flags_for arch flags
+./scripts/build ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
 
-if [[ ${#args[@]} -eq 3 ]]; then
-  ./scripts/build "${args[0]}" "${args[1]}"
-else
-  ./scripts/build "${args[0]}" "${args[1]}" "${args[@]:3}"
-fi
-./scripts/upload "${args[0]}" "${args[1]}"
-exec ./scripts/monitor "${args[0]}" "${args[2]}"
+ss_cli_flags_for port arch
+./scripts/upload ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
+
+ss_cli_flags_for port speed
+exec ./scripts/monitor ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}

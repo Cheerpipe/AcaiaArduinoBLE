@@ -3,6 +3,8 @@ set -eu
 
 test_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$test_dir/../.." && pwd)
+# No board arch: host tests never produce a flashable image, and the resulting
+# "unknown" arch is rejected by the controller's OTA verifier by construction.
 "$repo_root/scripts/gen_version.sh"
 test_binary=${TMPDIR:-/tmp}/shot_stopper_host_test
 sanitized_binary=${TMPDIR:-/tmp}/shot_stopper_host_test_sanitized
@@ -11,6 +13,8 @@ persistence_sanitized=${TMPDIR:-/tmp}/shot_stopper_persistence_host_test_sanitiz
 external_safety_binary=${TMPDIR:-/tmp}/shot_stopper_external_safety_host_test
 external_safety_sanitized=${TMPDIR:-/tmp}/shot_stopper_external_safety_host_test_sanitized
 remote_policy_binary=${TMPDIR:-/tmp}/shot_stopper_remote_policy_host_test
+ota_image_binary=${TMPDIR:-/tmp}/shot_stopper_ota_image_host_test
+ota_image_sanitized=${TMPDIR:-/tmp}/shot_stopper_ota_image_host_test_sanitized
 active_buzzer_binary=${TMPDIR:-/tmp}/shot_stopper_host_test_active_buzzer
 firmware_file="$test_dir/../shotStopper.ino"
 ble_companion_file="$test_dir/../ShotStopperBleCompanion.h"
@@ -67,6 +71,18 @@ ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
 "$remote_policy_binary"
 echo "Remote CN9 policy: disabled by default"
 
+"$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+  "$test_dir/ota_image_host_test.cpp" \
+  -o "$ota_image_binary"
+"$ota_image_binary"
+
+"$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+  -fno-omit-frame-pointer -fsanitize=address,undefined \
+  "$test_dir/ota_image_host_test.cpp" \
+  -o "$ota_image_sanitized"
+ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  "$ota_image_sanitized"
+
 for removed_symbol in MOMENTARY REEDSWITCH REED_IN BUTTON_STATE_ARRAY_LENGTH; do
   if grep -n "$removed_symbol" "$firmware_file"; then
     echo "Removed legacy symbol remains in firmware: $removed_symbol" >&2
@@ -103,6 +119,39 @@ for required_ble_config in '00000000-0000-0000-0000-000000000FFE' \
 done
 
 echo "BLE Companion v2 characteristics: present"
+
+for script in "$repo_root"/scripts/*; do
+  [ -f "$script" ] || continue
+  case "$script" in
+    *.js) continue ;;
+  esac
+  # BSD grep has no \| in a basic regex, so match the shebang with a case glob.
+  case "$(head -n 1 "$script")" in
+    '#!'*sh|'#!'*sh\ *) ;;
+    *) continue ;;
+  esac
+  if ! bash -n "$script"; then
+    echo "Shell syntax error in $script" >&2
+    exit 1
+  fi
+done
+
+# A command line is readable by every user on the machine through `ps`, for as
+# long as the child runs. An OTA upload runs for minutes.
+if grep -n -E '\-\-token[[:space:]]+"' "$repo_root"/scripts/* ; then
+  echo "The OTA token must reach a child through the environment, not argv" >&2
+  exit 1
+fi
+
+# bash 3.2, the system bash on macOS, treats "${array[@]}" on an empty array as
+# an unbound variable and aborts the script under `set -u`.
+if grep -n 'SS_CLI_FORWARD\[@\]' "$repo_root"/scripts/* |
+    grep -v 'SS_CLI_FORWARD\[@\]+' ; then
+  echo 'Expand as ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"} for bash 3.2' >&2
+  exit 1
+fi
+
+echo "Developer scripts: syntax OK, no secrets in argv, bash 3.2 safe arrays"
 
 if command -v node >/dev/null 2>&1; then
   if [ ! -d "$repo_root/node_modules/terser" ]; then

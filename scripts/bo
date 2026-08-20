@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and upload Shot Stopper in one command.
+# Build + OTA: compila y actualiza el controlador por Wi-Fi en un solo comando.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -10,17 +10,20 @@ source "$SCRIPT_DIR/shotstopper_cli.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/bu [flags]
+Uso: ./scripts/bo [flags]
 
-Ejecuta, en orden: build y upload.
+Ejecuta, en orden: build y ota. No hace falta cable USB.
 
-Parámetros que necesita: --port y --arch. --flags es opcional.
+Parámetros que necesita: --arch, --host y --token. --flags es opcional.
+El token es la contraseña del punto de acceso MicraShotStopperAP.
 
 $(ss_flag_help)
 
+$(shotstopper_arch_help)
+
 Ejemplos:
-  ./scripts/bu --port /dev/cu.usbmodem2101 --arch n16r8
-  ./scripts/bu -p /dev/cu.usbmodem2101 -a n8r4 -f "-DSHOT_STOPPER_ENABLE_BUZZER=1"
+  ./scripts/bo --arch n16r8 --host 192.168.1.50
+  ./scripts/bo -a n8r4 -H 192.168.4.1
 EOF
 }
 
@@ -30,8 +33,7 @@ if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
   exit 0
 fi
 
-# Resolve everything once here so the child scripts never prompt again.
-ss_cli_resolve "port arch" "flags" || exit $?
+ss_cli_resolve "arch host token" "flags" || exit $?
 
 root="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$root"
@@ -39,5 +41,6 @@ cd "$root"
 ss_cli_flags_for arch flags
 ./scripts/build ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
 
-ss_cli_flags_for port arch
-exec ./scripts/upload ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
+ss_cli_flags_for arch host
+ss_cli_export_secrets
+exec ./scripts/ota ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}

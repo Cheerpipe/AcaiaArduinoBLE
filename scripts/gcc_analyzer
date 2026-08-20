@@ -5,19 +5,15 @@ set -uo pipefail
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 # shellcheck source=scripts/shotstopper_board.sh
 source "$SCRIPT_DIR/shotstopper_board.sh"
+# shellcheck source=scripts/shotstopper_cli.sh
+source "$SCRIPT_DIR/shotstopper_cli.sh"
 
-readonly DEFAULT_ARCH="$SHOTSTOPPER_DEFAULT_ARCH"
-readonly DEFAULT_FLAGS=(
-  -Werror=deprecated-copy
-  -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1
-  -DSHOT_STOPPER_ENABLE_BUZZER=2
-)
 readonly ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 readonly OUTPUT_DIR="reports/gcc-analyzer"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/gcc_analyzer [ruta_serial arquitectura [flags_de_compilacion...]]
+Uso: ./scripts/gcc_analyzer [flags]
 
 Compila Shot Stopper con GCC -fanalyzer y guarda el resultado filtrado en
 reports/gcc-analyzer/gcc-analyzer.txt. Reemplaza el reporte anterior.
@@ -25,44 +21,26 @@ El registro completo de compilación queda en gcc-analyzer-raw.txt; el reporte
 principal conserva únicamente diagnósticos cuya ubicación inicial es código
 versionado en este repositorio.
 
-Sin argumentos usa la configuración de desarrollo de build. Si se indica una
-ruta serial, la arquitectura también es obligatoria. Los flags adicionales se
-añaden a los flags de desarrollo y al análisis.
+Parámetros que necesita: --arch. --flags es opcional y se añade al análisis.
+
+$(ss_flag_help)
 
 $(shotstopper_arch_help)
 
 Ejemplos:
-  ./scripts/gcc_analyzer
-  ./scripts/gcc_analyzer /dev/cu.usbmodem2101 n16r8
-  ./scripts/gcc_analyzer /dev/cu.usbmodem2101 n8r4 -DSHOT_STOPPER_ENABLE_BUZZER=1
+  ./scripts/gcc_analyzer --arch n16r8
+  ./scripts/gcc_analyzer -a n8r4 -f "-DSHOT_STOPPER_ENABLE_BUZZER=1"
 EOF
 }
 
-if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-  if [[ $# -ne 1 ]]; then
-    usage >&2
-    exit 2
-  fi
+ss_cli_parse "$@" || exit $?
+if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
   usage
   exit 0
 fi
 
-if [[ $# -eq 0 ]]; then
-  shotstopper_resolve_port optional
-  port="${SHOTSTOPPER_PORT:-"(no detectado)"}"
-  arch="$DEFAULT_ARCH"
-  extra_flags=()
-elif [[ $# -eq 1 ]]; then
-  echo "Falta la arquitectura después de la ruta serial." >&2
-  usage >&2
-  exit 2
-else
-  port="$1"
-  arch="$2"
-  extra_flags=("${@:3}")
-fi
-
-if ! shotstopper_resolve_board "$arch"; then
+ss_cli_resolve "arch" "flags" || exit $?
+if ! shotstopper_resolve_board "$(ss_get arch)"; then
   exit 2
 fi
 
@@ -72,17 +50,20 @@ rm -rf "$output_path"
 mkdir -p "$output_path"
 
 echo "Ejecutando GCC -fanalyzer para $SHOTSTOPPER_ARCH..."
-build_args=("$port" "$SHOTSTOPPER_ARCH" "${DEFAULT_FLAGS[@]}")
-if [[ ${#extra_flags[@]} -gt 0 ]]; then
-  build_args+=("${extra_flags[@]}")
-fi
-build_args+=(-fanalyzer)
+# -fanalyzer is a tool flag, not a user preference: passing it through
+# ./scripts/build would persist it into .shotstopper and every later compile.
+user_flags="$(ss_get flags)"
+analyzer_flags="$user_flags -fanalyzer"
 
 raw_report="$output_path/gcc-analyzer-raw.txt"
 report="$output_path/gcc-analyzer.txt"
 
-./scripts/build "${build_args[@]}" >"$raw_report" 2>&1
+SHOTSTOPPER_NONINTERACTIVE=1 ./scripts/build --arch "$SHOTSTOPPER_ARCH" \
+  --flags "$analyzer_flags" >"$raw_report" 2>&1
 build_status=$?
+
+ss_put flags "$user_flags" cli
+ss_cli_save
 
 if [[ $build_status -ne 0 ]]; then
   cat "$raw_report" >&2

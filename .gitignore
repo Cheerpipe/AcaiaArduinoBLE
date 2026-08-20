@@ -17,6 +17,8 @@ Desktop.ini
 .env
 .env.*
 !.env.example
+# Remembered script parameters, including the OTA token
+.shotstopper
 secrets.h
 credentials.h
 WiFiSecrets.h

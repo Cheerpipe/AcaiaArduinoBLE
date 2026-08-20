@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Compile Shot Stopper. The serial port is accepted for a consistent interface
-# with upload, but Arduino CLI does not need it to compile.
+# Compile Shot Stopper into build/<arquitectura>.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 # shellcheck source=scripts/shotstopper_board.sh
 source "$SCRIPT_DIR/shotstopper_board.sh"
+# shellcheck source=scripts/shotstopper_cli.sh
+source "$SCRIPT_DIR/shotstopper_cli.sh"
 
-readonly DEFAULT_ARCH="$SHOTSTOPPER_DEFAULT_ARCH"
-readonly DEFAULT_FLAGS="-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=2"
 # ESP32 Arduino 3.3.x / IDF 5.5 emits hundreds of -Wmissing-field-initializers
 # diagnostics from TinyUSB and SPI flash HAL designated initializers. extra_flags
 # is applied before -Wextra, so the suppression must live on warning_flags.all.
@@ -16,69 +15,48 @@ readonly WARNING_FLAGS_ALL="-Wall -Wextra -Wno-missing-field-initializers"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/build [ruta_serial] [arquitectura] [flags_de_compilacion...]
+Uso: ./scripts/build [flags]
 
 Compila Shot Stopper y deja los artefactos en build/<arquitectura>.
-La ruta serial se acepta para mantener la misma interfaz que upload, pero no
-se utiliza durante la compilación.
 
-Sin argumentos se usan todos los valores por defecto. Si se indica una ruta
-serial, la arquitectura también es obligatoria. Los flags son opcionales.
+Parámetros que necesita: --arch. --flags es opcional y se pregunta una vez.
 
-Valores por defecto (sin argumentos):
-  ruta_serial:  $SHOTSTOPPER_DEFAULT_PORT_HELP
-  arquitectura: $DEFAULT_ARCH
-  flags:        $DEFAULT_FLAGS
+$(ss_flag_help)
 
 $(shotstopper_arch_help)
 
+Flags de compilación recomendados para desarrollo (Enter en el prompt):
+  $SS_CLI_DEFAULT_FLAGS
+
 Ejemplos:
-  ./scripts/build
-  ./scripts/build /dev/cu.usbmodem2101 n16r8
-  ./scripts/build /dev/cu.usbmodem2101 n8r4 -DSHOT_STOPPER_ENABLE_ALED=1
+  ./scripts/build --arch n16r8
+  ./scripts/build -a n8r4 -f "-DSHOT_STOPPER_ENABLE_BUZZER=2"
 EOF
 }
 
-if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-  if [[ $# -ne 1 ]]; then
-    usage >&2
-    exit 2
-  fi
+ss_cli_parse "$@" || exit $?
+if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
   usage
   exit 0
 fi
 
-if [[ $# -eq 0 ]]; then
-  shotstopper_resolve_port optional
-  port="${SHOTSTOPPER_PORT:-"(no detectado)"}"
-  arch="$DEFAULT_ARCH"
-  flags="$DEFAULT_FLAGS"
-elif [[ $# -eq 1 ]]; then
-  echo "Falta la arquitectura después de la ruta serial." >&2
-  usage >&2
-  exit 2
-else
-  port="$1"
-  arch="$2"
-  if [[ $# -gt 2 ]]; then
-    flags="${*:3}"
-  else
-    flags="$DEFAULT_FLAGS"
-  fi
-fi
-
-shotstopper_resolve_board "$arch"
+ss_cli_resolve "arch" "flags" || exit $?
+shotstopper_resolve_board "$(ss_get arch)"
 
 command -v arduino-cli >/dev/null 2>&1 || {
   echo "No se encontró arduino-cli en PATH." >&2
+  exit 127
+}
+command -v node >/dev/null 2>&1 || {
+  echo "No se encontró node en PATH (necesario para el Web UI y el marcador OTA)." >&2
   exit 127
 }
 
 root="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$root"
 
-echo "Compilando $SHOTSTOPPER_ARCH (puerto configurado: $port)"
-./scripts/gen_version.sh
+echo "Compilando $SHOTSTOPPER_ARCH"
+./scripts/gen_version.sh "$SHOTSTOPPER_ARCH"
 node ./scripts/gen_web_ui.js
 rm -rf "$SHOTSTOPPER_BUILD_DIR"
 mkdir -p "$SHOTSTOPPER_BUILD_DIR"
@@ -87,7 +65,20 @@ arduino-cli compile \
   --fqbn "$SHOTSTOPPER_FQBN" \
   --warnings all \
   --build-property "compiler.warning_flags.all=$WARNING_FLAGS_ALL" \
-  --build-property "compiler.cpp.extra_flags=$flags" \
+  --build-property "compiler.cpp.extra_flags=$(ss_get flags)" \
   --library libraries/AcaiaArduinoBLE \
   --build-path "$SHOTSTOPPER_BUILD_DIR" \
   shotStopper
+
+# The controller refuses any OTA image without this marker, so a build that
+# somehow dropped it must fail here and not on the machine.
+image="$SHOTSTOPPER_BUILD_DIR/shotStopper.ino.bin"
+if [[ ! -f "$image" ]]; then
+  echo "La compilación no dejó $image, así que no se pudo verificar el" >&2
+  echo "marcador OTA. No subas por Wi-Fi una imagen sin verificar." >&2
+  exit 1
+fi
+echo "Identidad OTA de la imagen:"
+node ./scripts/image_tag.js "$image" --expect-arch "$SHOTSTOPPER_ARCH"
+
+ss_cli_save
