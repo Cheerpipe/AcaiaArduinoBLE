@@ -13,14 +13,12 @@
 #include <esp_attr.h>
 #endif
 
-// Large, non-control-path BSS. Host tests and the BLE/relay/paddle path stay
-// on internal SRAM.
-#if !defined(SHOT_STOPPER_HOST_TEST) &&                                        \
-    !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST) && defined(BOARD_HAS_PSRAM)
-#define SHOT_STOPPER_PSRAM_BSS EXT_RAM_BSS_ATTR
-#else
+// EXT_RAM_BSS_ATTR only works when CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+// is enabled at IDF build time. The prebuilt Arduino-ESP32 core ships with that
+// option off, so large buffers must use allocExternalOrInternal() instead.
+// This macro is kept for documentation only; it does not relocate BSS in our
+// normal ./scripts/build flow.
 #define SHOT_STOPPER_PSRAM_BSS
-#endif
 
 namespace shotstopper {
 

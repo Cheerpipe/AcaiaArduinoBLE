@@ -18,20 +18,30 @@ namespace detail {
 
 // HTTP JSON parse only. Never use as an NVS/OTA flash I/O buffer: flash writes
 // disable the cache and make PSRAM inaccessible on ESP32-S3.
-SHOT_STOPPER_PSRAM_BSS
-alignas(8) inline uint8_t g_jsonArena[JSON_ARENA_CAPACITY] = {};
 inline size_t g_jsonArenaUsed = 0;
 inline bool g_jsonArenaHooksInstalled = false;
 
+inline uint8_t *jsonArenaStorage() {
+  static uint8_t *block = nullptr;
+  if (block == nullptr) {
+    block = static_cast<uint8_t *>(allocExternalOrInternal(JSON_ARENA_CAPACITY));
+  }
+  return block;
+}
+
 inline void *jsonArenaMalloc(size_t size) {
   if (size == 0) {
+    return nullptr;
+  }
+  uint8_t *const storage = jsonArenaStorage();
+  if (storage == nullptr) {
     return nullptr;
   }
   const size_t aligned = (size + 7U) & ~size_t(7U);
   if (g_jsonArenaUsed + aligned > JSON_ARENA_CAPACITY) {
     return nullptr;
   }
-  void *const block = g_jsonArena + g_jsonArenaUsed;
+  void *const block = storage + g_jsonArenaUsed;
   g_jsonArenaUsed += aligned;
   return block;
 }
@@ -42,6 +52,9 @@ inline void jsonArenaFree(void *) {}
 
 inline void initJsonArenaHooks() {
   if (detail::g_jsonArenaHooksInstalled) {
+    return;
+  }
+  if (detail::jsonArenaStorage() == nullptr) {
     return;
   }
   cJSON_Hooks hooks = {detail::jsonArenaMalloc, detail::jsonArenaFree};

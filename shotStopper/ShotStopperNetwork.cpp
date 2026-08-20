@@ -46,19 +46,10 @@ struct NetworkWorkBuf {
   WifiScanSnapshot wifiScan;
 };
 
-// HTTP / Wi-Fi UI work area in PSRAM (WebUI and Wi-Fi are non-critical).
-// Do not pass these buffers to Preferences / esp_ota_write: flash ops disable
-// the cache and PSRAM becomes inaccessible.
-SHOT_STOPPER_PSRAM_BSS
-static NetworkWorkBuf g_networkWorkBuf;
-
 // Wi-Fi scan fetch + published snapshot. Network task / httpd only; not BLE.
 constexpr uint16_t kWifiScanFetchMax = 32;
-SHOT_STOPPER_PSRAM_BSS
-static wifi_ap_record_t g_wifiApRecords[kWifiScanFetchMax];
-SHOT_STOPPER_PSRAM_BSS
+static wifi_ap_record_t *g_wifiApRecords = nullptr;
 static WifiScanSnapshot g_wifiScan;
-SHOT_STOPPER_PSRAM_BSS
 static WifiScanSnapshot g_wifiScanWorking;
 
 namespace {
@@ -478,12 +469,9 @@ bool registerHandler(httpd_handle_t server, const char *uri,
 }
 
 // lwIP on ESP32-S3 cannot DMA a PSRAM or flash pointer in one tcp_write.
-// Copy complete bodies into internal RAM and send with Content-Length;
-// chunked mode stalls once the first body slice exceeds a few hundred bytes.
-constexpr size_t HTTP_BODY_STAGING_BYTES = 23552;
+// Stream through a small internal bounce buffer; no full-body staging in DRAM.
 constexpr size_t HTTP_DRAM_BOUNCE_BYTES = 512;
 
-static uint8_t g_httpBodyStaging[HTTP_BODY_STAGING_BYTES];
 static uint8_t g_httpSendBounce[HTTP_DRAM_BOUNCE_BYTES];
 
 esp_err_t sendCopiedChunk(httpd_req_t *request, const void *data,
@@ -509,13 +497,10 @@ esp_err_t sendCopiedBody(httpd_req_t *request, const void *data,
   if (length == 0) {
     return httpd_resp_send(request, nullptr, 0);
   }
-  if (length > HTTP_BODY_STAGING_BYTES) {
+  if (sendCopiedChunk(request, data, length) != ESP_OK) {
     return ESP_FAIL;
   }
-  memcpy(g_httpBodyStaging, data, length);
-  return httpd_resp_send(
-      request, reinterpret_cast<const char *>(g_httpBodyStaging),
-      static_cast<ssize_t>(length));
+  return httpd_resp_send_chunk(request, nullptr, 0);
 }
 
 esp_err_t sendJsonStringChunk(httpd_req_t *request, const char *value) {
@@ -748,12 +733,32 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
     acceptedCommandQueue_ = nullptr;
     return false;
   }
-  memset(&g_networkWorkBuf, 0, sizeof(g_networkWorkBuf));
+  workBuf_ = static_cast<NetworkWorkBuf *>(
+      allocExternalOrInternal(sizeof(NetworkWorkBuf)));
+  if (workBuf_ == nullptr) {
+    vSemaphoreDelete(statusResponseMux_);
+    statusResponseMux_ = nullptr;
+    vQueueDelete(acceptedCommandQueue_);
+    acceptedCommandQueue_ = nullptr;
+    return false;
+  }
+  memset(workBuf_, 0, sizeof(*workBuf_));
+  g_wifiApRecords = static_cast<wifi_ap_record_t *>(allocExternalOrInternal(
+      sizeof(wifi_ap_record_t) * kWifiScanFetchMax));
+  if (g_wifiApRecords == nullptr) {
+    heapCapsFree(workBuf_);
+    workBuf_ = nullptr;
+    vSemaphoreDelete(statusResponseMux_);
+    statusResponseMux_ = nullptr;
+    vQueueDelete(acceptedCommandQueue_);
+    acceptedCommandQueue_ = nullptr;
+    return false;
+  }
+  memset(g_wifiApRecords, 0, sizeof(wifi_ap_record_t) * kWifiScanFetchMax);
   memset(&g_wifiScan, 0, sizeof(g_wifiScan));
   memset(&g_wifiScanWorking, 0, sizeof(g_wifiScanWorking));
-  static_assert(REQUEST_BODY_CAPACITY == sizeof(g_networkWorkBuf.requestBody),
+  static_assert(REQUEST_BODY_CAPACITY == 2048,
                 "NetworkWorkBuf::requestBody must match REQUEST_BODY_CAPACITY");
-  workBuf_ = &g_networkWorkBuf;
   g_work = workBuf_;
   instance_ = this;
   initJsonArenaHooks();
@@ -768,6 +773,9 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
                               0) != pdPASS) {
     instance_ = nullptr;
     g_work = nullptr;
+    heapCapsFree(g_wifiApRecords);
+    g_wifiApRecords = nullptr;
+    heapCapsFree(workBuf_);
     workBuf_ = nullptr;
     vSemaphoreDelete(statusResponseMux_);
     statusResponseMux_ = nullptr;
@@ -1890,7 +1898,8 @@ void ShotStopperNetwork::finishWifiScan(int16_t resultCount, uint32_t now) {
   if (apCount > kWifiScanFetchMax) {
     apCount = kWifiScanFetchMax;
   }
-  if (esp_wifi_scan_get_ap_records(&apCount, g_wifiApRecords) != ESP_OK) {
+  if (g_wifiApRecords == nullptr ||
+      esp_wifi_scan_get_ap_records(&apCount, g_wifiApRecords) != ESP_OK) {
     completed.state = WifiScanState::FAILED;
     WiFi.scanDelete();
     portENTER_CRITICAL(&dataMux_);
