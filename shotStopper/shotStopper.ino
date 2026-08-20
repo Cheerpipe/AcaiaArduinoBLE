@@ -6510,6 +6510,7 @@ void serialCliPrintLiveHealth() {
   dump.stackAlertLatched = healthStackAlertLatched;
   dump.loopGapAlertLatched = healthLoopGapAlertLatched;
   dump.cpuLoadValid = hwmonSnapshot.cpuLoadValid;
+  dump.cpuMhz = hwmonSnapshot.cpuMhz;
   dump.cpuLoad5s = hwmonSnapshot.cpuLoad5s;
   dump.cpuLoad1m = hwmonSnapshot.cpuLoad1m;
   dump.cpuLoad5m = hwmonSnapshot.cpuLoad5m;

@@ -5996,6 +5996,7 @@ void sc15_status_printers_use_dump_views() {
   health.loopMaxGapMs = 12;
   health.networkStackMinWords = 400;
   health.cpuLoadValid = true;
+  health.cpuMhz = 80;
   health.cpuLoad5s = 0.42f;
   health.cpuLoad1m = 0.55f;
   health.cpuLoad5m = 0.61f;
@@ -6014,6 +6015,7 @@ void sc15_status_printers_use_dump_views() {
   CHECK(serialTxContains("bleHostAllocPsram=0"));
   CHECK(serialTxContains("bleHostAllocFallback=0"));
   CHECK(serialTxContains("stackNetwork=400"));
+  CHECK(serialTxContains("cpuMhz=80"));
   CHECK(serialTxContains("cpuLoad5s=0.42"));
   CHECK(serialTxContains("cpuLoad1m=0.55"));
   CHECK(serialTxContains("cpuLoad5m=0.61"));
@@ -6226,6 +6228,7 @@ void h02_hwmon_cpu_load_uses_idle_and_ema() {
   CHECK(snap.cpu1Busy >= 0.0f && snap.cpu1Busy <= 0.01f);
   CHECK(snap.cpuLoad5s >= 0.0f && snap.cpuLoad5s <= 0.01f);
   CHECK(snap.cpuLoad1m >= 0.0f && snap.cpuLoad1m <= 0.01f);
+  CHECK(snap.cpuMhz == 80U);
 
   // Fully busy both cores → load 2.0
   monitor.hostSetIdleAccumUs(0, 0);

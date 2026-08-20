@@ -587,6 +587,7 @@ struct SerialCliHealthDump {
   bool loopGapAlertLatched = false;
   bool cpuLoadValid = false;
   bool tempValid = false;
+  uint32_t cpuMhz = 0;
   float cpuLoad5s = 0.0f;
   float cpuLoad1m = 0.0f;
   float cpuLoad5m = 0.0f;
@@ -795,6 +796,8 @@ inline void serialCliPrintHealth(const SerialCliHealthDump &dump) {
   Serial.println(dump.loopGapAlertLatched ? "true" : "false");
   Serial.print("cpuLoadValid=");
   Serial.println(dump.cpuLoadValid ? "true" : "false");
+  Serial.print("cpuMhz=");
+  Serial.println(static_cast<unsigned long>(dump.cpuMhz));
   Serial.print("cpuLoad5s=");
   Serial.println(dump.cpuLoad5s, 2);
   Serial.print("cpuLoad1m=");

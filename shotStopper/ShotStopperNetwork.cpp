@@ -3731,6 +3731,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"bleHostAllocPsram\":%lu,\"bleHostAllocFallback\":%lu,"
         "\"hwmon\":{\"cpuLoad5s\":%.2f,\"cpuLoad1m\":%.2f,\"cpuLoad5m\":%.2f,"
         "\"cpu0Busy\":%.2f,\"cpu1Busy\":%.2f,\"cpuLoadValid\":%s,"
+        "\"cpuMhz\":%lu,"
         "\"tempValid\":%s,\"tempC\":%.1f,\"tempPeakC\":%.1f,"
         "\"ramTotalBytes\":%lu,\"ramUsedBytes\":%lu,"
         "\"ramFreeBytes\":%lu}},"
@@ -3770,6 +3771,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<double>(control.hwmon.cpu0Busy),
         static_cast<double>(control.hwmon.cpu1Busy),
         control.hwmon.cpuLoadValid ? "true" : "false",
+        static_cast<unsigned long>(control.hwmon.cpuMhz),
         control.hwmon.tempValid ? "true" : "false",
         static_cast<double>(control.hwmon.tempC),
         static_cast<double>(control.hwmon.tempPeakC),

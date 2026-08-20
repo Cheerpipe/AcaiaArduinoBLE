@@ -869,6 +869,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
   const statusHtml = html.slice(html.indexOf('id="statusPanel"'),
                                 html.indexOf('id="actionsPanel"'));
   if (!ui.includes('id="hCpu"') ||
+      !ui.includes('id="hCpuMhz"') ||
       !ui.includes('id="hWifi"') ||
       !ui.includes('id="hSsid"') ||
       !ui.includes('id="hAp"') ||
@@ -903,10 +904,13 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !network.includes('cpu0Busy') ||
       !network.includes('cpu1Busy') ||
       !network.includes('cpuLoadValid') ||
+      !network.includes('cpuMhz') ||
       !ui.includes('cpuLoad5s') ||
       !ui.includes('cpuLoad1m') ||
       !ui.includes('cpuLoad5m') ||
       !ui.includes('cpuLoadValid') ||
+      !ui.includes('cpuMhz') ||
+      !ui.includes("w.cpuMhz+' MHz'") ||
       !ui.includes('0–2 · 5s 1m 5m') ||
       !network.includes('tempPeakC') ||
       !network.includes('ramTotalBytes') ||
@@ -926,6 +930,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('<strong>PSRAM size</strong>') ||
       !diagHtml.includes('<strong>PSRAM free</strong>') ||
       !diagHtml.includes('<strong>PSRAM largest</strong>') ||
+      !diagHtml.includes('<strong>CPU clock</strong>') ||
       diagHtml.includes('<details') ||
       diagHtml.includes('<summary>Diagnostics</summary>') ||
       !diagHtml.includes('id="currentTime"') ||
@@ -933,6 +938,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       diagHtml.indexOf('id="diagnosticsPanel"') > diagHtml.indexOf('id="logPanel"') ||
       diagHtml.indexOf('id="currentTime"') > diagHtml.indexOf('id="ntpStatus"') ||
       diagHtml.indexOf('id="ntpStatus"') > diagHtml.indexOf('id="hWifi"') ||
+      diagHtml.indexOf('id="hCpu"') > diagHtml.indexOf('id="hCpuMhz"') ||
+      diagHtml.indexOf('id="hCpuMhz"') > diagHtml.indexOf('id="hTemp"') ||
       diagHtml.indexOf('id="hRamF"') > diagHtml.indexOf('id="hHeapMin"') ||
       diagHtml.indexOf('id="hHeapMin"') > diagHtml.indexOf('id="hHeapLargest"') ||
       diagHtml.indexOf('id="hHeapLargest"') > diagHtml.indexOf('id="hPsramT"') ||

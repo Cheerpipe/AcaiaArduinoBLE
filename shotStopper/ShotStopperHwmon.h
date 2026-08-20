@@ -26,6 +26,7 @@ struct HwmonSnapshot {
   float cpu0Busy = 0.0f;
   float cpu1Busy = 0.0f;
   bool cpuLoadValid = false;
+  uint32_t cpuMhz = 0;
   float tempC = 0.0f;
   float tempPeakC = 0.0f;
   bool tempValid = false;
@@ -65,6 +66,7 @@ class Hwmon {
     sampleCpuLoad_(out, intervalMs);
 
 #ifndef ARDUINO
+    out.cpuMhz = 80U;
     out.tempValid = true;
     out.tempC = 42.0f;
     if (!tempPeakValid_ || out.tempC > tempPeakC_) {
@@ -76,6 +78,7 @@ class Hwmon {
     out.ramFreeBytes = 200000U;
     out.ramUsedBytes = out.ramTotalBytes - out.ramFreeBytes;
 #else
+    out.cpuMhz = getCpuFrequencyMhz();
     const HeapCapSnapshot heap = sampleHeapCaps();
     out.ramFreeBytes = heap.internalFree;
     out.ramTotalBytes = heap.internalTotal;

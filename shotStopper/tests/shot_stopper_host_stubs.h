@@ -91,11 +91,17 @@ inline void ledcWriteTone(uint8_t pin, double freq) {
 }
 
 inline bool hostCpuFrequencySetSucceeds = true;
+inline uint32_t hostCpuFrequencyMhz = 80;
 
 inline bool setCpuFrequencyMhz(uint32_t mhz) {
-  (void)mhz;
-  return hostCpuFrequencySetSucceeds;
+  if (!hostCpuFrequencySetSucceeds) {
+    return false;
+  }
+  hostCpuFrequencyMhz = mhz;
+  return true;
 }
+
+inline uint32_t getCpuFrequencyMhz() { return hostCpuFrequencyMhz; }
 
 inline void vTaskDelay(TickType_t ticks) { (void)ticks; }
 inline void portENTER_CRITICAL(portMUX_TYPE *mux) { (void)mux; }
