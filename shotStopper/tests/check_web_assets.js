@@ -888,6 +888,9 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes('function updH(') ||
       !ui.includes('updH(s.health,s.safety)') ||
       !ui.includes('function applyDiagnosticStatus(') ||
+      !ui.includes('loopIntervalGapMs') ||
+      !ui.includes("loop gap '+s.health.loopIntervalGapMs") ||
+      !ui.includes("(max '+s.health.loopMaxGapMs") ||
       !ui.includes('h.uptimeMs') ||
       !ui.includes('h.minimumFreeHeapBytes') ||
       !ui.includes('h.largestFreeHeapBlockBytes') ||
@@ -1540,7 +1543,7 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'psramSizeBytes', 'psramFreeBytes', 'psramLargestFreeBlockBytes',
     'bleHostAllocPsram', 'bleHostAllocFallback',
     'resetReasonCode', 'packetGaps', 'rejectedPackets', 'reconnects',
-    'eventsDropped', 'lastCommand'
+    'eventsDropped', 'lastCommand', 'loopIntervalGapMs', 'loopMaxGapMs'
   ]) {
     if (!diagBody.includes(field)) {
       throw new Error('status/diagnostic missing required field: ' + field);

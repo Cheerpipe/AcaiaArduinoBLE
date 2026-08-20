@@ -129,7 +129,7 @@ persist.
 | Command | Parameters | Effect |
 | --- | --- | --- |
 | `LOG_DUMP` | none | Prints the RAM debug ring (oldest first), one event at a time. Deferred while a cycle is active or CN9 is closed. Says so if empty or retain is none |
-| `HEALTH` | none | Heap, PSRAM, BLE host alloc counters, loop gap, task stacks, CPU load, temperature, alert latches |
+| `HEALTH` | none | Heap, PSRAM, BLE host alloc counters, loop gap (interval + max), task stacks, CPU load, temperature, alert latches |
 | `SCALE_STATUS` | none | BLE scale link, preferred MAC/name, weight freshness |
 | `NTP_STATUS` | none | Wall clock / NTP state. Notes if STA is down |
 | `BLE_COMPAT_ENABLE` | none | Enables the ShotStopper Companion GATT profile on the next boot; restart required |

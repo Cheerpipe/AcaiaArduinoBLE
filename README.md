@@ -366,7 +366,7 @@ shot history. Follow the timings and examples in
 - Control source (physical vs web), maintenance lease, last command result.
 - Scale link: BLE availability, protocol, stream/control state, observed vs
   accepted weight, packet gaps, rejected packets, reconnects, disconnect reason.
-- Loop health: max loop gap, free/min heap, dropped debug events.
+- Loop health: recent loop gap (~5 s window) and lifetime max, free/min heap, dropped debug events.
 - Hardware monitor: CPU usage, chip temperature (and peak), RAM total/used/free,
   uptime, and last ESP reset reason.
 - NTP/time sync state and configured timezone.

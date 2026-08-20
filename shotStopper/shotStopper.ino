@@ -592,6 +592,7 @@ uint32_t settingsPersistResultStorageRevision = 0;
 #endif
 uint32_t lastLoopAtMs = 0;
 uint32_t loopMaxGapMs = 0;
+uint32_t loopIntervalGapMs = 0;
 uint32_t healthIntervalMaxGapMs = 0;
 uint32_t loopStackMinWords = 0;
 uint32_t healthTelemetryAtMs = 0;
@@ -6253,6 +6254,9 @@ void publishControlStatus() {
   next.scaleReconnects = scaleLink.reconnects;
   next.scaleLastDisconnectReason = scaleLink.lastDisconnectReason;
   next.uptimeMs = elapsedMs(bootStartedAtMs);
+  next.loopIntervalGapMs =
+      healthIntervalMaxGapMs > loopIntervalGapMs ? healthIntervalMaxGapMs
+                                                 : loopIntervalGapMs;
   next.loopMaxGapMs = loopMaxGapMs;
   next.loopStackMinWords = loopStackMinWords;
   next.scaleStackMinWords = scaleWorkerStackMinWords;
@@ -6498,7 +6502,9 @@ void serialCliPrintLiveHealth() {
   dump.bleHostAllocPsramCount = bleHostAllocPsramCount;
   dump.bleHostAllocFallbackCount = bleHostAllocFallbackCount;
   dump.loopMaxGapMs = loopMaxGapMs;
-  dump.healthIntervalMaxGapMs = healthIntervalMaxGapMs;
+  dump.healthIntervalMaxGapMs =
+      healthIntervalMaxGapMs > loopIntervalGapMs ? healthIntervalMaxGapMs
+                                                 : loopIntervalGapMs;
   dump.loopStackMinWords = loopStackMinWords;
   dump.scaleWorkerStackMinWords = scaleWorkerStackMinWords;
 #ifndef SHOT_STOPPER_HOST_TEST
@@ -7335,6 +7341,7 @@ void loop() {
     hwmonSnapshot = hwmon.sample(intervalMs > 0U ? intervalMs
                                                  : HEALTH_TELEMETRY_INTERVAL_MS);
     serviceHealthThresholdAlerts(healthIntervalMaxGapMs);
+    loopIntervalGapMs = healthIntervalMaxGapMs;
     healthIntervalMaxGapMs = 0;
   }
   // Relay and paddle control never wait for BLE. The worker owns every scale,

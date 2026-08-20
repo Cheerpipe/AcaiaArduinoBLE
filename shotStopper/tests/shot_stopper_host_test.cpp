@@ -183,6 +183,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   largestFreeHeapBlockBytes = 0;
   loopStackMinWords = 0;
   loopMaxGapMs = 0;
+  loopIntervalGapMs = 0;
   healthIntervalMaxGapMs = 0;
   healthHeapAlertLatched = false;
   healthStackAlertLatched = false;
@@ -5994,6 +5995,7 @@ void sc15_status_printers_use_dump_views() {
   SerialCliHealthDump health;
   health.freeHeapBytes = 80000;
   health.loopMaxGapMs = 12;
+  health.healthIntervalMaxGapMs = 5;
   health.networkStackMinWords = 400;
   health.cpuLoadValid = true;
   health.cpuMhz = 80;
@@ -6009,6 +6011,8 @@ void sc15_status_printers_use_dump_views() {
   serialCliPrintHealth(health);
   CHECK(serialTxContains("HEALTH"));
   CHECK(serialTxContains("heapFree=80000"));
+  CHECK(serialTxContains("loopMaxGapMs=12"));
+  CHECK(serialTxContains("loopIntervalGapMs=5"));
   CHECK(serialTxContains("psramSize=0"));
   CHECK(serialTxContains("psramFree=0"));
   CHECK(serialTxContains("psramLargest=0"));

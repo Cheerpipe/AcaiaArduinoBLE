@@ -2125,6 +2125,10 @@ struct ControlStatusSnapshot {
   uint32_t scaleReconnects = 0;
   uint8_t scaleLastDisconnectReason = 0;
   uint32_t uptimeMs = 0;
+  // Recent loop gap: max over the last completed ~5 s health window (and any
+  // larger gap already seen in the in-progress window). Lifetime max is
+  // loopMaxGapMs and never decreases until reboot.
+  uint32_t loopIntervalGapMs = 0;
   uint32_t loopMaxGapMs = 0;
   uint32_t loopStackMinWords = 0;
   uint32_t scaleStackMinWords = 0;

@@ -3722,7 +3722,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"nextRetryInMs\":%lu,\"activeServer\":\"%s\"},"
         "\"maintenance\":{\"active\":%s,\"leaseId\":%lu,"
         "\"persistPending\":%s,\"persistFailed\":%s},"
-        "\"health\":{\"uptimeMs\":%lu,\"loopMaxGapMs\":%lu,"
+        "\"health\":{\"uptimeMs\":%lu,\"loopIntervalGapMs\":%lu,"
+        "\"loopMaxGapMs\":%lu,"
         "\"freeHeapBytes\":%lu,\"minimumFreeHeapBytes\":%lu,"
         "\"largestFreeHeapBlockBytes\":%lu,"
         "\"psramSizeBytes\":%lu,\"psramFreeBytes\":%lu,"
@@ -3755,6 +3756,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.configPersistPending ? "true" : "false",
         control.configPersistFailed ? "true" : "false",
         static_cast<unsigned long>(control.uptimeMs),
+        static_cast<unsigned long>(control.loopIntervalGapMs),
         static_cast<unsigned long>(control.loopMaxGapMs),
         static_cast<unsigned long>(control.freeHeapBytes),
         static_cast<unsigned long>(control.minimumFreeHeapBytes),
