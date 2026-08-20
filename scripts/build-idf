@@ -68,11 +68,13 @@ SHOT_STOPPER_EXTRA_FLAGS="$(ss_get flags)"
 mkdir -p "$IDF_BUILD_DIR"
 # Spike sdkconfig / CMake cache predates Arduino autostart and the firmware
 # project name. Reuse would keep ALLOW_BSS but skip AUTOSTART and g_probe checks.
-# Also rebuild when Shot Stopper Kconfig keys are missing from an older tree.
+# Also rebuild when Shot Stopper Kconfig keys are missing from an older tree, or
+# when IPv6 was disabled (breaks arduino-esp32 → esp-modbus).
 if [[ -f "$IDF_BUILD_DIR/shotstopper_idf_spike.elf" ]] ||
    { [[ -f "$IDF_BUILD_DIR/CMakeCache.txt" ]] && grep -q 'shotstopper_idf_spike' "$IDF_BUILD_DIR/CMakeCache.txt"; } ||
    { [[ -f "$IDF_SDKCONFIG" ]] && ! grep -q '^CONFIG_AUTOSTART_ARDUINO=y$' "$IDF_SDKCONFIG"; } ||
-   { [[ -f "$IDF_SDKCONFIG" ]] && ! grep -q '^CONFIG_SHOT_STOPPER_ENABLE_BUZZER=' "$IDF_SDKCONFIG"; }; then
+   { [[ -f "$IDF_SDKCONFIG" ]] && ! grep -q '^CONFIG_SHOT_STOPPER_ENABLE_BUZZER=' "$IDF_SDKCONFIG"; } ||
+   { [[ -f "$IDF_SDKCONFIG" ]] && ! grep -q '^CONFIG_LWIP_IPV6=y$' "$IDF_SDKCONFIG"; }; then
   echo "Limpiando árbol de build IDF obsoleto"
   rm -rf "$IDF_BUILD_DIR"
   mkdir -p "$IDF_BUILD_DIR"

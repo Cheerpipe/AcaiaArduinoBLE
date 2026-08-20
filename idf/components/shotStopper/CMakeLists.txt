@@ -26,6 +26,9 @@ idf_component_register(
     esp_hw_support
     heap
     soc
+    # WiFiGeneric.h includes this even when CONFIG_ARDUINO_SELECTIVE_WiFiProv
+    # is unset (selective compilation). main used to get it via auto-REQUIRES.
+    espressif__network_provisioning
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-missing-field-initializers)
