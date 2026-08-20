@@ -360,6 +360,8 @@ class ShotStopperNetwork {
   static bool requireJsonContentType(httpd_req_t *request);
   bool lockWorkBuf();
   void unlockWorkBuf();
+  void unlockJsonBody();
+  esp_err_t lockJsonBody(httpd_req_t *request, const char *invalidMessage);
   esp_err_t workBufBusy(httpd_req_t *request);
   bool requireActiveWebUiClient(httpd_req_t *request);
   bool webUiOverrideAllowed(httpd_req_t *request);

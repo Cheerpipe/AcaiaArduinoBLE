@@ -1196,6 +1196,20 @@ void r05_regression_uses_last_ten_valid_samples() {
       (session.config.minRecoveryWeightG - session.config.weightOffsetG) /
       2.0f;
   CHECK(fabsf(shot.expectedEndS - expectedSlowEndS) < 0.001f);
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  startCycle();
+  resetShotTrajectory(session.startedAtMs);
+  session.receivedFreshWeightInCycle = false;
+  for (size_t i = 1; i <= MAX_SHOT_DATAPOINTS + 8; ++i) {
+    recordWeightSample(static_cast<float>(i) * 0.5f,
+                       shot.startMs + static_cast<uint32_t>(i * 1000));
+  }
+  CHECK(shot.datapoints == MAX_SHOT_DATAPOINTS);
+  CHECK(shot.weight[MAX_SHOT_DATAPOINTS - 1U] ==
+        static_cast<float>(MAX_SHOT_DATAPOINTS + 8U) * 0.5f);
+  CHECK(shot.timeS[0] == static_cast<float>(9));
 }
 
 void r06_hard_timer_opens_cn9_without_control_loop() {

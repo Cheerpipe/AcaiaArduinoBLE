@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ShotStopperPsram.h"
+
 #include <cJSON.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -14,6 +16,9 @@ inline size_t jsonArenaBytesUsed();
 
 namespace detail {
 
+// HTTP JSON parse only. Never use as an NVS/OTA flash I/O buffer: flash writes
+// disable the cache and make PSRAM inaccessible on ESP32-S3.
+SHOT_STOPPER_PSRAM_BSS
 alignas(8) inline uint8_t g_jsonArena[JSON_ARENA_CAPACITY] = {};
 inline size_t g_jsonArenaUsed = 0;
 inline bool g_jsonArenaHooksInstalled = false;

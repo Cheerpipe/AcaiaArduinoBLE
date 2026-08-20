@@ -908,9 +908,10 @@ Classic ESP32 Dev Module and Arduino Nano ESP32 are **not supported**. Both S3
 variants share the same GPIO map; choose `n8r4` or `n16r8` so flash size and
 PSRAM bus (QSPI vs OPI) match the module. The scripts have no default board;
 `--arch` is asked once and then remembered. The
-FQBN enables PSRAM at boot (`BOARD_HAS_PSRAM`); paddle, relay, and safety stay
-on internal SRAM. Using PSRAM for WebUI buffers is staged and must not run on
-the control path.
+FQBN enables PSRAM at boot (`BOARD_HAS_PSRAM`); paddle, relay, BLE, safety,
+NVS/OTA scratch buffers, and FreeRTOS stacks that touch flash (network manager,
+httpd/OTA) stay on internal SRAM. Web UI JSON work buffers and the HTTP parse
+arena live in PSRAM and must not run on the control path.
 Before energizing CN9, verify every pin for the specific board and the active
 polarity of the relay module.
 

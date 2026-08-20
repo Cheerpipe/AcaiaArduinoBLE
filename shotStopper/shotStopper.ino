@@ -55,6 +55,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 #include <new>
 #include <stdlib.h>
 
@@ -216,7 +217,12 @@ constexpr size_t EEPROM_SIZE = 2;
 constexpr size_t WEIGHT_ADDR = 0;
 constexpr size_t OFFSET_ADDR = 1;
 constexpr size_t TREND_POINT_COUNT = WEIGHT_TREND_POINT_COUNT;
-constexpr size_t MAX_SHOT_DATAPOINTS = 1000;
+// Sliding window for brew-by-weight prediction. Only the last
+// WEIGHT_TREND_POINT_COUNT samples are used; keep a small internal-RAM buffer
+// rather than 1000 points (~8 KiB) or a PSRAM array on the hot weight path.
+constexpr size_t MAX_SHOT_DATAPOINTS = 32;
+static_assert(MAX_SHOT_DATAPOINTS >= WEIGHT_TREND_POINT_COUNT,
+              "Shot trajectory must hold the prediction window");
 
 enum class ScaleLinkState : uint8_t {
   DISCONNECTED,
@@ -2345,12 +2351,16 @@ void considerDirectStopSample(float weight, uint32_t receivedAtMs,
 
 bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
                                 uint32_t packetSequence) {
-  if (shot.datapoints >= MAX_SHOT_DATAPOINTS) {
-    serialTrace(LogLevel::WARNING,
-                "Shot trajectory full; ignoring additional samples");
-    return true;
+  size_t index;
+  if (shot.datapoints < MAX_SHOT_DATAPOINTS) {
+    index = shot.datapoints++;
+  } else {
+    memmove(&shot.timeS[0], &shot.timeS[1],
+            (MAX_SHOT_DATAPOINTS - 1U) * sizeof(float));
+    memmove(&shot.weight[0], &shot.weight[1],
+            (MAX_SHOT_DATAPOINTS - 1U) * sizeof(float));
+    index = MAX_SHOT_DATAPOINTS - 1U;
   }
-  const size_t index = shot.datapoints++;
   shot.timeS[index] =
       static_cast<uint32_t>(receivedAtMs - shot.startMs) / 1000.0f;
   shot.weight[index] = weight;

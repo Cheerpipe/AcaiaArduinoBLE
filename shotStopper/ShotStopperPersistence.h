@@ -281,6 +281,9 @@ inline void finalizePersistedSettings(PersistedSettings &settings) {
 // Dual-slot / save scratch. Kept off the Arduino loopTask stack
 // (default 8 KB): nested load→save would otherwise put multiple copies on the
 // stack and panic in NVS (LoadStoreError).
+// Must stay in internal SRAM: these buffers are the source/destination of
+// Preferences putBytes/getBytes while flash cache is disabled (PSRAM is then
+// inaccessible on ESP32-S3).
 inline PersistedSettings &persistedSettingsScratch(uint8_t index) {
   static PersistedSettings slots[3] = {};
   return slots[index % 3];

@@ -1,6 +1,7 @@
 #include "ShotStopperNetwork.h"
 #include "ShotStopperJsonArena.h"
 #include "ShotStopperOta.h"
+#include "ShotStopperPsram.h"
 #include "ShotStopperSerialCli.h"
 #include "ShotStopperVersion.h"
 #include "ShotStopperWatchdog.h"
@@ -40,12 +41,13 @@ struct NetworkWorkBuf {
   DebugEvent logBatch[48];
   ShotLogRecord shotRecords[SHOT_LOG_CAPACITY];
   ControlStatusSnapshot control;
+  // Must match ShotStopperNetwork::REQUEST_BODY_CAPACITY (asserted in begin()).
+  char requestBody[2048];
 };
 
-#if !defined(SHOT_STOPPER_HOST_TEST) && defined(BOARD_HAS_PSRAM)
-#include <esp_attr.h>
-EXT_RAM_BSS_ATTR
-#endif
+// HTTP-only work area in PSRAM. Do not pass these buffers to Preferences /
+// esp_ota_write: flash ops disable the cache and PSRAM becomes inaccessible.
+SHOT_STOPPER_PSRAM_BSS
 static NetworkWorkBuf g_networkWorkBuf;
 
 namespace {
@@ -91,8 +93,12 @@ constexpr const char *STATUS_UNAVAILABLE = "503 Service Unavailable";
 // (settingsCopy, resetPersistedSettingsToFactory, savePersistedSettings) add
 // further frames.  7 168 was too small and triggered a stack-canary watchpoint
 // crash on FACTORY_RESET via the serial CLI.  12 288 gives comfortable headroom.
+// Keep this stack in internal RAM: the task writes NVS (flash cache disabled).
 constexpr uint32_t NETWORK_MANAGER_TASK_STACK_SIZE = 12288;
-constexpr uint32_t HTTP_SERVER_TASK_STACK_SIZE = 10240;
+// POST JSON bodies live in NetworkWorkBuf (PSRAM), so the httpd worker no
+// longer needs a 2 KiB request-body frame on top of headers and send buffers.
+// Stack stays internal: OTA flash writes run on this task.
+constexpr uint32_t HTTP_SERVER_TASK_STACK_SIZE = 8192;
 
 const char *scaleDisconnectReasonName(uint8_t reason) {
   // Mirrors AcaiaDisconnectReason without coupling the network task to the
@@ -676,6 +682,8 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
     return false;
   }
   memset(&g_networkWorkBuf, 0, sizeof(g_networkWorkBuf));
+  static_assert(REQUEST_BODY_CAPACITY == sizeof(g_networkWorkBuf.requestBody),
+                "NetworkWorkBuf::requestBody must match REQUEST_BODY_CAPACITY");
   workBuf_ = &g_networkWorkBuf;
   g_work = workBuf_;
   instance_ = this;
@@ -683,6 +691,8 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
   ntpConfigRevision_ = settings_.runtime.revision;
   g_wallClock.reset();
   // Pin beside the Wi-Fi/LwIP stacks on PRO_CPU (core 0).
+  // Stack must stay in internal RAM: this task calls NVS/Preferences (flash
+  // write disables the cache, which makes a PSRAM stack inaccessible).
   if (xTaskCreatePinnedToCore(taskEntry, "network_manager",
                               NETWORK_MANAGER_TASK_STACK_SIZE, this,
                               tskIDLE_PRIORITY + 1, &taskHandle_,
@@ -709,6 +719,26 @@ bool ShotStopperNetwork::lockWorkBuf() {
 
 void ShotStopperNetwork::unlockWorkBuf() {
   xSemaphoreGive(statusResponseMux_);
+}
+
+void ShotStopperNetwork::unlockJsonBody() {
+  if (workBuf_ != nullptr) {
+    memset(workBuf_->requestBody, 0, sizeof(workBuf_->requestBody));
+  }
+  unlockWorkBuf();
+}
+
+esp_err_t ShotStopperNetwork::lockJsonBody(httpd_req_t *request,
+                                           const char *invalidMessage) {
+  if (!lockWorkBuf()) {
+    return workBufBusy(request);
+  }
+  if (!readJsonBody(request, workBuf_->requestBody)) {
+    unlockJsonBody();
+    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
+                     invalidMessage);
+  }
+  return ESP_OK;
 }
 
 esp_err_t ShotStopperNetwork::workBufBusy(httpd_req_t *request) {
@@ -2653,6 +2683,9 @@ bool ShotStopperNetwork::startHttpServer() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.task_priority = tskIDLE_PRIORITY + 1;
   config.stack_size = HTTP_SERVER_TASK_STACK_SIZE;
+  // Keep the httpd task stack in internal RAM (default task_caps). OTA upload
+  // erases/writes flash on this task; a PSRAM stack would fault while the
+  // cache is disabled.
   // Web UI serializes API traffic (DEVICE_MAX_INFLIGHT, default 1). Reserve
   // headroom for the HTML/JS/CSS boot burst plus LRU/TCP close. ESP-IDF uses
   // (max_open_sockets + 3) LWIP sockets total.
@@ -2832,12 +2865,12 @@ esp_err_t ShotStopperNetwork::claimHandler(httpd_req_t *request) {
 esp_err_t ShotStopperNetwork::unlockHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   if (!self.requireActiveWebUiClient(request)) return ESP_OK;
-  char body[REQUEST_BODY_CAPACITY] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "An explicit confirmation is required.");
+  const esp_err_t bodyStatus = self.lockJsonBody(
+      request, "An explicit confirmation is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
   }
-  cJSON *root = parseJsonInArena(body);
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   char confirmation[32] = {};
   static const char *const fields[] = {"confirm"};
   const bool confirmed = root != nullptr &&
@@ -2846,7 +2879,7 @@ esp_err_t ShotStopperNetwork::unlockHandler(httpd_req_t *request) {
                                     sizeof(confirmation), false) &&
                          strcmp(confirmation, "UNSAFE_WEBUI_OVERRIDE") == 0;
   if (root != nullptr) cJSON_Delete(root);
-  memset(body, 0, sizeof(body));
+  self.unlockJsonBody();
   memset(confirmation, 0, sizeof(confirmation));
   if (!confirmed) {
     return sendError(request, STATUS_UNPROCESSABLE, "UNLOCK_NOT_CONFIRMED",
@@ -3919,13 +3952,13 @@ esp_err_t ShotStopperNetwork::shotsClearHandler(httpd_req_t *request) {
                      "Stop the cycle, switch the physical paddle OFF, and wait for Ready before clearing shot history.");
   }
 
-  char body[REQUEST_BODY_CAPACITY] = {};
-  char confirmation[32] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "An explicit confirmation is required.");
+  const esp_err_t bodyStatus = self.lockJsonBody(
+      request, "An explicit confirmation is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
   }
-  cJSON *root = parseJsonInArena(body);
+  char confirmation[32] = {};
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   static const char *const fields[] = {"confirm"};
   const bool parsed =
       root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
@@ -3934,7 +3967,7 @@ esp_err_t ShotStopperNetwork::shotsClearHandler(httpd_req_t *request) {
   if (root != nullptr) {
     cJSON_Delete(root);
   }
-  memset(body, 0, sizeof(body));
+  self.unlockJsonBody();
   memset(confirmation, 0, sizeof(confirmation));
   if (!parsed) {
     return sendError(request, STATUS_UNPROCESSABLE,
@@ -3960,13 +3993,13 @@ esp_err_t ShotStopperNetwork::lastShotClearHandler(httpd_req_t *request) {
                      "Stop the cycle, switch the physical paddle OFF, and wait for Ready before clearing the last shot.");
   }
 
-  char body[REQUEST_BODY_CAPACITY] = {};
-  char confirmation[32] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "An explicit confirmation is required.");
+  const esp_err_t bodyStatus = self.lockJsonBody(
+      request, "An explicit confirmation is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
   }
-  cJSON *root = parseJsonInArena(body);
+  char confirmation[32] = {};
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   static const char *const fields[] = {"confirm"};
   const bool parsed =
       root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
@@ -3975,7 +4008,7 @@ esp_err_t ShotStopperNetwork::lastShotClearHandler(httpd_req_t *request) {
   if (root != nullptr) {
     cJSON_Delete(root);
   }
-  memset(body, 0, sizeof(body));
+  self.unlockJsonBody();
   memset(confirmation, 0, sizeof(confirmation));
   if (!parsed) {
     return sendError(request, STATUS_UNPROCESSABLE,
@@ -4001,12 +4034,12 @@ esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
                      "Stop the cycle, switch the physical paddle OFF, and wait for Ready before deleting shot records.");
   }
 
-  char body[REQUEST_BODY_CAPACITY] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "A bounded JSON request is required.");
+  const esp_err_t bodyStatus = self.lockJsonBody(
+      request, "A bounded JSON request is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
   }
-  cJSON *root = parseJsonInArena(body);
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   uint32_t shotId = 0;
   static const char *const fields[] = {"id"};
   const bool parsed = root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
@@ -4014,7 +4047,7 @@ esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
   if (root != nullptr) {
     cJSON_Delete(root);
   }
-  memset(body, 0, sizeof(body));
+  self.unlockJsonBody();
   if (!parsed) {
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
                      "A non-zero shot id is required.");
@@ -4050,12 +4083,12 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Configuration is locked while a cycle is active.");
   }
-  char body[REQUEST_BODY_CAPACITY] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "A bounded JSON request is required.");
+  const esp_err_t bodyStatus = self.lockJsonBody(
+      request, "A bounded JSON request is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
   }
-  cJSON *root = parseJsonInArena(body);
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   // Patch: seed live effective config; only present keys overwrite.
   RuntimeConfig candidate = status.config;
   bool brewByWeightPresent = false;
@@ -4325,6 +4358,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
     baseRevisionPresent = jsonFieldPresent(root, "baseRevision");
     cJSON_Delete(root);
   }
+  self.unlockJsonBody();
   if (parseError != nullptr) {
     memset(customNtp, 0, sizeof(customNtp));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
@@ -4397,12 +4431,12 @@ esp_err_t ShotStopperNetwork::preferredScaleSelectHandler(httpd_req_t *request) 
                      "is active.");
   }
 
-  char body[REQUEST_BODY_CAPACITY] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "A bounded JSON request is required.");
+  const esp_err_t bodyStatus = self.lockJsonBody(
+      request, "A bounded JSON request is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
   }
-  cJSON *root = parseJsonInArena(body);
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   char mac[PREFERRED_SCALE_MAC_CAPACITY] = {};
   char name[PREFERRED_SCALE_NAME_CAPACITY] = {};
   const char *parseError = nullptr;
@@ -4424,6 +4458,7 @@ esp_err_t ShotStopperNetwork::preferredScaleSelectHandler(httpd_req_t *request) 
   if (root != nullptr) {
     cJSON_Delete(root);
   }
+  self.unlockJsonBody();
   if (parseError != nullptr) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST", parseError);
   }
@@ -4451,12 +4486,12 @@ esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
                      "Presets are locked while a cycle is active.");
   }
 
-  char body[REQUEST_BODY_CAPACITY] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "A bounded JSON request is required.");
+  const esp_err_t bodyStatus = self.lockJsonBody(
+      request, "A bounded JSON request is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
   }
-  cJSON *root = parseJsonInArena(body);
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   char action[24] = {};
   uint8_t presetId = 0;
   char presetName[SHOT_PRESET_NAME_CAPACITY] = {};
@@ -4556,7 +4591,7 @@ esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
   if (root != nullptr) {
     cJSON_Delete(root);
   }
-  memset(body, 0, sizeof(body));
+  self.unlockJsonBody();
   if (parseError != nullptr) {
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD", parseError);
   }
@@ -4580,18 +4615,19 @@ esp_err_t ShotStopperNetwork::resetCalibrationHandler(httpd_req_t *request) {
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Calibration is locked while a cycle is active.");
   }
-  char body[REQUEST_BODY_CAPACITY] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "An empty JSON object is required.");
+  const esp_err_t bodyStatus =
+      self.lockJsonBody(request, "An empty JSON object is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
   }
-  cJSON *root = parseJsonInArena(body);
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   static const char *const noFields[] = {nullptr};
   const bool parsed = root != nullptr &&
                       jsonHasOnlyUniqueFields(root, noFields, 0);
   if (root != nullptr) {
     cJSON_Delete(root);
   }
+  self.unlockJsonBody();
   if (!parsed) {
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_REQUEST",
                      "The calibration reset request must be an empty object.");
@@ -4616,18 +4652,19 @@ esp_err_t ShotStopperNetwork::resetGuardSamplesHandler(httpd_req_t *request) {
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Guard samples are locked while a cycle is active.");
   }
-  char body[REQUEST_BODY_CAPACITY] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "An empty JSON object is required.");
+  const esp_err_t bodyStatus =
+      self.lockJsonBody(request, "An empty JSON object is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
   }
-  cJSON *root = parseJsonInArena(body);
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   static const char *const noFields[] = {nullptr};
   const bool parsed = root != nullptr &&
                       jsonHasOnlyUniqueFields(root, noFields, 0);
   if (root != nullptr) {
     cJSON_Delete(root);
   }
+  self.unlockJsonBody();
   if (!parsed) {
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_REQUEST",
                      "The guard samples reset request must be an empty object.");
@@ -4645,12 +4682,12 @@ esp_err_t ShotStopperNetwork::resetGuardSamplesHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  char body[REQUEST_BODY_CAPACITY] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "A JSON body is required.");
+  const esp_err_t bodyStatus =
+      self.lockJsonBody(request, "A JSON body is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
   }
-  cJSON *root = parseJsonInArena(body);
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   bool on = false;
   static const char *const fields[] = {"on"};
   const bool parsed = root != nullptr &&
@@ -4659,6 +4696,7 @@ esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
   if (root != nullptr) {
     cJSON_Delete(root);
   }
+  self.unlockJsonBody();
   if (!parsed) {
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
                      "The on field must be boolean.");
@@ -4758,13 +4796,13 @@ esp_err_t ShotStopperNetwork::factoryResetHandler(httpd_req_t *request) {
                      "Stop the cycle, switch the physical paddle OFF, and wait for Ready before restoring factory settings.");
   }
 
-  char body[REQUEST_BODY_CAPACITY] = {};
-  char confirmation[32] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "An explicit factory-reset confirmation is required.");
+  const esp_err_t bodyStatus = self.lockJsonBody(
+      request, "An explicit factory-reset confirmation is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
   }
-  cJSON *root = parseJsonInArena(body);
+  char confirmation[32] = {};
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   static const char *const fields[] = {"confirm"};
   const bool parsed =
       root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
@@ -4773,7 +4811,7 @@ esp_err_t ShotStopperNetwork::factoryResetHandler(httpd_req_t *request) {
   if (root != nullptr) {
     cJSON_Delete(root);
   }
-  memset(body, 0, sizeof(body));
+  self.unlockJsonBody();
   memset(confirmation, 0, sizeof(confirmation));
   if (!parsed) {
     return sendError(request, STATUS_UNPROCESSABLE,
@@ -4797,12 +4835,12 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  char body[REQUEST_BODY_CAPACITY] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "A JSON request is required.");
+  const esp_err_t bodyStatus =
+      self.lockJsonBody(request, "A JSON request is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
   }
-  cJSON *root = parseJsonInArena(body);
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   char action[16] = {};
   WebCommand command;
   command.requestId = self.allocateRequestId();
@@ -4833,7 +4871,7 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
         if (root != nullptr) {
           cJSON_Delete(root);
         }
-        memset(body, 0, sizeof(body));
+        self.unlockJsonBody();
         return self.sendAccepted(request, command.requestId,
                                  "\"state\":\"QUEUED\"");
       }
@@ -4843,7 +4881,7 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
       if (root != nullptr) {
         cJSON_Delete(root);
       }
-      memset(body, 0, sizeof(body));
+      self.unlockJsonBody();
       return sendError(request, STATUS_CONFLICT,
                        "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                        "Network settings are locked while a cycle is active.");
@@ -4859,7 +4897,7 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
       if (root != nullptr) {
         cJSON_Delete(root);
       }
-      memset(body, 0, sizeof(body));
+      self.unlockJsonBody();
       return sendError(request, STATUS_CONFLICT,
                        "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                        "Network settings are locked while a cycle is active.");
@@ -4953,7 +4991,7 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
   if (root != nullptr) {
     cJSON_Delete(root);
   }
-  memset(body, 0, sizeof(body));
+  self.unlockJsonBody();
   if (!parsed) {
     memset(command.password, 0, sizeof(command.password));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_NETWORK",
@@ -5050,16 +5088,16 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "The password cannot be changed while a cycle is active.");
   }
-  char body[REQUEST_BODY_CAPACITY] = {};
+  const esp_err_t bodyStatus =
+      self.lockJsonBody(request, "A JSON request is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
+  }
   WebCommand command;
   command.type = WebCommandType::CHANGE_AP_PASSWORD;
   command.requestId = self.allocateRequestId();
   command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "A JSON request is required.");
-  }
-  cJSON *root = parseJsonInArena(body);
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   static const char *const fields[] = {"newPassword"};
   const bool parsed =
       root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
@@ -5068,7 +5106,7 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
   if (root != nullptr) {
     cJSON_Delete(root);
   }
-  memset(body, 0, sizeof(body));
+  self.unlockJsonBody();
   if (!parsed) {
     memset(command.password, 0, sizeof(command.password));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_AP_PASSWORD",
@@ -5095,12 +5133,12 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::bleCompatHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  char body[REQUEST_BODY_CAPACITY] = {};
-  if (!readJsonBody(request, body)) {
-    return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
-                     "A JSON request is required.");
+  const esp_err_t bodyStatus =
+      self.lockJsonBody(request, "A JSON request is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
   }
-  cJSON *root = parseJsonInArena(body);
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   bool enabled = false;
   static const char *const fields[] = {"enabled"};
   const bool parsed =
@@ -5109,7 +5147,7 @@ esp_err_t ShotStopperNetwork::bleCompatHandler(httpd_req_t *request) {
   if (root != nullptr) {
     cJSON_Delete(root);
   }
-  memset(body, 0, sizeof(body));
+  self.unlockJsonBody();
   if (!parsed) {
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_BLE_CONFIG",
                      "enabled must be a boolean.");

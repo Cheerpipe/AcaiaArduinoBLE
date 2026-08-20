@@ -652,6 +652,8 @@ inline bool shotLogBlobLengthMatches(const ShotLogStore &store, size_t length) {
 // Full-store scratch for load/migrate/compact. Kept off the Arduino loopTask
 // stack (default 8 KB): sizeof(ShotLogStore) is 5784 and nested load→save
 // would otherwise trip the stack canary during boot.
+// Must stay in internal SRAM: load/migrate call Preferences getBytes into this
+// buffer (and compact runs beside save) while flash cache may be disabled.
 inline ShotLogStore &shotLogScratchStore() {
   static ShotLogStore scratch = {};
   return scratch;
