@@ -1,6 +1,6 @@
 #include "ShotStopperNetwork.h"
+#include "ShotStopperJsonArena.h"
 #include "ShotStopperOta.h"
-#include "ShotStopperPsram.h"
 #include "ShotStopperSerialCli.h"
 #include "ShotStopperVersion.h"
 #include "ShotStopperWatchdog.h"
@@ -42,9 +42,28 @@ struct NetworkWorkBuf {
   ControlStatusSnapshot control;
 };
 
+#if !defined(SHOT_STOPPER_HOST_TEST) && defined(BOARD_HAS_PSRAM)
+#include <esp_attr.h>
+EXT_RAM_BSS_ATTR
+#endif
+static NetworkWorkBuf g_networkWorkBuf;
+
 namespace {
 
 NetworkWorkBuf *g_work = nullptr;
+
+void formatWifiMac(const uint8_t mac[6], char *output, size_t outputCapacity) {
+  if (mac == nullptr || output == nullptr || outputCapacity < 18) {
+    return;
+  }
+  snprintf(output, outputCapacity, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0],
+           mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+cJSON *parseJsonInArena(const char *body) {
+  resetJsonArena();
+  return cJSON_Parse(body);
+}
 
 constexpr const char *AP_SSID = "MicraShotStopperAP";
 constexpr const char *AP_IP = "192.168.4.1";
@@ -656,13 +675,11 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
     acceptedCommandQueue_ = nullptr;
     return false;
   }
-  workBuf_ = static_cast<NetworkWorkBuf *>(
-      allocExternalOrInternal(sizeof(NetworkWorkBuf)));
-  if (workBuf_ != nullptr) {
-    memset(workBuf_, 0, sizeof(*workBuf_));
-  }
+  memset(&g_networkWorkBuf, 0, sizeof(g_networkWorkBuf));
+  workBuf_ = &g_networkWorkBuf;
   g_work = workBuf_;
   instance_ = this;
+  initJsonArenaHooks();
   ntpConfigRevision_ = settings_.runtime.revision;
   g_wallClock.reset();
   // Pin beside the Wi-Fi/LwIP stacks on PRO_CPU (core 0).
@@ -672,7 +689,6 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
                               0) != pdPASS) {
     instance_ = nullptr;
     g_work = nullptr;
-    heapCapsFree(workBuf_);
     workBuf_ = nullptr;
     vSemaphoreDelete(statusResponseMux_);
     statusResponseMux_ = nullptr;
@@ -1770,18 +1786,34 @@ void ShotStopperNetwork::finishWifiScan(int16_t resultCount, uint32_t now) {
   }
 
   completed.state = WifiScanState::READY;
-  for (int16_t index = 0;
-       index < resultCount && completed.count < MAX_WIFI_SCAN_RESULTS;
-       ++index) {
-    const String ssid = WiFi.SSID(static_cast<uint8_t>(index));
-    const size_t length = ssid.length();
+  constexpr uint16_t kWifiScanFetchMax = 32;
+  wifi_ap_record_t apRecords[kWifiScanFetchMax];
+  uint16_t apCount = static_cast<uint16_t>(resultCount);
+  if (apCount > kWifiScanFetchMax) {
+    apCount = kWifiScanFetchMax;
+  }
+  if (esp_wifi_scan_get_ap_records(&apCount, apRecords) != ESP_OK) {
+    completed.state = WifiScanState::FAILED;
+    WiFi.scanDelete();
+    portENTER_CRITICAL(&dataMux_);
+    scan_ = completed;
+    portEXIT_CRITICAL(&dataMux_);
+    log(DebugCategory::NETWORK, DebugCode::WIFI_SCAN_ERROR, -2);
+    return;
+  }
+  for (uint16_t index = 0;
+       index < apCount && completed.count < MAX_WIFI_SCAN_RESULTS; ++index) {
+    const wifi_ap_record_t &ap = apRecords[index];
+    const size_t length =
+        strnlen(reinterpret_cast<const char *>(ap.ssid), sizeof(ap.ssid));
     if (length == 0 || length >= WIFI_SSID_CAPACITY) {
       continue;
     }
-    const int32_t rssi = WiFi.RSSI(static_cast<uint8_t>(index));
+    const int32_t rssi = ap.rssi;
     size_t duplicate = completed.count;
     for (size_t item = 0; item < completed.count; ++item) {
-      if (strcmp(completed.networks[item].ssid, ssid.c_str()) == 0) {
+      if (strcmp(completed.networks[item].ssid,
+                 reinterpret_cast<const char *>(ap.ssid)) == 0) {
         duplicate = item;
         break;
       }
@@ -1789,21 +1821,17 @@ void ShotStopperNetwork::finishWifiScan(int16_t resultCount, uint32_t now) {
     if (duplicate < completed.count) {
       if (rssi > completed.networks[duplicate].rssi) {
         completed.networks[duplicate].rssi = rssi;
-        completed.networks[duplicate].channel =
-            static_cast<uint8_t>(WiFi.channel(static_cast<uint8_t>(index)));
-        completed.networks[duplicate].open =
-            WiFi.encryptionType(static_cast<uint8_t>(index)) == WIFI_AUTH_OPEN;
+        completed.networks[duplicate].channel = ap.primary;
+        completed.networks[duplicate].open = ap.authmode == WIFI_AUTH_OPEN;
       }
       continue;
     }
     WifiScanNetwork &network = completed.networks[completed.count++];
-    memcpy(network.ssid, ssid.c_str(), length);
+    memcpy(network.ssid, ap.ssid, length);
     network.ssid[length] = '\0';
     network.rssi = rssi;
-    network.channel =
-        static_cast<uint8_t>(WiFi.channel(static_cast<uint8_t>(index)));
-    network.open =
-        WiFi.encryptionType(static_cast<uint8_t>(index)) == WIFI_AUTH_OPEN;
+    network.channel = ap.primary;
+    network.open = ap.authmode == WIFI_AUTH_OPEN;
   }
 
   for (size_t outer = 1; outer < completed.count; ++outer) {
@@ -2460,8 +2488,15 @@ void ShotStopperNetwork::refreshExtendedStatus(uint32_t now) {
   const bool staConnected = wifiStatus == WL_CONNECTED;
   const uint8_t wifiMode = static_cast<uint8_t>(WiFi.getMode());
   const uint8_t channel = static_cast<uint8_t>(WiFi.channel());
-  const String staMac = WiFi.macAddress();
-  const String apMac = WiFi.softAPmacAddress();
+  char staMac[18] = {};
+  char apMac[18] = {};
+  uint8_t mac[6] = {};
+  if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
+    formatWifiMac(mac, staMac, sizeof(staMac));
+  }
+  if (esp_wifi_get_mac(WIFI_IF_AP, mac) == ESP_OK) {
+    formatWifiMac(mac, apMac, sizeof(apMac));
+  }
   const bool ntpArm = ntpMayArm(now, staConnected);
   const bool httpActive = server_ != nullptr;
   const bool factoryPassword = passwordIsFactoryDefault(settings_);
@@ -2487,8 +2522,8 @@ void ShotStopperNetwork::refreshExtendedStatus(uint32_t now) {
           : 0;
   memset(status_.staMac, 0, sizeof(status_.staMac));
   memset(status_.apMac, 0, sizeof(status_.apMac));
-  strncpy(status_.staMac, staMac.c_str(), sizeof(status_.staMac) - 1);
-  strncpy(status_.apMac, apMac.c_str(), sizeof(status_.apMac) - 1);
+  strncpy(status_.staMac, staMac, sizeof(status_.staMac) - 1);
+  strncpy(status_.apMac, apMac, sizeof(status_.apMac) - 1);
   memset(status_.ntpActiveServer, 0, sizeof(status_.ntpActiveServer));
   strncpy(status_.ntpActiveServer, timeStatus.activeServer,
           sizeof(status_.ntpActiveServer) - 1);
@@ -2802,7 +2837,7 @@ esp_err_t ShotStopperNetwork::unlockHandler(httpd_req_t *request) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "An explicit confirmation is required.");
   }
-  cJSON *root = cJSON_Parse(body);
+  cJSON *root = parseJsonInArena(body);
   char confirmation[32] = {};
   static const char *const fields[] = {"confirm"};
   const bool confirmed = root != nullptr &&
@@ -3890,7 +3925,7 @@ esp_err_t ShotStopperNetwork::shotsClearHandler(httpd_req_t *request) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "An explicit confirmation is required.");
   }
-  cJSON *root = cJSON_Parse(body);
+  cJSON *root = parseJsonInArena(body);
   static const char *const fields[] = {"confirm"};
   const bool parsed =
       root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
@@ -3931,7 +3966,7 @@ esp_err_t ShotStopperNetwork::lastShotClearHandler(httpd_req_t *request) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "An explicit confirmation is required.");
   }
-  cJSON *root = cJSON_Parse(body);
+  cJSON *root = parseJsonInArena(body);
   static const char *const fields[] = {"confirm"};
   const bool parsed =
       root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
@@ -3971,7 +4006,7 @@ esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "A bounded JSON request is required.");
   }
-  cJSON *root = cJSON_Parse(body);
+  cJSON *root = parseJsonInArena(body);
   uint32_t shotId = 0;
   static const char *const fields[] = {"id"};
   const bool parsed = root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
@@ -4020,7 +4055,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "A bounded JSON request is required.");
   }
-  cJSON *root = cJSON_Parse(body);
+  cJSON *root = parseJsonInArena(body);
   // Patch: seed live effective config; only present keys overwrite.
   RuntimeConfig candidate = status.config;
   bool brewByWeightPresent = false;
@@ -4367,7 +4402,7 @@ esp_err_t ShotStopperNetwork::preferredScaleSelectHandler(httpd_req_t *request) 
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "A bounded JSON request is required.");
   }
-  cJSON *root = cJSON_Parse(body);
+  cJSON *root = parseJsonInArena(body);
   char mac[PREFERRED_SCALE_MAC_CAPACITY] = {};
   char name[PREFERRED_SCALE_NAME_CAPACITY] = {};
   const char *parseError = nullptr;
@@ -4421,7 +4456,7 @@ esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "A bounded JSON request is required.");
   }
-  cJSON *root = cJSON_Parse(body);
+  cJSON *root = parseJsonInArena(body);
   char action[24] = {};
   uint8_t presetId = 0;
   char presetName[SHOT_PRESET_NAME_CAPACITY] = {};
@@ -4550,7 +4585,7 @@ esp_err_t ShotStopperNetwork::resetCalibrationHandler(httpd_req_t *request) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "An empty JSON object is required.");
   }
-  cJSON *root = cJSON_Parse(body);
+  cJSON *root = parseJsonInArena(body);
   static const char *const noFields[] = {nullptr};
   const bool parsed = root != nullptr &&
                       jsonHasOnlyUniqueFields(root, noFields, 0);
@@ -4586,7 +4621,7 @@ esp_err_t ShotStopperNetwork::resetGuardSamplesHandler(httpd_req_t *request) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "An empty JSON object is required.");
   }
-  cJSON *root = cJSON_Parse(body);
+  cJSON *root = parseJsonInArena(body);
   static const char *const noFields[] = {nullptr};
   const bool parsed = root != nullptr &&
                       jsonHasOnlyUniqueFields(root, noFields, 0);
@@ -4615,7 +4650,7 @@ esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "A JSON body is required.");
   }
-  cJSON *root = cJSON_Parse(body);
+  cJSON *root = parseJsonInArena(body);
   bool on = false;
   static const char *const fields[] = {"on"};
   const bool parsed = root != nullptr &&
@@ -4729,7 +4764,7 @@ esp_err_t ShotStopperNetwork::factoryResetHandler(httpd_req_t *request) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "An explicit factory-reset confirmation is required.");
   }
-  cJSON *root = cJSON_Parse(body);
+  cJSON *root = parseJsonInArena(body);
   static const char *const fields[] = {"confirm"};
   const bool parsed =
       root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
@@ -4767,7 +4802,7 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "A JSON request is required.");
   }
-  cJSON *root = cJSON_Parse(body);
+  cJSON *root = parseJsonInArena(body);
   char action[16] = {};
   WebCommand command;
   command.requestId = self.allocateRequestId();
@@ -5024,7 +5059,7 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "A JSON request is required.");
   }
-  cJSON *root = cJSON_Parse(body);
+  cJSON *root = parseJsonInArena(body);
   static const char *const fields[] = {"newPassword"};
   const bool parsed =
       root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
@@ -5065,7 +5100,7 @@ esp_err_t ShotStopperNetwork::bleCompatHandler(httpd_req_t *request) {
     return sendError(request, STATUS_BAD_REQUEST, "INVALID_REQUEST",
                      "A JSON request is required.");
   }
-  cJSON *root = cJSON_Parse(body);
+  cJSON *root = parseJsonInArena(body);
   bool enabled = false;
   static const char *const fields[] = {"enabled"};
   const bool parsed =

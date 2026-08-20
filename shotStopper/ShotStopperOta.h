@@ -161,6 +161,7 @@ class ShotStopperOta {
   OtaImageTag runningTag_ = {};
   const void *runningPartition_ = nullptr;
   const void *targetPartition_ = nullptr;
+  alignas(4) uint8_t chunkBuffer_[4096] = {};
 };
 
 }  // namespace shotstopper

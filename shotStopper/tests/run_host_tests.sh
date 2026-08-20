@@ -83,6 +83,33 @@ echo "Remote CN9 policy: disabled by default"
 ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
   "$ota_image_sanitized"
 
+json_arena_binary=${TMPDIR:-/tmp}/shot_stopper_json_arena_host_test
+json_arena_cflags=""
+for cjson_include in /opt/homebrew/include/cjson /usr/local/include/cjson \
+    /usr/include/cjson; do
+  if [ -f "$cjson_include/cJSON.h" ]; then
+    json_arena_cflags="-I$cjson_include"
+    for cjson_lib in /opt/homebrew/lib /usr/local/lib /usr/lib; do
+      if [ -f "$cjson_lib/libcjson.dylib" ] || [ -f "$cjson_lib/libcjson.so" ] ||
+         [ -f "$cjson_lib/libcjson.a" ]; then
+        json_arena_cflags="$json_arena_cflags -L$cjson_lib -lcjson"
+        break
+      fi
+    done
+    break
+  fi
+done
+if [ -n "$json_arena_cflags" ]; then
+  # shellcheck disable=SC2086
+  "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+    $json_arena_cflags \
+    "$test_dir/json_arena_host_test.cpp" \
+    -o "$json_arena_binary"
+  "$json_arena_binary"
+else
+  echo "libcjson not found: json arena host test skipped" >&2
+fi
+
 for removed_symbol in MOMENTARY REEDSWITCH REED_IN BUTTON_STATE_ARRAY_LENGTH; do
   if grep -n "$removed_symbol" "$firmware_file"; then
     echo "Removed legacy symbol remains in firmware: $removed_symbol" >&2

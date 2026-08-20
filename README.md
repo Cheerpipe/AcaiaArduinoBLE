@@ -1107,10 +1107,12 @@ en silencio lo que falte**: cada parámetro se toma, en este orden, del flag con
 nombre, de su variable de entorno, del archivo `.shotstopper` en la raíz del
 repositorio, o se pregunta en la terminal. En la pregunta, **Enter acepta el
 valor sugerido** entre corchetes: puerto USB detectado (o `/dev/cu.usbmodem2101`),
-arquitectura `n16r8`, velocidad `115200`, host `192.168.4.1`, token `Micra1234`,
+arquitectura `n16r8`, velocidad `115200`, host el último usado (o `192.168.4.1`),
 y los flags extra de desarrollo actuales (`-Werror=deprecated-copy`,
-`REMOTE_CN9`, buzzer activo). Después de una ejecución correcta los valores
-usados quedan guardados, así que la segunda vez basta con `./scripts/bum`.
+`REMOTE_CN9`, buzzer activo). El **token OTA no se guarda ni se sugiere** — hay
+que pasarlo por flag o `SHOTSTOPPER_OTA_TOKEN` en cada actualización. Tras
+resolver los parámetros los demás valores quedan guardados, así que la segunda
+vez basta con `./scripts/bum`.
 
 | Script | Parámetros que necesita | Descripción |
 | --- | --- | --- |
@@ -1139,8 +1141,8 @@ Parámetros con nombre, en forma larga y corta:
 | `-o`, `--output-dir` | `SHOTSTOPPER_OUTPUT_DIR` | Carpeta de reportes (solo `static_report`). |
 | `-h`, `--help` | — | Muestra la ayuda del script. |
 
-El archivo `.shotstopper` se crea con permisos `600` y está en `.gitignore`
-porque guarda el token OTA. Para una terminal sin TTY (CI), define las
+El archivo `.shotstopper` se crea con permisos `600` y está en `.gitignore`.
+No persiste el token OTA. Para una terminal sin TTY (CI), define las
 variables de entorno o pasa los flags: si falta algo, el script termina con un
 error que nombra los parámetros que faltan en lugar de preguntar. Lo mismo
 ocurre con `SHOTSTOPPER_NONINTERACTIVE=1`.

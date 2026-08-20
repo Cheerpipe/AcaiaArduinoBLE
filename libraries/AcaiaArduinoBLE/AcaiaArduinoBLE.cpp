@@ -1029,11 +1029,9 @@ void AcaiaArduinoBLE::rememberPeripheral(const BLEDevice& peripheral) {
     _peripheral.~BLEDevice();
     new (&_peripheral) BLEDevice(peripheral);
     _hasPeripheral = true;
-    const String addr = peripheral.address();
-    const String name = peripheral.localName();
-    strncpy(_address, addr.c_str(), sizeof(_address) - 1);
+    strncpy(_address, peripheral.address().c_str(), sizeof(_address) - 1);
     _address[sizeof(_address) - 1] = '\0';
-    strncpy(_localName, name.c_str(), sizeof(_localName) - 1);
+    strncpy(_localName, peripheral.localName().c_str(), sizeof(_localName) - 1);
     _localName[sizeof(_localName) - 1] = '\0';
 }
 

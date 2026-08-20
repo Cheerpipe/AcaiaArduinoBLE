@@ -9,6 +9,9 @@
 #   4. an interactive prompt for the keys the command requires
 #      (Enter accepts the suggestion shown in brackets)
 #
+# After a successful resolve the values used are merged into .shotstopper.
+# The OTA token is never loaded, suggested, or persisted (use env/CLI each run).
+#
 # Written for bash 3.2 (the system bash on macOS): no associative arrays,
 # no ${var,,} case conversion.
 
@@ -107,7 +110,8 @@ Parámetros con nombre (largo y corto):
 Ningún script rellena en silencio lo que falte. Cada parámetro se toma del flag,
 de su variable de entorno, del archivo .shotstopper en la raíz del repositorio,
 o se pregunta. En la pregunta, Enter acepta el valor sugerido entre corchetes.
-Tras una ejecución correcta los valores usados quedan guardados.
+Tras resolver los parámetros los valores usados quedan guardados en .shotstopper
+(el token OTA nunca se guarda ni se sugiere).
 EOF
 }
 
@@ -195,10 +199,30 @@ ss_cli_load_store() {
       *) continue ;;
     esac
     ss_is_transient "$key" && continue
+    ss_is_secret "$key" && continue
     ss_is_set "$key" && continue
     ss_put "$key" "$value" "store"
   done < "$SS_CLI_STORE"
   return 0
+}
+
+# Reads one key from the store file without touching session state.
+ss_cli_store_value() {
+  local want="$1" line key value
+  [[ -f "$SS_CLI_STORE" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+      *'='*) ;;
+      *) continue ;;
+    esac
+    key="${line%%=*}"
+    [[ "$key" == "$want" ]] || continue
+    value="${line#*=}"
+    printf '%s' "$value"
+    return 0
+  done < "$SS_CLI_STORE"
+  return 1
 }
 
 ss_display_value() {
@@ -261,8 +285,19 @@ ss_prompt_text() {
 
 # Suggestion shown in [brackets] and used when the user presses Enter.
 ss_prompt_suggestion() {
-  local detected arch_s
-  case "$1" in
+  local key="$1" current detected arch_s
+  ss_is_secret "$key" && return 0
+  current="$(ss_get "$key")"
+  if [[ -n "$current" ]]; then
+    printf '%s' "$current"
+    return 0
+  fi
+  current="$(ss_cli_store_value "$key" 2>/dev/null || true)"
+  if [[ -n "$current" ]]; then
+    printf '%s' "$current"
+    return 0
+  fi
+  case "$key" in
     port)
       if declare -f shotstopper_detect_ports >/dev/null 2>&1; then
         detected="$(shotstopper_detect_ports | { IFS= read -r first || true; printf '%s' "${first:-}"; })"
@@ -276,7 +311,7 @@ ss_prompt_suggestion() {
     arch) printf 'n16r8' ;;
     speed) printf '115200' ;;
     host) printf '192.168.4.1' ;;
-    token) printf 'Micra1234' ;;
+    token) return 0 ;;
     flags) printf '%s' "$SS_CLI_DEFAULT_FLAGS" ;;
     build_dir)
       arch_s="$(ss_get arch)"
@@ -433,6 +468,7 @@ ss_cli_resolve() {
   for key in $required; do
     ss_validate_key "$key" || return 2
   done
+  ss_cli_save
   return 0
 }
 
@@ -443,19 +479,24 @@ ss_cli_save() {
   chmod 600 "$tmp" 2>/dev/null || true
   {
     printf '# Valores recordados por los scripts de Shot Stopper.\n'
-    printf '# Archivo local, ignorado por git. Contiene el token OTA.\n'
+    printf '# Archivo local, ignorado por git. No guarda el token OTA.\n'
     for key in $SS_CLI_KEYS; do
       ss_is_transient "$key" && continue
-      ss_is_set "$key" || continue
-      value="$(ss_get "$key")"
+      ss_is_secret "$key" && continue
+      if ss_is_set "$key"; then
+        value="$(ss_get "$key")"
+      else
+        value="$(ss_cli_store_value "$key" 2>/dev/null || true)"
+      fi
+      [[ -n "$value" ]] || continue
       # A newline in a stored value would split into a second "key=value" line
-      # on the next load and could clobber another key, including the token.
+      # on the next load and could clobber another key.
       case "$value" in
         *$'\n'*) continue ;;
       esac
       printf '%s=%s\n' "$key" "$value"
     done
-  } >> "$tmp"
+  } > "$tmp"
   mv -f "$tmp" "$SS_CLI_STORE" 2>/dev/null || rm -f "$tmp"
   chmod 600 "$SS_CLI_STORE" 2>/dev/null || true
   return 0

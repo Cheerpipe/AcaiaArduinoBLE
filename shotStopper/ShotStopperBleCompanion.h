@@ -127,6 +127,37 @@ inline uint8_t bleCompanionMsToSeconds(uint32_t milliseconds) {
 
 #if !defined(SHOT_STOPPER_HOST_TEST)
 
+inline bool readBleStringValue(BLEStringCharacteristic &characteristic,
+                               char *output, size_t capacity,
+                               size_t *outLength = nullptr) {
+  const int length = characteristic.valueLength();
+  if (length < 0 || static_cast<size_t>(length) >= capacity) {
+    return false;
+  }
+  if (length == 0) {
+    output[0] = '\0';
+    if (outLength != nullptr) {
+      *outLength = 0;
+    }
+    return true;
+  }
+  const int read =
+      characteristic.readValue(reinterpret_cast<byte *>(output), length);
+  if (read != length) {
+    return false;
+  }
+  output[length] = '\0';
+  if (outLength != nullptr) {
+    *outLength = static_cast<size_t>(length);
+  }
+  return true;
+}
+
+inline void writeBleStringValue(BLEStringCharacteristic &characteristic,
+                                const char *value) {
+  characteristic.writeValue(value == nullptr ? String("") : String(value));
+}
+
 class ShotStopperBleCompanion {
  public:
   using EnqueueRequest = bool (*)(const BleCompanionRequest &request);
@@ -299,13 +330,14 @@ class ShotStopperBleCompanion {
     }
     if (wifiSsid_.written()) {
       anyWrite = true;
-      const String value = wifiSsid_.value();
-      if (value.length() == 0 || value.length() >= WIFI_SSID_CAPACITY) {
+      size_t ssidLength = 0;
+      memset(wifiStageSsid_, 0, sizeof(wifiStageSsid_));
+      if (!readBleStringValue(wifiSsid_, wifiStageSsid_, sizeof(wifiStageSsid_),
+                              &ssidLength) ||
+          ssidLength == 0) {
         rejectLocal(BleCompanionRejectReason::INVALID_VALUE);
         clearWifiStage();
       } else {
-        memset(wifiStageSsid_, 0, sizeof(wifiStageSsid_));
-        memcpy(wifiStageSsid_, value.c_str(), value.length());
         wifiStageValid_ = true;
         wifiStageAtMs_ = nowMs;
       }
@@ -315,22 +347,25 @@ class ShotStopperBleCompanion {
       if (!wifiStageValid_) {
         rejectLocal(BleCompanionRejectReason::WIFI_STAGE_MISSING);
       } else {
-        const String value = wifiPassword_.value();
-        BleCompanionRequest request;
-        request.type = BleCompanionRequestType::SAVE_WIFI;
-        strncpy(request.ssid, wifiStageSsid_, sizeof(request.ssid) - 1);
-        if (value.length() >= WIFI_PASSWORD_CAPACITY) {
+        char password[WIFI_PASSWORD_CAPACITY] = {};
+        size_t passwordLength = 0;
+        if (!readBleStringValue(wifiPassword_, password, sizeof(password),
+                                &passwordLength) ||
+            passwordLength >= WIFI_PASSWORD_CAPACITY) {
           rejectLocal(BleCompanionRejectReason::INVALID_VALUE);
         } else {
-          request.openNetwork = value.length() == 0;
+          BleCompanionRequest request;
+          request.type = BleCompanionRequestType::SAVE_WIFI;
+          strncpy(request.ssid, wifiStageSsid_, sizeof(request.ssid) - 1);
+          request.openNetwork = passwordLength == 0;
           if (!request.openNetwork) {
-            memcpy(request.password, value.c_str(), value.length());
+            memcpy(request.password, password, passwordLength);
           }
           enqueue(request);
         }
         clearWifiStage();
       }
-      wifiPassword_.writeValue(String());
+      writeBleStringValue(wifiPassword_, "");
     }
     if (reboot_.written()) {
       anyWrite = true;
@@ -383,10 +418,10 @@ class ShotStopperBleCompanion {
       shotStatus_.writeValue(static_cast<byte>(snapshot.shotActive ? 1 : 0));
     }
     if (forceSync_ || strcmp(snapshot.wifiSsid, synced_.wifiSsid) != 0) {
-      wifiSsid_.writeValue(String(snapshot.wifiSsid));
+      writeBleStringValue(wifiSsid_, snapshot.wifiSsid);
     }
     if (forceSync_ || strcmp(snapshot.wifiIp, synced_.wifiIp) != 0) {
-      wifiIp_.writeValue(String(snapshot.wifiIp));
+      writeBleStringValue(wifiIp_, snapshot.wifiIp);
     }
     if (forceSync_ || snapshot.apActive != synced_.apActive) {
       enableAp_.writeValue(static_cast<byte>(snapshot.apActive ? 1 : 0));
