@@ -6,6 +6,7 @@ const assetQuery = new URL(import.meta.url).search;
 const htmlCache = new Map();
 const jsMods = new Map();
 const htmlLoaded = new Set();
+const viewLoads = new Map();
 
 let logTimer = 0;
 let shotsTimer = 0;
@@ -43,18 +44,31 @@ async function loadPartial(name) {
 }
 
 async function ensureView(name) {
-  const section = document.getElementById('view-' + name);
-  if (!section) throw new Error('Missing view section: ' + name);
-  if (!htmlLoaded.has(name)) {
-    section.innerHTML = await loadPartial(name);
-    htmlLoaded.add(name);
+  if (jsMods.has(name) && htmlLoaded.has(name)) return jsMods.get(name);
+  if (viewLoads.has(name)) return viewLoads.get(name);
+
+  const load = (async () => {
+    const section = document.getElementById('view-' + name);
+    if (!section) throw new Error('Missing view section: ' + name);
+    if (!htmlLoaded.has(name)) {
+      section.innerHTML = await loadPartial(name);
+      htmlLoaded.add(name);
+    }
+    if (!jsMods.has(name)) {
+      const mod = await import('/js/' + name + '.js' + assetQuery);
+      jsMods.set(name, mod);
+      if (mod.init) mod.init();
+    }
+    return jsMods.get(name);
+  })();
+
+  viewLoads.set(name, load);
+  try {
+    return await load;
+  } catch (e) {
+    viewLoads.delete(name);
+    throw e;
   }
-  if (!jsMods.has(name)) {
-    const mod = await import('/js/' + name + '.js' + assetQuery);
-    jsMods.set(name, mod);
-    if (mod.init) mod.init();
-  }
-  return jsMods.get(name);
 }
 
 R.setEnsureViewHook(ensureView);
@@ -67,6 +81,9 @@ function stopExtraPolls() {
 
 function startView(name) {
   if (!R.webUiPollingActive()) return;
+  clearInterval(logTimer);
+  clearInterval(shotsTimer);
+  logTimer = shotsTimer = 0;
   if (name === 'home' || name === 'settings' || name === 'admin' ||
       name === 'diagnostic') {
     R.loadStatus();
