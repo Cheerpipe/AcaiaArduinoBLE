@@ -12,7 +12,7 @@ usage() {
   cat <<EOF
 Uso: ./scripts/bo [flags]
 
-Ejecuta, en orden: build y ota. No hace falta cable USB.
+Ejecuta, en orden: build y o (ota). No hace falta cable USB.
 
 Parámetros que necesita: --arch, --host y --token. --flags es opcional.
 El token es la contraseña del punto de acceso MicraShotStopperAP.
@@ -43,4 +43,4 @@ ss_cli_flags_for arch flags
 
 ss_cli_flags_for arch host
 ss_cli_export_secrets
-exec ./scripts/ota ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
+exec ./scripts/o ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}

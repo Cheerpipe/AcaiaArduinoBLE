@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and upload Shot Stopper (ESP-IDF) in one command.
+# Build and flash Shot Stopper (ESP-IDF) in one command.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -10,17 +10,17 @@ source "$SCRIPT_DIR/shotstopper_cli.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/bu-idf [flags]
+Uso: ./scripts/bf-idf [flags]
 
-Ejecuta, en orden: build-idf y upload-idf.
+Ejecuta, en orden: build-idf y flash-idf.
 
 Parámetros que necesita: --port y --arch. --flags es opcional.
 
 $(ss_flag_help)
 
 Ejemplos:
-  ./scripts/bu-idf --port /dev/cu.usbmodem2101 --arch n16r8
-  ./scripts/bu-idf -p /dev/cu.usbmodem2101 -a n8r4 -f "-DSHOT_STOPPER_ENABLE_BUZZER=1"
+  ./scripts/bf-idf --port /dev/cu.usbmodem2101 --arch n16r8
+  ./scripts/bf-idf -p /dev/cu.usbmodem2101 -a n8r4 -f "-DSHOT_STOPPER_ENABLE_BUZZER=1"
 EOF
 }
 
@@ -40,4 +40,4 @@ ss_cli_flags_for arch flags
 ./scripts/build-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
 
 ss_cli_flags_for port arch
-exec ./scripts/upload-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
+exec ./scripts/flash-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}

@@ -31,8 +31,8 @@ Ejemplos:
   ./scripts/ota-idf -a n16r8 -H 192.168.4.1 -t "mi-clave-del-AP"
 
 La imagen sale de build-idf/<arquitectura>/shotstopper.bin, así que primero hay
-que compilar (./scripts/build-idf) o usar ./scripts/bo-idf, que hace las dos
-cosas.
+que compilar (./scripts/build-idf / ./scripts/b-idf) o usar ./scripts/bo-idf,
+que hace las dos cosas. También puedes usar el alias corto ./scripts/o-idf.
 EOF
 }
 

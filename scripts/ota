@@ -28,7 +28,8 @@ Ejemplos:
   ./scripts/ota -a n16r8 -H 192.168.4.1 -t "mi-clave-del-AP"
 
 La imagen sale de build/<arquitectura>/shotStopper.ino.bin, así que primero hay
-que compilar (./scripts/build) o usar ./scripts/bo, que hace las dos cosas.
+que compilar (./scripts/build / ./scripts/b) o usar ./scripts/bo, que hace
+las dos cosas. También puedes usar el alias corto ./scripts/o.
 EOF
 }
 

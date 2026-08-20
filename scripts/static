@@ -14,7 +14,7 @@ readonly SUPPRESSIONS_FILE="$ROOT/scripts/cppcheck-suppressions.txt"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/static_report [flags]
+Uso: ./scripts/static [flags]
 
 Ejecuta Cppcheck sobre una base de compilación ya generada por Arduino CLI.
 La carpeta de salida se borra y se recrea en cada ejecución. Este script nunca
@@ -26,8 +26,8 @@ Parámetros que necesita: --arch (de ahí sale build/<arquitectura>).
 $(ss_flag_help)
 
 Ejemplos:
-  ./scripts/static_report --arch n16r8
-  ./scripts/static_report -a n8r4 -o reports/analysis-n8r4
+  ./scripts/static --arch n16r8
+  ./scripts/static -a n8r4 -o reports/analysis-n8r4
 EOF
 }
 

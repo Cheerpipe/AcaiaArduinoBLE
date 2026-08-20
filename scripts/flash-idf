@@ -12,11 +12,11 @@ source "$SCRIPT_DIR/shotstopper_idf.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/upload-idf [flags]
+Uso: ./scripts/flash-idf [flags]
 
-Sube por USB el binario ESP-IDF ya compilado desde build-idf/<arquitectura>.
+Flashea por USB el binario ESP-IDF ya compilado desde build-idf/<arquitectura>.
 No recompila y no abre el monitor. Esto pisa el firmware de producción hasta
-que vuelvas a flashear con ./scripts/upload.
+que vuelvas a flashear con ./scripts/flash.
 
 Parámetros que necesita: --port y --arch.
 
@@ -25,8 +25,8 @@ $(ss_flag_help)
 $(shotstopper_arch_help)
 
 Ejemplos:
-  ./scripts/upload-idf --port /dev/cu.usbmodem2101 --arch n16r8
-  ./scripts/upload-idf -p /dev/cu.usbmodem2101 -a n8r4
+  ./scripts/flash-idf --port /dev/cu.usbmodem2101 --arch n16r8
+  ./scripts/flash-idf -p /dev/cu.usbmodem2101 -a n8r4
 EOF
 }
 
@@ -45,7 +45,7 @@ ss_idf_require_image
 cd "$SS_CLI_ROOT"
 
 port="$(ss_get port)"
-echo "Subiendo $SHOTSTOPPER_ARCH por $port (IDF)"
+echo "Flasheando $SHOTSTOPPER_ARCH por $port (IDF)"
 
 idf.py "${IDF_PY_ARGS[@]}" -p "$port" flash
 

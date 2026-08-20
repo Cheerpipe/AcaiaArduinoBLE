@@ -103,8 +103,8 @@ Parámetros con nombre (largo y corto):
   -H, --host <ip|nombre>   Dirección del controlador para OTA
   -t, --token <clave>      Token OTA (la contraseña del punto de acceso)
   -f, --flags "<flags>"    Flags extra de compilación (una sola cadena)
-  -b, --build-dir <ruta>   Carpeta de compilación (solo static_report)
-  -o, --output-dir <ruta>  Carpeta de reportes (solo static_report)
+  -b, --build-dir <ruta>   Carpeta de compilación (solo static / static-idf)
+  -o, --output-dir <ruta>  Carpeta de reportes (solo static / static-idf)
   -h, --help               Muestra esta ayuda
 
 Ningún script rellena en silencio lo que falte. Cada parámetro se toma del flag,

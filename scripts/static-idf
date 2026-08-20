@@ -16,7 +16,7 @@ readonly SUPPRESSIONS_FILE="$ROOT/scripts/cppcheck-suppressions.txt"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/static_report-idf [flags]
+Uso: ./scripts/static-idf [flags]
 
 Ejecuta Cppcheck sobre una base de compilación ya generada por ESP-IDF.
 La carpeta de salida se borra y se recrea en cada ejecución. Este script nunca
@@ -28,8 +28,8 @@ Parámetros que necesita: --arch (de ahí sale build-idf/<arquitectura>).
 $(ss_flag_help)
 
 Ejemplos:
-  ./scripts/static_report-idf --arch n16r8
-  ./scripts/static_report-idf -a n8r4 -o reports/analysis-idf-n8r4
+  ./scripts/static-idf --arch n16r8
+  ./scripts/static-idf -a n8r4 -o reports/analysis-idf-n8r4
 EOF
 }
 

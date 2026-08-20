@@ -10,9 +10,10 @@ source "$SCRIPT_DIR/shotstopper_cli.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/upload [flags]
+Uso: ./scripts/flash [flags]
 
-Sube por USB el binario ya compilado desde build/<arquitectura>.
+Flashea por USB el binario ya compilado desde build/<arquitectura>.
+No recompila y no abre el monitor.
 
 Parámetros que necesita: --port y --arch.
 
@@ -21,8 +22,8 @@ $(ss_flag_help)
 $(shotstopper_arch_help)
 
 Ejemplos:
-  ./scripts/upload --port /dev/cu.usbmodem2101 --arch n16r8
-  ./scripts/upload -p /dev/cu.usbmodem2101 -a n8r4
+  ./scripts/flash --port /dev/cu.usbmodem2101 --arch n16r8
+  ./scripts/flash -p /dev/cu.usbmodem2101 -a n8r4
 EOF
 }
 
@@ -49,7 +50,7 @@ if [[ ! -f "$SHOTSTOPPER_BUILD_DIR/shotStopper.ino.bin" ]]; then
 fi
 
 port="$(ss_get port)"
-echo "Subiendo $SHOTSTOPPER_ARCH por $port"
+echo "Flasheando $SHOTSTOPPER_ARCH por $port"
 
 arduino-cli upload \
   --fqbn "$SHOTSTOPPER_FQBN" \

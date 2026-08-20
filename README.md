@@ -1023,12 +1023,12 @@ for static analysis of the C++ firmware. Prefer the IDF compilation database:
 ```sh
 brew install cppcheck   # macOS / Homebrew
 ./scripts/build-idf --arch n16r8
-./scripts/static_report-idf --arch n16r8
+./scripts/static-idf --arch n16r8
 ```
 
-`./scripts/static_report-idf` reads `build-idf/<arch>/compile_commands.json`,
+`./scripts/static-idf` reads `build-idf/<arch>/compile_commands.json`,
 limits analysis to this repository’s sources, and writes
-`reports/static-analysis/`. The legacy `./scripts/static_report` path still
+`reports/static-analysis/`. The legacy `./scripts/static` path still
 targets `build/` from arduino-cli.
 
 For a deeper analysis using the actual Xtensa GCC toolchain, run:
@@ -1108,29 +1108,29 @@ y los flags extra de desarrollo actuales (`-Werror=deprecated-copy`,
 `REMOTE_CN9`, buzzer activo). El **token OTA no se guarda ni se sugiere** — hay
 que pasarlo por flag o `SHOTSTOPPER_OTA_TOKEN` en cada actualización. Tras
 resolver los parámetros los demás valores quedan guardados, así que la segunda
-vez basta con `./scripts/bum-idf`.
+vez basta con `./scripts/bfm-idf`.
 
 **Vía oficial (ESP-IDF)** — escribe en `build-idf/<arquitectura>` (`shotstopper.bin`):
 
 | Script | Parámetros que necesita | Descripción |
 | --- | --- | --- |
-| `./scripts/build-idf` | `--arch` (`--flags` opcional) | Genera la versión y el Web UI, compila con ESP-IDF y deja el resultado en `build-idf/<arquitectura>`. |
-| `./scripts/upload-idf` | `--port`, `--arch` | Sube el binario existente de `build-idf/<arquitectura>`; no recompila ni abre el monitor. |
-| `./scripts/monitor-idf` | `--port`, `--speed` | Abre el monitor serie de IDF (Ctrl+] para salir). |
-| `./scripts/ota-idf` | `--arch`, `--host`, `--token` | Sube el binario IDF ya compilado al controlador por Wi-Fi. |
-| `./scripts/bu-idf` | `--port`, `--arch` | Wrapper: build-idf y upload-idf. |
-| `./scripts/bum-idf` | `--port`, `--arch`, `--speed` | Wrapper: build-idf, upload-idf y monitor-idf. |
+| `./scripts/build-idf` (`b-idf`) | `--arch` (`--flags` opcional) | Genera la versión y el Web UI, compila con ESP-IDF y deja el resultado en `build-idf/<arquitectura>`. |
+| `./scripts/flash-idf` (`f-idf`) | `--port`, `--arch` | Flashea el binario existente de `build-idf/<arquitectura>`; no recompila ni abre el monitor. |
+| `./scripts/monitor-idf` (`m-idf`) | `--port`, `--speed` | Abre el monitor serie de IDF (Ctrl+] para salir). |
+| `./scripts/ota-idf` (`o-idf`) | `--arch`, `--host`, `--token` | Actualiza por Wi-Fi con el binario IDF ya compilado. |
+| `./scripts/static-idf` (`s-idf`) | `--arch` | Cppcheck sobre la compilation database de IDF. No compila. |
+| `./scripts/bf-idf` | `--port`, `--arch` | Wrapper: build-idf y flash-idf. |
+| `./scripts/bfm-idf` | `--port`, `--arch`, `--speed` | Wrapper: build-idf, flash-idf y monitor-idf. |
 | `./scripts/bo-idf` | `--arch`, `--host`, `--token` | Wrapper: build-idf y ota-idf. |
-| `./scripts/static_report-idf` | `--arch` | Cppcheck sobre la compilation database de IDF. No compila. |
-| `./scripts/bsum-idf` | `--port`, `--arch`, `--speed` | Wrapper: build-idf, static_report-idf, upload-idf y monitor-idf. Si el análisis encuentra diagnósticos, no carga el firmware. |
+| `./scripts/bsfm-idf` | `--port`, `--arch`, `--speed` | Wrapper: build-idf, static-idf, flash-idf y monitor-idf. Si el análisis encuentra diagnósticos, no flashea el firmware. |
 | `./scripts/gcc_analyzer` | `--arch` (`--flags` opcional) | Compila con GCC `-fanalyzer` y guarda el reporte en `reports/gcc-analyzer/`. |
 
 **Legado arduino-cli (no soportado)** — escribe en `build/<arquitectura>`; no usar para firmware de producción:
 
 | Script | Parámetros que necesita | Descripción |
 | --- | --- | --- |
-| `./scripts/build` | `--arch` (`--flags` opcional) | Compila con arduino-cli → `build/<arquitectura>`. |
-| `./scripts/upload` / `monitor` / `ota` / `bu` / `bum` / `bo` / `bsum` / `static_report` | (igual que antes) | Equivalentes legacy; preferir las variantes `*-idf`. |
+| `./scripts/build` (`b`) | `--arch` (`--flags` opcional) | Compila con arduino-cli → `build/<arquitectura>`. |
+| `./scripts/flash` / `monitor` / `ota` / `static` / `bf` / `bfm` / `bo` / `bsfm` (y cortos `f` / `m` / `o` / `s`) | (igual que antes) | Equivalentes legacy; preferir las variantes `*-idf`. |
 
 Parámetros con nombre, en forma larga y corta:
 
@@ -1142,8 +1142,8 @@ Parámetros con nombre, en forma larga y corta:
 | `-H`, `--host` | `SHOTSTOPPER_HOST` | IP o nombre del controlador para OTA. |
 | `-t`, `--token` | `SHOTSTOPPER_OTA_TOKEN` | Token OTA: la contraseña del punto de acceso. |
 | `-f`, `--flags` | `SHOTSTOPPER_FLAGS` | Flags extra de compilación, en una sola cadena. |
-| `-b`, `--build-dir` | `SHOTSTOPPER_BUILD_DIR_OVERRIDE` | Carpeta de compilación (solo `static_report` legacy). |
-| `-o`, `--output-dir` | `SHOTSTOPPER_OUTPUT_DIR` | Carpeta de reportes (solo `static_report`). |
+| `-b`, `--build-dir` | `SHOTSTOPPER_BUILD_DIR_OVERRIDE` | Carpeta de compilación (solo `static` legacy). |
+| `-o`, `--output-dir` | `SHOTSTOPPER_OUTPUT_DIR` | Carpeta de reportes (solo `static` / `static-idf`). |
 | `-h`, `--help` | — | Muestra la ayuda del script. |
 
 El archivo `.shotstopper` se crea con permisos `600` y está en `.gitignore`.
@@ -1154,21 +1154,23 @@ ocurre con `SHOTSTOPPER_NONINTERACTIVE=1`.
 
 ```sh
 # Primera vez: pregunta lo que falte y lo recuerda
-./scripts/bum-idf
+./scripts/bfm-idf
 
 # Explícito
 ./scripts/build-idf --arch n8r4 --flags "-DSHOT_STOPPER_ENABLE_BUZZER=1"
-./scripts/upload-idf --port /dev/cu.usbmodem2101 --arch n8r4
+./scripts/flash-idf --port /dev/cu.usbmodem2101 --arch n8r4
 ./scripts/monitor-idf -p /dev/cu.usbmodem2101 -s 115200
 
-# Build, static report, upload y monitor en una sola orden
-./scripts/bsum-idf -p /dev/cu.usbmodem2101 -a n8r4 -s 115200
+# Build, static, flash y monitor en una sola orden
+./scripts/bsfm-idf -p /dev/cu.usbmodem2101 -a n8r4 -s 115200
 
 # Actualización por Wi-Fi, sin cable
 ./scripts/bo-idf --arch n16r8 --host 192.168.1.50
+# OTA sin recompilar (imagen ya en build-idf/)
+./scripts/o-idf --arch n16r8 --host 192.168.1.50
 
 ./scripts/build-idf --help
-./scripts/bsum-idf -h
+./scripts/bsfm-idf -h
 ```
 
 From the repository root, the usual flow is:
@@ -1207,15 +1209,15 @@ check):
 wc -c < build-idf/n16r8/shotstopper.bin
 ```
 
-## Upload to the ESP32-S3
+## Flash to the ESP32-S3
 
-Connect the board and upload the official IDF image:
+Connect the board and flash the official IDF image:
 
 ```sh
-./scripts/upload-idf --port /dev/cu.usbmodem2101 --arch n16r8
+./scripts/flash-idf --port /dev/cu.usbmodem2101 --arch n16r8
 ```
 
-Or build and flash in one step with `./scripts/bu-idf` / `./scripts/bum-idf`
+Or build and flash in one step with `./scripts/bf-idf` / `./scripts/bfm-idf`
 (they ask for the port once and remember it in `.shotstopper`). Use `n8r4` if
 that is the module on the board. The flash step programs bootloader, partition
 table, and `shotstopper.bin` from `build-idf/<arquitectura>/`.
@@ -1230,7 +1232,8 @@ build can be sent over Wi-Fi and the previous one stays intact as the fallback.
 ./scripts/bo-idf --arch n16r8 --host 192.168.1.50
 ```
 
-`bo-idf` compiles with ESP-IDF and then runs `./scripts/ota-idf`, which uploads
+`bo-idf` compiles with ESP-IDF and then runs `./scripts/ota-idf` (alias
+`./scripts/o-idf`), which uploads
 `build-idf/<arquitectura>/shotstopper.bin`, waits for the controller to verify
 it, shows the identity it read back, and asks before flashing. The same thing
 is available from **Admin → Firmware update** in the Web UI, as two explicit
@@ -1300,9 +1303,9 @@ Nothing needs to be done: the controller keeps running the firmware it already
 had. The Web UI shows the reason, and the same event is recorded in the
 diagnostic log (`OTA upload rejected`, `OTA rollback armed`, …).
 
-A USB upload is always still possible and is the way out of any state. It
+A USB flash is always still possible and is the way out of any state. It
 writes the bootloader/partition/app image set from `build-idf/`, which resets
-boot selection appropriately, so `./scripts/upload-idf` after any number of OTA
+boot selection appropriately, so `./scripts/flash-idf` after any number of OTA
 updates lands on exactly the firmware you just built. See
 [Emergency recovery](docs/EMERGENCY_RECOVERY.md).
 
@@ -1363,11 +1366,11 @@ If output is still unreadable at every rate:
 
 If you see `Image length … doesn't fit in partition length …`, confirm the
 architecture matches the module (`n16r8` vs `n8r4`; see [Compile](#compile))
-and upload again with `./scripts/upload-idf`.
+and flash again with `./scripts/flash-idf`.
 
 ## Automated tests
 
-Run the tests before uploading firmware:
+Run the tests before flashing firmware:
 
 ```sh
 npm install

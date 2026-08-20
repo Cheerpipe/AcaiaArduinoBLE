@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build, static-report, upload, and monitor Shot Stopper in one command.
+# Build, flash, and monitor Shot Stopper in one command.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -10,17 +10,17 @@ source "$SCRIPT_DIR/shotstopper_cli.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/bsum [flags]
+Uso: ./scripts/bfm [flags]
 
-Ejecuta, en orden: build, static_report, upload y monitor.
+Ejecuta, en orden: build, flash y monitor.
 
 Parámetros que necesita: --port, --arch y --speed. --flags es opcional.
 
 $(ss_flag_help)
 
 Ejemplos:
-  ./scripts/bsum --port /dev/cu.usbmodem2101 --arch n16r8 --speed 115200
-  ./scripts/bsum -p /dev/cu.usbmodem2101 -a n8r4 -s 115200
+  ./scripts/bfm --port /dev/cu.usbmodem2101 --arch n16r8 --speed 115200
+  ./scripts/bfm -p /dev/cu.usbmodem2101 -a n8r4 -s 115200
 EOF
 }
 
@@ -38,11 +38,8 @@ cd "$root"
 ss_cli_flags_for arch flags
 ./scripts/build ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
 
-ss_cli_flags_for arch
-./scripts/static_report ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
-
 ss_cli_flags_for port arch
-./scripts/upload ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
+./scripts/flash ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
 
 ss_cli_flags_for port speed
 exec ./scripts/monitor ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
