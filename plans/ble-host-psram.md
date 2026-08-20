@@ -132,7 +132,9 @@ Reusar, no inventar una batería nueva:
 - M81 (persist + OTA + Wi-Fi scan; heap interno no debe stair-step; `psramFree` baja).
 - Un shot BBW Bookoo: corte por peso igual que baseline (no “un tick tarde” sistemático).
 
-Producción sigue siendo `./scripts/build`. IDF (`./scripts/build-idf`) es el camino donde además se puede verificar BSS; el parche ArduinoBLE aplica a ambos.
+Producción oficial es `./scripts/build-idf`. El pipeline arduino-cli
+(`./scripts/build`) queda como legado no soportado; el parche ArduinoBLE
+aplica a ambos.
 
 ## Impacto esperado
 

@@ -38,7 +38,7 @@ struct NetworkWorkBuf {
   char historyJson[kHistoryJson];
   char jsonItem[kJsonItem];
   char otaJson[kOtaJson];
-  DebugEvent logBatch[48];
+  DebugEvent logBatch[kNetworkLogBatchSize];
   ShotLogRecord shotRecords[SHOT_LOG_CAPACITY];
   ControlStatusSnapshot control;
   // Must match ShotStopperNetwork::REQUEST_BODY_CAPACITY (asserted in begin()).
@@ -47,7 +47,8 @@ struct NetworkWorkBuf {
 };
 
 // Wi-Fi scan fetch + published snapshot. Network task / httpd only; not BLE.
-constexpr uint16_t kWifiScanFetchMax = 32;
+// Match the published snapshot capacity — larger fetches were discarded.
+constexpr uint16_t kWifiScanFetchMax = MAX_WIFI_SCAN_RESULTS;
 static wifi_ap_record_t *g_wifiApRecords = nullptr;
 static WifiScanSnapshot g_wifiScan;
 static WifiScanSnapshot g_wifiScanWorking;
@@ -91,12 +92,11 @@ constexpr const char *STATUS_NOT_FOUND = "404 Not Found";
 constexpr const char *STATUS_UNPROCESSABLE = "422 Unprocessable Entity";
 constexpr const char *STATUS_UNAVAILABLE = "503 Service Unavailable";
 // PersistedSettings is ≤ PERSISTED_SETTINGS_NVS_BUDGET (3072 B).
-// processPersistedCommand() keeps one copy on the stack, and its callees
-// (settingsCopy, resetPersistedSettingsToFactory, savePersistedSettings) add
-// further frames.  7 168 was too small and triggered a stack-canary watchpoint
-// crash on FACTORY_RESET via the serial CLI.  12 288 gives comfortable headroom.
+// processPersistedCommand() keeps one copy on the stack via settingsCopy();
+// NVS dual-slot scratch is shared off-stack. 7 168 was too small (canary on
+// FACTORY_RESET). 10 240 keeps headroom without the old 12 KiB margin.
 // Keep this stack in internal RAM: the task writes NVS (flash cache disabled).
-constexpr uint32_t NETWORK_MANAGER_TASK_STACK_SIZE = 12288;
+constexpr uint32_t NETWORK_MANAGER_TASK_STACK_SIZE = 10240;
 // POST JSON bodies live in NetworkWorkBuf (PSRAM), so the httpd worker no
 // longer needs a 2 KiB request-body frame on top of headers and send buffers.
 // Stack stays internal: OTA flash writes run on this task.
@@ -2766,10 +2766,9 @@ bool ShotStopperNetwork::startHttpServer() {
   // Web UI serializes API traffic (DEVICE_MAX_INFLIGHT, default 1). Reserve
   // headroom for the HTML/JS/CSS boot burst plus LRU/TCP close. ESP-IDF uses
   // (max_open_sockets + 3) LWIP sockets total.
-  // Two browser windows can briefly request HTML, CSS, and JS in parallel.
-  // Keep enough client slots for that boot burst while responses still close
-  // promptly to limit the ESP's steady-state socket use.
-  config.max_open_sockets = 6;
+  // One active WebUI client plus a brief parallel asset fetch; 6 was oversized
+  // for steady-state DRAM (each open socket carries TCP wnd/snd buffers).
+  config.max_open_sockets = 4;
   // Keep one slot of headroom above the owned API routes; /api/v1/ui/unlock
   // and the four OTA routes are registered separately because they do not use
   // the exclusive WebUI claim.

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Compile Shot Stopper into build/<arquitectura>.
+# Legacy arduino-cli path — unsupported. Use ./scripts/build-idf for official builds.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -17,7 +18,8 @@ usage() {
   cat <<EOF
 Uso: ./scripts/build [flags]
 
-Compila Shot Stopper y deja los artefactos en build/<arquitectura>.
+Compila Shot Stopper (legado arduino-cli, no soportado) y deja los artefactos
+en build/<arquitectura>. Preferir ./scripts/build-idf.
 
 Parámetros que necesita: --arch. --flags es opcional y se pregunta una vez.
 

@@ -8,13 +8,12 @@ Do not type into a scrolling monitor if you cannot see what you send. Close
 any other serial client, then pipe the command:
 
 ```sh
-(sleep 4; printf 'HELP\n'; sleep 2) | arduino-cli monitor -p /dev/cu.usbmodem2101 -c baudrate=115200
+(sleep 4; printf 'HELP\n'; sleep 2) | ./scripts/monitor-idf -p /dev/cu.usbmodem2101 -s 115200
 ```
 
 The `sleep 4` waits for the USB-serial chip to reopen (opening the port often
-resets the ESP32). Replace the example port with yours from
-`arduino-cli board list`, or use `./scripts/monitor`, which selects the first
-`/dev/cu.usbmodem<número>` device.
+resets the ESP32). Replace the example port with yours, or use
+`./scripts/monitor-idf`, which prompts/remembers the port from `.shotstopper`.
 
 Successful mutating commands print `OK queued …`, `OK …`, or a status dump.
 Rejections print `ERR …`. Passwords are never echoed.

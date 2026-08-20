@@ -1,11 +1,12 @@
 #include "Arduino.h"
 #include "esp_attr.h"
 
-// 8 KiB BSS probe. With ALLOW_BSS enabled this must land in PSRAM
+// Small BSS probe. With ALLOW_BSS enabled this must land in PSRAM
 // (typically 0x3c0xxxxx). On Arduino-ESP32 the same attribute is a no-op
-// and the linker would put it in internal DRAM (0x3fcxxxxx).
+// and the linker would put it in internal DRAM (0x3fcxxxxx). Sized just
+// large enough for ./scripts/build-idf to verify placement — not 8 KiB.
 extern "C" {
-EXT_RAM_BSS_ATTR uint8_t g_probe[8192];
+EXT_RAM_BSS_ATTR uint8_t g_probe[256];
 
 // Arduino core only defines this flag when Bluedroid or NimBLE is the host.
 // ArduinoBLE talks to the controller over VHCI (CONFIG_BT_CONTROLLER_ONLY),

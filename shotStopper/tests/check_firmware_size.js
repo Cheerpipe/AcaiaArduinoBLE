@@ -11,7 +11,7 @@ const OTA_APP_LIMITS = {
 const DEFAULT_ARCH = 'n16r8';
 
 const binPath = process.argv[2] ||
-  path.resolve(__dirname, '..', '..', 'build', 'n16r8', 'shotStopper.ino.bin');
+  path.resolve(__dirname, '..', '..', 'build-idf', 'n16r8', 'shotstopper.bin');
 
 function archFromBinPath(filePath) {
   const normalized = filePath.replace(/\\/g, '/');

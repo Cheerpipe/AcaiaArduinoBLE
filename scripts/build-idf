@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Compile Shot Stopper with ESP-IDF (Arduino-ESP32 as a component) into
-# build-idf/<arquitectura>. This does not replace ./scripts/build
-# (arduino-cli production firmware).
+# build-idf/<arquitectura>. This is the official supported firmware build.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -16,9 +15,8 @@ usage() {
   cat <<EOF
 Uso: ./scripts/build-idf [flags]
 
-Compila Shot Stopper con ESP-IDF (ALLOW_BSS en PSRAM) y deja los artefactos
-en build-idf/<arquitectura>. No sustituye al firmware de producción de
-./scripts/build.
+Compila Shot Stopper con ESP-IDF (vía oficial y soportada) y deja los
+artefactos en build-idf/<arquitectura>.
 
 Parámetros que necesita: --arch. --flags es opcional y se pregunta una vez.
 

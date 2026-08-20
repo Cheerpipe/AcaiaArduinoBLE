@@ -31,6 +31,7 @@ enum class WifiScanState : uint8_t {
 };
 
 constexpr size_t MAX_WIFI_SCAN_RESULTS = 12;
+constexpr size_t kNetworkLogBatchSize = 32;
 
 struct WifiScanNetwork {
   char ssid[WIFI_SSID_CAPACITY] = {};
@@ -180,7 +181,7 @@ class ShotStopperNetwork {
   // Machine config JSON is ~1 KiB and grows with NTP custom / bool false
   // literals; keep headroom above the wire payload.
   static constexpr size_t REQUEST_BODY_CAPACITY = 2048;
-  static constexpr size_t LOG_BATCH_SIZE = 48;
+  static constexpr size_t LOG_BATCH_SIZE = kNetworkLogBatchSize;
   static constexpr size_t WEB_UI_CLIENT_ID_CAPACITY = 25;
 
   static ShotStopperNetwork *instance_;

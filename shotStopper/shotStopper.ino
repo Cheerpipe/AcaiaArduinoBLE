@@ -84,7 +84,7 @@ constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;
 constexpr uint32_t SCALE_ATT_TIMEOUT_MS = 1000;
 constexpr uint32_t SCALE_COMPLETION_BEEP_DELAY_MS = 200;
 constexpr size_t SCALE_COMMAND_QUEUE_LENGTH = 12;
-constexpr size_t SCALE_EVENT_QUEUE_LENGTH = 64;
+constexpr size_t SCALE_EVENT_QUEUE_LENGTH = 32;
 constexpr size_t BLE_COMPANION_REQUEST_QUEUE_LENGTH = 8;
 constexpr size_t BLE_COMPANION_RESULT_QUEUE_LENGTH = 8;
 // Measured high-water headroom with the full Companion profile is over 6 KiB.
@@ -839,11 +839,9 @@ size_t copyDebugEvents(uint32_t afterSequence, DebugEvent *output,
 }
 
 void copyControlStatus(ControlStatusSnapshot &output) {
-  ControlStatusSnapshot staging;
   portENTER_CRITICAL(&webStatusMux);
-  staging = publishedControlStatus;
+  output = publishedControlStatus;
   portEXIT_CRITICAL(&webStatusMux);
-  output = staging;
 }
 
 void reportTaskWatchdogFault() {
@@ -7380,9 +7378,18 @@ void loop() {
   {
     // Web UI / Companion poll ~1–2 Hz; rebuilding the full snapshot every 1 ms
     // loop tick wastes CPU copying presets + scale history under the mux.
+    // Force on control/safety edges so the UI never lags a shot start/stop by
+    // the throttle interval.
     static uint32_t lastControlStatusPublishMs = 0;
+    const RelaySafetySnapshot relaySnap = getRelaySafetySnapshot();
+    const bool forcePublish =
+        publishedControlStatus.state != stopperState ||
+        publishedControlStatus.activeCycle != session.active ||
+        publishedControlStatus.relayClosed != relaySnap.closed ||
+        publishedControlStatus.safetyGeneration != relaySnap.generation ||
+        publishedControlStatus.safetyFault != relaySnap.fault;
     const uint32_t nowMs = millis();
-    if (lastControlStatusPublishMs == 0 ||
+    if (forcePublish || lastControlStatusPublishMs == 0 ||
         static_cast<uint32_t>(nowMs - lastControlStatusPublishMs) >= 50U) {
       lastControlStatusPublishMs = nowMs;
       publishControlStatus();

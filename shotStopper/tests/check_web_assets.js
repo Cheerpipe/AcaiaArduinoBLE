@@ -1238,8 +1238,8 @@ const expected = new Map([
 ]);
 
 const maxSocketsMatch = network.match(/max_open_sockets\s*=\s*(\d+)/);
-if (!maxSocketsMatch || Number(maxSocketsMatch[1]) !== 6) {
-  throw new Error('HTTP server must reserve exactly 6 open sockets for the single-owner WebUI');
+if (!maxSocketsMatch || Number(maxSocketsMatch[1]) !== 4) {
+  throw new Error('HTTP server must reserve exactly 4 open sockets for the single-owner WebUI');
 }
 if (!network.includes('backlog_conn = 3')) {
   throw new Error('HTTP server backlog must be limited to 3 for the single-owner WebUI');

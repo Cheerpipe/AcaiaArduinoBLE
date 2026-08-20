@@ -2,8 +2,8 @@
 # Shared ESP-IDF helpers. Source after shotstopper_board.sh and
 # shotstopper_cli.sh; do not execute this file directly.
 #
-# Production images still come from ./scripts/build (arduino-cli). This
-# pipeline writes to build-idf/<arquitectura> and never touches build/.
+# Official supported firmware builds write to build-idf/<arquitectura>.
+# Legacy arduino-cli artifacts stay under build/ and are unsupported.
 
 IDF_PROJECT_NAME="shotstopper"
 IDF_DEFAULT_HOME="${HOME}/esp/esp-idf"
@@ -105,7 +105,7 @@ ss_idf_require_image() {
 }
 
 # ALLOW_BSS / autostart / g_probe, then the same OTA identity check as
-# ./scripts/build (image_tag.js).
+# ./scripts/build-idf (image_tag.js).
 ss_idf_verify_firmware() {
   ss_idf_resolve_paths
 

@@ -13,11 +13,10 @@
 #include <esp_attr.h>
 #endif
 
-// EXT_RAM_BSS_ATTR only works when CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
-// is enabled at IDF build time. The prebuilt Arduino-ESP32 core ships with that
-// option off, so large buffers must use allocExternalOrInternal() instead.
-// This macro is kept for documentation only; it does not relocate BSS in our
-// normal ./scripts/build flow.
+// EXT_RAM_BSS_ATTR works when CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY is
+// enabled (official ./scripts/build-idf). The legacy arduino-cli core ships
+// that option off, so large buffers must still use allocExternalOrInternal()
+// for dual-path safety. This macro is documentation only.
 #define SHOT_STOPPER_PSRAM_BSS
 
 namespace shotstopper {
