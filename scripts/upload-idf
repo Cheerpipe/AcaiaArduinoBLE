@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# Flash the ESP-IDF Shot Stopper build over USB. Experimental: this is not
+# the production arduino-cli image from ./scripts/upload.
+set -euo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/shotstopper_board.sh
+source "$SCRIPT_DIR/shotstopper_board.sh"
+# shellcheck source=scripts/shotstopper_cli.sh
+source "$SCRIPT_DIR/shotstopper_cli.sh"
+
+IDF_PROJECT_NAME="shotstopper"
+IDF_DEFAULT_HOME="${HOME}/esp/esp-idf"
+
+usage() {
+  cat <<EOF
+Uso: ./scripts/upload-idf [flags]
+
+Sube por USB el firmware ESP-IDF ya compilado en build-idf/<arquitectura>
+y abre el monitor serie. Esto pisa el firmware de producción hasta que
+vuelvas a flashear con ./scripts/upload.
+
+Parámetros que necesita: --port y --arch.
+
+$(ss_flag_help)
+
+$(shotstopper_arch_help)
+
+Ejemplos:
+  ./scripts/upload-idf --port /dev/cu.usbmodem2101 --arch n16r8
+  ./scripts/upload-idf -p /dev/cu.usbmodem2101 -a n8r4
+EOF
+}
+
+ss_find_idf() {
+  if [[ -n "${IDF_PATH:-}" && -f "${IDF_PATH}/export.sh" ]]; then
+    printf '%s' "$IDF_PATH"
+    return 0
+  fi
+  if [[ -f "${IDF_DEFAULT_HOME}/export.sh" ]]; then
+    printf '%s' "$IDF_DEFAULT_HOME"
+    return 0
+  fi
+  return 1
+}
+
+ss_source_idf() {
+  local idf_root
+  idf_root="$(ss_find_idf)" || {
+    echo "No se encontró ESP-IDF. Ejecuta ./scripts/build-idf primero o instala IDF 5.5.x." >&2
+    exit 127
+  }
+  unset IDF_PYTHON_ENV_PATH ESP_PYTHON
+  if [[ -x /opt/homebrew/opt/python@3.12/libexec/bin/python3 ]]; then
+    PATH="/opt/homebrew/opt/python@3.12/libexec/bin:${PATH}"
+    export PATH
+  fi
+  # shellcheck disable=SC1091
+  . "${idf_root}/export.sh"
+  command -v idf.py >/dev/null 2>&1 || {
+    echo "export.sh de ${idf_root} no dejó idf.py en PATH." >&2
+    exit 127
+  }
+}
+
+ss_cli_parse "$@" || exit $?
+if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
+  usage
+  exit 0
+fi
+
+ss_cli_resolve "port arch" || exit $?
+shotstopper_resolve_board "$(ss_get arch)"
+ss_source_idf
+
+root="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+project="$root/idf"
+build_dir="$root/build-idf/$SHOTSTOPPER_ARCH"
+image="$build_dir/${IDF_PROJECT_NAME}.bin"
+port="$(ss_get port)"
+
+if [[ ! -f "$image" ]]; then
+  echo "No existe $image. Ejecuta ./scripts/build-idf --arch $SHOTSTOPPER_ARCH primero." >&2
+  exit 1
+fi
+
+ss_cli_save
+
+echo "Subiendo firmware IDF experimental $SHOTSTOPPER_ARCH por $port"
+echo "Esto no es el binario de producción de ./scripts/build."
+echo "Salir del monitor: Ctrl+]"
+exec idf.py -C "$project" -B "$build_dir" -p "$port" flash monitor

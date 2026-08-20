@@ -163,10 +163,45 @@ ss_cli_parse() {
       printf 'Falta el valor de --%s.\n' "$key" >&2
       return 2
     fi
-    ss_put "$key" "$1" "cli"
+    value="$1"
     shift
+    # --flags is one logical string, but people often pass several -D/-W tokens
+    # unquoted. Swallow consecutive compiler tokens so the second -D is not
+    # treated as an unknown script option.
+    if [[ "$key" == "flags" ]]; then
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          -D*|-W*|-I*)
+            value="$value $1"
+            shift
+            ;;
+          [A-Za-z_]*=*)
+            value="$value $1"
+            shift
+            ;;
+          *) break ;;
+        esac
+      done
+    fi
+    ss_put "$key" "$value" "cli"
   done
   return 0
+}
+
+# g++ treats a bare MACRO=value token as a linker input. Prefix -D so
+# SHOT_STOPPER_ENABLE_REMOTE_CN9=1 is a define, not a missing file.
+ss_normalize_compiler_flags() {
+  local raw="$1" out="" tok
+  # Word-splitting is intentional: extra_flags is a space-separated list.
+  # shellcheck disable=SC2086
+  set -- $raw
+  for tok in "$@"; do
+    case "$tok" in
+      [A-Za-z_]*=*) tok="-D$tok" ;;
+    esac
+    out="$out $tok"
+  done
+  printf '%s' "${out# }"
 }
 
 ss_cli_apply_env() {
@@ -402,6 +437,11 @@ ss_validate_key() {
         return 1
       fi
       ;;
+    flags)
+      if [[ -n "$value" ]]; then
+        ss_put flags "$(ss_normalize_compiler_flags "$value")" "$(ss_origin flags)"
+      fi
+      ;;
   esac
   return 0
 }
@@ -465,7 +505,8 @@ ss_cli_resolve() {
     done
   fi
 
-  for key in $required; do
+  for key in $wanted; do
+    ss_is_set "$key" || continue
     ss_validate_key "$key" || return 2
   done
   ss_cli_save

@@ -1,0 +1,4 @@
+## IDF Component Manager Manifest File
+dependencies:
+  espressif/arduino-esp32:
+    version: "^3.3.11"

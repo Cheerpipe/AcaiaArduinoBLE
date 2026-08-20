@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+# Compile Shot Stopper with ESP-IDF (Arduino-ESP32 as a component) into
+# build-idf/<arquitectura>. This does not replace ./scripts/build
+# (arduino-cli production firmware).
+set -euo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/shotstopper_board.sh
+source "$SCRIPT_DIR/shotstopper_board.sh"
+# shellcheck source=scripts/shotstopper_cli.sh
+source "$SCRIPT_DIR/shotstopper_cli.sh"
+
+IDF_PROJECT_NAME="shotstopper"
+IDF_DEFAULT_HOME="${HOME}/esp/esp-idf"
+ARDUINO_BLE_VERSION="2.1.0"
+ARDUINO_BLE_REPO="https://github.com/arduino-libraries/ArduinoBLE.git"
+
+usage() {
+  cat <<EOF
+Uso: ./scripts/build-idf [flags]
+
+Compila Shot Stopper con ESP-IDF (ALLOW_BSS en PSRAM) y comprueba que
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY está activo y que g_probe
+cae en PSRAM. No sustituye al firmware de producción de ./scripts/build.
+
+Parámetros que necesita: --arch. --flags es opcional y se pregunta una vez.
+
+$(ss_flag_help)
+
+$(shotstopper_arch_help)
+
+Requiere ESP-IDF 5.5.x. Si IDF_PATH no está definido, se usa
+${IDF_DEFAULT_HOME} si existe.
+
+Ejemplos:
+  ./scripts/build-idf --arch n16r8
+  IDF_PATH=~/esp/esp-idf ./scripts/build-idf -a n8r4
+EOF
+}
+
+ss_find_idf() {
+  if [[ -n "${IDF_PATH:-}" && -f "${IDF_PATH}/export.sh" ]]; then
+    printf '%s' "$IDF_PATH"
+    return 0
+  fi
+  if [[ -f "${IDF_DEFAULT_HOME}/export.sh" ]]; then
+    printf '%s' "$IDF_DEFAULT_HOME"
+    return 0
+  fi
+  return 1
+}
+
+ss_source_idf() {
+  local idf_root
+  idf_root="$(ss_find_idf)" || {
+    echo "No se encontró ESP-IDF (idf.py / export.sh)." >&2
+    echo "Instala 5.5.x y vuelve a ejecutar:" >&2
+    echo "  mkdir -p \"\$HOME/esp\" && cd \"\$HOME/esp\"" >&2
+    echo "  git clone -b v5.5.5 --recursive https://github.com/espressif/esp-idf.git" >&2
+    echo "  cd esp-idf && ./install.sh esp32s3 && . ./export.sh" >&2
+    exit 127
+  }
+  unset IDF_PYTHON_ENV_PATH ESP_PYTHON
+  # IDF 5.5 supports Python 3.9–3.13. Homebrew python3 can be 3.14+.
+  if [[ -x /opt/homebrew/opt/python@3.12/libexec/bin/python3 ]]; then
+    PATH="/opt/homebrew/opt/python@3.12/libexec/bin:${PATH}"
+    export PATH
+  elif command -v python3.12 >/dev/null 2>&1; then
+    PATH="$(dirname "$(command -v python3.12)"):${PATH}"
+    export PATH
+  fi
+  # shellcheck disable=SC1091
+  . "${idf_root}/export.sh"
+  command -v idf.py >/dev/null 2>&1 || {
+    echo "export.sh de ${idf_root} no dejó idf.py en PATH." >&2
+    exit 127
+  }
+  echo "ESP-IDF: ${idf_root}"
+}
+
+ss_ensure_arduino_ble() {
+  local dest="$1"
+  if [[ -f "$dest/src/ArduinoBLE.h" ]]; then
+    return 0
+  fi
+  echo "Clonando ArduinoBLE ${ARDUINO_BLE_VERSION} → $dest"
+  mkdir -p "$(dirname "$dest")"
+  git clone --depth 1 --branch "$ARDUINO_BLE_VERSION" "$ARDUINO_BLE_REPO" "$dest"
+}
+
+# Turn stored tokens like SHOT_STOPPER_FOO=1 into -DSHOT_STOPPER_FOO=1 so a
+# missing -D in .shotstopper does not become a stray gcc filename.
+ss_normalize_cflags() {
+  local raw="$1"
+  local out="" tok
+  # shellcheck disable=SC2086
+  for tok in $raw; do
+    case "$tok" in
+      -*) ;;
+      [A-Z]*) tok="-D${tok}" ;;
+    esac
+    out="${out:+$out }$tok"
+  done
+  printf '%s' "$out"
+}
+
+ss_probe_in_psram() {
+  local addr="$1"
+  # ESP32-S3 maps instruction/data external RAM around 0x3C000000.
+  # Internal DRAM BSS is typically 0x3FC00000.
+  case "$addr" in
+    0x3c*|0x3C*) return 0 ;;
+  esac
+  return 1
+}
+
+ss_verify_idf_firmware() {
+  local build_dir="$1"
+  local arch="$2"
+  local sdkconfig="$build_dir/sdkconfig"
+  local elf="$build_dir/${IDF_PROJECT_NAME}.elf"
+  local map="$build_dir/${IDF_PROJECT_NAME}.map"
+  local image="$build_dir/${IDF_PROJECT_NAME}.bin"
+
+  if [[ ! -f "$sdkconfig" ]]; then
+    echo "No existe $sdkconfig; la compilación IDF no dejó sdkconfig." >&2
+    exit 1
+  fi
+  if ! grep -q '^CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y$' "$sdkconfig"; then
+    echo "ALLOW_BSS no está activo en $sdkconfig." >&2
+    grep 'SPIRAM_ALLOW_BSS' "$sdkconfig" >&2 || true
+    exit 1
+  fi
+  echo "sdkconfig: CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y"
+
+  if ! grep -q '^CONFIG_AUTOSTART_ARDUINO=y$' "$sdkconfig"; then
+    echo "CONFIG_AUTOSTART_ARDUINO no está activo en $sdkconfig." >&2
+    exit 1
+  fi
+  echo "sdkconfig: CONFIG_AUTOSTART_ARDUINO=y"
+
+  if [[ ! -f "$elf" ]]; then
+    echo "No existe $elf." >&2
+    exit 1
+  fi
+  command -v xtensa-esp32s3-elf-nm >/dev/null 2>&1 || {
+    echo "No se encontró xtensa-esp32s3-elf-nm (¿export.sh?)." >&2
+    exit 127
+  }
+
+  local nm_line addr
+  nm_line="$(xtensa-esp32s3-elf-nm "$elf" | grep -E '[[:space:]]g_probe$|[[:space:]]_ZL[0-9]+g_probe$' || true)"
+  if [[ -z "$nm_line" ]]; then
+    echo "nm no encontró g_probe en $elf." >&2
+    exit 1
+  fi
+  addr="0x$(printf '%s' "$nm_line" | awk '{print $1}')"
+  echo "g_probe: $nm_line"
+
+  if ss_probe_in_psram "$addr"; then
+    echo "BSS probe en PSRAM ($addr). ALLOW_BSS funciona en este toolchain."
+  else
+    echo "BSS probe NO está en PSRAM ($addr). Se esperaba 0x3c.... DRAM interna es 0x3fc....." >&2
+    if [[ -f "$map" ]]; then
+      echo "Extracto del .map:" >&2
+      grep -n -A2 -E 'g_probe|ext_ram\.bss|extern_ram_seg' "$map" | head -40 >&2 || true
+    fi
+    exit 1
+  fi
+
+  if [[ ! -f "$image" ]]; then
+    echo "No existe $image." >&2
+    exit 1
+  fi
+  if ! grep -a -F -q -- "SHOTSTOPPER_FW_TAG_V1|arch=${arch}" "$image"; then
+    echo "La imagen IDF no lleva el marcador OTA SHOTSTOPPER_FW_TAG_V1|arch=${arch}." >&2
+    exit 1
+  fi
+  echo "Marcador OTA presente (arch=${arch})"
+}
+
+ss_cli_parse "$@" || exit $?
+if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
+  usage
+  exit 0
+fi
+
+ss_cli_resolve "arch" "flags" || exit $?
+shotstopper_resolve_board "$(ss_get arch)"
+ss_source_idf
+
+command -v node >/dev/null 2>&1 || {
+  echo "No se encontró node en PATH (necesario para el Web UI)." >&2
+  exit 127
+}
+
+root="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+project="$root/idf"
+build_dir="$root/build-idf/$SHOTSTOPPER_ARCH"
+defaults="$project/sdkconfig.defaults;$project/sdkconfig.defaults.$SHOTSTOPPER_ARCH"
+
+cd "$root"
+echo "Generando versión y Web UI"
+./scripts/gen_version.sh "$SHOTSTOPPER_ARCH"
+node ./scripts/gen_web_ui.js
+
+ss_ensure_arduino_ble "$project/third_party/ArduinoBLE"
+
+export SHOT_STOPPER_EXTRA_FLAGS
+SHOT_STOPPER_EXTRA_FLAGS="$(ss_normalize_cflags "$(ss_get flags)")"
+
+mkdir -p "$build_dir"
+# Spike sdkconfig / CMake cache predates Arduino autostart and the firmware
+# project name. Reuse would keep ALLOW_BSS but skip AUTOSTART and g_probe checks.
+if [[ -f "$build_dir/shotstopper_idf_spike.elf" ]] ||
+   { [[ -f "$build_dir/CMakeCache.txt" ]] && grep -q 'shotstopper_idf_spike' "$build_dir/CMakeCache.txt"; } ||
+   { [[ -f "$build_dir/sdkconfig" ]] && ! grep -q '^CONFIG_AUTOSTART_ARDUINO=y$' "$build_dir/sdkconfig"; }; then
+  echo "Limpiando árbol de build del spike IDF"
+  rm -rf "$build_dir"
+  mkdir -p "$build_dir"
+fi
+
+echo "Compilando firmware IDF $SHOTSTOPPER_ARCH → $build_dir"
+
+idf_args=(
+  -C "$project"
+  -B "$build_dir"
+  -D "SDKCONFIG=$build_dir/sdkconfig"
+  -D "SDKCONFIG_DEFAULTS=$defaults"
+)
+
+if [[ ! -f "$build_dir/sdkconfig" ]] ||
+   ! grep -q '^CONFIG_IDF_TARGET="esp32s3"$' "$build_dir/sdkconfig"; then
+  idf.py "${idf_args[@]}" set-target esp32s3
+fi
+
+idf.py "${idf_args[@]}" build
+
+ss_verify_idf_firmware "$build_dir" "$SHOTSTOPPER_ARCH"
+ss_cli_save

@@ -1,0 +1,89 @@
+# Shared ESP-IDF defaults for Shot Stopper (Arduino-ESP32 as a component).
+# Architecture-specific flash/PSRAM overlays live in sdkconfig.defaults.n16r8
+# and sdkconfig.defaults.n8r4. Do not put CONFIG_IDF_TARGET here: idf.py
+# set-target writes it into sdkconfig.
+#
+# Production firmware still builds with ./scripts/build (arduino-cli), where
+# CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY is compiled out of the prebuilt
+# Arduino-ESP32 libraries. This IDF project is the path that can turn it on.
+
+CONFIG_FREERTOS_HZ=1000
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_COMPILER_DISABLE_DEFAULT_ERRORS=y
+
+# Shot Stopper runs at 80 MHz (setup() calls setCpuFrequencyMhz(80)).
+# Arduino-CLI boots at 240 (F_CPU) until that line; IDF's S3 default is 160.
+# Start already at 80 so cpu_start and setup agree.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_80=y
+
+# PSRAM heap + BSS in external RAM. Arduino-ESP32 ships this last option off.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
+# USB Serial/JTAG console on ESP32-S3 native USB (matches CDCOnBoot=cdc
+# with the default Hardware CDC/JTAG USB mode).
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Arduino setup()/loop() autostart. Arduino-ESP32 provides app_main.
+CONFIG_AUTOSTART_ARDUINO=y
+CONFIG_ARDUINO_LOOP_STACK_SIZE=8192
+
+# Skip Matter/RainMaker/esp-sr/Zigbee Arduino wrappers. Shot Stopper only
+# needs EEPROM, Preferences, Network and WiFi from the Arduino libraries.
+CONFIG_ARDUINO_SELECTIVE_COMPILATION=y
+CONFIG_ARDUINO_SELECTIVE_EEPROM=y
+CONFIG_ARDUINO_SELECTIVE_Preferences=y
+CONFIG_ARDUINO_SELECTIVE_Network=y
+CONFIG_ARDUINO_SELECTIVE_WiFi=y
+CONFIG_ARDUINO_SELECTIVE_WiFiProv=y
+# CONFIG_ARDUINO_SELECTIVE_ESP_SR is not set
+# CONFIG_ARDUINO_SELECTIVE_ESP_Video is not set
+# CONFIG_ARDUINO_SELECTIVE_Matter is not set
+# CONFIG_ARDUINO_SELECTIVE_RainMaker is not set
+# CONFIG_ARDUINO_SELECTIVE_Insights is not set
+# CONFIG_ARDUINO_SELECTIVE_OpenThread is not set
+# CONFIG_ARDUINO_SELECTIVE_Zigbee is not set
+# CONFIG_ARDUINO_SELECTIVE_BLE is not set
+# CONFIG_ARDUINO_SELECTIVE_BluetoothSerial is not set
+# CONFIG_ARDUINO_SELECTIVE_SimpleBLE is not set
+# CONFIG_ARDUINO_SELECTIVE_ArduinoOTA is not set
+# CONFIG_ARDUINO_SELECTIVE_HTTPClient is not set
+# CONFIG_ARDUINO_SELECTIVE_WebServer is not set
+# CONFIG_ARDUINO_SELECTIVE_Ethernet is not set
+# CONFIG_ARDUINO_SELECTIVE_PPP is not set
+# CONFIG_ARDUINO_SELECTIVE_SD is not set
+# CONFIG_ARDUINO_SELECTIVE_SD_MMC is not set
+# CONFIG_ARDUINO_SELECTIVE_SPIFFS is not set
+# CONFIG_ARDUINO_SELECTIVE_FFat is not set
+# CONFIG_ARDUINO_SELECTIVE_LittleFS is not set
+# CONFIG_ARDUINO_SELECTIVE_FS is not set
+# CONFIG_ARDUINO_SELECTIVE_Update is not set
+# CONFIG_ARDUINO_SELECTIVE_Hash is not set
+# CONFIG_ARDUINO_SELECTIVE_SPI is not set
+# CONFIG_ARDUINO_SELECTIVE_Wire is not set
+# CONFIG_ARDUINO_SELECTIVE_Ticker is not set
+# CONFIG_ARDUINO_SELECTIVE_DNSServer is not set
+# CONFIG_ARDUINO_SELECTIVE_ESPmDNS is not set
+# CONFIG_ARDUINO_SELECTIVE_NetBIOS is not set
+# CONFIG_ARDUINO_SELECTIVE_AsyncUDP is not set
+# CONFIG_ARDUINO_SELECTIVE_NetworkClientSecure is not set
+
+# ArduinoBLE talks to the controller over VHCI (no Bluedroid/NimBLE host).
+CONFIG_BT_ENABLED=y
+CONFIG_BT_CONTROLLER_ONLY=y
+CONFIG_BT_CONTROLLER_ENABLED=y
+
+# Compile-time requirements from ShotStopperWatchdog.h / ShotStopperOta.h /
+# ShotStopperHardwareTimer.h. Arduino-ESP32 prebuilt libs already ship these.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+CONFIG_BOOTLOADER_WDT_ENABLE=y
+CONFIG_GPTIMER_ISR_HANDLER_IN_IRAM=y
