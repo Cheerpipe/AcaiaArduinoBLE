@@ -250,6 +250,7 @@ if (!ui.includes('id="soundAlertsEnabled"') ||
     !ui.includes('soundAlertsEnabled:$(\'soundAlertsEnabled\').checked') ||
     !ui.includes('p.soundAlertsEnabled=$(\'homeSoundAlertsEnabled\').checked') ||
     !ui.includes("k!=='soundAlertsEnabled'") ||
+    !js.includes("keys[0]==='soundAlertsEnabled'") ||
     !ui.includes("typeof c.soundAlertsEnabled==='boolean'")) {
   throw new Error('Sound alerts must be mirrored by Settings and Home patch controls');
 }
@@ -1001,7 +1002,8 @@ if (!ui.includes('id="shotTable"') ||
     !ui.includes('id="timezoneOffsetMinutes"') ||
     !js.includes('m+=15') ||
     js.includes('Request accepted.') ||
-    !js.includes('Request queued.') ||
+    js.includes("message('Request queued.','ok')") ||
+    !js.includes('Request queued successfully.') ||
     !network.includes('hasWallTime') ||
     !network.includes('endedAtLocalSec') ||
     !network.includes('SHOT_LOG_CLEAR_NOT_CONFIRMED')) {
