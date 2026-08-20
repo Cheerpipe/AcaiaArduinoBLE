@@ -1866,6 +1866,17 @@ if (network.includes('zlib.h') || network.includes('miniz.h') ||
     /mz_compress|deflateInit|gzipCompress/.test(network)) {
   throw new Error('Firmware must not compress the Web UI at runtime');
 }
+if (!network.includes('sendCopiedBody(request, SHOT_STOPPER_WEB_UI_GZIP') ||
+    !network.includes('sendCopiedBody(request, SHOT_STOPPER_WEB_JS_GZIP') ||
+    !network.includes('sendCopiedBody(request, SHOT_STOPPER_WEB_CSS_GZIP') ||
+    !network.includes('return sendCopiedBody(request, json, length)') ||
+    !network.includes('HTTP_BODY_STAGING_BYTES') ||
+    !network.includes('g_httpBodyStaging') ||
+    !network.includes('g_httpSendBounce') ||
+    !network.includes(
+        'sendCopiedChunk(request, work.jsonItem, strlen(work.jsonItem))')) {
+  throw new Error('HTTP bodies must copy through internal RAM before tcp_write');
+}
 if (!network.includes('If-None-Match')) {
   throw new Error('GET / must honor If-None-Match for cached Web UI revalidation');
 }

@@ -477,6 +477,47 @@ bool registerHandler(httpd_handle_t server, const char *uri,
   return httpd_register_uri_handler(server, &descriptor) == ESP_OK;
 }
 
+// lwIP on ESP32-S3 cannot DMA a PSRAM or flash pointer in one tcp_write.
+// Copy complete bodies into internal RAM and send with Content-Length;
+// chunked mode stalls once the first body slice exceeds a few hundred bytes.
+constexpr size_t HTTP_BODY_STAGING_BYTES = 23552;
+constexpr size_t HTTP_DRAM_BOUNCE_BYTES = 512;
+
+static uint8_t g_httpBodyStaging[HTTP_BODY_STAGING_BYTES];
+static uint8_t g_httpSendBounce[HTTP_DRAM_BOUNCE_BYTES];
+
+esp_err_t sendCopiedChunk(httpd_req_t *request, const void *data,
+                          size_t length) {
+  const auto *src = static_cast<const uint8_t *>(data);
+  while (length > 0) {
+    const size_t n =
+        length < HTTP_DRAM_BOUNCE_BYTES ? length : HTTP_DRAM_BOUNCE_BYTES;
+    memcpy(g_httpSendBounce, src, n);
+    if (httpd_resp_send_chunk(request,
+                              reinterpret_cast<const char *>(g_httpSendBounce),
+                              n) != ESP_OK) {
+      return ESP_FAIL;
+    }
+    src += n;
+    length -= n;
+  }
+  return ESP_OK;
+}
+
+esp_err_t sendCopiedBody(httpd_req_t *request, const void *data,
+                         size_t length) {
+  if (length == 0) {
+    return httpd_resp_send(request, nullptr, 0);
+  }
+  if (length > HTTP_BODY_STAGING_BYTES) {
+    return ESP_FAIL;
+  }
+  memcpy(g_httpBodyStaging, data, length);
+  return httpd_resp_send(
+      request, reinterpret_cast<const char *>(g_httpBodyStaging),
+      static_cast<ssize_t>(length));
+}
+
 esp_err_t sendJsonStringChunk(httpd_req_t *request, const char *value) {
   if (httpd_resp_send_chunk(request, "\"", 1) != ESP_OK) {
     return ESP_FAIL;
@@ -504,13 +545,11 @@ esp_err_t sendJsonStringChunk(httpd_req_t *request, const char *value) {
     }
     if (escape != nullptr) {
       if (cursor > segment &&
-          httpd_resp_send_chunk(
-              request, reinterpret_cast<const char *>(segment),
-              static_cast<ssize_t>(cursor - segment)) != ESP_OK) {
+          sendCopiedChunk(request, segment,
+                          static_cast<size_t>(cursor - segment)) != ESP_OK) {
         return ESP_FAIL;
       }
-      if (httpd_resp_send_chunk(request, escape, HTTPD_RESP_USE_STRLEN) !=
-          ESP_OK) {
+      if (sendCopiedChunk(request, escape, strlen(escape)) != ESP_OK) {
         return ESP_FAIL;
       }
       segment = cursor + 1;
@@ -518,8 +557,8 @@ esp_err_t sendJsonStringChunk(httpd_req_t *request, const char *value) {
     ++cursor;
   }
   if (cursor > segment &&
-      httpd_resp_send_chunk(request, reinterpret_cast<const char *>(segment),
-                            static_cast<ssize_t>(cursor - segment)) != ESP_OK) {
+      sendCopiedChunk(request, segment,
+                      static_cast<size_t>(cursor - segment)) != ESP_OK) {
     return ESP_FAIL;
   }
   return httpd_resp_send_chunk(request, "\"", 1);
@@ -2814,7 +2853,8 @@ esp_err_t ShotStopperNetwork::sendJson(httpd_req_t *request,
   // ESP while BLE/Wi-Fi coex delays responses.
   httpd_resp_set_hdr(request, "Connection", "close");
   httpd_resp_set_hdr(request, "Access-Control-Allow-Origin", "*");
-  return httpd_resp_send(request, json, HTTPD_RESP_USE_STRLEN);
+  const size_t length = json == nullptr ? 0 : strlen(json);
+  return sendCopiedBody(request, json, length);
 }
 
 esp_err_t ShotStopperNetwork::sendError(httpd_req_t *request,
@@ -3089,9 +3129,8 @@ esp_err_t ShotStopperNetwork::rootHandler(httpd_req_t *request) {
       "default-src 'self'; script-src 'self'; style-src 'self'; "
       "connect-src 'self'; frame-ancestors 'none'");
   httpd_resp_set_hdr(request, "Connection", "close");
-  return httpd_resp_send(
-      request, reinterpret_cast<const char *>(SHOT_STOPPER_WEB_UI_GZIP),
-      SHOT_STOPPER_WEB_UI_GZIP_LEN);
+  return sendCopiedBody(request, SHOT_STOPPER_WEB_UI_GZIP,
+                        SHOT_STOPPER_WEB_UI_GZIP_LEN);
 }
 
 esp_err_t ShotStopperNetwork::jsHandler(httpd_req_t *request) {
@@ -3113,9 +3152,8 @@ esp_err_t ShotStopperNetwork::jsHandler(httpd_req_t *request) {
   httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
   httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
   httpd_resp_set_hdr(request, "Connection", "close");
-  return httpd_resp_send(
-      request, reinterpret_cast<const char *>(SHOT_STOPPER_WEB_JS_GZIP),
-      SHOT_STOPPER_WEB_JS_GZIP_LEN);
+  return sendCopiedBody(request, SHOT_STOPPER_WEB_JS_GZIP,
+                        SHOT_STOPPER_WEB_JS_GZIP_LEN);
 }
 
 esp_err_t ShotStopperNetwork::cssHandler(httpd_req_t *request) {
@@ -3137,9 +3175,8 @@ esp_err_t ShotStopperNetwork::cssHandler(httpd_req_t *request) {
   httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
   httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
   httpd_resp_set_hdr(request, "Connection", "close");
-  return httpd_resp_send(
-      request, reinterpret_cast<const char *>(SHOT_STOPPER_WEB_CSS_GZIP),
-      SHOT_STOPPER_WEB_CSS_GZIP_LEN);
+  return sendCopiedBody(request, SHOT_STOPPER_WEB_CSS_GZIP,
+                        SHOT_STOPPER_WEB_CSS_GZIP_LEN);
 }
 
 esp_err_t ShotStopperNetwork::notFoundHandler(httpd_req_t *request,
@@ -3840,7 +3877,7 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
              static_cast<unsigned>(event.code), message,
              static_cast<long>(event.argument1),
              static_cast<long>(event.argument2));
-    if (httpd_resp_send_chunk(request, work.jsonItem, HTTPD_RESP_USE_STRLEN) !=
+    if (sendCopiedChunk(request, work.jsonItem, strlen(work.jsonItem)) !=
         ESP_OK) {
       self.unlockWorkBuf();
       return ESP_FAIL;
@@ -3958,7 +3995,7 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
              maxRecovery, minBrewTime, targetEarly,
              actualWeightSourceName(
                  static_cast<ActualWeightSource>(record.actualWeightSource)));
-    if (httpd_resp_send_chunk(request, work.jsonItem, HTTPD_RESP_USE_STRLEN) !=
+    if (sendCopiedChunk(request, work.jsonItem, strlen(work.jsonItem)) !=
         ESP_OK) {
       self.unlockWorkBuf();
       return ESP_FAIL;
