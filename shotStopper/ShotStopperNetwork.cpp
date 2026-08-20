@@ -14,6 +14,7 @@
 #include <esp_wifi.h>
 #include <esp_system.h>
 #include <math.h>
+#include <new>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,17 +34,17 @@ struct NetworkWorkBuf {
   // Worst case is ~493 B: the envelope with the longest state and lock reason,
   // plus two fully populated tags at OTA_ARCH_CAPACITY + OTA_VERSION_CAPACITY.
   static constexpr size_t kOtaJson = 640;
-  char statusJson[kStatusJson];
-  char presetsJson[kPresetsJson];
-  char historyJson[kHistoryJson];
-  char jsonItem[kJsonItem];
-  char otaJson[kOtaJson];
-  DebugEvent logBatch[kNetworkLogBatchSize];
-  ShotLogRecord shotRecords[SHOT_LOG_CAPACITY];
-  ControlStatusSnapshot control;
+  char statusJson[kStatusJson]{};
+  char presetsJson[kPresetsJson]{};
+  char historyJson[kHistoryJson]{};
+  char jsonItem[kJsonItem]{};
+  char otaJson[kOtaJson]{};
+  DebugEvent logBatch[kNetworkLogBatchSize]{};
+  ShotLogRecord shotRecords[SHOT_LOG_CAPACITY]{};
+  ControlStatusSnapshot control{};
   // Must match ShotStopperNetwork::REQUEST_BODY_CAPACITY (asserted in begin()).
-  char requestBody[2048];
-  WifiScanSnapshot wifiScan;
+  char requestBody[2048]{};
+  WifiScanSnapshot wifiScan{};
 };
 
 // Wi-Fi scan fetch + published snapshot. Network task / httpd only; not BLE.
@@ -741,7 +742,7 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
     acceptedCommandQueue_ = nullptr;
     return false;
   }
-  memset(workBuf_, 0, sizeof(*workBuf_));
+  new (workBuf_) NetworkWorkBuf{};
   g_wifiApRecords = static_cast<wifi_ap_record_t *>(allocExternalOrInternal(
       sizeof(wifi_ap_record_t) * kWifiScanFetchMax));
   if (g_wifiApRecords == nullptr) {
