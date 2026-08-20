@@ -330,7 +330,7 @@ name, default WPA2 password, and step-by-step first connection.
     authenticated API traffic and optional session headers on `GET /api/v1/status/{page}` /
     `GET /shots`)
   - Config: `POST /config`, `POST /calibration/reset`, `POST /time/sync`,
-    `POST /access-point/password`
+    `POST /access-point/password` (`currentPassword` and `newPassword`)
   - Network: `POST /network` (`save` / `forget` / `confirm`), `POST /network/scan`,
     `GET /network/scan` (async, max **12** networks, **120 s** timeout;
     cancelable via maintenance lease). `save` accepts `ipMode` (`dhcp`|

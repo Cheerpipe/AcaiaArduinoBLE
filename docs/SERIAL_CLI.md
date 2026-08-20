@@ -93,7 +93,7 @@ reboot. Automatic SoftAP from boot is still torn down when STA comes up.
 | `AP_START` | none | Raises SoftAP (`MicraShotStopperAP` at `192.168.4.1`). Stays up if STA is connected. Does not start HTTP if `WEBUI_STOP` is held |
 | `AP_STOP` | none | Stops SoftAP and holds auto-raise. HTTP stays if STA is up |
 | `AP_STATUS` | none | Dumps SoftAP state (never the password) |
-| `SET_AP_PASSWORD` | `<password>` | Sets WPA2 password of the AP (8–63 chars, not `Micra1234`). Safety gate |
+| `SET_AP_PASSWORD` | `<password>` | Sets WPA2 password of the AP (8–63 chars, not `Micra1234`). Does not require the current password. Safety gate |
 | `RESET_AP_PASSWORD` | none | Restores AP password `Micra1234`. STA unchanged. Safety gate |
 
 ## Web UI

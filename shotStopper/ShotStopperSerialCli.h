@@ -421,7 +421,8 @@ inline void serialCliPrintHelp() {
       "unchanged)  e.g. RESET_AP_PASSWORD");
   Serial.println(
       "SET_AP_PASSWORD <password>  set AP password (8-63 chars, not "
-      "Micra1234)  e.g. SET_AP_PASSWORD password1234");
+      "Micra1234; USB does not require the current password)  e.g. "
+      "SET_AP_PASSWORD password1234");
   Serial.println(
       "SET_WIFI <ssid> [password]  save STA Wi-Fi (DHCP) and restart; omit "
       "password if open; quote spaces  e.g. SET_WIFI CafeLAN CafePass1");

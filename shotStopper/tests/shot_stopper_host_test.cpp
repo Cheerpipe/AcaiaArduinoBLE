@@ -5671,6 +5671,8 @@ void sc05_serial_cli_parser_covers_supported_commands() {
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(serialCliParseLine("SET_AP_PASSWORD Micra1234", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
+  CHECK(serialCliParseLine("SET_AP_PASSWORD oldpass newpass", request));
+  CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(serialCliParseLine("SET_WIFI Cafe short", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(serialCliParseLine("not_a_command", request));

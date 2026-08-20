@@ -181,6 +181,23 @@ bool jsonInt16(cJSON *object, const char *name, int16_t &output) {
   return true;
 }
 
+// Compared in constant time so a wrong secret cannot be recovered one byte at a
+// time by measuring how long the rejection takes.
+bool secretsMatch(const char *candidate, const char *expected) {
+  const size_t candidateLength = strnlen(candidate, WIFI_PASSWORD_CAPACITY);
+  const size_t expectedLength = strnlen(expected, WIFI_PASSWORD_CAPACITY);
+  uint32_t difference =
+      static_cast<uint32_t>(candidateLength ^ expectedLength);
+  const size_t span =
+      candidateLength < expectedLength ? candidateLength : expectedLength;
+  for (size_t index = 0; index < span; ++index) {
+    difference |= static_cast<uint32_t>(
+        static_cast<uint8_t>(candidate[index]) ^
+        static_cast<uint8_t>(expected[index]));
+  }
+  return difference == 0 && expectedLength > 0;
+}
+
 bool jsonString(cJSON *object, const char *name, char *output,
                 size_t outputCapacity, bool allowEmpty) {
   cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
@@ -5097,10 +5114,13 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
   command.type = WebCommandType::CHANGE_AP_PASSWORD;
   command.requestId = self.allocateRequestId();
   command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
+  char currentPassword[WIFI_PASSWORD_CAPACITY] = {};
   cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
-  static const char *const fields[] = {"newPassword"};
+  static const char *const fields[] = {"currentPassword", "newPassword"};
   const bool parsed =
-      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 2) &&
+      jsonString(root, "currentPassword", currentPassword,
+                 sizeof(currentPassword), false) &&
       jsonString(root, "newPassword", command.password,
                  sizeof(command.password), false);
   if (root != nullptr) {
@@ -5109,8 +5129,21 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
   self.unlockJsonBody();
   if (!parsed) {
     memset(command.password, 0, sizeof(command.password));
+    memset(currentPassword, 0, sizeof(currentPassword));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_AP_PASSWORD",
-                     "A new password field is required.");
+                     "Current and new password fields are required.");
+  }
+  char expected[WIFI_PASSWORD_CAPACITY] = {};
+  portENTER_CRITICAL(&self.dataMux_);
+  memcpy(expected, self.settings_.apPassword, sizeof(expected));
+  portEXIT_CRITICAL(&self.dataMux_);
+  const bool currentMatches = secretsMatch(currentPassword, expected);
+  memset(currentPassword, 0, sizeof(currentPassword));
+  memset(expected, 0, sizeof(expected));
+  if (!currentMatches) {
+    memset(command.password, 0, sizeof(command.password));
+    return sendError(request, STATUS_UNAUTHORIZED, "AP_PASSWORD_INVALID",
+                     "Current password is incorrect.");
   }
   if (!validAccessPointPassword(command.password)) {
     memset(command.password, 0, sizeof(command.password));
@@ -5170,21 +5203,8 @@ struct OtaTransfer {
   httpd_req_t *request = nullptr;
 };
 
-// Compared in constant time so a wrong token cannot be recovered one byte at a
-// time by measuring how long the rejection takes.
 bool otaTokensMatch(const char *candidate, const char *expected) {
-  const size_t candidateLength = strnlen(candidate, WIFI_PASSWORD_CAPACITY);
-  const size_t expectedLength = strnlen(expected, WIFI_PASSWORD_CAPACITY);
-  uint32_t difference =
-      static_cast<uint32_t>(candidateLength ^ expectedLength);
-  const size_t span =
-      candidateLength < expectedLength ? candidateLength : expectedLength;
-  for (size_t index = 0; index < span; ++index) {
-    difference |= static_cast<uint32_t>(
-        static_cast<uint8_t>(candidate[index]) ^
-        static_cast<uint8_t>(expected[index]));
-  }
-  return difference == 0 && expectedLength > 0;
+  return secretsMatch(candidate, expected);
 }
 
 const char *otaResultHttpStatus(OtaResult result) {

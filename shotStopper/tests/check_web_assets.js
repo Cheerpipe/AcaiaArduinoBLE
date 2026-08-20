@@ -2149,6 +2149,19 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
     throw new Error(
       'OTA authentication must reject the factory default password and compare in constant time');
   }
+  const currentApAt = html.indexOf('id="currentApPassword"');
+  const newApAt = html.indexOf('id="newApPassword"');
+  const confirmApAt = html.indexOf('id="confirmApPassword"');
+  if (currentApAt < 0 || newApAt < 0 || confirmApAt < 0 ||
+      !(currentApAt < newApAt && newApAt < confirmApAt)) {
+    throw new Error('AP password form must ask for the current password before a new one');
+  }
+  if (!js.includes('currentPassword:$(\'currentApPassword\').value') ||
+      !network.includes('"currentPassword"') ||
+      !network.includes('AP_PASSWORD_INVALID') ||
+      !network.includes('secretsMatch(currentPassword, expected)')) {
+    throw new Error('Web AP password change must verify the current password');
+  }
   if (!network.includes('serviceOtaRollback(now)') ||
       !networkHeader.includes('OTA_CONFIRM_MIN_UPTIME_MS') ||
       !networkHeader.includes('OTA_CONFIRM_DEADLINE_MS')) {
