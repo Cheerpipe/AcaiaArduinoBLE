@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ShotStopperDomain.h"
+#include "ShotStopperFlashIoScratch.h"
 #include "ShotStopperPresets.h"
 
 #if defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
@@ -278,15 +279,15 @@ inline void finalizePersistedSettings(PersistedSettings &settings) {
   settings.checksum = persistedSettingsChecksum(settings);
 }
 
-// Dual-slot / save scratch. Kept off the Arduino loopTask stack
-// (default 8 KB): nested load→save would otherwise put multiple copies on the
-// stack and panic in NVS (LoadStoreError).
-// Must stay in internal SRAM: these buffers are the source/destination of
-// Preferences putBytes/getBytes while flash cache is disabled (PSRAM is then
-// inaccessible on ESP32-S3).
+// Dual-slot scratch shared with shot-log flash I/O (see FlashIoScratch).
+// Must stay in internal SRAM: source/destination of Preferences putBytes/
+// getBytes while flash cache is disabled (PSRAM is then inaccessible).
 inline PersistedSettings &persistedSettingsScratch(uint8_t index) {
-  static PersistedSettings slots[3] = {};
-  return slots[index % 3];
+  static_assert(2 * sizeof(PersistedSettings) <= FLASH_IO_SCRATCH_BYTES,
+                "PersistedSettings dual-slot scratch exceeds flash I/O buffer");
+  auto *slots =
+      reinterpret_cast<PersistedSettings *>(flashIoScratchBytes());
+  return slots[index & 1U];
 }
 
 inline bool readSettingsSlot(Preferences &preferences, const char *key,
@@ -295,7 +296,7 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
     return false;
   }
   // Read directly into the out-param to avoid borrowing scratch slots that
-  // load/save may already hold (candidate lives in scratch[2] during save).
+  // load/save may already hold (candidate lives in scratch[1] during save).
   if (preferences.getBytes(key, &settings, sizeof(settings)) !=
       sizeof(settings)) {
     return false;
@@ -306,59 +307,11 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
   return true;
 }
 
-inline bool savePersistedSettings(PersistedSettings &settings);
-
-inline bool loadPersistedSettings(PersistedSettings &settings) {
-  Preferences preferences;
-  if (!preferences.begin(SETTINGS_NAMESPACE, true)) {
-    return false;
-  }
-  PersistedSettings &first = persistedSettingsScratch(0);
-  PersistedSettings &second = persistedSettingsScratch(1);
-  first = PersistedSettings{};
-  second = PersistedSettings{};
-  bool firstValid = readSettingsSlot(preferences, SETTINGS_SLOT_A, first);
-  bool secondValid = readSettingsSlot(preferences, SETTINGS_SLOT_B, second);
-  preferences.end();
-
-  if (!firstValid && !secondValid) {
-    return false;
-  }
-  if (!firstValid) {
-    settings = second;
-  } else if (!secondValid) {
-    settings = first;
-  } else {
-    const int32_t revisionDelta =
-        static_cast<int32_t>(second.storageRevision - first.storageRevision);
-    if (revisionDelta > 0) {
-      settings = second;
-    } else {
-      settings = first;
-    }
-  }
-  return true;
-}
 #if !defined(SHOT_STOPPER_HOST_TEST) &&                                        \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
-inline SemaphoreHandle_t settingsNvsMutexHandle() {
-  static SemaphoreHandle_t handle = xSemaphoreCreateMutex();
-  return handle;
-}
+inline void lockSettingsNvs() { lockFlashIo(); }
 
-inline void lockSettingsNvs() {
-  SemaphoreHandle_t handle = settingsNvsMutexHandle();
-  if (handle != nullptr) {
-    xSemaphoreTake(handle, portMAX_DELAY);
-  }
-}
-
-inline void unlockSettingsNvs() {
-  SemaphoreHandle_t handle = settingsNvsMutexHandle();
-  if (handle != nullptr) {
-    xSemaphoreGive(handle);
-  }
-}
+inline void unlockSettingsNvs() { unlockFlashIo(); }
 
 inline void yieldSettingsNvs() { vTaskDelay(pdMS_TO_TICKS(1)); }
 
@@ -370,6 +323,45 @@ inline void yieldSettingsNvs() {}
 inline void feedSettingsNvsWatchdog() {}
 #endif
 
+inline bool savePersistedSettings(PersistedSettings &settings);
+
+inline bool loadPersistedSettings(PersistedSettings &settings) {
+  lockSettingsNvs();
+  Preferences preferences;
+  if (!preferences.begin(SETTINGS_NAMESPACE, true)) {
+    unlockSettingsNvs();
+    return false;
+  }
+  PersistedSettings &first = persistedSettingsScratch(0);
+  PersistedSettings &second = persistedSettingsScratch(1);
+  first = PersistedSettings{};
+  second = PersistedSettings{};
+  bool firstValid = readSettingsSlot(preferences, SETTINGS_SLOT_A, first);
+  bool secondValid = readSettingsSlot(preferences, SETTINGS_SLOT_B, second);
+  preferences.end();
+
+  bool loaded = false;
+  if (!firstValid && !secondValid) {
+    loaded = false;
+  } else if (!firstValid) {
+    settings = second;
+    loaded = true;
+  } else if (!secondValid) {
+    settings = first;
+    loaded = true;
+  } else {
+    const int32_t revisionDelta =
+        static_cast<int32_t>(second.storageRevision - first.storageRevision);
+    if (revisionDelta > 0) {
+      settings = second;
+    } else {
+      settings = first;
+    }
+    loaded = true;
+  }
+  unlockSettingsNvs();
+  return loaded;
+}
 inline void overlayLivePersistedSettings(PersistedSettings &settings,
                                          const RuntimeConfig &runtime,
                                          const ShotPresetBank &presets) {
@@ -402,8 +394,10 @@ inline void resetDurableStorageRevision() {
 }
 
 inline bool savePersistedSettings(PersistedSettings &settings) {
-  PersistedSettings &candidate = persistedSettingsScratch(2);
-  PersistedSettings &current = persistedSettingsScratch(0);
+  // Slots 0 and 1 only: candidate in [1], scratch [0] for revision probe /
+  // verify. Never call loadPersistedSettings here — it needs both slots.
+  PersistedSettings &candidate = persistedSettingsScratch(1);
+  PersistedSettings &scratch = persistedSettingsScratch(0);
   candidate = settings;
   yieldSettingsNvs();
   feedSettingsNvsWatchdog();
@@ -411,9 +405,27 @@ inline bool savePersistedSettings(PersistedSettings &settings) {
   if (durableStorageRevisionValid()) {
     candidate.storageRevision = durableStorageRevision();
   } else if (candidate.storageRevision == 0) {
-    current = PersistedSettings{};
-    if (loadPersistedSettings(current)) {
-      candidate.storageRevision = current.storageRevision;
+    uint32_t revision = 0;
+    bool haveRevision = false;
+    Preferences probe;
+    if (probe.begin(SETTINGS_NAMESPACE, true)) {
+      scratch = PersistedSettings{};
+      if (readSettingsSlot(probe, SETTINGS_SLOT_A, scratch)) {
+        revision = scratch.storageRevision;
+        haveRevision = true;
+      }
+      scratch = PersistedSettings{};
+      if (readSettingsSlot(probe, SETTINGS_SLOT_B, scratch)) {
+        if (!haveRevision ||
+            static_cast<int32_t>(scratch.storageRevision - revision) > 0) {
+          revision = scratch.storageRevision;
+        }
+        haveRevision = true;
+      }
+      probe.end();
+    }
+    if (haveRevision) {
+      candidate.storageRevision = revision;
     }
   }
   ++candidate.storageRevision;
@@ -433,12 +445,11 @@ inline bool savePersistedSettings(PersistedSettings &settings) {
   const bool written =
       preferences.putBytes(target, &candidate, sizeof(candidate)) ==
       sizeof(candidate);
-  PersistedSettings &verified = persistedSettingsScratch(0);
-  verified = PersistedSettings{};
+  scratch = PersistedSettings{};
   const bool saved = written &&
-                     readSettingsSlot(preferences, target, verified) &&
-                     verified.storageRevision == candidate.storageRevision &&
-                     memcmp(&verified, &candidate, sizeof(candidate)) == 0;
+                     readSettingsSlot(preferences, target, scratch) &&
+                     scratch.storageRevision == candidate.storageRevision &&
+                     memcmp(&scratch, &candidate, sizeof(candidate)) == 0;
   preferences.end();
   if (saved) {
     durableStorageRevision() = candidate.storageRevision;
@@ -490,24 +501,20 @@ inline bool resetPersistedSettingsToFactory(PersistedSettings &settings) {
   const bool secondSaved =
       preferences.putBytes(SETTINGS_SLOT_B, &second, sizeof(second)) ==
       sizeof(second);
-  PersistedSettings &verifiedFirst = persistedSettingsScratch(2);
-  verifiedFirst = PersistedSettings{};
+  // Reuse the two slots for read-back verify (NVS already holds both blobs).
+  first = PersistedSettings{};
   const bool firstVerified =
-      firstSaved && readSettingsSlot(preferences, SETTINGS_SLOT_A,
-                                     verifiedFirst);
-  // Reuse slot 0 for the second verification (slot contents no longer needed).
-  PersistedSettings &verifiedSecond = persistedSettingsScratch(0);
-  verifiedSecond = PersistedSettings{};
+      firstSaved && readSettingsSlot(preferences, SETTINGS_SLOT_A, first);
+  second = PersistedSettings{};
   const bool secondVerified =
-      secondSaved && readSettingsSlot(preferences, SETTINGS_SLOT_B,
-                                      verifiedSecond);
+      secondSaved && readSettingsSlot(preferences, SETTINGS_SLOT_B, second);
   preferences.end();
   unlockSettingsNvs();
 
   if (!firstVerified && !secondVerified) {
     return false;
   }
-  settings = secondVerified ? verifiedSecond : verifiedFirst;
+  settings = secondVerified ? second : first;
   noteDurableStorageRevision(settings.storageRevision);
   return true;
 }

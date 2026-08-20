@@ -21,6 +21,20 @@ CONFIG_SPIRAM=y
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# Prefer PSRAM for Wi-Fi/lwIP buffers when the driver allows it (soak-tested
+# SoftAP+STA+BLE on n16r8). Leaves more internal DRAM for BLE controller.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# Trim Wi-Fi / lwIP DRAM for a single Web UI client + SoftAP.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
+# CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT is not set
+# CONFIG_LWIP_IPV6 is not set
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=2880
+CONFIG_LWIP_TCP_WND_DEFAULT=2880
+# Central (scale) + optional Companion peripheral.
+CONFIG_BT_CTRL_BLE_MAX_ACT=3
 
 # USB Serial/JTAG console on ESP32-S3 native USB (matches CDCOnBoot=cdc
 # with the default Hardware CDC/JTAG USB mode).
@@ -38,7 +52,9 @@ CONFIG_ARDUINO_SELECTIVE_EEPROM=y
 CONFIG_ARDUINO_SELECTIVE_Preferences=y
 CONFIG_ARDUINO_SELECTIVE_Network=y
 CONFIG_ARDUINO_SELECTIVE_WiFi=y
-CONFIG_ARDUINO_SELECTIVE_WiFiProv=y
+# SoftAP+HTTP provisioning is implemented in ShotStopperNetwork; WiFiProv /
+# network_provisioning is unused and only costs flash + init RAM.
+# CONFIG_ARDUINO_SELECTIVE_WiFiProv is not set
 # CONFIG_ARDUINO_SELECTIVE_ESP_SR is not set
 # CONFIG_ARDUINO_SELECTIVE_ESP_Video is not set
 # CONFIG_ARDUINO_SELECTIVE_Matter is not set

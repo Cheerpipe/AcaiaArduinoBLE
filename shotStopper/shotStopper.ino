@@ -7377,7 +7377,17 @@ void loop() {
   serviceRuntimePersistence();
   servicePreferredScaleMacPersistence();
   serviceMaintenanceLease();
-  publishControlStatus();
+  {
+    // Web UI / Companion poll ~1–2 Hz; rebuilding the full snapshot every 1 ms
+    // loop tick wastes CPU copying presets + scale history under the mux.
+    static uint32_t lastControlStatusPublishMs = 0;
+    const uint32_t nowMs = millis();
+    if (lastControlStatusPublishMs == 0 ||
+        static_cast<uint32_t>(nowMs - lastControlStatusPublishMs) >= 50U) {
+      lastControlStatusPublishMs = nowMs;
+      publishControlStatus();
+    }
+  }
   publishBleCompanionRuntimeSnapshot();
   serviceScaleConnectedLed();
   if (!feedCurrentTaskWatchdog()) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ShotStopperDomain.h"
+#include "ShotStopperFlashIoScratch.h"
 
 #if defined(SHOT_STOPPER_HOST_TEST)
 // State-machine host tests keep the shot log in memory only.
@@ -649,23 +650,23 @@ inline bool shotLogBlobLengthMatches(const ShotLogStore &store, size_t length) {
   return length == shotLogPersistedBytes(store);
 }
 
-// Full-store scratch for load/migrate/compact. Kept off the Arduino loopTask
-// stack (default 8 KB): sizeof(ShotLogStore) is 5784 and nested load→save
-// would otherwise trip the stack canary during boot.
-// Must stay in internal SRAM: load/migrate call Preferences getBytes into this
-// buffer (and compact runs beside save) while flash cache may be disabled.
+// Full-store scratch for load/migrate/compact. Reuses the shared flash I/O
+// buffer (see ShotStopperFlashIoScratch.h). Caller must hold lockFlashIo().
 inline ShotLogStore &shotLogScratchStore() {
-  static ShotLogStore scratch = {};
-  return scratch;
+  static_assert(sizeof(ShotLogStore) <= FLASH_IO_SCRATCH_BYTES,
+                "ShotLogStore exceeds shared flash I/O scratch");
+  return *reinterpret_cast<ShotLogStore *>(flashIoScratchBytes());
 }
 
 // Pack the ring into records[0..count) (oldest first) so NVS can store only
 // the used prefix instead of the full capacity array.
 inline void compactShotLogStore(ShotLogStore &store) {
+  lockFlashIo();
   const uint16_t count = store.header.count;
   if (count == 0) {
     store.header.writeIndex = 0;
     memset(store.records, 0, sizeof(store.records));
+    unlockFlashIo();
     return;
   }
 
@@ -686,6 +687,7 @@ inline void compactShotLogStore(ShotLogStore &store) {
          static_cast<size_t>(count) * sizeof(ShotLogRecord));
   store.header.writeIndex =
       static_cast<uint16_t>(count % SHOT_LOG_CAPACITY);
+  unlockFlashIo();
 }
 
 inline void resetShotLogStore(ShotLogStore &store, uint32_t bootId) {
@@ -712,9 +714,11 @@ class ShotLog {
     }
     return true;
 #else
+    lockFlashIo();
     Preferences preferences;
     if (!preferences.begin(SHOT_LOG_NAMESPACE, true)) {
       resetShotLogStore(store_, 1);
+      unlockFlashIo();
       return false;
     }
     bool loaded = false;
@@ -831,21 +835,25 @@ class ShotLog {
     } else if (needsRewrite) {
       save();
     }
+    unlockFlashIo();
     return true;
 #endif
   }
 
   bool save() {
+    lockFlashIo();
     compactShotLogStore(store_);
     finalizeShotLogStore(store_);
 #if defined(SHOT_STOPPER_HOST_TEST)
     memcpy(&hostStorage_, &store_, sizeof(store_));
     hostStorageValid_ = true;
+    unlockFlashIo();
     return true;
 #else
     const size_t bytes = shotLogPersistedBytes(store_);
     Preferences preferences;
     if (!preferences.begin(SHOT_LOG_NAMESPACE, false)) {
+      unlockFlashIo();
       return false;
     }
     uint8_t activeSlot = 0;
@@ -862,6 +870,7 @@ class ShotLog {
     const size_t written = preferences.putBytes(target, &store_, bytes);
     if (written != bytes) {
       preferences.end();
+      unlockFlashIo();
       return false;
     }
     const bool pointed =
@@ -871,6 +880,7 @@ class ShotLog {
       preferences.remove(SHOT_LOG_KEY_LEGACY);
     }
     preferences.end();
+    unlockFlashIo();
     return pointed;
 #endif
   }

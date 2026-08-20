@@ -1,5 +1,6 @@
 #include "ShotStopperOta.h"
 
+#include "ShotStopperPsram.h"
 #include "ShotStopperVersion.h"
 #include "ShotStopperWatchdog.h"
 
@@ -16,9 +17,24 @@ extern "C" const char SHOT_STOPPER_FW_IMAGE_TAG[] = FW_IMAGE_TAG_STRING;
 
 namespace {
 
-// Transfer buffer. Kept in internal RAM because it is handed straight to the
-// flash driver, and reused for every transfer.
+// Transfer buffer size. Allocated from internal heap only for the duration of
+// stage(): the flash driver cannot DMA from PSRAM, and a permanent 4 KiB BSS
+// member is wasted between updates.
 constexpr size_t OTA_CHUNK_BYTES = 4096;
+
+struct OtaChunkBuffer {
+  uint8_t *bytes = nullptr;
+
+  explicit OtaChunkBuffer(size_t capacity)
+      : bytes(static_cast<uint8_t *>(allocInternal(capacity))) {}
+
+  ~OtaChunkBuffer() { heapCapsFree(bytes); }
+
+  OtaChunkBuffer(const OtaChunkBuffer &) = delete;
+  OtaChunkBuffer &operator=(const OtaChunkBuffer &) = delete;
+
+  bool ok() const { return bytes != nullptr; }
+};
 
 // A real image is well over a megabyte; anything this small is not one.
 constexpr uint32_t OTA_MIN_IMAGE_BYTES = 65536;
@@ -133,8 +149,12 @@ OtaResult ShotStopperOta::stage(uint32_t contentLength, bool allowDowngrade,
     return OtaResult::UNAVAILABLE;
   }
 
+  OtaChunkBuffer chunk(OTA_CHUNK_BYTES);
+  if (!chunk.ok()) {
+    return OtaResult::NO_MEMORY;
+  }
   size_t chunkBytes = OTA_CHUNK_BYTES;
-  uint8_t *const buffer = chunkBuffer_;
+  uint8_t *const buffer = chunk.bytes;
 
   busy_ = true;
   state_ = OtaState::RECEIVING;

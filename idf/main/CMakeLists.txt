@@ -24,7 +24,6 @@ idf_component_register(
     esp_hw_support
     heap
     soc
-    espressif__network_provisioning
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-missing-field-initializers)
