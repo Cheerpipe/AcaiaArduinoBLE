@@ -9,11 +9,15 @@ const {minify: terserMinify} = require('terser');
 
 const repoRoot = path.resolve(__dirname, '..');
 const sourcePath = path.join(repoRoot, 'shotStopper', 'ShotStopperWebAssets.h');
-const jsSourcePath = path.join(repoRoot, 'shotStopper', 'web', 'app.js');
+const jsDir = path.join(repoRoot, 'shotStopper', 'web', 'js');
+const htmlDir = path.join(repoRoot, 'shotStopper', 'web', 'html');
+const appJsPath = path.join(repoRoot, 'shotStopper', 'web', 'app.js');
 const cssSourcePath = path.join(repoRoot, 'shotStopper', 'web', 'app.css');
 const versionPath = path.join(repoRoot, 'shotStopper', 'ShotStopperVersion.h');
 const outputPath =
     path.join(repoRoot, 'shotStopper', 'ShotStopperWebAssetsGzip.h');
+
+const VIEW_NAMES = ['home', 'history', 'diagnostic', 'settings', 'admin'];
 
 function extractHtml(source) {
   const match = source.match(/R"HTML\(([\s\S]*?)\)HTML"/);
@@ -67,6 +71,7 @@ function minifyCss(css) {
 
 async function minifyJs(js) {
   const result = await terserMinify(js, {
+    module: true,
     compress: true,
     mangle: true,
     format: {comments: false},
@@ -91,30 +96,104 @@ function formatByteArray(buffer) {
   return lines.join('\n');
 }
 
+function stampAssetTag(source, assetTag) {
+  return source.split('__FW_ASSET_TAG__').join(assetTag);
+}
+
+function emitGzipConst(name, buffer) {
+  return `constexpr size_t ${name}_LEN = ${buffer.length};
+const uint8_t ${name}[] PROGMEM = {
+${formatByteArray(buffer)}
+};
+
+static_assert(sizeof(${name}) == ${name}_LEN,
+              "gzip length mismatch for ${name}");
+`;
+}
+
 async function generate() {
   const source = fs.readFileSync(sourcePath, 'utf8');
-  const jsSource = fs.readFileSync(jsSourcePath, 'utf8');
   const cssSource = fs.readFileSync(cssSourcePath, 'utf8');
   const version = readFirmwareVersion();
-  const js = await minifyJs(jsSource);
+
+  const shellHtmlRaw = extractHtml(source);
+  const partialsRaw = {};
+  for (const name of VIEW_NAMES) {
+    const partialPath = path.join(htmlDir, `${name}.html`);
+    if (!fs.existsSync(partialPath)) {
+      throw new Error(`Missing HTML partial: ${partialPath}`);
+    }
+    partialsRaw[name] = fs.readFileSync(partialPath, 'utf8');
+  }
+
+  const appJsRaw = fs.readFileSync(appJsPath, 'utf8');
+  const runtimeRaw = fs.readFileSync(path.join(jsDir, 'runtime.js'), 'utf8');
+  const viewJsRaw = {};
+  for (const name of VIEW_NAMES) {
+    const viewPath = path.join(jsDir, `${name}.js`);
+    if (!fs.existsSync(viewPath)) {
+      throw new Error(`Missing JS view module: ${viewPath}`);
+    }
+    viewJsRaw[name] = fs.readFileSync(viewPath, 'utf8');
+  }
+
+  // Fingerprint unstamped sources so import ?v= tags stay stable and match
+  // WEB_UI_ASSET_TAG embedded in the firmware header.
+  const hash = crypto.createHash('sha256');
+  hash.update(shellHtmlRaw);
+  for (const name of VIEW_NAMES) hash.update(partialsRaw[name]);
+  hash.update(appJsRaw);
+  hash.update(runtimeRaw);
+  for (const name of VIEW_NAMES) hash.update(viewJsRaw[name]);
+  hash.update(cssSource);
+  const assetTag = hash.digest('hex').slice(0, 8);
+
+  const appJs = await minifyJs(stampAssetTag(appJsRaw, assetTag));
+  const runtimeJs = await minifyJs(stampAssetTag(runtimeRaw, assetTag));
+  const viewJs = {};
+  for (const name of VIEW_NAMES) {
+    viewJs[name] = await minifyJs(stampAssetTag(viewJsRaw[name], assetTag));
+  }
   const css = minifyCss(cssSource);
-  // Hash the stable payloads first, then stamp HTML cache-buster URLs so the
-  // query string changes whenever JS/CSS/HTML content changes.
-  const jsGzip = zlib.gzipSync(Buffer.from(js, 'utf8'), {level: 9});
+  const shellHtml = minifyHtml(
+      stampAssetTag(shellHtmlRaw, assetTag)
+          .split('__FW_VERSION__')
+          .join(`${version}.${assetTag}`));
+  const partials = {};
+  for (const name of VIEW_NAMES) {
+    partials[name] = minifyHtml(partialsRaw[name]);
+  }
+
+  return finish({
+    shellHtml,
+    partials,
+    appJs,
+    runtimeJs,
+    viewJs,
+    css,
+    assetTag,
+    version,
+  });
+}
+
+function finish({shellHtml, partials, appJs, runtimeJs, viewJs, css, assetTag,
+                 version}) {
+  const shellGzip = zlib.gzipSync(Buffer.from(shellHtml, 'utf8'), {level: 9});
   const cssGzip = zlib.gzipSync(Buffer.from(css, 'utf8'), {level: 9});
-  const assetTag = crypto
-                      .createHash('sha256')
-                      .update(js)
-                      .update(css)
-                      .update(extractHtml(source))
-                      .digest('hex')
-                      .slice(0, 8);
+  const appJsGzip = zlib.gzipSync(Buffer.from(appJs, 'utf8'), {level: 9});
+  const runtimeGzip =
+      zlib.gzipSync(Buffer.from(runtimeJs, 'utf8'), {level: 9});
+  const partialGzip = {};
+  const viewGzip = {};
+  for (const name of VIEW_NAMES) {
+    partialGzip[name] =
+        zlib.gzipSync(Buffer.from(partials[name], 'utf8'), {level: 9});
+    viewGzip[name] =
+        zlib.gzipSync(Buffer.from(viewJs[name], 'utf8'), {level: 9});
+  }
+
   const cacheVersion = `${version}.${assetTag}`;
-  const html = minifyHtml(
-      extractHtml(source).split('__FW_VERSION__').join(cacheVersion));
-  const htmlGzip = zlib.gzipSync(Buffer.from(html, 'utf8'), {level: 9});
-  const header =
-      `#pragma once
+  let body = `#pragma once
 
 #include <pgmspace.h>
 #include <stddef.h>
@@ -124,50 +203,56 @@ namespace shotstopper {
 
 // Generated by scripts/gen_web_ui.js — do not edit.
 
-// Short content fingerprint for ETag / cache busting (dirty rebuilds).
 constexpr char WEB_UI_ASSET_TAG[] = "${assetTag}";
 
-constexpr size_t SHOT_STOPPER_WEB_UI_GZIP_LEN = ${htmlGzip.length};
-const uint8_t SHOT_STOPPER_WEB_UI_GZIP[] PROGMEM = {
-${formatByteArray(htmlGzip)}
-};
+${emitGzipConst('SHOT_STOPPER_WEB_UI_GZIP', shellGzip)}
+${emitGzipConst('SHOT_STOPPER_WEB_JS_GZIP', appJsGzip)}
+${emitGzipConst('SHOT_STOPPER_WEB_RUNTIME_GZIP', runtimeGzip)}
+${emitGzipConst('SHOT_STOPPER_WEB_CSS_GZIP', cssGzip)}
+`;
 
-static_assert(sizeof(SHOT_STOPPER_WEB_UI_GZIP) == SHOT_STOPPER_WEB_UI_GZIP_LEN,
-              "gzip Web UI length mismatch");
+  for (const name of VIEW_NAMES) {
+    const upper = name.toUpperCase();
+    body += emitGzipConst(
+        `SHOT_STOPPER_WEB_PARTIAL_${upper}_GZIP`, partialGzip[name]);
+    body += emitGzipConst(
+        `SHOT_STOPPER_WEB_VIEW_${upper}_GZIP`, viewGzip[name]);
+  }
 
-constexpr size_t SHOT_STOPPER_WEB_JS_GZIP_LEN = ${jsGzip.length};
-const uint8_t SHOT_STOPPER_WEB_JS_GZIP[] PROGMEM = {
-${formatByteArray(jsGzip)}
-};
-
-static_assert(sizeof(SHOT_STOPPER_WEB_JS_GZIP) == SHOT_STOPPER_WEB_JS_GZIP_LEN,
-              "gzip Web JS length mismatch");
-
-constexpr size_t SHOT_STOPPER_WEB_CSS_GZIP_LEN = ${cssGzip.length};
-const uint8_t SHOT_STOPPER_WEB_CSS_GZIP[] PROGMEM = {
-${formatByteArray(cssGzip)}
-};
-
-static_assert(sizeof(SHOT_STOPPER_WEB_CSS_GZIP) == SHOT_STOPPER_WEB_CSS_GZIP_LEN,
-              "gzip Web CSS length mismatch");
-
+  body += `
 }  // namespace shotstopper
 `;
-  fs.writeFileSync(outputPath, header);
+
+  fs.writeFileSync(outputPath, body);
+
+  let combined = shellGzip.length + appJsGzip.length + runtimeGzip.length +
+      cssGzip.length;
+  for (const name of VIEW_NAMES) {
+    combined += partialGzip[name].length + viewGzip[name].length;
+  }
+
   return {
-    html,
-    js,
+    html: shellHtml,
+    js: appJs,
+    runtimeJs,
+    viewJs,
     css,
-    gzip: htmlGzip,
-    jsGzip,
+    partials,
+    gzip: shellGzip,
+    jsGzip: appJsGzip,
+    runtimeGzip,
+    viewGzip,
+    partialGzip,
     cssGzip,
     assetTag,
     cacheVersion,
+    combined,
     outputPath,
     sourcePath,
-    jsSourcePath,
+    appJsPath,
     cssSourcePath,
     version,
+    VIEW_NAMES,
   };
 }
 
@@ -178,26 +263,33 @@ module.exports = {
   minifyCss,
   generate,
   sourcePath,
-  jsSourcePath,
+  appJsPath: appJsPath,
+  jsSourcePath: appJsPath,
   cssSourcePath,
   outputPath,
+  VIEW_NAMES,
+  htmlDir,
+  jsDir,
 };
 
 if (require.main === module) {
   generate()
       .then((result) => {
-        const htmlBytes = Buffer.byteLength(result.html, 'utf8');
-        const jsBytes = Buffer.byteLength(result.js, 'utf8');
-        const cssBytes = Buffer.byteLength(result.css, 'utf8');
-        const combined = result.gzip.length + result.jsGzip.length +
-            result.cssGzip.length;
+        const parts = [
+          `shell ${result.gzip.length} B`,
+          `app.js ${result.jsGzip.length} B`,
+          `runtime ${result.runtimeGzip.length} B`,
+          `css ${result.cssGzip.length} B`,
+        ];
+        for (const name of VIEW_NAMES) {
+          parts.push(
+              `${name}.html ${result.partialGzip[name].length} B`,
+              `${name}.js ${result.viewGzip[name].length} B`);
+        }
         console.log(
             `Generated ${result.outputPath} ` +
-                `(HTML ${result.gzip.length} B gzip / ${htmlBytes} B, ` +
-                `JS ${result.jsGzip.length} B gzip / ${jsBytes} B, ` +
-                `CSS ${result.cssGzip.length} B gzip / ${cssBytes} B, ` +
-                `combined ${combined} B gzip, v=${result.cacheVersion})`
-        );
+                `(${parts.join(', ')}, combined ${result.combined} B gzip, ` +
+                `v=${result.cacheVersion})`);
       })
       .catch((error) => {
         console.error(error);

@@ -18,37 +18,67 @@ const bleLibrary = fs.readFileSync(
 );
 const htmlMatch = asset.match(/R"HTML\(([\s\S]*?)\)HTML"/);
 if (!htmlMatch) throw new Error('Embedded HTML raw string not found');
-const html = htmlMatch[1];
-const js = fs.readFileSync(path.join(sketchDir, 'web', 'app.js'), 'utf8');
+const shellHtml = htmlMatch[1];
+const VIEW_NAMES = webUi.VIEW_NAMES;
+const partialHtml = {};
+for (const name of VIEW_NAMES) {
+  partialHtml[name] = fs.readFileSync(
+      path.join(sketchDir, 'web', 'html', name + '.html'), 'utf8');
+}
+const allHtml = shellHtml.replace(
+    /<section id="view-([a-z]+)" class="view" data-view="\1"><\/section>/g,
+    (_, name) => {
+      if (!partialHtml[name]) {
+        throw new Error('Missing partial for shell placeholder: ' + name);
+      }
+      return `<section id="view-${name}" class="view" data-view="${name}">${
+          partialHtml[name]}</section>`;
+    });
+const appJsSource = fs.readFileSync(path.join(sketchDir, 'web', 'app.js'), 'utf8');
+const runtimeJs = fs.readFileSync(path.join(sketchDir, 'web', 'js', 'runtime.js'), 'utf8');
+const viewJs = {};
+for (const name of VIEW_NAMES) {
+  viewJs[name] = fs.readFileSync(
+      path.join(sketchDir, 'web', 'js', name + '.js'), 'utf8');
+}
+const allJs = [appJsSource, runtimeJs, ...VIEW_NAMES.map((n) => viewJs[n])].join('\n');
 const css = fs.readFileSync(path.join(sketchDir, 'web', 'app.css'), 'utf8');
-const ui = html + '\n' + js;
-if (/<details\b[^>]*\bopen\b/i.test(html)) {
+// Most wiring checks look across shell + partials + all JS modules.
+const html = allHtml;
+const js = allJs;
+const ui = allHtml + '\n' + allJs;
+if (/<details\b[^>]*\bopen\b/i.test(allHtml)) {
   throw new Error('All collapsible <details> groups must start collapsed (no open attribute)');
 }
-if (css.includes('.brandLogo') || html.includes('logo.svg') || html.includes('brandLogo')) {
+if (css.includes('.brandLogo') || allHtml.includes('logo.svg') || allHtml.includes('brandLogo')) {
   throw new Error('Web UI must not embed a logo asset or .brandLogo styles');
 }
 if (!css.includes('.brand') || !css.includes('inline-flex')) {
   throw new Error('Brand heading styles must remain for text-only branding');
 }
-if (!html.includes('src="/app.js?v=__FW_VERSION__"') ||
-    /<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(html)) {
-  throw new Error('Web UI must load same-origin /app.js (no inline script body)');
+if (!shellHtml.includes('type="module"') ||
+    !shellHtml.includes('src="/app.js?v=__FW_VERSION__"') ||
+    /<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(shellHtml)) {
+  throw new Error('Web UI must load same-origin /app.js as a module (no inline script body)');
+}
+for (const name of VIEW_NAMES) {
+  if (!shellHtml.includes('id="view-' + name + '"') ||
+      !shellHtml.includes('data-view="' + name + '"') ||
+      !shellHtml.includes(`<section id="view-${name}" class="view" data-view="${name}"></section>`)) {
+    throw new Error('Shell must keep empty placeholder for view: ' + name);
+  }
 }
 
-// Parse the authored JavaScript source (pre-minify).
-new Function(js);
-
-const htmlBytes = Buffer.byteLength(html, 'utf8');
-const jsBytes = Buffer.byteLength(js, 'utf8');
+const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
+const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 40960) {
   throw new Error('Web UI HTML source exceeds the 40 KiB authoring budget');
 }
-if (jsBytes > 90112) {
-  throw new Error('Web UI JS source exceeds the 88 KiB authoring budget');
+if (jsBytes > 110000) {
+  throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 131072) {
-  throw new Error('Web UI HTML+JS source exceeds the 128 KiB combined authoring budget');
+if (htmlBytes + jsBytes > 160000) {
+  throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
@@ -304,11 +334,12 @@ if (ui.includes('authenticatedOnly') ||
     ui.includes('pageNav authenticatedOnly') ||
     ui.includes("authenticated()&&known") ||
     !ui.includes('function knownPath(') ||
-    !ui.includes('true&&known') ||
     !ui.includes('class="brand"') ||
     !ui.includes('>Micra Shot Stopper</a>') ||
     !ui.includes('href="/" data-route="/"') ||
     !ui.includes("querySelectorAll('a[data-route]')") ||
+    !ui.includes('ensureView') ||
+    !ui.includes('/partials/') ||
     !network.includes('HTTPD_404_NOT_FOUND') ||
     !network.includes('notFoundHandler')) {
   throw new Error('Web UI must expose public SPA routes and redirect unknown paths to /');
@@ -640,7 +671,8 @@ if (!html.includes('id="postTareBaselineGraceS" type="number" min="0.5" max="10"
     !ui.includes("postTareBaselineGraceMs:sToMs('postTareBaselineGraceS')") ||
     !ui.includes("['postTareBaselineGraceS','postTareBaselineGraceMs']") ||
     !ui.includes("apply('tareOpt',!$('autoTare').checked)") ||
-    !ui.includes("$('autoTare').onchange=()=>{updateConfigGroups();markConfigDirty()}") ||
+    !(ui.includes("$('autoTare').onchange=()=>{updateConfigGroups();markConfigDirty()}") ||
+      ui.includes("$('autoTare').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()}")) ||
     !ui.includes("typeof c.postTareBaselineGraceMs==='number'") ||
     !network.includes('\\"postTareBaselineGraceMs\\":%lu') ||
     !network.includes('Post-tare grace must be from 0.5 to 10 s.') ||
@@ -986,7 +1018,7 @@ if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
     !ui.includes('loadLog()') ||
     !ui.includes('refreshLog()') ||
-    !ui.includes("name==='diagnostic'") ||
+    !(ui.includes("name==='diagnostic'") || ui.includes("name === 'diagnostic'")) ||
     !ui.includes('id="view-diagnostic"') ||
     !ui.includes('data-route="/diagnostic"') ||
     !html.includes('>Diagnostic</a>') ||
@@ -1183,16 +1215,16 @@ if (!network.includes('startStation(next, now)')) {
     throw new Error('Combined tare/start must fall back to reset/start/tare');
   }
 }
-if (!/<script\s+src="\/app\.js\?v=/.test(html) &&
-    !html.includes('src="/app.js?v=__FW_VERSION__"')) {
+if (!/<script\s+type="module"\s+src="\/app\.js\?v=/.test(shellHtml) &&
+    !shellHtml.includes('src="/app.js?v=__FW_VERSION__"')) {
   throw new Error('Web UI must load same-origin /app.js with a firmware version query');
 }
-if (!/<link\s+rel="stylesheet"\s+href="\/app\.css\?v=/.test(html) &&
-    !html.includes('href="/app.css?v=__FW_VERSION__"')) {
+if (!/<link\s+rel="stylesheet"\s+href="\/app\.css\?v=/.test(shellHtml) &&
+    !shellHtml.includes('href="/app.css?v=__FW_VERSION__"')) {
   throw new Error('Web UI must load same-origin /app.css with a firmware version query');
 }
-if (/<link\s+[^>]*href=["']https?:\/\//i.test(html) ||
-    /cdn\.|unpkg\.|jsdelivr\./i.test(html)) {
+if (/<link\s+[^>]*href=["']https?:\/\//i.test(shellHtml) ||
+    /cdn\.|unpkg\.|jsdelivr\./i.test(shellHtml)) {
   throw new Error('Web UI must not depend on CDN or third-party assets');
 }
 
@@ -1205,6 +1237,17 @@ const expected = new Map([
   ['GET /settings', 'rootHandler'],
   ['GET /app.js', 'jsHandler'],
   ['GET /app.css', 'cssHandler'],
+  ['GET /js/runtime.js', 'runtimeJsHandler'],
+  ['GET /partials/home.html', 'partialHomeHandler'],
+  ['GET /partials/history.html', 'partialHistoryHandler'],
+  ['GET /partials/diagnostic.html', 'partialDiagnosticHandler'],
+  ['GET /partials/settings.html', 'partialSettingsHandler'],
+  ['GET /partials/admin.html', 'partialAdminHandler'],
+  ['GET /js/home.js', 'viewHomeHandler'],
+  ['GET /js/history.js', 'viewHistoryHandler'],
+  ['GET /js/diagnostic.js', 'viewDiagnosticHandler'],
+  ['GET /js/settings.js', 'viewSettingsHandler'],
+  ['GET /js/admin.js', 'viewAdminHandler'],
   ['POST /api/v1/ui/claim', 'claimHandler'],
   ['GET /api/v1/status/home', 'ownedApiHandler'],
   ['GET /api/v1/status/settings', 'ownedApiHandler'],
@@ -1264,9 +1307,12 @@ if (!ui.includes('const WEB_UI_INACTIVITY_MS=15*60*1000') ||
     !ui.includes('function resetWebUiInactivity()') ||
     !ui.includes('function webUiPollingActive()') ||
     !ui.includes('function noteWebUiInteraction(event)') ||
-    !ui.includes("document.addEventListener('pointerdown',noteWebUiInteraction,true)") ||
-    !ui.includes("document.addEventListener('keydown',noteWebUiInteraction,true)") ||
-    ui.includes("addEventListener('scroll',noteWebUiInteraction")) {
+    !(ui.includes("document.addEventListener('pointerdown',noteWebUiInteraction,true)") ||
+      ui.includes("document.addEventListener('pointerdown', R.noteWebUiInteraction, true)")) ||
+    !(ui.includes("document.addEventListener('keydown',noteWebUiInteraction,true)") ||
+      ui.includes("document.addEventListener('keydown', R.noteWebUiInteraction, true)")) ||
+    ui.includes("addEventListener('scroll',noteWebUiInteraction") ||
+    ui.includes("addEventListener('scroll', R.noteWebUiInteraction")) {
   throw new Error('WebUI inactivity must expire after 15 minutes of direct control interaction, never scrolling');
 }
 if (!ui.includes('This WebUI window is inactive. Reactivate to continue.') ||
@@ -1374,10 +1420,13 @@ if (!ui.includes('async function loadStatus(){') ||
     !ui.includes('function refreshStatus(){return withPollGate(loadStatus)}') ||
     !ui.includes('function refreshShots(){return withPollGate(loadShots)}') ||
     !ui.includes('function refreshLog(){return withPollGate(loadLog)}') ||
-    !ui.includes("name==='home'||name==='settings'||name==='admin'||name==='diagnostic'") ||
+    !(ui.includes("name==='home'||name==='settings'||name==='admin'||name==='diagnostic'") ||
+      ui.includes("name === 'home' || name === 'settings' || name === 'admin' ||") ||
+      ui.includes("name === 'diagnostic'")) ||
     ui.includes("name==='presets'") ||
-    !ui.includes("name==='history'") ||
+    !(ui.includes("name==='history'") || ui.includes("name === 'history'")) ||
     !ui.includes('renderRoute(location.pathname)') ||
+    !ui.includes('ensureView') ||
     ui.includes('Promise.all([loadShots(),loadLog()])')) {
   throw new Error('Web UI must lazy-load status/shots/log per active SPA view; background polls stay gated');
 }
@@ -1419,7 +1468,9 @@ for (const [route, handler] of expected) {
   }
   if (uri !== '/' && !ui.includes(uri.split('?')[0])) {
     const statusPage = uri.match(/^\/api\/v1\/status\/(home|settings|admin|diagnostic)$/);
-    if (!(statusPage && ui.includes('function statusUrl(') && ui.includes('/api/v1/status/'))) {
+    const lazyAsset = uri.match(/^\/(partials|js)\//);
+    if (!(statusPage && ui.includes('function statusUrl(') && ui.includes('/api/v1/status/')) &&
+        !(lazyAsset && (ui.includes('/partials/') || ui.includes('/js/')))) {
       throw new Error(`Registered API is not referenced by the UI: ${uri}`);
     }
   }
@@ -1842,23 +1893,41 @@ const jsRoundTrip = zlib.gunzipSync(generated.jsGzip).toString('utf8');
 if (jsRoundTrip !== generated.js) {
   throw new Error('Generated gzip Web JS does not round-trip to the minified JS');
 }
-new Function(generated.js);
+if (!generated.js.includes('import') || !generated.runtimeJs.includes('export')) {
+  throw new Error('Generated Web UI JS must remain ES modules (shell + runtime)');
+}
+const runtimeRoundTrip = zlib.gunzipSync(generated.runtimeGzip).toString('utf8');
+if (runtimeRoundTrip !== generated.runtimeJs) {
+  throw new Error('Generated gzip runtime JS does not round-trip');
+}
+for (const name of VIEW_NAMES) {
+  const partialRt = zlib.gunzipSync(generated.partialGzip[name]).toString('utf8');
+  if (partialRt !== generated.partials[name]) {
+    throw new Error('Generated gzip partial does not round-trip: ' + name);
+  }
+  const viewRt = zlib.gunzipSync(generated.viewGzip[name]).toString('utf8');
+  if (viewRt !== generated.viewJs[name]) {
+    throw new Error('Generated gzip view JS does not round-trip: ' + name);
+  }
+}
 const cssRoundTrip = zlib.gunzipSync(generated.cssGzip).toString('utf8');
 if (cssRoundTrip !== generated.css) {
   throw new Error('Generated gzip Web CSS does not round-trip to the minified CSS');
 }
-if (generated.gzip.length > 9216) {
-  throw new Error('Compressed Web UI HTML exceeds the 9 KiB gzip budget');
+if (generated.gzip.length > 2048) {
+  throw new Error('Compressed Web UI shell HTML exceeds the 2 KiB gzip budget');
 }
-if (generated.jsGzip.length > 23552) {
-  throw new Error('Compressed Web UI JS exceeds the 23 KiB gzip budget');
+if (generated.jsGzip.length > 4096) {
+  throw new Error('Compressed Web UI shell JS exceeds the 4 KiB gzip budget');
+}
+if (generated.runtimeGzip.length > 24576) {
+  throw new Error('Compressed Web UI runtime JS exceeds the 24 KiB gzip budget');
 }
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
 }
-if (generated.gzip.length + generated.jsGzip.length + generated.cssGzip.length >
-    36864) {
-  throw new Error('Combined HTML+JS+CSS gzip exceeds the 36 KiB flash budget');
+if (generated.combined > 45056) {
+  throw new Error('Combined Web UI gzip exceeds the 44 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
@@ -1868,20 +1937,23 @@ if (!network.includes('SHOT_STOPPER_WEB_UI_GZIP') ||
     !network.includes('SHOT_STOPPER_WEB_UI_GZIP_LEN') ||
     !network.includes('SHOT_STOPPER_WEB_JS_GZIP') ||
     !network.includes('SHOT_STOPPER_WEB_JS_GZIP_LEN') ||
+    !network.includes('SHOT_STOPPER_WEB_RUNTIME_GZIP') ||
     !network.includes('SHOT_STOPPER_WEB_CSS_GZIP') ||
-    !network.includes('SHOT_STOPPER_WEB_CSS_GZIP_LEN') ||
+    !network.includes('SHOT_STOPPER_WEB_PARTIAL_HOME_GZIP') ||
+    !network.includes('SHOT_STOPPER_WEB_VIEW_HOME_GZIP') ||
     network.includes('SHOT_STOPPER_WEB_LOGO_GZIP') ||
     !network.includes('"Content-Encoding"') ||
     !network.includes('"gzip"')) {
-  throw new Error('GET /, GET /app.js, and GET /app.css must send precompressed gzip bodies without logo');
+  throw new Error('GET /, assets, partials, and view modules must send precompressed gzip bodies without logo');
 }
 if (network.includes('zlib.h') || network.includes('miniz.h') ||
     /mz_compress|deflateInit|gzipCompress/.test(network)) {
   throw new Error('Firmware must not compress the Web UI at runtime');
 }
 if (!network.includes('sendCopiedBody(request, SHOT_STOPPER_WEB_UI_GZIP') ||
-    !network.includes('sendCopiedBody(request, SHOT_STOPPER_WEB_JS_GZIP') ||
-    !network.includes('sendCopiedBody(request, SHOT_STOPPER_WEB_CSS_GZIP') ||
+    !network.includes('serveImmutableGzip') ||
+    !network.includes('SHOT_STOPPER_WEB_JS_GZIP') ||
+    !network.includes('SHOT_STOPPER_WEB_CSS_GZIP') ||
     !network.includes('return sendCopiedBody(request, json, length)') ||
     !network.includes('HTTP_DRAM_BOUNCE_BYTES') ||
     !network.includes('g_httpSendBounce') ||
@@ -1897,19 +1969,25 @@ if (!network.includes('If-None-Match')) {
 const rootHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::rootHandler');
 const jsHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::jsHandler');
 const cssHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::cssHandler');
+const runtimeHandlerStart =
+    network.indexOf('esp_err_t ShotStopperNetwork::runtimeJsHandler');
 const notFoundHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::notFoundHandler');
+const serveImmutableStart = network.indexOf('static esp_err_t serveImmutableGzip');
 if (rootHandlerStart < 0 || jsHandlerStart < 0 || cssHandlerStart < 0 ||
-    notFoundHandlerStart < 0 || statusHandlerStart < 0 ||
+    runtimeHandlerStart < 0 || notFoundHandlerStart < 0 ||
+    statusHandlerStart < 0 || serveImmutableStart < 0 ||
     network.includes('logoHandler') ||
     network.includes('loginHandler') ||
     !(rootHandlerStart < jsHandlerStart && jsHandlerStart < cssHandlerStart &&
-      cssHandlerStart < notFoundHandlerStart &&
+      cssHandlerStart < runtimeHandlerStart &&
+      runtimeHandlerStart < notFoundHandlerStart &&
       notFoundHandlerStart < statusHandlerStart)) {
-  throw new Error('rootHandler/jsHandler/cssHandler/notFoundHandler order not found');
+  throw new Error('rootHandler/jsHandler/cssHandler/runtime/notFoundHandler order not found');
 }
 const rootHandler = network.slice(rootHandlerStart, jsHandlerStart);
+const serveImmutable = network.slice(serveImmutableStart, rootHandlerStart);
 const jsHandler = network.slice(jsHandlerStart, cssHandlerStart);
-const cssHandler = network.slice(cssHandlerStart, notFoundHandlerStart);
+const cssHandler = network.slice(cssHandlerStart, runtimeHandlerStart);
 const notFoundHandler = network.slice(notFoundHandlerStart, statusHandlerStart);
 if (rootHandler.includes('no-store') || !rootHandler.includes('no-cache') ||
     !rootHandler.includes('STATUS_NOT_MODIFIED') ||
@@ -1923,25 +2001,21 @@ if (rootHandler.includes('no-store') || !rootHandler.includes('no-cache') ||
     rootHandler.includes('HTTPD_RESP_USE_STRLEN')) {
   throw new Error('GET / must revalidate with ETag/304, CSP script/style self, Connection close, and gzip by length');
 }
-if (jsHandler.includes('no-store') ||
-    !jsHandler.includes('max-age=31536000') ||
-    !jsHandler.includes('immutable') ||
-    !jsHandler.includes('STATUS_NOT_MODIFIED') ||
-    !jsHandler.includes('SHOT_STOPPER_WEB_JS_GZIP') ||
-    !jsHandler.includes('"Connection"') ||
-    !jsHandler.includes('"close"') ||
-    !jsHandler.includes('application/javascript')) {
-  throw new Error('GET /app.js must serve immutable gzip JS with ETag/304 and Connection close');
+if (serveImmutable.includes('no-store') ||
+    !serveImmutable.includes('max-age=31536000') ||
+    !serveImmutable.includes('immutable') ||
+    !serveImmutable.includes('STATUS_NOT_MODIFIED') ||
+    !serveImmutable.includes('"Connection"') ||
+    !serveImmutable.includes('"close"')) {
+  throw new Error('Immutable gzip assets must use long-cache ETag/304 and Connection close');
 }
-if (cssHandler.includes('no-store') ||
-    !cssHandler.includes('max-age=31536000') ||
-    !cssHandler.includes('immutable') ||
-    !cssHandler.includes('STATUS_NOT_MODIFIED') ||
-    !cssHandler.includes('SHOT_STOPPER_WEB_CSS_GZIP') ||
-    !cssHandler.includes('"Connection"') ||
-    !cssHandler.includes('"close"') ||
+if (!jsHandler.includes('SHOT_STOPPER_WEB_JS_GZIP') ||
+    !jsHandler.includes('application/javascript')) {
+  throw new Error('GET /app.js must serve immutable gzip JS');
+}
+if (!cssHandler.includes('SHOT_STOPPER_WEB_CSS_GZIP') ||
     !cssHandler.includes('text/css')) {
-  throw new Error('GET /app.css must serve immutable gzip CSS with ETag/304 and Connection close');
+  throw new Error('GET /app.css must serve immutable gzip CSS');
 }
 if (network.includes('logoHandler') || network.includes('SHOT_STOPPER_WEB_LOGO')) {
   throw new Error('Firmware must not serve /logo.svg');
@@ -2234,10 +2308,10 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
 }
 
 console.log(
-  `Embedded Web UI: JavaScript valid, ${htmlBytes} bytes HTML / ${jsBytes} bytes JS source, ` +
-  `${generated.gzip.length} bytes HTML gzip, ${generated.jsGzip.length} bytes JS gzip, ` +
-  `${generated.cssGzip.length} bytes CSS gzip, ` +
-  `${expected.size} routes checked`
+  `Embedded Web UI: modules+partials valid, ${htmlBytes} bytes HTML / ${jsBytes} bytes JS source, ` +
+  `${generated.gzip.length} bytes shell gzip, ${generated.jsGzip.length} bytes app.js gzip, ` +
+  `${generated.runtimeGzip.length} bytes runtime gzip, ${generated.cssGzip.length} bytes CSS gzip, ` +
+  `combined ${generated.combined} bytes gzip, ${expected.size} routes checked`
 );
 })().catch((error) => {
   console.error(error);

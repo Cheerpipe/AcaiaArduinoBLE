@@ -305,6 +305,17 @@ class ShotStopperNetwork {
   static esp_err_t rootHandler(httpd_req_t *request);
   static esp_err_t jsHandler(httpd_req_t *request);
   static esp_err_t cssHandler(httpd_req_t *request);
+  static esp_err_t runtimeJsHandler(httpd_req_t *request);
+  static esp_err_t partialHomeHandler(httpd_req_t *request);
+  static esp_err_t partialHistoryHandler(httpd_req_t *request);
+  static esp_err_t partialDiagnosticHandler(httpd_req_t *request);
+  static esp_err_t partialSettingsHandler(httpd_req_t *request);
+  static esp_err_t partialAdminHandler(httpd_req_t *request);
+  static esp_err_t viewHomeHandler(httpd_req_t *request);
+  static esp_err_t viewHistoryHandler(httpd_req_t *request);
+  static esp_err_t viewDiagnosticHandler(httpd_req_t *request);
+  static esp_err_t viewSettingsHandler(httpd_req_t *request);
+  static esp_err_t viewAdminHandler(httpd_req_t *request);
   static esp_err_t notFoundHandler(httpd_req_t *request, httpd_err_code_t error);
   static esp_err_t claimHandler(httpd_req_t *request);
   static esp_err_t unlockHandler(httpd_req_t *request);

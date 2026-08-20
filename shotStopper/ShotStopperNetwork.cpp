@@ -2775,7 +2775,8 @@ bool ShotStopperNetwork::startHttpServer() {
   // Kept ahead of the number of routes actually registered. Exhausting this
   // makes the last registerHandler fail, which tears down the whole Web UI, so
   // check_web_assets.js fails the build before the margin is gone.
-  config.max_uri_handlers = 44;
+  // Shell + app.js/css/runtime + 5 HTML partials + 5 view JS modules + APIs.
+  config.max_uri_handlers = 56;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
   // the IDF default (1024) is enough most of the time but intermittent
   // long browser headers have returned 431 Request Header Fields Too Large.
@@ -2801,6 +2802,24 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/settings", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/app.js", HTTP_GET, jsHandler) &&
       registerHandler(server_, "/app.css", HTTP_GET, cssHandler) &&
+      registerHandler(server_, "/js/runtime.js", HTTP_GET, runtimeJsHandler) &&
+      registerHandler(server_, "/partials/home.html", HTTP_GET,
+                      partialHomeHandler) &&
+      registerHandler(server_, "/partials/history.html", HTTP_GET,
+                      partialHistoryHandler) &&
+      registerHandler(server_, "/partials/diagnostic.html", HTTP_GET,
+                      partialDiagnosticHandler) &&
+      registerHandler(server_, "/partials/settings.html", HTTP_GET,
+                      partialSettingsHandler) &&
+      registerHandler(server_, "/partials/admin.html", HTTP_GET,
+                      partialAdminHandler) &&
+      registerHandler(server_, "/js/home.js", HTTP_GET, viewHomeHandler) &&
+      registerHandler(server_, "/js/history.js", HTTP_GET, viewHistoryHandler) &&
+      registerHandler(server_, "/js/diagnostic.js", HTTP_GET,
+                      viewDiagnosticHandler) &&
+      registerHandler(server_, "/js/settings.js", HTTP_GET,
+                      viewSettingsHandler) &&
+      registerHandler(server_, "/js/admin.js", HTTP_GET, viewAdminHandler) &&
       registerHandler(server_, "/api/v1/ui/claim", HTTP_POST, claimHandler) &&
       registerHandler(server_, "/api/v1/ui/unlock", HTTP_POST, unlockHandler) &&
       registerHandler(server_, "/api/v1/status/home", HTTP_GET, ownedApiHandler) &&
@@ -3116,6 +3135,29 @@ static bool ifNoneMatchEquals(httpd_req_t *request, const char *etag) {
   return strcmp(value, etag) == 0;
 }
 
+static esp_err_t serveImmutableGzip(httpd_req_t *request, const char *contentType,
+                                    const uint8_t *data, size_t length) {
+  char etag[WEB_UI_ETAG_CAPACITY] = {};
+  formatWebUiEtag(etag);
+  if (ifNoneMatchEquals(request, etag)) {
+    httpd_resp_set_status(request, STATUS_NOT_MODIFIED);
+    httpd_resp_set_hdr(request, "Cache-Control",
+                       "public, max-age=31536000, immutable");
+    httpd_resp_set_hdr(request, "ETag", etag);
+    httpd_resp_set_hdr(request, "Connection", "close");
+    return httpd_resp_send(request, nullptr, 0);
+  }
+  httpd_resp_set_type(request, contentType);
+  httpd_resp_set_hdr(request, "Content-Encoding", "gzip");
+  httpd_resp_set_hdr(request, "Cache-Control",
+                     "public, max-age=31536000, immutable");
+  httpd_resp_set_hdr(request, "ETag", etag);
+  httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
+  httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
+  httpd_resp_set_hdr(request, "Connection", "close");
+  return sendCopiedBody(request, data, length);
+}
+
 esp_err_t ShotStopperNetwork::rootHandler(httpd_req_t *request) {
   char etag[WEB_UI_ETAG_CAPACITY] = {};
   formatWebUiEtag(etag);
@@ -3142,49 +3184,81 @@ esp_err_t ShotStopperNetwork::rootHandler(httpd_req_t *request) {
 }
 
 esp_err_t ShotStopperNetwork::jsHandler(httpd_req_t *request) {
-  char etag[WEB_UI_ETAG_CAPACITY] = {};
-  formatWebUiEtag(etag);
-  if (ifNoneMatchEquals(request, etag)) {
-    httpd_resp_set_status(request, STATUS_NOT_MODIFIED);
-    httpd_resp_set_hdr(request, "Cache-Control",
-                       "public, max-age=31536000, immutable");
-    httpd_resp_set_hdr(request, "ETag", etag);
-    httpd_resp_set_hdr(request, "Connection", "close");
-    return httpd_resp_send(request, nullptr, 0);
-  }
-  httpd_resp_set_type(request, "application/javascript; charset=utf-8");
-  httpd_resp_set_hdr(request, "Content-Encoding", "gzip");
-  httpd_resp_set_hdr(request, "Cache-Control",
-                     "public, max-age=31536000, immutable");
-  httpd_resp_set_hdr(request, "ETag", etag);
-  httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
-  httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
-  httpd_resp_set_hdr(request, "Connection", "close");
-  return sendCopiedBody(request, SHOT_STOPPER_WEB_JS_GZIP,
-                        SHOT_STOPPER_WEB_JS_GZIP_LEN);
+  return serveImmutableGzip(request, "application/javascript; charset=utf-8",
+                            SHOT_STOPPER_WEB_JS_GZIP,
+                            SHOT_STOPPER_WEB_JS_GZIP_LEN);
 }
 
 esp_err_t ShotStopperNetwork::cssHandler(httpd_req_t *request) {
-  char etag[WEB_UI_ETAG_CAPACITY] = {};
-  formatWebUiEtag(etag);
-  if (ifNoneMatchEquals(request, etag)) {
-    httpd_resp_set_status(request, STATUS_NOT_MODIFIED);
-    httpd_resp_set_hdr(request, "Cache-Control",
-                       "public, max-age=31536000, immutable");
-    httpd_resp_set_hdr(request, "ETag", etag);
-    httpd_resp_set_hdr(request, "Connection", "close");
-    return httpd_resp_send(request, nullptr, 0);
-  }
-  httpd_resp_set_type(request, "text/css; charset=utf-8");
-  httpd_resp_set_hdr(request, "Content-Encoding", "gzip");
-  httpd_resp_set_hdr(request, "Cache-Control",
-                     "public, max-age=31536000, immutable");
-  httpd_resp_set_hdr(request, "ETag", etag);
-  httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
-  httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
-  httpd_resp_set_hdr(request, "Connection", "close");
-  return sendCopiedBody(request, SHOT_STOPPER_WEB_CSS_GZIP,
-                        SHOT_STOPPER_WEB_CSS_GZIP_LEN);
+  return serveImmutableGzip(request, "text/css; charset=utf-8",
+                            SHOT_STOPPER_WEB_CSS_GZIP,
+                            SHOT_STOPPER_WEB_CSS_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::runtimeJsHandler(httpd_req_t *request) {
+  return serveImmutableGzip(request, "application/javascript; charset=utf-8",
+                            SHOT_STOPPER_WEB_RUNTIME_GZIP,
+                            SHOT_STOPPER_WEB_RUNTIME_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::partialHomeHandler(httpd_req_t *request) {
+  return serveImmutableGzip(request, "text/html; charset=utf-8",
+                            SHOT_STOPPER_WEB_PARTIAL_HOME_GZIP,
+                            SHOT_STOPPER_WEB_PARTIAL_HOME_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::partialHistoryHandler(httpd_req_t *request) {
+  return serveImmutableGzip(request, "text/html; charset=utf-8",
+                            SHOT_STOPPER_WEB_PARTIAL_HISTORY_GZIP,
+                            SHOT_STOPPER_WEB_PARTIAL_HISTORY_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::partialDiagnosticHandler(httpd_req_t *request) {
+  return serveImmutableGzip(request, "text/html; charset=utf-8",
+                            SHOT_STOPPER_WEB_PARTIAL_DIAGNOSTIC_GZIP,
+                            SHOT_STOPPER_WEB_PARTIAL_DIAGNOSTIC_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::partialSettingsHandler(httpd_req_t *request) {
+  return serveImmutableGzip(request, "text/html; charset=utf-8",
+                            SHOT_STOPPER_WEB_PARTIAL_SETTINGS_GZIP,
+                            SHOT_STOPPER_WEB_PARTIAL_SETTINGS_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::partialAdminHandler(httpd_req_t *request) {
+  return serveImmutableGzip(request, "text/html; charset=utf-8",
+                            SHOT_STOPPER_WEB_PARTIAL_ADMIN_GZIP,
+                            SHOT_STOPPER_WEB_PARTIAL_ADMIN_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::viewHomeHandler(httpd_req_t *request) {
+  return serveImmutableGzip(request, "application/javascript; charset=utf-8",
+                            SHOT_STOPPER_WEB_VIEW_HOME_GZIP,
+                            SHOT_STOPPER_WEB_VIEW_HOME_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::viewHistoryHandler(httpd_req_t *request) {
+  return serveImmutableGzip(request, "application/javascript; charset=utf-8",
+                            SHOT_STOPPER_WEB_VIEW_HISTORY_GZIP,
+                            SHOT_STOPPER_WEB_VIEW_HISTORY_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::viewDiagnosticHandler(httpd_req_t *request) {
+  return serveImmutableGzip(request, "application/javascript; charset=utf-8",
+                            SHOT_STOPPER_WEB_VIEW_DIAGNOSTIC_GZIP,
+                            SHOT_STOPPER_WEB_VIEW_DIAGNOSTIC_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::viewSettingsHandler(httpd_req_t *request) {
+  return serveImmutableGzip(request, "application/javascript; charset=utf-8",
+                            SHOT_STOPPER_WEB_VIEW_SETTINGS_GZIP,
+                            SHOT_STOPPER_WEB_VIEW_SETTINGS_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::viewAdminHandler(httpd_req_t *request) {
+  return serveImmutableGzip(request, "application/javascript; charset=utf-8",
+                            SHOT_STOPPER_WEB_VIEW_ADMIN_GZIP,
+                            SHOT_STOPPER_WEB_VIEW_ADMIN_GZIP_LEN);
 }
 
 esp_err_t ShotStopperNetwork::notFoundHandler(httpd_req_t *request,
