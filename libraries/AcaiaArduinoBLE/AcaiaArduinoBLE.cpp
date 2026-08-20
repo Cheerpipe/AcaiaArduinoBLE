@@ -805,13 +805,15 @@ bool AcaiaArduinoBLE::newWeightAvailable() {
     }
 
     const int length = _read.valueLength();
-    if (!supportedPacketLength(length)) {
+    if (!supportedPacketLength(length) || length > MAX_BLE_PACKET_LENGTH) {
         rejectPacket("unsupported length");
         return false;
     }
 
     byte input[MAX_BLE_PACKET_LENGTH] = {0};
-    const int bytesRead = _read.readValue(input, length);
+    // Always pass the array capacity so a future protocol length cannot
+    // overrun even if supportedPacketLength drifts.
+    const int bytesRead = _read.readValue(input, MAX_BLE_PACKET_LENGTH);
     if (_debug) {
         Serial.print(bytesRead);
         Serial.print(": 0x");

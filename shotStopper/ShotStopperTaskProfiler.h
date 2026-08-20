@@ -1,10 +1,11 @@
 #pragma once
 
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 
 #if defined(ARDUINO) && !defined(SHOT_STOPPER_HOST_TEST)
+#include "ShotStopperPsram.h"
+
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -84,18 +85,19 @@ class TaskProfiler {
     }
 #if defined(ARDUINO) && !defined(SHOT_STOPPER_HOST_TEST)
     ActiveWorkspace *next = static_cast<ActiveWorkspace *>(
-        calloc(1, sizeof(ActiveWorkspace)));
+        allocExternalOrInternal(sizeof(ActiveWorkspace)));
     if (next == nullptr) {
       noteStartFailure_(TaskProfilerStopReason::ALLOCATION_FAILED);
       return false;
     }
+    memset(next, 0, sizeof(*next));
     uint32_t ignoredTotal = 0;
     const int64_t captureStartedUs = esp_timer_get_time();
     const UBaseType_t count = uxTaskGetSystemState(
         next->capture, TASK_PROFILER_MAX_TRACKED, &ignoredTotal);
     const int64_t captureEndedUs = esp_timer_get_time();
     if (count == 0 || uxTaskGetNumberOfTasks() > TASK_PROFILER_MAX_TRACKED) {
-      free(next);
+      heapCapsFree(next);
       noteStartFailure_(TaskProfilerStopReason::CAPTURE_FAILED);
       return false;
     }
@@ -398,7 +400,7 @@ class TaskProfiler {
 
   void releaseWorkspace_() {
     if (workspace_ != nullptr) {
-      free(workspace_);
+      heapCapsFree(workspace_);
       workspace_ = nullptr;
     }
   }

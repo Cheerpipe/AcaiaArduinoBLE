@@ -17,6 +17,30 @@ const bleLibrary = fs.readFileSync(
   path.resolve(sketchDir, '..', 'libraries', 'AcaiaArduinoBLE', 'AcaiaArduinoBLE.cpp'),
   'utf8'
 );
+const bleCompanion = fs.readFileSync(
+  path.join(sketchDir, 'ShotStopperBleCompanion.h'), 'utf8');
+const taskProfiler = fs.readFileSync(
+  path.join(sketchDir, 'ShotStopperTaskProfiler.h'), 'utf8');
+if (!bleCompanion.includes('BLECharacteristic::writeValue') ||
+    bleCompanion.includes('String("")') ||
+    bleCompanion.includes('String(value)')) {
+  throw new Error(
+      'BLE companion string writes must use BLECharacteristic::writeValue(const char*), not Arduino String');
+}
+if (!taskProfiler.includes('allocExternalOrInternal(sizeof(ActiveWorkspace))') ||
+    !taskProfiler.includes('heapCapsFree(workspace_)') ||
+    taskProfiler.includes('calloc(') ||
+    /\bfree\(workspace_\)/.test(taskProfiler) ||
+    /\bfree\(next\)/.test(taskProfiler)) {
+  throw new Error(
+      'TaskProfiler workspace must use allocExternalOrInternal/heapCapsFree, not calloc/free');
+}
+if (!bleLibrary.includes('readValue(input, MAX_BLE_PACKET_LENGTH)') ||
+    !bleLibrary.includes('length > MAX_BLE_PACKET_LENGTH')) {
+  throw new Error(
+      'Acaia BLE reads must clamp to MAX_BLE_PACKET_LENGTH');
+}
+
 const htmlMatch = asset.match(/R"HTML\(([\s\S]*?)\)HTML"/);
 if (!htmlMatch) throw new Error('Embedded HTML raw string not found');
 const shellHtml = htmlMatch[1];
@@ -1422,6 +1446,8 @@ if (!ui.includes('function withPollGate(') ||
 if (!ui.includes('async function loadStatus(){') ||
     !ui.includes('async function loadShots(){') ||
     !ui.includes('async function loadLog(){') ||
+    !ui.includes('LOG_EVENTS_CAPACITY') ||
+    !ui.includes('logEvents.splice(0,logEvents.length-LOG_EVENTS_CAPACITY)') ||
     !ui.includes('function refreshStatus(){return withPollGate(loadStatus)}') ||
     !ui.includes('function refreshShots(){return withPollGate(loadShots)}') ||
     !ui.includes('function refreshLog(){return withPollGate(loadLog)}') ||

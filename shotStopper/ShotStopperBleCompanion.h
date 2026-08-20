@@ -155,7 +155,9 @@ inline bool readBleStringValue(BLEStringCharacteristic &characteristic,
 
 inline void writeBleStringValue(BLEStringCharacteristic &characteristic,
                                 const char *value) {
-  characteristic.writeValue(value == nullptr ? String("") : String(value));
+  // Prefer the base const-char path: BLEStringCharacteristic::writeValue(String)
+  // would heap-allocate a temporary Arduino String on every notify/update.
+  characteristic.BLECharacteristic::writeValue(value == nullptr ? "" : value);
 }
 
 class ShotStopperBleCompanion {
