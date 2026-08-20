@@ -3,9 +3,11 @@
 
 const fs = require('fs');
 const path = require('path');
-const zlib = require('zlib');
 const crypto = require('crypto');
 const {minify: terserMinify} = require('terser');
+const {minify: htmlMinify} = require('html-minifier-terser');
+const CleanCSS = require('clean-css');
+const zopfli = require('@gfx/zopfli');
 
 const repoRoot = path.resolve(__dirname, '..');
 const sourcePath = path.join(repoRoot, 'shotStopper', 'ShotStopperWebAssets.h');
@@ -18,6 +20,8 @@ const outputPath =
     path.join(repoRoot, 'shotStopper', 'ShotStopperWebAssetsGzip.h');
 
 const VIEW_NAMES = ['home', 'history', 'diagnostic', 'settings', 'admin'];
+const LAZY_PARTIALS = ['history', 'diagnostic', 'settings', 'admin'];
+const SECONDARY_VIEWS = ['history', 'diagnostic', 'admin'];
 
 function extractHtml(source) {
   const match = source.match(/R"HTML\(([\s\S]*?)\)HTML"/);
@@ -36,43 +40,30 @@ function readFirmwareVersion() {
   return match ? match[1] : 'dev';
 }
 
-function collapseMarkup(markup) {
-  return markup.replace(/>\s+</g, '><');
-}
-
-function minifyHtml(html) {
-  html = html.replace(/<!--[\s\S]*?-->/g, '');
-  const pieces = [];
-  const re =
-      /(<script\b[^>]*>)([\s\S]*?)(<\/script>)|(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi;
-  let last = 0;
-  let match;
-  while ((match = re.exec(html))) {
-    pieces.push(collapseMarkup(html.slice(last, match.index)));
-    if (match[1]) {
-      pieces.push(match[1], match[2], match[3]);
-    } else {
-      pieces.push(match[4], match[5], match[6]);
-    }
-    last = match.index + match[0].length;
-  }
-  pieces.push(collapseMarkup(html.slice(last)));
-  return pieces.join('').trim();
+async function minifyHtml(html) {
+  return htmlMinify(html, {
+    collapseWhitespace: true,
+    conservativeCollapse: true,
+    removeComments: true,
+    collapseBooleanAttributes: true,
+    removeRedundantAttributes: true,
+    minifyCSS: false,
+    minifyJS: false,
+  });
 }
 
 function minifyCss(css) {
-  return css
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\s+/g, ' ')
-      .replace(/\s*([{}:;,])\s*/g, '$1')
-      .replace(/;}/g, '}')
-      .trim();
+  const out = new CleanCSS({level: 2}).minify(css);
+  if (out.errors && out.errors.length) {
+    throw new Error('CSS minify failed: ' + out.errors.join('; '));
+  }
+  return out.styles;
 }
 
 async function minifyJs(js) {
   const result = await terserMinify(js, {
     module: true,
-    compress: true,
+    compress: {passes: 2},
     mangle: true,
     format: {comments: false},
     ecma: 2018,
@@ -81,6 +72,15 @@ async function minifyJs(js) {
     throw new Error('Terser failed to minify Web UI JavaScript');
   }
   return result.code;
+}
+
+function gzipBuffer(buffer) {
+  return new Promise((resolve, reject) => {
+    zopfli.gzip(buffer, {numiterations: 15}, (err, out) => {
+      if (err) reject(err);
+      else resolve(Buffer.from(out));
+    });
+  });
 }
 
 function formatByteArray(buffer) {
@@ -109,6 +109,66 @@ ${formatByteArray(buffer)}
 static_assert(sizeof(${name}) == ${name}_LEN,
               "gzip length mismatch for ${name}");
 `;
+}
+
+function injectHomePartial(shellHtml, homePartial) {
+  const re =
+      /(<section id="view-home" class="view" data-view="home">)(<\/section>)/;
+  if (!re.test(shellHtml)) {
+    throw new Error('Shell missing empty view-home placeholder for home inject');
+  }
+  return shellHtml.replace(re, `$1${homePartial}$2`);
+}
+
+function inlineHomeModule(appSrc, homeSrc, assetTag) {
+  const stamped = stampAssetTag(homeSrc, assetTag);
+  const body = stamped
+      .replace(/^['"]use strict['"];\s*/m, '')
+      .replace(/import\s+\*\s+as\s+R\s+from\s+['"][^'"]+['"];\s*/m, '')
+      .replace(/export\s+function\s+/g, 'function ');
+  const iife =
+      `const __homeModule=(()=>{${body}\nreturn{init,applyStatus,activate};})();`;
+  if (!appSrc.includes('__homeModule')) {
+    throw new Error('app.js must reference __homeModule for home cold path');
+  }
+  const marker = /import \* as R from ['"][^'"]+['"];\s*/;
+  if (!marker.test(appSrc)) {
+    throw new Error('app.js runtime import not found');
+  }
+  return appSrc.replace(marker, (m) => m + iife + '\n');
+}
+
+function buildSecondaryJs(viewJsRaw, assetTag) {
+  const parts = [
+    `'use strict';`,
+    `import * as R from '/js/runtime.js?v=${assetTag}';`,
+    `const $=R.$;`,
+  ];
+  for (const name of SECONDARY_VIEWS) {
+    let body = stampAssetTag(viewJsRaw[name], assetTag);
+    body = body
+        .replace(/^['"]use strict['"];\s*/m, '')
+        .replace(/import\s+\*\s+as\s+R\s+from\s+['"][^'"]+['"];\s*/m, '')
+        .replace(/const\s+\$\s*=\s*R\.\$;\s*/m, '')
+        .replace(/export\s+function\s+applyStatus/g, `function ${name}ApplyStatus`)
+        .replace(/export\s+function\s+init/g, `function ${name}Init`)
+        .replace(/export\s+function\s+activate/g, `function ${name}Activate`)
+        .replace(/\blet ready=/g, `let ${name}Ready=`)
+        .replace(/\bif\(ready\)/g, `if(${name}Ready)`)
+        .replace(/\bready=true/g, `${name}Ready=true`)
+        .replace(
+            new RegExp(
+                `registerViewStatus\\('${name}',applyStatus\\)`, 'g'),
+            `registerViewStatus('${name}',${name}ApplyStatus)`);
+    parts.push(`// ${name}`, body);
+  }
+  parts.push('export const views={');
+  for (const name of SECONDARY_VIEWS) {
+    parts.push(
+        `  ${name}:{init:${name}Init,applyStatus:${name}ApplyStatus,activate:${name}Activate},`);
+  }
+  parts.push('};');
+  return parts.join('\n');
 }
 
 async function generate() {
@@ -148,48 +208,52 @@ async function generate() {
   hash.update(cssSource);
   const assetTag = hash.digest('hex').slice(0, 8);
 
-  const appJs = await minifyJs(stampAssetTag(appJsRaw, assetTag));
-  const runtimeJs = await minifyJs(stampAssetTag(runtimeRaw, assetTag));
-  const viewJs = {};
+  const partials = {};
   for (const name of VIEW_NAMES) {
-    viewJs[name] = await minifyJs(stampAssetTag(viewJsRaw[name], assetTag));
+    partials[name] = await minifyHtml(partialsRaw[name]);
   }
-  const css = minifyCss(cssSource);
-  const shellHtml = minifyHtml(
+
+  let shellHtml = await minifyHtml(
       stampAssetTag(shellHtmlRaw, assetTag)
           .split('__FW_VERSION__')
           .join(`${version}.${assetTag}`));
-  const partials = {};
-  for (const name of VIEW_NAMES) {
-    partials[name] = minifyHtml(partialsRaw[name]);
-  }
+  shellHtml = injectHomePartial(shellHtml, partials.home);
+
+  const appWithHome =
+      inlineHomeModule(stampAssetTag(appJsRaw, assetTag), viewJsRaw.home, assetTag);
+  const appJs = await minifyJs(appWithHome);
+  const runtimeJs = await minifyJs(stampAssetTag(runtimeRaw, assetTag));
+  const secondaryJs =
+      await minifyJs(buildSecondaryJs(viewJsRaw, assetTag));
+  const settingsJs =
+      await minifyJs(stampAssetTag(viewJsRaw.settings, assetTag));
+  const css = minifyCss(cssSource);
 
   return finish({
     shellHtml,
     partials,
     appJs,
     runtimeJs,
-    viewJs,
+    secondaryJs,
+    settingsJs,
     css,
     assetTag,
     version,
   });
 }
 
-function finish({shellHtml, partials, appJs, runtimeJs, viewJs, css, assetTag,
-                 version}) {
-  const shellGzip = zlib.gzipSync(Buffer.from(shellHtml, 'utf8'), {level: 9});
-  const cssGzip = zlib.gzipSync(Buffer.from(css, 'utf8'), {level: 9});
-  const appJsGzip = zlib.gzipSync(Buffer.from(appJs, 'utf8'), {level: 9});
-  const runtimeGzip =
-      zlib.gzipSync(Buffer.from(runtimeJs, 'utf8'), {level: 9});
+async function finish({shellHtml, partials, appJs, runtimeJs, secondaryJs,
+                       settingsJs, css, assetTag, version}) {
+  const shellGzip = await gzipBuffer(Buffer.from(shellHtml, 'utf8'));
+  const cssGzip = await gzipBuffer(Buffer.from(css, 'utf8'));
+  const appJsGzip = await gzipBuffer(Buffer.from(appJs, 'utf8'));
+  const runtimeGzip = await gzipBuffer(Buffer.from(runtimeJs, 'utf8'));
+  const secondaryGzip = await gzipBuffer(Buffer.from(secondaryJs, 'utf8'));
+  const settingsGzip = await gzipBuffer(Buffer.from(settingsJs, 'utf8'));
   const partialGzip = {};
-  const viewGzip = {};
-  for (const name of VIEW_NAMES) {
+  for (const name of LAZY_PARTIALS) {
     partialGzip[name] =
-        zlib.gzipSync(Buffer.from(partials[name], 'utf8'), {level: 9});
-    viewGzip[name] =
-        zlib.gzipSync(Buffer.from(viewJs[name], 'utf8'), {level: 9});
+        await gzipBuffer(Buffer.from(partials[name], 'utf8'));
   }
 
   const cacheVersion = `${version}.${assetTag}`;
@@ -204,19 +268,20 @@ namespace shotstopper {
 // Generated by scripts/gen_web_ui.js — do not edit.
 
 constexpr char WEB_UI_ASSET_TAG[] = "${assetTag}";
+constexpr char WEB_UI_ETAG[] = ${JSON.stringify('"' + cacheVersion + '"')};
 
 ${emitGzipConst('SHOT_STOPPER_WEB_UI_GZIP', shellGzip)}
 ${emitGzipConst('SHOT_STOPPER_WEB_JS_GZIP', appJsGzip)}
 ${emitGzipConst('SHOT_STOPPER_WEB_RUNTIME_GZIP', runtimeGzip)}
 ${emitGzipConst('SHOT_STOPPER_WEB_CSS_GZIP', cssGzip)}
+${emitGzipConst('SHOT_STOPPER_WEB_SECONDARY_GZIP', secondaryGzip)}
+${emitGzipConst('SHOT_STOPPER_WEB_VIEW_SETTINGS_GZIP', settingsGzip)}
 `;
 
-  for (const name of VIEW_NAMES) {
+  for (const name of LAZY_PARTIALS) {
     const upper = name.toUpperCase();
     body += emitGzipConst(
         `SHOT_STOPPER_WEB_PARTIAL_${upper}_GZIP`, partialGzip[name]);
-    body += emitGzipConst(
-        `SHOT_STOPPER_WEB_VIEW_${upper}_GZIP`, viewGzip[name]);
   }
 
   body += `
@@ -226,26 +291,29 @@ ${emitGzipConst('SHOT_STOPPER_WEB_CSS_GZIP', cssGzip)}
   fs.writeFileSync(outputPath, body);
 
   let combined = shellGzip.length + appJsGzip.length + runtimeGzip.length +
-      cssGzip.length;
-  for (const name of VIEW_NAMES) {
-    combined += partialGzip[name].length + viewGzip[name].length;
+      cssGzip.length + secondaryGzip.length + settingsGzip.length;
+  for (const name of LAZY_PARTIALS) {
+    combined += partialGzip[name].length;
   }
 
   return {
     html: shellHtml,
     js: appJs,
     runtimeJs,
-    viewJs,
+    secondaryJs,
+    settingsJs,
     css,
     partials,
     gzip: shellGzip,
     jsGzip: appJsGzip,
     runtimeGzip,
-    viewGzip,
+    secondaryGzip,
+    settingsGzip,
     partialGzip,
     cssGzip,
     assetTag,
     cacheVersion,
+    etag: `"${cacheVersion}"`,
     combined,
     outputPath,
     sourcePath,
@@ -253,6 +321,8 @@ ${emitGzipConst('SHOT_STOPPER_WEB_CSS_GZIP', cssGzip)}
     cssSourcePath,
     version,
     VIEW_NAMES,
+    LAZY_PARTIALS,
+    SECONDARY_VIEWS,
   };
 }
 
@@ -268,6 +338,8 @@ module.exports = {
   cssSourcePath,
   outputPath,
   VIEW_NAMES,
+  LAZY_PARTIALS,
+  SECONDARY_VIEWS,
   htmlDir,
   jsDir,
 };
@@ -280,11 +352,11 @@ if (require.main === module) {
           `app.js ${result.jsGzip.length} B`,
           `runtime ${result.runtimeGzip.length} B`,
           `css ${result.cssGzip.length} B`,
+          `secondary.js ${result.secondaryGzip.length} B`,
+          `settings.js ${result.settingsGzip.length} B`,
         ];
-        for (const name of VIEW_NAMES) {
-          parts.push(
-              `${name}.html ${result.partialGzip[name].length} B`,
-              `${name}.js ${result.viewGzip[name].length} B`);
+        for (const name of LAZY_PARTIALS) {
+          parts.push(`${name}.html ${result.partialGzip[name].length} B`);
         }
         console.log(
             `Generated ${result.outputPath} ` +

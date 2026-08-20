@@ -6,6 +6,9 @@
     "gen:web-ui": "node ./scripts/gen_web_ui.js"
   },
   "devDependencies": {
+    "@gfx/zopfli": "^1.0.15",
+    "clean-css": "^5.3.3",
+    "html-minifier-terser": "^7.2.0",
     "terser": "^5.50.0"
   }
 }

@@ -76,7 +76,6 @@ constexpr const char *JSON_CONTENT_TYPE = "application/json";
 constexpr const char *STATUS_OK = "200 OK";
 constexpr const char *STATUS_NOT_MODIFIED = "304 Not Modified";
 constexpr const char *STATUS_ACCEPTED = "202 Accepted";
-constexpr size_t WEB_UI_ETAG_CAPACITY = 64;
 constexpr size_t IF_NONE_MATCH_CAPACITY = 80;
 constexpr const char *STATUS_BAD_REQUEST = "400 Bad Request";
 constexpr const char *STATUS_UNAUTHORIZED = "401 Unauthorized";
@@ -2775,7 +2774,7 @@ bool ShotStopperNetwork::startHttpServer() {
   // Kept ahead of the number of routes actually registered. Exhausting this
   // makes the last registerHandler fail, which tears down the whole Web UI, so
   // check_web_assets.js fails the build before the margin is gone.
-  // Shell + app.js/css/runtime + 5 HTML partials + 5 view JS modules + APIs.
+  // Shell + app.js/css/runtime + secondary + settings + 4 HTML partials + APIs.
   config.max_uri_handlers = 56;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
   // the IDF default (1024) is enough most of the time but intermittent
@@ -2803,8 +2802,8 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/app.js", HTTP_GET, jsHandler) &&
       registerHandler(server_, "/app.css", HTTP_GET, cssHandler) &&
       registerHandler(server_, "/js/runtime.js", HTTP_GET, runtimeJsHandler) &&
-      registerHandler(server_, "/partials/home.html", HTTP_GET,
-                      partialHomeHandler) &&
+      registerHandler(server_, "/js/secondary.js", HTTP_GET,
+                      secondaryJsHandler) &&
       registerHandler(server_, "/partials/history.html", HTTP_GET,
                       partialHistoryHandler) &&
       registerHandler(server_, "/partials/diagnostic.html", HTTP_GET,
@@ -2813,13 +2812,8 @@ bool ShotStopperNetwork::startHttpServer() {
                       partialSettingsHandler) &&
       registerHandler(server_, "/partials/admin.html", HTTP_GET,
                       partialAdminHandler) &&
-      registerHandler(server_, "/js/home.js", HTTP_GET, viewHomeHandler) &&
-      registerHandler(server_, "/js/history.js", HTTP_GET, viewHistoryHandler) &&
-      registerHandler(server_, "/js/diagnostic.js", HTTP_GET,
-                      viewDiagnosticHandler) &&
       registerHandler(server_, "/js/settings.js", HTTP_GET,
                       viewSettingsHandler) &&
-      registerHandler(server_, "/js/admin.js", HTTP_GET, viewAdminHandler) &&
       registerHandler(server_, "/api/v1/ui/claim", HTTP_POST, claimHandler) &&
       registerHandler(server_, "/api/v1/ui/unlock", HTTP_POST, unlockHandler) &&
       registerHandler(server_, "/api/v1/status/home", HTTP_GET, ownedApiHandler) &&
@@ -3114,14 +3108,6 @@ bool ShotStopperNetwork::readJsonBody(
   return true;
 }
 
-static void formatWebUiEtag(char etag[WEB_UI_ETAG_CAPACITY]) {
-  // Asset tag changes when embedded HTML/JS/CSS/logo change, even if the git
-  // version string is unchanged (dirty rebuilds). Required so immutable
-  // /app.js?v=… cache busts after reflashes.
-  snprintf(etag, WEB_UI_ETAG_CAPACITY, "\"%s.%s\"", FW_VERSION,
-           WEB_UI_ASSET_TAG);
-}
-
 static bool ifNoneMatchEquals(httpd_req_t *request, const char *etag) {
   const size_t length = httpd_req_get_hdr_value_len(request, "If-None-Match");
   if (length == 0 || length >= IF_NONE_MATCH_CAPACITY) {
@@ -3137,13 +3123,13 @@ static bool ifNoneMatchEquals(httpd_req_t *request, const char *etag) {
 
 static esp_err_t serveImmutableGzip(httpd_req_t *request, const char *contentType,
                                     const uint8_t *data, size_t length) {
-  char etag[WEB_UI_ETAG_CAPACITY] = {};
-  formatWebUiEtag(etag);
-  if (ifNoneMatchEquals(request, etag)) {
+  // WEB_UI_ETAG is bake-time (FW_VERSION + asset tag); immutable ?v= busts
+  // after reflashes without snprintf on each request.
+  if (ifNoneMatchEquals(request, WEB_UI_ETAG)) {
     httpd_resp_set_status(request, STATUS_NOT_MODIFIED);
     httpd_resp_set_hdr(request, "Cache-Control",
                        "public, max-age=31536000, immutable");
-    httpd_resp_set_hdr(request, "ETag", etag);
+    httpd_resp_set_hdr(request, "ETag", WEB_UI_ETAG);
     httpd_resp_set_hdr(request, "Connection", "close");
     return httpd_resp_send(request, nullptr, 0);
   }
@@ -3151,7 +3137,7 @@ static esp_err_t serveImmutableGzip(httpd_req_t *request, const char *contentTyp
   httpd_resp_set_hdr(request, "Content-Encoding", "gzip");
   httpd_resp_set_hdr(request, "Cache-Control",
                      "public, max-age=31536000, immutable");
-  httpd_resp_set_hdr(request, "ETag", etag);
+  httpd_resp_set_hdr(request, "ETag", WEB_UI_ETAG);
   httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
   httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
   httpd_resp_set_hdr(request, "Connection", "close");
@@ -3159,19 +3145,17 @@ static esp_err_t serveImmutableGzip(httpd_req_t *request, const char *contentTyp
 }
 
 esp_err_t ShotStopperNetwork::rootHandler(httpd_req_t *request) {
-  char etag[WEB_UI_ETAG_CAPACITY] = {};
-  formatWebUiEtag(etag);
-  if (ifNoneMatchEquals(request, etag)) {
+  if (ifNoneMatchEquals(request, WEB_UI_ETAG)) {
     httpd_resp_set_status(request, STATUS_NOT_MODIFIED);
     httpd_resp_set_hdr(request, "Cache-Control", "no-cache");
-    httpd_resp_set_hdr(request, "ETag", etag);
+    httpd_resp_set_hdr(request, "ETag", WEB_UI_ETAG);
     httpd_resp_set_hdr(request, "Connection", "close");
     return httpd_resp_send(request, nullptr, 0);
   }
   httpd_resp_set_type(request, "text/html; charset=utf-8");
   httpd_resp_set_hdr(request, "Content-Encoding", "gzip");
   httpd_resp_set_hdr(request, "Cache-Control", "no-cache");
-  httpd_resp_set_hdr(request, "ETag", etag);
+  httpd_resp_set_hdr(request, "ETag", WEB_UI_ETAG);
   httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
   httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
   httpd_resp_set_hdr(
@@ -3201,10 +3185,10 @@ esp_err_t ShotStopperNetwork::runtimeJsHandler(httpd_req_t *request) {
                             SHOT_STOPPER_WEB_RUNTIME_GZIP_LEN);
 }
 
-esp_err_t ShotStopperNetwork::partialHomeHandler(httpd_req_t *request) {
-  return serveImmutableGzip(request, "text/html; charset=utf-8",
-                            SHOT_STOPPER_WEB_PARTIAL_HOME_GZIP,
-                            SHOT_STOPPER_WEB_PARTIAL_HOME_GZIP_LEN);
+esp_err_t ShotStopperNetwork::secondaryJsHandler(httpd_req_t *request) {
+  return serveImmutableGzip(request, "application/javascript; charset=utf-8",
+                            SHOT_STOPPER_WEB_SECONDARY_GZIP,
+                            SHOT_STOPPER_WEB_SECONDARY_GZIP_LEN);
 }
 
 esp_err_t ShotStopperNetwork::partialHistoryHandler(httpd_req_t *request) {
@@ -3231,34 +3215,10 @@ esp_err_t ShotStopperNetwork::partialAdminHandler(httpd_req_t *request) {
                             SHOT_STOPPER_WEB_PARTIAL_ADMIN_GZIP_LEN);
 }
 
-esp_err_t ShotStopperNetwork::viewHomeHandler(httpd_req_t *request) {
-  return serveImmutableGzip(request, "application/javascript; charset=utf-8",
-                            SHOT_STOPPER_WEB_VIEW_HOME_GZIP,
-                            SHOT_STOPPER_WEB_VIEW_HOME_GZIP_LEN);
-}
-
-esp_err_t ShotStopperNetwork::viewHistoryHandler(httpd_req_t *request) {
-  return serveImmutableGzip(request, "application/javascript; charset=utf-8",
-                            SHOT_STOPPER_WEB_VIEW_HISTORY_GZIP,
-                            SHOT_STOPPER_WEB_VIEW_HISTORY_GZIP_LEN);
-}
-
-esp_err_t ShotStopperNetwork::viewDiagnosticHandler(httpd_req_t *request) {
-  return serveImmutableGzip(request, "application/javascript; charset=utf-8",
-                            SHOT_STOPPER_WEB_VIEW_DIAGNOSTIC_GZIP,
-                            SHOT_STOPPER_WEB_VIEW_DIAGNOSTIC_GZIP_LEN);
-}
-
 esp_err_t ShotStopperNetwork::viewSettingsHandler(httpd_req_t *request) {
   return serveImmutableGzip(request, "application/javascript; charset=utf-8",
                             SHOT_STOPPER_WEB_VIEW_SETTINGS_GZIP,
                             SHOT_STOPPER_WEB_VIEW_SETTINGS_GZIP_LEN);
-}
-
-esp_err_t ShotStopperNetwork::viewAdminHandler(httpd_req_t *request) {
-  return serveImmutableGzip(request, "application/javascript; charset=utf-8",
-                            SHOT_STOPPER_WEB_VIEW_ADMIN_GZIP,
-                            SHOT_STOPPER_WEB_VIEW_ADMIN_GZIP_LEN);
 }
 
 esp_err_t ShotStopperNetwork::notFoundHandler(httpd_req_t *request,

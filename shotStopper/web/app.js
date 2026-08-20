@@ -5,9 +5,11 @@ import * as R from '/js/runtime.js?v=__FW_ASSET_TAG__';
 const assetQuery = new URL(import.meta.url).search;
 const htmlCache = new Map();
 const jsMods = new Map();
-const htmlLoaded = new Set();
+const htmlLoaded = new Set(['home']);
 const viewLoads = new Map();
+const SECONDARY = new Set(['history', 'diagnostic', 'admin']);
 
+let secondaryViews = null;
 let logTimer = 0;
 let shotsTimer = 0;
 let routeSeq = 0;
@@ -50,12 +52,31 @@ async function ensureView(name) {
   const load = (async () => {
     const section = document.getElementById('view-' + name);
     if (!section) throw new Error('Missing view section: ' + name);
+
+    if (name === 'home') {
+      if (!jsMods.has('home')) {
+        jsMods.set('home', __homeModule);
+        if (__homeModule.init) __homeModule.init();
+      }
+      return jsMods.get('home');
+    }
+
     if (!htmlLoaded.has(name)) {
       section.innerHTML = await loadPartial(name);
       htmlLoaded.add(name);
     }
     if (!jsMods.has(name)) {
-      const mod = await import('/js/' + name + '.js' + assetQuery);
+      let mod;
+      if (SECONDARY.has(name)) {
+        if (!secondaryViews) {
+          const sec = await import('/js/secondary.js' + assetQuery);
+          secondaryViews = sec.views;
+        }
+        mod = secondaryViews[name];
+        if (!mod) throw new Error('Missing secondary view: ' + name);
+      } else {
+        mod = await import('/js/' + name + '.js' + assetQuery);
+      }
       jsMods.set(name, mod);
       if (mod.init) mod.init();
     }

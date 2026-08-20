@@ -165,7 +165,7 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('settingFieldCount') ||
     !network.includes('allowedCount > 64') ||
     !network.includes('uint64_t seen') ||
-    !network.includes('WEB_UI_ASSET_TAG') ||
+    !network.includes('WEB_UI_ETAG') ||
     !network.includes('\\"buzzerSupported\\"') ||
     !network.includes('BUZZER_SUPPORT_ENABLED') ||
     !network.includes('"autoRetare"') ||
@@ -1244,16 +1244,12 @@ const expected = new Map([
   ['GET /app.js', 'jsHandler'],
   ['GET /app.css', 'cssHandler'],
   ['GET /js/runtime.js', 'runtimeJsHandler'],
-  ['GET /partials/home.html', 'partialHomeHandler'],
+  ['GET /js/secondary.js', 'secondaryJsHandler'],
   ['GET /partials/history.html', 'partialHistoryHandler'],
   ['GET /partials/diagnostic.html', 'partialDiagnosticHandler'],
   ['GET /partials/settings.html', 'partialSettingsHandler'],
   ['GET /partials/admin.html', 'partialAdminHandler'],
-  ['GET /js/home.js', 'viewHomeHandler'],
-  ['GET /js/history.js', 'viewHistoryHandler'],
-  ['GET /js/diagnostic.js', 'viewDiagnosticHandler'],
   ['GET /js/settings.js', 'viewSettingsHandler'],
-  ['GET /js/admin.js', 'viewAdminHandler'],
   ['POST /api/v1/ui/claim', 'claimHandler'],
   ['GET /api/v1/status/home', 'ownedApiHandler'],
   ['GET /api/v1/status/settings', 'ownedApiHandler'],
@@ -1888,46 +1884,71 @@ const generated = await webUi.generate();
 if (!generated.assetTag || !generated.cacheVersion ||
     !generated.html.includes(`v=${generated.cacheVersion}`) ||
     !fs.readFileSync(path.join(sketchDir, 'ShotStopperWebAssetsGzip.h'), 'utf8')
-         .includes(`WEB_UI_ASSET_TAG[] = "${generated.assetTag}"`)) {
+         .includes(`WEB_UI_ASSET_TAG[] = "${generated.assetTag}"`) ||
+    !fs.readFileSync(path.join(sketchDir, 'ShotStopperWebAssetsGzip.h'), 'utf8')
+         .includes(`WEB_UI_ETAG[] = ${JSON.stringify('"' + generated.cacheVersion + '"')}`)) {
   throw new Error('Web UI cache-buster must embed FW version + asset content tag');
 }
 const roundTrip = zlib.gunzipSync(generated.gzip).toString('utf8');
 if (roundTrip !== generated.html) {
   throw new Error('Generated gzip Web UI does not round-trip to the minified HTML');
 }
+if (!generated.html.includes('id="view-home"') ||
+    !generated.html.includes('virtualPaddle') ||
+    generated.html.includes('<section id="view-home" class="view" data-view="home"></section>')) {
+  throw new Error('Generated shell must embed home partial markup');
+}
 const jsRoundTrip = zlib.gunzipSync(generated.jsGzip).toString('utf8');
 if (jsRoundTrip !== generated.js) {
   throw new Error('Generated gzip Web JS does not round-trip to the minified JS');
 }
-if (!generated.js.includes('import') || !generated.runtimeJs.includes('export')) {
-  throw new Error('Generated Web UI JS must remain ES modules (shell + runtime)');
+if (!generated.js.includes('import') || !generated.runtimeJs.includes('export') ||
+    !generated.js.includes('virtualPaddle') ||
+    generated.js.includes('/js/home.js') ||
+    !generated.secondaryJs.includes('export') ||
+    !generated.secondaryJs.includes('views') ||
+    !appJsSource.includes('__homeModule') ||
+    !appJsSource.includes('/js/secondary.js')) {
+  throw new Error('Generated Web UI JS must remain ES modules (shell + runtime + secondary)');
 }
 const runtimeRoundTrip = zlib.gunzipSync(generated.runtimeGzip).toString('utf8');
 if (runtimeRoundTrip !== generated.runtimeJs) {
   throw new Error('Generated gzip runtime JS does not round-trip');
 }
-for (const name of VIEW_NAMES) {
+const secondaryRoundTrip =
+    zlib.gunzipSync(generated.secondaryGzip).toString('utf8');
+if (secondaryRoundTrip !== generated.secondaryJs) {
+  throw new Error('Generated gzip secondary JS does not round-trip');
+}
+const settingsRoundTrip =
+    zlib.gunzipSync(generated.settingsGzip).toString('utf8');
+if (settingsRoundTrip !== generated.settingsJs) {
+  throw new Error('Generated gzip settings JS does not round-trip');
+}
+for (const name of webUi.LAZY_PARTIALS) {
   const partialRt = zlib.gunzipSync(generated.partialGzip[name]).toString('utf8');
   if (partialRt !== generated.partials[name]) {
     throw new Error('Generated gzip partial does not round-trip: ' + name);
-  }
-  const viewRt = zlib.gunzipSync(generated.viewGzip[name]).toString('utf8');
-  if (viewRt !== generated.viewJs[name]) {
-    throw new Error('Generated gzip view JS does not round-trip: ' + name);
   }
 }
 const cssRoundTrip = zlib.gunzipSync(generated.cssGzip).toString('utf8');
 if (cssRoundTrip !== generated.css) {
   throw new Error('Generated gzip Web CSS does not round-trip to the minified CSS');
 }
-if (generated.gzip.length > 2048) {
-  throw new Error('Compressed Web UI shell HTML exceeds the 2 KiB gzip budget');
+if (generated.gzip.length > 4096) {
+  throw new Error('Compressed Web UI shell HTML exceeds the 4 KiB gzip budget');
 }
-if (generated.jsGzip.length > 4096) {
-  throw new Error('Compressed Web UI shell JS exceeds the 4 KiB gzip budget');
+if (generated.jsGzip.length > 6144) {
+  throw new Error('Compressed Web UI shell JS exceeds the 6 KiB gzip budget');
 }
 if (generated.runtimeGzip.length > 24576) {
   throw new Error('Compressed Web UI runtime JS exceeds the 24 KiB gzip budget');
+}
+if (generated.secondaryGzip.length > 4096) {
+  throw new Error('Compressed secondary view JS exceeds the 4 KiB gzip budget');
+}
+if (generated.settingsGzip.length > 4096) {
+  throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
 }
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
@@ -1945,8 +1966,13 @@ if (!network.includes('SHOT_STOPPER_WEB_UI_GZIP') ||
     !network.includes('SHOT_STOPPER_WEB_JS_GZIP_LEN') ||
     !network.includes('SHOT_STOPPER_WEB_RUNTIME_GZIP') ||
     !network.includes('SHOT_STOPPER_WEB_CSS_GZIP') ||
-    !network.includes('SHOT_STOPPER_WEB_PARTIAL_HOME_GZIP') ||
-    !network.includes('SHOT_STOPPER_WEB_VIEW_HOME_GZIP') ||
+    !network.includes('SHOT_STOPPER_WEB_SECONDARY_GZIP') ||
+    !network.includes('SHOT_STOPPER_WEB_VIEW_SETTINGS_GZIP') ||
+    !network.includes('SHOT_STOPPER_WEB_PARTIAL_SETTINGS_GZIP') ||
+    !network.includes('WEB_UI_ETAG') ||
+    network.includes('SHOT_STOPPER_WEB_PARTIAL_HOME_GZIP') ||
+    network.includes('SHOT_STOPPER_WEB_VIEW_HOME_GZIP') ||
+    network.includes('formatWebUiEtag') ||
     network.includes('SHOT_STOPPER_WEB_LOGO_GZIP') ||
     !network.includes('"Content-Encoding"') ||
     !network.includes('"gzip"')) {
@@ -2316,8 +2342,9 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
 console.log(
   `Embedded Web UI: modules+partials valid, ${htmlBytes} bytes HTML / ${jsBytes} bytes JS source, ` +
   `${generated.gzip.length} bytes shell gzip, ${generated.jsGzip.length} bytes app.js gzip, ` +
-  `${generated.runtimeGzip.length} bytes runtime gzip, ${generated.cssGzip.length} bytes CSS gzip, ` +
-  `combined ${generated.combined} bytes gzip, ${expected.size} routes checked`
+  `${generated.runtimeGzip.length} bytes runtime gzip, ${generated.secondaryGzip.length} bytes secondary gzip, ` +
+  `${generated.cssGzip.length} bytes CSS gzip, combined ${generated.combined} bytes gzip, ` +
+  `${expected.size} routes checked`
 );
 })().catch((error) => {
   console.error(error);
