@@ -2134,6 +2134,8 @@ struct ControlStatusSnapshot {
   uint32_t psramSizeBytes = 0;
   uint32_t psramFreeBytes = 0;
   uint32_t psramLargestFreeBlockBytes = 0;
+  uint32_t bleHostAllocPsramCount = 0;
+  uint32_t bleHostAllocFallbackCount = 0;
   uint32_t scaleEventsDropped = 0;
   RuntimeConfig config = {};
   ShotPresetBank presets = {};

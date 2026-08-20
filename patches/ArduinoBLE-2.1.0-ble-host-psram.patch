@@ -1,0 +1,515 @@
+diff -ruN a/src/local/BLELocalCharacteristic.cpp b/src/local/BLELocalCharacteristic.cpp
+--- a/src/local/BLELocalCharacteristic.cpp	2026-08-20 00:11:12
++++ b/src/local/BLELocalCharacteristic.cpp	2026-08-20 00:11:12
+@@ -29,6 +29,8 @@
+ 
+ #include "BLELocalCharacteristic.h"
+ 
++#include "utility/BLEHostAlloc.h"
++
+ BLELocalCharacteristic::BLELocalCharacteristic(const char* uuid, uint16_t permissions, int valueSize, bool fixedLength) :
+   BLELocalAttribute(uuid),
+   _properties((uint8_t)(permissions&0x000FF)),
+@@ -50,7 +52,7 @@
+     _descriptors.add(cccd);
+   }
+ 
+-  _value = (uint8_t*)malloc(valueSize);
++  _value = (uint8_t*)BLEHostAlloc(valueSize);
+ }
+ 
+ BLELocalCharacteristic::BLELocalCharacteristic(const char* uuid, uint16_t permissions, const char* value) :
+@@ -71,7 +73,7 @@
+   _descriptors.clear();
+ 
+   if (_value) {
+-    free(_value);
++    BLEHostFree(_value);
+   }
+ }
+ 
+diff -ruN a/src/remote/BLERemoteCharacteristic.cpp b/src/remote/BLERemoteCharacteristic.cpp
+--- a/src/remote/BLERemoteCharacteristic.cpp	2026-08-20 00:11:12
++++ b/src/remote/BLERemoteCharacteristic.cpp	2026-08-20 00:11:12
+@@ -23,6 +23,8 @@
+ 
+ #include "BLERemoteCharacteristic.h"
+ 
++#include "utility/BLEHostAlloc.h"
++
+ BLERemoteCharacteristic::BLERemoteCharacteristic(const uint8_t uuid[], uint8_t uuidLen, uint16_t connectionHandle,
+                                                   uint16_t startHandle, uint16_t permissions, uint16_t valueHandle) :
+   BLERemoteAttribute(uuid, uuidLen),
+@@ -45,7 +47,8 @@
+     BLERemoteDescriptor* d = descriptor(i);
+ 
+     if (d->release() == 0) {
+-      delete d;
++      d->~BLERemoteDescriptor();
++      BLEHostFree(d);
+     }
+   }
+ 
+diff -ruN a/src/remote/BLERemoteDevice.cpp b/src/remote/BLERemoteDevice.cpp
+--- a/src/remote/BLERemoteDevice.cpp	2026-08-20 00:11:12
++++ b/src/remote/BLERemoteDevice.cpp	2026-08-20 00:11:12
+@@ -19,6 +19,8 @@
+ 
+ #include "BLERemoteDevice.h"
+ 
++#include "../utility/BLEHostAlloc.h"
++
+ BLERemoteDevice::BLERemoteDevice()
+ {
+ }
+@@ -51,7 +53,8 @@
+     BLERemoteService* s = service(i);
+ 
+     if (s->release() == 0) {
+-      delete s;
++      s->~BLERemoteService();
++      BLEHostFree(s);
+     }
+   }
+ 
+diff -ruN a/src/remote/BLERemoteService.cpp b/src/remote/BLERemoteService.cpp
+--- a/src/remote/BLERemoteService.cpp	2026-08-20 00:11:12
++++ b/src/remote/BLERemoteService.cpp	2026-08-20 00:11:12
+@@ -19,6 +19,8 @@
+ 
+ #include "BLERemoteService.h"
+ 
++#include "../utility/BLEHostAlloc.h"
++
+ BLERemoteService::BLERemoteService(const uint8_t uuid[], uint8_t uuidLen, uint16_t startHandle, uint16_t endHandle) :
+   BLERemoteAttribute(uuid, uuidLen),
+   _startHandle(startHandle),
+@@ -32,7 +34,8 @@
+     BLERemoteCharacteristic* c = characteristic(i);
+ 
+     if (c->release() == 0) {
+-      delete c;
++      c->~BLERemoteCharacteristic();
++      BLEHostFree(c);
+     }
+   }
+ 
+diff -ruN a/src/utility/ATT.cpp b/src/utility/ATT.cpp
+--- a/src/utility/ATT.cpp	2026-08-20 00:11:12
++++ b/src/utility/ATT.cpp	2026-08-20 00:11:12
+@@ -34,6 +34,10 @@
+ 
+ #include "ATT.h"
+ 
++#include <new>
++
++#include "BLEHostAlloc.h"
++
+ extern "C" int strcasecmp(char const *a, char const *b);
+ 
+ #define ATT_OP_ERROR              0x01
+@@ -176,8 +180,12 @@
+   for (int i = 0; i < ATT_MAX_PEERS; i++) {
+     if (_peers[i].connectionHandle == connHandle) {
+       if (_peers[i].device == NULL) {
+-        _peers[i].device = new BLERemoteDevice();
+-      }
++          void* mem = BLEHostAlloc(sizeof(BLERemoteDevice));
++          if (mem == NULL) {
++            return false;
++          }
++          _peers[i].device = new (mem) BLERemoteDevice();
++        }
+ 
+       device = _peers[i].device;
+ 
+@@ -445,7 +453,8 @@
+   _peers[peerIndex].IOCap[2] = 0;
+ 
+   if (_peers[peerIndex].device) {
+-    delete _peers[peerIndex].device;
++    _peers[peerIndex].device->~BLERemoteDevice();
++    BLEHostFree(_peers[peerIndex].device);
+   }
+   _peers[peerIndex].device = NULL;
+ }
+@@ -577,7 +586,8 @@
+     _peers[i].mtu = 23;
+ 
+     if (_peers[i].device) {
+-      delete _peers[i].device;
++      _peers[i].device->~BLERemoteDevice();
++      BLEHostFree(_peers[i].device);
+     }
+     _peers[i].device = NULL;
+   }
+@@ -1631,14 +1641,14 @@
+         if (serviceUuidFilter == NULL || 
+             (uuidLen == serviceUuid.length() && memcmp(rawService->uuid, serviceUuid.data(), uuidLen) == 0)) {
+         
+-          BLERemoteService* service = new BLERemoteService(rawService->uuid, uuidLen,
++          void* mem = BLEHostAlloc(sizeof(BLERemoteService));
++          if (mem == NULL) {
++            return false;
++          }
++          BLERemoteService* service = new (mem) BLERemoteService(rawService->uuid, uuidLen,
+                                                             rawService->startHandle,
+                                                             rawService->endHandle);
+ 
+-          if (service == NULL) {
+-            return false;
+-          }
+-
+           device->addService(service);
+ 
+         }
+@@ -1691,16 +1701,16 @@
+             uint8_t uuid[16];
+           } *rawCharacteristic = (RawCharacteristic*)&responseBuffer[i];
+ 
+-          BLERemoteCharacteristic* characteristic = new BLERemoteCharacteristic(rawCharacteristic->uuid, uuidLen,
++          void* mem = BLEHostAlloc(sizeof(BLERemoteCharacteristic));
++          if (mem == NULL) {
++            return false;
++          }
++          BLERemoteCharacteristic* characteristic = new (mem) BLERemoteCharacteristic(rawCharacteristic->uuid, uuidLen,
+                                                                                 connectionHandle,
+                                                                                 rawCharacteristic->startHandle,
+                                                                                 rawCharacteristic->properties,
+                                                                                 rawCharacteristic->valueHandle);
+ 
+-          if (characteristic == NULL) {
+-            return false;
+-          }
+-
+           service->addCharacteristic(characteristic);
+ 
+           reqStartHandle = rawCharacteristic->valueHandle + 1;
+@@ -1758,13 +1768,13 @@
+               uint8_t uuid[16];
+             } *rawDescriptor = (RawDescriptor*)&responseBuffer[i];
+ 
+-            BLERemoteDescriptor* descriptor = new BLERemoteDescriptor(rawDescriptor->uuid, uuidLen,
+-                                                                      connectionHandle,
+-                                                                      rawDescriptor->handle);
+-
+-            if (descriptor == NULL) {
++            void* mem = BLEHostAlloc(sizeof(BLERemoteDescriptor));
++            if (mem == NULL) {
+               return false;
+             }
++            BLERemoteDescriptor* descriptor = new (mem) BLERemoteDescriptor(rawDescriptor->uuid, uuidLen,
++                                                                      connectionHandle,
++                                                                      rawDescriptor->handle);
+ 
+             characteristic->addDescriptor(descriptor);
+ 
+diff -ruN a/src/utility/BLEHostAlloc.cpp b/src/utility/BLEHostAlloc.cpp
+--- a/src/utility/BLEHostAlloc.cpp	1969-12-31 21:00:00
++++ b/src/utility/BLEHostAlloc.cpp	2026-08-20 00:11:12
+@@ -0,0 +1,52 @@
++/*
++  BLE host allocator for Shot Stopper / ESP32 ArduinoBLE VHCI builds.
++*/
++
++#include "BLEHostAlloc.h"
++
++static uint32_t g_bleHostAllocPsram = 0;
++static uint32_t g_bleHostAllocFallback = 0;
++
++extern "C" uint32_t BLEHostAllocPsramCount(void) {
++  return g_bleHostAllocPsram;
++}
++
++extern "C" uint32_t BLEHostAllocFallbackCount(void) {
++  return g_bleHostAllocFallback;
++}
++
++extern "C" void* BLEHostAlloc(size_t size) {
++  if (size == 0) {
++    return NULL;
++  }
++
++#if defined(ESP32)
++  void* block = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
++  if (block != NULL) {
++    g_bleHostAllocPsram++;
++    return block;
++  }
++  block = heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
++  if (block != NULL) {
++    g_bleHostAllocFallback++;
++  }
++  return block;
++#else
++  void* block = malloc(size);
++  if (block != NULL) {
++    g_bleHostAllocFallback++;
++  }
++  return block;
++#endif
++}
++
++extern "C" void BLEHostFree(void* ptr) {
++  if (ptr == NULL) {
++    return;
++  }
++#if defined(ESP32)
++  heap_caps_free(ptr);
++#else
++  free(ptr);
++#endif
++}
+diff -ruN a/src/utility/BLEHostAlloc.h b/src/utility/BLEHostAlloc.h
+--- a/src/utility/BLEHostAlloc.h	1969-12-31 21:00:00
++++ b/src/utility/BLEHostAlloc.h	2026-08-20 00:11:12
+@@ -0,0 +1,35 @@
++/*
++  BLE host allocator for Shot Stopper / ESP32 ArduinoBLE VHCI builds.
++
++  Small GAP/ATT/GATT host objects normally go through malloc() and stay in
++  internal DRAM because CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL (or the Arduino
++  equivalent) keeps blocks under ~4 KiB out of PSRAM. Prefer SPIRAM here so
++  discovery queues and remote ATT trees do not compete with the controller.
++*/
++
++#ifndef _BLE_HOST_ALLOC_H_
++#define _BLE_HOST_ALLOC_H_
++
++#include <stddef.h>
++#include <stdint.h>
++#include <stdlib.h>
++
++#if defined(ESP32)
++#include <esp_heap_caps.h>
++#endif
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++uint32_t BLEHostAllocPsramCount(void);
++uint32_t BLEHostAllocFallbackCount(void);
++
++void* BLEHostAlloc(size_t size);
++void BLEHostFree(void* ptr);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff -ruN a/src/utility/BLELinkedList.h b/src/utility/BLELinkedList.h
+--- a/src/utility/BLELinkedList.h	2026-08-20 00:11:12
++++ b/src/utility/BLELinkedList.h	2026-08-20 00:11:12
+@@ -24,6 +24,8 @@
+ #include <new>
+ #include <stddef.h>
+ 
++#include "BLEHostAlloc.h"
++
+ template<class T> struct BLELinkedListNode
+ {
+   T data;
+@@ -66,7 +68,8 @@
+ {
+   // Avoid operator new: on this toolchain even new(nothrow) can abort when
+   // allocating the bad_alloc exception object also fails under OOM.
+-  void* mem = malloc(sizeof(BLELinkedListNode<T>));
++  // Prefer PSRAM on ESP32 so small host nodes skip ALWAYSINTERNAL DRAM.
++  void* mem = BLEHostAlloc(sizeof(BLELinkedListNode<T>));
+   if (mem == NULL) {
+     return false;
+   }
+@@ -112,7 +115,7 @@
+     itemNode = itemNode->next;
+ 
+     n->~BLELinkedListNode();
+-    free(n);
++    BLEHostFree(n);
+   }
+ 
+   _size = 0;
+@@ -152,7 +155,7 @@
+   }
+ 
+   itemNode->~BLELinkedListNode();
+-  free(itemNode);
++  BLEHostFree(itemNode);
+   _size--;
+ 
+   return result;
+diff -ruN a/src/utility/GAP.cpp b/src/utility/GAP.cpp
+--- a/src/utility/GAP.cpp	2026-08-20 00:11:12
++++ b/src/utility/GAP.cpp	2026-08-20 00:11:12
+@@ -25,6 +25,8 @@
+ #include <cstdlib>
+ #include <new>
+ 
++#include "BLEHostAlloc.h"
++
+ #define GAP_MAX_DISCOVERED_QUEUE_SIZE 32
+ 
+ #define GAP_ADV_IND (0x00)
+@@ -149,7 +151,7 @@
+ 
+     if (device != NULL) {
+       device->~BLEDevice();
+-      free(device);
++      BLEHostFree(device);
+     }
+   }
+ 
+@@ -166,7 +168,7 @@
+ 
+       _discoveredDevices.remove(i);
+       device->~BLEDevice();
+-      free(device);
++      BLEHostFree(device);
+ 
+       if (matchesScanFilter(result)) {
+         return result;
+@@ -234,14 +236,15 @@
+       BLEDevice* device_first = _discoveredDevices.remove(0);
+       if (device_first != NULL) {
+         device_first->~BLEDevice();
+-        free(device_first);
++        BLEHostFree(device_first);
+       }
+     }
+ 
+     // ESP32 WiFi+BLE can exhaust the heap. Avoid operator new entirely:
+     // even new(nothrow) calls the throwing allocator, which tries to build a
+     // bad_alloc exception and abort()s when that allocation also fails.
+-    void *mem = malloc(sizeof(BLEDevice));
++    // Prefer PSRAM so small BLEDevice entries skip ALWAYSINTERNAL DRAM.
++    void *mem = BLEHostAlloc(sizeof(BLEDevice));
+     if (mem == NULL) {
+       return;
+     }
+@@ -249,7 +252,7 @@
+ 
+     if (!_discoveredDevices.add(discoveredDevice)) {
+       discoveredDevice->~BLEDevice();
+-      free(discoveredDevice);
++      BLEHostFree(discoveredDevice);
+       return;
+     }
+     discoveredIndex = _discoveredDevices.size() - 1;
+@@ -267,7 +270,7 @@
+ 
+     _discoveredDevices.remove(discoveredIndex);
+     discoveredDevice->~BLEDevice();
+-    free(discoveredDevice);
++    BLEHostFree(discoveredDevice);
+ 
+     if (matchesScanFilter(device)) {
+       _discoverEventHandler(device);
+diff -ruN a/src/utility/GATT.cpp b/src/utility/GATT.cpp
+--- a/src/utility/GATT.cpp	2026-08-20 00:11:12
++++ b/src/utility/GATT.cpp	2026-08-20 00:11:12
+@@ -27,6 +27,10 @@
+ 
+ #include "GATT.h"
+ 
++#include <new>
++
++#include "BLEHostAlloc.h"
++
+ GATTClass::GATTClass() :
+   _genericAccessService(NULL),
+   _deviceNameCharacteristic(NULL),
+@@ -43,12 +47,50 @@
+ 
+ void GATTClass::begin()
+ {
+-  _genericAccessService = new BLELocalService("1800");
+-  _deviceNameCharacteristic = new BLELocalCharacteristic("2a00", BLERead, 20);
+-  _appearanceCharacteristic = new BLELocalCharacteristic("2a01", BLERead, 2);
+-  _genericAttributeService = new BLELocalService("1801");
+-  _servicesChangedCharacteristic = new BLELocalCharacteristic("2a05", BLEIndicate, 4);
++  void* mem;
+ 
++  mem = BLEHostAlloc(sizeof(BLELocalService));
++  _genericAccessService = (mem == NULL) ? NULL : new (mem) BLELocalService("1800");
++  mem = BLEHostAlloc(sizeof(BLELocalCharacteristic));
++  _deviceNameCharacteristic = (mem == NULL) ? NULL : new (mem) BLELocalCharacteristic("2a00", BLERead, 20);
++  mem = BLEHostAlloc(sizeof(BLELocalCharacteristic));
++  _appearanceCharacteristic = (mem == NULL) ? NULL : new (mem) BLELocalCharacteristic("2a01", BLERead, 2);
++  mem = BLEHostAlloc(sizeof(BLELocalService));
++  _genericAttributeService = (mem == NULL) ? NULL : new (mem) BLELocalService("1801");
++  mem = BLEHostAlloc(sizeof(BLELocalCharacteristic));
++  _servicesChangedCharacteristic = (mem == NULL) ? NULL : new (mem) BLELocalCharacteristic("2a05", BLEIndicate, 4);
++
++  if (_genericAccessService == NULL || _deviceNameCharacteristic == NULL ||
++      _appearanceCharacteristic == NULL || _genericAttributeService == NULL ||
++      _servicesChangedCharacteristic == NULL) {
++    if (_genericAccessService) {
++      _genericAccessService->~BLELocalService();
++      BLEHostFree(_genericAccessService);
++      _genericAccessService = NULL;
++    }
++    if (_deviceNameCharacteristic) {
++      _deviceNameCharacteristic->~BLELocalCharacteristic();
++      BLEHostFree(_deviceNameCharacteristic);
++      _deviceNameCharacteristic = NULL;
++    }
++    if (_appearanceCharacteristic) {
++      _appearanceCharacteristic->~BLELocalCharacteristic();
++      BLEHostFree(_appearanceCharacteristic);
++      _appearanceCharacteristic = NULL;
++    }
++    if (_genericAttributeService) {
++      _genericAttributeService->~BLELocalService();
++      BLEHostFree(_genericAttributeService);
++      _genericAttributeService = NULL;
++    }
++    if (_servicesChangedCharacteristic) {
++      _servicesChangedCharacteristic->~BLELocalCharacteristic();
++      BLEHostFree(_servicesChangedCharacteristic);
++      _servicesChangedCharacteristic = NULL;
++    }
++    return;
++  }
++
+   _genericAccessService->retain();
+   _deviceNameCharacteristic->retain();
+   _appearanceCharacteristic->retain();
+@@ -71,27 +113,32 @@
+ void GATTClass::end()
+ {
+   if (_genericAccessService && _genericAccessService->release() == 0) {
+-    delete(_genericAccessService);
++    _genericAccessService->~BLELocalService();
++    BLEHostFree(_genericAccessService);
+     _genericAccessService = NULL;
+   }
+ 
+   if (_deviceNameCharacteristic && _deviceNameCharacteristic->release() == 0) {
+-    delete(_deviceNameCharacteristic);
++    _deviceNameCharacteristic->~BLELocalCharacteristic();
++    BLEHostFree(_deviceNameCharacteristic);
+     _deviceNameCharacteristic = NULL;
+   }
+ 
+   if (_appearanceCharacteristic && _appearanceCharacteristic->release() == 0) {
+-    delete(_appearanceCharacteristic);
++    _appearanceCharacteristic->~BLELocalCharacteristic();
++    BLEHostFree(_appearanceCharacteristic);
+     _appearanceCharacteristic = NULL;
+   }
+ 
+   if (_genericAttributeService && _genericAttributeService->release() == 0) {
+-    delete(_genericAttributeService);
++    _genericAttributeService->~BLELocalService();
++    BLEHostFree(_genericAttributeService);
+     _genericAttributeService = NULL;
+   }
+ 
+   if (_servicesChangedCharacteristic && _servicesChangedCharacteristic->release() == 0) {
+-    delete(_servicesChangedCharacteristic);
++    _servicesChangedCharacteristic->~BLELocalCharacteristic();
++    BLEHostFree(_servicesChangedCharacteristic);
+     _servicesChangedCharacteristic = NULL;
+   }
+ 

@@ -3728,6 +3728,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"largestFreeHeapBlockBytes\":%lu,"
         "\"psramSizeBytes\":%lu,\"psramFreeBytes\":%lu,"
         "\"psramLargestFreeBlockBytes\":%lu,"
+        "\"bleHostAllocPsram\":%lu,\"bleHostAllocFallback\":%lu,"
         "\"hwmon\":{\"cpuLoad5s\":%.2f,\"cpuLoad1m\":%.2f,\"cpuLoad5m\":%.2f,"
         "\"cpu0Busy\":%.2f,\"cpu1Busy\":%.2f,\"cpuLoadValid\":%s,"
         "\"tempValid\":%s,\"tempC\":%.1f,\"tempPeakC\":%.1f,"
@@ -3761,6 +3762,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.psramSizeBytes),
         static_cast<unsigned long>(control.psramFreeBytes),
         static_cast<unsigned long>(control.psramLargestFreeBlockBytes),
+        static_cast<unsigned long>(control.bleHostAllocPsramCount),
+        static_cast<unsigned long>(control.bleHostAllocFallbackCount),
         static_cast<double>(control.hwmon.cpuLoad5s),
         static_cast<double>(control.hwmon.cpuLoad1m),
         static_cast<double>(control.hwmon.cpuLoad5m),

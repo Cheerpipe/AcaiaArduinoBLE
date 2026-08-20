@@ -916,6 +916,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !network.includes('\\"psramSizeBytes\\"') ||
       !network.includes('\\"psramFreeBytes\\"') ||
       !network.includes('\\"psramLargestFreeBlockBytes\\"') ||
+      !network.includes('\\"bleHostAllocPsram\\"') ||
+      !network.includes('\\"bleHostAllocFallback\\"') ||
       !network.includes('\\"resetReasonCode\\"') ||
       !diagHtml.includes('id="diagnosticsPanel"') ||
       !diagHtml.includes('<legend>Diagnostics</legend>') ||
@@ -1529,6 +1531,7 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'activeServer', 'maintenance', 'persistPending', 'uptimeMs', 'hwmon',
     'freeHeapBytes', 'minimumFreeHeapBytes', 'largestFreeHeapBlockBytes',
     'psramSizeBytes', 'psramFreeBytes', 'psramLargestFreeBlockBytes',
+    'bleHostAllocPsram', 'bleHostAllocFallback',
     'resetReasonCode', 'packetGaps', 'rejectedPackets', 'reconnects',
     'eventsDropped', 'lastCommand'
   ]) {

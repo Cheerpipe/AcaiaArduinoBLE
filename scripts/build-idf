@@ -80,12 +80,13 @@ ss_source_idf() {
 
 ss_ensure_arduino_ble() {
   local dest="$1"
-  if [[ -f "$dest/src/ArduinoBLE.h" ]]; then
-    return 0
+  if [[ ! -f "$dest/src/ArduinoBLE.h" ]]; then
+    echo "Clonando ArduinoBLE ${ARDUINO_BLE_VERSION} → $dest"
+    mkdir -p "$(dirname "$dest")"
+    git clone --depth 1 --branch "$ARDUINO_BLE_VERSION" "$ARDUINO_BLE_REPO" "$dest"
   fi
-  echo "Clonando ArduinoBLE ${ARDUINO_BLE_VERSION} → $dest"
-  mkdir -p "$(dirname "$dest")"
-  git clone --depth 1 --branch "$ARDUINO_BLE_VERSION" "$ARDUINO_BLE_REPO" "$dest"
+  # Scan 40/20, OOM-safe discover, and BLE host PSRAM (same as Arduino-CLI).
+  ARDUINO_BLE_HOME="$dest" "$SCRIPT_DIR/patch_arduinoble.sh"
 }
 
 # Turn stored tokens like SHOT_STOPPER_FOO=1 into -DSHOT_STOPPER_FOO=1 so a

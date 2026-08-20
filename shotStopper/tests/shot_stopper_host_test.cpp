@@ -6011,6 +6011,8 @@ void sc15_status_printers_use_dump_views() {
   CHECK(serialTxContains("psramSize=0"));
   CHECK(serialTxContains("psramFree=0"));
   CHECK(serialTxContains("psramLargest=0"));
+  CHECK(serialTxContains("bleHostAllocPsram=0"));
+  CHECK(serialTxContains("bleHostAllocFallback=0"));
   CHECK(serialTxContains("stackNetwork=400"));
   CHECK(serialTxContains("cpuLoad5s=0.42"));
   CHECK(serialTxContains("cpuLoad1m=0.55"));

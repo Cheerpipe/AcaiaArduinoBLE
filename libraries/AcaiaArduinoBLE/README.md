@@ -65,12 +65,15 @@ even when the advertisement has no local name.
 Stock ArduinoBLE 2.1.0 scans active at 20/20 ms. Shot Stopper patches GAP to
 active 40/20 ms (50% duty) via `scripts/patch_arduinoble.sh` so SCAN_RSP names
 stay visible while leaving airtime for Wi-Fi. The same script also applies an
-OOM-safe discovery patch: advertising reports allocate with `malloc` +
-placement `new` (and the linked-list nodes likewise) so a failed alloc drops
-the advert instead of `abort()` via `bad_alloc`. Idle discovery keeps that
-scan enabled until a match or filter change; `startScan()` / `pollScan()` do
-not cycle GAP every 1 s or 3 s. Migrating to ESP-IDF NimBLE is out of scope:
-this library stays on the pinned ArduinoBLE lifecycle.
+OOM-safe discovery patch and a BLE-host PSRAM allocator: advertising reports,
+linked-list nodes, remote ATT trees, local GATT 1800/1801, and characteristic
+value buffers allocate with `BLEHostAlloc` (SPIRAM first, internal fallback) +
+placement `new` so small host objects skip the ALWAYSINTERNAL DRAM threshold
+and a failed alloc drops the advert instead of `abort()` via `bad_alloc`. The
+VHCI stream buffers and `bleTask` stack stay in internal SRAM. Idle discovery
+keeps that scan enabled until a match or filter change; `startScan()` /
+`pollScan()` do not cycle GAP every 1 s or 3 s. Migrating to ESP-IDF NimBLE is
+out of scope: this library stays on the pinned ArduinoBLE lifecycle.
 
 The operation timeout bounds ATT waits supported by the public ArduinoBLE API;
 it cannot bound every internal ESP32 HCI wait.

@@ -575,6 +575,8 @@ struct SerialCliHealthDump {
   uint32_t psramSizeBytes = 0;
   uint32_t psramFreeBytes = 0;
   uint32_t psramLargestFreeBlockBytes = 0;
+  uint32_t bleHostAllocPsramCount = 0;
+  uint32_t bleHostAllocFallbackCount = 0;
   uint32_t loopMaxGapMs = 0;
   uint32_t healthIntervalMaxGapMs = 0;
   uint32_t loopStackMinWords = 0;
@@ -771,6 +773,10 @@ inline void serialCliPrintHealth(const SerialCliHealthDump &dump) {
   Serial.println(static_cast<unsigned long>(dump.psramFreeBytes));
   Serial.print("psramLargest=");
   Serial.println(static_cast<unsigned long>(dump.psramLargestFreeBlockBytes));
+  Serial.print("bleHostAllocPsram=");
+  Serial.println(static_cast<unsigned long>(dump.bleHostAllocPsramCount));
+  Serial.print("bleHostAllocFallback=");
+  Serial.println(static_cast<unsigned long>(dump.bleHostAllocFallbackCount));
   Serial.print("loopMaxGapMs=");
   Serial.println(static_cast<unsigned long>(dump.loopMaxGapMs));
   Serial.print("loopIntervalGapMs=");

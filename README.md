@@ -908,10 +908,12 @@ Classic ESP32 Dev Module and Arduino Nano ESP32 are **not supported**. Both S3
 variants share the same GPIO map; choose `n8r4` or `n16r8` so flash size and
 PSRAM bus (QSPI vs OPI) match the module. The scripts have no default board;
 `--arch` is asked once and then remembered. The
-FQBN enables PSRAM at boot (`BOARD_HAS_PSRAM`); paddle, relay, BLE, safety,
-NVS/OTA scratch buffers, and FreeRTOS stacks that touch flash (network manager,
-httpd/OTA) stay on internal SRAM. Web UI and Wi-Fi (AP/STA) work buffers —
-JSON arena, NetworkWorkBuf, Wi-Fi scan records/snapshots — live in PSRAM.
+FQBN enables PSRAM at boot (`BOARD_HAS_PSRAM`); paddle, relay, BLE controller /
+VHCI, safety, NVS/OTA scratch buffers, and FreeRTOS stacks that touch flash
+(network manager, httpd/OTA) stay on internal SRAM. Web UI, Wi-Fi (AP/STA) work
+buffers, and ArduinoBLE **host** objects (GAP/ATT/GATT via `BLEHostAlloc`) —
+JSON arena, NetworkWorkBuf, Wi-Fi scan records/snapshots, Companion profile —
+live in PSRAM.
 Before energizing CN9, verify every pin for the specific board and the active
 polarity of the relay module.
 
@@ -1042,11 +1044,13 @@ arduino-cli lib install ArduinoBLE@2.1.0
 
 `./scripts/patch_arduinoble.sh` is required: stock ArduinoBLE 2.1.0 scans
 active at 20/20 ms (100% duty). The patch sets active 40/20 ms (50% duty) so
-SCAN_RSP names stay visible while leaving airtime for the Wi-Fi AP, and makes
-discovery OOM-safe (`malloc` + placement `new`) so a starved heap drops an
-advertisement instead of aborting. The script is idempotent and also converts
-a leftover 100/30 patch. Set `ARDUINO_BLE_HOME` if ArduinoBLE is not in the
-default Arduino libraries path.
+SCAN_RSP names stay visible while leaving airtime for the Wi-Fi AP, makes
+discovery OOM-safe (placement `new`), and places ArduinoBLE **host** objects
+(GAP queue, ATT remote tree, local GATT values) in PSRAM via `BLEHostAlloc`
+while VHCI stream buffers and the BLE **controller** stay on internal SRAM.
+`./scripts/build` and `./scripts/build-idf` run the patch automatically. The
+script is idempotent and also converts a leftover 100/30 patch. Set
+`ARDUINO_BLE_HOME` if ArduinoBLE is not in the default Arduino libraries path.
 
 This project is pinned to Arduino-ESP32 **3.3.11** (ESP-IDF 5.5.5). On
 **3.3.6+** the core frees BLE controller RAM at boot unless a translation

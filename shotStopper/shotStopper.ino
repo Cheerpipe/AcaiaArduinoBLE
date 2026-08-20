@@ -61,6 +61,15 @@
 
 using namespace shotstopper;
 
+#if !defined(SHOT_STOPPER_HOST_TEST)
+// ArduinoBLE BLEHostAlloc counters (patches/ArduinoBLE-2.1.0-ble-host-psram).
+extern "C" uint32_t BLEHostAllocPsramCount(void);
+extern "C" uint32_t BLEHostAllocFallbackCount(void);
+#else
+static inline uint32_t BLEHostAllocPsramCount(void) { return 0; }
+static inline uint32_t BLEHostAllocFallbackCount(void) { return 0; }
+#endif
+
 // ---------------------------------------------------------------------------
 // User configuration
 // ---------------------------------------------------------------------------
@@ -592,6 +601,8 @@ uint32_t largestFreeHeapBlockBytes = 0;
 uint32_t psramSizeBytes = 0;
 uint32_t psramFreeBytes = 0;
 uint32_t psramLargestFreeBlockBytes = 0;
+uint32_t bleHostAllocPsramCount = 0;
+uint32_t bleHostAllocFallbackCount = 0;
 bool healthHeapAlertLatched = false;
 bool healthStackAlertLatched = false;
 bool healthLoopGapAlertLatched = false;
@@ -6253,6 +6264,8 @@ void publishControlStatus() {
   next.psramSizeBytes = psramSizeBytes;
   next.psramFreeBytes = psramFreeBytes;
   next.psramLargestFreeBlockBytes = psramLargestFreeBlockBytes;
+  next.bleHostAllocPsramCount = bleHostAllocPsramCount;
+  next.bleHostAllocFallbackCount = bleHostAllocFallbackCount;
   next.hwmon = hwmonSnapshot;
   next.scaleEventsDropped = scaleEventsDropped;
   next.config = effectiveRuntimeConfig();
@@ -6484,6 +6497,8 @@ void serialCliPrintLiveHealth() {
   dump.psramSizeBytes = psramSizeBytes;
   dump.psramFreeBytes = psramFreeBytes;
   dump.psramLargestFreeBlockBytes = psramLargestFreeBlockBytes;
+  dump.bleHostAllocPsramCount = bleHostAllocPsramCount;
+  dump.bleHostAllocFallbackCount = bleHostAllocFallbackCount;
   dump.loopMaxGapMs = loopMaxGapMs;
   dump.healthIntervalMaxGapMs = healthIntervalMaxGapMs;
   dump.loopStackMinWords = loopStackMinWords;
@@ -7043,7 +7058,12 @@ void setup() {
   bleCompanionStatusSnapshot.configuredEnabled = bleCompanionConfigured;
   bleCompanionRuntimeSnapshot.configuredEnabled = bleCompanionConfigured;
   if (bleCompanionConfigured) {
-    void *storage = allocInternal(sizeof(ShotStopperBleCompanion));
+    // Host GATT profile (object + characteristic value buffers via ArduinoBLE
+    // BLEHostAlloc) prefers PSRAM; fall back to internal if SPIRAM is full.
+    static_assert(sizeof(ShotStopperBleCompanion) >= 64u &&
+                      sizeof(ShotStopperBleCompanion) <= 8192u,
+                  "ShotStopperBleCompanion size outside expected host budget");
+    void *storage = allocExternalOrInternal(sizeof(ShotStopperBleCompanion));
     if (storage != nullptr) {
       bleCompanion = new (storage) ShotStopperBleCompanion();
       bleCompanionRuntimeSnapshot.enabled = true;
@@ -7310,6 +7330,8 @@ void loop() {
     psramSizeBytes = heap.psramTotal;
     psramFreeBytes = heap.psramFree;
     psramLargestFreeBlockBytes = heap.psramLargest;
+    bleHostAllocPsramCount = BLEHostAllocPsramCount();
+    bleHostAllocFallbackCount = BLEHostAllocFallbackCount();
 #endif
     hwmonSnapshot = hwmon.sample(intervalMs > 0U ? intervalMs
                                                  : HEALTH_TELEMETRY_INTERVAL_MS);
