@@ -6469,6 +6469,7 @@ void serialCliFillNetworkDump(SerialCliNetworkDump &dump) {
   strncpy(dump.configuredDns2, snap.configuredDns2,
           sizeof(dump.configuredDns2) - 1);
   strncpy(dump.staMac, snap.staMac, sizeof(dump.staMac) - 1);
+  strncpy(dump.staBssid, snap.staBssid, sizeof(dump.staBssid) - 1);
   strncpy(dump.apMac, snap.apMac, sizeof(dump.apMac) - 1);
   strncpy(dump.ntpActiveServer, snap.ntpActiveServer,
           sizeof(dump.ntpActiveServer) - 1);

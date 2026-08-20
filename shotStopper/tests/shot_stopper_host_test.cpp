@@ -1814,6 +1814,29 @@ void w04_wifi_credentials_have_strict_bounds() {
   CHECK(!shouldReuseSavedWifiCredentials("", "", false, true, "CafeLAN", false));
 }
 
+void w04b_select_best_sta_ap_prefers_strongest_matching_bssid() {
+  const uint8_t weakBssid[6] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+  const uint8_t strongBssid[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+  const uint8_t otherBssid[6] = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60};
+  const StaApScanEntry entries[] = {
+      {"CafeLAN", weakBssid, 1, -80, false},
+      {"OtherNet", strongBssid, 6, -40, false},
+      {"CafeLAN", strongBssid, 11, -55, false},
+      {"CafeLAN", otherBssid, 6, -50, true},
+  };
+  size_t bestIndex = 99;
+  CHECK(selectBestStaAp(entries, 4, "CafeLAN", false, bestIndex));
+  CHECK(bestIndex == 2);
+  CHECK(entries[bestIndex].rssi == -55);
+  CHECK(entries[bestIndex].bssid[0] == 0xAA);
+
+  bestIndex = 99;
+  CHECK(!selectBestStaAp(entries, 4, "Missing", false, bestIndex));
+  CHECK(!selectBestStaAp(nullptr, 0, "CafeLAN", false, bestIndex));
+  CHECK(selectBestStaAp(entries, 4, "CafeLAN", true, bestIndex));
+  CHECK(bestIndex == 3);
+}
+
 void attemptActiveConfigUpdate() {
   const RuntimeConfig before = runtimeConfig;
   WebCommand update;
@@ -7156,6 +7179,7 @@ const TestCase testCases[] = {
     {"W02", w02_each_runtime_field_is_validated},
     {"W03", w03_runtime_timing_relations_are_transactional},
     {"W04", w04_wifi_credentials_have_strict_bounds},
+    {"W04b", w04b_select_best_sta_ap_prefers_strongest_matching_bssid},
     {"W05", w05_config_is_blocked_while_brewing_early},
     {"W06", w06_config_is_blocked_while_brewing},
     {"W07", w07_config_is_blocked_while_rinsing},

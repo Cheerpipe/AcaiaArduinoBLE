@@ -564,6 +564,7 @@ struct SerialCliNetworkDump {
   char configuredDns1[16] = {};
   char configuredDns2[16] = {};
   char staMac[18] = {};
+  char staBssid[18] = {};
   char apMac[18] = {};
   char ntpActiveServer[NTP_SERVER_HOST_CAPACITY] = {};
 };
@@ -675,6 +676,8 @@ inline void serialCliPrintWifiStatus(const SerialCliNetworkDump &dump) {
   }
   Serial.print("channel=");
   Serial.println(static_cast<unsigned>(dump.channel));
+  Serial.print("staBssid=");
+  Serial.println(dump.staBssid[0] != '\0' ? dump.staBssid : "-");
   Serial.print("staMac=");
   Serial.println(dump.staMac[0] != '\0' ? dump.staMac : "-");
   Serial.print("confirmRemainingMs=");

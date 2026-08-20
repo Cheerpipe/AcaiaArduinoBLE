@@ -11,6 +11,7 @@ const network = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.cpp'), 
 const networkHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.h'), 'utf8');
 const firmware = fs.readFileSync(path.join(sketchDir, 'shotStopper.cpp'), 'utf8');
 const domain = fs.readFileSync(path.join(sketchDir, 'ShotStopperDomain.h'), 'utf8');
+const serialCli = fs.readFileSync(path.join(sketchDir, 'ShotStopperSerialCli.h'), 'utf8');
 const buzzer = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzer.h'), 'utf8');
 const bleLibrary = fs.readFileSync(
   path.resolve(sketchDir, '..', 'libraries', 'AcaiaArduinoBLE', 'AcaiaArduinoBLE.cpp'),
@@ -1681,11 +1682,26 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
     !network.includes('WIFI_AP_STA') ||
     !network.includes('ensureAccessPoint') ||
     !network.includes('beginStationConnect') ||
+    !network.includes('findBestStaCandidate') ||
+    !network.includes('selectBestStaAp') ||
+    !network.includes('selecting strongest AP') ||
+    !network.includes('WIFI_ALL_CHANNEL_SCAN') ||
+    !network.includes('WIFI_CONNECT_AP_BY_SIGNAL') ||
+    !network.includes('setScanMethod') ||
+    !network.includes('setSortMethod') ||
     !network.includes('stopSoftApKeepStation') ||
     !network.includes('wifiScanInProgress') ||
     !network.includes('STA_RECOVERY_ATTEMPT_MS')) {
   throw new Error(
-      'Network must use STA-first boot, SoftAP when unassociated, WIFI_AP_STA while retrying STA, and pause retries during Wi-Fi scan');
+      'Network must use STA-first boot, SoftAP when unassociated, WIFI_AP_STA while retrying STA, pause retries during Wi-Fi scan, and associate to the strongest matching BSSID');
+}
+if (!domain.includes('selectBestStaAp') ||
+    !domain.includes('StaApScanEntry')) {
+  throw new Error('Strongest-AP selection helpers must live in Domain for host tests');
+}
+if (!network.includes('staBssid') ||
+    !serialCli.includes('staBssid=')) {
+  throw new Error('Associated AP BSSID must be exposed on status and WIFI_STATUS');
 }
 if (!network.includes('WiFi.scanNetworks(true, false, false, 120)') ||
     !network.includes('esp_wifi_scan_stop()') ||

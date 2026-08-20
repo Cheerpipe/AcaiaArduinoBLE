@@ -1536,6 +1536,50 @@ inline bool shouldReuseSavedWifiCredentials(const char *ssid,
          strcmp(ssid, savedSsid) == 0 && openNetwork == savedOpen;
 }
 
+// One scanned BSS for strongest-AP selection (same SSID, many BSSIDs).
+struct StaApScanEntry {
+  const char *ssid = nullptr;
+  const uint8_t *bssid = nullptr;
+  uint8_t channel = 0;
+  int32_t rssi = 0;
+  bool open = false;
+};
+
+// Picks the matching SSID/auth entry with the highest RSSI. Does not collapse
+// by SSID — callers pass one entry per BSSID.
+inline bool selectBestStaAp(const StaApScanEntry *entries, size_t count,
+                            const char *targetSsid, bool openNetwork,
+                            size_t &bestIndexOut) {
+  if (entries == nullptr || targetSsid == nullptr || !validWifiSsid(targetSsid)) {
+    return false;
+  }
+  bool found = false;
+  size_t bestIndex = 0;
+  int32_t bestRssi = 0;
+  for (size_t index = 0; index < count; ++index) {
+    const StaApScanEntry &entry = entries[index];
+    if (entry.ssid == nullptr || entry.bssid == nullptr) {
+      continue;
+    }
+    if (strcmp(entry.ssid, targetSsid) != 0) {
+      continue;
+    }
+    if (entry.open != openNetwork) {
+      continue;
+    }
+    if (!found || entry.rssi > bestRssi) {
+      found = true;
+      bestIndex = index;
+      bestRssi = entry.rssi;
+    }
+  }
+  if (!found) {
+    return false;
+  }
+  bestIndexOut = bestIndex;
+  return true;
+}
+
 inline bool validAccessPointPassword(const char *password) {
   return validWifiPassword(password, false);
 }

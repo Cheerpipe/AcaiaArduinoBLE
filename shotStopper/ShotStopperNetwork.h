@@ -88,6 +88,7 @@ struct NetworkStatusSnapshot {
   char configuredDns1[16] = {};
   char configuredDns2[16] = {};
   char staMac[18] = {};
+  char staBssid[18] = {};
   char apMac[18] = {};
   char ntpActiveServer[NTP_SERVER_HOST_CAPACITY] = {};
 };
@@ -255,7 +256,11 @@ class ShotStopperNetwork {
   bool startNetwork();
   void startStation(const PersistedSettings &settings, uint32_t now);
   void applyStationAddressConfig(const PersistedSettings &settings);
+  bool findBestStaCandidate(const char *ssid, bool openNetwork,
+                            uint8_t bssidOut[6], uint8_t &channelOut,
+                            int32_t &rssiOut);
   void beginStationConnect(const PersistedSettings &settings, uint32_t now);
+  void clearStaLinkMetrics();
   bool ensureAccessPoint(uint32_t now, bool force = false);
   void stopSoftApKeepStation();
   void stopSoftApLeaveHttp();

@@ -13,6 +13,10 @@
 #include <esp_sntp.h>
 #include <esp_wifi.h>
 #include <esp_system.h>
+#if __has_include(<esp_coexist.h>)
+#include <esp_coexist.h>
+#define SHOT_STOPPER_NETWORK_HAS_COEX 1
+#endif
 #include <math.h>
 #include <new>
 #include <stdarg.h>
@@ -1293,9 +1297,7 @@ bool ShotStopperNetwork::revertPendingNetwork(uint32_t now,
     status_.apClients = 0;
     status_.staState = StaState::NOT_CONFIGURED;
     status_.staIp[0] = '\0';
-    status_.staLinkMetricsValid = false;
-    status_.staRssi = 0;
-    status_.staSignalQualityPct = 0;
+    clearStaLinkMetrics();
     portEXIT_CRITICAL(&dataMux_);
     lifecycleLog(
         "WiFi STA cleared after prior connect; SoftAP suppressed (AP_START or reboot)");
@@ -1328,6 +1330,92 @@ void ShotStopperNetwork::applyStationAddressConfig(
   }
 }
 
+void ShotStopperNetwork::clearStaLinkMetrics() {
+  status_.staLinkMetricsValid = false;
+  status_.staRssi = 0;
+  status_.staSignalQualityPct = 0;
+  status_.staBssid[0] = '\0';
+}
+
+bool ShotStopperNetwork::findBestStaCandidate(const char *ssid, bool openNetwork,
+                                              uint8_t bssidOut[6],
+                                              uint8_t &channelOut,
+                                              int32_t &rssiOut) {
+  if (ssid == nullptr || bssidOut == nullptr || !validWifiSsid(ssid)) {
+    return false;
+  }
+#if defined(SHOT_STOPPER_NETWORK_HAS_COEX)
+  // BLE central scanning starves Wi-Fi channel dwell; prefer Wi-Fi for this
+  // sync pass so same-SSID BSSIs are more likely to all appear.
+  (void)esp_coex_preference_set(ESP_COEX_PREFER_WIFI);
+#endif
+  // Radio needs a beat after disconnect/mode before a full AP list is useful.
+  delay(150);
+  // SSID-filtered all-channel scan with a longer dwell; channel 0 = all.
+  const int16_t scanned =
+      WiFi.scanNetworks(false, false, false, 300, 0, ssid, nullptr);
+  if (scanned <= 0) {
+    WiFi.scanDelete();
+#if defined(SHOT_STOPPER_NETWORK_HAS_COEX)
+    (void)esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
+#endif
+    return false;
+  }
+
+  constexpr size_t kMaxCandidates = 32;
+  StaApScanEntry entries[kMaxCandidates] = {};
+  char ssidBuffers[kMaxCandidates][WIFI_SSID_CAPACITY] = {};
+  uint8_t bssidBuffers[kMaxCandidates][6] = {};
+  size_t count = 0;
+  for (int index = 0; index < scanned && count < kMaxCandidates; ++index) {
+    const String scannedSsid = WiFi.SSID(index);
+    const size_t length = scannedSsid.length();
+    if (length == 0 || length >= WIFI_SSID_CAPACITY) {
+      continue;
+    }
+    const uint8_t *bssid = WiFi.BSSID(index);
+    if (bssid == nullptr) {
+      continue;
+    }
+    strncpy(ssidBuffers[count], scannedSsid.c_str(), WIFI_SSID_CAPACITY - 1);
+    memcpy(bssidBuffers[count], bssid, 6);
+    entries[count].ssid = ssidBuffers[count];
+    entries[count].bssid = bssidBuffers[count];
+    entries[count].channel = static_cast<uint8_t>(WiFi.channel(index));
+    entries[count].rssi = WiFi.RSSI(index);
+    entries[count].open = WiFi.encryptionType(index) == WIFI_AUTH_OPEN;
+    ++count;
+  }
+  WiFi.scanDelete();
+#if defined(SHOT_STOPPER_NETWORK_HAS_COEX)
+  (void)esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
+#endif
+
+  size_t matchCount = 0;
+  for (size_t index = 0; index < count; ++index) {
+    if (entries[index].ssid != nullptr &&
+        strcmp(entries[index].ssid, ssid) == 0 &&
+        entries[index].open == openNetwork) {
+      ++matchCount;
+    }
+  }
+
+  size_t bestIndex = 0;
+  if (!selectBestStaAp(entries, count, ssid, openNetwork, bestIndex)) {
+    lifecycleLogf("WiFi STA scan saw %u BSS(s), 0 auth-matched for %s",
+                  static_cast<unsigned>(count), ssid);
+    return false;
+  }
+  memcpy(bssidOut, entries[bestIndex].bssid, 6);
+  channelOut = entries[bestIndex].channel;
+  rssiOut = entries[bestIndex].rssi;
+  lifecycleLogf("WiFi STA scan matched %u AP(s) for SSID; best rssi=%ld ch=%u",
+                static_cast<unsigned>(matchCount),
+                static_cast<long>(rssiOut),
+                static_cast<unsigned>(channelOut));
+  return true;
+}
+
 void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
                                              uint32_t now) {
   const bool apActive = snapshot().apActive;
@@ -1337,14 +1425,12 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
     WiFi.mode(WIFI_STA);
   }
   applyStationAddressConfig(settings);
-  staConnectStartedAtMs_ = now;
-  staReconnectAttemptAtMs_ = now;
+  // Drop any UI scan so the strongest-AP sync scan owns the radio.
+  abortWifiScan(now, false);
   portENTER_CRITICAL(&dataMux_);
   status_.staState = StaState::CONNECTING;
   status_.staIp[0] = '\0';
-  status_.staLinkMetricsValid = false;
-  status_.staRssi = 0;
-  status_.staSignalQualityPct = 0;
+  clearStaLinkMetrics();
   portEXIT_CRITICAL(&dataMux_);
   log(DebugCategory::NETWORK, DebugCode::STA_CONNECTING);
   if (apActive) {
@@ -1357,8 +1443,35 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
     lifecycleLog("WiFi STA connecting; AP disabled");
   }
   WiFi.disconnect(false, false);
-  WiFi.begin(settings.staSsid,
-             settings.staOpen ? nullptr : settings.staPassword);
+
+  // Arduino defaults to WIFI_FAST_SCAN (first SSID hit). Force a full scan and
+  // RSSI sort so SSID-only fallback also prefers the strongest AP.
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+
+  uint8_t bssid[6] = {};
+  uint8_t channel = 0;
+  int32_t candidateRssi = 0;
+  const bool haveBest = findBestStaCandidate(
+      settings.staSsid, settings.staOpen, bssid, channel, candidateRssi);
+  // Association timeout starts after the scan so SoftAP bootstrap stays fair.
+  const uint32_t associateAtMs = millis();
+  staConnectStartedAtMs_ = associateAtMs;
+  staReconnectAttemptAtMs_ = associateAtMs;
+  if (haveBest) {
+    char bssidText[18] = {};
+    formatWifiMac(bssid, bssidText, sizeof(bssidText));
+    lifecycleLogf("WiFi STA selecting strongest AP %s ch=%u rssi=%ld",
+                  bssidText, static_cast<unsigned>(channel),
+                  static_cast<long>(candidateRssi));
+    WiFi.begin(settings.staSsid,
+               settings.staOpen ? nullptr : settings.staPassword, channel,
+               bssid);
+  } else {
+    lifecycleLog("WiFi STA no scan match; associating by SSID with RSSI sort");
+    WiFi.begin(settings.staSsid,
+               settings.staOpen ? nullptr : settings.staPassword);
+  }
 }
 
 void ShotStopperNetwork::startStation(const PersistedSettings &settings,
@@ -1376,9 +1489,7 @@ void ShotStopperNetwork::startStation(const PersistedSettings &settings,
   status_.apClients = 0;
   status_.staState = StaState::CONNECTING;
   status_.staIp[0] = '\0';
-  status_.staLinkMetricsValid = false;
-  status_.staRssi = 0;
-  status_.staSignalQualityPct = 0;
+  clearStaLinkMetrics();
   status_.windowRemainingMs = 0;
   status_.confirmRemainingMs = 0;
   portEXIT_CRITICAL(&dataMux_);
@@ -1505,9 +1616,7 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
   if (!staLinkUp &&
       (!keepStation || status_.staState != StaState::CONNECTED)) {
     status_.staIp[0] = '\0';
-    status_.staLinkMetricsValid = false;
-    status_.staRssi = 0;
-    status_.staSignalQualityPct = 0;
+    clearStaLinkMetrics();
   }
   status_.windowRemainingMs = 0;
   portEXIT_CRITICAL(&dataMux_);
@@ -1549,9 +1658,7 @@ void ShotStopperNetwork::stopNetwork() {
   status_.staState = status_.wifiConfigured ? StaState::DISCONNECTED
                                             : StaState::NOT_CONFIGURED;
   status_.staIp[0] = '\0';
-  status_.staLinkMetricsValid = false;
-  status_.staRssi = 0;
-  status_.staSignalQualityPct = 0;
+  clearStaLinkMetrics();
   status_.windowRemainingMs = 0;
   portEXIT_CRITICAL(&dataMux_);
   log(DebugCategory::NETWORK, DebugCode::AP_STOPPED);
@@ -1569,9 +1676,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       status_.staState = StaState::DISCONNECTED;
       status_.networkActive = false;
       status_.staIp[0] = '\0';
-      status_.staLinkMetricsValid = false;
-      status_.staRssi = 0;
-      status_.staSignalQualityPct = 0;
+      clearStaLinkMetrics();
       portEXIT_CRITICAL(&dataMux_);
       log(DebugCategory::NETWORK, DebugCode::STA_FAILED,
           static_cast<int32_t>(WiFi.status()));
@@ -2380,9 +2485,7 @@ bool ShotStopperNetwork::handleCliWifiAction(const WebCommand &command,
       status_.staState = status_.wifiConfigured ? StaState::DISCONNECTED
                                                 : StaState::NOT_CONFIGURED;
       status_.staIp[0] = '\0';
-      status_.staLinkMetricsValid = false;
-      status_.staRssi = 0;
-      status_.staSignalQualityPct = 0;
+      clearStaLinkMetrics();
       portEXIT_CRITICAL(&dataMux_);
       actionLog("WIFI_DISCONNECT STA down; reconnect held");
       printActionSnapshot("WIFI_DISCONNECT", true);
@@ -2402,7 +2505,7 @@ bool ShotStopperNetwork::handleCliWifiAction(const WebCommand &command,
       portENTER_CRITICAL(&dataMux_);
       status_.staState = StaState::DISCONNECTED;
       status_.staIp[0] = '\0';
-      status_.staLinkMetricsValid = false;
+      clearStaLinkMetrics();
       portEXIT_CRITICAL(&dataMux_);
       beginStationConnect(settings, now);
       actionLog("WIFI_RESTART reconnecting saved STA");
@@ -2596,10 +2699,17 @@ void ShotStopperNetwork::refreshExtendedStatus(uint32_t now) {
   const uint8_t wifiMode = static_cast<uint8_t>(WiFi.getMode());
   const uint8_t channel = static_cast<uint8_t>(WiFi.channel());
   char staMac[18] = {};
+  char staBssid[18] = {};
   char apMac[18] = {};
   uint8_t mac[6] = {};
   if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
     formatWifiMac(mac, staMac, sizeof(staMac));
+  }
+  if (staConnected) {
+    const uint8_t *bssid = WiFi.BSSID();
+    if (bssid != nullptr) {
+      formatWifiMac(bssid, staBssid, sizeof(staBssid));
+    }
   }
   if (esp_wifi_get_mac(WIFI_IF_AP, mac) == ESP_OK) {
     formatWifiMac(mac, apMac, sizeof(apMac));
@@ -2628,8 +2738,10 @@ void ShotStopperNetwork::refreshExtendedStatus(uint32_t now) {
           ? static_cast<uint32_t>(now - staReconnectAttemptAtMs_)
           : 0;
   memset(status_.staMac, 0, sizeof(status_.staMac));
+  memset(status_.staBssid, 0, sizeof(status_.staBssid));
   memset(status_.apMac, 0, sizeof(status_.apMac));
   strncpy(status_.staMac, staMac, sizeof(status_.staMac) - 1);
+  strncpy(status_.staBssid, staBssid, sizeof(status_.staBssid) - 1);
   strncpy(status_.apMac, apMac, sizeof(status_.apMac) - 1);
   memset(status_.ntpActiveServer, 0, sizeof(status_.ntpActiveServer));
   strncpy(status_.ntpActiveServer, timeStatus.activeServer,
