@@ -43,12 +43,23 @@ struct NetworkWorkBuf {
   ControlStatusSnapshot control;
   // Must match ShotStopperNetwork::REQUEST_BODY_CAPACITY (asserted in begin()).
   char requestBody[2048];
+  WifiScanSnapshot wifiScan;
 };
 
-// HTTP-only work area in PSRAM. Do not pass these buffers to Preferences /
-// esp_ota_write: flash ops disable the cache and PSRAM becomes inaccessible.
+// HTTP / Wi-Fi UI work area in PSRAM (WebUI and Wi-Fi are non-critical).
+// Do not pass these buffers to Preferences / esp_ota_write: flash ops disable
+// the cache and PSRAM becomes inaccessible.
 SHOT_STOPPER_PSRAM_BSS
 static NetworkWorkBuf g_networkWorkBuf;
+
+// Wi-Fi scan fetch + published snapshot. Network task / httpd only; not BLE.
+constexpr uint16_t kWifiScanFetchMax = 32;
+SHOT_STOPPER_PSRAM_BSS
+static wifi_ap_record_t g_wifiApRecords[kWifiScanFetchMax];
+SHOT_STOPPER_PSRAM_BSS
+static WifiScanSnapshot g_wifiScan;
+SHOT_STOPPER_PSRAM_BSS
+static WifiScanSnapshot g_wifiScanWorking;
 
 namespace {
 
@@ -699,6 +710,8 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
     return false;
   }
   memset(&g_networkWorkBuf, 0, sizeof(g_networkWorkBuf));
+  memset(&g_wifiScan, 0, sizeof(g_wifiScan));
+  memset(&g_wifiScanWorking, 0, sizeof(g_wifiScanWorking));
   static_assert(REQUEST_BODY_CAPACITY == sizeof(g_networkWorkBuf.requestBody),
                 "NetworkWorkBuf::requestBody must match REQUEST_BODY_CAPACITY");
   workBuf_ = &g_networkWorkBuf;
@@ -1360,8 +1373,8 @@ void ShotStopperNetwork::stopSoftApLeaveHttp() {
 bool ShotStopperNetwork::wifiScanInProgress() {
   bool busy = false;
   portENTER_CRITICAL(&dataMux_);
-  busy = scanRequested_ || scan_.state == WifiScanState::QUEUED ||
-         scan_.state == WifiScanState::RUNNING;
+  busy = scanRequested_ || g_wifiScan.state == WifiScanState::QUEUED ||
+         g_wifiScan.state == WifiScanState::RUNNING;
   portEXIT_CRITICAL(&dataMux_);
   return busy;
 }
@@ -1370,14 +1383,14 @@ void ShotStopperNetwork::abortWifiScan(uint32_t now, bool logTimeout) {
   bool wasRunning = false;
   bool wasQueuedOrRequested = false;
   portENTER_CRITICAL(&dataMux_);
-  wasRunning = scan_.state == WifiScanState::RUNNING;
+  wasRunning = g_wifiScan.state == WifiScanState::RUNNING;
   wasQueuedOrRequested =
-      scanRequested_ || scan_.state == WifiScanState::QUEUED || wasRunning;
+      scanRequested_ || g_wifiScan.state == WifiScanState::QUEUED || wasRunning;
   if (wasQueuedOrRequested) {
     scanRequested_ = false;
-    scan_.state = logTimeout ? WifiScanState::FAILED : WifiScanState::CANCELED;
-    scan_.updatedAtMs = now;
-    scan_.count = 0;
+    g_wifiScan.state = logTimeout ? WifiScanState::FAILED : WifiScanState::CANCELED;
+    g_wifiScan.updatedAtMs = now;
+    g_wifiScan.count = 0;
   }
   portEXIT_CRITICAL(&dataMux_);
   if (wasRunning) {
@@ -1482,7 +1495,7 @@ void ShotStopperNetwork::stopNetwork() {
   WiFi.mode(WIFI_OFF);
   portENTER_CRITICAL(&dataMux_);
   scanRequested_ = false;
-  scan_ = WifiScanSnapshot{};
+  g_wifiScan = WifiScanSnapshot{};
   status_.networkActive = false;
   status_.apActive = false;
   status_.apClients = 0;
@@ -1762,7 +1775,7 @@ void ShotStopperNetwork::serviceWifiScan(uint32_t now) {
   WifiScanState state;
   portENTER_CRITICAL(&dataMux_);
   requested = scanRequested_;
-  state = scan_.state;
+  state = g_wifiScan.state;
   portEXIT_CRITICAL(&dataMux_);
 
   if (!safe) {
@@ -1780,8 +1793,8 @@ void ShotStopperNetwork::serviceWifiScan(uint32_t now) {
     portENTER_CRITICAL(&dataMux_);
     scanRequested_ = false;
     if (result == WIFI_SCAN_RUNNING) {
-      scan_.state = WifiScanState::RUNNING;
-      scan_.updatedAtMs = now;
+      g_wifiScan.state = WifiScanState::RUNNING;
+      g_wifiScan.updatedAtMs = now;
     }
     portEXIT_CRITICAL(&dataMux_);
     if (result == WIFI_SCAN_RUNNING) {
@@ -1797,7 +1810,7 @@ void ShotStopperNetwork::serviceWifiScan(uint32_t now) {
   }
   uint32_t scanStartedAtMs = 0;
   portENTER_CRITICAL(&dataMux_);
-  scanStartedAtMs = scan_.updatedAtMs;
+  scanStartedAtMs = g_wifiScan.updatedAtMs;
   portEXIT_CRITICAL(&dataMux_);
   if (static_cast<uint32_t>(now - scanStartedAtMs) >= WIFI_SCAN_TIMEOUT_MS) {
     abortWifiScan(now, true);
@@ -1811,13 +1824,14 @@ void ShotStopperNetwork::serviceWifiScan(uint32_t now) {
 }
 
 void ShotStopperNetwork::finishWifiScan(int16_t resultCount, uint32_t now) {
-  WifiScanSnapshot completed;
+  WifiScanSnapshot &completed = g_wifiScanWorking;
+  completed = WifiScanSnapshot{};
   completed.updatedAtMs = now;
   if (resultCount < 0) {
     completed.state = WifiScanState::FAILED;
     WiFi.scanDelete();
     portENTER_CRITICAL(&dataMux_);
-    scan_ = completed;
+    g_wifiScan = completed;
     portEXIT_CRITICAL(&dataMux_);
     log(DebugCategory::NETWORK, DebugCode::WIFI_SCAN_ERROR, resultCount);
     if (scanMaintenanceLeaseId_ != 0) {
@@ -1833,24 +1847,22 @@ void ShotStopperNetwork::finishWifiScan(int16_t resultCount, uint32_t now) {
   }
 
   completed.state = WifiScanState::READY;
-  constexpr uint16_t kWifiScanFetchMax = 32;
-  wifi_ap_record_t apRecords[kWifiScanFetchMax];
   uint16_t apCount = static_cast<uint16_t>(resultCount);
   if (apCount > kWifiScanFetchMax) {
     apCount = kWifiScanFetchMax;
   }
-  if (esp_wifi_scan_get_ap_records(&apCount, apRecords) != ESP_OK) {
+  if (esp_wifi_scan_get_ap_records(&apCount, g_wifiApRecords) != ESP_OK) {
     completed.state = WifiScanState::FAILED;
     WiFi.scanDelete();
     portENTER_CRITICAL(&dataMux_);
-    scan_ = completed;
+    g_wifiScan = completed;
     portEXIT_CRITICAL(&dataMux_);
     log(DebugCategory::NETWORK, DebugCode::WIFI_SCAN_ERROR, -2);
     return;
   }
   for (uint16_t index = 0;
        index < apCount && completed.count < MAX_WIFI_SCAN_RESULTS; ++index) {
-    const wifi_ap_record_t &ap = apRecords[index];
+    const wifi_ap_record_t &ap = g_wifiApRecords[index];
     const size_t length =
         strnlen(reinterpret_cast<const char *>(ap.ssid), sizeof(ap.ssid));
     if (length == 0 || length >= WIFI_SSID_CAPACITY) {
@@ -1892,7 +1904,7 @@ void ShotStopperNetwork::finishWifiScan(int16_t resultCount, uint32_t now) {
   }
   WiFi.scanDelete();
   portENTER_CRITICAL(&dataMux_);
-  scan_ = completed;
+  g_wifiScan = completed;
   portEXIT_CRITICAL(&dataMux_);
   log(DebugCategory::NETWORK, DebugCode::WIFI_SCAN_COMPLETE,
       completed.count, resultCount);
@@ -2079,9 +2091,9 @@ bool ShotStopperNetwork::processAcceptedCommand(const WebCommand &command) {
   }
   if (command.type == WebCommandType::START_WIFI_SCAN) {
     portENTER_CRITICAL(&dataMux_);
-    scan_ = WifiScanSnapshot{};
-    scan_.state = WifiScanState::QUEUED;
-    scan_.updatedAtMs = millis();
+    g_wifiScan = WifiScanSnapshot{};
+    g_wifiScan.state = WifiScanState::QUEUED;
+    g_wifiScan.updatedAtMs = millis();
     scanRequested_ = true;
     scanMaintenanceLeaseId_ = command.maintenanceLeaseId;
     scanRequestId_ = command.requestId;
@@ -2556,7 +2568,7 @@ void ShotStopperNetwork::refreshExtendedStatus(uint32_t now) {
   status_.apStartHeld = apStartHeld_;
   status_.httpStartHeld = httpStartHeld_;
   status_.apPasswordFactory = factoryPassword;
-  status_.scanState = static_cast<uint8_t>(scan_.state);
+  status_.scanState = static_cast<uint8_t>(g_wifiScan.state);
   status_.ntpState = static_cast<uint8_t>(timeStatus.state);
   status_.ntpMayArm = ntpArm;
   status_.staConnectAgeMs =
@@ -5045,7 +5057,7 @@ esp_err_t ShotStopperNetwork::wifiScanStartHandler(httpd_req_t *request) {
   }
   
   portENTER_CRITICAL(&self.dataMux_);
-  self.scan_.state = WifiScanState::QUEUED;
+  g_wifiScan.state = WifiScanState::QUEUED;
   portEXIT_CRITICAL(&self.dataMux_);
   
   return self.sendAccepted(request, command.requestId,
@@ -5054,9 +5066,12 @@ esp_err_t ShotStopperNetwork::wifiScanStartHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::wifiScanStatusHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  WifiScanSnapshot scan;
+  if (!self.lockWorkBuf()) {
+    return self.workBufBusy(request);
+  }
+  WifiScanSnapshot &scan = self.workBuf_->wifiScan;
   portENTER_CRITICAL(&self.dataMux_);
-  scan = self.scan_;
+  scan = g_wifiScan;
   portEXIT_CRITICAL(&self.dataMux_);
 
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
@@ -5070,6 +5085,7 @@ esp_err_t ShotStopperNetwork::wifiScanStatusHandler(httpd_req_t *request) {
            wifiScanStateName(scan.state),
            static_cast<unsigned long>(scan.updatedAtMs));
   if (httpd_resp_send_chunk(request, prefix, HTTPD_RESP_USE_STRLEN) != ESP_OK) {
+    self.unlockWorkBuf();
     return ESP_FAIL;
   }
   for (size_t index = 0; index < scan.count; ++index) {
@@ -5077,6 +5093,7 @@ esp_err_t ShotStopperNetwork::wifiScanStatusHandler(httpd_req_t *request) {
                                                   ",{\"ssid\":",
                               HTTPD_RESP_USE_STRLEN) != ESP_OK ||
         sendJsonStringChunk(request, scan.networks[index].ssid) != ESP_OK) {
+      self.unlockWorkBuf();
       return ESP_FAIL;
     }
     char suffix[96] = {};
@@ -5087,13 +5104,17 @@ esp_err_t ShotStopperNetwork::wifiScanStatusHandler(httpd_req_t *request) {
              scan.networks[index].open ? "true" : "false");
     if (httpd_resp_send_chunk(request, suffix, HTTPD_RESP_USE_STRLEN) !=
         ESP_OK) {
+      self.unlockWorkBuf();
       return ESP_FAIL;
     }
   }
   if (httpd_resp_send_chunk(request, "]}", 2) != ESP_OK) {
+    self.unlockWorkBuf();
     return ESP_FAIL;
   }
-  return httpd_resp_send_chunk(request, nullptr, 0);
+  const esp_err_t sent = httpd_resp_send_chunk(request, nullptr, 0);
+  self.unlockWorkBuf();
+  return sent;
 }
 
 esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
@@ -5374,9 +5395,13 @@ void ShotStopperNetwork::buildOtaJson(char *buffer, size_t capacity,
 esp_err_t ShotStopperNetwork::sendOtaSnapshot(
     httpd_req_t *request, const char *httpStatus,
     const ControlStatusSnapshot &control) {
-  char body[OTA_STATUS_JSON_CAPACITY] = {};
-  buildOtaJson(body, sizeof(body), control);
-  return sendJson(request, httpStatus, body);
+  if (!lockWorkBuf()) {
+    return workBufBusy(request);
+  }
+  buildOtaJson(workBuf_->otaJson, sizeof(workBuf_->otaJson), control);
+  const esp_err_t sent = sendJson(request, httpStatus, workBuf_->otaJson);
+  unlockWorkBuf();
+  return sent;
 }
 
 int ShotStopperNetwork::otaReadChunk(void *context, uint8_t *buffer,

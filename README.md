@@ -910,8 +910,8 @@ PSRAM bus (QSPI vs OPI) match the module. The scripts have no default board;
 `--arch` is asked once and then remembered. The
 FQBN enables PSRAM at boot (`BOARD_HAS_PSRAM`); paddle, relay, BLE, safety,
 NVS/OTA scratch buffers, and FreeRTOS stacks that touch flash (network manager,
-httpd/OTA) stay on internal SRAM. Web UI JSON work buffers and the HTTP parse
-arena live in PSRAM and must not run on the control path.
+httpd/OTA) stay on internal SRAM. Web UI and Wi-Fi (AP/STA) work buffers —
+JSON arena, NetworkWorkBuf, Wi-Fi scan records/snapshots — live in PSRAM.
 Before energizing CN9, verify every pin for the specific board and the active
 polarity of the relay module.
 

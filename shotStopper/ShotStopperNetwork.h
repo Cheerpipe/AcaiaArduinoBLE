@@ -196,7 +196,6 @@ class ShotStopperNetwork {
   char activeWebUiClientId_[WEB_UI_CLIENT_ID_CAPACITY] = {};
   bool webUiOverrideActive_ = false;
   NetworkStatusSnapshot status_ = {};
-  WifiScanSnapshot scan_ = {};
   bool startupComplete_ = false;
   // Latched for process lifetime after first STA CONNECTED. SoftAP auto-raise
   // is boot/bootstrap only; never cleared by startStation / pending revert.
