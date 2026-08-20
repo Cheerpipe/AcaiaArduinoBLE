@@ -88,8 +88,8 @@ constexpr size_t SCALE_EVENT_QUEUE_LENGTH = 32;
 constexpr size_t BLE_COMPANION_REQUEST_QUEUE_LENGTH = 8;
 constexpr size_t BLE_COMPANION_RESULT_QUEUE_LENGTH = 8;
 // Measured high-water headroom with the full Companion profile is over 6 KiB.
-// Keep roughly 3 KiB spare while returning scarce internal RAM to LwIP/httpd.
-constexpr uint32_t SCALE_WORKER_TASK_STACK_SIZE = 5120;
+// Keep spare above that while returning scarce internal RAM to LwIP/httpd.
+constexpr uint32_t SCALE_WORKER_TASK_STACK_SIZE = 6656;
 constexpr uint32_t SETTINGS_PERSIST_TASK_STACK_SIZE = 6144;
 constexpr uint32_t SCALE_STOP_RETRY_INTERVAL_MS = 250;
 constexpr uint32_t SCALE_STOP_RETRY_WINDOW_MS = 5000;
@@ -1199,14 +1199,23 @@ bool scaleAutomationUnavailableForSession() {
              session.scaleDisconnectSequenceAtStart;
 }
 
+static uint32_t scaleCommandDropCount = 0;
+
 bool enqueueScaleCommand(const ScaleCommand &command) {
   if (scaleCommandQueue == nullptr) {
     return false;
   }
 
-  if (xQueueSend(scaleCommandQueue, &command, 0) == pdTRUE) {
+  BaseType_t queued = pdFALSE;
+  if (command.type == ScaleCommandType::STOP_TIMER) {
+    queued = xQueueSendToFront(scaleCommandQueue, &command, 0);
+  } else {
+    queued = xQueueSend(scaleCommandQueue, &command, 0);
+  }
+  if (queued == pdTRUE) {
     return true;
   }
+  ++scaleCommandDropCount;
   serialTrace(LogLevel::WARNING, "Scale command queue full");
   return false;
 }
@@ -1530,6 +1539,11 @@ void applyBrewRfPreference(bool preferBluetooth) {
                                                 : ESP_COEX_PREFER_BALANCE);
 #else
   (void)preferBluetooth;
+#endif
+#if !defined(SHOT_STOPPER_HOST_TEST)
+  if (bleCompanion != nullptr) {
+    bleCompanion->setAdvertisingPaused(preferBluetooth);
+  }
 #endif
 }
 
@@ -3071,6 +3085,12 @@ void updateWorkerLinkState() {
                                         : ScaleLinkState::DISCONNECTED);
 }
 
+void yieldBetweenScaleAttOps() {
+  BLE.poll();
+  markScaleWorkerProgress();
+  (void)feedCurrentTaskWatchdog();
+}
+
 void executeScaleStartCommand(const ScaleCommand &command) {
   ScaleEvent event;
   event.type = ScaleEventType::TIMER_START_RESULT;
@@ -3083,16 +3103,20 @@ void executeScaleStartCommand(const ScaleCommand &command) {
       event.commandAttempted = true;
       event.usedCombinedTareStart = true;
       event.writeSucceeded = scale.tareStartTimer();
+      yieldBetweenScaleAttOps();
     }
     if (!event.writeSucceeded) {
       event.usedCombinedTareStart = false;
       const bool resetSucceeded = scale.resetTimer();
+      yieldBetweenScaleAttOps();
       if (resetSucceeded) {
         event.commandAttempted = true;
         event.writeSucceeded = scale.startTimer();
+        yieldBetweenScaleAttOps();
       }
       if (event.writeSucceeded && command.autoTare) {
         scale.tare();
+        yieldBetweenScaleAttOps();
       }
     }
   }
@@ -3112,6 +3136,7 @@ void executeScaleStopCommand(const ScaleCommand &command) {
     // STOP on the existing connection is harmless and covers that case.
     event.commandAttempted = true;
     event.writeSucceeded = scale.stopTimer();
+    yieldBetweenScaleAttOps();
   }
 
   updateWorkerLinkState();
@@ -3127,6 +3152,7 @@ void executeScaleTareCommand(const ScaleCommand &command) {
   if (scale.isConnected()) {
     event.commandAttempted = true;
     event.writeSucceeded = scale.tare();
+    yieldBetweenScaleAttOps();
   }
 
   updateWorkerLinkState();
@@ -3146,6 +3172,7 @@ void executeScaleBeepCommand(DebugCode successCode, DebugCode failureCode,
     return;
   }
   const bool succeeded = scale.beepWithoutStateChange();
+  yieldBetweenScaleAttOps();
   addDebugEvent(DebugCategory::SCALE, succeeded ? successCode : failureCode);
   updateWorkerLinkState();
 }
@@ -3232,6 +3259,7 @@ void executeScaleDebugCommand(BookooDebugAction action, uint8_t beepLevel) {
       succeeded = scale.setBeepLevel(beepLevel);
       break;
   }
+  yieldBetweenScaleAttOps();
   addDebugEvent(DebugCategory::SCALE,
                 succeeded ? DebugCode::SCALE_DEBUG_OK
                           : DebugCode::SCALE_DEBUG_FAILED);
@@ -3978,11 +4006,12 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
                                  uint32_t &lastConnectLogMs,
                                  uint32_t &connectRetryMs,
                                  bool &connectAttemptSeriesActive,
-                                 uint32_t &scanSessionAtMs) {
+                                 uint32_t &scanSessionAtMs,
+                                 uint32_t &scanLastAdvertAtMs) {
   // Library drop can happen on a beep/command path that never refreshed the
   // link snapshot. Clear CONNECTED before idle scan work so the UI cannot sit
   // on "BLE connected" for the whole (indefinite) discovery session.
-  if (!scale.isConnected()) {
+  if (!scale.isConnected() && !scale.isConnecting()) {
     updateWorkerLinkState();
     setScaleLinkState(ScaleLinkState::DISCONNECTED);
   }
@@ -3991,6 +4020,26 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
   }
 
   const ScaleMacCacheMode cacheMode = currentScaleMacCacheMode();
+
+  if (scale.isConnecting()) {
+    const bool connected = scale.pollScan();
+    if (connected) {
+      connectAttemptSeriesActive = false;
+      connectRetryMs = SCALE_CONNECT_RETRY_MS;
+      const char *address = scale.address();
+      const char *name = scale.localName();
+      notePreferredScale(address, name);
+      serialTracef(LogLevel::INFO, "Scale connected: %s @ %s (%s)",
+                   name != nullptr && name[0] != '\0' ? name : "(unknown)",
+                   address != nullptr && address[0] != '\0' ? address
+                                                             : "(no address)",
+                   scale.connectedProtocolName());
+      updateWorkerLinkState();
+      setScaleLinkState(ScaleLinkState::CONNECTED);
+      applyBookooConnectBeepPolicy();
+    }
+    return;
+  }
 
   if (scale.isScanning()) {
     const bool connected = scale.pollScan();
@@ -4001,6 +4050,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
                                     sizeof(seenName))) {
       noteScaleHistory(seenMac, seenName);
       sawCompatibleAd = true;
+      scanLastAdvertAtMs = millis();
     }
     if (connected) {
       connectAttemptSeriesActive = false;
@@ -4018,6 +4068,9 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       applyBookooConnectBeepPolicy();
       return;
     }
+    if (scale.isConnecting()) {
+      return;
+    }
     if (scale.isScanning()) {
       if (elapsedMs(lastScanCycleMs) < SCALE_DISCOVERY_TICK_MS) {
         return;
@@ -4031,19 +4084,24 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
         lastConnectLogMs = lastScanCycleMs;
         connectAttemptSeriesActive = true;
         if (directed) {
-          serialTrace(LogLevel::WARNING,
+          serialTrace(LogLevel::DEBUG,
                       "Preferred scale attempt: no advertisement");
         } else {
-          serialTrace(LogLevel::WARNING,
+          serialTrace(LogLevel::DEBUG,
                       "Scale name scan: no advertisement");
         }
       } else if (logAttempt && directed && sawCompatibleAd) {
         lastConnectLogMs = lastScanCycleMs;
         connectAttemptSeriesActive = true;
-        serialTrace(LogLevel::WARNING,
+        serialTrace(LogLevel::DEBUG,
                     "Preferred scale attempt: other scale seen, waiting");
       }
-      if (elapsedMs(scanSessionAtMs) >= SCALE_SCAN_HCI_RESTART_MS) {
+      // HCI/GAP force-restart only when the idle scan has gone quiet.
+      const bool noAdsThisSession =
+          scanLastAdvertAtMs == 0 ||
+          elapsedMs(scanLastAdvertAtMs) >= SCALE_SCAN_HCI_RESTART_MS;
+      if (elapsedMs(scanSessionAtMs) >= SCALE_SCAN_HCI_RESTART_MS &&
+          noAdsThisSession) {
         char preferredMac[PREFERRED_SCALE_MAC_CAPACITY];
         copyPreferredScaleMac(preferredMac, sizeof(preferredMac));
         const bool hasMac =
@@ -4052,6 +4110,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
             shouldUseDirectedScaleScan(cacheMode, hasMac);
         if (scale.startScan(useDirected ? preferredMac : nullptr, true)) {
           scanSessionAtMs = lastScanCycleMs;
+          scanLastAdvertAtMs = 0;
         }
       }
       return;
@@ -4068,7 +4127,10 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
                    scale.lastDisconnectReasonName());
     }
 
-    if (reason == AcaiaDisconnectReason::SCAN_START_FAILED) {
+    if (reason == AcaiaDisconnectReason::SCAN_START_FAILED ||
+        reason == AcaiaDisconnectReason::PACKET_TIMEOUT ||
+        reason == AcaiaDisconnectReason::FIRST_PACKET_TIMEOUT ||
+        reason == AcaiaDisconnectReason::CONNECT_FAILED) {
       connectRetryMs = nextScaleConnectRetryMs(connectRetryMs);
     } else {
       connectRetryMs = SCALE_CONNECT_RETRY_MS;
@@ -4116,6 +4178,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
   }
   if (scale.startScan(useDirected ? preferredMac : nullptr)) {
     scanSessionAtMs = lastScanCycleMs;
+    scanLastAdvertAtMs = 0;
     return;
   }
 
@@ -4167,6 +4230,7 @@ void scaleWorkerTask(void *) {
   uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
   uint32_t telemetryAtMs = 0;
 
   if (!subscribeCurrentTaskToWatchdog()) {
@@ -4275,7 +4339,7 @@ void scaleWorkerTask(void *) {
           serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                                       connectRetryMs,
                                       connectAttemptSeriesActive,
-                                      scanSessionAtMs);
+                                      scanSessionAtMs, scanLastAdvertAtMs);
         }
       }
     }
@@ -6855,13 +6919,27 @@ void waitForRecoveryBuzzer() {
   }
 }
 
+void completeBootRecovery(RecoveryOperation operation);
+
 void holdFailedBootRecovery() {
   (void)localBuzzer.request(BuzzerPattern::RECOVERY_ERROR);
   waitForRecoveryBuzzer();
+  RecoveryGestureRecognizer gesture;
+  gesture.begin(millis());
   for (;;) {
-    // Persistence did not reach a verified state. Do not expose a partially
-    // reset controller and never permit CN9 to close. A later power cycle
-    // retries the durable intent before RF startup.
+    // Persistence did not reach a verified state. Keep CN9 open. A power cycle
+    // retries the durable intent; the same paddle recovery gesture can also
+    // re-enter NETWORK_ACCESS_RESET / FACTORY_RESET without cycling power.
+    updatePaddleInput();
+    const RecoveryGestureResult result = gesture.update(
+        millis(), paddleOn, paddleTurnedOn, paddleTurnedOff);
+    if (result == RecoveryGestureResult::NETWORK_ACCESS_RESET) {
+      completeBootRecovery(RecoveryOperation::NETWORK_ACCESS_RESET);
+    } else if (result == RecoveryGestureResult::FACTORY_RESET) {
+      completeBootRecovery(RecoveryOperation::FACTORY_RESET);
+    } else if (result == RecoveryGestureResult::TIMED_OUT) {
+      gesture.begin(millis());
+    }
     serviceBootRecoverySafety();
     vTaskDelay(pdMS_TO_TICKS(10));
   }

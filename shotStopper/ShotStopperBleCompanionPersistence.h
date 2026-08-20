@@ -90,7 +90,9 @@ inline bool loadBleCompanionSettings(
 
 inline bool saveBleCompanionSettings(
     BleCompanionPersistedSettings &settings) {
-  lockSettingsNvs();
+  if (!lockSettingsNvs()) {
+    return false;
+  }
   BleCompanionPersistedSettings current;
   if (loadBleCompanionSettings(current)) {
     settings.revision = current.revision;

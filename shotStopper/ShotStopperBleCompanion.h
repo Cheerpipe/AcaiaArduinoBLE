@@ -256,6 +256,24 @@ class ShotStopperBleCompanion {
 
   const BleCompanionStatusSnapshot &status() const { return status_; }
 
+  void setAdvertisingPaused(bool paused) {
+    if (!status_.stackReady) {
+      return;
+    }
+    if (paused) {
+      if (status_.advertising) {
+        BLE.stopAdvertise();
+        status_.advertising = false;
+      }
+      advertisingPaused_ = true;
+      return;
+    }
+    advertisingPaused_ = false;
+    if (!status_.advertising) {
+      status_.advertising = BLE.advertise() != 0;
+    }
+  }
+
  private:
   bool enqueue(BleCompanionRequest &request) {
     const size_t pendingIndex = static_cast<size_t>(request.type);
@@ -487,6 +505,7 @@ class ShotStopperBleCompanion {
   BLEByteCharacteristic enableAp_;
   EnqueueRequest enqueueRequest_ = nullptr;
   BleCompanionStatusSnapshot status_ = {};
+  bool advertisingPaused_ = false;
   uint32_t nextSequence_ = 1;
   char wifiStageSsid_[WIFI_SSID_CAPACITY] = {};
   bool wifiStageValid_ = false;

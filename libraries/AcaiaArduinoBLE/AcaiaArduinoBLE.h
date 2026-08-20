@@ -11,7 +11,7 @@
 #ifndef AcaiaArduinoBLE_h
 #define AcaiaArduinoBLE_h
 
-#define LIBRARY_VERSION                 "3.7.0"
+#define LIBRARY_VERSION                 "3.8.0"
 #define WRITE_CHAR_OLD_VERSION          "2a80"
 #define READ_CHAR_OLD_VERSION           "2a80"
 #define WRITE_CHAR_NEW_VERSION          "49535343-8841-43f4-a8d4-ecbe34729bb3"
@@ -25,8 +25,11 @@
 #define HEARTBEAT_PERIOD_MS              2750UL
 #define FIRST_PACKET_TIMEOUT_MS          5000UL
 #define MAX_PACKET_PERIOD_MS             5000UL
+// Bookoo/GENERIC has no heartbeat; allow slightly longer silence under Wi-Fi coex.
+#define GENERIC_MAX_PACKET_PERIOD_MS     8000UL
 #define SCALE_SCAN_TIMEOUT_MS            3000UL
 #define BLE_OPERATION_TIMEOUT_MS          1000UL
+#define SCALE_CONNECT_BUDGET_MS         10000UL
 #define MAX_SUPPORTED_WEIGHT_GRAMS      10000.0f
 #define MAX_CONSECUTIVE_REJECTED_PACKETS 8U
 #define ACAIA_MAC_CAPACITY               18U
@@ -85,12 +88,14 @@ class AcaiaArduinoBLE {
         // connect when the address matches (other compatible scales are
         // reported via takeSeenAdvertisement without connecting).
         bool startScan(const char *mac = nullptr, bool forceRestart = false);
-        // Poll an active scan. Performs GATT connect only when a scale
-        // advertisement matches the connect policy. Idle scans stay enabled
-        // until a connect, filter change, or init()'s SCALE_SCAN_TIMEOUT_MS.
-        // Returns true if connected after this call.
+        // Poll an active scan or advance an in-progress GATT connect by one
+        // ATT step. Idle scans stay enabled until a match, filter change, or
+        // init()'s SCALE_SCAN_TIMEOUT_MS. Returns true only when fully
+        // connected after this call.
         bool pollScan();
         bool isScanning() const;
+        // True while GATT connect/discover/subscribe/init writes are in progress.
+        bool isConnecting() const;
 
         void disconnect();
 
@@ -164,9 +169,15 @@ class AcaiaArduinoBLE {
         bool validWeight(float weight) const;
         bool supportedPacketLength(int length) const;
         bool writeCommand(const byte command[], int length);
-        bool completeConnection(BLEDevice& peripheral);
+        bool beginConnection(BLEDevice& peripheral);
+        bool advanceConnection();
+        bool finishConnectionSuccess();
+        bool detectAndConfigureScale();
+        bool runInitWrites();
+        void clearConnectingState();
         void logVersionOnce();
         void stopIdleScan(AcaiaDisconnectReason reason);
+        uint32_t maxPacketPeriodMs() const;
 
         // These helpers use destruction + copy construction intentionally.
         // ArduinoBLE's BLECharacteristic copy constructor retains ownership;
@@ -206,9 +217,20 @@ class AcaiaArduinoBLE {
         uint32_t            _scanStartedAt;
         bool                _scanning;
         bool                _connected;
+        bool                _connecting;
         bool                _loggedVersion;
         scale_type          _type;
         bool                _debug;
+        enum class ConnectStep : uint8_t {
+            Idle = 0,
+            Connect,
+            Discover,
+            Configure,
+            Subscribe,
+            InitWrites
+        };
+        ConnectStep         _connectStep;
+        uint32_t            _connectStartedAt;
         char                _scanMac[ACAIA_MAC_CAPACITY];
         char                _address[ACAIA_MAC_CAPACITY];
         char                _localName[ACAIA_NAME_CAPACITY];

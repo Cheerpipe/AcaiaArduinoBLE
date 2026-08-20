@@ -309,7 +309,7 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
 
 #if !defined(SHOT_STOPPER_HOST_TEST) &&                                        \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
-inline void lockSettingsNvs() { lockFlashIo(); }
+inline bool lockSettingsNvs() { return lockFlashIo(); }
 
 inline void unlockSettingsNvs() { unlockFlashIo(); }
 
@@ -317,7 +317,7 @@ inline void yieldSettingsNvs() { vTaskDelay(pdMS_TO_TICKS(1)); }
 
 inline void feedSettingsNvsWatchdog() { (void)esp_task_wdt_reset(); }
 #else
-inline void lockSettingsNvs() {}
+inline bool lockSettingsNvs() { return true; }
 inline void unlockSettingsNvs() {}
 inline void yieldSettingsNvs() {}
 inline void feedSettingsNvsWatchdog() {}
@@ -326,7 +326,9 @@ inline void feedSettingsNvsWatchdog() {}
 inline bool savePersistedSettings(PersistedSettings &settings);
 
 inline bool loadPersistedSettings(PersistedSettings &settings) {
-  lockSettingsNvs();
+  if (!lockSettingsNvs()) {
+    return false;
+  }
   Preferences preferences;
   if (!preferences.begin(SETTINGS_NAMESPACE, true)) {
     unlockSettingsNvs();
@@ -380,14 +382,18 @@ inline bool &durableStorageRevisionValid() {
 }
 
 inline void noteDurableStorageRevision(uint32_t revision) {
-  lockSettingsNvs();
+  if (!lockSettingsNvs()) {
+    return;
+  }
   durableStorageRevision() = revision;
   durableStorageRevisionValid() = revision != 0;
   unlockSettingsNvs();
 }
 
 inline void resetDurableStorageRevision() {
-  lockSettingsNvs();
+  if (!lockSettingsNvs()) {
+    return;
+  }
   durableStorageRevision() = 0;
   durableStorageRevisionValid() = false;
   unlockSettingsNvs();
@@ -401,7 +407,10 @@ inline bool savePersistedSettings(PersistedSettings &settings) {
   candidate = settings;
   yieldSettingsNvs();
   feedSettingsNvsWatchdog();
-  lockSettingsNvs();
+  if (!lockSettingsNvs()) {
+    feedSettingsNvsWatchdog();
+    return false;
+  }
   if (durableStorageRevisionValid()) {
     candidate.storageRevision = durableStorageRevision();
   } else if (candidate.storageRevision == 0) {
@@ -484,7 +493,9 @@ inline bool resetPersistedSettingsToFactory(PersistedSettings &settings) {
   second.storageRevision = 2;
   finalizePersistedSettings(second);
 
-  lockSettingsNvs();
+  if (!lockSettingsNvs()) {
+    return false;
+  }
   Preferences preferences;
   if (!preferences.begin(SETTINGS_NAMESPACE, false)) {
     unlockSettingsNvs();

@@ -204,9 +204,14 @@ void testNonBlockingScanConnectsWithoutInit() {
     ScaleFixture fixture = makeScale(NEW);
     AcaiaArduinoBLE scale(false);
     CHECK(scale.startScan());
-    CHECK(scale.pollScan());
+    bool connected = false;
+    for (int i = 0; i < 16 && !connected; ++i) {
+        connected = scale.pollScan();
+    }
+    CHECK(connected);
     CHECK(scale.isConnected());
     CHECK(!scale.isScanning());
+    CHECK(!scale.isConnecting());
     CHECK(fixture.peripheral->connected);
     CHECK(strcmp(scale.address(), "01:02:03:04:05:06") == 0);
     CHECK(strcmp(scale.localName(), "PYXIS") == 0);
@@ -222,7 +227,11 @@ void testConnectFilterUsesNameScan() {
     CHECK(BLE.scanCalls == 1);
     CHECK(BLE.scanForAddressCalls == 0);
     CHECK(BLE.lastWithDuplicates);
-    CHECK(scale.pollScan());
+    bool connected = false;
+    for (int i = 0; i < 16 && !connected; ++i) {
+        connected = scale.pollScan();
+    }
+    CHECK(connected);
     CHECK(scale.isConnected());
     CHECK(!scale.isDirectedScan());
     CHECK(strcmp(scale.address(), "AA:BB:CC:DD:EE:FF") == 0);
@@ -256,7 +265,11 @@ void testConnectFilterConnectsWithoutLocalName() {
     fixture.peripheral->localName.clear();
     AcaiaArduinoBLE scale(false);
     CHECK(scale.startScan("AA:BB:CC:DD:EE:FF"));
-    CHECK(scale.pollScan());
+    bool connected = false;
+    for (int i = 0; i < 16 && !connected; ++i) {
+        connected = scale.pollScan();
+    }
+    CHECK(connected);
     CHECK(scale.isConnected());
     CHECK(strcmp(scale.address(), "aa:bb:cc:dd:ee:ff") == 0);
 }
@@ -331,10 +344,11 @@ void testFirstPacketAndSteadyStateTimeouts() {
     ScaleFixture fixture = makeScale(NEW);
     AcaiaArduinoBLE scale(false);
     CHECK(scale.init());
-    fakeMillis = FIRST_PACKET_TIMEOUT_MS - 1;
+    uint32_t connectedAt = fakeMillis;
+    fakeMillis = connectedAt + FIRST_PACKET_TIMEOUT_MS - 1;
     CHECK(!scale.newWeightAvailable());
     CHECK(scale.isConnected());
-    fakeMillis = FIRST_PACKET_TIMEOUT_MS;
+    fakeMillis = connectedAt + FIRST_PACKET_TIMEOUT_MS;
     CHECK(!scale.newWeightAvailable());
     CHECK(!scale.isConnected());
     CHECK(scale.lastDisconnectReason() ==
@@ -349,12 +363,36 @@ void testFirstPacketAndSteadyStateTimeouts() {
     CHECK(steadyScale.newWeightAvailable());
     CHECK(std::fabs(steadyScale.getWeight() - 123.4f) < 0.01f);
     CHECK(steadyScale.lastValidPacketAgeMs() == 0);
-    fakeMillis = MAX_PACKET_PERIOD_MS - 1;
+    const uint32_t lastPacketAt = fakeMillis;
+    fakeMillis = lastPacketAt + MAX_PACKET_PERIOD_MS - 1;
     CHECK(!steadyScale.newWeightAvailable());
     CHECK(steadyScale.isConnected());
-    fakeMillis = MAX_PACKET_PERIOD_MS;
+    fakeMillis = lastPacketAt + MAX_PACKET_PERIOD_MS;
     CHECK(!steadyScale.newWeightAvailable());
     CHECK(steadyScale.lastDisconnectReason() ==
+          AcaiaDisconnectReason::PACKET_TIMEOUT);
+
+    resetFake();
+    ScaleFixture genericFixture = makeScale(GENERIC);
+    AcaiaArduinoBLE genericScale(false);
+    CHECK(genericScale.init());
+    std::vector<byte> genericPacket(20, 0);
+    genericPacket[0] = 0x03;
+    genericPacket[2] = 0x00;
+    genericPacket[3] = 0x30;
+    genericPacket[4] = 0x39;
+    genericPacket[6] = '-';
+    genericPacket[8] = 0x04;
+    genericPacket[9] = 0xd2;
+    notify(genericFixture, genericPacket);
+    CHECK(genericScale.newWeightAvailable());
+    const uint32_t genericPacketAt = fakeMillis;
+    fakeMillis = genericPacketAt + GENERIC_MAX_PACKET_PERIOD_MS - 1;
+    CHECK(!genericScale.newWeightAvailable());
+    CHECK(genericScale.isConnected());
+    fakeMillis = genericPacketAt + GENERIC_MAX_PACKET_PERIOD_MS;
+    CHECK(!genericScale.newWeightAvailable());
+    CHECK(genericScale.lastDisconnectReason() ==
           AcaiaDisconnectReason::PACKET_TIMEOUT);
 }
 
@@ -470,7 +508,11 @@ void testDirectedEclairDiscoveryWithoutName() {
     fixture.peripheral->localName.clear();
     AcaiaArduinoBLE scale(false);
     CHECK(scale.startScan("AA:BB:CC:DD:EE:FF"));
-    CHECK(scale.pollScan());
+    bool connected = false;
+    for (int i = 0; i < 16 && !connected; ++i) {
+        connected = scale.pollScan();
+    }
+    CHECK(connected);
     CHECK(scale.isConnected());
     CHECK(std::strcmp(scale.connectedProtocolName(), "atomheart_eclair") == 0);
 }
@@ -669,15 +711,16 @@ void testRejectedPacketsDoNotRefreshAvailability() {
     CHECK(scale.init());
     notify(fixture, acaiaNewWeight(10.0f));
     CHECK(scale.newWeightAvailable());
+    const uint32_t lastPacketAt = fakeMillis;
 
-    fakeMillis = MAX_PACKET_PERIOD_MS - 1;
+    fakeMillis = lastPacketAt + MAX_PACKET_PERIOD_MS - 1;
     std::vector<byte> invalid = acaiaNewWeight(11.0f);
     invalid[0] = 0;
     notify(fixture, invalid);
     CHECK(!scale.newWeightAvailable());
     CHECK(scale.isConnected());
 
-    fakeMillis = MAX_PACKET_PERIOD_MS;
+    fakeMillis = lastPacketAt + MAX_PACKET_PERIOD_MS;
     CHECK(!scale.newWeightAvailable());
     CHECK(scale.lastDisconnectReason() ==
           AcaiaDisconnectReason::PACKET_TIMEOUT);

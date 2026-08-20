@@ -83,7 +83,9 @@ inline bool saveRecoveryIntent(RecoveryOperation operation) {
   intent.operation = static_cast<uint8_t>(operation);
   finalizeRecoveryIntent(intent);
 
-  lockSettingsNvs();
+  if (!lockSettingsNvs()) {
+    return false;
+  }
   Preferences preferences;
   if (!preferences.begin(RECOVERY_NAMESPACE, false)) {
     unlockSettingsNvs();
@@ -106,7 +108,9 @@ inline bool saveRecoveryIntent(RecoveryOperation operation) {
 }
 
 inline bool clearRecoveryIntent() {
-  lockSettingsNvs();
+  if (!lockSettingsNvs()) {
+    return false;
+  }
   Preferences preferences;
   if (!preferences.begin(RECOVERY_NAMESPACE, false)) {
     unlockSettingsNvs();

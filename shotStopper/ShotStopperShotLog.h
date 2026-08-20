@@ -660,13 +660,12 @@ inline ShotLogStore &shotLogScratchStore() {
 
 // Pack the ring into records[0..count) (oldest first) so NVS can store only
 // the used prefix instead of the full capacity array.
+// Caller must already hold lockFlashIo() (recursive).
 inline void compactShotLogStore(ShotLogStore &store) {
-  lockFlashIo();
   const uint16_t count = store.header.count;
   if (count == 0) {
     store.header.writeIndex = 0;
     memset(store.records, 0, sizeof(store.records));
-    unlockFlashIo();
     return;
   }
 
@@ -687,7 +686,6 @@ inline void compactShotLogStore(ShotLogStore &store) {
          static_cast<size_t>(count) * sizeof(ShotLogRecord));
   store.header.writeIndex =
       static_cast<uint16_t>(count % SHOT_LOG_CAPACITY);
-  unlockFlashIo();
 }
 
 inline void resetShotLogStore(ShotLogStore &store, uint32_t bootId) {
@@ -714,7 +712,10 @@ class ShotLog {
     }
     return true;
 #else
-    lockFlashIo();
+    if (!lockFlashIo()) {
+      resetShotLogStore(store_, 1);
+      return false;
+    }
     Preferences preferences;
     if (!preferences.begin(SHOT_LOG_NAMESPACE, true)) {
       resetShotLogStore(store_, 1);
@@ -841,7 +842,9 @@ class ShotLog {
   }
 
   bool save() {
-    lockFlashIo();
+    if (!lockFlashIo()) {
+      return false;
+    }
     compactShotLogStore(store_);
     finalizeShotLogStore(store_);
 #if defined(SHOT_STOPPER_HOST_TEST)
@@ -927,6 +930,9 @@ class ShotLog {
     if (id == 0 || store_.header.count == 0) {
       return false;
     }
+    if (!lockFlashIo()) {
+      return false;
+    }
     // Compact to a linear prefix so deletion is a memmove, avoiding two
     // SHOT_LOG_CAPACITY arrays on the 8 KB loopTask stack.
     compactShotLogStore(store_);
@@ -940,6 +946,7 @@ class ShotLog {
       }
     }
     if (!found) {
+      unlockFlashIo();
       return false;
     }
     const uint16_t previousCount = store_.header.count;
@@ -952,7 +959,9 @@ class ShotLog {
     store_.header.writeIndex =
         static_cast<uint16_t>(store_.header.count % SHOT_LOG_CAPACITY);
     memset(&store_.records[store_.header.count], 0, sizeof(ShotLogRecord));
-    if (save()) {
+    const bool saved = save();
+    unlockFlashIo();
+    if (saved) {
       return true;
     }
     load();

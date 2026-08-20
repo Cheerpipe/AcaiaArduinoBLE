@@ -8,17 +8,20 @@
 
 namespace shotstopper {
 
-constexpr size_t JSON_ARENA_CAPACITY = 8192;
+constexpr size_t JSON_ARENA_CAPACITY = 16384;
 
 inline void initJsonArenaHooks();
 inline void resetJsonArena();
 inline size_t jsonArenaBytesUsed();
+inline uint32_t jsonArenaAllocFailures();
+inline bool jsonArenaExhaustedRecently();
 
 namespace detail {
 
 // HTTP JSON parse only. Never use as an NVS/OTA flash I/O buffer: flash writes
 // disable the cache and make PSRAM inaccessible on ESP32-S3.
 inline size_t g_jsonArenaUsed = 0;
+inline uint32_t g_jsonArenaAllocFailures = 0;
 inline bool g_jsonArenaHooksInstalled = false;
 
 inline uint8_t *jsonArenaStorage() {
@@ -35,10 +38,12 @@ inline void *jsonArenaMalloc(size_t size) {
   }
   uint8_t *const storage = jsonArenaStorage();
   if (storage == nullptr) {
+    ++g_jsonArenaAllocFailures;
     return nullptr;
   }
   const size_t aligned = (size + 7U) & ~size_t(7U);
   if (g_jsonArenaUsed + aligned > JSON_ARENA_CAPACITY) {
+    ++g_jsonArenaAllocFailures;
     return nullptr;
   }
   void *const block = storage + g_jsonArenaUsed;
@@ -68,6 +73,15 @@ inline void resetJsonArena() {
 
 inline size_t jsonArenaBytesUsed() {
   return detail::g_jsonArenaUsed;
+}
+
+inline uint32_t jsonArenaAllocFailures() {
+  return detail::g_jsonArenaAllocFailures;
+}
+
+inline bool jsonArenaExhaustedRecently() {
+  return detail::g_jsonArenaAllocFailures > 0 &&
+         detail::g_jsonArenaUsed + 64 >= JSON_ARENA_CAPACITY;
 }
 
 }  // namespace shotstopper

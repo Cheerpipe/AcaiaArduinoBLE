@@ -1430,8 +1430,9 @@ void r12b_discovery_clears_stale_connected_link_snapshot() {
   uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = hostMillis;
+  uint32_t scanLastAdvertAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(getScaleLinkSnapshot().state == ScaleLinkState::DISCONNECTED);
   CHECK(!scaleAvailable());
 }
@@ -3453,8 +3454,9 @@ void w75_bookoo_discovery_connect_applies_beep_policy() {
   uint32_t connectRetryMs = 1000;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.commandLog.size() == 1);
   CHECK(scale.commandLog[0] == "setBeepLevel:0");
 }
@@ -3671,15 +3673,16 @@ void d01_idle_scan_stays_enabled_between_ticks() {
   uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
   CHECK(scale.startScanCalls == 1);
   const size_t calls = scale.startScanCalls;
   hostMillis += SCALE_DISCOVERY_TICK_MS - 1;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
   CHECK(scale.startScanCalls == calls);
@@ -3697,8 +3700,9 @@ void d02_full_empty_mac_uses_name_scan() {
   uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(!scale.directedScan);
   CHECK(scale.lastStartScanMac[0] == '\0');
@@ -3714,18 +3718,19 @@ void d03_scan_start_failed_uses_backoff() {
   uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(!scale.scanning);
   CHECK(connectRetryMs == SCALE_CONNECT_RETRY_MS * 2U);
   CHECK(scale.startScanCalls == 1);
   hostMillis += SCALE_CONNECT_RETRY_MS;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.startScanCalls == 1);
   hostMillis += SCALE_CONNECT_RETRY_MS;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.startScanCalls == 2);
   CHECK(connectRetryMs == SCALE_CONNECT_RETRY_MS * 4U);
 }
@@ -3742,13 +3747,14 @@ void d04_full_cache_keeps_directed_scan() {
   uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   for (uint8_t tick = 0; tick < 3; ++tick) {
     hostMillis += SCALE_DISCOVERY_TICK_MS;
     serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                                 connectRetryMs, connectAttemptSeriesActive,
-                                scanSessionAtMs);
+                                scanSessionAtMs, scanLastAdvertAtMs);
   }
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
@@ -3767,8 +3773,9 @@ void d05_hci_watchdog_force_restarts_same_filter() {
   uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.startScanCalls == 1);
   CHECK(!scale.lastForceRestart);
   const size_t callsBeforeRestart = scale.startScanCalls;
@@ -3777,7 +3784,7 @@ void d05_hci_watchdog_force_restarts_same_filter() {
     hostMillis += SCALE_DISCOVERY_TICK_MS;
     serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                                 connectRetryMs, connectAttemptSeriesActive,
-                                scanSessionAtMs);
+                                scanSessionAtMs, scanLastAdvertAtMs);
     ++ticks;
     CHECK(ticks < 40);
   }
@@ -3799,26 +3806,27 @@ void d06_forget_pauses_discovery_for_30s() {
   uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
   const size_t callsBeforeForget = scale.startScanCalls;
   scale.connected = true;
   clearPreferredScaleCache();
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(!scale.connected);
   CHECK(!scale.scanning);
   CHECK(scale.startScanCalls == callsBeforeForget);
   hostMillis += SCALE_PAIRING_DISCOVERY_PAUSE_MS - 1;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(!scale.scanning);
   CHECK(scale.startScanCalls == callsBeforeForget);
   hostMillis += 2;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs);
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(!scale.directedScan);
   CHECK(scale.lastStartScanMac[0] == '\0');

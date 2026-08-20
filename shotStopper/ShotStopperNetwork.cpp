@@ -75,6 +75,13 @@ cJSON *parseJsonInArena(const char *body) {
   return cJSON_Parse(body);
 }
 
+const char *jsonParseFailureMessage(const char *fallback) {
+  if (jsonArenaExhaustedRecently()) {
+    return "JSON too large for device buffer";
+  }
+  return fallback;
+}
+
 constexpr const char *AP_SSID = "MicraShotStopperAP";
 constexpr const char *AP_IP = "192.168.4.1";
 constexpr const char *JSON_CONTENT_TYPE = "application/json";
@@ -795,7 +802,7 @@ bool ShotStopperNetwork::lockWorkBuf() {
   if (workBuf_ == nullptr || statusResponseMux_ == nullptr) {
     return false;
   }
-  return xSemaphoreTake(statusResponseMux_, pdMS_TO_TICKS(1500)) == pdTRUE;
+  return xSemaphoreTake(statusResponseMux_, pdMS_TO_TICKS(2500)) == pdTRUE;
 }
 
 void ShotStopperNetwork::unlockWorkBuf() {
@@ -1387,8 +1394,17 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   // Let the IDF connect path scan every channel and sort by RSSI.
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
-  preferStaWifiCoex(true);
-  delay(100);
+  ControlStatusSnapshot control = {};
+  if (callbacks_.copyControlStatus != nullptr) {
+    callbacks_.copyControlStatus(control);
+  }
+  const bool brewRfActive = control.activeCycle || control.relayClosed;
+  // Do not override brew BT preference with WIFI while CN9/automation is live.
+  if (!brewRfActive) {
+    preferStaWifiCoex(true);
+  }
+  vTaskDelay(pdMS_TO_TICKS(100));
+  (void)feedCurrentTaskWatchdog();
 
   staConnectStartedAtMs_ = millis();
   staReconnectAttemptAtMs_ = staConnectStartedAtMs_;
@@ -1794,7 +1810,14 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
 
   // SoftAP after STA bootstrap window while still DISCONNECTED/FAILED (e.g.
   // scan delayed the reconnect begin). Never after a prior CONNECTED session.
-  if (!staEverConnected_ && !status.apActive &&
+  // Also skip while brew RF is active so SoftAP raise cannot steal airtime.
+  ControlStatusSnapshot softApControl = {};
+  if (callbacks_.copyControlStatus != nullptr) {
+    callbacks_.copyControlStatus(softApControl);
+  }
+  const bool brewRfActive =
+      softApControl.activeCycle || softApControl.relayClosed;
+  if (!staEverConnected_ && !status.apActive && !brewRfActive &&
       (status.staState == StaState::DISCONNECTED ||
        status.staState == StaState::FAILED) &&
       static_cast<uint32_t>(now - staConnectStartedAtMs_) >=
@@ -2553,13 +2576,13 @@ void ShotStopperNetwork::log(DebugCategory category, DebugCode code,
 }
 
 void ShotStopperNetwork::actionLog(const char *message) {
-  if (message != nullptr) {
+  if (serialDebugEnabled() && message != nullptr) {
     Serial.println(message);
   }
 }
 
 void ShotStopperNetwork::actionLogf(const char *fmt, ...) {
-  if (fmt == nullptr) {
+  if (!serialDebugEnabled() || fmt == nullptr) {
     return;
   }
   char line[192] = {};
@@ -4298,8 +4321,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   if (root == nullptr ||
       !jsonHasOnlyUniqueFields(root, fields,
                                sizeof(fields) / sizeof(fields[0]))) {
-    parseError =
-        "Config must be a JSON object with known fields and correct types.";
+    parseError = jsonParseFailureMessage(
+        "Config must be a JSON object with known fields and correct types.");
   } else if (settingFieldCount == 0) {
     parseError = "Config patch must include at least one setting field.";
   } else if (jsonFieldPresent(root, "baseRevision") &&
@@ -4606,7 +4629,7 @@ esp_err_t ShotStopperNetwork::preferredScaleSelectHandler(httpd_req_t *request) 
   char name[PREFERRED_SCALE_NAME_CAPACITY] = {};
   const char *parseError = nullptr;
   if (root == nullptr) {
-    parseError = "JSON body is required.";
+    parseError = jsonParseFailureMessage("JSON body is required.");
   } else if (!jsonString(root, "mac", mac, sizeof(mac), true)) {
     parseError = "mac must be a string (empty clears the preferred scale).";
   } else if (mac[0] != '\0' && !validPreferredScaleMac(mac)) {

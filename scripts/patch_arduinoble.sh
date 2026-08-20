@@ -2,13 +2,15 @@
 # Patch ArduinoBLE 2.1.0 for Shot Stopper:
 #  1) GAP scan active 40/20 ms (50% duty; stock is 20/20)
 #  2) OOM-safe discovery (malloc + placement new; no abort on bad_alloc)
-#  3) BLE host objects in PSRAM (GAP/ATT/GATT/local values; VHCI untouched)
+#  3) BLE host objects in PSRAM (GAP/ATT/GATT/local values; VHCI stream buffers untouched)
+#  4) Bound ESP32 VHCI / HCI ACL / ATT indication waits (no indefinite blocks)
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 scan_patch="$script_dir/../patches/ArduinoBLE-2.1.0-scan-40-20.patch"
 oom_patch="$script_dir/../patches/ArduinoBLE-2.1.0-oom-safe-discover.patch"
 psram_patch="$script_dir/../patches/ArduinoBLE-2.1.0-ble-host-psram.patch"
+hci_patch="$script_dir/../patches/ArduinoBLE-2.1.0-hci-bounded-waits.patch"
 
 candidates=()
 if [[ -n "${ARDUINO_BLE_HOME:-}" ]]; then
@@ -48,10 +50,12 @@ fi
 gap="$target/src/utility/GAP.cpp"
 list="$target/src/utility/BLELinkedList.h"
 host_alloc_h="$target/src/utility/BLEHostAlloc.h"
+vhci="$target/src/utility/HCIVirtualTransport.cpp"
 
 apply_scan=0
 apply_oom=0
 apply_psram=0
+apply_hci=0
 
 if ! grep -q 'leSetScanParameters(0x01, 0x0040, 0x0020' "$gap"; then
   apply_scan=1
@@ -67,8 +71,12 @@ if [[ ! -f "$host_alloc_h" ]] || ! grep -q 'BLEHostAlloc(sizeof(BLEDevice))' "$g
   apply_psram=1
 fi
 
-if [[ "$apply_scan" -eq 0 && "$apply_oom" -eq 0 && "$apply_psram" -eq 0 ]]; then
-  echo "ArduinoBLE already patched (scan 40/20 + OOM-safe + host PSRAM): $target"
+if [[ ! -f "$vhci" ]] || ! grep -q 'HCI_VHCI_IO_TIMEOUT_MS' "$vhci"; then
+  apply_hci=1
+fi
+
+if [[ "$apply_scan" -eq 0 && "$apply_oom" -eq 0 && "$apply_psram" -eq 0 && "$apply_hci" -eq 0 ]]; then
+  echo "ArduinoBLE already patched (scan 40/20 + OOM-safe + host PSRAM + HCI waits): $target"
   exit 0
 fi
 
@@ -150,4 +158,22 @@ if [[ "$apply_psram" -eq 1 ]]; then
   fi
   patch -p1 -d "$target" < "$psram_patch"
   echo "Patched ArduinoBLE BLE host PSRAM allocator: $target"
+fi
+
+if [[ "$apply_hci" -eq 1 ]]; then
+  if [[ ! -f "$hci_patch" ]]; then
+    echo "Missing HCI bounded-waits patch: $hci_patch" >&2
+    exit 1
+  fi
+  if ! command -v patch >/dev/null 2>&1; then
+    echo "patch(1) is required to apply $hci_patch" >&2
+    exit 1
+  fi
+  if ! patch -p1 --dry-run -d "$target" < "$hci_patch" >/dev/null 2>&1; then
+    echo "HCI bounded-waits patch does not apply cleanly to: $target" >&2
+    echo "Install stock ArduinoBLE@2.1.0, apply prior patches, then retry." >&2
+    exit 1
+  fi
+  patch -p1 -d "$target" < "$hci_patch"
+  echo "Patched ArduinoBLE HCI bounded waits: $target"
 fi

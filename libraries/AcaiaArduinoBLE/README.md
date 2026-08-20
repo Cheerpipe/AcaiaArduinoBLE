@@ -25,12 +25,14 @@ Release 3.5.0 is compiled and tested against ArduinoBLE 2.1.0, which is pinned
 in `library.properties` so upgrades cannot silently change the audited BLE
 lifecycle behavior.
 
-ArduinoBLE 2.1.0's ESP32 virtual HCI transport can still block indefinitely in
-the dependency itself. The current upstream implementation retains those
-unbounded waits. Consequently, this library must not be treated as a
-standalone safety mechanism or as proof that BLE calls always make progress.
-See [Audit remediation](../../docs/audits/AUDIT_REMEDIATION.md) for the
-residual risk and the required hardware/soak validation.
+Shot Stopper's `scripts/patch_arduinoble.sh` bounds ESP32 VHCI / HCI ACL / ATT
+indication waits (1 s deadlines; see patch
+`ArduinoBLE-2.1.0-hci-bounded-waits.patch`). Combined with
+`BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS)`, host-side waits return instead of
+blocking forever. This library is still not a standalone safety mechanism:
+pair it with task watchdogs and fail-open outputs. See
+[Audit remediation](../../docs/audits/AUDIT_REMEDIATION.md) for residuals and
+the required hardware/soak validation (M72/M73).
 
 On Arduino-ESP32 **3.3.6+**, `initArduino()` releases BLE controller RAM unless
 a linked translation unit includes `esp32-hal-alloc-ble-mem.h`. Native
@@ -65,18 +67,19 @@ even when the advertisement has no local name.
 Stock ArduinoBLE 2.1.0 scans active at 20/20 ms. Shot Stopper patches GAP to
 active 40/20 ms (50% duty) via `scripts/patch_arduinoble.sh` so SCAN_RSP names
 stay visible while leaving airtime for Wi-Fi. The same script also applies an
-OOM-safe discovery patch and a BLE-host PSRAM allocator: advertising reports,
-linked-list nodes, remote ATT trees, local GATT 1800/1801, and characteristic
-value buffers allocate with `BLEHostAlloc` (SPIRAM first, internal fallback) +
-placement `new` so small host objects skip the ALWAYSINTERNAL DRAM threshold
-and a failed alloc drops the advert instead of `abort()` via `bad_alloc`. The
+OOM-safe discovery patch, a BLE-host PSRAM allocator, and HCI bounded waits:
+advertising reports, linked-list nodes, remote ATT trees, local GATT 1800/1801,
+and characteristic value buffers allocate with `BLEHostAlloc` (SPIRAM first,
+internal fallback) + placement `new` so small host objects skip the
+ALWAYSINTERNAL DRAM threshold and a failed alloc drops the advert instead of
+`abort()` via `bad_alloc`. VHCI RX/TX stream ops, ACL credit waits, and ATT
+indication confirms use ≤1 s deadlines (or the configured ATT timeout). The
 VHCI stream buffers and `bleTask` stack stay in internal SRAM. Idle discovery
 keeps that scan enabled until a match or filter change; `startScan()` /
-`pollScan()` do not cycle GAP every 1 s or 3 s. Migrating to ESP-IDF NimBLE is
-out of scope: this library stays on the pinned ArduinoBLE lifecycle.
-
-The operation timeout bounds ATT waits supported by the public ArduinoBLE API;
-it cannot bound every internal ESP32 HCI wait.
+`pollScan()` do not cycle GAP every 1 s or 3 s. GATT connect is stepped across
+`pollScan()` calls so the owner task can feed its watchdog between ATT ops.
+Migrating to ESP-IDF NimBLE is out of scope: this library stays on the pinned
+ArduinoBLE lifecycle.
 
 `AcaiaArduinoBLE` is a single-owner object: create it, call it, and destroy it
 from one task only. It is intentionally non-copyable and is not thread-safe.

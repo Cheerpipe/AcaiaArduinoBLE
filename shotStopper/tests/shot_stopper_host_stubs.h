@@ -281,20 +281,39 @@ class AcaiaArduinoBLE {
     if (connected) {
       scanning = false;
       directedScan = false;
+      connecting = false;
       return true;
+    }
+    if (connecting) {
+      if (pollScanConnects) {
+        connected = true;
+        connecting = false;
+        scanning = false;
+        directedScan = false;
+        return true;
+      }
+      return false;
     }
     if (!scanning) {
       return false;
     }
     if (pollScanConnects) {
-      connected = true;
+      connecting = true;
       scanning = false;
       directedScan = false;
-      return true;
+      // Match firmware stepped connect: first poll begins, later poll finishes.
+      if (pollScanStepsToConnect <= 1) {
+        connected = true;
+        connecting = false;
+        return true;
+      }
+      --pollScanStepsToConnect;
+      return false;
     }
     return false;
   }
   bool isScanning() const { return scanning; }
+  bool isConnecting() const { return connecting; }
   bool isDirectedScan() const { return scanning && directedScan; }
   bool takeSeenAdvertisement(char *macOut, size_t macCapacity, char *nameOut,
                              size_t nameCapacity) {
@@ -383,6 +402,7 @@ class AcaiaArduinoBLE {
   bool isConnected() const { return connected; }
   void disconnect() {
     connected = false;
+    connecting = false;
     scanning = false;
     directedScan = false;
   }
@@ -414,10 +434,12 @@ class AcaiaArduinoBLE {
 
   bool connected = false;
   bool scanning = false;
+  bool connecting = false;
   bool directedScan = false;
   bool seenPending = false;
   bool startScanSucceeds = true;
   bool pollScanConnects = false;
+  int pollScanStepsToConnect = 1;
   bool lastForceRestart = false;
   size_t startScanCalls = 0;
   char lastStartScanMac[ACAIA_MAC_CAPACITY] = {};
@@ -491,6 +513,18 @@ inline int xQueueSend(QueueHandle_t queue, const void *item, TickType_t wait) {
   std::vector<uint8_t> bytes(queue->itemSize);
   std::memcpy(bytes.data(), item, queue->itemSize);
   queue->items.push_back(std::move(bytes));
+  return pdTRUE;
+}
+
+inline int xQueueSendToFront(QueueHandle_t queue, const void *item,
+                             TickType_t wait) {
+  (void)wait;
+  if (queue == nullptr || queue->items.size() >= queue->capacity) {
+    return pdFALSE;
+  }
+  std::vector<uint8_t> bytes(queue->itemSize);
+  std::memcpy(bytes.data(), item, queue->itemSize);
+  queue->items.push_front(std::move(bytes));
   return pdTRUE;
 }
 
