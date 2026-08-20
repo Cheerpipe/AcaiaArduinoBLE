@@ -158,7 +158,7 @@ class ShotStopperNetwork {
   void mergePreferredScaleMac(PersistedSettings &settings);
   void overlayLiveShotSettings(PersistedSettings &settings);
   bool serialDebugEnabled() const;
-  static constexpr uint32_t STA_CONNECT_TIMEOUT_MS = 15000;
+  static constexpr uint32_t STA_CONNECT_TIMEOUT_MS = 25000;
   static constexpr uint32_t STA_RECOVERY_ATTEMPT_MS = 60000;
   static constexpr uint32_t STA_CONFIRM_TIMEOUT_MS = 180000;
   static constexpr uint32_t STA_RECONNECT_INTERVAL_MS = 10000;
@@ -213,6 +213,7 @@ class ShotStopperNetwork {
   bool apStartHeld_ = false;
   bool apKeepRequested_ = false;
   bool httpStartHeld_ = false;
+  bool staWifiCoexPreferred_ = false;
   bool otaRestartPending_ = false;
   bool otaRollbackRestartPending_ = false;
   uint32_t otaRestartRequestedAtMs_ = 0;
@@ -256,11 +257,9 @@ class ShotStopperNetwork {
   bool startNetwork();
   void startStation(const PersistedSettings &settings, uint32_t now);
   void applyStationAddressConfig(const PersistedSettings &settings);
-  bool findBestStaCandidate(const char *ssid, bool openNetwork,
-                            uint8_t bssidOut[6], uint8_t &channelOut,
-                            int32_t &rssiOut);
   void beginStationConnect(const PersistedSettings &settings, uint32_t now);
   void clearStaLinkMetrics();
+  void preferStaWifiCoex(bool enable);
   bool ensureAccessPoint(uint32_t now, bool force = false);
   void stopSoftApKeepStation();
   void stopSoftApLeaveHttp();

@@ -1337,83 +1337,21 @@ void ShotStopperNetwork::clearStaLinkMetrics() {
   status_.staBssid[0] = '\0';
 }
 
-bool ShotStopperNetwork::findBestStaCandidate(const char *ssid, bool openNetwork,
-                                              uint8_t bssidOut[6],
-                                              uint8_t &channelOut,
-                                              int32_t &rssiOut) {
-  if (ssid == nullptr || bssidOut == nullptr || !validWifiSsid(ssid)) {
-    return false;
+void ShotStopperNetwork::preferStaWifiCoex(bool enable) {
+#if defined(SHOT_STOPPER_NETWORK_HAS_COEX)
+  if (enable) {
+    (void)esp_coex_preference_set(ESP_COEX_PREFER_WIFI);
+    staWifiCoexPreferred_ = true;
+    return;
   }
-#if defined(SHOT_STOPPER_NETWORK_HAS_COEX)
-  // BLE central scanning starves Wi-Fi channel dwell; prefer Wi-Fi for this
-  // sync pass so same-SSID BSSIs are more likely to all appear.
-  (void)esp_coex_preference_set(ESP_COEX_PREFER_WIFI);
-#endif
-  // Radio needs a beat after disconnect/mode before a full AP list is useful.
-  delay(150);
-  // SSID-filtered all-channel scan with a longer dwell; channel 0 = all.
-  const int16_t scanned =
-      WiFi.scanNetworks(false, false, false, 300, 0, ssid, nullptr);
-  if (scanned <= 0) {
-    WiFi.scanDelete();
-#if defined(SHOT_STOPPER_NETWORK_HAS_COEX)
+  if (staWifiCoexPreferred_) {
     (void)esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
+    staWifiCoexPreferred_ = false;
+  }
+#else
+  (void)enable;
+  staWifiCoexPreferred_ = false;
 #endif
-    return false;
-  }
-
-  constexpr size_t kMaxCandidates = 32;
-  StaApScanEntry entries[kMaxCandidates] = {};
-  char ssidBuffers[kMaxCandidates][WIFI_SSID_CAPACITY] = {};
-  uint8_t bssidBuffers[kMaxCandidates][6] = {};
-  size_t count = 0;
-  for (int index = 0; index < scanned && count < kMaxCandidates; ++index) {
-    const String scannedSsid = WiFi.SSID(index);
-    const size_t length = scannedSsid.length();
-    if (length == 0 || length >= WIFI_SSID_CAPACITY) {
-      continue;
-    }
-    const uint8_t *bssid = WiFi.BSSID(index);
-    if (bssid == nullptr) {
-      continue;
-    }
-    strncpy(ssidBuffers[count], scannedSsid.c_str(), WIFI_SSID_CAPACITY - 1);
-    memcpy(bssidBuffers[count], bssid, 6);
-    entries[count].ssid = ssidBuffers[count];
-    entries[count].bssid = bssidBuffers[count];
-    entries[count].channel = static_cast<uint8_t>(WiFi.channel(index));
-    entries[count].rssi = WiFi.RSSI(index);
-    entries[count].open = WiFi.encryptionType(index) == WIFI_AUTH_OPEN;
-    ++count;
-  }
-  WiFi.scanDelete();
-#if defined(SHOT_STOPPER_NETWORK_HAS_COEX)
-  (void)esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
-#endif
-
-  size_t matchCount = 0;
-  for (size_t index = 0; index < count; ++index) {
-    if (entries[index].ssid != nullptr &&
-        strcmp(entries[index].ssid, ssid) == 0 &&
-        entries[index].open == openNetwork) {
-      ++matchCount;
-    }
-  }
-
-  size_t bestIndex = 0;
-  if (!selectBestStaAp(entries, count, ssid, openNetwork, bestIndex)) {
-    lifecycleLogf("WiFi STA scan saw %u BSS(s), 0 auth-matched for %s",
-                  static_cast<unsigned>(count), ssid);
-    return false;
-  }
-  memcpy(bssidOut, entries[bestIndex].bssid, 6);
-  channelOut = entries[bestIndex].channel;
-  rssiOut = entries[bestIndex].rssi;
-  lifecycleLogf("WiFi STA scan matched %u AP(s) for SSID; best rssi=%ld ch=%u",
-                static_cast<unsigned>(matchCount),
-                static_cast<long>(rssiOut),
-                static_cast<unsigned>(channelOut));
-  return true;
 }
 
 void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
@@ -1425,7 +1363,7 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
     WiFi.mode(WIFI_STA);
   }
   applyStationAddressConfig(settings);
-  // Drop any UI scan so the strongest-AP sync scan owns the radio.
+  // Drop any UI scan so association owns the radio.
   abortWifiScan(now, false);
   portENTER_CRITICAL(&dataMux_);
   status_.staState = StaState::CONNECTING;
@@ -1444,34 +1382,19 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   }
   WiFi.disconnect(false, false);
 
-  // Arduino defaults to WIFI_FAST_SCAN (first SSID hit). Force a full scan and
-  // RSSI sort so SSID-only fallback also prefers the strongest AP.
+  // Do NOT pre-scan and lock a BSSID: an incomplete scan (BLE coexistence)
+  // often sees only the weak BSS and then forces sticky association to it.
+  // Let the IDF connect path scan every channel and sort by RSSI.
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+  preferStaWifiCoex(true);
+  delay(100);
 
-  uint8_t bssid[6] = {};
-  uint8_t channel = 0;
-  int32_t candidateRssi = 0;
-  const bool haveBest = findBestStaCandidate(
-      settings.staSsid, settings.staOpen, bssid, channel, candidateRssi);
-  // Association timeout starts after the scan so SoftAP bootstrap stays fair.
-  const uint32_t associateAtMs = millis();
-  staConnectStartedAtMs_ = associateAtMs;
-  staReconnectAttemptAtMs_ = associateAtMs;
-  if (haveBest) {
-    char bssidText[18] = {};
-    formatWifiMac(bssid, bssidText, sizeof(bssidText));
-    lifecycleLogf("WiFi STA selecting strongest AP %s ch=%u rssi=%ld",
-                  bssidText, static_cast<unsigned>(channel),
-                  static_cast<long>(candidateRssi));
-    WiFi.begin(settings.staSsid,
-               settings.staOpen ? nullptr : settings.staPassword, channel,
-               bssid);
-  } else {
-    lifecycleLog("WiFi STA no scan match; associating by SSID with RSSI sort");
-    WiFi.begin(settings.staSsid,
-               settings.staOpen ? nullptr : settings.staPassword);
-  }
+  staConnectStartedAtMs_ = millis();
+  staReconnectAttemptAtMs_ = staConnectStartedAtMs_;
+  lifecycleLog("WiFi STA associating with all-channel RSSI sort");
+  WiFi.begin(settings.staSsid,
+             settings.staOpen ? nullptr : settings.staPassword);
 }
 
 void ShotStopperNetwork::startStation(const PersistedSettings &settings,
@@ -1643,6 +1566,7 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
 }
 
 void ShotStopperNetwork::stopNetwork() {
+  preferStaWifiCoex(false);
   esp_wifi_scan_stop();
   WiFi.scanDelete();
   stopHttpServer();
@@ -1672,6 +1596,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
 
   if (status.staState == StaState::CONNECTED) {
     if (WiFi.status() != WL_CONNECTED) {
+      preferStaWifiCoex(false);
       portENTER_CRITICAL(&dataMux_);
       status_.staState = StaState::DISCONNECTED;
       status_.networkActive = false;
@@ -1755,8 +1680,14 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
     const bool httpReady = mayStartHttp && startHttpServer();
     httpRetryAtMs_ = httpReady || httpStartHeld_ ? 0 : now + HTTP_RETRY_MS;
     staEverConnected_ = true;
+    preferStaWifiCoex(false);
     {
       const int32_t rssi = WiFi.RSSI();
+      char bssidText[18] = {};
+      const uint8_t *bssid = WiFi.BSSID();
+      if (bssid != nullptr) {
+        formatWifiMac(bssid, bssidText, sizeof(bssidText));
+      }
       portENTER_CRITICAL(&dataMux_);
       status_.staState = StaState::CONNECTED;
       status_.networkActive = httpReady;
@@ -1765,11 +1696,15 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       status_.staRssi = clampWifiRssi(rssi);
       status_.staSignalQualityPct = wifiRssiToSignalQualityPct(rssi);
       status_.windowRemainingMs = 0;
+      memset(status_.staBssid, 0, sizeof(status_.staBssid));
+      strncpy(status_.staBssid, bssidText, sizeof(status_.staBssid) - 1);
       portEXIT_CRITICAL(&dataMux_);
+      log(DebugCategory::NETWORK, DebugCode::STA_CONNECTED);
+      lifecycleLogf("WiFi STA connected; IP: %s bssid=%s rssi=%ld http=%s",
+                    address, bssidText[0] != '\0' ? bssidText : "-",
+                    static_cast<long>(rssi),
+                    httpReady ? "up" : (httpStartHeld_ ? "held" : "down"));
     }
-    log(DebugCategory::NETWORK, DebugCode::STA_CONNECTED);
-    lifecycleLogf("WiFi STA connected; IP: %s http=%s", address,
-                  httpReady ? "up" : (httpStartHeld_ ? "held" : "down"));
     staNtpEligibleAtMs_ = now + NTP_STA_SETTLE_MS;
     ntpRearmPending_ = true;
     if (settingsCopy().staConfigState ==
@@ -1787,6 +1722,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
     if (wifiScanInProgress()) {
       return;
     }
+    preferStaWifiCoex(false);
     WiFi.disconnect(false, false);
     portENTER_CRITICAL(&dataMux_);
     status_.staState = StaState::FAILED;
@@ -2477,6 +2413,7 @@ bool ShotStopperNetwork::handleCliWifiAction(const WebCommand &command,
     }
     case WebCommandType::WIFI_DISCONNECT: {
       staReconnectHeld_ = true;
+      preferStaWifiCoex(false);
       WiFi.disconnect(false, false);
       stopNtp();
       staNtpEligibleAtMs_ = 0;

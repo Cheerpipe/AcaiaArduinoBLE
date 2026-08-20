@@ -1682,18 +1682,18 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
     !network.includes('WIFI_AP_STA') ||
     !network.includes('ensureAccessPoint') ||
     !network.includes('beginStationConnect') ||
-    !network.includes('findBestStaCandidate') ||
-    !network.includes('selectBestStaAp') ||
-    !network.includes('selecting strongest AP') ||
     !network.includes('WIFI_ALL_CHANNEL_SCAN') ||
     !network.includes('WIFI_CONNECT_AP_BY_SIGNAL') ||
     !network.includes('setScanMethod') ||
     !network.includes('setSortMethod') ||
+    !network.includes('all-channel RSSI sort') ||
+    !network.includes('preferStaWifiCoex') ||
+    network.includes('findBestStaCandidate') ||
     !network.includes('stopSoftApKeepStation') ||
     !network.includes('wifiScanInProgress') ||
     !network.includes('STA_RECOVERY_ATTEMPT_MS')) {
   throw new Error(
-      'Network must use STA-first boot, SoftAP when unassociated, WIFI_AP_STA while retrying STA, pause retries during Wi-Fi scan, and associate to the strongest matching BSSID');
+      'Network must use STA-first boot, SoftAP when unassociated, WIFI_AP_STA while retrying STA, pause retries during Wi-Fi scan, and associate via IDF all-channel RSSI sort (no incomplete BSSID lock)');
 }
 if (!domain.includes('selectBestStaAp') ||
     !domain.includes('StaApScanEntry')) {
