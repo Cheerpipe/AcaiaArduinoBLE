@@ -6,7 +6,7 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "../shotStopper.ino"
+#include "../shotStopper.cpp"
 
 namespace {
 

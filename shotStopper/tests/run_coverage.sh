@@ -2,7 +2,7 @@
 set -eu
 
 test_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-firmware_file="$test_dir/../shotStopper.ino"
+firmware_file="$test_dir/../shotStopper.cpp"
 domain_file="$test_dir/../ShotStopperDomain.h"
 coverage_binary=${TMPDIR:-/tmp}/shot_stopper_coverage
 raw_profile=${TMPDIR:-/tmp}/shot_stopper_coverage.profraw

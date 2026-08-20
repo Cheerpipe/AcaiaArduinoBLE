@@ -142,7 +142,7 @@ The following notes describe the upstream example from which the main
 application evolved. They are retained for provenance; current configuration
 is documented in the repository's [main README](../../README.md).
 
-The following variables at the top of the shotStopper.ino file can be configured by the user:
+The following variables at the top of the shotStopper.cpp file can be configured by the user:
 
 `MOMENTARY`
 * true for momentary switches such as GS3 AV, Rancilio Silvia Pro, etc.

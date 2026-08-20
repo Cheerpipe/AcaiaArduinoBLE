@@ -511,7 +511,8 @@ LED while scale connected**. Override the pin at compile time with
 ├── shotStopper/web/app.js          # Authored Web UI JavaScript (embedded via generator)
 ├── shotStopper/web/app.css         # Authored Web UI stylesheet (embedded via generator)
 ├── shotStopper/                    # Main firmware sketch and host tests
-│   ├── shotStopper.ino
+│   ├── shotStopper.ino          # Arduino sketch stub (sources in .cpp)
+│   ├── shotStopper.cpp          # Application setup()/loop() and firmware core
 │   ├── ShotStopperSerialCli.h      # USB serial command parser
 │   └── tests/                      # Host tests, web asset + firmware checks
 ├── libraries/
@@ -896,7 +897,7 @@ stuck LOW, absent, or out of frequency; a second relay controlled directly by
 the same GPIO does not provide this barrier.
 
 The selected FQBN automatically defines the matching pin block in
-`shotStopper.ino`. An active-HIGH **scale-connected LED** on GPIO 1 is part of
+`shotStopper.cpp`. An active-HIGH **scale-connected LED** on GPIO 1 is part of
 the default map:
 
 | Module | Script arch | FQBN extras | Paddle | Relay | Scale LED |
@@ -984,8 +985,16 @@ idf.py --version
 ```
 
 `./scripts/build-idf` sources `export.sh` from `IDF_PATH` or `$HOME/esp/esp-idf`
-when needed. Clone ArduinoBLE into the IDF tree on first build (handled by the
-script) and keep the local patch applied:
+when needed and **refuses any ESP-IDF version outside 5.5.x**. Arduino-ESP32 is
+pinned to **3.3.11** in `idf/main/idf_component.yml`; commit
+`idf/dependencies.lock` so Component Manager resolves the same graph on every
+machine. `managed_components/` stays local/gitignored (arduino-esp32 still
+downloads large optional transitive trees such as esp-sr; selective compilation
+keeps them out of the link).
+
+Clone ArduinoBLE **2.1.0** into the IDF tree on first build (handled by the
+script; version is checked via `library.properties`) and keep the local patch
+applied:
 
 ```sh
 ./scripts/patch_arduinoble.sh

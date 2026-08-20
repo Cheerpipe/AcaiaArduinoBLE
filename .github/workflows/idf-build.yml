@@ -1,0 +1,54 @@
+# Build Micra Shot Stopper with the official ESP-IDF path for both flash maps.
+name: IDF Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: idf-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build-idf (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [n16r8, n8r4]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install ESP-IDF v5.5.5
+        uses: espressif/install-esp-idf-action@v1
+        with:
+          version: v5.5.5
+
+      - name: Build firmware
+        env:
+          SS_IDF_QUIET: "1"
+        run: |
+          ./scripts/build-idf \
+            --arch "${{ matrix.arch }}" \
+            --flags "-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=2"
+
+      - name: Upload image artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: shotstopper-${{ matrix.arch }}
+          path: |
+            build-idf/${{ matrix.arch }}/shotstopper.bin
+            build-idf/${{ matrix.arch }}/shotstopper.elf
+            build-idf/${{ matrix.arch }}/shotstopper.map
+          if-no-files-found: error

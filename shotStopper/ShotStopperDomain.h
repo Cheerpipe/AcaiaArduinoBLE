@@ -9,6 +9,24 @@
 #include "ShotStopperSafety.h"
 #include "ShotStopperHwmon.h"
 
+// Map ESP-IDF Kconfig (main/Kconfig.projbuild) onto the historical
+// SHOT_STOPPER_* macros. Command-line -DSHOT_STOPPER_*=… wins (ifndef).
+#if !defined(SHOT_STOPPER_HOST_TEST) && __has_include("sdkconfig.h")
+#include "sdkconfig.h"
+#ifndef SHOT_STOPPER_ENABLE_REMOTE_CN9
+#ifdef CONFIG_SHOT_STOPPER_ENABLE_REMOTE_CN9
+#define SHOT_STOPPER_ENABLE_REMOTE_CN9 1
+#else
+#define SHOT_STOPPER_ENABLE_REMOTE_CN9 0
+#endif
+#endif
+#ifndef SHOT_STOPPER_ENABLE_BUZZER
+#ifdef CONFIG_SHOT_STOPPER_ENABLE_BUZZER
+#define SHOT_STOPPER_ENABLE_BUZZER CONFIG_SHOT_STOPPER_ENABLE_BUZZER
+#endif
+#endif
+#endif
+
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;

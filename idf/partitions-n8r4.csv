@@ -1,4 +1,9 @@
 # Name,   Type, SubType, Offset,  Size, Flags
+#
+# Matches Arduino FQBN PartitionScheme=default_8MB.
+# The spiffs region is reserved for FQBN / OTA layout parity with existing
+# field devices. Firmware does not mount SPIFFS today; do not shrink or move
+# it without a coordinated migration (full reflash + otadata reset).
 nvs,      data, nvs,     0x9000,  0x5000,
 otadata,  data, ota,     0xe000,  0x2000,
 app0,     app,  ota_0,   0x10000, 0x330000,

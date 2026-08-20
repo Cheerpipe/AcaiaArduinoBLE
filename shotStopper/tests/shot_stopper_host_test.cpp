@@ -12,7 +12,7 @@
 #include <limits>
 #include <string>
 
-#include "../shotStopper.ino"
+#include "../shotStopper.cpp"
 
 namespace {
 

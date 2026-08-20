@@ -9,7 +9,11 @@
 
 CONFIG_FREERTOS_HZ=1000
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
-CONFIG_COMPILER_DISABLE_DEFAULT_ERRORS=y
+
+# Product defaults (main/Kconfig.projbuild). Override with
+# SHOT_STOPPER_EXTRA_FLAGS=-DSHOT_STOPPER_… when needed.
+CONFIG_SHOT_STOPPER_ENABLE_REMOTE_CN9=y
+CONFIG_SHOT_STOPPER_ENABLE_BUZZER=2
 
 # Shot Stopper runs at 80 MHz (setup() calls setCpuFrequencyMhz(80)).
 # Arduino-CLI boots at 240 (F_CPU) until that line; IDF's S3 default is 160.

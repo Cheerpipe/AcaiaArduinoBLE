@@ -41,7 +41,7 @@ balanza ──aire──► controller (SRAM, ~70 KiB, no se toca)
 - Nodos `BLELinkedList` (mismo parche).
 - `BLERemoteDevice` / services / characteristics / descriptors (`new` en `ATT.cpp`).
 - Valores locales Companion (`BLELocalCharacteristic` hace `malloc(valueSize)` para SSID/password/IP).
-- El objeto `ShotStopperBleCompanion` (hoy `allocInternal` en `shotStopper.ino`).
+- El objeto `ShotStopperBleCompanion` (hoy `allocInternal` en `shotStopper.cpp`).
 
 **No mover:**
 
@@ -98,7 +98,7 @@ Aplicar también en el clone IDF (`idf/third_party/ArduinoBLE`) desde `scripts/b
 
 ### 3 — Companion en PSRAM
 
-En `shotStopper.ino` (~línea del `allocInternal(sizeof(ShotStopperBleCompanion))`):
+En `shotStopper.cpp` (~línea del `allocInternal(sizeof(ShotStopperBleCompanion))`):
 
 ```cpp
 void *storage = allocExternalOrInternal(sizeof(ShotStopperBleCompanion));

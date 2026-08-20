@@ -47,9 +47,35 @@ ss_idf_source() {
     echo "export.sh de ${idf_root} no dejó idf.py en PATH." >&2
     exit 127
   }
+  ss_idf_require_version
   if [[ "${SS_IDF_QUIET:-}" != "1" ]]; then
     echo "ESP-IDF: ${idf_root}"
   fi
+}
+
+# Shot Stopper is validated against ESP-IDF 5.5.x (tracks 5.5.5 with
+# Arduino-ESP32 3.3.11). Refuse other majors/minors to avoid silent drift.
+ss_idf_require_version() {
+  local ver_line ver
+  ver_line="$(idf.py --version 2>/dev/null | head -n1 || true)"
+  ver="$(printf '%s' "$ver_line" | sed -n 's/.*v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+  if [[ -z "$ver" ]]; then
+    ver="$(printf '%s' "$ver_line" | sed -n 's/.*v\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+  fi
+  case "$ver" in
+    5.5|5.5.*)
+      if [[ "${SS_IDF_QUIET:-}" != "1" ]]; then
+        echo "ESP-IDF version: v${ver} (requerido: 5.5.x)"
+      fi
+      ;;
+    *)
+      echo "Se requiere ESP-IDF 5.5.x (proyecto validado con v5.5.5)." >&2
+      echo "Encontrado: ${ver_line:-desconocido} (parseado: ${ver:-ninguno})" >&2
+      echo "Instala o apunta IDF_PATH a v5.5.5:" >&2
+      echo "  git clone -b v5.5.5 --recursive https://github.com/espressif/esp-idf.git" >&2
+      exit 127
+      ;;
+  esac
 }
 
 # Call after shotstopper_resolve_board. Sets IDF_PROJECT, IDF_BUILD_DIR,
@@ -76,11 +102,28 @@ ss_idf_py_args() {
 
 ss_idf_ensure_arduino_ble() {
   local dest="${1:-$IDF_PROJECT/third_party/ArduinoBLE}"
+  local props="$dest/library.properties"
+  local need_clone=0
+
   if [[ ! -f "$dest/src/ArduinoBLE.h" ]]; then
+    need_clone=1
+  elif [[ -f "$props" ]] && ! grep -q "^version=${ARDUINO_BLE_VERSION}$" "$props"; then
+    echo "ArduinoBLE en $dest no es ${ARDUINO_BLE_VERSION}; se reclona." >&2
+    rm -rf "$dest"
+    need_clone=1
+  fi
+
+  if [[ "$need_clone" -eq 1 ]]; then
     echo "Clonando ArduinoBLE ${ARDUINO_BLE_VERSION} → $dest"
     mkdir -p "$(dirname "$dest")"
     git clone --depth 1 --branch "$ARDUINO_BLE_VERSION" "$ARDUINO_BLE_REPO" "$dest"
   fi
+
+  if [[ ! -f "$props" ]] || ! grep -q "^version=${ARDUINO_BLE_VERSION}$" "$props"; then
+    echo "ArduinoBLE en $dest no declara version=${ARDUINO_BLE_VERSION}." >&2
+    exit 1
+  fi
+
   # Scan 40/20, OOM-safe discover, and BLE host PSRAM (same as Arduino-CLI).
   ARDUINO_BLE_HOME="$dest" "$SS_CLI_ROOT/scripts/patch_arduinoble.sh"
 }

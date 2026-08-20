@@ -9,7 +9,7 @@ const sketchDir = path.resolve(__dirname, '..');
 const asset = fs.readFileSync(path.join(sketchDir, 'ShotStopperWebAssets.h'), 'utf8');
 const network = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.cpp'), 'utf8');
 const networkHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.h'), 'utf8');
-const firmware = fs.readFileSync(path.join(sketchDir, 'shotStopper.ino'), 'utf8');
+const firmware = fs.readFileSync(path.join(sketchDir, 'shotStopper.cpp'), 'utf8');
 const domain = fs.readFileSync(path.join(sketchDir, 'ShotStopperDomain.h'), 'utf8');
 const buzzer = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzer.h'), 'utf8');
 const bleLibrary = fs.readFileSync(
@@ -1013,6 +1013,12 @@ if (!ui.includes('id="firmwareFooter"') ||
     !network.includes('\\"bootId\\":%lu') ||
     !network.includes('FW_VERSION')) {
   throw new Error('Firmware version must be exposed in status API and web footer');
+}
+if (!shellHtml.includes('https://github.com/Cheerpipe/AcaiaArduinoBLE') ||
+    !shellHtml.includes('https://github.com/Cheerpipe') ||
+    !shellHtml.includes('Hecho por') ||
+    !shellHtml.includes('>Cheerpipe</a>')) {
+  throw new Error('Web UI footer must credit the GitHub repo and Cheerpipe');
 }
 if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||

@@ -9,12 +9,38 @@ if(NOT EXISTS "${ARDUINO_BLE_PATH}/src/ArduinoBLE.h")
     "./scripts/build-idf clones it into idf/third_party/ArduinoBLE.")
 endif()
 
-file(GLOB_RECURSE ARDUINO_BLE_SRCS "${ARDUINO_BLE_PATH}/src/*.cpp")
-list(FILTER ARDUINO_BLE_SRCS EXCLUDE REGEX ".*/extras/.*")
-# Only the ESP32 VHCI transport belongs in this firmware. The other HCI
-# backends are #ifdef'd out, but they still define HCITransport if compiled.
-list(FILTER ARDUINO_BLE_SRCS EXCLUDE REGEX
-  "HCI(Cordio|Uart|NinaSpi|Silabs|VirtualTransport(AT|RPC|Zephyr))")
+# Explicit SRCS (ESP32 VHCI transport only). Avoid GLOB so CMake reconfigure
+# is not required when unrelated transports appear upstream.
+set(ARDUINO_BLE_SRCS
+  "${ARDUINO_BLE_PATH}/src/BLEAdvertisingData.cpp"
+  "${ARDUINO_BLE_PATH}/src/BLECharacteristic.cpp"
+  "${ARDUINO_BLE_PATH}/src/BLEDescriptor.cpp"
+  "${ARDUINO_BLE_PATH}/src/BLEDevice.cpp"
+  "${ARDUINO_BLE_PATH}/src/BLEService.cpp"
+  "${ARDUINO_BLE_PATH}/src/BLEStringCharacteristic.cpp"
+  "${ARDUINO_BLE_PATH}/src/BLETypedCharacteristics.cpp"
+  "${ARDUINO_BLE_PATH}/src/local/BLELocalAttribute.cpp"
+  "${ARDUINO_BLE_PATH}/src/local/BLELocalCharacteristic.cpp"
+  "${ARDUINO_BLE_PATH}/src/local/BLELocalDescriptor.cpp"
+  "${ARDUINO_BLE_PATH}/src/local/BLELocalDevice.cpp"
+  "${ARDUINO_BLE_PATH}/src/local/BLELocalService.cpp"
+  "${ARDUINO_BLE_PATH}/src/remote/BLERemoteAttribute.cpp"
+  "${ARDUINO_BLE_PATH}/src/remote/BLERemoteCharacteristic.cpp"
+  "${ARDUINO_BLE_PATH}/src/remote/BLERemoteDescriptor.cpp"
+  "${ARDUINO_BLE_PATH}/src/remote/BLERemoteDevice.cpp"
+  "${ARDUINO_BLE_PATH}/src/remote/BLERemoteService.cpp"
+  "${ARDUINO_BLE_PATH}/src/utility/ATT.cpp"
+  "${ARDUINO_BLE_PATH}/src/utility/BLEHostAlloc.cpp"
+  "${ARDUINO_BLE_PATH}/src/utility/BLEUuid.cpp"
+  "${ARDUINO_BLE_PATH}/src/utility/GAP.cpp"
+  "${ARDUINO_BLE_PATH}/src/utility/GATT.cpp"
+  "${ARDUINO_BLE_PATH}/src/utility/HCI.cpp"
+  "${ARDUINO_BLE_PATH}/src/utility/HCIVirtualTransport.cpp"
+  "${ARDUINO_BLE_PATH}/src/utility/L2CAPSignaling.cpp"
+  "${ARDUINO_BLE_PATH}/src/utility/bitDescriptions.cpp"
+  "${ARDUINO_BLE_PATH}/src/utility/btct.cpp"
+  "${ARDUINO_BLE_PATH}/src/utility/keyDistribution.cpp"
+)
 
 idf_component_register(
   SRCS ${ARDUINO_BLE_SRCS}
@@ -23,5 +49,6 @@ idf_component_register(
     "${ARDUINO_BLE_PATH}/src/local"
     "${ARDUINO_BLE_PATH}/src/remote"
     "${ARDUINO_BLE_PATH}/src/utility"
-  REQUIRES arduino-esp32 bt nvs_flash
+  REQUIRES arduino-esp32
+  PRIV_REQUIRES bt nvs_flash
 )

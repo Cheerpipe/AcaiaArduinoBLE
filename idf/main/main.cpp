@@ -19,4 +19,5 @@ extern "C" void shotstopperKeepBssProbe(void) {
   g_probe[0] = static_cast<uint8_t>(g_probe[0] + 1U);
 }
 
-#include "shotStopper.ino"
+// Application setup()/loop() live in the shotStopper component
+// (shotStopper/shotStopper.cpp), started by CONFIG_AUTOSTART_ARDUINO.

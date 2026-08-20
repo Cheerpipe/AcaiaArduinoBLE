@@ -15,8 +15,8 @@ usage() {
 Uso: ./scripts/flash-idf [flags]
 
 Flashea por USB el binario ESP-IDF ya compilado desde build-idf/<arquitectura>.
-No recompila y no abre el monitor. Esto pisa el firmware de producción hasta
-que vuelvas a flashear con ./scripts/flash.
+No recompila y no abre el monitor. Esta es la vía oficial de carga por USB
+(sustituye el firmware actualmente en el dispositivo).
 
 Parámetros que necesita: --port y --arch.
 

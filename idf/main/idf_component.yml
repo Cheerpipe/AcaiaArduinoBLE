@@ -1,4 +1,8 @@
 ## IDF Component Manager Manifest File
+## Pin exact Arduino-ESP32 release for reproducible builds (see dependencies.lock).
+## Transitive managed_components (esp-sr, Zigbee, RainMaker, …) are still
+## downloaded by arduino-esp32's manifest; selective compilation keeps them
+## out of the link. Do not delete dependencies.lock from version control.
 dependencies:
   espressif/arduino-esp32:
-    version: "^3.3.11"
+    version: "==3.3.11"

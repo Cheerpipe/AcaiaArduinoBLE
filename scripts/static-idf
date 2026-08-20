@@ -98,10 +98,10 @@ cppcheck \
   --project="$compile_commands" \
   --suppressions-list="$SUPPRESSIONS_FILE" \
   --file-filter='*/shotStopper/*.cpp' \
-  --file-filter='*/shotStopper/*.ino' \
   --file-filter='*/libraries/AcaiaArduinoBLE/*.cpp' \
   --file-filter='*/idf/main/*.cpp' \
   --file-filter='*/idf/components/AcaiaArduinoBLE/*.cpp' \
+  --file-filter='*/idf/components/shotStopper/*' \
   --enable=warning,performance,portability \
   --inconclusive \
   --error-exitcode=1 \

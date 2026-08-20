@@ -1,7 +1,7 @@
-# ESP-IDF build tree (generated). sdkconfig.defaults* are committed.
+# ESP-IDF build tree (generated). sdkconfig.defaults* and dependencies.lock
+# are committed for reproducible Component Manager resolution.
 build/
 managed_components/
-dependencies.lock
 sdkconfig
 sdkconfig.old
 third_party/

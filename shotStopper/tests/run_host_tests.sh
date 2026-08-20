@@ -16,7 +16,7 @@ remote_policy_binary=${TMPDIR:-/tmp}/shot_stopper_remote_policy_host_test
 ota_image_binary=${TMPDIR:-/tmp}/shot_stopper_ota_image_host_test
 ota_image_sanitized=${TMPDIR:-/tmp}/shot_stopper_ota_image_host_test_sanitized
 active_buzzer_binary=${TMPDIR:-/tmp}/shot_stopper_host_test_active_buzzer
-firmware_file="$test_dir/../shotStopper.ino"
+firmware_file="$test_dir/../shotStopper.cpp"
 ble_companion_file="$test_dir/../ShotStopperBleCompanion.h"
 cxx=${CXX:-c++}
 

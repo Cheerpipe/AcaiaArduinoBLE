@@ -1,0 +1,18 @@
+menu "Micra Shot Stopper"
+
+    config SHOT_STOPPER_ENABLE_REMOTE_CN9
+        bool "Enable remote CN9 control path"
+        default y
+        help
+            When enabled, compiles with SHOT_STOPPER_ENABLE_REMOTE_CN9=1.
+            Command-line -DSHOT_STOPPER_ENABLE_REMOTE_CN9=… still overrides.
+
+    config SHOT_STOPPER_ENABLE_BUZZER
+        int "Buzzer mode (0=off, 1=passive/open-drain, 2=active drive)"
+        range 0 2
+        default 2
+        help
+            Maps to the SHOT_STOPPER_ENABLE_BUZZER compile-time macro.
+            Command-line -DSHOT_STOPPER_ENABLE_BUZZER=… still overrides.
+
+endmenu
