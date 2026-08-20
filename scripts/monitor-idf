@@ -12,17 +12,17 @@ source "$SCRIPT_DIR/shotstopper_idf.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/monitor-idf [flags]
+Usage: ./scripts/monitor-idf [flags]
 
-Inicia el monitor serie de ESP-IDF. Si .shotstopper (o --arch) tiene una
-arquitectura, usa el ELF de build-idf/<arquitectura> para decodificar
-backtraces. Salir: Ctrl+].
+Start the ESP-IDF serial monitor. If .shotstopper (or --arch) has an
+architecture, use the ELF from build-idf/<architecture> to decode backtraces.
+Exit: Ctrl+].
 
-Parámetros que necesita: --port y --speed.
+Required parameters: --port and --speed.
 
 $(ss_flag_help)
 
-Ejemplos:
+Examples:
   ./scripts/monitor-idf --port /dev/cu.usbmodem2101 --speed 115200
   ./scripts/monitor-idf -p /dev/cu.usbmodem2101 -s 115200
 EOF
@@ -44,7 +44,7 @@ speed="$(ss_get speed)"
 # Persist before exec: the monitor runs until the user stops it.
 ss_cli_save
 
-echo "Monitor serie en $port ($speed)"
+echo "Serial monitor on $port ($speed)"
 if ss_is_set arch; then
   shotstopper_resolve_board "$(ss_get arch)" || exit 2
   ss_idf_py_args

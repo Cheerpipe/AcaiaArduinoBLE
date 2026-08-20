@@ -86,43 +86,42 @@ function inspectImage(filePath) {
   const buffer = fs.readFileSync(filePath);
   const problems = [];
   if (buffer.length < APP_DESC_OFFSET + 256) {
-    problems.push('el archivo es demasiado corto para ser una imagen de aplicación');
+    problems.push('file is too short to be an application image');
     return {problems, buffer};
   }
   if (buffer[0] !== ESP_IMAGE_MAGIC) {
-    problems.push(`falta la magia 0xE9 de imagen ESP (byte 0 = 0x${
+    problems.push(`missing ESP image magic 0xE9 (byte 0 = 0x${
         buffer[0].toString(16)})`);
   }
   const chipId = buffer.readUInt16LE(12);
   if (chipId !== ESP_CHIP_ID_ESP32S3) {
-    problems.push(`chip incorrecto: 0x${chipId.toString(16).padStart(4, '0')} (se espera ESP32-S3 0x0009)`);
+    problems.push(`wrong chip: 0x${chipId.toString(16).padStart(4, '0')} (expected ESP32-S3 0x0009)`);
   }
   const descMagic = buffer.readUInt32LE(APP_DESC_OFFSET);
   if (descMagic !== APP_DESC_MAGIC) {
-    problems.push('el descriptor de aplicación no tiene la magia esperada');
+    problems.push('application descriptor does not have the expected magic');
   }
   const projectName =
       readCString(buffer, APP_DESC_PROJECT_NAME_OFFSET, 32);
   if (!EXPECTED_PROJECT_NAMES.has(projectName)) {
-    problems.push(`project_name inesperado: '${projectName}'`);
+    problems.push(`unexpected project_name: '${projectName}'`);
   }
   if (buffer[IMAGE_HASH_APPENDED_OFFSET] !== 1) {
     problems.push(
-        'la imagen no lleva SHA-256 al final, así que no se puede comprobar ' +
-        'que esté completa');
+        'image has no trailing SHA-256, so completeness cannot be checked');
   } else {
     const body = buffer.subarray(0, buffer.length - IMAGE_HASH_BYTES);
     const expected = buffer.subarray(buffer.length - IMAGE_HASH_BYTES);
     const actual = crypto.createHash('sha256').update(body).digest();
     if (!actual.equals(expected)) {
       problems.push(
-          'el SHA-256 final no coincide: la imagen está truncada o corrupta');
+          'trailing SHA-256 mismatch: image is truncated or corrupt');
     }
   }
   const tag = findImageTag(buffer);
   if (tag === null) {
     problems.push(
-        `no se encontró el marcador ${TAG_PREFIX}… (¿se compiló sin scripts/build?)`);
+        `marker ${TAG_PREFIX}… not found (built without scripts/build?)`);
   }
   return {problems, tag, sizeBytes: buffer.length, projectName};
 }
@@ -143,28 +142,28 @@ function main(argv) {
     } else if (!filePath) {
       filePath = arg;
     } else {
-      process.stderr.write(`Argumento inesperado: ${arg}\n`);
+      process.stderr.write(`Unexpected argument: ${arg}\n`);
       return 2;
     }
   }
   if (!filePath) {
     process.stderr.write(
-        'Uso: node scripts/image_tag.js <imagen.bin> [--expect-arch <arq>] [--json]\n');
+        'Usage: node scripts/image_tag.js <image.bin> [--expect-arch <arch>] [--json]\n');
     return 2;
   }
   if (!fs.existsSync(filePath)) {
-    process.stderr.write(`No existe ${filePath}\n`);
+    process.stderr.write(`${filePath} does not exist\n`);
     return 1;
   }
 
   const result = inspectImage(filePath);
   if (expectArch && result.tag && result.tag.arch !== expectArch) {
     result.problems.push(
-        `la imagen declara arch=${result.tag.arch} pero se esperaba ${expectArch}`);
+        `image declares arch=${result.tag.arch} but expected ${expectArch}`);
   }
 
   if (result.problems.length > 0) {
-    process.stderr.write(`Imagen no válida: ${filePath}\n`);
+    process.stderr.write(`Invalid image: ${filePath}\n`);
     for (const problem of result.problems) {
       process.stderr.write(`  - ${problem}\n`);
     }

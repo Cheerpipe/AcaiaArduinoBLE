@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build + OTA (ESP-IDF): compila y actualiza el controlador por Wi-Fi.
+# Build + OTA (ESP-IDF): compile and update the controller over Wi-Fi.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -10,18 +10,18 @@ source "$SCRIPT_DIR/shotstopper_cli.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/bo-idf [flags]
+Usage: ./scripts/bo-idf [flags]
 
-Ejecuta, en orden: build-idf y o-idf (ota-idf). No hace falta cable USB.
+Runs, in order: build-idf and o-idf (ota-idf). No USB cable required.
 
-Parámetros que necesita: --arch, --host y --token. --flags es opcional.
-El token es la contraseña del punto de acceso MicraShotStopperAP.
+Required parameters: --arch, --host, and --token. --flags is optional.
+The token is the MicraShotStopperAP SoftAP password.
 
 $(ss_flag_help)
 
 $(shotstopper_arch_help)
 
-Ejemplos:
+Examples:
   ./scripts/bo-idf --arch n16r8 --host 192.168.1.50
   ./scripts/bo-idf -a n8r4 -H 192.168.4.1
 EOF

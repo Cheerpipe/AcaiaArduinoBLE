@@ -12,19 +12,19 @@ source "$SCRIPT_DIR/shotstopper_idf.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/flash-idf [flags]
+Usage: ./scripts/flash-idf [flags]
 
-Flashea por USB el binario ESP-IDF ya compilado desde build-idf/<arquitectura>.
-No recompila y no abre el monitor. Esta es la vía oficial de carga por USB
-(sustituye el firmware actualmente en el dispositivo).
+Flash the already-built ESP-IDF binary from build-idf/<architecture> over USB.
+Does not recompile and does not open the monitor. This is the official USB
+flash path (replaces the firmware currently on the device).
 
-Parámetros que necesita: --port y --arch.
+Required parameters: --port and --arch.
 
 $(ss_flag_help)
 
 $(shotstopper_arch_help)
 
-Ejemplos:
+Examples:
   ./scripts/flash-idf --port /dev/cu.usbmodem2101 --arch n16r8
   ./scripts/flash-idf -p /dev/cu.usbmodem2101 -a n8r4
 EOF
@@ -45,7 +45,7 @@ ss_idf_require_image
 cd "$SS_CLI_ROOT"
 
 port="$(ss_get port)"
-echo "Flasheando $SHOTSTOPPER_ARCH por $port (IDF)"
+echo "Flashing $SHOTSTOPPER_ARCH via $port (IDF)"
 
 idf.py "${IDF_PY_ARGS[@]}" -p "$port" flash
 

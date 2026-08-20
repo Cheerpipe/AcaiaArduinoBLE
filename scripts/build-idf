@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Compile Shot Stopper with ESP-IDF (Arduino-ESP32 as a component) into
-# build-idf/<arquitectura>. This is the official supported firmware build.
+# build-idf/<architecture>. This is the official supported firmware build.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -13,24 +13,24 @@ source "$SCRIPT_DIR/shotstopper_idf.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/build-idf [flags]
+Usage: ./scripts/build-idf [flags]
 
-Compila Shot Stopper con ESP-IDF (vía oficial y soportada) y deja los
-artefactos en build-idf/<arquitectura>.
+Compile Shot Stopper with ESP-IDF (official supported path) and write artifacts
+to build-idf/<architecture>.
 
-Parámetros que necesita: --arch. --flags es opcional y se pregunta una vez.
+Required parameters: --arch. --flags is optional and prompted once.
 
 $(ss_flag_help)
 
 $(shotstopper_arch_help)
 
-Flags de compilación recomendados para desarrollo (Enter en el prompt):
+Recommended development compile flags (Enter at the prompt):
   $SS_CLI_DEFAULT_FLAGS
 
-Requiere ESP-IDF 5.5.x. Si IDF_PATH no está definido, se usa
-${IDF_DEFAULT_HOME} si existe.
+Requires ESP-IDF 5.5.x. If IDF_PATH is unset, ${IDF_DEFAULT_HOME} is used when
+it exists.
 
-Ejemplos:
+Examples:
   ./scripts/build-idf --arch n16r8
   ./scripts/build-idf -a n8r4 -f "-DSHOT_STOPPER_ENABLE_BUZZER=2"
 EOF
@@ -48,7 +48,7 @@ ss_idf_source
 ss_idf_py_args
 
 command -v node >/dev/null 2>&1 || {
-  echo "No se encontró node en PATH (necesario para el Web UI y el marcador OTA)." >&2
+  echo "node not found on PATH (needed for the Web UI and OTA marker)." >&2
   exit 127
 }
 
@@ -58,7 +58,7 @@ cd "$root"
 # GAP 40/20, OOM-safe discover, BLE host objects in PSRAM (ArduinoBLE 2.1.0).
 ss_idf_ensure_arduino_ble "$IDF_PROJECT/third_party/ArduinoBLE"
 
-echo "Compilando $SHOTSTOPPER_ARCH (IDF)"
+echo "Building $SHOTSTOPPER_ARCH (IDF)"
 ./scripts/gen_version.sh "$SHOTSTOPPER_ARCH"
 node ./scripts/gen_web_ui.js
 
@@ -75,12 +75,12 @@ if [[ -f "$IDF_BUILD_DIR/shotstopper_idf_spike.elf" ]] ||
    { [[ -f "$IDF_SDKCONFIG" ]] && ! grep -q '^CONFIG_AUTOSTART_ARDUINO=y$' "$IDF_SDKCONFIG"; } ||
    { [[ -f "$IDF_SDKCONFIG" ]] && ! grep -q '^CONFIG_SHOT_STOPPER_ENABLE_BUZZER=' "$IDF_SDKCONFIG"; } ||
    { [[ -f "$IDF_SDKCONFIG" ]] && ! grep -q '^CONFIG_LWIP_IPV6=y$' "$IDF_SDKCONFIG"; }; then
-  echo "Limpiando árbol de build IDF obsoleto"
+  echo "Cleaning stale IDF build tree"
   rm -rf "$IDF_BUILD_DIR"
   mkdir -p "$IDF_BUILD_DIR"
 fi
 
-echo "Compilando firmware IDF $SHOTSTOPPER_ARCH → $IDF_BUILD_DIR"
+echo "Building IDF firmware $SHOTSTOPPER_ARCH → $IDF_BUILD_DIR"
 
 if [[ ! -f "$IDF_SDKCONFIG" ]] ||
    ! grep -q '^CONFIG_IDF_TARGET="esp32s3"$' "$IDF_SDKCONFIG"; then

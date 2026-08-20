@@ -20,12 +20,12 @@ SHOTSTOPPER_SLOT_BYTES_N16R8=3145728
 
 shotstopper_arch_help() {
   cat <<'EOF'
-Arquitecturas admitidas (solo ESP32-S3 con PSRAM):
+Supported architectures (ESP32-S3 with PSRAM only):
   n8r4   ESP32-S3, 8 MB flash, 4 MB QSPI PSRAM
   n16r8  ESP32-S3, 16 MB flash, 8 MB OPI PSRAM
 
-Alias: esp32s3 y esp32s3-n16r8 → n16r8; esp32s3-n8r4 → n8r4.
-El ESP32 clásico y Nano ESP32 ya no están soportados.
+Aliases: esp32s3 and esp32s3-n16r8 → n16r8; esp32s3-n8r4 → n8r4.
+Classic ESP32 and Nano ESP32 are no longer supported.
 EOF
 }
 
@@ -60,12 +60,12 @@ shotstopper_resolve_board() {
       SHOTSTOPPER_SLOT_BYTES="$SHOTSTOPPER_SLOT_BYTES_N16R8"
       ;;
     esp32|esp32c3|nanoesp32|"")
-      echo "Arquitectura no admitida: ${arch:-<vacía>}." >&2
-      echo "Shot Stopper solo soporta ESP32-S3 con PSRAM (n8r4 o n16r8)." >&2
+      echo "Unsupported architecture: ${arch:-<empty>}." >&2
+      echo "Shot Stopper only supports ESP32-S3 with PSRAM (n8r4 or n16r8)." >&2
       return 2
       ;;
     *)
-      echo "Arquitectura no admitida: $arch (usa n8r4 o n16r8)." >&2
+      echo "Unsupported architecture: $arch (use n8r4 or n16r8)." >&2
       return 2
       ;;
   esac

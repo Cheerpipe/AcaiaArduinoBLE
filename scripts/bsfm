@@ -10,15 +10,15 @@ source "$SCRIPT_DIR/shotstopper_cli.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/bsfm [flags]
+Usage: ./scripts/bsfm [flags]
 
-Ejecuta, en orden: build, static, flash y monitor.
+Runs, in order: build, static, flash, and monitor.
 
-Parámetros que necesita: --port, --arch y --speed. --flags es opcional.
+Required parameters: --port, --arch, and --speed. --flags is optional.
 
 $(ss_flag_help)
 
-Ejemplos:
+Examples:
   ./scripts/bsfm --port /dev/cu.usbmodem2101 --arch n16r8 --speed 115200
   ./scripts/bsfm -p /dev/cu.usbmodem2101 -a n8r4 -s 115200
 EOF

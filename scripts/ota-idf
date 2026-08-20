@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Actualiza el firmware ESP-IDF del controlador por Wi-Fi, sin cable USB.
+# Update ESP-IDF controller firmware over Wi-Fi, without a USB cable.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -12,27 +12,26 @@ source "$SCRIPT_DIR/shotstopper_idf.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/ota-idf [flags]
+Usage: ./scripts/ota-idf [flags]
 
-Sube la imagen ESP-IDF ya compilada al controlador, la verifica y la deja
-arrancando.
+Upload the already-built ESP-IDF image to the controller, verify it, and leave
+it ready to boot.
 
-Parámetros que necesita: --arch, --host y --token.
-El token es la contraseña del punto de acceso MicraShotStopperAP. El
-controlador rechaza la actualización mientras esa contraseña siga siendo la de
-fábrica.
+Required parameters: --arch, --host, and --token.
+The token is the MicraShotStopperAP SoftAP password. The controller rejects
+updates while that password is still the factory default.
 
 $(ss_flag_help)
 
 $(shotstopper_arch_help)
 
-Ejemplos:
+Examples:
   ./scripts/ota-idf --arch n16r8 --host 192.168.1.50
-  ./scripts/ota-idf -a n16r8 -H 192.168.4.1 -t "mi-clave-del-AP"
+  ./scripts/ota-idf -a n16r8 -H 192.168.4.1 -t "my-AP-password"
 
-La imagen sale de build-idf/<arquitectura>/shotstopper.bin, así que primero hay
-que compilar (./scripts/build-idf / ./scripts/b-idf) o usar ./scripts/bo-idf,
-que hace las dos cosas. También puedes usar el alias corto ./scripts/o-idf.
+The image comes from build-idf/<architecture>/shotstopper.bin, so compile first
+(./scripts/build-idf / ./scripts/b-idf) or use ./scripts/bo-idf, which does both.
+You can also use the short alias ./scripts/o-idf.
 EOF
 }
 
@@ -48,7 +47,7 @@ ss_idf_resolve_paths
 
 for tool in curl node; do
   command -v "$tool" >/dev/null 2>&1 || {
-    echo "No se encontró $tool en PATH." >&2
+    echo "$tool not found on PATH." >&2
     exit 127
   }
 done
@@ -62,20 +61,20 @@ image="$IDF_IMAGE"
 host="$(ss_get host)"
 base="http://$host"
 
-# El controlador rechaza una imagen de otra placa, pero comprobarlo aquí evita
-# subir megabytes para nada y detecta un build-idf/ desactualizado.
-echo "Identidad de la imagen local:"
+# The controller rejects an image for another board, but checking here avoids
+# uploading megabytes for nothing and catches a stale build-idf/.
+echo "Local image identity:"
 node ./scripts/image_tag.js "$image" --expect-arch "$SHOTSTOPPER_ARCH"
 
-# El token viaja en un archivo de configuración de curl y no en la línea de
-# comandos, donde cualquier `ps` lo dejaría a la vista.
+# The token travels in a curl config file, not on the command line where any
+# `ps` would expose it.
 curl_config="$(mktemp "${TMPDIR:-/tmp}/shotstopper-ota.XXXXXX")"
 chmod 600 "$curl_config"
 cleanup() { rm -f "$curl_config" "${body_file:-}"; }
 trap cleanup EXIT
-# Dentro de las comillas de un archivo de configuración de curl, \ y " son
-# escapes. Una contraseña WPA2 puede contener ambos: sin escaparlos el token
-# viaja truncado y el controlador responde OTA_TOKEN_INVALID sin más pistas.
+# Inside curl config-file quotes, \ and " are escapes. A WPA2 password may
+# contain both: without escaping them the token arrives truncated and the
+# controller replies OTA_TOKEN_INVALID with no further clues.
 ota_token="$(ss_get token)"
 ota_token="${ota_token//\\/\\\\}"
 ota_token="${ota_token//\"/\\\"}"
@@ -84,16 +83,16 @@ unset ota_token
 
 body_file="$(mktemp "${TMPDIR:-/tmp}/shotstopper-ota-body.XXXXXX")"
 
-# ota_request <método> <ruta> <archivo-de-cuerpo|""> <timeout>
-# Deja el cuerpo de la respuesta en $body_file y el estado en $OTA_HTTP_STATUS.
+# ota_request <method> <path> <body-file|""> <timeout>
+# Leaves the response body in $body_file and the status in $OTA_HTTP_STATUS.
 ota_request() {
   local method="$1" path="$2" payload="$3" timeout="$4"
   local args=(--show-error --config "$curl_config"
               --max-time "$timeout" --output "$body_file"
               --write-out '%{http_code}' --request "$method")
   if [[ -n "$payload" ]]; then
-    # La barra de progreso reemplaza a --silent: una imagen tarda minutos y sin
-    # señal de avance parece un cuelgue.
+    # Progress bar replaces --silent: an image takes minutes and without
+    # progress it looks hung.
     args+=(--progress-bar
            --header "Content-Type: application/octet-stream"
            --data-binary "@$payload")
@@ -120,8 +119,8 @@ ota_fail() {
   local error message
   error="$(ota_field error)"
   message="$(ota_field message)"
-  printf '%s falló (HTTP %s).\n' "$action" "${OTA_HTTP_STATUS:-sin respuesta}" >&2
-  [[ -n "$error" ]] && printf 'Código: %s\n' "$error" >&2
+  printf '%s failed (HTTP %s).\n' "$action" "${OTA_HTTP_STATUS:-no response}" >&2
+  [[ -n "$error" ]] && printf 'Code: %s\n' "$error" >&2
   [[ -n "$message" ]] && printf '%s\n' "$message" >&2
   if [[ -z "$error" && -s "$body_file" ]]; then
     head -c 400 "$body_file" >&2
@@ -131,67 +130,67 @@ ota_fail() {
 }
 
 echo
-echo "Consultando $base ..."
+echo "Querying $base ..."
 ota_request GET /api/v1/ota "" 20 || {
-  echo "No se pudo contactar al controlador en $base." >&2
-  echo "Verifica la IP (Admin o Diagnostic del Web UI; en SoftAP es 192.168.4.1)." >&2
+  echo "Could not reach the controller at $base." >&2
+  echo "Check the IP (Admin or Diagnostic in the Web UI; SoftAP is 192.168.4.1)." >&2
   exit 1
 }
-[[ "$OTA_HTTP_STATUS" == "200" ]] || ota_fail "La consulta de estado"
+[[ "$OTA_HTTP_STATUS" == "200" ]] || ota_fail "Status query"
 
 if [[ "$(ota_field available)" != "true" ]]; then
-  echo "Este controlador no tiene una segunda partición de aplicación." >&2
-  echo "Hay que actualizarlo por USB." >&2
+  echo "This controller has no second application partition." >&2
+  echo "Update it over USB instead." >&2
   exit 1
 fi
-printf 'Controlador: %s · %s\n' "$(ota_field running.version)" "$(ota_field running.arch)"
+printf 'Controller: %s · %s\n' "$(ota_field running.version)" "$(ota_field running.arch)"
 if [[ "$(ota_field safe)" != "true" ]]; then
-  printf 'La máquina está ocupada (%s). Espera a Ready.\n' "$(ota_field lockReason)" >&2
+  printf 'Machine is busy (%s). Wait until Ready.\n' "$(ota_field lockReason)" >&2
   exit 1
 fi
 
 size="$(wc -c < "$image" | tr -d ' ')"
-printf 'Subiendo %s (%s KiB)...\n' "$image" "$((size / 1024))"
-# Ventana amplia: la escritura en flash del ESP32 marca el ritmo, no la red.
+printf 'Uploading %s (%s KiB)...\n' "$image" "$((size / 1024))"
+# Wide window: ESP32 flash write sets the pace, not the network.
 ota_request POST /api/v1/ota "$image" 900 || {
-  echo "Se cortó la subida. El firmware en ejecución no se tocó." >&2
+  echo "Upload was cut short. Running firmware was not touched." >&2
   exit 1
 }
-[[ "$OTA_HTTP_STATUS" == "200" ]] || ota_fail "La verificación de la imagen"
+[[ "$OTA_HTTP_STATUS" == "200" ]] || ota_fail "Image verification"
 
 staged_version="$(ota_field staged.version)"
 staged_arch="$(ota_field staged.arch)"
 if [[ -z "$staged_version" ]]; then
-  echo "El controlador no reportó una imagen verificada." >&2
+  echo "Controller did not report a verified image." >&2
   exit 1
 fi
-printf '\nImagen verificada: %s · %s\n' "$staged_version" "$staged_arch"
+printf '\nVerified image: %s · %s\n' "$staged_version" "$staged_arch"
 
 if ss_can_prompt; then
-  printf '¿Grabarla y reiniciar el controlador? [s/N]: ' > /dev/tty
+  printf 'Commit and reboot the controller? [y/N]: ' > /dev/tty
   IFS= read -r answer < /dev/tty || answer=""
   case "$answer" in
-    s|S|si|SI|Si|y|Y|yes|YES) ;;
+    y|Y|yes|YES) ;;
     *)
-      echo "Cancelado. Descartando la imagen del controlador."
+      echo "Cancelled. Discarding the image on the controller."
       ota_request POST /api/v1/ota/abort "" 20 || true
       exit 1
       ;;
   esac
 fi
 
-echo "Grabando..."
+echo "Committing..."
 ota_request POST /api/v1/ota/flash "" 30 || {
-  echo "No se pudo confirmar el cambio de partición de arranque." >&2
+  echo "Could not confirm the boot partition change." >&2
   exit 1
 }
-[[ "$OTA_HTTP_STATUS" == "202" ]] || ota_fail "La grabación"
+[[ "$OTA_HTTP_STATUS" == "202" ]] || ota_fail "Commit"
 
 cat <<EOF
 
-Listo. El controlador reinicia en cuanto la máquina esté libre.
-La nueva versión se confirma sola al servir su Web UI; si no lo consigue, el
-bootloader vuelve a la versión anterior.
+Done. The controller reboots once the machine is free.
+The new version confirms itself by serving its Web UI; if it cannot, the
+bootloader rolls back to the previous version.
 EOF
 
 ss_cli_save

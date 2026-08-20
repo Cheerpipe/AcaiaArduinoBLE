@@ -2,7 +2,7 @@
 # Shared ESP-IDF helpers. Source after shotstopper_board.sh and
 # shotstopper_cli.sh; do not execute this file directly.
 #
-# Official supported firmware builds write to build-idf/<arquitectura>.
+# Official supported firmware builds write to build-idf/<architecture>.
 # Legacy arduino-cli artifacts stay under build/ and are unsupported.
 
 IDF_PROJECT_NAME="shotstopper"
@@ -25,8 +25,8 @@ ss_idf_find() {
 ss_idf_source() {
   local idf_root
   idf_root="$(ss_idf_find)" || {
-    echo "No se encontró ESP-IDF (idf.py / export.sh)." >&2
-    echo "Instala 5.5.x y vuelve a ejecutar:" >&2
+    echo "ESP-IDF not found (idf.py / export.sh)." >&2
+    echo "Install 5.5.x and run again:" >&2
     echo "  mkdir -p \"\$HOME/esp\" && cd \"\$HOME/esp\"" >&2
     echo "  git clone -b v5.5.5 --recursive https://github.com/espressif/esp-idf.git" >&2
     echo "  cd esp-idf && ./install.sh esp32s3 && . ./export.sh" >&2
@@ -44,7 +44,7 @@ ss_idf_source() {
   # shellcheck disable=SC1091
   . "${idf_root}/export.sh"
   command -v idf.py >/dev/null 2>&1 || {
-    echo "export.sh de ${idf_root} no dejó idf.py en PATH." >&2
+    echo "export.sh from ${idf_root} did not put idf.py on PATH." >&2
     exit 127
   }
   ss_idf_require_version
@@ -65,13 +65,13 @@ ss_idf_require_version() {
   case "$ver" in
     5.5|5.5.*)
       if [[ "${SS_IDF_QUIET:-}" != "1" ]]; then
-        echo "ESP-IDF version: v${ver} (requerido: 5.5.x)"
+        echo "ESP-IDF version: v${ver} (required: 5.5.x)"
       fi
       ;;
     *)
-      echo "Se requiere ESP-IDF 5.5.x (proyecto validado con v5.5.5)." >&2
-      echo "Encontrado: ${ver_line:-desconocido} (parseado: ${ver:-ninguno})" >&2
-      echo "Instala o apunta IDF_PATH a v5.5.5:" >&2
+      echo "ESP-IDF 5.5.x is required (project validated with v5.5.5)." >&2
+      echo "Found: ${ver_line:-unknown} (parsed: ${ver:-none})" >&2
+      echo "Install or point IDF_PATH at v5.5.5:" >&2
       echo "  git clone -b v5.5.5 --recursive https://github.com/espressif/esp-idf.git" >&2
       exit 127
       ;;
@@ -108,19 +108,19 @@ ss_idf_ensure_arduino_ble() {
   if [[ ! -f "$dest/src/ArduinoBLE.h" ]]; then
     need_clone=1
   elif [[ -f "$props" ]] && ! grep -q "^version=${ARDUINO_BLE_VERSION}$" "$props"; then
-    echo "ArduinoBLE en $dest no es ${ARDUINO_BLE_VERSION}; se reclona." >&2
+    echo "ArduinoBLE at $dest is not ${ARDUINO_BLE_VERSION}; recloning." >&2
     rm -rf "$dest"
     need_clone=1
   fi
 
   if [[ "$need_clone" -eq 1 ]]; then
-    echo "Clonando ArduinoBLE ${ARDUINO_BLE_VERSION} → $dest"
+    echo "Cloning ArduinoBLE ${ARDUINO_BLE_VERSION} → $dest"
     mkdir -p "$(dirname "$dest")"
     git clone --depth 1 --branch "$ARDUINO_BLE_VERSION" "$ARDUINO_BLE_REPO" "$dest"
   fi
 
   if [[ ! -f "$props" ]] || ! grep -q "^version=${ARDUINO_BLE_VERSION}$" "$props"; then
-    echo "ArduinoBLE en $dest no declara version=${ARDUINO_BLE_VERSION}." >&2
+    echo "ArduinoBLE at $dest does not declare version=${ARDUINO_BLE_VERSION}." >&2
     exit 1
   fi
 
@@ -141,8 +141,8 @@ ss_idf_probe_in_psram() {
 ss_idf_require_image() {
   ss_idf_resolve_paths
   if [[ ! -f "$IDF_IMAGE" ]]; then
-    echo "No existe $IDF_IMAGE." >&2
-    echo "Compila primero: ./scripts/build-idf --arch $SHOTSTOPPER_ARCH" >&2
+    echo "$IDF_IMAGE does not exist." >&2
+    echo "Build first: ./scripts/build-idf --arch $SHOTSTOPPER_ARCH" >&2
     exit 1
   fi
 }
@@ -153,56 +153,56 @@ ss_idf_verify_firmware() {
   ss_idf_resolve_paths
 
   if [[ ! -f "$IDF_SDKCONFIG" ]]; then
-    echo "No existe $IDF_SDKCONFIG; la compilación IDF no dejó sdkconfig." >&2
+    echo "$IDF_SDKCONFIG does not exist; the IDF build left no sdkconfig." >&2
     exit 1
   fi
   if ! grep -q '^CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y$' "$IDF_SDKCONFIG"; then
-    echo "ALLOW_BSS no está activo en $IDF_SDKCONFIG." >&2
+    echo "ALLOW_BSS is not enabled in $IDF_SDKCONFIG." >&2
     grep 'SPIRAM_ALLOW_BSS' "$IDF_SDKCONFIG" >&2 || true
     exit 1
   fi
   echo "sdkconfig: CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y"
 
   if ! grep -q '^CONFIG_AUTOSTART_ARDUINO=y$' "$IDF_SDKCONFIG"; then
-    echo "CONFIG_AUTOSTART_ARDUINO no está activo en $IDF_SDKCONFIG." >&2
+    echo "CONFIG_AUTOSTART_ARDUINO is not enabled in $IDF_SDKCONFIG." >&2
     exit 1
   fi
   echo "sdkconfig: CONFIG_AUTOSTART_ARDUINO=y"
 
   if [[ ! -f "$IDF_ELF" ]]; then
-    echo "No existe $IDF_ELF." >&2
+    echo "$IDF_ELF does not exist." >&2
     exit 1
   fi
   command -v xtensa-esp32s3-elf-nm >/dev/null 2>&1 || {
-    echo "No se encontró xtensa-esp32s3-elf-nm (¿export.sh?)." >&2
+    echo "xtensa-esp32s3-elf-nm not found (did you run export.sh?)." >&2
     exit 127
   }
 
   local nm_line addr
   nm_line="$(xtensa-esp32s3-elf-nm "$IDF_ELF" | grep -E '[[:space:]]g_probe$|[[:space:]]_ZL[0-9]+g_probe$' || true)"
   if [[ -z "$nm_line" ]]; then
-    echo "nm no encontró g_probe en $IDF_ELF." >&2
+    echo "nm did not find g_probe in $IDF_ELF." >&2
     exit 1
   fi
   addr="0x$(printf '%s' "$nm_line" | awk '{print $1}')"
   echo "g_probe: $nm_line"
 
   if ss_idf_probe_in_psram "$addr"; then
-    echo "BSS probe en PSRAM ($addr). ALLOW_BSS funciona en este toolchain."
+    echo "BSS probe in PSRAM ($addr). ALLOW_BSS works with this toolchain."
   else
-    echo "BSS probe NO está en PSRAM ($addr). Se esperaba 0x3c.... DRAM interna es 0x3fc....." >&2
+    echo "BSS probe is NOT in PSRAM ($addr). Expected 0x3c.... Internal DRAM is 0x3fc....." >&2
     if [[ -f "$IDF_MAP" ]]; then
-      echo "Extracto del .map:" >&2
+      echo ".map excerpt:" >&2
       grep -n -A2 -E 'g_probe|ext_ram\.bss|extern_ram_seg' "$IDF_MAP" | head -40 >&2 || true
     fi
     exit 1
   fi
 
   if [[ ! -f "$IDF_IMAGE" ]]; then
-    echo "No existe $IDF_IMAGE, así que no se pudo verificar el" >&2
-    echo "marcador OTA. No subas por Wi-Fi una imagen sin verificar." >&2
+    echo "$IDF_IMAGE does not exist, so the OTA marker could not be verified." >&2
+    echo "Do not upload an unverified image over Wi-Fi." >&2
     exit 1
   fi
-  echo "Identidad OTA de la imagen:"
+  echo "Image OTA identity:"
   node "$SS_CLI_ROOT/scripts/image_tag.js" "$IDF_IMAGE" --expect-arch "$SHOTSTOPPER_ARCH"
 }

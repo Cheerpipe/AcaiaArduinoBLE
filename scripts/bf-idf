@@ -10,15 +10,15 @@ source "$SCRIPT_DIR/shotstopper_cli.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/bf-idf [flags]
+Usage: ./scripts/bf-idf [flags]
 
-Ejecuta, en orden: build-idf y flash-idf.
+Runs, in order: build-idf and flash-idf.
 
-Parámetros que necesita: --port y --arch. --flags es opcional.
+Required parameters: --port and --arch. --flags is optional.
 
 $(ss_flag_help)
 
-Ejemplos:
+Examples:
   ./scripts/bf-idf --port /dev/cu.usbmodem2101 --arch n16r8
   ./scripts/bf-idf -p /dev/cu.usbmodem2101 -a n8r4 -f "-DSHOT_STOPPER_ENABLE_BUZZER=1"
 EOF

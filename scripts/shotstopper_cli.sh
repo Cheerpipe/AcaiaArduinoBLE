@@ -96,22 +96,22 @@ ss_env_name() {
 
 ss_flag_help() {
   cat <<'EOF'
-Parámetros con nombre (largo y corto):
-  -p, --port <ruta>        Puerto serial, por ejemplo /dev/cu.usbmodem2101
-  -a, --arch <arq>         n8r4 | n16r8
-  -s, --speed <baudios>    Velocidad del monitor serie, por ejemplo 115200
-  -H, --host <ip|nombre>   Dirección del controlador para OTA
-  -t, --token <clave>      Token OTA (la contraseña del punto de acceso)
-  -f, --flags "<flags>"    Flags extra de compilación (una sola cadena)
-  -b, --build-dir <ruta>   Carpeta de compilación (solo static / static-idf)
-  -o, --output-dir <ruta>  Carpeta de reportes (solo static / static-idf)
-  -h, --help               Muestra esta ayuda
+Named parameters (long and short):
+  -p, --port <path>        Serial port, e.g. /dev/cu.usbmodem2101
+  -a, --arch <arch>        n8r4 | n16r8
+  -s, --speed <baud>       Serial monitor baud rate, e.g. 115200
+  -H, --host <ip|name>     Controller address for OTA
+  -t, --token <key>        OTA token (the SoftAP password)
+  -f, --flags "<flags>"    Extra compile flags (single string)
+  -b, --build-dir <path>   Build directory (static / static-idf only)
+  -o, --output-dir <path>  Reports directory (static / static-idf only)
+  -h, --help               Show this help
 
-Ningún script rellena en silencio lo que falte. Cada parámetro se toma del flag,
-de su variable de entorno, del archivo .shotstopper en la raíz del repositorio,
-o se pregunta. En la pregunta, Enter acepta el valor sugerido entre corchetes.
-Tras resolver los parámetros los valores usados quedan guardados en .shotstopper
-(el token OTA nunca se guarda ni se sugiere).
+No script silently fills in missing values. Each parameter comes from the flag,
+its environment variable, the .shotstopper file at the repository root, or a
+prompt. At the prompt, Enter accepts the suggested value in brackets.
+After resolving parameters, the values used are saved to .shotstopper
+(the OTA token is never saved or suggested).
 EOF
 }
 
@@ -146,21 +146,21 @@ ss_cli_parse() {
         return 0
         ;;
       -*)
-        printf 'Opción desconocida: %s\n\n' "$1" >&2
+        printf 'Unknown option: %s\n\n' "$1" >&2
         ss_flag_help >&2
         return 2
         ;;
       *)
-        printf 'Argumento posicional no admitido: %s\n' "$1" >&2
-        printf 'Los scripts ahora usan parámetros con nombre.\n' >&2
-        printf 'Por ejemplo: --port /dev/cu.usbmodem2101 --arch n16r8 --speed 115200\n\n' >&2
+        printf 'Positional argument not allowed: %s\n' "$1" >&2
+        printf 'Scripts now use named parameters.\n' >&2
+        printf 'For example: --port /dev/cu.usbmodem2101 --arch n16r8 --speed 115200\n\n' >&2
         ss_flag_help >&2
         return 2
         ;;
     esac
     shift
     if [[ $# -eq 0 ]]; then
-      printf 'Falta el valor de --%s.\n' "$key" >&2
+      printf 'Missing value for --%s.\n' "$key" >&2
       return 2
     fi
     value="$1"
@@ -267,12 +267,12 @@ ss_display_value() {
     if [[ -n "$value" ]]; then
       printf '********'
     else
-      printf '(vacío)'
+      printf '(empty)'
     fi
     return 0
   fi
   if [[ -z "$value" ]]; then
-    printf '(vacío)'
+    printf '(empty)'
   else
     printf '%s' "$value"
   fi
@@ -290,11 +290,11 @@ ss_cli_summary() {
       store) line_store="$line_store $key=$(ss_display_value "$key")" ;;
     esac
   done
-  [[ -n "$line_cli" ]] && printf 'Desde CLI:               %s\n' "${line_cli# }"
-  [[ -n "$line_env" ]] && printf 'Desde entorno:           %s\n' "${line_env# }"
-  [[ -n "$line_store" ]] && printf 'Guardados (.shotstopper):%s\n' "$line_store"
+  [[ -n "$line_cli" ]] && printf 'From CLI:                %s\n' "${line_cli# }"
+  [[ -n "$line_env" ]] && printf 'From environment:        %s\n' "${line_env# }"
+  [[ -n "$line_store" ]] && printf 'Stored (.shotstopper):  %s\n' "$line_store"
   if [[ -n "$missing" ]]; then
-    printf 'Faltan:                  %s\n' "$(printf '%s' "$missing" | tr ' ' ',' | sed 's/,/, /g')"
+    printf 'Missing:                 %s\n' "$(printf '%s' "$missing" | tr ' ' ',' | sed 's/,/, /g')"
   fi
   return 0
 }
@@ -306,14 +306,14 @@ ss_can_prompt() {
 
 ss_prompt_text() {
   case "$1" in
-    port) printf 'Puerto serial' ;;
-    arch) printf 'Arquitectura (n8r4 o n16r8)' ;;
-    speed) printf 'Velocidad del monitor' ;;
-    host) printf 'Dirección del controlador (IP o nombre)' ;;
-    token) printf 'Token OTA = contraseña del punto de acceso' ;;
-    flags) printf 'Flags extra de compilación' ;;
-    build_dir) printf 'Carpeta de compilación' ;;
-    output_dir) printf 'Carpeta de reportes' ;;
+    port) printf 'Serial port' ;;
+    arch) printf 'Architecture (n8r4 or n16r8)' ;;
+    speed) printf 'Monitor baud rate' ;;
+    host) printf 'Controller address (IP or hostname)' ;;
+    token) printf 'OTA token = SoftAP password' ;;
+    flags) printf 'Extra compile flags' ;;
+    build_dir) printf 'Build directory' ;;
+    output_dir) printf 'Reports directory' ;;
     *) printf '%s' "$1" ;;
   esac
 }
@@ -368,9 +368,9 @@ ss_prompt_hint() {
       if declare -f shotstopper_detect_ports >/dev/null 2>&1; then
         detected="$(shotstopper_detect_ports | tr '\n' ' ')" || detected=""
         if [[ -n "$detected" ]]; then
-          printf 'Puertos USB detectados: %s\n' "${detected% }" > /dev/tty
+          printf 'Detected USB ports: %s\n' "${detected% }" > /dev/tty
         else
-          printf 'No se detectó ningún /dev/cu.usbmodem<número> conectado.\n' > /dev/tty
+          printf 'No /dev/cu.usbmodem<number> device detected.\n' > /dev/tty
         fi
       fi
       ;;
@@ -414,26 +414,26 @@ ss_validate_key() {
     speed)
       case "$value" in
         ''|*[!0-9]*)
-          ss_cli_die "Velocidad inválida: '$value' (se esperan solo dígitos)."
+          ss_cli_die "Invalid baud rate: '$value' (digits only)."
           return 1
           ;;
       esac
       ;;
     host)
       if [[ -z "$value" ]]; then
-        ss_cli_die "El parámetro --host no puede quedar vacío."
+        ss_cli_die "Parameter --host cannot be empty."
         return 1
       fi
       case "$value" in
         *[[:space:]]*)
-          ss_cli_die "Host inválido: '$value' (no puede contener espacios)."
+          ss_cli_die "Invalid host: '$value' (must not contain spaces)."
           return 1
           ;;
       esac
       ;;
     port|token|build_dir|output_dir)
       if [[ -z "$value" ]]; then
-        ss_cli_die "El parámetro --$(printf '%s' "$key" | tr '_' '-') no puede quedar vacío."
+        ss_cli_die "Parameter --$(printf '%s' "$key" | tr '_' '-') cannot be empty."
         return 1
       fi
       ;;
@@ -476,7 +476,7 @@ ss_cli_resolve() {
   if [[ -n "$optional_missing" ]] && ss_can_prompt; then
     for key in $optional_missing; do
       ss_prompt_one "$key" || {
-        printf 'Lectura interrumpida.\n' >&2
+        printf 'Input interrupted.\n' >&2
         return 2
       }
     done
@@ -488,18 +488,18 @@ ss_cli_resolve() {
 
   if [[ -n "$missing" ]]; then
     if ! ss_can_prompt; then
-      printf '\nNo hay terminal interactiva para pedir: %s\n' "$missing" >&2
-      printf 'Pásalos como flags o guárdalos en %s.\n' "$SS_CLI_STORE" >&2
+      printf '\nNo interactive terminal to prompt for: %s\n' "$missing" >&2
+      printf 'Pass them as flags or save them in %s.\n' "$SS_CLI_STORE" >&2
       case " $missing " in
         *' host '*)
-          printf 'La IP aparece en Admin/Diagnostic del Web UI; en SoftAP es 192.168.4.1.\n' >&2
+          printf 'The IP appears under Admin/Diagnostic in the Web UI; on SoftAP it is 192.168.4.1.\n' >&2
           ;;
       esac
       return 2
     fi
     for key in $missing; do
       ss_prompt_one "$key" || {
-        printf 'Lectura interrumpida.\n' >&2
+        printf 'Input interrupted.\n' >&2
         return 2
       }
     done
@@ -519,8 +519,8 @@ ss_cli_save() {
   tmp="$(mktemp "$tmp")" || return 0
   chmod 600 "$tmp" 2>/dev/null || true
   {
-    printf '# Valores recordados por los scripts de Shot Stopper.\n'
-    printf '# Archivo local, ignorado por git. No guarda el token OTA.\n'
+    printf '# Values remembered by the Shot Stopper scripts.\n'
+    printf '# Local file, ignored by git. Does not store the OTA token.\n'
     for key in $SS_CLI_KEYS; do
       ss_is_transient "$key" && continue
       ss_is_secret "$key" && continue

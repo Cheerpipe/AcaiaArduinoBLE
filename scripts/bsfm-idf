@@ -10,15 +10,15 @@ source "$SCRIPT_DIR/shotstopper_cli.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/bsfm-idf [flags]
+Usage: ./scripts/bsfm-idf [flags]
 
-Ejecuta, en orden: build-idf, static-idf, flash-idf y monitor-idf.
+Runs, in order: build-idf, static-idf, flash-idf, and monitor-idf.
 
-Parámetros que necesita: --port, --arch y --speed. --flags es opcional.
+Required parameters: --port, --arch, and --speed. --flags is optional.
 
 $(ss_flag_help)
 
-Ejemplos:
+Examples:
   ./scripts/bsfm-idf --port /dev/cu.usbmodem2101 --arch n16r8 --speed 115200
   ./scripts/bsfm-idf -p /dev/cu.usbmodem2101 -a n8r4 -s 115200
 EOF

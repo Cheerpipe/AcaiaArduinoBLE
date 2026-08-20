@@ -10,15 +10,15 @@ source "$SCRIPT_DIR/shotstopper_cli.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/monitor [flags]
+Usage: ./scripts/monitor [flags]
 
-Inicia el monitor serie de Arduino CLI.
+Start the Arduino CLI serial monitor.
 
-Parámetros que necesita: --port y --speed.
+Required parameters: --port and --speed.
 
 $(ss_flag_help)
 
-Ejemplos:
+Examples:
   ./scripts/monitor --port /dev/cu.usbmodem2101 --speed 115200
   ./scripts/monitor -p /dev/cu.usbmodem2101 -s 115200
 EOF
@@ -33,7 +33,7 @@ fi
 ss_cli_resolve "port speed" || exit $?
 
 command -v arduino-cli >/dev/null 2>&1 || {
-  echo "No se encontró arduino-cli en PATH." >&2
+  echo "arduino-cli not found on PATH." >&2
   exit 127
 }
 
@@ -43,5 +43,5 @@ speed="$(ss_get speed)"
 # Persist before exec: the monitor runs until the user stops it.
 ss_cli_save
 
-echo "Monitor serie en $port ($speed)"
+echo "Serial monitor on $port ($speed)"
 exec arduino-cli monitor --port "$port" --config "baudrate=$speed"

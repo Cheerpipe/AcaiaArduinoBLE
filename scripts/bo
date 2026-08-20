@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build + OTA: compila y actualiza el controlador por Wi-Fi en un solo comando.
+# Build + OTA: compile and update the controller over Wi-Fi in one command.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -10,18 +10,18 @@ source "$SCRIPT_DIR/shotstopper_cli.sh"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/bo [flags]
+Usage: ./scripts/bo [flags]
 
-Ejecuta, en orden: build y o (ota). No hace falta cable USB.
+Runs, in order: build and o (ota). No USB cable required.
 
-Parámetros que necesita: --arch, --host y --token. --flags es opcional.
-El token es la contraseña del punto de acceso MicraShotStopperAP.
+Required parameters: --arch, --host, and --token. --flags is optional.
+The token is the MicraShotStopperAP SoftAP password.
 
 $(ss_flag_help)
 
 $(shotstopper_arch_help)
 
-Ejemplos:
+Examples:
   ./scripts/bo --arch n16r8 --host 192.168.1.50
   ./scripts/bo -a n8r4 -H 192.168.4.1
 EOF

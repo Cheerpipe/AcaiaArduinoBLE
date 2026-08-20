@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Compile Shot Stopper into build/<arquitectura>.
+# Compile Shot Stopper into build/<architecture>.
 # Legacy arduino-cli path — unsupported. Use ./scripts/build-idf for official builds.
 set -euo pipefail
 
@@ -16,21 +16,21 @@ readonly WARNING_FLAGS_ALL="-Wall -Wextra -Wno-missing-field-initializers"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/build [flags]
+Usage: ./scripts/build [flags]
 
-Compila Shot Stopper (legado arduino-cli, no soportado) y deja los artefactos
-en build/<arquitectura>. Preferir ./scripts/build-idf.
+Compile Shot Stopper (legacy arduino-cli, unsupported) and write artifacts to
+build/<architecture>. Prefer ./scripts/build-idf.
 
-Parámetros que necesita: --arch. --flags es opcional y se pregunta una vez.
+Required parameters: --arch. --flags is optional and prompted once.
 
 $(ss_flag_help)
 
 $(shotstopper_arch_help)
 
-Flags de compilación recomendados para desarrollo (Enter en el prompt):
+Recommended development compile flags (Enter at the prompt):
   $SS_CLI_DEFAULT_FLAGS
 
-Ejemplos:
+Examples:
   ./scripts/build --arch n16r8
   ./scripts/build -a n8r4 -f "-DSHOT_STOPPER_ENABLE_BUZZER=2"
 EOF
@@ -46,11 +46,11 @@ ss_cli_resolve "arch" "flags" || exit $?
 shotstopper_resolve_board "$(ss_get arch)"
 
 command -v arduino-cli >/dev/null 2>&1 || {
-  echo "No se encontró arduino-cli en PATH." >&2
+  echo "arduino-cli not found on PATH." >&2
   exit 127
 }
 command -v node >/dev/null 2>&1 || {
-  echo "No se encontró node en PATH (necesario para el Web UI y el marcador OTA)." >&2
+  echo "node not found on PATH (needed for the Web UI and OTA marker)." >&2
   exit 127
 }
 
@@ -60,7 +60,7 @@ cd "$root"
 # GAP 40/20, OOM-safe discover, BLE host objects in PSRAM (ArduinoBLE 2.1.0).
 ./scripts/patch_arduinoble.sh
 
-echo "Compilando $SHOTSTOPPER_ARCH"
+echo "Building $SHOTSTOPPER_ARCH"
 ./scripts/gen_version.sh "$SHOTSTOPPER_ARCH"
 node ./scripts/gen_web_ui.js
 rm -rf "$SHOTSTOPPER_BUILD_DIR"
@@ -79,11 +79,11 @@ arduino-cli compile \
 # somehow dropped it must fail here and not on the machine.
 image="$SHOTSTOPPER_BUILD_DIR/shotStopper.ino.bin"
 if [[ ! -f "$image" ]]; then
-  echo "La compilación no dejó $image, así que no se pudo verificar el" >&2
-  echo "marcador OTA. No subas por Wi-Fi una imagen sin verificar." >&2
+  echo "Build did not produce $image, so the OTA marker could not be verified." >&2
+  echo "Do not upload an unverified image over Wi-Fi." >&2
   exit 1
 fi
-echo "Identidad OTA de la imagen:"
+echo "Image OTA identity:"
 node ./scripts/image_tag.js "$image" --expect-arch "$SHOTSTOPPER_ARCH"
 
 ss_cli_save

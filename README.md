@@ -1105,77 +1105,76 @@ strings build-idf/n16r8/shotstopper.bin | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\+'
 
 ## Compile
 
-### Scripts de compilación, carga y monitor serie
+### Build, flash, and serial-monitor scripts
 
-Los scripts de `scripts/` simplifican el flujo habitual. **Ningún script rellena
-en silencio lo que falte**: cada parámetro se toma, en este orden, del flag con
-nombre, de su variable de entorno, del archivo `.shotstopper` en la raíz del
-repositorio, o se pregunta en la terminal. En la pregunta, **Enter acepta el
-valor sugerido** entre corchetes: puerto USB detectado (o `/dev/cu.usbmodem2101`),
-arquitectura `n16r8`, velocidad `115200`, host el último usado (o `192.168.4.1`),
-y los flags extra de desarrollo actuales (`-Werror=deprecated-copy`,
-`REMOTE_CN9`, buzzer activo). El **token OTA no se guarda ni se sugiere** — hay
-que pasarlo por flag o `SHOTSTOPPER_OTA_TOKEN` en cada actualización. Tras
-resolver los parámetros los demás valores quedan guardados, así que la segunda
-vez basta con `./scripts/bfm-idf`.
+The scripts under `scripts/` cover the usual workflow. **No script silently fills
+in missing values**: each parameter comes, in order, from a named flag, its
+environment variable, the `.shotstopper` file at the repository root, or an
+interactive prompt. At the prompt, **Enter accepts the suggested value** in
+brackets: detected USB port (or `/dev/cu.usbmodem2101`), architecture `n16r8`,
+baud `115200`, last-used host (or `192.168.4.1`), and the current development
+extra flags (`-Werror=deprecated-copy`, `REMOTE_CN9`, buzzer enabled). The
+**OTA token is never stored or suggested** — pass it via flag or
+`SHOTSTOPPER_OTA_TOKEN` on every update. After parameters resolve, the other
+values are saved, so the next run can be just `./scripts/bfm-idf`.
 
-**Vía oficial (ESP-IDF)** — escribe en `build-idf/<arquitectura>` (`shotstopper.bin`):
+**Official path (ESP-IDF)** — writes to `build-idf/<architecture>` (`shotstopper.bin`):
 
-| Script | Parámetros que necesita | Descripción |
+| Script | Required parameters | Description |
 | --- | --- | --- |
-| `./scripts/build-idf` (`b-idf`) | `--arch` (`--flags` opcional) | Genera la versión y el Web UI, compila con ESP-IDF y deja el resultado en `build-idf/<arquitectura>`. |
-| `./scripts/flash-idf` (`f-idf`) | `--port`, `--arch` | Flashea el binario existente de `build-idf/<arquitectura>`; no recompila ni abre el monitor. |
-| `./scripts/monitor-idf` (`m-idf`) | `--port`, `--speed` | Abre el monitor serie de IDF (Ctrl+] para salir). |
-| `./scripts/ota-idf` (`o-idf`) | `--arch`, `--host`, `--token` | Actualiza por Wi-Fi con el binario IDF ya compilado. |
-| `./scripts/static-idf` (`s-idf`) | `--arch` | Cppcheck sobre la compilation database de IDF. No compila. |
-| `./scripts/bf-idf` | `--port`, `--arch` | Wrapper: build-idf y flash-idf. |
-| `./scripts/bfm-idf` | `--port`, `--arch`, `--speed` | Wrapper: build-idf, flash-idf y monitor-idf. |
-| `./scripts/bo-idf` | `--arch`, `--host`, `--token` | Wrapper: build-idf y ota-idf. |
-| `./scripts/bsfm-idf` | `--port`, `--arch`, `--speed` | Wrapper: build-idf, static-idf, flash-idf y monitor-idf. Si el análisis encuentra diagnósticos, no flashea el firmware. |
-| `./scripts/gcc_analyzer` | `--arch` (`--flags` opcional) | Compila con GCC `-fanalyzer` y guarda el reporte en `reports/gcc-analyzer/`. |
+| `./scripts/build-idf` (`b-idf`) | `--arch` (`--flags` optional) | Generates version and Web UI, builds with ESP-IDF, writes to `build-idf/<architecture>`. |
+| `./scripts/flash-idf` (`f-idf`) | `--port`, `--arch` | Flashes the existing binary from `build-idf/<architecture>`; does not rebuild or open the monitor. |
+| `./scripts/monitor-idf` (`m-idf`) | `--port`, `--speed` | Opens the IDF serial monitor (Ctrl+] to exit). |
+| `./scripts/ota-idf` (`o-idf`) | `--arch`, `--host`, `--token` | Updates over Wi-Fi with the already-built IDF binary. |
+| `./scripts/static-idf` (`s-idf`) | `--arch` | Cppcheck against the IDF compilation database. Does not build. |
+| `./scripts/bf-idf` | `--port`, `--arch` | Wrapper: build-idf and flash-idf. |
+| `./scripts/bfm-idf` | `--port`, `--arch`, `--speed` | Wrapper: build-idf, flash-idf, and monitor-idf. |
+| `./scripts/bo-idf` | `--arch`, `--host`, `--token` | Wrapper: build-idf and ota-idf. |
+| `./scripts/bsfm-idf` | `--port`, `--arch`, `--speed` | Wrapper: build-idf, static-idf, flash-idf, and monitor-idf. If analysis finds diagnostics, it does not flash. |
+| `./scripts/gcc_analyzer` | `--arch` (`--flags` optional) | Builds with GCC `-fanalyzer` and writes the report under `reports/gcc-analyzer/`. |
 
-**Legado arduino-cli (no soportado)** — escribe en `build/<arquitectura>`; no usar para firmware de producción:
+**Legacy arduino-cli (unsupported)** — writes to `build/<architecture>`; do not use for production firmware:
 
-| Script | Parámetros que necesita | Descripción |
+| Script | Required parameters | Description |
 | --- | --- | --- |
-| `./scripts/build` (`b`) | `--arch` (`--flags` opcional) | Compila con arduino-cli → `build/<arquitectura>`. |
-| `./scripts/flash` / `monitor` / `ota` / `static` / `bf` / `bfm` / `bo` / `bsfm` (y cortos `f` / `m` / `o` / `s`) | (igual que antes) | Equivalentes legacy; preferir las variantes `*-idf`. |
+| `./scripts/build` (`b`) | `--arch` (`--flags` optional) | Builds with arduino-cli → `build/<architecture>`. |
+| `./scripts/flash` / `monitor` / `ota` / `static` / `bf` / `bfm` / `bo` / `bsfm` (and short aliases `f` / `m` / `o` / `s`) | (same as above) | Legacy equivalents; prefer the `*-idf` variants. |
 
-Parámetros con nombre, en forma larga y corta:
+Named parameters, long and short form:
 
-| Flag | Variable de entorno | Significado |
+| Flag | Environment variable | Meaning |
 | --- | --- | --- |
-| `-p`, `--port` | `SHOTSTOPPER_PORT` | Puerto serial, por ejemplo `/dev/cu.usbmodem2101`. |
-| `-a`, `--arch` | `SHOTSTOPPER_ARCH` | `n8r4` o `n16r8` (alias `esp32s3` → `n16r8`). |
-| `-s`, `--speed` | `SHOTSTOPPER_SPEED` | Velocidad del monitor serie, por ejemplo `115200`. |
-| `-H`, `--host` | `SHOTSTOPPER_HOST` | IP o nombre del controlador para OTA. |
-| `-t`, `--token` | `SHOTSTOPPER_OTA_TOKEN` | Token OTA: la contraseña del punto de acceso. |
-| `-f`, `--flags` | `SHOTSTOPPER_FLAGS` | Flags extra de compilación, en una sola cadena. |
-| `-b`, `--build-dir` | `SHOTSTOPPER_BUILD_DIR_OVERRIDE` | Carpeta de compilación (solo `static` legacy). |
-| `-o`, `--output-dir` | `SHOTSTOPPER_OUTPUT_DIR` | Carpeta de reportes (solo `static` / `static-idf`). |
-| `-h`, `--help` | — | Muestra la ayuda del script. |
+| `-p`, `--port` | `SHOTSTOPPER_PORT` | Serial port, e.g. `/dev/cu.usbmodem2101`. |
+| `-a`, `--arch` | `SHOTSTOPPER_ARCH` | `n8r4` or `n16r8` (alias `esp32s3` → `n16r8`). |
+| `-s`, `--speed` | `SHOTSTOPPER_SPEED` | Serial monitor baud rate, e.g. `115200`. |
+| `-H`, `--host` | `SHOTSTOPPER_HOST` | Controller IP or hostname for OTA. |
+| `-t`, `--token` | `SHOTSTOPPER_OTA_TOKEN` | OTA token: the SoftAP password. |
+| `-f`, `--flags` | `SHOTSTOPPER_FLAGS` | Extra compile flags, as a single string. |
+| `-b`, `--build-dir` | `SHOTSTOPPER_BUILD_DIR_OVERRIDE` | Build directory (`static` legacy only). |
+| `-o`, `--output-dir` | `SHOTSTOPPER_OUTPUT_DIR` | Reports directory (`static` / `static-idf` only). |
+| `-h`, `--help` | — | Show the script help. |
 
-El archivo `.shotstopper` se crea con permisos `600` y está en `.gitignore`.
-No persiste el token OTA. Para una terminal sin TTY (CI), define las
-variables de entorno o pasa los flags: si falta algo, el script termina con un
-error que nombra los parámetros que faltan en lugar de preguntar. Lo mismo
-ocurre con `SHOTSTOPPER_NONINTERACTIVE=1`.
+The `.shotstopper` file is created with mode `600` and is in `.gitignore`.
+It does not persist the OTA token. For a non-TTY terminal (CI), set the
+environment variables or pass flags: if anything is missing, the script exits
+with an error naming the missing parameters instead of prompting. The same
+applies with `SHOTSTOPPER_NONINTERACTIVE=1`.
 
 ```sh
-# Primera vez: pregunta lo que falte y lo recuerda
+# First run: prompts for what is missing and remembers it
 ./scripts/bfm-idf
 
-# Explícito
+# Explicit
 ./scripts/build-idf --arch n8r4 --flags "-DSHOT_STOPPER_ENABLE_BUZZER=1"
 ./scripts/flash-idf --port /dev/cu.usbmodem2101 --arch n8r4
 ./scripts/monitor-idf -p /dev/cu.usbmodem2101 -s 115200
 
-# Build, static, flash y monitor en una sola orden
+# Build, static, flash, and monitor in one command
 ./scripts/bsfm-idf -p /dev/cu.usbmodem2101 -a n8r4 -s 115200
 
-# Actualización por Wi-Fi, sin cable
+# Wi-Fi update, no cable
 ./scripts/bo-idf --arch n16r8 --host 192.168.1.50
-# OTA sin recompilar (imagen ya en build-idf/)
+# OTA without rebuilding (image already under build-idf/)
 ./scripts/o-idf --arch n16r8 --host 192.168.1.50
 
 ./scripts/build-idf --help

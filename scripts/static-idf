@@ -16,18 +16,18 @@ readonly SUPPRESSIONS_FILE="$ROOT/scripts/cppcheck-suppressions.txt"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/static-idf [flags]
+Usage: ./scripts/static-idf [flags]
 
-Ejecuta Cppcheck sobre una base de compilación ya generada por ESP-IDF.
-La carpeta de salida se borra y se recrea en cada ejecución. Este script nunca
-compila el firmware; ejecuta ./scripts/build-idf por separado primero.
+Run Cppcheck against a compilation database already produced by ESP-IDF.
+The output directory is deleted and recreated on every run. This script never
+builds the firmware; run ./scripts/build-idf separately first.
 
-Parámetros que necesita: --arch (de ahí sale build-idf/<arquitectura>).
---build-dir y --output-dir son anulaciones puntuales: no se guardan.
+Required parameters: --arch (implies build-idf/<architecture>).
+--build-dir and --output-dir are one-shot overrides: they are not persisted.
 
 $(ss_flag_help)
 
-Ejemplos:
+Examples:
   ./scripts/static-idf --arch n16r8
   ./scripts/static-idf -a n8r4 -o reports/analysis-idf-n8r4
 EOF
@@ -62,7 +62,7 @@ esac
 # Keep the destructive cleanup strictly inside the repository.
 case "$output_dir" in
   /*|*'..'*)
-    echo "La carpeta de salida debe ser una ruta relativa dentro del repositorio." >&2
+    echo "Output directory must be a relative path inside the repository." >&2
     exit 2
     ;;
 esac
@@ -71,19 +71,19 @@ compile_commands="$build_path/compile_commands.json"
 
 for tool in cppcheck; do
   command -v "$tool" >/dev/null 2>&1 || {
-    echo "No se encontró $tool en PATH." >&2
+    echo "$tool not found on PATH." >&2
     exit 127
   }
 done
 
 if [[ ! -f "$compile_commands" ]]; then
-  echo "No existe $compile_commands." >&2
-  echo "Compila primero la variante elegida (por ejemplo, ./scripts/build-idf --arch $SHOTSTOPPER_ARCH)." >&2
+  echo "$compile_commands does not exist." >&2
+  echo "Build the chosen variant first (e.g. ./scripts/build-idf --arch $SHOTSTOPPER_ARCH)." >&2
   exit 1
 fi
 
 if [[ ! -f "$SUPPRESSIONS_FILE" ]]; then
-  echo "No existe el archivo de supresiones $SUPPRESSIONS_FILE." >&2
+  echo "Suppressions file $SUPPRESSIONS_FILE does not exist." >&2
   exit 1
 fi
 
@@ -93,7 +93,7 @@ mkdir -p "$output_path"
 printf 'Build database: %s\n' "$compile_commands" > "$output_path/README.txt"
 printf 'Generated: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >> "$output_path/README.txt"
 
-echo "Ejecutando Cppcheck sobre $build_dir..."
+echo "Running Cppcheck on $build_dir..."
 cppcheck \
   --project="$compile_commands" \
   --suppressions-list="$SUPPRESSIONS_FILE" \
@@ -110,9 +110,9 @@ cppcheck_status=${PIPESTATUS[0]}
 
 printf '\nCppcheck exit status: %d\n' "$cppcheck_status" | tee -a "$output_path/README.txt"
 
-echo "Reportes guardados en $output_dir/"
+echo "Reports saved under $output_dir/"
 if [[ $cppcheck_status -ne 0 ]]; then
-  echo "El análisis terminó con diagnósticos o un error; revisa los reportes." >&2
+  echo "Analysis finished with diagnostics or an error; check the reports." >&2
   exit 1
 fi
 

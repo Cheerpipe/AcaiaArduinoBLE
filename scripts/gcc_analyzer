@@ -13,21 +13,20 @@ readonly OUTPUT_DIR="reports/gcc-analyzer"
 
 usage() {
   cat <<EOF
-Uso: ./scripts/gcc_analyzer [flags]
+Usage: ./scripts/gcc_analyzer [flags]
 
-Compila Shot Stopper con GCC -fanalyzer y guarda el resultado filtrado en
-reports/gcc-analyzer/gcc-analyzer.txt. Reemplaza el reporte anterior.
-El registro completo de compilación queda en gcc-analyzer-raw.txt; el reporte
-principal conserva únicamente diagnósticos cuya ubicación inicial es código
-versionado en este repositorio.
+Build Shot Stopper with GCC -fanalyzer and save the filtered result to
+reports/gcc-analyzer/gcc-analyzer.txt. Replaces the previous report.
+The full compile log is kept in gcc-analyzer-raw.txt; the main report keeps
+only diagnostics whose primary location is versioned code in this repository.
 
-Parámetros que necesita: --arch. --flags es opcional y se añade al análisis.
+Required parameters: --arch. --flags is optional and appended to the analysis.
 
 $(ss_flag_help)
 
 $(shotstopper_arch_help)
 
-Ejemplos:
+Examples:
   ./scripts/gcc_analyzer --arch n16r8
   ./scripts/gcc_analyzer -a n8r4 -f "-DSHOT_STOPPER_ENABLE_BUZZER=1"
 EOF
@@ -49,7 +48,7 @@ output_path="$ROOT/$OUTPUT_DIR"
 rm -rf "$output_path"
 mkdir -p "$output_path"
 
-echo "Ejecutando GCC -fanalyzer para $SHOTSTOPPER_ARCH..."
+echo "Running GCC -fanalyzer for $SHOTSTOPPER_ARCH..."
 # -fanalyzer is a tool flag, not a user preference: passing it through
 # ./scripts/build would persist it into .shotstopper and every later compile.
 user_flags="$(ss_get flags)"
@@ -69,13 +68,13 @@ if [[ $build_status -ne 0 ]]; then
   cat "$raw_report" >&2
   printf 'Architecture: %s\nGCC analyzer exit status: %d\n' \
     "$SHOTSTOPPER_ARCH" "$build_status" > "$output_path/README.txt"
-  echo "La compilación falló; registro guardado en $OUTPUT_DIR/gcc-analyzer-raw.txt" >&2
+  echo "Build failed; log saved under $OUTPUT_DIR/gcc-analyzer-raw.txt" >&2
   exit "$build_status"
 fi
 
-# GCC analiza también las librerías instaladas transitivamente. Conservamos el
-# bloque de cada advertencia solo cuando su ubicación principal pertenece al
-# repositorio; las trazas asociadas se mantienen para que el diagnóstico sirva.
+# GCC also analyzes transitively installed libraries. Keep each warning block
+# only when its primary location belongs to the repository; associated traces
+# are retained so the diagnostic remains useful.
 awk -v root="$ROOT/" '
   /^[^:]+:[0-9]+:[0-9]+: (warning|error):/ {
     if ($0 ~ /\[-Wanalyzer-/) {
@@ -97,5 +96,5 @@ fi
 printf 'Architecture: %s\nGCC analyzer exit status: %d\n' \
   "$SHOTSTOPPER_ARCH" "$analyzer_status" > "$output_path/README.txt"
 
-echo "Reporte guardado en $OUTPUT_DIR/"
+echo "Report saved under $OUTPUT_DIR/"
 exit "$analyzer_status"
