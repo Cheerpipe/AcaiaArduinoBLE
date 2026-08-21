@@ -1,6 +1,7 @@
 #define SHOT_STOPPER_PERSISTENCE_HOST_TEST
 #include "../ShotStopperPersistence.h"
 #include "../ShotStopperBleCompanionPersistence.h"
+#include "../ShotStopperDurableStores.h"
 #include "../ShotStopperRecovery.h"
 #include "../ShotStopperRecoveryGesture.h"
 #include "../ShotStopperShotLog.h"
@@ -954,6 +955,228 @@ void p55_network_access_reset_preserves_non_network_settings() {
   CHECK(strcmp(reset.preferredScaleName, "Lunar") == 0);
 }
 
+void p56_decode_shot_log_v2_through_v7() {
+  ShotLogStore current = {};
+  resetShotLogStore(current, 4);
+  current.header.count = 1;
+  current.header.writeIndex = 1;
+  current.header.nextRecordId = 2;
+  current.records[0].id = 1;
+  current.records[0].bootId = 4;
+  current.records[0].goalWeightG = 36;
+  current.records[0].actualWeightCg = 3600;
+  current.records[0].actualWeightSource =
+      static_cast<uint8_t>(ActualWeightSource::POST_DRIP);
+  finalizeShotLogStore(current);
+  ShotLogStore decoded = {};
+  CHECK(decodeShotLogBlob(&current, sizeof(current), decoded) ==
+        ShotLogDecodeStatus::CURRENT);
+  CHECK(decoded.header.schemaVersion == SHOT_LOG_SCHEMA_VERSION);
+  CHECK(decoded.records[0].goalWeightG == 36);
+
+  ShotLogStore v6 = current;
+  v6.header.schemaVersion = SHOT_LOG_SCHEMA_VERSION_V6;
+  v6.records[0].actualWeightCg = SHOT_LOG_WEIGHT_MISSING_LEGACY;
+  v6.header.checksum = 0;
+  v6.header.checksum = shotLogChecksumBytes(v6.header);
+  CHECK(validShotLogStoreV6(v6));
+  decoded = ShotLogStore{};
+  CHECK(decodeShotLogBlob(&v6, sizeof(v6), decoded) ==
+        ShotLogDecodeStatus::MIGRATED);
+  CHECK(decoded.header.schemaVersion == SHOT_LOG_SCHEMA_VERSION);
+  CHECK(decoded.records[0].actualWeightCg == SHOT_LOG_WEIGHT_MISSING);
+
+  ShotLogStoreV5 v5 = {};
+  v5.header.bootId = 5;
+  v5.header.nextRecordId = 2;
+  v5.header.count = 1;
+  v5.header.writeIndex = 1;
+  v5.records[0].id = 1;
+  v5.records[0].bootId = 5;
+  v5.records[0].goalWeightG = 18;
+  v5.records[0].actualWeightCg = SHOT_LOG_WEIGHT_MISSING_LEGACY;
+  v5.header.magic = SHOT_LOG_MAGIC;
+  v5.header.schemaVersion = 5;
+  v5.header.recordSize = sizeof(ShotLogRecordV5);
+  v5.header.checksum = 0;
+  v5.header.checksum = shotLogChecksumBytes(v5.header);
+  decoded = ShotLogStore{};
+  CHECK(decodeShotLogBlob(&v5, sizeof(v5), decoded) ==
+        ShotLogDecodeStatus::MIGRATED);
+  CHECK(decoded.header.schemaVersion == SHOT_LOG_SCHEMA_VERSION);
+  CHECK(decoded.records[0].goalWeightG == 18);
+  CHECK(decoded.records[0].actualWeightCg == SHOT_LOG_WEIGHT_MISSING);
+
+  ShotLogStoreV4 v4 = {};
+  v4.header.bootId = 4;
+  v4.header.nextRecordId = 2;
+  v4.header.count = 1;
+  v4.header.writeIndex = 1;
+  v4.records[0].id = 1;
+  v4.records[0].goalWeightG = 20;
+  v4.records[0].actualWeightCg = 2000;
+  v4.header.magic = SHOT_LOG_MAGIC;
+  v4.header.schemaVersion = 4;
+  v4.header.recordSize = sizeof(ShotLogRecordV4);
+  v4.header.checksum = 0;
+  v4.header.checksum = shotLogChecksumBytes(v4.header);
+  decoded = ShotLogStore{};
+  CHECK(decodeShotLogBlob(&v4, sizeof(v4), decoded) ==
+        ShotLogDecodeStatus::MIGRATED);
+  CHECK(decoded.header.schemaVersion == SHOT_LOG_SCHEMA_VERSION);
+  CHECK(decoded.records[0].goalWeightG == 20);
+
+  ShotLogStoreV3 v3 = {};
+  v3.header.bootId = 3;
+  v3.header.nextRecordId = 2;
+  v3.header.count = 1;
+  v3.header.writeIndex = 1;
+  v3.records[0].id = 1;
+  v3.records[0].goalWeightG = 22;
+  v3.records[0].endedAtUnixSec = 1700000000;
+  finalizeShotLogStoreV3(v3);
+  decoded = ShotLogStore{};
+  CHECK(decodeShotLogBlob(&v3, sizeof(v3), decoded) ==
+        ShotLogDecodeStatus::MIGRATED);
+  CHECK(decoded.header.schemaVersion == SHOT_LOG_SCHEMA_VERSION);
+  CHECK(decoded.records[0].endedAtUnixSec == 1700000000);
+
+  ShotLogStoreV2 v2 = {};
+  v2.header.bootId = 2;
+  v2.header.nextRecordId = 2;
+  v2.header.count = 1;
+  v2.header.writeIndex = 1;
+  v2.records[0].id = 1;
+  v2.records[0].goalWeightG = 24;
+  v2.records[0].actualWeightCg = SHOT_LOG_WEIGHT_MISSING_LEGACY;
+  finalizeShotLogStoreV2(v2);
+  decoded = ShotLogStore{};
+  CHECK(decodeShotLogBlob(&v2, sizeof(v2), decoded) ==
+        ShotLogDecodeStatus::MIGRATED);
+  CHECK(decoded.header.schemaVersion == SHOT_LOG_SCHEMA_VERSION);
+  CHECK(decoded.records[0].goalWeightG == 24);
+  CHECK(decoded.records[0].actualWeightCg == SHOT_LOG_WEIGHT_MISSING);
+}
+
+void p57_load_rewrites_legacy_v5_shot_log_key() {
+  resetHostPersistence();
+  ShotLogStoreV5 v5 = {};
+  v5.header.bootId = 9;
+  v5.header.nextRecordId = 2;
+  v5.header.count = 1;
+  v5.header.writeIndex = 1;
+  v5.records[0].id = 1;
+  v5.records[0].bootId = 9;
+  v5.records[0].goalWeightG = 36;
+  v5.records[0].actualWeightCg = SHOT_LOG_WEIGHT_MISSING_LEGACY;
+  v5.header.magic = SHOT_LOG_MAGIC;
+  v5.header.schemaVersion = 5;
+  v5.header.recordSize = sizeof(ShotLogRecordV5);
+  v5.header.checksum = 0;
+  v5.header.checksum = shotLogChecksumBytes(v5.header);
+  persistence_host::putRaw("shotlog", "records", &v5, sizeof(v5));
+
+  ShotLog log;
+  CHECK(log.load());
+  CHECK(log.count() == 1);
+  ShotLogRecord out[1] = {};
+  CHECK(log.copyNewestFirst(out, 1) == 1);
+  CHECK(out[0].goalWeightG == 36);
+  CHECK(out[0].actualWeightCg == SHOT_LOG_WEIGHT_MISSING);
+  CHECK(persistence_host::records.count("shotlog/active") == 1);
+  CHECK(persistence_host::records.count("shotlog/records") == 0);
+}
+
+void p58_reset_all_durable_stores_and_mid_fail_keeps_settings() {
+  resetHostPersistence();
+  PersistedSettings settings;
+  CHECK(initializeDefaultSettings(settings));
+  settings.runtime.goalWeightG = 41;
+  finalizePersistedSettings(settings);
+  CHECK(savePersistedSettings(settings));
+
+  ShotLog log;
+  CHECK(log.load());
+  ShotLogRecord record = {};
+  record.durationDs = 250;
+  record.goalWeightG = 36;
+  record.actualWeightCg = 3600;
+  CHECK(log.append(record));
+
+  LastShotStore lastShot;
+  CHECK(lastShot.load());
+  PersistedLastShot shot = {};
+  shot.valid = true;
+  shot.cycleId = 3;
+  CHECK(lastShot.persist(shot));
+
+  BleCompanionPersistedSettings ble;
+  ble.enabled = 0;
+  CHECK(saveBleCompanionSettings(ble));
+
+  CHECK(resetAllDurableStores(settings, ble, log, lastShot));
+  CHECK(verifyFactorySettings(settings));
+  CHECK(log.count() == 0);
+  CHECK(!lastShot.get().valid);
+  CHECK(ble.enabled == 1);
+
+  settings.runtime.goalWeightG = 40;
+  finalizePersistedSettings(settings);
+  CHECK(savePersistedSettings(settings));
+  CHECK(log.append(record));
+  persistence_host::failNextWrite = true;
+  CHECK(!resetAllDurableStores(settings, ble, log, lastShot));
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(loaded.runtime.goalWeightG == 40);
+  ShotLog reloaded;
+  CHECK(reloaded.load());
+  CHECK(reloaded.count() == 1);
+}
+
+void p59_deferred_shot_log_append_writes_only_on_flush() {
+  resetHostPersistence();
+  ShotLog log;
+  CHECK(log.load());
+  ShotLogRecord record = {};
+  record.durationDs = 250;
+  record.goalWeightG = 36;
+  CHECK(log.append(record, false));
+  CHECK(log.dirty());
+  CHECK(log.count() == 1);
+  CHECK(persistence_host::records.count("shotlog/recordsA") == 0);
+  CHECK(persistence_host::records.count("shotlog/recordsB") == 0);
+  CHECK(persistence_host::records.count("shotlog/active") == 0);
+  CHECK(log.flush());
+  CHECK(!log.dirty());
+  CHECK(persistence_host::records.count("shotlog/active") == 1);
+  CHECK(persistence_host::records.count("shotlog/recordsA") +
+            persistence_host::records.count("shotlog/recordsB") ==
+        1);
+}
+
+void p60_factory_intent_survives_failed_store_reset() {
+  resetHostPersistence();
+  CHECK(saveRecoveryIntent(RecoveryOperation::FACTORY_RESET));
+  PersistedSettings settings;
+  CHECK(initializeDefaultSettings(settings));
+  settings.runtime.goalWeightG = 41;
+  finalizePersistedSettings(settings);
+  CHECK(savePersistedSettings(settings));
+  ShotLog log;
+  CHECK(log.load());
+  LastShotStore lastShot;
+  CHECK(lastShot.load());
+  BleCompanionPersistedSettings ble;
+  ble.enabled = 1;
+  persistence_host::failNextWrite = true;
+  CHECK(!resetAllDurableStores(settings, ble, log, lastShot));
+  RecoveryIntent intent;
+  CHECK(loadRecoveryIntent(intent));
+  CHECK(intent.operation ==
+        static_cast<uint8_t>(RecoveryOperation::FACTORY_RESET));
+}
+
 struct TestCase {
   const char *id;
   void (*function)();
@@ -993,6 +1216,11 @@ const TestCase tests[] = {
     {"P53", p53_recovery_boundaries_and_millis_wraparound},
     {"P54", p54_recovery_intent_round_trip_corruption_and_clear},
     {"P55", p55_network_access_reset_preserves_non_network_settings},
+    {"P56", p56_decode_shot_log_v2_through_v7},
+    {"P57", p57_load_rewrites_legacy_v5_shot_log_key},
+    {"P58", p58_reset_all_durable_stores_and_mid_fail_keeps_settings},
+    {"P59", p59_deferred_shot_log_append_writes_only_on_flush},
+    {"P60", p60_factory_intent_survives_failed_store_reset},
 };
 
 }  // namespace

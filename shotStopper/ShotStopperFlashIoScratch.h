@@ -15,8 +15,10 @@
 #if !defined(SHOT_STOPPER_HOST_TEST) &&                                        \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
 #include <esp_memory_utils.h>
+#include <esp_task_wdt.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <freertos/task.h>
 #endif
 
 namespace shotstopper {
@@ -26,6 +28,12 @@ namespace shotstopper {
 // call sites that reinterpret these bytes.
 constexpr size_t FLASH_IO_SCRATCH_BYTES = 2 * PERSISTED_SETTINGS_NVS_BUDGET;
 constexpr uint32_t FLASH_IO_LOCK_TIMEOUT_MS = 5000;
+// Control-loop NVS must fail fast: waiting the full durable timeout equals the
+// task watchdog budget and can panic mid-pour.
+constexpr uint32_t FLASH_IO_CONTROL_LOCK_TIMEOUT_MS = 50;
+
+static_assert(FLASH_IO_CONTROL_LOCK_TIMEOUT_MS < FLASH_IO_LOCK_TIMEOUT_MS,
+              "Control flash lock must be shorter than durable I/O");
 
 inline uint8_t *&flashIoScratchBlock() {
   static uint8_t *block = nullptr;
@@ -103,7 +111,38 @@ inline bool tryLockFlashIo(uint32_t = FLASH_IO_LOCK_TIMEOUT_MS) {
 inline void unlockFlashIo() {}
 #endif
 
+inline void yieldFlashIo() {
+#if !defined(SHOT_STOPPER_HOST_TEST) &&                                        \
+    !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
+  vTaskDelay(pdMS_TO_TICKS(1));
+#endif
+}
+
+inline void feedFlashIoWatchdog() {
+#if !defined(SHOT_STOPPER_HOST_TEST) &&                                        \
+    !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
+  (void)esp_task_wdt_reset();
+#endif
+}
+
 // Compatibility alias used by existing call sites.
 inline bool lockFlashIo() { return tryLockFlashIo(); }
+inline bool lockFlashIoForControl() {
+  return tryLockFlashIo(FLASH_IO_CONTROL_LOCK_TIMEOUT_MS);
+}
+
+// Preferences putBytes/getBytes must not touch PSRAM while flash cache is
+// off. Caller must already hold the flash I/O lock so the scratch exists.
+inline void *copyToFlashIoScratch(const void *source, size_t bytes) {
+  if (source == nullptr || bytes == 0 || bytes > FLASH_IO_SCRATCH_BYTES) {
+    return nullptr;
+  }
+  uint8_t *scratch = flashIoScratchBytes();
+  if (scratch == nullptr) {
+    return nullptr;
+  }
+  memcpy(scratch, source, bytes);
+  return scratch;
+}
 
 }  // namespace shotstopper

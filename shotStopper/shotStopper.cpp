@@ -26,6 +26,7 @@
 #include "ShotStopperNetwork.h"
 #include "ShotStopperOta.h"
 #include "ShotStopperPersistence.h"
+#include "ShotStopperDurableStores.h"
 #include "ShotStopperRecovery.h"
 #if __has_include(<esp_coexist.h>)
 #include <esp_coexist.h>
@@ -108,6 +109,9 @@ constexpr bool DEBUG = false;
 static_assert(SCALE_WORKER_STALE_MS > PADDLE_DEBOUNCE_MS &&
                   SCALE_WORKER_STALE_MS < HARD_MAX_CN9_CLOSED_MS,
               "Scale worker stale timeout must be useful and safety-bounded");
+static_assert(FLASH_IO_CONTROL_LOCK_TIMEOUT_MS * 20U <
+                  TASK_WATCHDOG_TIMEOUT_MS,
+              "Control flash lock must stay well under the task watchdog");
 
 // ---------------------------------------------------------------------------
 // Persistent storage and scale prediction
@@ -358,6 +362,7 @@ uint32_t lastReportedLogOverwritten = 0;
 ShotLog shotLog;
 LastShotStore lastShotStore;
 PersistedLastShot persistedLastShot;
+bool lastShotNvsDirty = false;
 
 bool noScaleShotGuardArmed = true;
 uint32_t noScaleShotGuardActivityAtMs = 0;
@@ -764,12 +769,32 @@ bool clearShotLog() {
 
 bool clearLastShot() {
   persistedLastShot = PersistedLastShot{};
+  lastShotNvsDirty = false;
   return lastShotStore.clear();
 }
 
+void clearLastShotSnapshot() {
+  persistedLastShot = PersistedLastShot{};
+  lastShotNvsDirty = false;
+}
+
+#ifndef SHOT_STOPPER_HOST_TEST
+bool resetAllDurableStoresForNetwork(PersistedSettings &settings) {
+  if (!resetAllDurableStores(settings, bleCompanionPersistedSettings, shotLog,
+                             lastShotStore)) {
+    return false;
+  }
+  // Status/UI read this snapshot, not LastShotStore. Drop it only after NVS
+  // factory succeeded so a failed reset does not blank a still-durable shot.
+  clearLastShotSnapshot();
+  return true;
+}
+#endif
+
 void persistLastShotSnapshot(const PersistedLastShot &snapshot) {
   persistedLastShot = snapshot;
-  (void)lastShotStore.persist(snapshot);
+  lastShotStore.adopt(snapshot);
+  lastShotNvsDirty = true;
 }
 
 void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
@@ -1625,7 +1650,7 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
     }
   }
 
-  if (!shotLog.append(record)) {
+  if (!shotLog.append(record, false)) {
     const size_t nextCount =
         shotLog.count() < SHOT_LOG_CAPACITY ? shotLog.count() + 1U
                                             : SHOT_LOG_CAPACITY;
@@ -4142,6 +4167,20 @@ bool dispatchSettingsPersist() {
 }
 #endif
 
+void serviceShotStorePersistence() {
+  if (session.active || getRelaySafetySnapshot().closed) {
+    return;
+  }
+  if (shotLog.dirty() && !shotLog.flush()) {
+    addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
+                  static_cast<int32_t>(shotLog.count()), 0);
+  }
+  if (lastShotNvsDirty &&
+      lastShotStore.save(FLASH_IO_CONTROL_LOCK_TIMEOUT_MS)) {
+    lastShotNvsDirty = false;
+  }
+}
+
 void serviceRuntimePersistence() {
 #ifndef SHOT_STOPPER_HOST_TEST
   serviceSettingsPersistResult();
@@ -5493,13 +5532,6 @@ void holdFailedBootRecovery() {
   }
 }
 
-bool verifyFactorySettings(const PersistedSettings &settings) {
-  return validPersistedSettings(settings) && !settings.staConfigured &&
-         !settings.lkgValid && passwordIsFactoryDefault(settings) &&
-         settings.preferredScaleMac[0] == '\0' &&
-         settings.preferredScaleName[0] == '\0';
-}
-
 bool applyBootRecoveryOperation(RecoveryOperation operation) {
   if (operation == RecoveryOperation::NETWORK_ACCESS_RESET) {
     return resetPersistedNetworkAccess(persistedSettings);
@@ -5508,28 +5540,7 @@ bool applyBootRecoveryOperation(RecoveryOperation operation) {
     return false;
   }
 
-  // All steps are idempotent. Clear independent stores first and publish the
-  // verified factory settings last. The durable intent remains until every
-  // store, including BLE Companion, has been verified.
-  if (!shotLog.clear() || !clearLastShot()) {
-    return false;
-  }
-  if (!resetPersistedSettingsToFactory(persistedSettings)) {
-    return false;
-  }
-  if (!resetBleCompanionSettings(bleCompanionPersistedSettings)) {
-    return false;
-  }
-
-  PersistedSettings verifiedSettings;
-  BleCompanionPersistedSettings verifiedBle;
-  const bool shotLogVerified = shotLog.load() && shotLog.count() == 0;
-  const bool lastShotVerified =
-      lastShotStore.load() && !lastShotStore.get().valid;
-  return loadPersistedSettings(verifiedSettings) &&
-         verifyFactorySettings(verifiedSettings) &&
-         loadBleCompanionSettings(verifiedBle) && verifiedBle.enabled == 1 &&
-         shotLogVerified && lastShotVerified;
+  return resetAllDurableStoresForNetwork(persistedSettings);
 }
 
 void completeBootRecovery(RecoveryOperation operation) {
@@ -5854,6 +5865,7 @@ void setup() {
     callbacks.deleteShotRecord = deleteShotRecord;
     callbacks.clearShotLog = clearShotLog;
     callbacks.clearLastShot = clearLastShot;
+    callbacks.resetAllDurableStores = resetAllDurableStoresForNetwork;
     callbacks.copyPreferredScaleMac = copyPreferredScaleMac;
     callbacks.copyPreferredScaleName = copyPreferredScaleName;
     callbacks.copyScaleHistory = copyScaleHistory;
@@ -6008,6 +6020,7 @@ void loop() {
   processWebCommands();
   serviceControlCommandResult();
   serviceRuntimePersistence();
+  serviceShotStorePersistence();
   servicePreferredScaleMacPersistence();
   serviceMaintenanceLease();
   {

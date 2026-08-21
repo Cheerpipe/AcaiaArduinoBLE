@@ -1,8 +1,8 @@
 #include "ShotStopperNetwork.h"
-#include "ShotStopperBleCompanionPersistence.h"
 #include "ShotStopperJsonArena.h"
 #include "ShotStopperOta.h"
 #include "ShotStopperPsram.h"
+#include "ShotStopperRecovery.h"
 #include "ShotStopperSerialCli.h"
 #include "ShotStopperVersion.h"
 #include "ShotStopperWatchdog.h"
@@ -756,11 +756,15 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
     return false;
   }
   new (workBuf_) NetworkWorkBuf{};
+  auto destroyWorkBuf = [&]() {
+    workBuf_->~NetworkWorkBuf();
+    heapCapsFree(workBuf_);
+    workBuf_ = nullptr;
+  };
   g_wifiApRecords = static_cast<wifi_ap_record_t *>(allocExternalOrInternal(
       sizeof(wifi_ap_record_t) * kWifiScanFetchMax));
   if (g_wifiApRecords == nullptr) {
-    heapCapsFree(workBuf_);
-    workBuf_ = nullptr;
+    destroyWorkBuf();
     vSemaphoreDelete(statusResponseMux_);
     statusResponseMux_ = nullptr;
     vQueueDelete(acceptedCommandQueue_);
@@ -788,8 +792,7 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
     g_work = nullptr;
     heapCapsFree(g_wifiApRecords);
     g_wifiApRecords = nullptr;
-    heapCapsFree(workBuf_);
-    workBuf_ = nullptr;
+    destroyWorkBuf();
     vSemaphoreDelete(statusResponseMux_);
     statusResponseMux_ = nullptr;
     vQueueDelete(acceptedCommandQueue_);
@@ -2340,26 +2343,22 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
       break;
 
     case WebCommandType::FACTORY_RESET:
-      if (!resetPersistedSettingsToFactory(next)) {
-        if (!otaRollbackRestartPending_) {
-          restartPending_ = false;
-        }
-        apRestartPending_ = false;
-        log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
+      if (callbacks_.resetAllDurableStores == nullptr) {
         return false;
       }
-      if (callbacks_.clearShotLog != nullptr) {
-        callbacks_.clearShotLog();
+      if (!saveRecoveryIntent(RecoveryOperation::FACTORY_RESET)) {
+        return false;
       }
-      if (callbacks_.clearLastShot != nullptr) {
-        callbacks_.clearLastShot();
-      }
-      {
-        BleCompanionPersistedSettings bleFactory{};
-        (void)resetBleCompanionSettings(bleFactory);
-      }
-      factoryReset = true;
       restartPending_ = true;
+      if (!callbacks_.resetAllDurableStores(next)) {
+        if (!otaRollbackRestartPending_) {
+          apRestartPending_ = false;
+        }
+        log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
+        break;
+      }
+      (void)clearRecoveryIntent();
+      factoryReset = true;
       log(DebugCategory::SECURITY, DebugCode::FACTORY_RESET);
       break;
 
@@ -3112,6 +3111,14 @@ bool ShotStopperNetwork::webUiConfigurationAllowed(
     return true;
   }
   return webUiOverrideAllowed(request);
+}
+
+bool ShotStopperNetwork::historyMutationAllowed(
+    httpd_req_t *request, const ControlStatusSnapshot &status) {
+  if (!controlAllowsHistoryMutation(status)) {
+    return false;
+  }
+  return webUiConfigurationAllowed(request, status);
 }
 
 void ShotStopperNetwork::clearWebUiOverrideIfSafe(
@@ -4183,7 +4190,7 @@ esp_err_t ShotStopperNetwork::shotsClearHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!self.webUiConfigurationAllowed(request, status)) {
+  if (!self.historyMutationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Stop the cycle, switch the physical paddle OFF, and wait for Ready before clearing shot history.");
@@ -4224,7 +4231,7 @@ esp_err_t ShotStopperNetwork::lastShotClearHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!self.webUiConfigurationAllowed(request, status)) {
+  if (!self.historyMutationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Stop the cycle, switch the physical paddle OFF, and wait for Ready before clearing the last shot.");
@@ -4265,7 +4272,7 @@ esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
-  if (!self.webUiConfigurationAllowed(request, status)) {
+  if (!self.historyMutationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                      "Stop the cycle, switch the physical paddle OFF, and wait for Ready before deleting shot records.");

@@ -3,7 +3,7 @@
 #include "ShotStopperDomain.h"
 #include "ShotStopperBleCompanion.h"
 #include "ShotStopperPersistence.h"
-#include "ShotStopperShotLog.h"
+#include "ShotStopperShotLogTypes.h"
 #include "ShotStopperTime.h"
 
 #include <WiFi.h>
@@ -128,6 +128,7 @@ struct NetworkBridgeCallbacks {
   bool (*deleteShotRecord)(uint32_t id) = nullptr;
   bool (*clearShotLog)() = nullptr;
   bool (*clearLastShot)() = nullptr;
+  bool (*resetAllDurableStores)(PersistedSettings &settings) = nullptr;
   // Keeps NVS Wi-Fi/runtime saves from overwriting a newer preferred scale MAC.
   void (*copyPreferredScaleMac)(char *out, size_t capacity) = nullptr;
   void (*copyPreferredScaleName)(char *out, size_t capacity) = nullptr;
@@ -379,6 +380,8 @@ class ShotStopperNetwork {
   bool webUiOverrideAllowed(httpd_req_t *request);
   bool webUiConfigurationAllowed(httpd_req_t *request,
                                  const ControlStatusSnapshot &status);
+  bool historyMutationAllowed(httpd_req_t *request,
+                              const ControlStatusSnapshot &status);
   void clearWebUiOverrideIfSafe(const ControlStatusSnapshot &status);
   static const char *stateLabel(StopperState state);
   static const char *controlSourceName(ControlSource source);

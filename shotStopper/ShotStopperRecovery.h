@@ -1,6 +1,8 @@
 #pragma once
 
-#include "ShotStopperPersistence.h"
+#include "ShotStopperDomain.h"
+#include "ShotStopperFlashIoScratch.h"
+#include "ShotStopperPreferences.h"
 
 #if !defined(SHOT_STOPPER_HOST_TEST) &&                                        \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
@@ -57,9 +59,13 @@ inline bool validRecoveryIntent(const RecoveryIntent &intent) {
 }
 
 inline bool loadRecoveryIntent(RecoveryIntent &intent) {
+  if (!lockFlashIo()) {
+    return false;
+  }
 #if defined(SHOT_STOPPER_HOST_TEST) || defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
   Preferences preferences;
   if (!preferences.begin(RECOVERY_NAMESPACE, true)) {
+    unlockFlashIo();
     return false;
   }
   const bool loaded =
@@ -68,40 +74,50 @@ inline bool loadRecoveryIntent(RecoveryIntent &intent) {
           sizeof(intent) &&
       validRecoveryIntent(intent);
   preferences.end();
+  unlockFlashIo();
   return loaded;
 #else
   // Read-only Preferences.begin() ESP_LOGEs when the namespace is absent.
   nvs_handle_t handle = 0;
   if (nvs_open(RECOVERY_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+    unlockFlashIo();
     return false;
   }
   size_t length = sizeof(intent);
   const esp_err_t err =
       nvs_get_blob(handle, RECOVERY_INTENT_KEY, &intent, &length);
   nvs_close(handle);
+  unlockFlashIo();
   return err == ESP_OK && length == sizeof(intent) &&
          validRecoveryIntent(intent);
 #endif
 }
 
 inline bool recoveryIntentRecordPresent() {
+  if (!lockFlashIo()) {
+    return false;
+  }
 #if defined(SHOT_STOPPER_HOST_TEST) || defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
   Preferences preferences;
   if (!preferences.begin(RECOVERY_NAMESPACE, true)) {
+    unlockFlashIo();
     return false;
   }
   const bool present = preferences.getBytesLength(RECOVERY_INTENT_KEY) != 0;
   preferences.end();
+  unlockFlashIo();
   return present;
 #else
   nvs_handle_t handle = 0;
   if (nvs_open(RECOVERY_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+    unlockFlashIo();
     return false;
   }
   size_t length = 0;
   const esp_err_t err =
       nvs_get_blob(handle, RECOVERY_INTENT_KEY, nullptr, &length);
   nvs_close(handle);
+  unlockFlashIo();
   return err == ESP_ERR_NVS_INVALID_LENGTH || (err == ESP_OK && length != 0);
 #endif
 }
@@ -114,12 +130,12 @@ inline bool saveRecoveryIntent(RecoveryOperation operation) {
   intent.operation = static_cast<uint8_t>(operation);
   finalizeRecoveryIntent(intent);
 
-  if (!lockSettingsNvs()) {
+  if (!lockFlashIo()) {
     return false;
   }
   Preferences preferences;
   if (!preferences.begin(RECOVERY_NAMESPACE, false)) {
-    unlockSettingsNvs();
+    unlockFlashIo();
     return false;
   }
   const bool written =
@@ -134,17 +150,17 @@ inline bool saveRecoveryIntent(RecoveryOperation operation) {
       validRecoveryIntent(verified) &&
       verified.operation == intent.operation;
   preferences.end();
-  unlockSettingsNvs();
+  unlockFlashIo();
   return saved;
 }
 
 inline bool clearRecoveryIntent() {
-  if (!lockSettingsNvs()) {
+  if (!lockFlashIo()) {
     return false;
   }
   Preferences preferences;
   if (!preferences.begin(RECOVERY_NAMESPACE, false)) {
-    unlockSettingsNvs();
+    unlockFlashIo();
     return false;
   }
   const bool absent = preferences.getBytesLength(RECOVERY_INTENT_KEY) == 0;
@@ -152,30 +168,8 @@ inline bool clearRecoveryIntent() {
   const bool verified =
       removed && preferences.getBytesLength(RECOVERY_INTENT_KEY) == 0;
   preferences.end();
-  unlockSettingsNvs();
+  unlockFlashIo();
   return verified;
-}
-
-inline bool resetPersistedNetworkAccess(PersistedSettings &settings) {
-  PersistedSettings candidate;
-  if (!loadPersistedSettings(candidate) &&
-      !initializeDefaultSettings(candidate)) {
-    return false;
-  }
-  clearStaNetwork(candidate);
-  if (!initializeDefaultAccessPointPassword(candidate) ||
-      !savePersistedSettings(candidate)) {
-    return false;
-  }
-  PersistedSettings verified;
-  if (!loadPersistedSettings(verified) || verified.staConfigured ||
-      verified.lkgValid ||
-      verified.staIpMode != static_cast<uint8_t>(StaIpMode::DHCP) ||
-      !passwordIsFactoryDefault(verified)) {
-    return false;
-  }
-  settings = verified;
-  return true;
 }
 
 }  // namespace shotstopper

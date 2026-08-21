@@ -33,7 +33,10 @@ inline uint8_t *jsonArenaStorage() {
 }
 
 inline void *jsonArenaMalloc(size_t size) {
-  if (size == 0) {
+  if (size == 0 || size > JSON_ARENA_CAPACITY) {
+    if (size > JSON_ARENA_CAPACITY) {
+      ++g_jsonArenaAllocFailures;
+    }
     return nullptr;
   }
   uint8_t *const storage = jsonArenaStorage();
@@ -42,7 +45,8 @@ inline void *jsonArenaMalloc(size_t size) {
     return nullptr;
   }
   const size_t aligned = (size + 7U) & ~size_t(7U);
-  if (g_jsonArenaUsed + aligned > JSON_ARENA_CAPACITY) {
+  if (g_jsonArenaUsed > JSON_ARENA_CAPACITY ||
+      aligned > JSON_ARENA_CAPACITY - g_jsonArenaUsed) {
     ++g_jsonArenaAllocFailures;
     return nullptr;
   }

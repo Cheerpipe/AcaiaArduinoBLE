@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ShotStopperNvsDualSlot.h"
 #include "ShotStopperPersistence.h"
 
 namespace shotstopper {
@@ -63,8 +64,12 @@ inline bool readBleCompanionSlot(Preferences &preferences, const char *key,
 
 inline bool loadBleCompanionSettings(
     BleCompanionPersistedSettings &settings) {
+  if (!lockSettingsNvs()) {
+    return false;
+  }
   Preferences preferences;
   if (!preferences.begin(SETTINGS_NAMESPACE, true)) {
+    unlockSettingsNvs();
     return false;
   }
   BleCompanionPersistedSettings first;
@@ -74,19 +79,18 @@ inline bool loadBleCompanionSettings(
   const bool secondValid =
       readBleCompanionSlot(preferences, BLE_COMPANION_SLOT_B, second);
   preferences.end();
-  if (!firstValid && !secondValid) {
-    return false;
-  }
-  if (!firstValid) {
+  const DualSlotChoice choice = chooseNewerRevision(
+      firstValid, first.revision, secondValid, second.revision);
+  bool loaded = false;
+  if (choice == DualSlotChoice::SECOND) {
     settings = second;
-  } else if (!secondValid) {
+    loaded = true;
+  } else if (choice == DualSlotChoice::FIRST) {
     settings = first;
-  } else if (static_cast<int32_t>(second.revision - first.revision) > 0) {
-    settings = second;
-  } else {
-    settings = first;
+    loaded = true;
   }
-  return true;
+  unlockSettingsNvs();
+  return loaded;
 }
 
 inline bool saveBleCompanionSettings(

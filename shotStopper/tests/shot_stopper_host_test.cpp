@@ -106,6 +106,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   runtimeConfig.scaleTimerStopExtraDelayMs = 0;
   lastCycle = LastCycleSummary{};
   persistedLastShot = PersistedLastShot{};
+  lastShotNvsDirty = false;
   lastShotStore.clear();
   noScaleShotGuardArmed = true;
   noScaleShotGuardActivityAtMs = 0;
@@ -3846,6 +3847,16 @@ void w62_local_buzzer_drive_matches_compile_flag() {
 #endif
 }
 
+void w39_history_mutation_blocked_while_brew_rf_active() {
+  ControlStatusSnapshot status;
+  CHECK(controlAllowsHistoryMutation(status));
+  status.activeCycle = true;
+  CHECK(!controlAllowsHistoryMutation(status));
+  status.activeCycle = false;
+  status.relayClosed = true;
+  CHECK(!controlAllowsHistoryMutation(status));
+}
+
 void w37_factory_reset_is_rejected_while_control_is_active() {
   resetHarness(false, false);
   reachReadyFromBoot();
@@ -5366,6 +5377,8 @@ void s17_new_cycle_commits_pending_log_as_last_known() {
   pendingFinalize.endedAtMs = hostMillis;
   startCycle();
   CHECK(!pendingFinalize.pending);
+  CHECK(session.active);
+  CHECK(shotLog.dirty());
   CHECK(shotLog.count() == 1);
   ShotLogRecord records[1] = {};
   CHECK(shotLog.copyNewestFirst(records, 1) == 1);
@@ -5459,6 +5472,19 @@ void s16_last_shot_clear_empties_snapshot() {
   CHECK(clearLastShot());
   CHECK(!persistedLastShot.valid);
   CHECK(!lastShotStore.get().valid);
+}
+
+void s16b_factory_reset_hides_last_shot_on_status() {
+  resetHarness(false, false);
+  persistedLastShot.valid = true;
+  persistedLastShot.cycleId = 11;
+  persistLastShotSnapshot(persistedLastShot);
+  CHECK(lastShotStore.clear());
+  clearLastShotSnapshot();
+  ControlStatusSnapshot status;
+  copyControlStatus(status);
+  CHECK(!persistedLastShot.valid);
+  CHECK(!status.lastShot.valid);
 }
 
 void s18_last_shot_keeps_no_scale_guard_from_cycle() {
@@ -7226,6 +7252,7 @@ const TestCase testCases[] = {
     {"W35", w35_status_reports_the_live_physical_paddle_gpio},
     {"W36", w36_paddle_return_reminder_beeps_at_configured_interval_only_while_open},
     {"W37", w37_factory_reset_is_rejected_while_control_is_active},
+    {"W39", w39_history_mutation_blocked_while_brew_rf_active},
     {"W38", w38_scale_connected_led_tracks_link_and_setting},
     {"W44", w44_paddle_return_reminder_stops_after_fifteen_minutes},
     {"W50", w50_local_buzzer_plays_triple_pattern_non_blocking},
@@ -7312,6 +7339,7 @@ const TestCase testCases[] = {
     {"S14", s14_last_shot_persists_every_cycle},
     {"S15", s15_last_shot_updates_weight_after_drip},
     {"S16", s16_last_shot_clear_empties_snapshot},
+    {"S16b", s16b_factory_reset_hides_last_shot_on_status},
     {"S18", s18_last_shot_keeps_no_scale_guard_from_cycle},
     {"S04", s04_shot_log_remove_by_id},
     {"S06", s06_shot_log_local_sec_from_utc},

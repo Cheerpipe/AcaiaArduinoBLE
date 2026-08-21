@@ -1650,6 +1650,12 @@ inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {
          !status.maintenanceLeaseActive;
 }
 
+// Shot-log / last-shot NVS. WebUI override may mutate config during a pour;
+// it must not disable flash cache while CN9 can be closed.
+inline bool controlAllowsHistoryMutation(const ControlStatusSnapshot &status) {
+  return !status.activeCycle && !status.relayClosed;
+}
+
 enum class DebugCategory : uint8_t {
   PADDLE,
   RELAY,

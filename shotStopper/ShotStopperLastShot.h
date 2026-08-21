@@ -1,13 +1,8 @@
 #pragma once
 
 #include "ShotStopperDomain.h"
-
-#if defined(SHOT_STOPPER_HOST_TEST)
-// State-machine host tests keep the last-shot snapshot in memory only.
-#elif !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
-#include <Preferences.h>
-#endif
-// Persistence host tests provide Preferences via persistence_host_stubs.h.
+#include "ShotStopperFlashIoScratch.h"
+#include "ShotStopperPreferences.h"
 
 namespace shotstopper {
 
@@ -42,6 +37,9 @@ inline bool validLastShotBlob(const LastShotBlob &blob) {
          blob.checksum == lastShotChecksum(blob);
 }
 
+static_assert(sizeof(LastShotBlob) <= FLASH_IO_SCRATCH_BYTES,
+              "LastShotBlob must fit in the internal flash I/O scratch");
+
 inline void resetLastShotBlob(LastShotBlob &blob) {
   blob = LastShotBlob{};
   finalizeLastShotBlob(blob);
@@ -61,15 +59,21 @@ class LastShotStore {
     }
     return true;
 #else
+    if (!lockFlashIo()) {
+      resetLastShotBlob(blob_);
+      return false;
+    }
     Preferences preferences;
     if (!preferences.begin(LAST_SHOT_NAMESPACE, true)) {
       resetLastShotBlob(blob_);
+      unlockFlashIo();
       return false;
     }
     LastShotBlob candidate = {};
     if (!preferences.isKey(LAST_SHOT_KEY)) {
       preferences.end();
       resetLastShotBlob(blob_);
+      unlockFlashIo();
       return true;
     }
     const size_t length = preferences.getBytesLength(LAST_SHOT_KEY);
@@ -85,30 +89,52 @@ class LastShotStore {
     if (!loaded) {
       resetLastShotBlob(blob_);
     }
+    unlockFlashIo();
     return true;
 #endif
   }
 
-  bool save() {
+  bool save(uint32_t lockTimeoutMs = FLASH_IO_LOCK_TIMEOUT_MS) {
     finalizeLastShotBlob(blob_);
 #if defined(SHOT_STOPPER_HOST_TEST)
+    (void)lockTimeoutMs;
     hostStorage_ = blob_;
     hostStorageValid_ = true;
     return true;
 #else
+    if (!tryLockFlashIo(lockTimeoutMs)) {
+      return false;
+    }
+    yieldFlashIo();
+    feedFlashIoWatchdog();
     Preferences preferences;
     if (!preferences.begin(LAST_SHOT_NAMESPACE, false)) {
+      unlockFlashIo();
+      return false;
+    }
+    void *nvsSource = copyToFlashIoScratch(&blob_, sizeof(blob_));
+    if (nvsSource == nullptr) {
+      preferences.end();
+      unlockFlashIo();
       return false;
     }
     const size_t written =
-        preferences.putBytes(LAST_SHOT_KEY, &blob_, sizeof(blob_));
+        preferences.putBytes(LAST_SHOT_KEY, nvsSource, sizeof(blob_));
     preferences.end();
+    yieldFlashIo();
+    feedFlashIoWatchdog();
+    unlockFlashIo();
     return written == sizeof(blob_);
 #endif
   }
 
-  bool persist(const PersistedLastShot &shot) {
+  void adopt(const PersistedLastShot &shot) {
     blob_.shot = shot;
+    finalizeLastShotBlob(blob_);
+  }
+
+  bool persist(const PersistedLastShot &shot) {
+    adopt(shot);
     return save();
   }
 

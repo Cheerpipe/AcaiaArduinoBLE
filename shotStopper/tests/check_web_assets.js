@@ -17,6 +17,9 @@ const firmware = [
   fs.readFileSync(path.join(sketchDir, 'ShotStopperScaleSense.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8'),
 ].join('\n');
+const shotLogIo = fs.readFileSync(path.join(sketchDir, 'ShotStopperShotLog.h'), 'utf8');
+const lastShotIo = fs.readFileSync(path.join(sketchDir, 'ShotStopperLastShot.h'), 'utf8');
+const jsonArena = fs.readFileSync(path.join(sketchDir, 'ShotStopperJsonArena.h'), 'utf8');
 const domainCore = fs.readFileSync(path.join(sketchDir, 'ShotStopperDomain.h'), 'utf8');
 const domain = [
   domainCore,
@@ -906,6 +909,18 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !network.includes('LAST_SHOT_CLEAR_NOT_CONFIRMED') ||
     !firmware.includes('persistLastShotFromEndedCycle') ||
     !firmware.includes('clearLastShot') ||
+    !firmware.includes('clearLastShotSnapshot') ||
+    !firmware.includes('serviceShotStorePersistence') ||
+    !shotLogIo.includes('copyToFlashIoScratch(&store_') ||
+    !lastShotIo.includes('copyToFlashIoScratch(&blob_') ||
+    !jsonArena.includes('size > JSON_ARENA_CAPACITY') ||
+    !network.includes('workBuf_->~NetworkWorkBuf()') ||
+    !firmware.includes('resetAllDurableStoresForNetwork') ||
+    !firmware.includes(
+        'return resetAllDurableStoresForNetwork(persistedSettings)') ||
+    !network.includes('historyMutationAllowed') ||
+    !network.includes('controlAllowsHistoryMutation') ||
+    (network.match(/historyMutationAllowed/g) || []).length < 4 ||
     ui.includes('id="view-presets"') ||
     ui.includes('data-route="/presets"') ||
     ui.includes('id="presetsPageCards"') ||
@@ -1096,7 +1111,8 @@ if (!ui.includes('id="factoryResetButton"') ||
     !ui.includes("confirm('Restore all factory settings?") ||
     !ui.includes("confirm:'ERASE_ALL_SETTINGS'") ||
     !network.includes('FACTORY_RESET_NOT_CONFIRMED') ||
-    !network.includes('resetPersistedSettingsToFactory(next)') ||
+    !network.includes('resetAllDurableStores(next)') ||
+    !network.includes('saveRecoveryIntent(RecoveryOperation::FACTORY_RESET)') ||
     !ui.includes('id="restartPanel"') ||
     html.indexOf('id="saveDateTimeButton"') > html.indexOf('id="restartPanel"') ||
     html.indexOf('id="restartPanel"') > html.indexOf('id="factoryResetButton"') ||

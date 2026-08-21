@@ -81,6 +81,18 @@ web/serial bridges, alerts, shot log, BLE worker. It:
 `RuntimeConfig` / NVS remains one composed blob in
 [`ShotStopperDomain.h`](../shotStopper/ShotStopperDomain.h) (schema unchanged).
 
+## Persistence
+
+NVS I/O, current-schema types, and migrations are separate:
+
+- Infra: flash lock/scratch, `chooseNewerRevision`, Preferences include.
+- Types: current shot-log schema and STA/LKG/AP field policy (no Preferences).
+- Migrate: `decodeShotLogBlob` (v2–v6) and recipe→bank. No NVS.
+- I/O: one header per store (settings, shot log, last-shot, BLE, recovery intent).
+- Fachada: `resetAllDurableStores` (boot recovery and Web factory reset).
+
+Machine / Scale / Brew do not include NVS I/O or `*Migrate.h`.
+
 ## Memory
 
 - No `new` / `malloc` in domain modules. State is file-scope BSS.
@@ -99,6 +111,11 @@ web/serial bridges, alerts, shot log, BLE worker. It:
 | `ShotStopperScaleTypes.h` / `ShotStopperScaleSense.h` | Scale types + detectors |
 | `ShotStopperBrewTypes.h` / `ShotStopperBrew.h` | Brew types + policy |
 | `ShotStopperDomain.h` | Compose + NVS/UI/debug leftovers |
+| `ShotStopperShotLogTypes.h` | Shot log schema 7 + domain helpers |
+| `ShotStopperShotLogMigrate.h` | Legacy v2–v6 + `decodeShotLogBlob` |
+| `ShotStopperShotLog.h` / `ShotStopperLastShot.h` | Shot log / last-shot NVS I/O |
+| `ShotStopperPersistence.h` | Settings blob NVS (dual-slot) |
+| `ShotStopperDurableStores.h` | Factory reset of every durable store |
 
 Implementation headers are included from `shotStopper.cpp` (single translation
 unit) so host tests that `#include` the firmware keep seeing the same BSS

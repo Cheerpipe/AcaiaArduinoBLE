@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ShotStopperScaleTypes.h"
-#include "ShotStopperShotLog.h"
+#include "ShotStopperShotLogTypes.h"
 
 // Scale sense: trajectory, first-drop / stable-cup / cup-removed detectors.
 // Predicts against a brew-injected target. No GPIO. No heap; trajectory is BSS.
