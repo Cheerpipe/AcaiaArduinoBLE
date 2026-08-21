@@ -210,6 +210,17 @@ if (navToggle) {
     setNav(!document.body.classList.contains('navOpen'));
   });
 }
+if (window.matchMedia) {
+  const desktopNav = window.matchMedia('(min-width: 700px)');
+  const closeDesktopNav = (e) => {
+    if (e.matches) setNav(false);
+  };
+  if (desktopNav.addEventListener) {
+    desktopNav.addEventListener('change', closeDesktopNav);
+  } else if (desktopNav.addListener) {
+    desktopNav.addListener(closeDesktopNav);
+  }
+}
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') setNav(false);
 });

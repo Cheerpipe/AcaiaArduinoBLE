@@ -121,6 +121,15 @@ if (css.includes('.brandLogo') || allHtml.includes('logo.svg') || allHtml.includ
 if (!css.includes('.brand') || !css.includes('inline-flex')) {
   throw new Error('Brand heading styles must remain for text-only branding');
 }
+if (!shellHtml.includes('class="pageNav"') ||
+    !shellHtml.includes('id="navToggle"') ||
+    shellHtml.indexOf('class="pageNav"') > shellHtml.indexOf('id="app"') ||
+    shellHtml.indexOf('class="topBar"') > shellHtml.indexOf('class="pageNav"') ||
+    !css.includes('@media(min-width:700px)') ||
+    !css.includes('.navToggle{display:none}') ||
+    !appJsSource.includes("matchMedia('(min-width: 700px)')")) {
+  throw new Error('Desktop Web UI must show a top nav instead of the hamburger');
+}
 if (!shellHtml.includes('type="module"') ||
     !shellHtml.includes('src="/app.js?v=__FW_VERSION__"') ||
     /<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(shellHtml)) {
@@ -817,7 +826,13 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('id="presetDupBtn"') ||
     ui.includes('id="presetLoadBtn"') ||
     ui.includes('id="presetSaveBtn"') ||
-    !ui.includes('id="saveBrewPresetButton"') ||
+    !html.includes('id="saveBrewPresetButton" class="btnGlyph mutable btnInvert"') ||
+    !html.includes('id="saveConfigButton" class="btnGlyph mutable btnInvert"') ||
+    html.includes('id="exportShotsButton" class="btnGlyph btnInvert"') ||
+    !css.includes('font-variant-emoji:text') ||
+    !html.includes('<span class="g">×</span>') ||
+    !html.includes('<span class="g">✓</span>') ||
+    ui.includes('💾') || ui.includes('⚡') ||
     !ui.includes('Save brew settings') ||
     !ui.includes('id="activeBrewProfileHint"') ||
     !ui.includes('Current profile: ') ||
@@ -1130,8 +1145,18 @@ if (!ui.includes('<legend>Brew</legend>') ||
 if (!ui.includes('id="shotTable"') ||
     !ui.includes('id="exportShotsButton"') ||
     !ui.includes('id="clearShotsButton"') ||
+    !html.includes('id="clearShotsButton" class="btnGlyph btnInvert"') ||
+    html.includes('id="clearShotsButton" class="btnGlyph btnDanger"') ||
+    !css.includes('#shotHistoryPanel .btnGlyph:not(.btnInvert)') ||
     !ui.includes("confirm:'CLEAR_SHOT_LOG'") ||
     !ui.includes('refreshShots()') ||
+    !js.includes("'shotDur'") ||
+    !js.includes("'shotActual'") ||
+    !css.includes('#shotTable .shotDur,#shotTable .shotActual') ||
+    !css.includes('grid-template-areas:"dur dur actual actual"') ||
+    !css.includes('#shotTable .shotDel') ||
+    !js.includes("className='shotDel'") ||
+    runtimeJs.includes('<span class="t">Delete</span>') ||
     !ui.includes('formatShotTime(r)') ||
     !ui.includes('no time') ||
     !ui.includes('id="timezoneOffsetMinutes"') ||
