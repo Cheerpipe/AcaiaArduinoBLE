@@ -17,6 +17,10 @@ if(DEFINED ENV{SHOT_STOPPER_EXTRA_FLAGS} AND NOT "$ENV{SHOT_STOPPER_EXTRA_FLAGS}
   foreach(_opt IN LISTS _ss_extra)
     if(_opt MATCHES "^-D(.+)$")
       idf_build_set_property(COMPILE_DEFINITIONS "${CMAKE_MATCH_1}" APPEND)
+    elseif(_opt MATCHES "^-W")
+      # gcc C rejects C++-only warnings such as -Werror=deprecated-copy (the
+      # default extra flag). Keep -W extras on C++ so mbedtls/.c still build.
+      idf_build_set_property(CXX_COMPILE_OPTIONS "${_opt}" APPEND)
     else()
       idf_build_set_property(COMPILE_OPTIONS "${_opt}" APPEND)
     endif()

@@ -1291,6 +1291,9 @@ const expected = new Map([
   ['GET /partials/settings.html', 'partialSettingsHandler'],
   ['GET /partials/admin.html', 'partialAdminHandler'],
   ['GET /js/settings.js', 'viewSettingsHandler'],
+  ['GET /favicon.ico', 'browserIconHandler'],
+  ['GET /apple-touch-icon.png', 'browserIconHandler'],
+  ['GET /apple-touch-icon-precomposed.png', 'browserIconHandler'],
   ['POST /api/v1/ui/claim', 'claimHandler'],
   ['GET /api/v1/status/home', 'ownedApiHandler'],
   ['GET /api/v1/status/settings', 'ownedApiHandler'],
@@ -1514,8 +1517,12 @@ for (const [route, handler] of expected) {
   if (uri !== '/' && !ui.includes(uri.split('?')[0])) {
     const statusPage = uri.match(/^\/api\/v1\/status\/(home|settings|admin|diagnostic)$/);
     const lazyAsset = uri.match(/^\/(partials|js)\//);
+    const browserIcon = uri === '/favicon.ico' ||
+        uri === '/apple-touch-icon.png' ||
+        uri === '/apple-touch-icon-precomposed.png';
     if (!(statusPage && ui.includes('function statusUrl(') && ui.includes('/api/v1/status/')) &&
-        !(lazyAsset && (ui.includes('/partials/') || ui.includes('/js/')))) {
+        !(lazyAsset && (ui.includes('/partials/') || ui.includes('/js/'))) &&
+        !browserIcon) {
       throw new Error(`Registered API is not referenced by the UI: ${uri}`);
     }
   }
@@ -2061,16 +2068,20 @@ const jsHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::jsHandler'
 const cssHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::cssHandler');
 const runtimeHandlerStart =
     network.indexOf('esp_err_t ShotStopperNetwork::runtimeJsHandler');
+const browserIconHandlerStart =
+    network.indexOf('esp_err_t ShotStopperNetwork::browserIconHandler');
 const notFoundHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::notFoundHandler');
 const serveImmutableStart = network.indexOf('static esp_err_t serveImmutableGzip');
 if (rootHandlerStart < 0 || jsHandlerStart < 0 || cssHandlerStart < 0 ||
-    runtimeHandlerStart < 0 || notFoundHandlerStart < 0 ||
+    runtimeHandlerStart < 0 || browserIconHandlerStart < 0 ||
+    notFoundHandlerStart < 0 ||
     statusHandlerStart < 0 || serveImmutableStart < 0 ||
     network.includes('logoHandler') ||
     network.includes('loginHandler') ||
     !(rootHandlerStart < jsHandlerStart && jsHandlerStart < cssHandlerStart &&
       cssHandlerStart < runtimeHandlerStart &&
-      runtimeHandlerStart < notFoundHandlerStart &&
+      runtimeHandlerStart < browserIconHandlerStart &&
+      browserIconHandlerStart < notFoundHandlerStart &&
       notFoundHandlerStart < statusHandlerStart)) {
   throw new Error('rootHandler/jsHandler/cssHandler/runtime/notFoundHandler order not found');
 }
@@ -2078,6 +2089,7 @@ const rootHandler = network.slice(rootHandlerStart, jsHandlerStart);
 const serveImmutable = network.slice(serveImmutableStart, rootHandlerStart);
 const jsHandler = network.slice(jsHandlerStart, cssHandlerStart);
 const cssHandler = network.slice(cssHandlerStart, runtimeHandlerStart);
+const browserIconHandler = network.slice(browserIconHandlerStart, notFoundHandlerStart);
 const notFoundHandler = network.slice(notFoundHandlerStart, statusHandlerStart);
 if (rootHandler.includes('no-store') || !rootHandler.includes('no-cache') ||
     !rootHandler.includes('STATUS_NOT_MODIFIED') ||
@@ -2109,6 +2121,13 @@ if (!cssHandler.includes('SHOT_STOPPER_WEB_CSS_GZIP') ||
 }
 if (network.includes('logoHandler') || network.includes('SHOT_STOPPER_WEB_LOGO')) {
   throw new Error('Firmware must not serve /logo.svg');
+}
+if (!browserIconHandler.includes('STATUS_NO_CONTENT') ||
+    !browserIconHandler.includes('max-age=31536000') ||
+    !browserIconHandler.includes('immutable') ||
+    browserIconHandler.includes('302 Found') ||
+    browserIconHandler.includes('Location')) {
+  throw new Error('Safari icon probes must 204 with long cache and must not 302 to /');
 }
 if (!notFoundHandler.includes('302 Found') ||
     !notFoundHandler.includes('Location') ||

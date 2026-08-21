@@ -32,6 +32,7 @@ For complete technical details, see the [main README](../README.md).
 | **No tengo acceso por Web UI, Wi‑Fi, BLE ni USB. ¿Cómo recupero el equipo?** | Usa la [recuperación de emergencia con el paddle](EMERGENCY_RECOVERY.md). Al energizar con paddle ON se abre una ventana local de 60 s con CN9 bloqueado abierto: tres ciclos restauran Wi‑Fi/AP/contraseña y cinco hacen factory reset. |
 | **¿Puedo controlar el shot desde el móvil?** | La Web UI permite monitorización siempre. **Paddle virtual**, rinse remoto y ciclos nuevos por red requieren compilar con **`SHOT_STOPPER_ENABLE_REMOTE_CN9=1`** (desactivado en builds conservadores). **Stop** remoto abre CN9 en cualquier build autenticado. El **paddle físico siempre tiene prioridad**. |
 | **La Web UI se ve como basura en `curl`.** | El HTML se sirve **gzip**. Los navegadores lo descomprimen solos. Desde terminal usa `curl --compressed http://<ip>/`. |
+| **En el serie veo `FT-PSK present but FT disabled, falling back to WPA2-PSK`.** | Es esperado. El router de casa anuncia Fast Transition (802.11r); el ESP32 no lo usa (la máquina no se mueve entre APs) y asocia con WPA2-PSK. No es un fallo de conexión. |
 
 ## Hardware y compatibilidad
 

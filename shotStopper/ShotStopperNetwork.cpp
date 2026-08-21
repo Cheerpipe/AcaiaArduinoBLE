@@ -87,6 +87,7 @@ constexpr const char *AP_SSID = "MicraShotStopperAP";
 constexpr const char *AP_IP = "192.168.4.1";
 constexpr const char *JSON_CONTENT_TYPE = "application/json";
 constexpr const char *STATUS_OK = "200 OK";
+constexpr const char *STATUS_NO_CONTENT = "204 No Content";
 constexpr const char *STATUS_NOT_MODIFIED = "304 Not Modified";
 constexpr const char *STATUS_ACCEPTED = "202 Accepted";
 constexpr size_t IF_NONE_MATCH_CAPACITY = 80;
@@ -2919,6 +2920,12 @@ bool ShotStopperNetwork::startHttpServer() {
                       partialAdminHandler) &&
       registerHandler(server_, "/js/settings.js", HTTP_GET,
                       viewSettingsHandler) &&
+      registerHandler(server_, "/favicon.ico", HTTP_GET,
+                      browserIconHandler) &&
+      registerHandler(server_, "/apple-touch-icon.png", HTTP_GET,
+                      browserIconHandler) &&
+      registerHandler(server_, "/apple-touch-icon-precomposed.png", HTTP_GET,
+                      browserIconHandler) &&
       registerHandler(server_, "/api/v1/ui/claim", HTTP_POST, claimHandler) &&
       registerHandler(server_, "/api/v1/ui/unlock", HTTP_POST, unlockHandler) &&
       registerHandler(server_, "/api/v1/status/home", HTTP_GET, ownedApiHandler) &&
@@ -3324,6 +3331,16 @@ esp_err_t ShotStopperNetwork::viewSettingsHandler(httpd_req_t *request) {
   return serveImmutableGzip(request, "application/javascript; charset=utf-8",
                             SHOT_STOPPER_WEB_VIEW_SETTINGS_GZIP,
                             SHOT_STOPPER_WEB_VIEW_SETTINGS_GZIP_LEN);
+}
+
+esp_err_t ShotStopperNetwork::browserIconHandler(httpd_req_t *request) {
+  // Safari/iOS probe these paths on every visit. A registered handler avoids
+  // the IDF "URI not found" WARN and the 302-to-/ HTML bounce.
+  httpd_resp_set_status(request, STATUS_NO_CONTENT);
+  httpd_resp_set_hdr(request, "Cache-Control",
+                     "public, max-age=31536000, immutable");
+  httpd_resp_set_hdr(request, "Connection", "close");
+  return httpd_resp_send(request, nullptr, 0);
 }
 
 esp_err_t ShotStopperNetwork::notFoundHandler(httpd_req_t *request,
