@@ -101,6 +101,19 @@ constexpr uint8_t FIRST_DROP_CONFIRMATION_SAMPLES = 2;
 // Matches DEFAULT_MINIMUM_CUP_WEIGHT_G. Callers pass runtime min-cup.
 constexpr float FIRST_DROP_DEFAULT_CUP_MIN_G = 10.0f;
 constexpr float MAX_RECOVERY_WEIGHT_DROP_G = 2.0f;
+
+// Post-shot sample is still the brew if it did not collapse vs last accepted
+// (cup off / tare reads ~0). Drip may add weight or drop a little from settle.
+inline bool plausibleSettledBrewWeight(float candidateG, float lastKnownG,
+                                       bool lastKnownValid) {
+  if (!isfinite(candidateG)) {
+    return false;
+  }
+  if (!lastKnownValid || !isfinite(lastKnownG)) {
+    return true;
+  }
+  return candidateG >= lastKnownG - MAX_RECOVERY_WEIGHT_DROP_G;
+}
 constexpr size_t WEIGHT_TREND_POINT_COUNT = 10;
 constexpr float WEIGHT_TREND_MIN_LAST_SAMPLE_G = 10.0f;
 constexpr float WEIGHT_TREND_MIN_HORIZON_S = 0.25f;

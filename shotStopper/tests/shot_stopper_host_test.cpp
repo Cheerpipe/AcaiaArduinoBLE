@@ -5743,6 +5743,65 @@ void s14_last_shot_persists_every_cycle() {
   CHECK(!persistedLastShot.noScaleShotGuardEnabled);
 }
 
+void s15b_cup_off_after_end_keeps_last_known_actual() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  shotLog.clear();
+  persistedLastShot = PersistedLastShot{};
+  persistedLastShot.valid = true;
+  persistedLastShot.cycleId = 9;
+  persistedLastShot.weightValid = true;
+  persistedLastShot.currentWeightG = 42.1f;
+  persistLastShotSnapshot(persistedLastShot);
+
+  currentWeight = 0.0f;
+  currentWeightSequence = 8;
+  currentWeightReceivedAtMs = hostMillis + 1;
+  pendingFinalize = PendingShotFinalize{};
+  pendingFinalize.pending = true;
+  pendingFinalize.cycleId = 9;
+  pendingFinalize.logEligible = true;
+  pendingFinalize.startedWithScale = true;
+  pendingFinalize.lastKnownWeightValid = true;
+  pendingFinalize.lastKnownWeightG = 42.1f;
+  pendingFinalize.finalState = StopperState::BREW;
+  pendingFinalize.endReason = EndReason::FAST_EXTRACTION_MAX_WEIGHT;
+  pendingFinalize.bootId = shotLog.bootId();
+  pendingFinalize.durationDs = 280;
+  pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  pendingFinalize.weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
+  pendingFinalize.endedAtMs = hostMillis;
+  pendingFinalize.endedWeightSequence = 7;
+  pendingFinalize.extractionGuardEnabled = true;
+  pendingFinalize.extractionExtended = true;
+  runLoopAfter(pendingFinalize.dripDelayMs);
+  CHECK(!pendingFinalize.pending);
+  CHECK(shotLog.count() == 1);
+  ShotLogRecord records[1] = {};
+  CHECK(shotLog.copyNewestFirst(records, 1) == 1);
+  CHECK(records[0].actualWeightSource ==
+        static_cast<uint8_t>(ActualWeightSource::LAST_KNOWN));
+  CHECK(records[0].actualWeightCg == shotLogWeightToCentigrams(42.1f));
+  CHECK(fabsf(persistedLastShot.currentWeightG - 42.1f) < 0.001f);
+}
+
+void s15c_last_shot_prefers_last_accepted_over_cup_off() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  session.active = true;
+  session.hasWeightAnchor = true;
+  session.lastAcceptedWeightG = 42.1f;
+  session.startedAtMs = hostMillis > 25000 ? hostMillis - 25000 : 1;
+  session.weightSequenceAtStart = 1;
+  currentWeight = 0.0f;
+  currentWeightSequence = 5;
+  currentWeightReceivedAtMs = hostMillis;
+  persistLastShotFromEndedCycle(EndReason::FAST_EXTRACTION_MAX_WEIGHT, 25000);
+  CHECK(persistedLastShot.valid);
+  CHECK(persistedLastShot.weightValid);
+  CHECK(fabsf(persistedLastShot.currentWeightG - 42.1f) < 0.001f);
+}
+
 void s15_last_shot_updates_weight_after_drip() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -8333,6 +8392,8 @@ const TestCase testCases[] = {
     {"S03", s03_shot_log_clear_empties_records},
     {"S14", s14_last_shot_persists_every_cycle},
     {"S15", s15_last_shot_updates_weight_after_drip},
+    {"S15b", s15b_cup_off_after_end_keeps_last_known_actual},
+    {"S15c", s15c_last_shot_prefers_last_accepted_over_cup_off},
     {"S16", s16_last_shot_clear_empties_snapshot},
     {"S16b", s16b_factory_reset_hides_last_shot_on_status},
     {"S18", s18_last_shot_keeps_no_scale_guard_from_cycle},

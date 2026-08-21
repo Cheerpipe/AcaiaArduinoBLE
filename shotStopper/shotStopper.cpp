@@ -825,6 +825,15 @@ void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
       static_cast<int32_t>(currentWeightReceivedAtMs - session.startedAtMs) >=
           0;
   last.currentWeightG = last.weightValid ? currentWeight : 0.0f;
+  const bool lastAcceptedValid =
+      session.hasWeightAnchor && isfinite(session.lastAcceptedWeightG);
+  if (lastAcceptedValid &&
+      (!last.weightValid ||
+       !plausibleSettledBrewWeight(last.currentWeightG,
+                                   session.lastAcceptedWeightG, true))) {
+    last.weightValid = true;
+    last.currentWeightG = session.lastAcceptedWeightG;
+  }
   last.goalWeightG = session.config.goalWeightG;
   last.extractionExtended =
       session.extractionExtended && session.config.fastExtractionGuardEnabled;
@@ -1812,7 +1821,9 @@ void pendingShotFinalizeTask() {
   if (scaleAvailable() && isfinite(currentWeight) &&
       currentWeightSequence != snapshot.endedWeightSequence &&
       static_cast<int32_t>(currentWeightReceivedAtMs - snapshot.endedAtMs) >
-          0) {
+          0 &&
+      plausibleSettledBrewWeight(currentWeight, snapshot.lastKnownWeightG,
+                                 snapshot.lastKnownWeightValid)) {
     finalWeightG = currentWeight;
     postDripWeightValid = snapshot.startedWithScale;
   }

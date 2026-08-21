@@ -1266,6 +1266,9 @@ if (!ui.includes('id="shotTable"') ||
     runtimeJs.includes('<span class="t">Delete</span>') ||
     !ui.includes('formatShotTime(r)') ||
     !runtimeJs.includes('function formatShotEnded(') ||
+    !runtimeJs.includes('function shotDisplayActualG(') ||
+    !runtimeJs.includes('shotDisplayActualG(r.actualG,r.wCg)') ||
+    !runtimeJs.includes('shotDisplayActualG(ls.currentWeightG,cv.wCg)') ||
     !runtimeJs.includes('formatShotEnded(r.stopDetail)') ||
     !runtimeJs.includes("labels=['Time','Dur','Goal','Actual','Err%','Flow','1st drop','Ended','Shot']") ||
     runtimeJs.includes("labels=['Time','Dur','Goal','Actual','Err%','Flow','1st drop','Guard','Ext','Stop','Shot','Cut']") ||
