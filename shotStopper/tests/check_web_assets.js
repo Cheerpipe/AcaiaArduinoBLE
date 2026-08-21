@@ -118,8 +118,11 @@ if (/<details\b[^>]*\bopen\b/i.test(allHtml)) {
 if (css.includes('.brandLogo') || allHtml.includes('logo.svg') || allHtml.includes('brandLogo')) {
   throw new Error('Web UI must not embed a logo asset or .brandLogo styles');
 }
-if (!css.includes('.brand') || !css.includes('inline-flex')) {
-  throw new Error('Brand heading styles must remain for text-only branding');
+if (!css.includes('.brand') || !css.includes('inline-flex') ||
+    !css.includes('.brandMark') || !shellHtml.includes('class="brandMark"') ||
+    !shellHtml.includes('<svg') || !shellHtml.includes('<small>Micra</small>Shot Stopper') ||
+    shellHtml.includes('logo.svg')) {
+  throw new Error('Brand lockup must use inline SVG mark plus HTML wordmark');
 }
 if (!shellHtml.includes('class="pageNav"') ||
     !shellHtml.includes('id="navToggle"') ||
@@ -408,7 +411,8 @@ if (ui.includes('authenticatedOnly') ||
     ui.includes("authenticated()&&known") ||
     !ui.includes('function knownPath(') ||
     !ui.includes('class="brand"') ||
-    !ui.includes('>Micra Shot Stopper</a>') ||
+    !ui.includes('class="brandMark"') ||
+    !ui.includes('<small>Micra</small>Shot Stopper') ||
     !ui.includes('href="/" data-route="/"') ||
     !ui.includes("querySelectorAll('a[data-route]')") ||
     !ui.includes('ensureView') ||

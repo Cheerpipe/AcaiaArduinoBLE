@@ -1,10 +1,15 @@
-:root{--bg:#f6f3ef;--sf:#fff;--fg:#2a2118;--mu:#6b5d4f;--ln:#e4ddd4;--ac:#a83b21;--off:rgba(168,59,33,.6);--on:#fff;--ok:#087f23;--dn:#a83b21;--wn:#8a4b00;--r:1rem;--tap:2.75rem;--hdr:3.25rem}
+:root{--bg:#f6f3ef;--sf:#fff;--fg:#2a2118;--mu:#6b5d4f;--ln:#e4ddd4;--ac:#a83b21;--off:rgba(168,59,33,.6);--on:#fff;--ok:#087f23;--dn:#a83b21;--wn:#8a4b00;--r:1rem;--tap:2.75rem;--hdr:4.25rem}
 @media(prefers-color-scheme:dark){:root{--bg:#1a1612;--sf:#2a241e;--fg:#f3efe9;--mu:#b5a99a;--ln:#3d342c;--ac:#c45c38;--off:rgba(168,59,33,.6);--on:#f6f3ef;--ok:#1a9a3c;--dn:#c45c38;--wn:#f2b35a}}
 html{background:var(--bg)}
 body{font-family:system-ui;max-width:760px;margin:0 auto;padding:0 1rem 1.25rem;color:var(--fg);background:var(--bg)}
-.topBar{position:sticky;top:0;z-index:21;display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin:0 -1rem;padding:.45rem 1rem;padding-top:max(.45rem,env(safe-area-inset-top));min-height:var(--hdr);background:var(--bg);color:var(--ac);box-sizing:border-box}
-.brand{margin:0;font-size:1.4rem;font-weight:700;line-height:1.2;min-width:0;position:relative;z-index:22}
-.brand a,.brand a:link,.brand a:visited,.brand a:hover,.brand a:active{color:var(--ac);text-decoration:none;display:inline-flex;align-items:center;gap:.45rem}
+.topBar{position:sticky;top:0;z-index:21;display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin:0 -1rem;padding:.55rem 1rem;padding-top:max(.55rem,env(safe-area-inset-top));min-height:var(--hdr);background:var(--bg);color:var(--ac);box-sizing:border-box}
+.brand{margin:0;min-width:0;position:relative;z-index:22;--brandGap:.55rem}
+.brand a,.brand a:link,.brand a:visited,.brand a:hover,.brand a:active{color:var(--ac);text-decoration:none;display:inline-flex;align-items:center;gap:var(--brandGap)}
+.brandMark{width:2.55rem;height:3.35rem;flex:0 0 auto;display:block;overflow:visible;fill:currentColor}
+.brandMark .hole{fill-rule:evenodd}
+.brandMark .cup{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.brand a span{display:flex;flex-direction:column;justify-content:center;gap:.08rem;min-width:0;line-height:1.05;font-size:1.55rem;font-weight:800;letter-spacing:-.02em;white-space:nowrap}
+.brand a small{font-size:.92rem;font-weight:600;letter-spacing:.02em}
 .navToggle{flex-shrink:0;width:var(--tap);height:var(--tap);margin:0;border:0;border-radius:.4rem;background:transparent;color:var(--ac);font:inherit;font-size:2rem;line-height:1;cursor:pointer;position:relative;z-index:22}
 .navToggle:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
 .pageNav{display:none;position:fixed;inset:0;z-index:20;flex-direction:column;gap:.15rem;padding:calc(var(--hdr) + .85rem) 1.25rem 1.5rem;background:var(--bg)}
@@ -14,9 +19,13 @@ body{font-family:system-ui;max-width:760px;margin:0 auto;padding:0 1rem 1.25rem;
 .pageNav a.active{background:var(--sf);color:var(--ac);box-shadow:inset 0 0 0 1px var(--ac);font-weight:700;text-decoration:none}
 .pageNav a:hover{text-decoration:none;background:var(--sf)}
 @media(min-width:700px){
+:root{--hdr:4.7rem}
 .navToggle{display:none}
 .brand,.navToggle{z-index:auto}
-.brand{flex-shrink:0}
+.brand{flex-shrink:0;--brandGap:.65rem}
+.brandMark{width:2.95rem;height:3.85rem}
+.brand a span{font-size:1.75rem;gap:.1rem}
+.brand a small{font-size:1.05rem}
 .pageNav{display:flex;position:static;inset:auto;flex-direction:row;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:.1rem;padding:0;background:transparent;z-index:auto}
 .pageNav a{min-height:2.25rem;padding:.3rem .5rem;font-size:.88rem;border-radius:.4rem}
 .pageNav a.active{background:transparent;box-shadow:inset 0 -2px 0 var(--ac)}
