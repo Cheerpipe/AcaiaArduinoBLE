@@ -37,6 +37,11 @@ inline bool validPersistedSettings(const PersistedSettings &settings) {
 
 inline void finalizePersistedSettings(PersistedSettings &settings) {
   ensurePersistedPresetBank(settings);
+  if (scaleMacCacheModeRequiresPreferred(settings.runtime.scaleMacCacheMode) &&
+      settings.preferredScaleMac[0] == '\0') {
+    settings.runtime.scaleMacCacheMode =
+        static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
+  }
   uint32_t seedSeq = 0;
   for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
     if (settings.scaleHistory[i].lastSeenSeq > seedSeq) {

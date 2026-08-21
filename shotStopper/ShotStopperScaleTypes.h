@@ -11,11 +11,14 @@ constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
 constexpr size_t PREFERRED_SCALE_NAME_CAPACITY = 32;
 constexpr size_t SCALE_HISTORY_CAPACITY = 8;
 constexpr uint32_t SCALE_PAIRING_DISCOVERY_PAUSE_MS = 30000;
+// PREFER: wait this long for the preferred MAC before connecting any other.
+constexpr uint32_t SCALE_PREFER_FALLBACK_MS = 5000;
 
 enum class ScaleMacCacheMode : uint8_t {
-  // Named OFF (not DISABLED): ESP32 Arduino defines a DISABLED GPIO macro.
-  OFF = 0,   // Name scan; connect first compatible; do not lock preferred.
-  FULL = 1,  // Name scan; connect only preferred (or first if none yet).
+  // Numeric values: FIRST=0 and ONLY=1 match legacy OFF/FULL in NVS.
+  FIRST = 0,  // Name scan; first compatible; do not lock preferred.
+  ONLY = 1,   // Name scan + connect-filter; preferred MAC only.
+  PREFER = 2, // Prefer preferred; after grace, fall back to any compatible.
 };
 
 // BLE-seen scales remembered for the preferred-scale dropdown (NVS + status).
@@ -26,17 +29,26 @@ struct ScaleHistoryEntry {
 };
 
 inline bool validScaleMacCacheMode(uint8_t mode) {
-  return mode == static_cast<uint8_t>(ScaleMacCacheMode::OFF) ||
-         mode == static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+  return mode == static_cast<uint8_t>(ScaleMacCacheMode::FIRST) ||
+         mode == static_cast<uint8_t>(ScaleMacCacheMode::ONLY) ||
+         mode == static_cast<uint8_t>(ScaleMacCacheMode::PREFER);
+}
+
+inline bool scaleMacCacheModeRequiresPreferred(uint8_t mode) {
+  return mode == static_cast<uint8_t>(ScaleMacCacheMode::ONLY) ||
+         mode == static_cast<uint8_t>(ScaleMacCacheMode::PREFER);
 }
 
 inline const char *scaleMacCacheModeId(uint8_t mode) {
   switch (static_cast<ScaleMacCacheMode>(mode)) {
-    case ScaleMacCacheMode::OFF:
-      return "disabled";
-    case ScaleMacCacheMode::FULL:
+    case ScaleMacCacheMode::FIRST:
+      return "first";
+    case ScaleMacCacheMode::PREFER:
+      return "prefer";
+    case ScaleMacCacheMode::ONLY:
+      return "only";
     default:
-      return "full";
+      return "first";
   }
 }
 
@@ -44,12 +56,17 @@ inline bool parseScaleMacCacheMode(const char *text, uint8_t &mode) {
   if (text == nullptr) {
     return false;
   }
-  if (strcmp(text, "disabled") == 0) {
-    mode = static_cast<uint8_t>(ScaleMacCacheMode::OFF);
+  // Legacy wire strings from the Always-use checkbox era.
+  if (strcmp(text, "first") == 0 || strcmp(text, "disabled") == 0) {
+    mode = static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
     return true;
   }
-  if (strcmp(text, "full") == 0) {
-    mode = static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+  if (strcmp(text, "prefer") == 0) {
+    mode = static_cast<uint8_t>(ScaleMacCacheMode::PREFER);
+    return true;
+  }
+  if (strcmp(text, "only") == 0 || strcmp(text, "full") == 0) {
+    mode = static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
     return true;
   }
   return false;

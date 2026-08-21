@@ -14,9 +14,9 @@ export function init(){
   if($('saveBrewPresetButton'))$('saveBrewPresetButton').onclick=R.saveBrewPreset;
   if($('presetResetBtn'))$('presetResetBtn').onclick=()=>{const p=R.selectedPreset();if(!p||!p.isFactory)return;if(!confirm('Reset this factory preset to its default values?'))return;if(R.brewDirty){R.brewDirty=false;if($('brewDirtyHint'))$('brewDirtyHint').classList.add('hidden')}R.configLoaded=false;R.formRev=0;R.command('/api/v1/presets',{action:'restore_factory_values',id:p.id})};
   if($('presetDeleteBtn'))$('presetDeleteBtn').onclick=()=>{const p=R.selectedPreset();if(!p||p.isFactory)return;if(confirm('Delete this preset?'))R.command('/api/v1/presets',{action:'delete',id:p.id})};
-  $('alwaysUseThisScale').onchange=()=>R.markConfigDirty();
+  if($('scalePreference'))$('scalePreference').onchange=()=>{R.updateScalePreferenceOptions();R.markConfigDirty()};
   $('forgetPairedScale').onclick=R.forgetPairedScale;
-  if($('preferredScaleSelect'))$('preferredScaleSelect').onchange=R.selectPreferredScale;
+  if($('preferredScaleSelect'))$('preferredScaleSelect').onchange=()=>{R.selectPreferredScale();R.updateScalePreferenceOptions()};
   $('autoTare').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('autoRetare').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('avoidBbwShotWithoutScale').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
@@ -31,6 +31,7 @@ export function init(){
   if($('cupProtectionEnabled'))$('cupProtectionEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
   $('operationalWallS').addEventListener('input',R.updateConfigGroups);
   document.querySelectorAll('#workflowPanel input,#workflowPanel select').forEach(el=>{
+    if(el.id==='preferredScaleSelect')return;
     const brewIds=['brewByWeight','goalWeightG','operationalWallS','bbwProtectionS','weightOffsetBaselineG','cupProtectionEnabled','stopIfCupRemoved','requireCupToStart','fastExtractionGuardEnabled','avoidAccidentalTouchEnabled','maxRecoveryWeightG','minBrewTimeS','slowExtractionGuardEnabled','minRecoveryWeightG','maxBrewTimeS','autoToManualGuardEnabled','autoToManualGuardLimitMode','autoToManualGuardManualLimitS','autoToManualGuardBaselineS'];
     const fn=()=>brewIds.includes(el.id)?R.markBrewDirty():R.markConfigDirty();
     el.addEventListener('input',fn);el.addEventListener('change',fn);

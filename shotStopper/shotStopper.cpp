@@ -2677,7 +2677,11 @@ void noteScaleHistory(const char *mac, const char *name) {
 
 void notePreferredScale(const char *mac, const char *name) {
   noteScaleHistory(mac, name);
-  if (currentScaleMacCacheMode() == ScaleMacCacheMode::OFF) {
+  const ScaleMacCacheMode cacheMode = currentScaleMacCacheMode();
+  // FIRST: never auto-write preferred. PREFER/ONLY: refresh name only when the
+  // connected MAC already matches the user-selected preferred (never auto-fill
+  // or steal on fallback connect).
+  if (cacheMode == ScaleMacCacheMode::FIRST) {
     return;
   }
   if (scaleDiscoveryPaused()) {
@@ -2694,35 +2698,45 @@ void notePreferredScale(const char *mac, const char *name) {
     strncpy(safeName, name, PREFERRED_SCALE_NAME_CAPACITY - 1);
   }
   bool changed = false;
-  bool macChanged = false;
   portENTER_CRITICAL(&scalePreferredMacMux);
-  // FULL: lock first connect when empty; never auto-steal to another MAC
-  // (case-insensitive — BLE often reports lowercase).
-  if (scalePreferredMac[0] != '\0' &&
+  if (scalePreferredMac[0] == '\0' ||
       !preferredScaleMacEqual(scalePreferredMac, canonicalMac)) {
     portEXIT_CRITICAL(&scalePreferredMacMux);
     return;
   }
-  macChanged =
-      strncmp(scalePreferredMac, canonicalMac, PREFERRED_SCALE_MAC_CAPACITY) !=
-      0;
   const bool nameChanged =
       strncmp(scalePreferredName, safeName, PREFERRED_SCALE_NAME_CAPACITY) != 0;
-  if (macChanged || nameChanged) {
-    memcpy(scalePreferredMac, canonicalMac, sizeof(scalePreferredMac));
+  if (nameChanged) {
     strncpy(scalePreferredName, safeName, PREFERRED_SCALE_NAME_CAPACITY - 1);
     scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY - 1] = '\0';
     scalePreferredMacDirty = true;
     changed = true;
   }
   portEXIT_CRITICAL(&scalePreferredMacMux);
-  if (changed && macChanged) {
-    serialTracef(LogLevel::INFO, "Preferred scale updated: %s — %s",
+  if (changed) {
+    serialTracef(LogLevel::INFO, "Preferred scale name updated: %s — %s",
                  safeName[0] != '\0' ? safeName : "(unknown)", canonicalMac);
   }
 }
 
 void clearPreferredScaleCache();
+
+void coerceScalePreferenceModeToFirst() {
+  if (runtimeConfig.scaleMacCacheMode ==
+      static_cast<uint8_t>(ScaleMacCacheMode::FIRST)) {
+    return;
+  }
+  RuntimeConfig candidate = runtimeConfig;
+  candidate.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
+  ++candidate.revision;
+  if (candidate.revision == 0) {
+    candidate.revision = 1;
+  }
+  commitLiveRuntimeConfig(candidate, RUNTIME_PERSIST_REASON_USER);
+  serialTrace(LogLevel::INFO,
+              "Scale preference coerced to first (no preferred)");
+}
 
 // Clear preferred without the Forget 30 s pause (dropdown "None").
 void clearPreferredScaleSelectionOnly() {
@@ -2734,12 +2748,13 @@ void clearPreferredScaleSelectionOnly() {
   ++scalePreferredDirectedResetGeneration;
   portEXIT_CRITICAL(&scalePreferredMacMux);
   serialTrace(LogLevel::INFO, "Preferred scale cleared (history kept)");
+  coerceScalePreferenceModeToFirst();
   if (scale.isScanning() || scale.isConnected()) {
     // Restart discovery under the new (unlocked) policy.
     scale.disconnect();
-    updateWorkerLinkState();
-    setScaleLinkState(ScaleLinkState::DISCONNECTED);
   }
+  updateWorkerLinkState();
+  setScaleLinkState(ScaleLinkState::DISCONNECTED);
 }
 
 void selectPreferredScale(const char *mac, const char *name) {
@@ -2799,6 +2814,7 @@ void clearPreferredScaleCache() {
   portEXIT_CRITICAL(&scalePreferredMacMux);
   serialTrace(LogLevel::INFO,
               "Paired scale forgotten; looking paused for 30 s");
+  coerceScalePreferenceModeToFirst();
 }
 
 void servicePreferredScaleMacPersistence() {
@@ -2862,9 +2878,20 @@ void logScaleConnectionFailed(bool directed) {
                scale.lastDisconnectReasonName());
 }
 
-// FULL + preferred MAC → name scan with connect-filter (not GAP directed).
-bool shouldUseDirectedScaleScan(ScaleMacCacheMode cacheMode, bool hasMac) {
-  return cacheMode == ScaleMacCacheMode::FULL && hasMac;
+// ONLY + preferred MAC → name scan with connect-filter (not GAP directed).
+// PREFER uses the same filter until SCALE_PREFER_FALLBACK_MS, then any scale.
+bool shouldUseDirectedScaleScan(ScaleMacCacheMode cacheMode, bool hasMac,
+                                bool preferStillWaiting) {
+  if (!hasMac) {
+    return false;
+  }
+  if (cacheMode == ScaleMacCacheMode::ONLY) {
+    return true;
+  }
+  if (cacheMode == ScaleMacCacheMode::PREFER) {
+    return preferStillWaiting;
+  }
+  return false;
 }
 
 bool applyScaleDiscoveryPause() {
@@ -2973,6 +3000,16 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
         serialTrace(LogLevel::DEBUG,
                     "Preferred scale attempt: other scale seen, waiting");
       }
+      // PREFER: after grace, drop the preferred-only filter and accept any.
+      if (cacheMode == ScaleMacCacheMode::PREFER && directed &&
+          elapsedMs(scanSessionAtMs) >= SCALE_PREFER_FALLBACK_MS) {
+        if (scale.startScan(nullptr, true)) {
+          serialTrace(LogLevel::INFO,
+                      "Preferred scale not found; falling back to any scale");
+          scanLastAdvertAtMs = 0;
+        }
+        return;
+      }
       // HCI/GAP force-restart only when the idle scan has gone quiet.
       const bool noAdsThisSession =
           scanLastAdvertAtMs == 0 ||
@@ -2983,8 +3020,11 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
         copyPreferredScaleMac(preferredMac, sizeof(preferredMac));
         const bool hasMac =
             preferredMac[0] != '\0' && validPreferredScaleMac(preferredMac);
+        const bool preferWaiting =
+            cacheMode != ScaleMacCacheMode::PREFER ||
+            elapsedMs(scanSessionAtMs) < SCALE_PREFER_FALLBACK_MS;
         const bool useDirected =
-            shouldUseDirectedScaleScan(cacheMode, hasMac);
+            shouldUseDirectedScaleScan(cacheMode, hasMac, preferWaiting);
         if (scale.startScan(useDirected ? preferredMac : nullptr, true)) {
           scanSessionAtMs = lastScanCycleMs;
           scanLastAdvertAtMs = 0;
@@ -2996,7 +3036,9 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     lastScanCycleMs = millis();
     const AcaiaDisconnectReason reason = scale.lastDisconnectReason();
     const bool finishedDirectedAttempt =
-        cacheMode == ScaleMacCacheMode::FULL && hasPreferredScaleMac();
+        (cacheMode == ScaleMacCacheMode::ONLY ||
+         cacheMode == ScaleMacCacheMode::PREFER) &&
+        hasPreferredScaleMac();
 
     if (finishedDirectedAttempt) {
       serialTracef(LogLevel::WARNING,
@@ -3037,7 +3079,9 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
   copyPreferredScaleMac(preferredMac, sizeof(preferredMac));
   const bool hasMac =
       preferredMac[0] != '\0' && validPreferredScaleMac(preferredMac);
-  const bool useDirected = shouldUseDirectedScaleScan(cacheMode, hasMac);
+  // PREFER always starts directed; fallback switches mid-session.
+  const bool useDirected =
+      shouldUseDirectedScaleScan(cacheMode, hasMac, true);
   const bool logAttempt =
       !connectAttemptSeriesActive ||
       elapsedMs(lastConnectLogMs) >= SCALE_CONNECT_LOG_MS;
@@ -4426,10 +4470,16 @@ void processWebCommand(const WebCommand &command) {
       memcpy(candidate.ntpServerCustom, command.config.ntpServerCustom,
              sizeof(candidate.ntpServerCustom));
       if (candidate.scaleMacCacheMode != command.config.scaleMacCacheMode) {
-                     serialTracef(LogLevel::INFO, "Paired scale lock: %s",
+        serialTracef(LogLevel::INFO, "Scale preference: %s",
                      scaleMacCacheModeId(command.config.scaleMacCacheMode));
       }
       candidate.scaleMacCacheMode = command.config.scaleMacCacheMode;
+      if (scaleMacCacheModeRequiresPreferred(candidate.scaleMacCacheMode) &&
+          !hasPreferredScaleMac()) {
+        addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
+        rejectWebCommand(command);
+        return;
+      }
       candidate.avoidBbwShotWithoutScale =
           command.config.avoidBbwShotWithoutScale;
       candidate.lastShotCooldownMs = command.config.lastShotCooldownMs;
@@ -4615,7 +4665,7 @@ void processWebCommand(const WebCommand &command) {
         return;
       }
       if (command.scaleSelectMac[0] == '\0') {
-        clearPreferredScaleCache();
+        selectPreferredScale("", "");
       } else if (!validPreferredScaleMac(command.scaleSelectMac)) {
         rejectWebCommand(command);
         return;

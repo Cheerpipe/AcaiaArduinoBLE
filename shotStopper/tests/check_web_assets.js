@@ -417,9 +417,12 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !ui.includes('id="preferredScale"') ||
     !ui.includes('id="preferredScaleSelect"') ||
     !ui.includes('id="preferredScalePauseHint"') ||
-    !ui.includes('id="alwaysUseThisScale"') ||
+    !ui.includes('id="scalePreference"') ||
     !ui.includes('id="forgetPairedScale"') ||
-    !ui.includes('Always use this scale') ||
+    !ui.includes('Scale preference') ||
+    !ui.includes('First available') ||
+    !ui.includes('Prefer selected') ||
+    !ui.includes('Preferred only') ||
     !ui.includes('Preferred scale') ||
     !ui.includes('Clear preferred') ||
     !ui.includes('scaleMacCacheMode') ||
@@ -427,6 +430,11 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !ui.includes('/api/v1/scale/preferred/select') ||
     !ui.includes('function formatPreferredScale(') ||
     !ui.includes('function updatePreferredScaleSelect(') ||
+    !ui.includes('function updateScalePreferenceOptions(') ||
+    !ui.includes("scaleMacCacheMode:(()=>{const el=$('scalePreference')") ||
+    !ui.includes("el.id==='preferredScaleSelect'") ||
+    ui.includes('id="alwaysUseThisScale"') ||
+    ui.includes('Always use this scale') ||
     !ui.includes('function selectPreferredScale(') ||
     !ui.includes('function forgetPairedScale(') ||
     !ui.includes('Saved scale history is kept') ||
@@ -443,8 +451,10 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !network.includes('preferredScaleSelectHandler') ||
     !network.includes('/api/v1/scale/preferred/clear') ||
     !network.includes('/api/v1/scale/preferred/select') ||
-    !network.includes('Always use this scale must be on or off.') ||
-    !network.includes('scaleMacCacheMode must be disabled or full.') ||
+    !network.includes('Scale preference must be first, prefer, or only.') ||
+    network.includes('Always use this scale must be on or off.') ||
+    network.includes('scaleMacCacheMode must be disabled or full.') ||
+    !network.includes('scaleMacCacheMode must be first, prefer, or only.') ||
     !network.includes('The paired scale cannot be forgotten while a cycle') ||
     !network.includes('\\"history\\"') ||
     network.includes('Preferred scale cache cannot be cleared') ||
@@ -687,9 +697,9 @@ if (!html.includes('<summary>Cup</summary>') ||
         html.indexOf('<summary>Scales</summary>') ||
     html.indexOf('id="dripDelayS"') <
         html.indexOf('id="scaleTimerStopExtraDelayMs"') ||
-    html.indexOf('id="alwaysUseThisScale"') <
+    html.indexOf('id="scalePreference"') <
         html.indexOf('id="dripDelayS"') ||
-    html.indexOf('id="alwaysUseThisScale"') <
+    html.indexOf('id="scalePreference"') <
         html.indexOf('<summary>Scales</summary>') ||
     html.indexOf('id="preferredScaleSelect"') <
         html.indexOf('<summary>Scales</summary>') ||

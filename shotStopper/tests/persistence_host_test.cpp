@@ -69,7 +69,7 @@ void p01_defaults_are_valid() {
   CHECK(settings.preferredScaleMac[0] == '\0');
   CHECK(settings.preferredScaleName[0] == '\0');
   CHECK(settings.runtime.scaleMacCacheMode ==
-        static_cast<uint8_t>(ScaleMacCacheMode::FULL));
+        static_cast<uint8_t>(ScaleMacCacheMode::FIRST));
   CHECK(settings.runtime.paddleMode ==
         static_cast<uint8_t>(PaddleMode::NATURAL));
   CHECK(settings.runtime.alertOutputChannel ==
@@ -315,7 +315,7 @@ void p08_factory_reset_rebuilds_defaults() {
   strcpy(settings.preferredScaleMac, "AA:BB:CC:DD:EE:FF");
   strcpy(settings.preferredScaleName, "Lunar");
   settings.runtime.scaleMacCacheMode =
-      static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+      static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
   finalizePersistedSettings(settings);
   CHECK(savePersistedSettings(settings));
   CHECK(resetPersistedSettingsToFactory(settings));
@@ -326,7 +326,7 @@ void p08_factory_reset_rebuilds_defaults() {
   CHECK(settings.preferredScaleMac[0] == '\0');
   CHECK(settings.preferredScaleName[0] == '\0');
   CHECK(settings.runtime.scaleMacCacheMode ==
-        static_cast<uint8_t>(ScaleMacCacheMode::FULL));
+        static_cast<uint8_t>(ScaleMacCacheMode::FIRST));
 }
 
 void p09_fast_extraction_guard_validation() {

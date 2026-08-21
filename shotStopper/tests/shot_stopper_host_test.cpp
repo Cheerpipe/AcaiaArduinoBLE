@@ -3682,6 +3682,8 @@ void setHostPreferredScaleMac(const char *mac) {
 void d01_idle_scan_stays_enabled_between_ticks() {
   resetHarness(false, false);
   reachReadyFromBoot();
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
   setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
   hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
@@ -3704,11 +3706,11 @@ void d01_idle_scan_stays_enabled_between_ticks() {
   CHECK(scale.startScanCalls == calls);
 }
 
-void d02_full_empty_mac_uses_name_scan() {
+void d02_first_mode_uses_name_scan() {
   resetHarness(false, false);
   reachReadyFromBoot();
   runtimeConfig.scaleMacCacheMode =
-      static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+      static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
   scalePreferredMac[0] = '\0';
   hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
@@ -3755,7 +3757,7 @@ void d04_full_cache_keeps_directed_scan() {
   resetHarness(false, false);
   reachReadyFromBoot();
   runtimeConfig.scaleMacCacheMode =
-      static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+      static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
   setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
   hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
@@ -3781,7 +3783,7 @@ void d05_hci_watchdog_force_restarts_same_filter() {
   resetHarness(false, false);
   reachReadyFromBoot();
   runtimeConfig.scaleMacCacheMode =
-      static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+      static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
   setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
   hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
@@ -3814,7 +3816,7 @@ void d06_forget_pauses_discovery_for_30s() {
   resetHarness(false, false);
   reachReadyFromBoot();
   runtimeConfig.scaleMacCacheMode =
-      static_cast<uint8_t>(ScaleMacCacheMode::FULL);
+      static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
   setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
   hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
@@ -3846,6 +3848,60 @@ void d06_forget_pauses_discovery_for_30s() {
   CHECK(scale.scanning);
   CHECK(!scale.directedScan);
   CHECK(scale.lastStartScanMac[0] == '\0');
+}
+
+void d07_prefer_falls_back_after_grace() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::PREFER);
+  setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
+  hostMillis = SCALE_CONNECT_RETRY_MS;
+  uint32_t lastScanCycleMs = 0;
+  uint32_t lastConnectLogMs = 0;
+  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
+  bool connectAttemptSeriesActive = false;
+  uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.scanning);
+  CHECK(scale.directedScan);
+  const size_t callsBefore = scale.startScanCalls;
+  hostMillis += SCALE_PREFER_FALLBACK_MS;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.scanning);
+  CHECK(!scale.directedScan);
+  CHECK(scale.startScanCalls > callsBefore);
+  CHECK(scale.lastStartScanMac[0] == '\0');
+}
+
+void d08_select_none_clears_without_pause() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
+  setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
+  hostMillis = SCALE_CONNECT_RETRY_MS;
+  selectPreferredScale("", "");
+  CHECK(scalePreferredMac[0] == '\0');
+  CHECK(runtimeConfig.scaleMacCacheMode ==
+        static_cast<uint8_t>(ScaleMacCacheMode::FIRST));
+  CHECK(!scaleDiscoveryPaused());
+  uint32_t lastScanCycleMs = 0;
+  uint32_t lastConnectLogMs = 0;
+  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
+  bool connectAttemptSeriesActive = false;
+  uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.scanning);
+  CHECK(!scale.directedScan);
 }
 
 void w62_local_buzzer_drive_matches_compile_flag() {
@@ -7724,11 +7780,13 @@ const TestCase testCases[] = {
     {"W95", w95_web_buzzer_test_plays_chime_sequence},
     {"W96", w96_echo_inverted_uses_long_bookend_tones},
     {"D01", d01_idle_scan_stays_enabled_between_ticks},
-    {"D02", d02_full_empty_mac_uses_name_scan},
+    {"D02", d02_first_mode_uses_name_scan},
     {"D03", d03_scan_start_failed_uses_backoff},
     {"D04", d04_full_cache_keeps_directed_scan},
     {"D05", d05_hci_watchdog_force_restarts_same_filter},
     {"D06", d06_forget_pauses_discovery_for_30s},
+    {"D07", d07_prefer_falls_back_after_grace},
+    {"D08", d08_select_none_clears_without_pause},
     {"S01", s01_shot_log_filters_short_and_rinse},
     {"S02", s02_shot_log_appends_after_drip_delay},
     {"S02B", s02b_drip_delay_is_snapshotted_and_honors_boundaries},

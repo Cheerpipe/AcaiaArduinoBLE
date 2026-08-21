@@ -332,7 +332,7 @@ const char *configValidationMessage(ConfigValidationError error) {
     case ConfigValidationError::WEIGHT_OFFSET_BASELINE:
       return "Offset baseline must be from 0 to 5.0 g.";
     case ConfigValidationError::SCALE_MAC_CACHE_MODE:
-      return "Always use this scale must be on or off.";
+      return "Scale preference must be first, prefer, or only.";
     case ConfigValidationError::ALERT_OUTPUT_CHANNEL:
       return "Alert output channel must be scale_only, buzzer_only, or "
              "scale_priority.";
@@ -4588,7 +4588,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (jsonFieldPresent(root, "scaleMacCacheMode") &&
              !jsonScaleMacCacheMode(root, "scaleMacCacheMode",
                                     candidate.scaleMacCacheMode)) {
-    parseError = "scaleMacCacheMode must be disabled or full.";
+    parseError = "scaleMacCacheMode must be first, prefer, or only.";
   } else if (jsonFieldPresent(root, "bookooMuteOnBuzzerOnly") &&
              !jsonBoolean(root, "bookooMuteOnBuzzerOnly",
                           candidate.bookooMuteOnBuzzerOnly)) {
