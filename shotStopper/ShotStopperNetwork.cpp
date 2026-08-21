@@ -4354,6 +4354,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "buzzerManualNoScaleBeep", "buzzerScaleConnectedBeep",
       "buzzerExtendedPulseRate", "buzzerSlowExtendedPulseRate",
       "alertOutputChannel", "autoRetare", "retareWindowMs", "minimumCupWeightG",
+      "cupRemovedWeightG",
       "retareStabilitySamples", "retareStabilityToleranceG",
       "retareStabilityMaxGapMs", "retareStabilityMinDurationMs",
       "bbwProtectionMs", "fastExtractionGuardEnabled", "maxRecoveryWeightG",
@@ -4488,6 +4489,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
              !jsonFloat(root, "minimumCupWeightG",
                         candidate.minimumCupWeightG)) {
     parseError = "minimumCupWeightG must be a number.";
+  } else if (jsonFieldPresent(root, "cupRemovedWeightG") &&
+             !jsonFloat(root, "cupRemovedWeightG",
+                        candidate.cupRemovedWeightG)) {
+    parseError = "cupRemovedWeightG must be a number.";
   } else if (jsonFieldPresent(root, "retareStabilitySamples") &&
              !jsonUint8(root, "retareStabilitySamples",
                         candidate.retareStabilitySamples)) {
@@ -4818,11 +4823,7 @@ esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
           !jsonBoolean(root, "stopIfCupRemoved",
                        command.config.stopIfCupRemoved) ||
           !jsonBoolean(root, "requireCupToStart",
-                       command.config.requireCupToStart) ||
-          !jsonFloat(root, "cupPresentWeightG",
-                     command.config.cupPresentWeightG) ||
-          !jsonFloat(root, "cupRemovedWeightG",
-                     command.config.cupRemovedWeightG)) {
+                       command.config.requireCupToStart)) {
         parseError = "save requires the full Brew recipe field set.";
       } else {
         command.config.timerOnly = !brewByWeight;

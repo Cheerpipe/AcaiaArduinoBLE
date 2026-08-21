@@ -347,8 +347,6 @@ inline void applyShotPresetToConfig(const ShotPreset &preset,
   config.cupProtectionEnabled = preset.cupProtectionEnabled;
   config.stopIfCupRemoved = preset.stopIfCupRemoved;
   config.requireCupToStart = preset.requireCupToStart;
-  config.cupPresentWeightG = preset.cupPresentWeightG;
-  config.cupRemovedWeightG = preset.cupRemovedWeightG;
   memcpy(config.autoToManualGuardSamplesDs, preset.autoToManualGuardSamplesDs,
          sizeof(config.autoToManualGuardSamplesDs));
   config.timerOnly = sessionManual ? true : !preset.brewByWeight;
@@ -382,8 +380,6 @@ inline void copyUserRecipeFromConfig(const RuntimeConfig &config,
   preset.cupProtectionEnabled = config.cupProtectionEnabled;
   preset.stopIfCupRemoved = config.stopIfCupRemoved;
   preset.requireCupToStart = config.requireCupToStart;
-  preset.cupPresentWeightG = config.cupPresentWeightG;
-  preset.cupRemovedWeightG = config.cupRemovedWeightG;
 }
 
 inline bool allocateShotPresetId(ShotPresetBank &bank, uint8_t &outId) {

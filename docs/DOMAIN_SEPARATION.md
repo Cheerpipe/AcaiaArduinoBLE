@@ -47,13 +47,14 @@ See [`ShotStopperMachine.h`](../shotStopper/ShotStopperMachine.h) and
 | Owns | Does not own |
 | ---- | ------------ |
 | Weight freshness, slew/range validation, trajectory ring | Whether a retare is *allowed* (BBW window) |
-| First-drop detector, stable-cup detector, cup-removed detector | `EndReason`, start/stop of the machine |
+| First-drop detector, **cup-presence FSM** (PRESENT/ABSENT, place/remove events) | `EndReason`, start/stop of the machine |
 | Least-squares cut prediction against an injected target | Fast/slow/A→M policy |
 | BLE link/commands stay in the orchestrator transport | Beep / alert routing |
 
 Scale emits **signals**. Brew interprets them with recipe settings.
 
-See [`ShotStopperScaleSense.h`](../shotStopper/ShotStopperScaleSense.h) and
+See [`ShotStopperCupPresence.h`](../shotStopper/ShotStopperCupPresence.h),
+[`ShotStopperScaleSense.h`](../shotStopper/ShotStopperScaleSense.h) and
 [`ShotStopperScaleTypes.h`](../shotStopper/ShotStopperScaleTypes.h).
 
 ### Brew — BBW, guards, recipe, paddle modes
@@ -61,8 +62,8 @@ See [`ShotStopperScaleSense.h`](../shotStopper/ShotStopperScaleSense.h) and
 | Owns | Does not own |
 | ---- | ------------ |
 | `StopperState` shot SM | GPIO / relay timers |
-| BBW protection and retare *policy* | BLE writes |
-| Fast / slow extraction, A→M, no-cup, no-scale | Electrical hard-limit ISR |
+| BBW protection and retare *policy* (consumes cup-placed events) | BLE writes |
+| Fast / slow extraction, A→M, cup-protection *policy* (consumes cup state/events), no-scale | Electrical hard-limit ISR |
 | `PaddleMode` hold override | Scale MAC cache |
 
 See [`ShotStopperBrew.h`](../shotStopper/ShotStopperBrew.h) and
@@ -108,7 +109,7 @@ Machine / Scale / Brew do not include NVS I/O or `*Migrate.h`.
 | ---- | ---- |
 | `ShotStopperHardware.h` | Board pins, paddle/relay levels |
 | `ShotStopperMachineTypes.h` / `ShotStopperMachine.h` | Machine types + driver |
-| `ShotStopperScaleTypes.h` / `ShotStopperScaleSense.h` | Scale types + detectors |
+| `ShotStopperScaleTypes.h` / `ShotStopperCupPresence.h` / `ShotStopperScaleSense.h` | Scale types, cup-presence FSM, trajectory / first-drop |
 | `ShotStopperBrewTypes.h` / `ShotStopperBrew.h` | Brew types + policy |
 | `ShotStopperDomain.h` | Compose + NVS/UI/debug leftovers |
 | `ShotStopperShotLogTypes.h` | Shot log schema 7 + domain helpers |

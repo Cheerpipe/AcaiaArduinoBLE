@@ -95,6 +95,17 @@ enum class ScaleSignal : uint8_t {
   STREAM_FAULT = 7
 };
 
+enum class CupPresenceState : uint8_t {
+  ABSENT = 0,
+  PRESENT = 1
+};
+
+enum class CupPresenceEvent : uint8_t {
+  NONE = 0,
+  PLACED = 1,
+  REMOVED = 2
+};
+
 enum class WeightStreamState : uint8_t {
   NO_SAMPLE,
   FRESH,

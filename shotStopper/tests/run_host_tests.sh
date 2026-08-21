@@ -30,6 +30,7 @@ scan_firmware_sources() {
     "$firmware_dir/ShotStopperMachine.h" \
     "$firmware_dir/ShotStopperMachineTypes.h" \
     "$firmware_dir/ShotStopperScaleSense.h" \
+    "$firmware_dir/ShotStopperCupPresence.h" \
     "$firmware_dir/ShotStopperScaleTypes.h" \
     "$firmware_dir/ShotStopperBrew.h" \
     "$firmware_dir/ShotStopperBrewTypes.h"

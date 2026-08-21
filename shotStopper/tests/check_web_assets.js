@@ -15,6 +15,7 @@ const firmware = [
   fs.readFileSync(path.join(sketchDir, 'ShotStopperHardware.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachine.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperScaleSense.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperCupPresence.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8'),
 ].join('\n');
 const shotLogIo = fs.readFileSync(path.join(sketchDir, 'ShotStopperShotLog.h'), 'utf8');
@@ -305,19 +306,19 @@ if (html.indexOf('<summary>Brew by Weight</summary>') >
     html.indexOf('id="stopIfCupRemoved"') >
         html.indexOf('id="requireCupToStart"') ||
     html.indexOf('id="requireCupToStart"') >
-        html.indexOf('id="cupPresentWeightG"') ||
-    html.indexOf('id="cupPresentWeightG"') >
-        html.indexOf('id="cupRemovedWeightG"') ||
+        html.indexOf('<summary>Fast extraction guard</summary>') ||
     !ui.includes('id="stopIfCupRemoved"') ||
     !ui.includes('id="requireCupToStart"') ||
-    !ui.includes('id="cupPresentWeightG"') ||
-    !ui.includes('id="cupRemovedWeightG"') ||
-    !html.includes('id="cupPresentWeightG" type="number" min="0.1" max="50" step="0.1"') ||
-    !html.includes('id="cupRemovedWeightG" type="number" min="-50" max="-0.1" step="0.1"') ||
+    ui.includes('id="cupPresentWeightG"') ||
+    html.includes('id="cupPresentWeightG"') ||
+    html.indexOf('id="cupRemovedWeightG"') <
+        html.indexOf('<summary>Cup</summary>') ||
+    html.indexOf('id="cupRemovedWeightG"') >
+        html.indexOf('<summary>Tare</summary>') ||
     html.includes('id="requireCupToStart" type="checkbox" checked') ||
     !ui.includes('Enable cup protection') ||
     !ui.includes('cupProtectOpt') ||
-    !ui.includes('If you tared the empty cup, the shot will not start.') ||
+    !ui.includes('place the cup after connect so presence can be detected.') ||
     !ui.includes('id="homeCupProtectionEnabled"') ||
     html.indexOf('id="homeSoundAlertsEnabled"') >
         html.indexOf('id="homeCupProtectionEnabled"') ||
@@ -328,13 +329,9 @@ if (html.indexOf('<summary>Brew by Weight</summary>') >
     !ui.includes('cupProtectionEnabled:$(\'cupProtectionEnabled\')') ||
     !ui.includes('stopIfCupRemoved:$(\'stopIfCupRemoved\')') ||
     !ui.includes('requireCupToStart:$(\'requireCupToStart\')') ||
-    !ui.includes("cupPresentWeightG:number('cupPresentWeightG')") ||
-    !ui.includes("cupRemovedWeightG:number('cupRemovedWeightG')") ||
-    !ui.includes("'requireCupToStart','cupPresentWeightG','cupRemovedWeightG'") ||
     !network.includes('cupProtectionEnabled') ||
     !network.includes('stopIfCupRemoved') ||
     !network.includes('requireCupToStart') ||
-    !network.includes('cupPresentWeightG') ||
     !network.includes('cupRemovedWeightG')) {
   throw new Error('Cup protection master must precede Stop if cup is removed and Require cup to start; Home mirrors the master after Alerts');
 }
@@ -579,14 +576,11 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !network.includes('cupProtectionEnabled') ||
     !network.includes('stopIfCupRemoved') ||
     !network.includes('requireCupToStart') ||
-    !network.includes('cupPresentWeightG') ||
     !network.includes('cupRemovedWeightG') ||
     !ui.includes('cupProtectionEnabled:$(\'cupProtectionEnabled\')') ||
     !ui.includes('stopIfCupRemoved:$(\'stopIfCupRemoved\')') ||
     !ui.includes('requireCupToStart:$(\'requireCupToStart\')') ||
-    !ui.includes("cupPresentWeightG:number('cupPresentWeightG')") ||
-    !ui.includes("cupRemovedWeightG:number('cupRemovedWeightG')") ||
-    !ui.includes("'requireCupToStart','cupPresentWeightG','cupRemovedWeightG'")) {
+    !ui.includes("cupRemovedWeightG:number('cupRemovedWeightG')")) {
   throw new Error('Auto-to-manual time guard must be wired in config UI, live panel, shots API, and routes');
 }
 if (!html.includes('<summary>Paddle</summary>') ||
@@ -637,7 +631,22 @@ if (!ui.includes('id="learnedOffsetG"') ||
     !ui.includes('weightOffsetBaselineG')) {
   throw new Error('Learned stop offset baseline must be wired like A→M baseline reset');
 }
-if (!html.includes('<summary>Tare</summary>') ||
+if (!html.includes('<summary>Cup</summary>') ||
+    !html.includes('<summary>Tare</summary>') ||
+    html.indexOf('<summary>Cup</summary>') >
+        html.indexOf('<summary>Tare</summary>') ||
+    html.indexOf('id="minimumCupWeightG"') <
+        html.indexOf('<summary>Cup</summary>') ||
+    html.indexOf('id="minimumCupWeightG"') >
+        html.indexOf('<summary>Tare</summary>') ||
+    html.indexOf('id="cupRemovedWeightG"') <
+        html.indexOf('<summary>Cup</summary>') ||
+    html.indexOf('id="cupRemovedWeightG"') >
+        html.indexOf('<summary>Tare</summary>') ||
+    html.indexOf('id="retareStabilitySamples"') <
+        html.indexOf('<summary>Cup</summary>') ||
+    html.indexOf('id="retareStabilitySamples"') >
+        html.indexOf('<summary>Tare</summary>') ||
     !html.includes('<summary>Scales</summary>') ||
     html.includes('<summary>Scale & retare</summary>') ||
     html.indexOf('<summary>Tare</summary>') >
@@ -827,15 +836,11 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('id="stopIfCupRemoved"') ||
     !ui.includes('id="requireCupToStart"') ||
     html.indexOf('id="requireCupToStart"') >
-        html.indexOf('id="cupPresentWeightG"') ||
-    html.indexOf('id="cupPresentWeightG"') >
-        html.indexOf('id="cupRemovedWeightG"') ||
-    !ui.includes('id="cupPresentWeightG"') ||
-    !ui.includes('id="cupRemovedWeightG"') ||
-    !html.includes('step="0.1" value="3"') ||
-    !html.includes('step="0.1" value="-3"') ||
+        html.indexOf('<summary>Fast extraction guard</summary>') ||
+    ui.includes('id="cupPresentWeightG"') ||
+    html.includes('id="cupPresentWeightG"') ||
     html.includes('id="requireCupToStart" type="checkbox" checked') ||
-    !ui.includes('If you tared the empty cup, the shot will not start.') ||
+    !ui.includes('place the cup after connect so presence can be detected.') ||
     !ui.includes('id="homeCupProtectionEnabled"') ||
     html.indexOf('<summary>Slow extraction guard</summary>') < 0 ||
     html.indexOf('<summary>A→M time guard</summary>') < 0 ||

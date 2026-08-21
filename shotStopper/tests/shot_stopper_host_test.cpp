@@ -91,6 +91,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   stopperState = StopperState::REQUIRES_OFF;
   shot = ShotTrajectory{};
   session = CycleSession{};
+  resetCupPresence();
   pendingFinalize = PendingShotFinalize{};
   pendingScaleTimerStop = PendingScaleTimerStop{};
   runtimeConfig = RuntimeConfig{};
@@ -377,10 +378,22 @@ void publishStableCupWeight(float weight, uint32_t baseSequence = 10) {
           ? minDurationMs / static_cast<uint32_t>(sampleCount - 1U)
           : 100U;
   const uint32_t intervalMs = stepMs > 0U ? stepMs : 100U;
+  const uint32_t startedAtMs = hostMillis;
   for (uint8_t index = 0; index < sampleCount; ++index) {
     publishWeight(weight + (index == 1 ? 0.1f : 0.0f),
-                  hostMillis + index * intervalMs, 1, baseSequence + index);
+                  startedAtMs + index * intervalMs, 1, baseSequence + index);
   }
+  if (sampleCount > 0U) {
+    hostMillis = startedAtMs + (sampleCount - 1U) * intervalMs;
+  }
+}
+
+void seedCupPresence(float weight) {
+  currentWeight = weight;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  publishStableCupWeight(weight, 1);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
 }
 
 void reachReadyFromBoot() {
@@ -4475,9 +4488,7 @@ void cp03_positive_pre_tare_weight_starts_brew() {
   resetHarness(false, true);
   reachReadyFromBoot();
   enableCupStartGuardForTest();
-  currentWeight = 80.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 1;
+  seedCupPresence(80.0f);
   startCycle();
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.active);
@@ -4517,9 +4528,7 @@ void cp05_rinse_without_cup_still_starts() {
 void cp06_cup_removed_stops_during_bbw_protection() {
   resetHarness(false, true);
   reachReadyFromBoot();
-  currentWeight = 80.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 1;
+  seedCupPresence(80.0f);
   startCycle();
   advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
@@ -4538,9 +4547,7 @@ void cp06_cup_removed_stops_during_bbw_protection() {
 void cp07_zero_after_tare_does_not_stop() {
   resetHarness(false, true);
   reachReadyFromBoot();
-  currentWeight = 80.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 1;
+  seedCupPresence(80.0f);
   startCycle();
   advanceToBrew();
   publishWeight(0.0f, hostMillis, 1, 50);
@@ -4555,9 +4562,7 @@ void cp08_stop_if_cup_removed_off_keeps_negative_weight() {
   reachReadyFromBoot();
   runtimeConfig.stopIfCupRemoved = false;
   mutableActiveShotPreset(presetBank).stopIfCupRemoved = false;
-  currentWeight = 80.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 1;
+  seedCupPresence(80.0f);
   startCycle();
   advanceToBrew();
   publishWeight(-80.0f, hostMillis, 1, 40);
@@ -4620,9 +4625,7 @@ void cp12_master_off_does_not_stop_on_negative_weight() {
   reachReadyFromBoot();
   runtimeConfig.cupProtectionEnabled = false;
   mutableActiveShotPreset(presetBank).cupProtectionEnabled = false;
-  currentWeight = 80.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 1;
+  seedCupPresence(80.0f);
   startCycle();
   advanceToBrew();
   publishWeight(-80.0f, hostMillis, 1, 40);
@@ -4658,15 +4661,14 @@ void cp13_pre_tare_negative_packets_do_not_abort() {
   publishWeight(-80.0f, hostMillis, 1, 40);
   publishWeight(-81.0f, hostMillis + 1, 1, 41);
   runLoopAfter(1);
-  CHECK(session.endReason == EndReason::CUP_REMOVED);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.endReason == EndReason::NONE);
 }
 
 void cp14_post_tare_noise_does_not_stop() {
   resetHarness(false, true);
   reachReadyFromBoot();
-  currentWeight = 80.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 1;
+  seedCupPresence(80.0f);
   startCycle();
   advanceToBrew();
   publishWeight(-0.2f, hostMillis, 1, 50);
@@ -4680,9 +4682,7 @@ void cp15_timer_only_ignores_negative_weight() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.timerOnly = true;
-  currentWeight = 80.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 1;
+  seedCupPresence(80.0f);
   startCycle();
   CHECK(session.config.timerOnly);
   publishWeight(-80.0f, hostMillis, 1, 40);
@@ -4695,9 +4695,7 @@ void cp15_timer_only_ignores_negative_weight() {
 void cp16_small_negative_noise_does_not_stop() {
   resetHarness(false, true);
   reachReadyFromBoot();
-  currentWeight = 80.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 1;
+  seedCupPresence(80.0f);
   startCycle();
   advanceToBrew();
   publishWeight(-2.9f, hostMillis, 1, 60);
@@ -4710,9 +4708,7 @@ void cp16_small_negative_noise_does_not_stop() {
 void cp17_weight_at_removed_threshold_stops() {
   resetHarness(false, true);
   reachReadyFromBoot();
-  currentWeight = 80.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 1;
+  seedCupPresence(80.0f);
   startCycle();
   advanceToBrew();
   publishWeight(-3.0f, hostMillis, 1, 70);
@@ -4726,9 +4722,7 @@ void cp18_custom_removed_threshold_is_honored() {
   reachReadyFromBoot();
   runtimeConfig.cupRemovedWeightG = -10.0f;
   mutableActiveShotPreset(presetBank).cupRemovedWeightG = -10.0f;
-  currentWeight = 80.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 1;
+  seedCupPresence(80.0f);
   startCycle();
   advanceToBrew();
   publishWeight(-5.0f, hostMillis, 1, 80);
@@ -4746,9 +4740,11 @@ void cp19_weight_below_present_threshold_blocks_brew() {
   resetHarness(false, true);
   reachReadyFromBoot();
   enableCupStartGuardForTest();
-  currentWeight = 2.9f;
+  currentWeight = 5.0f;
   currentWeightReceivedAtMs = hostMillis;
   currentWeightSequence = 1;
+  publishStableCupWeight(5.0f, 1);
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
   attemptBlockedCupStart();
 }
 
@@ -4756,9 +4752,7 @@ void cp20_weight_at_present_threshold_starts_brew() {
   resetHarness(false, true);
   reachReadyFromBoot();
   enableCupStartGuardForTest();
-  currentWeight = 3.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 1;
+  seedCupPresence(10.0f);
   startCycle();
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.active);
@@ -4768,15 +4762,117 @@ void cp21_custom_present_threshold_is_honored() {
   resetHarness(false, true);
   reachReadyFromBoot();
   enableCupStartGuardForTest();
-  runtimeConfig.cupPresentWeightG = 8.0f;
-  mutableActiveShotPreset(presetBank).cupPresentWeightG = 8.0f;
-  currentWeight = 7.9f;
+  runtimeConfig.minimumCupWeightG = 8.0f;
+  currentWeight = 7.8f;
   currentWeightReceivedAtMs = hostMillis;
   currentWeightSequence = 1;
+  publishStableCupWeight(7.8f, 1);
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
   attemptBlockedCupStart();
-  currentWeight = 8.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 2;
+  seedCupPresence(8.0f);
+  startCycle();
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.active);
+}
+
+void cup_fsm_boot_zero_is_absent() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+  publishWeight(0.0f, hostMillis, 1, 1);
+  publishWeight(-0.2f, hostMillis + 50, 1, 2);
+  publishWeight(2.0f, hostMillis + 100, 1, 3);
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+}
+
+void cup_fsm_stable_min_cup_is_present() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  seedCupPresence(80.0f);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+}
+
+void cup_fsm_noise_does_not_remove() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  seedCupPresence(80.0f);
+  notifyCupPresenceTare();
+  holdCupPresenceTransitions(false);
+  publishWeight(0.0f, hostMillis, 1, 20);
+  publishWeight(-0.2f, hostMillis + 50, 1, 21);
+  publishWeight(-0.2f, hostMillis + 51, 1, 22);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+}
+
+void cup_fsm_spike_does_not_place() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  publishWeight(28.0f, hostMillis + 100, 1, 10);
+  publishWeight(6.0f, hostMillis + 200, 1, 11);
+  publishWeight(5.0f, hostMillis + 300, 1, 12);
+  publishWeight(5.0f, hostMillis + 400, 1, 13);
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+}
+
+void cup_fsm_tare_does_not_change_state() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  seedCupPresence(80.0f);
+  notifyCupPresenceTare();
+  holdCupPresenceTransitions(false);
+  publishStableCupWeight(0.0f, 30);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+  publishWeight(-80.0f, hostMillis, 1, 40);
+  publishWeight(-81.0f, hostMillis + 1, 1, 41);
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+  notifyCupPresenceTare();
+  publishStableCupWeight(0.0f, 50);
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+}
+
+void cup_fsm_put_back_without_tare_is_present() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  seedCupPresence(80.0f);
+  notifyCupPresenceTare();
+  holdCupPresenceTransitions(false);
+  publishWeight(0.0f, hostMillis, 1, 20);
+  publishWeight(-80.0f, hostMillis + 50, 1, 40);
+  publishWeight(-81.0f, hostMillis + 51, 1, 41);
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+  publishStableCupWeight(0.0f, 50);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+}
+
+void cup_fsm_disconnect_does_not_emit_removed() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  seedCupPresence(80.0f);
+  startCycle();
+  advanceToBrew();
+  CHECK(session.endReason == EndReason::NONE);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+  setScaleConnected(false);
+  runLoopAfter(1);
+  CHECK(session.endReason != EndReason::CUP_REMOVED);
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+}
+
+void cup_fsm_rinse_does_not_freeze_presence() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.autoTare = true;
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+  const uint32_t rawOnAt = startCycle();
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE);
+  const uint32_t remaining =
+      runtimeConfig.rinseDurationMs - elapsedMs(session.rinseStartedAtMs);
+  runLoopAfter(remaining);
+  CHECK(stopperState == StopperState::READY);
+  seedCupPresence(80.0f);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+  enableCupStartGuardForTest();
   startCycle();
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.active);
@@ -7183,6 +7279,14 @@ const TestCase testCases[] = {
     {"CP19", cp19_weight_below_present_threshold_blocks_brew},
     {"CP20", cp20_weight_at_present_threshold_starts_brew},
     {"CP21", cp21_custom_present_threshold_is_honored},
+    {"CF01", cup_fsm_boot_zero_is_absent},
+    {"CF02", cup_fsm_stable_min_cup_is_present},
+    {"CF03", cup_fsm_noise_does_not_remove},
+    {"CF04", cup_fsm_spike_does_not_place},
+    {"CF05", cup_fsm_tare_does_not_change_state},
+    {"CF06", cup_fsm_put_back_without_tare_is_present},
+    {"CF07", cup_fsm_disconnect_does_not_emit_removed},
+    {"CF08", cup_fsm_rinse_does_not_freeze_presence},
     {"R42", r42_weight_below_automation_min_stays_manual},
     {"R43", r43_post_tare_baseline_accepts_zero_after_pre_tare_weight},
     {"R54", r54_post_tare_baseline_keeps_weight_control},

@@ -237,10 +237,6 @@ struct CycleSession {
   bool retarePerformed = false;
   bool retareDisabled = false;
   bool firstDropsBeepSent = false;
-  float retareCandidateWeightG = 0.0f;
-  uint8_t retareStabilitySamples = 0;
-  uint32_t retareStabilityStartedAtMs = 0;
-  uint32_t retareLastSampleAtMs = 0;
   uint8_t firstDropConfirmations = 0;
   uint32_t firstDropLastAtMs = 0;
   uint32_t firstDropLastPacketSequence = 0;
@@ -257,11 +253,7 @@ struct CycleSession {
   uint8_t activePresetId = 0;
   bool paddlePromotedToNatural = false;
   bool originalBbwHardMaxArmed = false;
-  bool cupRemovedArmed = false;
   bool cupRemovedPending = false;
-  uint8_t cupRemovedConfirmations = 0;
-  uint32_t lastCupRemovedAtMs = 0;
-  uint32_t lastCupRemovedPacketSequence = 0;
 };
 
 struct PendingShotFinalize {
@@ -862,6 +854,7 @@ bool controlAllowsConfigurationNow();
 RuntimeConfig effectiveRuntimeConfig();
 ScaleLinkSnapshot getScaleLinkSnapshot();
 bool scaleLinkAvailable(const ScaleLinkSnapshot &snapshot);
+void resetCupPresence();
 
 bool enqueueWebCommand(const WebCommand &command) {
   return webCommandQueue != nullptr &&
@@ -1009,6 +1002,10 @@ void setScaleLinkState(ScaleLinkState state) {
                runtimeConfig.buzzerScaleLostBeep) {
       emitAlert(AlertEvent::SCALE_LOST);
     }
+  }
+  if (previous == ScaleLinkState::CONNECTED &&
+      state != ScaleLinkState::CONNECTED) {
+    resetCupPresence();
   }
 }
 
@@ -1335,6 +1332,7 @@ void serviceRemoteTimerStopRetry() {
 // Brew policy + scale sense (domain headers). Orchestrator glue follows.
 // ---------------------------------------------------------------------------
 
+#include "ShotStopperCupPresence.h"
 #include "ShotStopperBrew.h"
 #include "ShotStopperScaleSense.h"
 
@@ -1357,14 +1355,26 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
     }
   }
 
-  considerCupRemovedSample(weight, receivedAtMs, packetSequence);
+  const CupPresenceEvent cupEvent =
+      feedCupPresence(weight, receivedAtMs, packetSequence);
+  if (cupEvent == CupPresenceEvent::REMOVED && session.active &&
+      stopperState == StopperState::BREW && !session.config.timerOnly &&
+      session.config.cupProtectionEnabled && session.config.stopIfCupRemoved &&
+      session.startedWithScale) {
+    session.cupRemovedPending = true;
+    addDebugEvent(DebugCategory::SCALE, DebugCode::CUP_REMOVED_CONFIRMED,
+                  weightToCentigrams(weight),
+                  static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+  }
+  if (cupEvent == CupPresenceEvent::PLACED && session.active &&
+      session.startedWithScale && retareWindowOpen() &&
+      !session.awaitingPostTareBaseline && !session.flowDuringRetare &&
+      session.firstDropMs == 0 && weight >= MIN_AUTOMATION_WEIGHT_G &&
+      weight <= MAX_AUTOMATION_WEIGHT_G) {
+    performAutomaticRetare();
+  }
 
   if (session.active && session.startedWithScale) {
-    if (retareWindowOpen() && !session.awaitingPostTareBaseline &&
-        weight >= MIN_AUTOMATION_WEIGHT_G &&
-        weight <= MAX_AUTOMATION_WEIGHT_G) {
-      considerRetareCupCandidate(weight, receivedAtMs);
-    }
     considerScaleFlowMarkers(weight, receivedAtMs, packetSequence);
   }
 
@@ -1408,6 +1418,7 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
   if (session.awaitingPostTareBaseline) {
     if (fabsf(weight) <= POST_TARE_BASELINE_MAX_ABS_G) {
       session.awaitingPostTareBaseline = false;
+      holdCupPresenceTransitions(false);
       weightStreamState = WeightStreamState::FRESH;
       return acceptWeightIntoTrajectory(weight, receivedAtMs, packetSequence);
     }
@@ -3341,7 +3352,8 @@ void processScaleWorkerEvents() {
           session.remoteTimerMayBeRunning = event.commandAttempted;
           session.remoteTimerStarted = event.writeSucceeded;
           if (event.writeSucceeded && session.config.autoTare &&
-              session.startedWithScale) {
+              session.startedWithScale && session.active &&
+              stopperState == StopperState::BREW) {
             armPostTareBaselineWindow();
           }
         }
@@ -3359,7 +3371,8 @@ void processScaleWorkerEvents() {
 
       case ScaleEventType::TARE_RESULT:
         if (event.cycleId == session.id && event.writeSucceeded &&
-            session.startedWithScale) {
+            session.startedWithScale && session.active &&
+            stopperState == StopperState::BREW) {
           armPostTareBaselineWindow();
           session.scaleBaselineReady = false;
           session.scaleBaselineG = 0.0f;
@@ -3580,6 +3593,8 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
     noScaleShotGuardActivityAtMs = millis();
   }
   session.active = false;
+  session.awaitingPostTareBaseline = false;
+  holdCupPresenceTransitions(false);
   virtualPaddleOn = false;
   addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_ENDED,
                 static_cast<int32_t>(reason));
@@ -3642,6 +3657,8 @@ void enterRinse() {
   session.automaticEnabled = false;
   session.autoToManualGuardArmed = false;
   session.autoToManualGuardEnforced = false;
+  session.awaitingPostTareBaseline = false;
+  holdCupPresenceTransitions(false);
   addDebugEvent(DebugCategory::STATE, DebugCode::RINSE_CLASSIFIED);
   transitionTo(StopperState::RINSE);
   maybeRequestNtpSyncOnActivity();
@@ -4370,6 +4387,7 @@ void processWebCommand(const WebCommand &command) {
       candidate.autoRetare = command.config.autoRetare;
       candidate.retareWindowMs = command.config.retareWindowMs;
       candidate.minimumCupWeightG = command.config.minimumCupWeightG;
+      candidate.cupRemovedWeightG = command.config.cupRemovedWeightG;
       candidate.retareStabilitySamples = command.config.retareStabilitySamples;
       candidate.retareStabilityToleranceG =
           command.config.retareStabilityToleranceG;

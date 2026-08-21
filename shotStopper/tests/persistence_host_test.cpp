@@ -556,8 +556,10 @@ void p24_preset_bank_size_and_crud_budgets() {
     CHECK(!recipe.cupProtectionEnabled);
     CHECK(!recipe.stopIfCupRemoved);
     CHECK(recipe.requireCupToStart);
-    CHECK(std::fabs(recipe.cupPresentWeightG - 5.0f) < 0.001f);
-    CHECK(std::fabs(recipe.cupRemovedWeightG - (-8.0f)) < 0.001f);
+    CHECK(std::fabs(recipe.cupPresentWeightG - DEFAULT_CUP_PRESENT_WEIGHT_G) <
+          0.001f);
+    CHECK(std::fabs(recipe.cupRemovedWeightG - DEFAULT_CUP_REMOVED_WEIGHT_G) <
+          0.001f);
     applyShotPresetToConfig(recipe, cfg, false);
     CHECK(!cfg.cupProtectionEnabled);
     CHECK(!cfg.stopIfCupRemoved);

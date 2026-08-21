@@ -57,7 +57,7 @@ Perform all relay and CN9 tests on a bench first. Do not connect CN9 to the mach
 | M48 | Run an automatic brew to target weight after M45 or M46. | CN9 opens at the BBW target after BBW protection ends (`normal_target`). |
 | M49 | Start an automatic shot with the cup off the scale, then place a ~150 g cup within 1 s of brew start. Repeat with the cup at ~3 s (still inside the default 4 s retare window). | Automatic retare occurs once; shot timer does not restart; first drops beep once when coffee starts after the **Post-tare grace** settle (**Settings → Machine and scale → Tare**, default 2 s; independent of the retare window); shot stops at target weight. |
 | M50 | Repeat M49 with automatic retare disabled. | No retare window; BBW protection still runs from shot start. |
-| M51 | During the retare window, place only a stable ~7 g object (below minimum cup weight). | No retare; retare window expires; BBW protection continues until timeout. |
+| M51 | During the retare window, place only a stable ~7 g object (below minimum cup weight in **Settings → Machine and scale → Cup**). | No retare; retare window expires; BBW protection continues until timeout. |
 | M52 | Place a heavy cup (> target weight) during the retare window. | Shot does not stop by weight until BBW protection ends. |
 | M53 | Let BBW protection timeout expire without detecting drops, then allow coffee to accumulate. | No beep at timeout; when first drops are later detected, optional beep plays once; weight stop then works normally. |
 | M54 | Shorten BBW protection below retare window + 3 s in the Web UI and save. | Server rejects the transaction or clamps to the minimum; UI hint explains the rule. |

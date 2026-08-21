@@ -3,8 +3,9 @@
 #include "ShotStopperScaleTypes.h"
 #include "ShotStopperShotLogTypes.h"
 
-// Scale sense: trajectory, first-drop / stable-cup / cup-removed detectors.
-// Predicts against a brew-injected target. No GPIO. No heap; trajectory is BSS.
+// Scale sense: trajectory and first-drop detector.
+// Cup presence lives in ShotStopperCupPresence.h. Predicts against a
+// brew-injected target. No GPIO. No heap; trajectory is BSS.
 
 void resetShotTrajectory(uint32_t startedAtMs) {
   shot.startMs = startedAtMs;
@@ -17,52 +18,6 @@ void calculateExpectedEndTime() {
   shot.expectedEndS = predictedWeightStopTimeS(
       shot.timeS, shot.weight, shot.datapoints, activeWeightCutTargetG(),
       session.config.operationalWallMs / 1000.0f);
-}
-
-void considerRetareCupCandidate(float weight, uint32_t receivedAtMs) {
-  if (!retareWindowOpen() || session.retareDisabled || session.retarePerformed) {
-    return;
-  }
-  if (weight < session.config.minimumCupWeightG) {
-    resetRetareStabilityStreak();
-    return;
-  }
-
-  if (session.retareStabilitySamples == 0) {
-    session.retareCandidateWeightG = weight;
-    session.retareStabilitySamples = 1;
-    session.retareStabilityStartedAtMs = receivedAtMs;
-    session.retareLastSampleAtMs = receivedAtMs;
-    return;
-  }
-
-  if (static_cast<uint32_t>(receivedAtMs - session.retareLastSampleAtMs) >
-          session.config.retareStabilityMaxGapMs ||
-      fabsf(weight - session.retareCandidateWeightG) >
-          session.config.retareStabilityToleranceG) {
-    session.retareCandidateWeightG = weight;
-    session.retareStabilitySamples = 1;
-    session.retareStabilityStartedAtMs = receivedAtMs;
-    session.retareLastSampleAtMs = receivedAtMs;
-    return;
-  }
-
-  session.retareCandidateWeightG = weight;
-  session.retareLastSampleAtMs = receivedAtMs;
-  if (session.retareStabilitySamples < UINT8_MAX) {
-    ++session.retareStabilitySamples;
-  }
-  const uint32_t stableDurationMs =
-      static_cast<uint32_t>(receivedAtMs - session.retareStabilityStartedAtMs);
-  const bool samplesMet =
-      session.retareStabilitySamples >= session.config.retareStabilitySamples;
-  const bool durationMet =
-      session.config.retareStabilityMinDurationMs == 0U ||
-      stableDurationMs >= session.config.retareStabilityMinDurationMs;
-  if (samplesMet && durationMet &&
-      session.retareCandidateWeightG >= session.config.minimumCupWeightG) {
-    performAutomaticRetare();
-  }
 }
 
 void rejectScaleSample(DebugCode code, float weightG, float referenceG = 0.0f) {
@@ -79,6 +34,8 @@ void armPostTareBaselineWindow() {
   session.recoveryLastAtMs = 0;
   session.recoveryLastPacketSequence = 0;
   resetWeightTrend();
+  notifyCupPresenceTare();
+  holdCupPresenceTransitions(true);
   if (session.weightControlState == WeightControlState::VALIDATING) {
     setWeightControlState(WeightControlState::ACTIVE);
   }
@@ -93,6 +50,7 @@ void expirePostTareBaselineIfNeeded() {
     return;
   }
   session.awaitingPostTareBaseline = false;
+  holdCupPresenceTransitions(false);
   addDebugEvent(DebugCategory::SCALE,
                 DebugCode::SCALE_POST_TARE_BASELINE_TIMEOUT,
                 static_cast<int32_t>(session.id),
@@ -124,57 +82,6 @@ bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
   serialTracef(LogLevel::DEBUG, "%.2fg, t=%.2fs, expected end=%.2fs",
                weight, shot.timeS[index], shot.expectedEndS);
   return true;
-}
-
-void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
-                              uint32_t packetSequence);
-
-void considerCupRemovedSample(float weight, uint32_t receivedAtMs,
-                              uint32_t packetSequence) {
-  if (!session.active || stopperState != StopperState::BREW ||
-      session.config.timerOnly || !session.config.cupProtectionEnabled ||
-      !session.config.stopIfCupRemoved || !session.startedWithScale) {
-    return;
-  }
-  if (session.awaitingPostTareBaseline) {
-    if (isfinite(weight) && weight > session.config.cupRemovedWeightG) {
-      session.cupRemovedArmed = true;
-    }
-    session.cupRemovedConfirmations = 0;
-    session.lastCupRemovedAtMs = 0;
-    session.lastCupRemovedPacketSequence = 0;
-    return;
-  }
-  if (!isfinite(weight) || weight > session.config.cupRemovedWeightG) {
-    session.cupRemovedArmed = true;
-    session.cupRemovedConfirmations = 0;
-    session.lastCupRemovedAtMs = 0;
-    session.lastCupRemovedPacketSequence = 0;
-    return;
-  }
-  if (!session.cupRemovedArmed) {
-    return;
-  }
-
-  const bool consecutive = session.cupRemovedConfirmations > 0 &&
-      static_cast<int32_t>(receivedAtMs - session.lastCupRemovedAtMs) >= 0 &&
-      static_cast<uint32_t>(receivedAtMs - session.lastCupRemovedAtMs) <=
-          DIRECT_STOP_CONFIRMATION_WINDOW_MS &&
-      (packetSequence == 0 || session.lastCupRemovedPacketSequence == 0 ||
-       packetSequence == session.lastCupRemovedPacketSequence + 1U);
-  session.cupRemovedConfirmations = consecutive
-      ? static_cast<uint8_t>(session.cupRemovedConfirmations + 1U)
-      : 1U;
-  session.lastCupRemovedAtMs = receivedAtMs;
-  session.lastCupRemovedPacketSequence = packetSequence;
-
-  if (session.cupRemovedConfirmations < DIRECT_STOP_CONFIRMATION_SAMPLES) {
-    return;
-  }
-  session.cupRemovedPending = true;
-  addDebugEvent(DebugCategory::SCALE, DebugCode::CUP_REMOVED_CONFIRMED,
-                weightToCentigrams(weight),
-                static_cast<int32_t>(elapsedMs(session.startedAtMs)));
 }
 
 void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,

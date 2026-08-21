@@ -489,6 +489,7 @@ struct RuntimeConfig {
   bool cupProtectionEnabled = true;
   bool stopIfCupRemoved = true;
   bool requireCupToStart = false;
+  // Dead field: cup presence uses minimumCupWeightG. Kept for NVS layout.
   float cupPresentWeightG = DEFAULT_CUP_PRESENT_WEIGHT_G;
   float cupRemovedWeightG = DEFAULT_CUP_REMOVED_WEIGHT_G;
   bool avoidBbwShotWithoutScale = true;
@@ -750,6 +751,7 @@ struct ShotPreset {
   bool cupProtectionEnabled = true;
   bool stopIfCupRemoved = true;
   bool requireCupToStart = false;
+  // Unused leftover: cup mass lives on RuntimeConfig. Kept for NVS layout.
   float cupPresentWeightG = DEFAULT_CUP_PRESENT_WEIGHT_G;
   float cupRemovedWeightG = DEFAULT_CUP_REMOVED_WEIGHT_G;
   uint16_t autoToManualGuardSamplesDs[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT] = {

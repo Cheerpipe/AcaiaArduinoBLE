@@ -130,8 +130,6 @@ bool bbwProtectionActive() {
   return !session.bbwProtectionEnded;
 }
 
-void resetRetareStabilityStreak();
-
 void markRetareEnded(uint32_t endedAtMs) {
   (void)endedAtMs;
   if (session.retareEnded) {
@@ -139,7 +137,6 @@ void markRetareEnded(uint32_t endedAtMs) {
   }
   session.retareEnded = true;
   session.retareDisabled = true;
-  resetRetareStabilityStreak();
 }
 
 bool bbwWeightStopInhibited() {
@@ -151,12 +148,6 @@ bool bbwWeightStopInhibited() {
 
 bool withinRinseGestureWindow() {
   return elapsedMs(session.startedAtMs) <= session.config.rinseGestureMs;
-}
-
-void resetRetareStabilityStreak() {
-  session.retareStabilitySamples = 0;
-  session.retareStabilityStartedAtMs = 0;
-  session.retareLastSampleAtMs = 0;
 }
 
 void onFirstDropsDetected(uint32_t receivedAtMs) {
@@ -173,7 +164,6 @@ void performAutomaticRetare() {
     return;
   }
   session.retarePerformed = true;
-  resetRetareStabilityStreak();
   emitImmediateCommandAlertIfBuzzer();
   markRetareEnded(millis());
 }
@@ -186,8 +176,6 @@ void initializeBbwProtection() {
   session.retarePerformed = false;
   session.retareDisabled = false;
   session.firstDropsBeepSent = false;
-  session.retareCandidateWeightG = 0.0f;
-  resetRetareStabilityStreak();
   session.firstDropConfirmations = 0;
   session.firstDropLastAtMs = 0;
   session.firstDropLastPacketSequence = 0;
@@ -418,7 +406,7 @@ bool cupStartGuardWouldBlock() {
       scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
   return effective.cupProtectionEnabled && effective.requireCupToStart &&
          !effective.timerOnly && scaleUsable &&
-         currentWeight < effective.cupPresentWeightG;
+         cupPresenceState() != CupPresenceState::PRESENT;
 }
 
 void serviceCupStartGuard() {
@@ -434,7 +422,7 @@ void serviceCupStartGuard() {
   const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
   const bool scaleUsable =
       scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
-  if (scaleUsable && currentWeight >= effective.cupPresentWeightG) {
+  if (scaleUsable && cupPresenceState() == CupPresenceState::PRESENT) {
     cupStartGuardHold = false;
     return;
   }

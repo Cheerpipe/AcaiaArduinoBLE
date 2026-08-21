@@ -30,7 +30,7 @@ export function init(){
   if($('cupProtectionEnabled'))$('cupProtectionEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
   $('operationalWallS').addEventListener('input',R.updateConfigGroups);
   document.querySelectorAll('#workflowPanel input,#workflowPanel select').forEach(el=>{
-    const brewIds=['brewByWeight','goalWeightG','operationalWallS','bbwProtectionS','weightOffsetBaselineG','cupProtectionEnabled','stopIfCupRemoved','requireCupToStart','cupPresentWeightG','cupRemovedWeightG','fastExtractionGuardEnabled','maxRecoveryWeightG','minBrewTimeS','slowExtractionGuardEnabled','minRecoveryWeightG','maxBrewTimeS','autoToManualGuardEnabled','autoToManualGuardLimitMode','autoToManualGuardManualLimitS','autoToManualGuardBaselineS'];
+    const brewIds=['brewByWeight','goalWeightG','operationalWallS','bbwProtectionS','weightOffsetBaselineG','cupProtectionEnabled','stopIfCupRemoved','requireCupToStart','fastExtractionGuardEnabled','maxRecoveryWeightG','minBrewTimeS','slowExtractionGuardEnabled','minRecoveryWeightG','maxBrewTimeS','autoToManualGuardEnabled','autoToManualGuardLimitMode','autoToManualGuardManualLimitS','autoToManualGuardBaselineS'];
     const fn=()=>brewIds.includes(el.id)?R.markBrewDirty():R.markConfigDirty();
     el.addEventListener('input',fn);el.addEventListener('change',fn);
   });
