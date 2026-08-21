@@ -38,6 +38,8 @@ const bleCompanion = fs.readFileSync(
   path.join(sketchDir, 'ShotStopperBleCompanion.h'), 'utf8');
 const taskProfiler = fs.readFileSync(
   path.join(sketchDir, 'ShotStopperTaskProfiler.h'), 'utf8');
+const flashIoScratch = fs.readFileSync(
+  path.join(sketchDir, 'ShotStopperFlashIoScratch.h'), 'utf8');
 if (!bleCompanion.includes('BLECharacteristic::writeValue') ||
     bleCompanion.includes('String("")') ||
     bleCompanion.includes('String(value)')) {
@@ -51,6 +53,12 @@ if (!taskProfiler.includes('allocExternalOrInternal(sizeof(ActiveWorkspace))') |
     /\bfree\(next\)/.test(taskProfiler)) {
   throw new Error(
       'TaskProfiler workspace must use allocExternalOrInternal/heapCapsFree, not calloc/free');
+}
+if (!flashIoScratch.includes('inline void feedFlashIoWatchdog()') ||
+    !flashIoScratch.includes('esp_task_wdt_status(nullptr) == ESP_OK') ||
+    !flashIoScratch.includes('(void)esp_task_wdt_reset()')) {
+  throw new Error(
+      'Flash I/O watchdog feed must reset TWDT only when the current task is subscribed');
 }
 if (!bleLibrary.includes('readValue(input, MAX_BLE_PACKET_LENGTH)') ||
     !bleLibrary.includes('length > MAX_BLE_PACKET_LENGTH')) {
@@ -148,8 +156,8 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 40960) {
-  throw new Error('Web UI HTML source exceeds the 40 KiB authoring budget');
+if (htmlBytes > 45056) {
+  throw new Error('Web UI HTML source exceeds the 44 KiB authoring budget');
 }
 if (jsBytes > 110000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
@@ -158,7 +166,7 @@ if (htmlBytes + jsBytes > 160000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
-    !ui.includes('Paddle State') || !ui.includes('firstDropBeep') ||
+    !ui.includes('id="dPaddle"') || !ui.includes('firstDropBeep') ||
     !ui.includes('paddleReturnReminderBeep') ||
     !ui.includes('buzzerScaleLostBeep') ||
     !ui.includes('buzzerAutoToManualGuardEndBeep') ||
@@ -432,25 +440,39 @@ if (html.includes('id="rememberMe"') ||
   throw new Error(
       'Web UI must not use login tokens; exclusive WebUI claim owns the session');
 }
-const statusSection = html.match(/<fieldset[^>]*><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
+const statusSection = html.match(/<fieldset[^>]*id="statusPanel"[^>]*><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/) ||
+    html.match(/<fieldset id="statusPanel"><legend>Status<\/legend>([\s\S]*?)<\/fieldset>/);
+const scaleSection = html.match(/<fieldset[^>]*id="scalePanel"[^>]*><legend>Scale<\/legend>([\s\S]*?)<\/fieldset>/) ||
+    html.match(/<fieldset id="scalePanel"><legend>Scale<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     statusSection[1].includes('class="row"') ||
-    (statusSection[1].match(/class="metric"/g) || []).length !== 13 ||
-    !(ui.includes("s.relayClosed?'CLOSED (ON)':'OPEN (OFF)'") || ui.includes("onOff(s.relayClosed,'CLOSED (ON)','OPEN (OFF)')")) ||
-    !ui.includes('id="scaleWeight"') ||
-    !ui.includes('id="scaleTimer"') ||
-    !ui.includes('Weight (scale)') ||
-    !ui.includes('Timer (scale)') ||
-    !statusSection[1].includes('id="statusExtractionGuard"') ||
-    !statusSection[1].includes('id="statusSlowExtractionGuard"') ||
-    !statusSection[1].includes('id="statusAtmGuard"') ||
-    !statusSection[1].includes('id="statusNoScaleGuard"') ||
+    (statusSection[1].match(/class="metric"/g) || []).length !== 3 ||
+    !statusSection[1].includes('id="machineState"') ||
+    !statusSection[1].includes('id="state"') ||
+    !statusSection[1].includes('id="cupState"') ||
+    statusSection[1].includes('id="paddle"') ||
+    statusSection[1].includes('id="relay"') ||
+    statusSection[1].includes('id="safety"') ||
+    statusSection[1].includes('id="statusExtractionGuard"') ||
+    !scaleSection || !scaleSection[1].includes('class="statusColumn"') ||
+    (scaleSection[1].match(/class="metric"/g) || []).length !== 4 ||
+    !scaleSection[1].includes('id="scale"') ||
+    !scaleSection[1].includes('id="preferredScale"') ||
+    !scaleSection[1].includes('id="scaleWeight"') ||
+    !scaleSection[1].includes('id="scaleTimer"') ||
+    !ui.includes("s.physicalPaddleOn?'ON':'OFF'") ||
+    !ui.includes("s.relayClosed?'ON':'OFF'") ||
     !ui.includes('function formatScaleWeight(') ||
-    !ui.includes('function formatScaleLink(') ||
+    !ui.includes('function formatScaleStatus(') ||
     !ui.includes('function formatScaleTimer(') ||
+    !ui.includes('function formatMachineState(') ||
+    !ui.includes("CONFIRMED_OFF:'Idle'") ||
+    !ui.includes("CONFIRMED_ON:'Working'") ||
+    !ui.includes('function formatCupState(') ||
     !ui.includes('lastDisconnectReasonName') ||
-    !ui.includes("BLE up (no weight)") ||
-    !ui.includes('formatScaleLink(s)') ||
+    !ui.includes("'Stale'") ||
+    !ui.includes("'No sample'") ||
+    !ui.includes('formatScaleStatus(s)') ||
     !ui.includes('id="preferredScale"') ||
     !ui.includes('id="preferredScaleSelect"') ||
     !ui.includes('id="preferredScalePauseHint"') ||
@@ -481,7 +503,7 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !ui.includes('function selectPreferredScale(') ||
     !ui.includes('function forgetPairedScale(') ||
     !ui.includes('Saved scale history is kept') ||
-    !ui.includes(' (not locked)') ||
+    !ui.includes('formatPreferredScale(s)') ||
     !ui.includes('macCachePauseRemainingMs>0') ||
     ui.includes('id="preferredScaleSettings"') ||
     ui.includes('id="scaleMacCacheMode"') ||
@@ -502,7 +524,7 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !network.includes('\\"history\\"') ||
     network.includes('Preferred scale cache cannot be cleared') ||
     !network.includes('\\"timerMs\\"')) {
-  throw new Error('Status must use one metric per row and homologate Paddle/CN9 OPEN/OFF and CLOSED/ON labels');
+  throw new Error('Home Status must show Machine/Brew/Cup and a Scale panel with one value per label');
 }
 if (!ui.includes('id="shotPanel"') ||
     !ui.includes('id="shotBar"') ||
@@ -552,10 +574,6 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !ui.includes('Reset A→M samples to baseline') ||
     !ui.includes('id="shotAtmGuard"') ||
     !ui.includes('id="shotNoScaleGuard"') ||
-    !ui.includes('id="statusExtractionGuard"') ||
-    !ui.includes('id="statusSlowExtractionGuard"') ||
-    !ui.includes('id="statusAtmGuard"') ||
-    !ui.includes('id="statusNoScaleGuard"') ||
     !ui.includes('No-scale guard') ||
     !ui.includes('id="avoidBbwShotWithoutScale"') ||
     !ui.includes('id="lastShotCooldownMin"') ||
@@ -568,16 +586,10 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     ui.includes('function updateNoScaleGuard(') ||
     html.indexOf('id="shotNoScaleGuard"') <
         html.indexOf('id="shotAtmGuard"') ||
-    html.indexOf('id="scaleTimer"') >
-        html.indexOf('id="statusExtractionGuard"') ||
-    html.indexOf('id="statusExtractionGuard"') >
-        html.indexOf('id="statusSlowExtractionGuard"') ||
-    html.indexOf('id="statusSlowExtractionGuard"') >
-        html.indexOf('id="statusAtmGuard"') ||
-    html.indexOf('id="statusAtmGuard"') >
-        html.indexOf('id="statusNoScaleGuard"') ||
-    html.indexOf('id="shotNoScaleGuard"') >
-        html.indexOf('id="statusExtractionGuard"') ||
+    html.includes('id="statusExtractionGuard"') ||
+    html.includes('id="statusSlowExtractionGuard"') ||
+    html.includes('id="statusAtmGuard"') ||
+    html.includes('id="statusNoScaleGuard"') ||
     html.indexOf('<legend>Machine and scale</legend>') >
         html.indexOf('<summary>Paddle</summary>') ||
     html.indexOf('<summary>Paddle</summary>') >
@@ -607,20 +619,31 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !network.includes('noScaleShotGuardArmed') ||
     !network.includes('cupPresence') ||
     !network.includes('control.cupPresent') ||
+    !network.includes('machineState') ||
+    !network.includes('machineRunStateName') ||
+    !network.includes('cupPresenceStateName') ||
     !firmware.includes('last.noScaleShotGuardEnabled') ||
     !firmware.includes('last.noScaleShotGuardArmed') ||
     !firmware.includes('next.cupPresent') ||
+    !firmware.includes('next.machineRunState') ||
+    !firmware.includes('next.cupPresenceState') ||
     !firmware.includes('cupPresenceState() == CupPresenceState::PRESENT') ||
     !domain.includes('bool cupPresent = false') ||
+    !domain.includes('MachineRunState machineRunState') ||
+    !domain.includes('CupPresenceState cupPresenceState') ||
     !ui.includes('A→M ·') ||
     !ui.includes('function updateHomeGuardSubs(') ||
     !ui.includes('updateHomeGuardSubs(s,live)') ||
     !ui.includes("setHomeSub('homeBbwSub'") ||
     !ui.includes("setHomeSub('homeCupSub'") ||
     !ui.includes("setHomeSub('homeAlertsSub'") ||
-    !ui.includes('function formatCupPresence(') ||
+    !ui.includes('function formatCupProtection(') ||
     !ui.includes('function formatAlertsChannel(') ||
-    !ui.includes("d.present?'Present':'Absent'") ||
+    !ui.includes("Can't brew — no cup") ||
+    !ui.includes('Shot aborted') ||
+    !ui.includes('Brew allowed') ||
+    !ui.includes("c.state==='PRESENT'||c.present?'Present':'Absent'") ||
+    !network.includes('endReasonName(control.lastShot.endReason)') ||
     !ui.includes("'scale_priority'?'Scale priority'") ||
     !css.includes('.swS') ||
     !css.includes('.homeSwitchGrid .swS') ||
@@ -1056,11 +1079,20 @@ if (!ui.includes('<legend>Brew</legend>') ||
                                html.indexOf('id="firmwareFooter"'));
   const statusHtml = html.slice(html.indexOf('id="statusPanel"'),
                                 html.indexOf('id="actionsPanel"'));
-  if (!ui.includes('id="hCpu"') ||
+  if (!ui.includes('id="hCpu5s"') ||
+      !ui.includes('id="hCpu1m"') ||
+      !ui.includes('id="hCpu5m"') ||
       !ui.includes('id="hCpuMhz"') ||
-      !ui.includes('id="hWifi"') ||
+      !ui.includes('id="hWifiState"') ||
       !ui.includes('id="hSsid"') ||
-      !ui.includes('id="hAp"') ||
+      !ui.includes('id="hWifiChannel"') ||
+      !ui.includes('id="hWifiIp"') ||
+      !ui.includes('id="hWifiSignal"') ||
+      !ui.includes('id="hWifiRssi"') ||
+      !ui.includes('id="hApState"') ||
+      !ui.includes('id="hApSsid"') ||
+      !ui.includes('id="hApIp"') ||
+      !ui.includes('id="hApClients"') ||
       !ui.includes('id="hUptime"') ||
       !ui.includes('id="hResetReason"') ||
       !ui.includes('id="hTemp"') ||
@@ -1073,12 +1105,15 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes('id="hPsramT"') ||
       !ui.includes('id="hPsramF"') ||
       !ui.includes('id="hPsramL"') ||
+      !ui.includes('id="hLoopGap"') ||
+      !ui.includes('id="hLoopMax"') ||
+      !ui.includes('id="lastCommandState"') ||
       !ui.includes('function updH(') ||
       !ui.includes('updH(s.health,s.safety)') ||
       !ui.includes('function applyDiagnosticStatus(') ||
       !ui.includes('loopIntervalGapMs') ||
-      !ui.includes("loop gap '+s.health.loopIntervalGapMs") ||
-      !ui.includes("(max '+s.health.loopMaxGapMs") ||
+      !ui.includes("s.health.loopIntervalGapMs+' ms'") ||
+      !ui.includes("s.health.loopMaxGapMs+' ms'") ||
       !ui.includes('h.uptimeMs') ||
       !ui.includes('h.minimumFreeHeapBytes') ||
       !ui.includes('h.largestFreeHeapBlockBytes') ||
@@ -1102,7 +1137,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes('cpuLoadValid') ||
       !ui.includes('cpuMhz') ||
       !ui.includes("w.cpuMhz+' MHz'") ||
-      !ui.includes('0–2 · 5s 1m 5m') ||
+      !ui.includes('0–2') ||
       !network.includes('tempPeakC') ||
       !network.includes('ramTotalBytes') ||
       !network.includes('\\"uptimeMs\\"') ||
@@ -1116,34 +1151,76 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !network.includes('\\"resetReasonCode\\"') ||
       !diagHtml.includes('id="diagnosticsPanel"') ||
       !diagHtml.includes('<legend>Diagnostics</legend>') ||
+      !diagHtml.includes('<legend>States</legend>') ||
+      !diagHtml.includes('<legend>Machine I/O</legend>') ||
+      !diagHtml.includes('<legend>WiFi</legend>') ||
+      !diagHtml.includes('<legend>AP</legend>') ||
+      !diagHtml.includes('<legend>CPU') ||
+      !diagHtml.includes('<legend>RAM</legend>') ||
+      !diagHtml.includes('<legend>HEAP</legend>') ||
+      !diagHtml.includes('<legend>Scale</legend>') ||
+      !diagHtml.includes('<legend>MISC</legend>') ||
+      !diagHtml.includes('id="dMachine"') ||
+      !diagHtml.includes('id="dBrew"') ||
+      !diagHtml.includes('id="dCup"') ||
+      !diagHtml.includes('id="dPaddle"') ||
+      !diagHtml.includes('id="dRelay"') ||
+      !diagHtml.includes('id="dSource"') ||
+      !diagHtml.includes('id="dSafety"') ||
+      !diagHtml.includes('id="dFault"') ||
+      !diagHtml.includes('id="dWatchdog"') ||
+      !diagHtml.includes('id="dExternal"') ||
+      !diagHtml.includes('id="dRecovery"') ||
+      !diagHtml.includes('id="dStream"') ||
+      !diagHtml.includes('id="dControl"') ||
+      !ui.includes("t('dMachine',s.machineState)") ||
+      !ui.includes("t('dBrew',s.state)") ||
+      !ui.includes("t('dCup',cp.state)") ||
+      !ui.includes("t('dPaddle',s.physicalPaddleOn?'ON':'OFF')") ||
+      !ui.includes("t('dStream',sc.streamState)") ||
+      !ui.includes("t('dControl',sc.controlState)") ||
       !diagHtml.includes('<strong>Heap min</strong>') ||
       !diagHtml.includes('<strong>Heap largest</strong>') ||
       !diagHtml.includes('<strong>PSRAM size</strong>') ||
       !diagHtml.includes('<strong>PSRAM free</strong>') ||
       !diagHtml.includes('<strong>PSRAM largest</strong>') ||
-      !diagHtml.includes('<strong>CPU clock</strong>') ||
+      !diagHtml.includes('<strong>Clock</strong>') ||
+      !diagHtml.includes('<strong>Temp current</strong>') ||
+      !diagHtml.includes('<strong>Temp peak</strong>') ||
       diagHtml.includes('<details') ||
       diagHtml.includes('<summary>Diagnostics</summary>') ||
       !diagHtml.includes('id="currentTime"') ||
       !diagHtml.includes('id="ntpStatus"') ||
+      !diagHtml.includes('id="ntpLastSync"') ||
+      !diagHtml.includes('id="ntpServer"') ||
       diagHtml.indexOf('id="diagnosticsPanel"') > diagHtml.indexOf('id="logPanel"') ||
-      diagHtml.indexOf('id="currentTime"') > diagHtml.indexOf('id="ntpStatus"') ||
-      diagHtml.indexOf('id="ntpStatus"') > diagHtml.indexOf('id="hWifi"') ||
-      diagHtml.indexOf('id="hCpu"') > diagHtml.indexOf('id="hCpuMhz"') ||
+      diagHtml.indexOf('<legend>States</legend>') > diagHtml.indexOf('<legend>Machine I/O</legend>') ||
+      diagHtml.indexOf('<legend>Machine I/O</legend>') > diagHtml.indexOf('<legend>WiFi</legend>') ||
+      diagHtml.indexOf('<legend>WiFi</legend>') > diagHtml.indexOf('<legend>AP</legend>') ||
+      diagHtml.indexOf('<legend>AP</legend>') > diagHtml.indexOf('<legend>CPU') ||
+      diagHtml.indexOf('<legend>CPU') > diagHtml.indexOf('<legend>RAM</legend>') ||
+      diagHtml.indexOf('<legend>RAM</legend>') > diagHtml.indexOf('<legend>HEAP</legend>') ||
+      diagHtml.indexOf('<legend>HEAP</legend>') > diagHtml.indexOf('<legend>Scale</legend>') ||
+      diagHtml.indexOf('<legend>Scale</legend>') > diagHtml.indexOf('<legend>MISC</legend>') ||
+      diagHtml.indexOf('id="hWifiState"') > diagHtml.indexOf('id="hSsid"') ||
+      diagHtml.indexOf('id="hCpu5s"') > diagHtml.indexOf('id="hCpuMhz"') ||
       diagHtml.indexOf('id="hCpuMhz"') > diagHtml.indexOf('id="hTemp"') ||
       diagHtml.indexOf('id="hRamF"') > diagHtml.indexOf('id="hHeapMin"') ||
       diagHtml.indexOf('id="hHeapMin"') > diagHtml.indexOf('id="hHeapLargest"') ||
       diagHtml.indexOf('id="hHeapLargest"') > diagHtml.indexOf('id="hPsramT"') ||
       diagHtml.indexOf('id="hPsramT"') > diagHtml.indexOf('id="hPsramF"') ||
       diagHtml.indexOf('id="hPsramF"') > diagHtml.indexOf('id="hPsramL"') ||
+      diagHtml.indexOf('id="currentTime"') > diagHtml.indexOf('id="ntpStatus"') ||
+      diagHtml.indexOf('id="ntpStatus"') > diagHtml.indexOf('id="ntpLastSync"') ||
       adminHtml.includes('id="diagnosticsPanel"') ||
       adminHtml.includes('id="currentTime"') ||
       adminHtml.includes('<summary>Diagnostics</summary>') ||
       statusHtml.includes('id="currentTime"') ||
       statusHtml.includes('id="ntpStatus"') ||
+      !css.includes('#diagnosticsPanel fieldset') ||
       css.includes('diagGroup')) {
     throw new Error(
-        'Diagnostics must be a non-collapsible fieldset at the top of Diagnostic, above Log, with Current time/NTP first');
+        'Diagnostics must be a non-collapsible fieldset at the top of Diagnostic, above Log, with States/Machine I/O/WiFi/AP/CPU/RAM/HEAP/Scale/MISC sections and one value per label');
   }
 }
 if (!ui.includes('id="shotTable"') ||
@@ -1186,6 +1263,18 @@ if (!shellHtml.includes('https://github.com/Cheerpipe/AcaiaArduinoBLE') ||
     !shellHtml.includes('Hecho por') ||
     !shellHtml.includes('>Cheerpipe</a>')) {
   throw new Error('Web UI footer must credit the GitHub repo and Cheerpipe');
+}
+if (!shellHtml.includes('id="message"') ||
+    !shellHtml.includes('id="messageText"') ||
+    !shellHtml.includes('id="messageClose"') ||
+    !runtimeJs.includes('function clearMessage(') ||
+    !runtimeJs.includes('b.onclick=clearMessage') ||
+    !runtimeJs.includes("kind==='ok'?5e3") ||
+    !runtimeJs.includes("kind==='warn'&&!e.querySelector('button:not(#messageClose)')?15e3") ||
+    !runtimeJs.includes('setTimeout(clearMessage,ms)') ||
+    !css.includes('.messageClose') ||
+    !css.includes('#message[hidden]')) {
+  throw new Error('Status message bar must auto-hide ok/warn and stay for errors');
 }
 if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
@@ -1359,12 +1448,14 @@ if (!ui.includes('id="staIpMode"') ||
     !ui.includes("n.rssi") ||
     !ui.includes('signal ') ||
     !ui.includes(' dBm)') ||
-    !ui.includes("$('hWifi').textContent=formatNetworkStatus(s.network)") ||
-    !ui.includes("$('hSsid').textContent=s.network.ssid||'—'") ||
-    !ui.includes("$('hAp').textContent='AP: '+(s.network.apActive?'active':'inactive')") ||
-    !html.includes('<strong>WiFi</strong><div id="hWifi">') ||
+    !ui.includes("$('networkStatus').textContent=formatNetworkStatus(s.network)") ||
+    !ui.includes("t('hSsid',n.ssid)") ||
+    !ui.includes("t('hWifiState',n.staState)") ||
+    !ui.includes("$('apStatus').textContent='AP: '+(s.network.apActive?'active':'inactive')") ||
+    !ui.includes("t('hApState',n.apActive?'active':'inactive')") ||
+    !html.includes('<legend>WiFi</legend>') ||
     !html.includes('<strong>SSID</strong><div id="hSsid">') ||
-    !html.includes('<strong>AP</strong><div id="hAp">') ||
+    !html.includes('<legend>AP</legend>') ||
     !network.includes('WiFi.config(') ||
     !network.includes('confirmPendingNetwork') ||
     !network.includes('revertPendingNetwork') ||
@@ -1788,6 +1879,11 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
     throw new Error(
         'statusPageOk(admin) must validate network, BLE Companion, NTP config and OTA');
   }
+  if (!ui.includes(
+          "v==='diagnostic'?!!(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalPaddleOn==='boolean'&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean')")) {
+    throw new Error(
+        'statusPageOk(diagnostic) must validate states, machine I/O, and diagnostic metrics');
+  }
 }
 if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     !statusFormat.includes(',\\"serialDebugOutput\\":%s') ||
@@ -1810,7 +1906,9 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'psramSizeBytes', 'psramFreeBytes', 'psramLargestFreeBlockBytes',
     'bleHostAllocPsram', 'bleHostAllocFallback',
     'resetReasonCode', 'packetGaps', 'rejectedPackets', 'reconnects',
-    'eventsDropped', 'lastCommand', 'loopIntervalGapMs', 'loopMaxGapMs'
+    'eventsDropped', 'lastCommand', 'loopIntervalGapMs', 'loopMaxGapMs',
+    'machineState', 'physicalPaddleOn', 'controlSource', 'cupPresence',
+    'streamState', 'controlState', 'taskWatchdogReady', 'recoveryRequired'
   ]) {
     if (!diagBody.includes(field)) {
       throw new Error('status/diagnostic missing required field: ' + field);

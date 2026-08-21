@@ -134,6 +134,14 @@ enum class CupPresenceState : uint8_t {
   PRESENT = 1
 };
 
+inline const char *cupPresenceStateName(CupPresenceState state) {
+  switch (state) {
+    case CupPresenceState::ABSENT: return "ABSENT";
+    case CupPresenceState::PRESENT: return "PRESENT";
+  }
+  return "ABSENT";
+}
+
 enum class CupPresenceEvent : uint8_t {
   NONE = 0,
   PLACED = 1,

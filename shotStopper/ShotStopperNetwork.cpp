@@ -3747,7 +3747,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   if (ok && page == StatusPage::Home) {
     ok = statusJsonAppend(
         &used,
-        ",\"state\":\"%s\",\"stateLabel\":\"%s\",\"relayClosed\":%s,"
+        ",\"state\":\"%s\",\"stateLabel\":\"%s\",\"machineState\":\"%s\","
+        "\"relayClosed\":%s,"
         "\"physicalPaddleOn\":%s,\"virtualPaddleOn\":%s,"
         "\"remoteControlEnabled\":%s,\"controlSource\":\"%s\","
         "\"cn9ElapsedMs\":%lu,"
@@ -3783,10 +3784,11 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"autoToManualGuardEnforced\":%s,"
         "\"autoToManualGuardRemainingMs\":%lu,"
         "\"noScaleShotGuardEnabled\":%s,"
-        "\"noScaleShotGuardArmed\":%s},"
+        "\"noScaleShotGuardArmed\":%s,\"endReason\":\"%s\"},"
         "\"noScaleShotGuard\":{\"enabled\":%s,\"armed\":%s},"
-        "\"cupPresence\":{\"present\":%s}",
+        "\"cupPresence\":{\"state\":\"%s\",\"present\":%s}",
         stopperStateName(control.state), stateLabel(control.state),
+        machineRunStateName(control.machineRunState),
         control.relayClosed ? "true" : "false",
         control.physicalPaddleOn ? "true" : "false",
         control.virtualPaddleOn ? "true" : "false",
@@ -3839,8 +3841,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
             control.lastShot.autoToManualGuardRemainingMs),
         control.lastShot.noScaleShotGuardEnabled ? "true" : "false",
         control.lastShot.noScaleShotGuardArmed ? "true" : "false",
+        endReasonName(control.lastShot.endReason),
         control.noScaleShotGuardEnabled ? "true" : "false",
         control.noScaleShotGuardArmed ? "true" : "false",
+        cupPresenceStateName(control.cupPresenceState),
         control.cupPresent ? "true" : "false");
   } else if (ok && page == StatusPage::Settings) {
     ok = statusJsonAppend(
@@ -3900,7 +3904,11 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
     // form fields; those stay on status/admin).
     ok = statusJsonAppend(
         &used,
-        ",\"network\":{\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
+        ",\"state\":\"%s\",\"machineState\":\"%s\","
+        "\"relayClosed\":%s,\"physicalPaddleOn\":%s,"
+        "\"controlSource\":\"%s\","
+        "\"cupPresence\":{\"state\":\"%s\",\"present\":%s},"
+        "\"network\":{\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
         "\"wifiConfigured\":%s,\"ssid\":\"%s\","
         "\"staState\":\"%s\",\"channel\":%s,\"staIp\":\"%s\",\"ipMode\":\"%s\","
         "\"configState\":\"%s\",\"confirmRemainingMs\":%lu,"
@@ -3922,11 +3930,21 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"tempValid\":%s,\"tempC\":%.1f,\"tempPeakC\":%.1f,"
         "\"ramTotalBytes\":%lu,\"ramUsedBytes\":%lu,"
         "\"ramFreeBytes\":%lu}},"
-        "\"safety\":{\"resetReasonCode\":%lu},"
-        "\"scale\":{\"packetGaps\":%lu,\"rejectedPackets\":%lu,"
+        "\"safety\":{\"state\":\"%s\",\"fault\":\"%s\","
+        "\"taskWatchdogReady\":%s,\"externalHardware\":%s,"
+        "\"recoveryRequired\":%s,\"resetReasonCode\":%lu},"
+        "\"scale\":{\"streamState\":\"%s\",\"controlState\":\"%s\","
+        "\"packetGaps\":%lu,\"rejectedPackets\":%lu,"
         "\"reconnects\":%lu,\"lastDisconnectReasonName\":\"%s\","
         "\"eventsDropped\":%lu},"
         "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"}",
+        stopperStateName(control.state),
+        machineRunStateName(control.machineRunState),
+        control.relayClosed ? "true" : "false",
+        control.physicalPaddleOn ? "true" : "false",
+        controlSourceName(control.source),
+        cupPresenceStateName(control.cupPresenceState),
+        control.cupPresent ? "true" : "false",
         network.apActive ? "true" : "false", network.apIp,
         static_cast<unsigned>(network.apClients),
         network.wifiConfigured ? "true" : "false", safeStaSsid,
@@ -3966,7 +3984,14 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.hwmon.ramTotalBytes),
         static_cast<unsigned long>(control.hwmon.ramUsedBytes),
         static_cast<unsigned long>(control.hwmon.ramFreeBytes),
+        relaySafetyStateName(control.safetyState),
+        relaySafetyFaultName(control.safetyFault),
+        control.taskWatchdogReady ? "true" : "false",
+        control.externalSafetyPresent ? "true" : "false",
+        control.resetRecoveryRequired ? "true" : "false",
         static_cast<unsigned long>(control.resetReasonCode),
+        weightStreamStateName(control.weightStreamState),
+        weightControlStateName(control.weightControlState),
         static_cast<unsigned long>(control.scalePacketGaps),
         static_cast<unsigned long>(control.scaleRejectedPackets),
         static_cast<unsigned long>(control.scaleReconnects),

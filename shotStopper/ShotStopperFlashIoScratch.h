@@ -121,7 +121,11 @@ inline void yieldFlashIo() {
 inline void feedFlashIoWatchdog() {
 #if !defined(SHOT_STOPPER_HOST_TEST) &&                                        \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
-  (void)esp_task_wdt_reset();
+  // HTTP workers are not TWDT subscribers. Resetting from them logs
+  // "esp_task_wdt_reset: task not found" and does not feed loop/network/scale.
+  if (esp_task_wdt_status(nullptr) == ESP_OK) {
+    (void)esp_task_wdt_reset();
+  }
 #endif
 }
 

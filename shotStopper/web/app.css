@@ -48,13 +48,20 @@ input[type=number],input[type=text],input[type=password],select{width:100%;max-w
 .statusColumn{display:grid;grid-template-columns:1fr 1fr;gap:.65rem .75rem}
 .metric{overflow-wrap:anywhere}
 .metric .hint{font-weight:400;font-size:.75rem;color:var(--mu)}
+#diagnosticsPanel fieldset{margin:.5rem 0 0;padding:.55rem .65rem;background:transparent;display:grid;grid-template-columns:1fr 1fr;gap:.65rem .75rem}
+#diagnosticsPanel fieldset:first-of-type{margin-top:.25rem}
+#diagnosticsPanel fieldset>legend{grid-column:1/-1}
 .stateReady{color:var(--ok);font-weight:700}
 .stateActive{color:var(--ac);font-weight:700}
 .stateFault{color:var(--dn);font-weight:700}
 .error{color:var(--dn)}.ok{color:var(--ok)}.warn{color:var(--wn)}
 .hidden{display:none}.fieldOff{opacity:.45}
-#message{position:sticky;top:var(--hdr);z-index:12;background:var(--bg);padding:.45rem 0;margin:0 0 .5rem;font-weight:600}
-#message.error,#message.ok,#message.warn{padding:.55rem .65rem;border-radius:.4rem;border-left:4px solid}
+#message{position:sticky;top:var(--hdr);z-index:12;display:flex;align-items:center;gap:.45rem;background:var(--bg);padding:.45rem 0;margin:0 0 .5rem;font-weight:600}
+#message[hidden]{display:none}
+#message.error,#message.ok,#message.warn{padding:.55rem .45rem .55rem .65rem;border-radius:.4rem;border-left:4px solid}
+#messageText{flex:1;min-width:0}
+.messageClose{flex:none;margin-left:auto;border:0;background:transparent;color:inherit;opacity:.7;font:inherit;font-size:1.25rem;font-weight:700;line-height:1;cursor:pointer;padding:0 .15rem;min-width:1.5rem;min-height:1.5rem}
+.messageClose:hover{opacity:1}
 #message.error{background:#fde8e8;border-color:var(--dn)}
 #message.ok{background:#e7f6ec;border-color:var(--ok)}
 #message.warn{background:#fff4e5;border-color:var(--wn)}

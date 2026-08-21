@@ -1646,6 +1646,8 @@ struct ControlStatusSnapshot {
   uint32_t scaleMacCachePauseRemainingMs = 0;
   bool noScaleShotGuardEnabled = true;
   bool noScaleShotGuardArmed = true;
+  MachineRunState machineRunState = MachineRunState::CONFIRMED_OFF;
+  CupPresenceState cupPresenceState = CupPresenceState::ABSENT;
   bool cupPresent = false;
   bool configPersistPending = false;
   bool configPersistFailed = false;
