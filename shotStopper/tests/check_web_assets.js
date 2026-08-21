@@ -449,6 +449,10 @@ const scaleSection = html.match(/<fieldset[^>]*id="scalePanel"[^>]*><legend>Scal
 if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     statusSection[1].includes('class="row"') ||
     (statusSection[1].match(/class="metric"/g) || []).length !== 3 ||
+    !statusSection[1].includes('<strong>Machine</strong>') ||
+    !statusSection[1].includes('<strong>Brew</strong>') ||
+    !statusSection[1].includes('<strong>Cup</strong>') ||
+    statusSection[1].includes('data-label="Machine"') ||
     !statusSection[1].includes('id="machineState"') ||
     !statusSection[1].includes('id="state"') ||
     !statusSection[1].includes('id="cupState"') ||
@@ -458,6 +462,11 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     statusSection[1].includes('id="statusExtractionGuard"') ||
     !scaleSection || !scaleSection[1].includes('class="statusColumn"') ||
     (scaleSection[1].match(/class="metric"/g) || []).length !== 4 ||
+    !scaleSection[1].includes('<strong>Status</strong>') ||
+    !scaleSection[1].includes('<strong>Preferred</strong>') ||
+    !scaleSection[1].includes('<strong>Weight</strong>') ||
+    !scaleSection[1].includes('<strong>Timer</strong>') ||
+    scaleSection[1].includes('data-label="Status"') ||
     !scaleSection[1].includes('id="scale"') ||
     !scaleSection[1].includes('id="preferredScale"') ||
     !scaleSection[1].includes('id="scaleWeight"') ||
@@ -536,10 +545,18 @@ if (!ui.includes('id="shotPanel"') ||
     !css.includes('.shotSpark{') ||
     !ui.includes('function renderShotSpark(') ||
     !css.includes('.shotCard{') ||
+    !css.includes('#diagnosticsPanel .metric,#statusPanel .metric,#scalePanel .metric,.shotCard > *{') ||
+    css.includes('#statusPanel .metric::before,#scalePanel .metric::before,.shotCard > *::before{') ||
+    css.includes('font-size:1rem;font-weight:700;color:var(--mu)') ||
+    !css.includes('.shotCard .shotDur > div,.shotCard .shotActual > div') ||
     !css.includes('grid-template-areas:"dur dur actual actual" "goal err flow drop" "ended ended shot shot"') ||
     !ui.includes('id="shotElapsed"') ||
     !ui.includes('id="shotFirstDrop"') ||
     !ui.includes('id="shotCurrentWeight"') ||
+    !partialHtml.home.includes('<strong>Weight</strong>') ||
+    !partialHtml.home.includes('<strong>Dur</strong>') ||
+    partialHtml.home.includes('data-label=') ||
+    html.includes('data-label="Actual"') ||
     !ui.includes('id="shotGoalWeight"') ||
     !ui.includes('id="shotErr"') ||
     !ui.includes('id="shotFlow"') ||
@@ -1240,6 +1257,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       statusHtml.includes('id="currentTime"') ||
       statusHtml.includes('id="ntpStatus"') ||
       !css.includes('#diagnosticsPanel fieldset') ||
+      !css.includes('#diagnosticsPanel .metric,#statusPanel .metric,#scalePanel .metric,.shotCard > *{') ||
       css.includes('diagGroup')) {
     throw new Error(
         'Diagnostics must be a non-collapsible fieldset at the top of Diagnostic, above Log, with States/Machine I/O/WiFi/AP/CPU/RAM/HEAP/Scale/MISC sections and one value per label');
@@ -1270,13 +1288,16 @@ if (!ui.includes('id="shotTable"') ||
     !runtimeJs.includes('shotDisplayActualG(r.actualG,r.wCg)') ||
     !runtimeJs.includes('shotDisplayActualG(ls.currentWeightG,cv.wCg)') ||
     !runtimeJs.includes('formatShotEnded(r.stopDetail)') ||
-    !runtimeJs.includes("labels=['Time','Dur','Goal','Actual','Err%','Flow','1st drop','Ended','Shot']") ||
+    !runtimeJs.includes("labels=['Time','Dur','Goal','Weight','Err%','Flow','1st drop','Ended','Shot']") ||
+    runtimeJs.includes("labels=['Time','Dur','Goal','Actual','Err%','Flow','1st drop','Ended','Shot']") ||
     runtimeJs.includes("labels=['Time','Dur','Goal','Actual','Err%','Flow','1st drop','Guard','Ext','Stop','Shot','Cut']") ||
     partialHtml.history.includes('<th>Guard</th>') ||
     partialHtml.history.includes('<th>Ext</th>') ||
     partialHtml.history.includes('<th>Stop</th>') ||
     partialHtml.history.includes('>Cut</th>') ||
     !partialHtml.history.includes('<th>Ended</th>') ||
+    !partialHtml.history.includes('<th>Weight</th>') ||
+    partialHtml.history.includes('<th>Actual</th>') ||
     !ui.includes('no time') ||
     !ui.includes('id="timezoneOffsetMinutes"') ||
     !js.includes('m+=15') ||
