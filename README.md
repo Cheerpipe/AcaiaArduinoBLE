@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/micra-shot-stopper.svg" alt="Micra Shot Stopper" width="520">
+</p>
+
 # Micra Shot Stopper
 
 ESP32-S3 firmware for a **La Marzocco Linea Micra**. It adds brew-by-weight
