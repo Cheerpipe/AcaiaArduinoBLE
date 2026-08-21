@@ -431,6 +431,10 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !ui.includes('function formatPreferredScale(') ||
     !ui.includes('function updatePreferredScaleSelect(') ||
     !ui.includes('function updateScalePreferenceOptions(') ||
+    // Regression: missing ';' after `prev` concatenated into
+    // `prevupdateScalePreferenceOptions` and broke Settings status refresh.
+    ui.includes(':prevupdateScalePreferenceOptions') ||
+    !ui.includes(':prev;updateScalePreferenceOptions()') ||
     !ui.includes("scaleMacCacheMode:(()=>{const el=$('scalePreference')") ||
     !ui.includes("el.id==='preferredScaleSelect'") ||
     ui.includes('id="alwaysUseThisScale"') ||
