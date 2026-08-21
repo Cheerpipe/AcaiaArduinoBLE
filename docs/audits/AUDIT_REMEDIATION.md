@@ -1,12 +1,12 @@
 # Audit remediation — BLE continuity
 
-Shot Stopper pins ArduinoBLE **2.1.0** and applies four patches via
-`scripts/patch_arduinoble.sh`:
+Shot Stopper pins ArduinoBLE **2.1.0** and keeps GAP scan at stock active
+**20/20 ms** (100% duty). `scripts/patch_arduinoble.sh` reverts leftover 40/20
+or 100/30 params and applies three patches:
 
-1. GAP scan active **40/20 ms** (50% duty)
-2. OOM-safe discovery (no `abort` on `bad_alloc`)
-3. BLE host objects in PSRAM (`BLEHostAlloc`)
-4. **HCI bounded waits** (`ArduinoBLE-2.1.0-hci-bounded-waits.patch`)
+1. OOM-safe discovery (no `abort` on `bad_alloc`)
+2. BLE host objects in PSRAM (`BLEHostAlloc`)
+3. **HCI bounded waits** (`ArduinoBLE-2.1.0-hci-bounded-waits.patch`)
 
 ## HCI bounded waits (C1)
 

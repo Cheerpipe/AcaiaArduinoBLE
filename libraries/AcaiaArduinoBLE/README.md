@@ -67,10 +67,11 @@ matches; other compatible advertisements are exposed via
 filter still require a known scale prefix; a connect-filter MAC may connect
 even when the advertisement has no local name.
 
-Stock ArduinoBLE 2.1.0 scans active at 20/20 ms. Shot Stopper patches GAP to
-active 40/20 ms (50% duty) via `scripts/patch_arduinoble.sh` so SCAN_RSP names
-stay visible while leaving airtime for Wi-Fi. The same script also applies an
-OOM-safe discovery patch, a BLE-host PSRAM allocator, and HCI bounded waits:
+Stock ArduinoBLE 2.1.0 scans active at 20/20 ms (100% duty). Shot Stopper
+keeps that default so SCAN_RSP names stay visible.
+`scripts/patch_arduinoble.sh` reverts leftover 40/20 or 100/30 GAP params and
+also applies an OOM-safe discovery patch, a BLE-host PSRAM allocator, and HCI
+bounded waits:
 advertising reports, linked-list nodes, remote ATT trees, local GATT 1800/1801,
 and characteristic value buffers allocate with `BLEHostAlloc` (SPIRAM first,
 internal fallback) + placement `new` so small host objects skip the

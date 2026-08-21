@@ -1006,14 +1006,14 @@ applied:
 ```
 
 `./scripts/patch_arduinoble.sh` is required: stock ArduinoBLE 2.1.0 scans
-active at 20/20 ms (100% duty). The patch sets active 40/20 ms (50% duty) so
-SCAN_RSP names stay visible while leaving airtime for the Wi-Fi AP, makes
-discovery OOM-safe (placement `new`), and places ArduinoBLE **host** objects
-(GAP queue, ATT remote tree, local GATT values) in PSRAM via `BLEHostAlloc`
-while VHCI stream buffers and the BLE **controller** stay on internal SRAM.
-`./scripts/build-idf` (and the legacy `./scripts/build`) run the patch
-automatically. The script is idempotent and also converts a leftover 100/30
-patch. Set `ARDUINO_BLE_HOME` if ArduinoBLE is not in the default path.
+active at 20/20 ms (100% duty), and Shot Stopper keeps that default so
+SCAN_RSP names stay visible. The script reverts leftover 40/20 or 100/30 GAP
+params, makes discovery OOM-safe (placement `new`), and places ArduinoBLE
+**host** objects (GAP queue, ATT remote tree, local GATT values) in PSRAM via
+`BLEHostAlloc` while VHCI stream buffers and the BLE **controller** stay on
+internal SRAM. `./scripts/build-idf` (and the legacy `./scripts/build`) run
+the patch automatically. The script is idempotent. Set `ARDUINO_BLE_HOME` if
+ArduinoBLE is not in the default path.
 
 Shot Stopper requires ESP32-S3 with PSRAM so Web UI buffers can live in
 SPIRAM while the BLE controller stays on internal SRAM. The IDF project enables
@@ -1023,7 +1023,7 @@ After a core/IDF bump, run the BLE+Web UI hardware gate in
 
 Idle discovery does not start or stop GAP every 1 s or 3 s. Those timers are
 retry (only when scan is down), a software tick for logs, and log throttle.
-The radio stays in scan; the controller runs the 40/20 cycle. The only
+The radio stays in scan; the controller runs the stock 20/20 cycle. The only
 periodic GAP restart is the 60 s HCI watchdog.
 
 Do not install AcaiaArduinoBLE from Library Manager for this application: the

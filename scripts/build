@@ -57,7 +57,7 @@ command -v node >/dev/null 2>&1 || {
 root="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$root"
 
-# GAP 40/20, OOM-safe discover, BLE host objects in PSRAM (ArduinoBLE 2.1.0).
+# GAP scan stock 20/20, OOM-safe discover, BLE host objects in PSRAM (ArduinoBLE 2.1.0).
 ./scripts/patch_arduinoble.sh
 
 echo "Building $SHOTSTOPPER_ARCH"

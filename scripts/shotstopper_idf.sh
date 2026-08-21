@@ -124,7 +124,7 @@ ss_idf_ensure_arduino_ble() {
     exit 1
   fi
 
-  # Scan 40/20, OOM-safe discover, and BLE host PSRAM (same as Arduino-CLI).
+  # Stock GAP scan 20/20, OOM-safe discover, and BLE host PSRAM (same as Arduino-CLI).
   ARDUINO_BLE_HOME="$dest" "$SS_CLI_ROOT/scripts/patch_arduinoble.sh"
 }
 
