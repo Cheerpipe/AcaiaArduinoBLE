@@ -254,6 +254,11 @@ struct CycleSession {
   bool paddlePromotedToNatural = false;
   bool originalBbwHardMaxArmed = false;
   bool cupRemovedPending = false;
+  AccidentalTouchPhase accidentalTouchPhase = AccidentalTouchPhase::STARTUP;
+  AccidentalTouchClass accidentalTouchClass = AccidentalTouchClass::OK;
+  bool accidentalTouchHolding = false;
+  uint8_t accidentalTouchPendingCount = 0;
+  float accidentalTouchPendingG[ACCIDENTAL_TOUCH_SUSTAINED_SAMPLES] = {};
 };
 
 struct PendingShotFinalize {
@@ -1085,9 +1090,17 @@ void setWeightControlState(WeightControlState state) {
   }
 }
 
+void resetAccidentalTouchState() {
+  session.accidentalTouchPhase = AccidentalTouchPhase::STARTUP;
+  session.accidentalTouchClass = AccidentalTouchClass::OK;
+  session.accidentalTouchHolding = false;
+  session.accidentalTouchPendingCount = 0;
+}
+
 void resetWeightTrend() {
   shot.expectedEndS = session.config.operationalWallMs / 1000.0f;
   shot.datapoints = 0;
+  resetAccidentalTouchState();
 }
 
 void suspendWeightControl() {
@@ -1505,7 +1518,21 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
         getScaleLinkSnapshot().disconnectSequence;
     session.recoveryConfirmations = 0;
     resetWeightTrend();
+    session.hasWeightAnchor = true;
+    session.lastAcceptedWeightG = weight;
+    session.lastAcceptedWeightAtMs = receivedAtMs;
+    session.lastAcceptedPacketSequence = packetSequence;
     setWeightControlState(WeightControlState::ACTIVE);
+  }
+
+  if (accidentalTouchSessionActive()) {
+    const AccidentalTouchClass classified =
+        evaluateAccidentalTouchSample(weight, receivedAtMs);
+    if (classified == AccidentalTouchClass::TOUCH) {
+      resetDirectStopConfirmation();
+      weightStreamState = WeightStreamState::FRESH;
+      return true;
+    }
   }
 
   considerDirectStopSample(weight, receivedAtMs, packetSequence,
@@ -4999,6 +5026,7 @@ void publishControlStatus() {
     }
     next.cycleAutoToManualGuardArmed = session.autoToManualGuardArmed;
     next.cycleAutoToManualGuardEnforced = session.autoToManualGuardEnforced;
+    next.cycleAccidentalTouchHolding = session.accidentalTouchHolding;
     if (session.autoToManualGuardEnforced) {
       const uint32_t nowMs = millis();
       next.cycleAutoToManualGuardRemainingMs =

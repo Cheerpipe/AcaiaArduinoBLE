@@ -79,6 +79,15 @@ constexpr float MAX_RECOVERY_WEIGHT_DROP_G = 2.0f;
 constexpr size_t WEIGHT_TREND_POINT_COUNT = 10;
 constexpr float WEIGHT_TREND_MIN_LAST_SAMPLE_G = 10.0f;
 constexpr float WEIGHT_TREND_MIN_HORIZON_S = 0.25f;
+constexpr float ACCIDENTAL_TOUCH_RESIDUAL_G = 1.5f;
+constexpr float ACCIDENTAL_TOUCH_STARTUP_MIN_DELTA_G = 2.0f;
+constexpr float ACCIDENTAL_TOUCH_STARTUP_MAX_RATE_G_S = 8.0f;
+constexpr float ACCIDENTAL_TOUCH_TREND_MIN_RATE_G_S = 3.0f;
+constexpr float ACCIDENTAL_TOUCH_RATE_FACTOR = 3.0f;
+constexpr float ACCIDENTAL_TOUCH_MIN_SLOPE_G_S = 0.2f;
+constexpr float ACCIDENTAL_TOUCH_SUSTAINED_SPAN_G = 1.0f;
+constexpr uint8_t ACCIDENTAL_TOUCH_SUSTAINED_SAMPLES = 3;
+constexpr size_t ACCIDENTAL_TOUCH_RATE_WINDOW = 4;
 
 // Sliding window for brew-by-weight prediction. Keep this tiny and in
 // internal RAM — do not allocate on heap or PSRAM on the weight path.
@@ -122,6 +131,17 @@ enum class WeightControlState : uint8_t {
   FAULT_STOPPED
 };
 
+enum class AccidentalTouchPhase : uint8_t {
+  STARTUP = 0,
+  TREND = 1
+};
+
+enum class AccidentalTouchClass : uint8_t {
+  OK = 0,
+  TOUCH = 1,
+  SUSTAINED = 2
+};
+
 inline const char *weightStreamStateName(WeightStreamState state) {
   switch (state) {
     case WeightStreamState::NO_SAMPLE: return "NO_SAMPLE";
@@ -144,18 +164,21 @@ inline const char *weightControlStateName(WeightControlState state) {
   return "UNKNOWN";
 }
 
-// Linear least-squares over the last WEIGHT_TREND_POINT_COUNT samples of
-// (timeS, weightG); returns the time when weight reaches targetWeightG.
-inline float predictedWeightStopTimeS(const float *timeS, const float *weightG,
-                                      size_t datapoints, float targetWeightG,
-                                      float fallbackEndS) {
+struct WeightTrendFit {
+  bool valid = false;
+  float slope = 0.0f;
+  float intercept = 0.0f;
+};
+
+inline WeightTrendFit fitWeightTrend(const float *timeS, const float *weightG,
+                                     size_t datapoints) {
+  WeightTrendFit fit;
   if (timeS == nullptr || weightG == nullptr ||
-      datapoints < WEIGHT_TREND_POINT_COUNT || !isfinite(targetWeightG) ||
-      !isfinite(fallbackEndS)) {
-    return fallbackEndS;
+      datapoints < WEIGHT_TREND_POINT_COUNT) {
+    return fit;
   }
   if (weightG[datapoints - 1] < WEIGHT_TREND_MIN_LAST_SAMPLE_G) {
-    return fallbackEndS;
+    return fit;
   }
 
   float sumXY = 0.0f;
@@ -165,7 +188,7 @@ inline float predictedWeightStopTimeS(const float *timeS, const float *weightG,
   const size_t first = datapoints - WEIGHT_TREND_POINT_COUNT;
   for (size_t i = first; i < datapoints; ++i) {
     if (!isfinite(timeS[i]) || !isfinite(weightG[i])) {
-      return fallbackEndS;
+      return fit;
     }
     sumXY += timeS[i] * weightG[i];
     sumX += timeS[i];
@@ -176,24 +199,150 @@ inline float predictedWeightStopTimeS(const float *timeS, const float *weightG,
   const float n = static_cast<float>(WEIGHT_TREND_POINT_COUNT);
   const float denominator = n * sumSquaredX - sumX * sumX;
   if (fabsf(denominator) < 0.000001f) {
-    return fallbackEndS;
+    return fit;
   }
 
   const float slope = (n * sumXY - sumX * sumY) / denominator;
   if (slope <= 0.0f || !isfinite(slope)) {
-    return fallbackEndS;
+    return fit;
   }
 
   const float meanX = sumX / n;
   const float meanY = sumY / n;
-  const float intercept = meanY - slope * meanX;
-  const float predicted = (targetWeightG - intercept) / slope;
+  fit.slope = slope;
+  fit.intercept = meanY - slope * meanX;
+  fit.valid = isfinite(fit.intercept);
+  return fit;
+}
+
+// Linear least-squares over the last WEIGHT_TREND_POINT_COUNT samples of
+// (timeS, weightG); returns the time when weight reaches targetWeightG.
+inline float predictedWeightStopTimeS(const float *timeS, const float *weightG,
+                                      size_t datapoints, float targetWeightG,
+                                      float fallbackEndS) {
+  if (!isfinite(targetWeightG) || !isfinite(fallbackEndS)) {
+    return fallbackEndS;
+  }
+  const WeightTrendFit fit = fitWeightTrend(timeS, weightG, datapoints);
+  if (!fit.valid) {
+    return fallbackEndS;
+  }
+  const float predicted = (targetWeightG - fit.intercept) / fit.slope;
   const float latestSampleS = timeS[datapoints - 1];
   if (!isfinite(predicted) ||
       predicted < latestSampleS + WEIGHT_TREND_MIN_HORIZON_S) {
     return fallbackEndS;
   }
   return predicted;
+}
+
+inline bool accidentalTouchTrendReady(const float *timeS, const float *weightG,
+                                      size_t datapoints) {
+  return fitWeightTrend(timeS, weightG, datapoints).valid;
+}
+
+inline float accidentalTouchMedianControlRate(const float *timeS,
+                                              const float *weightG,
+                                              size_t datapoints) {
+  if (timeS == nullptr || weightG == nullptr || datapoints < 4) {
+    return 0.0f;
+  }
+  float rates[ACCIDENTAL_TOUCH_RATE_WINDOW];
+  size_t count = 0;
+  const size_t first =
+      datapoints > ACCIDENTAL_TOUCH_RATE_WINDOW
+          ? datapoints - ACCIDENTAL_TOUCH_RATE_WINDOW
+          : 1U;
+  for (size_t i = first; i < datapoints && count < ACCIDENTAL_TOUCH_RATE_WINDOW;
+       ++i) {
+    if (!isfinite(timeS[i]) || !isfinite(timeS[i - 1]) ||
+        !isfinite(weightG[i]) || !isfinite(weightG[i - 1])) {
+      continue;
+    }
+    float dt = timeS[i] - timeS[i - 1];
+    if (dt <= 0.0f) {
+      dt = 0.001f;
+    }
+    rates[count++] = (weightG[i] - weightG[i - 1]) / dt;
+  }
+  if (count < 3) {
+    return 0.0f;
+  }
+  for (size_t i = 1; i < count; ++i) {
+    const float value = rates[i];
+    size_t j = i;
+    while (j > 0 && rates[j - 1] > value) {
+      rates[j] = rates[j - 1];
+      --j;
+    }
+    rates[j] = value;
+  }
+  if ((count % 2U) == 1U) {
+    return rates[count / 2U];
+  }
+  return 0.5f * (rates[count / 2U - 1U] + rates[count / 2U]);
+}
+
+inline AccidentalTouchClass classifyAccidentalTouch(
+    AccidentalTouchPhase phase, const float *timeS, const float *weightG,
+    size_t datapoints, float weight, float timeSNow, bool hasAnchor,
+    float lastAcceptedWeightG, float lastAcceptedTimeS,
+    const float *pendingTouchG, uint8_t pendingTouchCount) {
+  if (!hasAnchor || !isfinite(weight) || !isfinite(timeSNow) ||
+      !isfinite(lastAcceptedWeightG) || !isfinite(lastAcceptedTimeS)) {
+    return AccidentalTouchClass::OK;
+  }
+
+  float dt = timeSNow - lastAcceptedTimeS;
+  if (dt <= 0.0f) {
+    dt = 0.001f;
+  }
+  const float delta = weight - lastAcceptedWeightG;
+  const float instantRate = delta / dt;
+  const float medianRate =
+      accidentalTouchMedianControlRate(timeS, weightG, datapoints);
+  const float startupLimit = fmaxf(
+      ACCIDENTAL_TOUCH_STARTUP_MAX_RATE_G_S,
+      ACCIDENTAL_TOUCH_RATE_FACTOR * fmaxf(medianRate, 0.0f));
+  const bool startupTouch =
+      fabsf(delta) >= ACCIDENTAL_TOUCH_STARTUP_MIN_DELTA_G &&
+      fabsf(instantRate) > startupLimit;
+
+  bool anomalous = startupTouch;
+  const WeightTrendFit fit = fitWeightTrend(timeS, weightG, datapoints);
+  if (phase == AccidentalTouchPhase::TREND && fit.valid) {
+    const float expected = fit.intercept + fit.slope * timeSNow;
+    const float residual = weight - expected;
+    const float trendLimit = fmaxf(
+        ACCIDENTAL_TOUCH_TREND_MIN_RATE_G_S,
+        ACCIDENTAL_TOUCH_RATE_FACTOR *
+            fmaxf(fit.slope, ACCIDENTAL_TOUCH_MIN_SLOPE_G_S));
+    anomalous =
+        (residual > ACCIDENTAL_TOUCH_RESIDUAL_G && instantRate > trendLimit) ||
+        (residual < -ACCIDENTAL_TOUCH_RESIDUAL_G && instantRate < -trendLimit);
+  }
+
+  if (!anomalous) {
+    return AccidentalTouchClass::OK;
+  }
+
+  float lo = weight;
+  float hi = weight;
+  if (pendingTouchG != nullptr) {
+    for (uint8_t i = 0; i < pendingTouchCount; ++i) {
+      if (!isfinite(pendingTouchG[i])) {
+        continue;
+      }
+      lo = fminf(lo, pendingTouchG[i]);
+      hi = fmaxf(hi, pendingTouchG[i]);
+    }
+  }
+  if (static_cast<uint8_t>(pendingTouchCount + 1U) >=
+          ACCIDENTAL_TOUCH_SUSTAINED_SAMPLES &&
+      (hi - lo) <= ACCIDENTAL_TOUCH_SUSTAINED_SPAN_G) {
+    return AccidentalTouchClass::SUSTAINED;
+  }
+  return AccidentalTouchClass::TOUCH;
 }
 
 inline bool validBleMacNibble(char c) {

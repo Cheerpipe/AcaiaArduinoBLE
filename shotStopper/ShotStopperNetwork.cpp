@@ -3608,6 +3608,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"fastExtractionGuardEnabled\":%s,\"slowExtractionGuardEnabled\":%s,"
         "\"autoToManualGuardEnabled\":%s,\"cupProtectionEnabled\":%s,"
         "\"stopIfCupRemoved\":%s,\"requireCupToStart\":%s,"
+        "\"avoidAccidentalTouchEnabled\":%s,"
         "\"cupPresentWeightG\":%.1f,\"cupRemovedWeightG\":%.1f,"
         "\"avoidBbwShotWithoutScale\":%s,"
         "\"scaleMacCacheMode\":\"%s\"",
@@ -3626,6 +3627,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.config.cupProtectionEnabled ? "true" : "false",
         control.config.stopIfCupRemoved ? "true" : "false",
         control.config.requireCupToStart ? "true" : "false",
+        control.config.avoidAccidentalTouchEnabled ? "true" : "false",
         static_cast<double>(control.config.cupPresentWeightG),
         static_cast<double>(control.config.cupRemovedWeightG),
         control.config.avoidBbwShotWithoutScale ? "true" : "false",
@@ -3661,6 +3663,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"autoToManualGuardBaselineMs\":%lu,"
         "\"autoToManualGuardTrendMs\":%lu,\"cupProtectionEnabled\":%s,"
         "\"stopIfCupRemoved\":%s,\"requireCupToStart\":%s,"
+        "\"avoidAccidentalTouchEnabled\":%s,"
         "\"cupPresentWeightG\":%.1f,\"cupRemovedWeightG\":%.1f,"
         "\"scaleMacCacheMode\":\"%s\","
         "\"bookooMuteOnBuzzerOnly\":%s,\"bookooConnectBeepLevel\":%u,"
@@ -3715,6 +3718,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.config.cupProtectionEnabled ? "true" : "false",
         control.config.stopIfCupRemoved ? "true" : "false",
         control.config.requireCupToStart ? "true" : "false",
+        control.config.avoidAccidentalTouchEnabled ? "true" : "false",
         static_cast<double>(control.config.cupPresentWeightG),
         static_cast<double>(control.config.cupRemovedWeightG),
         scaleMacCacheModeId(control.config.scaleMacCacheMode),
@@ -3751,7 +3755,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"activeStopWeightG\":%.1f,\"minBrewTimeRemainingMs\":%lu,"
         "\"autoToManualGuardArmed\":%s,"
         "\"autoToManualGuardEnforced\":%s,"
-        "\"autoToManualGuardRemainingMs\":%lu},"
+        "\"autoToManualGuardRemainingMs\":%lu,"
+        "\"accidentalTouchHolding\":%s},"
         "\"lastShot\":{\"valid\":%s,\"currentWeightG\":%s,"
         "\"goalWeightG\":%u,\"extractionExtended\":%s,"
         "\"activeStopWeightG\":%.1f,\"durationMs\":%lu,"
@@ -3798,6 +3803,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.cycleAutoToManualGuardArmed ? "true" : "false",
         control.cycleAutoToManualGuardEnforced ? "true" : "false",
         static_cast<unsigned long>(control.cycleAutoToManualGuardRemainingMs),
+        control.cycleAccidentalTouchHolding ? "true" : "false",
         control.lastShot.valid ? "true" : "false", lastShotWeight,
         static_cast<unsigned>(control.lastShot.goalWeightG),
         control.lastShot.extractionExtended ? "true" : "false",
@@ -4361,7 +4367,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "cupRemovedWeightG",
       "retareStabilitySamples", "retareStabilityToleranceG",
       "retareStabilityMaxGapMs", "retareStabilityMinDurationMs",
-      "bbwProtectionMs", "fastExtractionGuardEnabled", "maxRecoveryWeightG",
+      "bbwProtectionMs", "fastExtractionGuardEnabled", "avoidAccidentalTouchEnabled",
+      "maxRecoveryWeightG",
       "minBrewTimeMs", "slowExtractionGuardEnabled", "minRecoveryWeightG",
       "maxBrewTimeMs", "autoToManualGuardEnabled", "autoToManualGuardLimitMode",
       "autoToManualGuardManualLimitMs", "autoToManualGuardBaselineMs",
@@ -4521,6 +4528,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
              !jsonBoolean(root, "fastExtractionGuardEnabled",
                           candidate.fastExtractionGuardEnabled)) {
     parseError = "fastExtractionGuardEnabled must be a boolean.";
+  } else if (jsonFieldPresent(root, "avoidAccidentalTouchEnabled") &&
+             !jsonBoolean(root, "avoidAccidentalTouchEnabled",
+                          candidate.avoidAccidentalTouchEnabled)) {
+    parseError = "avoidAccidentalTouchEnabled must be a boolean.";
   } else if (jsonFieldPresent(root, "maxRecoveryWeightG") &&
              !jsonFloat(root, "maxRecoveryWeightG",
                         candidate.maxRecoveryWeightG)) {
@@ -4827,7 +4838,9 @@ esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
           !jsonBoolean(root, "stopIfCupRemoved",
                        command.config.stopIfCupRemoved) ||
           !jsonBoolean(root, "requireCupToStart",
-                       command.config.requireCupToStart)) {
+                       command.config.requireCupToStart) ||
+          !jsonBoolean(root, "avoidAccidentalTouchEnabled",
+                       command.config.avoidAccidentalTouchEnabled)) {
         parseError = "save requires the full Brew recipe field set.";
       } else {
         command.config.timerOnly = !brewByWeight;

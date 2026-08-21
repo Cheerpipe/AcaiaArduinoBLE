@@ -103,6 +103,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   runtimeConfig.fastExtractionGuardEnabled = false;
   runtimeConfig.slowExtractionGuardEnabled = false;
   runtimeConfig.avoidBbwShotWithoutScale = false;
+  runtimeConfig.avoidAccidentalTouchEnabled = false;
   // Host scenarios assert immediate scale timer stop; delayed stop is covered by ST02.
   runtimeConfig.scaleTimerStopExtraDelayMs = 0;
   lastCycle = LastCycleSummary{};
@@ -1650,6 +1651,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.cupProtectionEnabled);
   CHECK(config.stopIfCupRemoved);
   CHECK(!config.requireCupToStart);
+  CHECK(config.avoidAccidentalTouchEnabled);
   CHECK(fabsf(config.cupPresentWeightG - DEFAULT_CUP_PRESENT_WEIGHT_G) < 0.001f);
   CHECK(fabsf(config.cupRemovedWeightG - DEFAULT_CUP_REMOVED_WEIGHT_G) < 0.001f);
   CHECK(config.lastShotCooldownMs == DEFAULT_LAST_SHOT_COOLDOWN_MS);
@@ -6841,6 +6843,288 @@ void r64_slow_guard_min_weight_cut_from_predicted_time() {
   CHECK(session.endReason == EndReason::SLOW_EXTRACTION_MIN_WEIGHT);
 }
 
+void enableAccidentalTouchForTest() {
+  runtimeConfig.avoidAccidentalTouchEnabled = true;
+  mutableActiveShotPreset(presetBank).avoidAccidentalTouchEnabled = true;
+}
+
+void publishControlRamp(float startG, float endG, float stepG, uint32_t intervalMs,
+                        uint32_t sequence) {
+  (void)sequence;
+  float weight = startG;
+  while (weight <= endG + 0.0001f) {
+    hostMillis += intervalMs;
+    markScaleWorkerProgress();
+    publishWeight(weight);
+    weight += stepG;
+  }
+}
+
+void at01_classifier_startup_and_trend_math() {
+  float times[WEIGHT_TREND_POINT_COUNT];
+  float weights[WEIGHT_TREND_POINT_COUNT];
+  for (size_t i = 0; i < WEIGHT_TREND_POINT_COUNT; ++i) {
+    times[i] = static_cast<float>(i + 1);
+    weights[i] = static_cast<float>(i + 1) * 2.0f;
+  }
+  CHECK(accidentalTouchTrendReady(times, weights, WEIGHT_TREND_POINT_COUNT));
+  CHECK(classifyAccidentalTouch(AccidentalTouchPhase::STARTUP, times, weights, 2,
+                               5.2f, 1.1f, true, 5.0f, 1.0f, nullptr, 0) ==
+        AccidentalTouchClass::OK);
+  CHECK(classifyAccidentalTouch(AccidentalTouchPhase::STARTUP, times, weights, 2,
+                               13.0f, 1.1f, true, 5.0f, 1.0f, nullptr, 0) ==
+        AccidentalTouchClass::TOUCH);
+  const float pending[2] = {13.0f, 13.1f};
+  CHECK(classifyAccidentalTouch(AccidentalTouchPhase::STARTUP, times, weights, 2,
+                               13.2f, 1.3f, true, 5.0f, 1.0f, pending, 2) ==
+        AccidentalTouchClass::SUSTAINED);
+  CHECK(classifyAccidentalTouch(
+            AccidentalTouchPhase::TREND, times, weights,
+            WEIGHT_TREND_POINT_COUNT, 20.2f, 10.1f, true, 20.0f, 10.0f, nullptr,
+            0) == AccidentalTouchClass::OK);
+  CHECK(classifyAccidentalTouch(
+            AccidentalTouchPhase::TREND, times, weights,
+            WEIGHT_TREND_POINT_COUNT, 28.0f, 10.1f, true, 20.0f, 10.0f, nullptr,
+            0) == AccidentalTouchClass::TOUCH);
+  CHECK(classifyAccidentalTouch(AccidentalTouchPhase::STARTUP, times, weights, 2,
+                               7.0f, 0.2f, true, 5.0f, -0.1f, nullptr, 0) ==
+        AccidentalTouchClass::OK);
+}
+
+void at02_early_spike_skips_control_trajectory() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableAccidentalTouchForTest();
+  startCycle();
+  advanceToBrew();
+  publishControlRamp(0.2f, 5.0f, 0.4f, 100, 10);
+  CHECK(!session.accidentalTouchHolding);
+  const size_t before = shot.datapoints;
+  const float expectedEnd = shot.expectedEndS;
+  const float lastAccepted = session.lastAcceptedWeightG;
+  hostMillis += 100;
+  publishWeight(lastAccepted + 8.0f);
+  CHECK(session.accidentalTouchHolding);
+  CHECK(shot.datapoints == before);
+  CHECK(fabsf(shot.expectedEndS - expectedEnd) < 0.001f);
+  CHECK(fabsf(session.lastAcceptedWeightG - lastAccepted) < 0.001f);
+  CHECK(stopperState == StopperState::BREW);
+}
+
+void at03_late_spike_does_not_cut_then_recovers() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableAccidentalTouchForTest();
+  runtimeConfig.goalWeightG = 36;
+  mutableActiveShotPreset(presetBank).goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  publishControlRamp(1.0f, 20.0f, 1.0f, 200, 10);
+  CHECK(session.accidentalTouchPhase == AccidentalTouchPhase::TREND);
+  const float threshold = effectiveStopThreshold();
+  hostMillis += 100;
+  publishWeight(threshold + 8.0f);
+  hostMillis += 100;
+  publishWeight(threshold + 8.1f);
+  loop();
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.endReason == EndReason::NONE);
+  CHECK(session.accidentalTouchHolding);
+  hostMillis += 100;
+  publishWeight(20.2f);
+  CHECK(!session.accidentalTouchHolding);
+  CHECK(stopperState == StopperState::BREW);
+}
+
+void at04_smooth_approach_cuts_on_two_samples() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableAccidentalTouchForTest();
+  runtimeConfig.goalWeightG = 36;
+  mutableActiveShotPreset(presetBank).goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  const float threshold = effectiveStopThreshold();
+  publishControlRamp(1.0f, threshold - 0.4f, 0.4f, 100, 10);
+  hostMillis += 100;
+  publishWeight(threshold + 0.1f);
+  hostMillis += 100;
+  publishWeight(threshold + 0.2f);
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
+}
+
+void at05_spike_before_min_brew_time_does_not_enter_fast_extended() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableAccidentalTouchForTest();
+  runtimeConfig.fastExtractionGuardEnabled = true;
+  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.goalWeightG = 36;
+  mutableActiveShotPreset(presetBank).fastExtractionGuardEnabled = true;
+  mutableActiveShotPreset(presetBank).minBrewTimeMs = 26000;
+  mutableActiveShotPreset(presetBank).goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  publishControlRamp(1.0f, 20.0f, 1.0f, 200, 10);
+  const float threshold = effectiveStopThreshold();
+  hostMillis += 100;
+  publishWeight(threshold + 6.0f);
+  CHECK(!session.extractionExtended);
+  CHECK(session.accidentalTouchHolding);
+  CHECK(stopperState == StopperState::BREW);
+}
+
+void at06_fast_extended_spike_does_not_cut_until_sustained() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.avoidAccidentalTouchEnabled = false;
+  runtimeConfig.fastExtractionGuardEnabled = true;
+  runtimeConfig.maxRecoveryWeightG = 42.5f;
+  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  runLoopAfter(22000);
+  const float threshold = effectiveStopThreshold();
+  publishWeight(threshold + 0.1f);
+  publishWeight(threshold + 0.2f);
+  CHECK(session.extractionExtended);
+  session.config.avoidAccidentalTouchEnabled = true;
+  runtimeConfig.avoidAccidentalTouchEnabled = true;
+  const float maxThreshold = effectiveMaxStopThreshold();
+  hostMillis += 100;
+  publishWeight(maxThreshold + 0.5f);
+  loop();
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.endReason == EndReason::NONE);
+  CHECK(session.accidentalTouchHolding);
+  hostMillis += 100;
+  publishWeight(maxThreshold + 0.5f);
+  hostMillis += 100;
+  publishWeight(maxThreshold + 0.6f);
+  hostMillis += 100;
+  publishWeight(maxThreshold + 0.6f);
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::FAST_EXTRACTION_MAX_WEIGHT);
+}
+
+void at07_feature_off_matches_legacy_threshold_cut() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  CHECK(!runtimeConfig.avoidAccidentalTouchEnabled);
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  const float threshold = effectiveStopThreshold();
+  publishWeight(threshold + 0.1f);
+  publishWeight(threshold + 0.2f);
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
+}
+
+void at08_retare_and_cup_remove_still_work_with_touch_guard() {
+  resetHarness(false, true);
+  runtimeConfig.autoRetare = true;
+  runtimeConfig.bbwProtectionMs = minimumBbwProtectionMs(runtimeConfig);
+  enableAccidentalTouchForTest();
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+  CHECK(retareWindowOpen());
+  publishStableCupWeight(150.0f, 10);
+  CHECK(session.retarePerformed);
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableAccidentalTouchForTest();
+  seedCupPresence(80.0f);
+  startCycle();
+  advanceToBrew();
+  publishWeight(-3.0f, hostMillis, 1, 70);
+  publishWeight(-3.1f, hostMillis + 1, 1, 71);
+  runLoopAfter(1);
+  CHECK(session.endReason == EndReason::CUP_REMOVED);
+}
+
+void at09_slew_recovery_advances_control_weight() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableAccidentalTouchForTest();
+  startCycle();
+  advanceToBrew();
+  publishControlRamp(0.2f, 5.0f, 0.4f, 100, 10);
+  const float lastAccepted = session.lastAcceptedWeightG;
+  const uint32_t seq = session.lastAcceptedPacketSequence;
+  CHECK(session.weightControlState == WeightControlState::ACTIVE);
+  hostMillis += 100;
+  publishWeight(lastAccepted + 35.0f, hostMillis, 0, seq + 1);
+  CHECK(session.weightControlState == WeightControlState::VALIDATING);
+  hostMillis += 100;
+  publishWeight(lastAccepted + 35.5f, hostMillis, 0, seq + 2);
+  hostMillis += 100;
+  publishWeight(lastAccepted + 36.0f, hostMillis, 0, seq + 3);
+  hostMillis += 100;
+  publishWeight(lastAccepted + 36.5f, hostMillis, 0, seq + 4);
+  CHECK(session.weightControlState == WeightControlState::ACTIVE);
+  CHECK(!session.accidentalTouchHolding);
+  CHECK(session.lastAcceptedWeightG > lastAccepted + 30.0f);
+  hostMillis += 100;
+  publishWeight(lastAccepted + 37.0f, hostMillis, 0, seq + 5);
+  CHECK(session.lastAcceptedWeightG > lastAccepted + 36.0f);
+}
+
+void at10_holding_does_not_block_slow_extended_at_max_time() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableAccidentalTouchForTest();
+  runtimeConfig.slowExtractionGuardEnabled = true;
+  runtimeConfig.minRecoveryWeightG = 30.0f;
+  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.goalWeightG = 36;
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  publishWeight(20.0f);
+  publishWeight(20.1f);
+  session.lastAcceptedWeightG = 20.1f;
+  currentWeight = 20.1f;
+  hostMillis += 100;
+  publishWeight(28.0f);
+  CHECK(session.accidentalTouchHolding);
+  CHECK(stopperState == StopperState::BREW);
+  reachSessionElapsed(44000);
+  CHECK(session.slowExtractionExtended);
+  CHECK(stopperState == StopperState::BREW);
+}
+
+void at11_pre_cycle_anchor_does_not_treat_first_pour_as_touch() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  enableAccidentalTouchForTest();
+  runtimeConfig.autoTare = false;
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  advanceToBrew();
+  session.hasWeightAnchor = true;
+  session.lastAcceptedWeightG = 0.0f;
+  session.lastAcceptedWeightAtMs = session.startedAtMs - PADDLE_DEBOUNCE_MS;
+  hostMillis += 300;
+  publishWeight(2.0f);
+  CHECK(!session.accidentalTouchHolding);
+  CHECK(session.lastAcceptedWeightG > 1.5f);
+}
+
 void pm01_original_bbw_release_after_rinse_keeps_cn9_closed() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -7252,6 +7536,17 @@ const TestCase testCases[] = {
     {"R62", r62_fast_extended_is_not_cut_by_slow},
     {"R63", r63_slow_guard_disabled_continues_past_max_time},
     {"R64", r64_slow_guard_min_weight_cut_from_predicted_time},
+    {"AT01", at01_classifier_startup_and_trend_math},
+    {"AT02", at02_early_spike_skips_control_trajectory},
+    {"AT03", at03_late_spike_does_not_cut_then_recovers},
+    {"AT04", at04_smooth_approach_cuts_on_two_samples},
+    {"AT05", at05_spike_before_min_brew_time_does_not_enter_fast_extended},
+    {"AT06", at06_fast_extended_spike_does_not_cut_until_sustained},
+    {"AT07", at07_feature_off_matches_legacy_threshold_cut},
+    {"AT08", at08_retare_and_cup_remove_still_work_with_touch_guard},
+    {"AT09", at09_slew_recovery_advances_control_weight},
+    {"AT10", at10_holding_does_not_block_slow_extended_at_max_time},
+    {"AT11", at11_pre_cycle_anchor_does_not_treat_first_pour_as_touch},
     {"R65", r65_slow_extended_shot_does_not_learn_weight_offset},
     {"R32", r32_old_connection_generation_cannot_update_weight},
     {"R33", r33_weight_mailbox_keeps_latest_and_reports_gap},

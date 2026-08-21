@@ -489,6 +489,7 @@ struct RuntimeConfig {
   bool cupProtectionEnabled = true;
   bool stopIfCupRemoved = true;
   bool requireCupToStart = false;
+  bool avoidAccidentalTouchEnabled = true;
   // Dead field: cup presence uses minimumCupWeightG. Kept for NVS layout.
   float cupPresentWeightG = DEFAULT_CUP_PRESENT_WEIGHT_G;
   float cupRemovedWeightG = DEFAULT_CUP_REMOVED_WEIGHT_G;
@@ -544,6 +545,7 @@ struct CycleConfigSnapshot {
   bool cupProtectionEnabled = true;
   bool stopIfCupRemoved = true;
   bool requireCupToStart = false;
+  bool avoidAccidentalTouchEnabled = true;
   float cupPresentWeightG = DEFAULT_CUP_PRESENT_WEIGHT_G;
   float cupRemovedWeightG = DEFAULT_CUP_REMOVED_WEIGHT_G;
   uint16_t autoToManualGuardSamplesDs[AUTO_TO_MANUAL_GUARD_SAMPLE_COUNT] = {
@@ -596,6 +598,7 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.cupProtectionEnabled = config.cupProtectionEnabled;
   snapshot.stopIfCupRemoved = config.stopIfCupRemoved;
   snapshot.requireCupToStart = config.requireCupToStart;
+  snapshot.avoidAccidentalTouchEnabled = config.avoidAccidentalTouchEnabled;
   snapshot.cupPresentWeightG = config.cupPresentWeightG;
   snapshot.cupRemovedWeightG = config.cupRemovedWeightG;
   memcpy(snapshot.autoToManualGuardSamplesDs, config.autoToManualGuardSamplesDs,
@@ -751,6 +754,7 @@ struct ShotPreset {
   bool cupProtectionEnabled = true;
   bool stopIfCupRemoved = true;
   bool requireCupToStart = false;
+  bool avoidAccidentalTouchEnabled = true;
   // Unused leftover: cup mass lives on RuntimeConfig. Kept for NVS layout.
   float cupPresentWeightG = DEFAULT_CUP_PRESENT_WEIGHT_G;
   float cupRemovedWeightG = DEFAULT_CUP_REMOVED_WEIGHT_G;
@@ -1621,6 +1625,7 @@ struct ControlStatusSnapshot {
   bool cycleAutoToManualGuardArmed = false;
   bool cycleAutoToManualGuardEnforced = false;
   uint32_t cycleAutoToManualGuardRemainingMs = 0;
+  bool cycleAccidentalTouchHolding = false;
   uint32_t autoToManualGuardTrendMs = DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
   char scaleProtocol[20] = "none";
   char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
@@ -1762,6 +1767,10 @@ enum class DebugCode : uint8_t {
   SLOW_EXTRACTION_ENTERED,
   SLOW_EXTRACTION_STOP_MAX_TIME,
   SLOW_EXTRACTION_STOP_MIN_WEIGHT,
+  ACCIDENTAL_TOUCH_HOLD,
+  ACCIDENTAL_TOUCH_RELEASE,
+  ACCIDENTAL_TOUCH_HANDOFF,
+  ACCIDENTAL_TOUCH_SUSTAINED,
   SHOT_LOG_PERSIST_FAILED,
   RUNTIME_PERSIST_FAILED,
   BOOT_BANNER,
@@ -2233,6 +2242,14 @@ inline const char *debugCodeName(DebugCode code) {
       return "slow extraction guard stopped at max brew time";
     case DebugCode::SLOW_EXTRACTION_STOP_MIN_WEIGHT:
       return "slow extraction guard stopped at min weight";
+    case DebugCode::ACCIDENTAL_TOUCH_HOLD:
+      return "accidental touch holding weight cut";
+    case DebugCode::ACCIDENTAL_TOUCH_RELEASE:
+      return "accidental touch released";
+    case DebugCode::ACCIDENTAL_TOUCH_HANDOFF:
+      return "accidental touch trend handoff";
+    case DebugCode::ACCIDENTAL_TOUCH_SUSTAINED:
+      return "accidental touch sustained weight accepted";
     case DebugCode::SHOT_LOG_PERSIST_FAILED:
       return "shot history NVS persist failed";
     case DebugCode::RUNTIME_PERSIST_FAILED:

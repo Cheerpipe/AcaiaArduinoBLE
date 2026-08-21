@@ -219,6 +219,7 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('"retareStabilityMinDurationMs"') ||
     !network.includes('"bbwProtectionMs"') ||
     !network.includes('"fastExtractionGuardEnabled"') ||
+    !network.includes('"avoidAccidentalTouchEnabled"') ||
     !network.includes('"maxRecoveryWeightG"') ||
     !network.includes('"minBrewTimeMs"') ||
     !network.includes('"slowExtractionGuardEnabled"') ||
@@ -239,6 +240,7 @@ if (!network.includes('"firstDropBeep"') ||
     !ui.includes('id="syncTimeButton"') ||
     !ui.includes('id="autoRetare"') ||
     !ui.includes('id="fastExtractionGuardEnabled"') ||
+    !ui.includes('id="avoidAccidentalTouchEnabled"') ||
     !ui.includes('id="maxRecoveryWeightG"') ||
     !ui.includes('id="minBrewTimeS"') ||
     !ui.includes('Fast extraction guard') ||
@@ -793,6 +795,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !html.includes('id="homeBbwSub"') ||
     !html.includes('id="homeNoScaleSub"') ||
     !html.includes('id="homeFastSub"') ||
+    !html.includes('id="homeTouchSub"') ||
+    !ui.includes('function formatAccidentalTouch(') ||
     !html.includes('id="homeSlowSub"') ||
     !html.includes('id="homeAtmSub"') ||
     !html.includes('id="homeCupSub"') ||
@@ -826,6 +830,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
     html.indexOf('id="homeFastExtractionGuardEnabled"') >
         html.indexOf('id="homePresetBlock"') ||
     html.indexOf('id="homeFastExtractionGuardEnabled"') >
+        html.indexOf('id="homeAvoidAccidentalTouchEnabled"') ||
+    html.indexOf('id="homeAvoidAccidentalTouchEnabled"') >
         html.indexOf('id="homeSoundAlertsEnabled"') ||
     html.indexOf('id="homeSoundAlertsEnabled"') >
         html.indexOf('id="homePresetBlock"') ||
@@ -836,6 +842,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
     html.indexOf('id="homeFastExtractionGuardEnabled"') > html.indexOf('id="shotPanel"') ||
     !html.includes('>No-scale BBW<span') ||
     !html.includes('>Fast extraction guard<span') ||
+    !html.includes('>Avoid accidental touch<span') ||
     !html.includes('>Slow extraction guard<span') ||
     !html.includes('>A→M time guard<span') ||
     html.indexOf('<summary>No-scale BBW</summary>') < 0 ||
@@ -859,6 +866,11 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('id="homeCupProtectionEnabled"') ||
     html.indexOf('<summary>Slow extraction guard</summary>') < 0 ||
     html.indexOf('<summary>A→M time guard</summary>') < 0 ||
+    html.includes('<summary>Avoid accidental touch</summary>') ||
+    html.indexOf('<summary>Brew by Weight</summary>') >
+        html.indexOf('id="avoidAccidentalTouchEnabled"') ||
+    html.indexOf('id="avoidAccidentalTouchEnabled"') >
+        html.indexOf('<summary>Cup protection</summary>') ||
     html.indexOf('<summary>Fast extraction guard</summary>') >
         html.indexOf('<summary>Slow extraction guard</summary>') ||
     html.indexOf('<summary>Slow extraction guard</summary>') >
@@ -876,11 +888,13 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes("classList.toggle('switchPending',!!on)") ||
     !ui.includes("persistHomeGuard('homeAvoidBbwShotWithoutScale'") ||
     !ui.includes("persistHomeGuard('homeFastExtractionGuardEnabled'") ||
+    !ui.includes("persistHomeGuard('homeAvoidAccidentalTouchEnabled'") ||
     !ui.includes("persistHomeGuard('homeSlowExtractionGuardEnabled'") ||
     !ui.includes("persistHomeGuard('homeAutoToManualGuardEnabled'") ||
     !ui.includes("persistHomeGuard('homeCupProtectionEnabled'") ||
     !ui.includes("'avoidBbwShotWithoutScale',0)") ||
     !ui.includes("'fastExtractionGuardEnabled',1)") ||
+    !ui.includes("'avoidAccidentalTouchEnabled',1)") ||
     !ui.includes("'slowExtractionGuardEnabled',1)") ||
     !ui.includes("'autoToManualGuardEnabled',1)") ||
     !ui.includes("'cupProtectionEnabled',1)") ||
@@ -1951,6 +1965,8 @@ if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
     !firmware.includes('notifyRetareFlowDetected') ||
     !firmware.includes('retareFlowFirstDetectedAtMs') ||
     !firmware.includes('bbwProtectionActive') ||
+    !firmware.includes('classifyAccidentalTouch') ||
+    !firmware.includes('accidentalTouchHolding') ||
     !firmware.includes('retareWindowOpen') ||
     !firmware.includes('scale.supportsTareStartTimer()') ||
     !firmware.includes('alertOutputChannel') ||

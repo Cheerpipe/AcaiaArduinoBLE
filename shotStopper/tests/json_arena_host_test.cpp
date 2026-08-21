@@ -75,6 +75,7 @@ void testConfigPatchWorstCaseFitsArena() {
       "\"retareStabilityMinDurationMs\":800,"
       "\"bbwProtectionMs\":3000,"
       "\"fastExtractionGuardEnabled\":true,"
+      "\"avoidAccidentalTouchEnabled\":true,"
       "\"maxRecoveryWeightG\":2.5,"
       "\"minBrewTimeMs\":18000,"
       "\"slowExtractionGuardEnabled\":true,"

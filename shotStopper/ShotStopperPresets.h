@@ -33,6 +33,7 @@ inline void fillDoubleFirmwareDefaults(ShotPreset &preset) {
   preset.cupProtectionEnabled = true;
   preset.stopIfCupRemoved = true;
   preset.requireCupToStart = false;
+  preset.avoidAccidentalTouchEnabled = true;
   preset.cupPresentWeightG = DEFAULT_CUP_PRESENT_WEIGHT_G;
   preset.cupRemovedWeightG = DEFAULT_CUP_REMOVED_WEIGHT_G;
   seedAutoToManualSamples(preset);
@@ -347,6 +348,7 @@ inline void applyShotPresetToConfig(const ShotPreset &preset,
   config.cupProtectionEnabled = preset.cupProtectionEnabled;
   config.stopIfCupRemoved = preset.stopIfCupRemoved;
   config.requireCupToStart = preset.requireCupToStart;
+  config.avoidAccidentalTouchEnabled = preset.avoidAccidentalTouchEnabled;
   memcpy(config.autoToManualGuardSamplesDs, preset.autoToManualGuardSamplesDs,
          sizeof(config.autoToManualGuardSamplesDs));
   config.timerOnly = sessionManual ? true : !preset.brewByWeight;
@@ -380,6 +382,7 @@ inline void copyUserRecipeFromConfig(const RuntimeConfig &config,
   preset.cupProtectionEnabled = config.cupProtectionEnabled;
   preset.stopIfCupRemoved = config.stopIfCupRemoved;
   preset.requireCupToStart = config.requireCupToStart;
+  preset.avoidAccidentalTouchEnabled = config.avoidAccidentalTouchEnabled;
 }
 
 inline bool allocateShotPresetId(ShotPresetBank &bank, uint8_t &outId) {
@@ -607,6 +610,7 @@ inline void migrateRecipeFromRuntimeToBank(const RuntimeConfig &runtime,
   dbl->cupProtectionEnabled = runtime.cupProtectionEnabled;
   dbl->stopIfCupRemoved = runtime.stopIfCupRemoved;
   dbl->requireCupToStart = runtime.requireCupToStart;
+  dbl->avoidAccidentalTouchEnabled = runtime.avoidAccidentalTouchEnabled;
   dbl->cupPresentWeightG = runtime.cupPresentWeightG;
   dbl->cupRemovedWeightG = runtime.cupRemovedWeightG;
   dbl->brewByWeight = !runtime.timerOnly;

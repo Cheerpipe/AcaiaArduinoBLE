@@ -24,13 +24,14 @@ export function init(){
   $('paddleReturnReminderBeep').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('alertOutputChannel').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('fastExtractionGuardEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
+  if($('avoidAccidentalTouchEnabled'))$('avoidAccidentalTouchEnabled').onchange=()=>{R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
   $('slowExtractionGuardEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
   $('autoToManualGuardLimitMode').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('autoToManualGuardEnabled').onchange=()=>{R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
   if($('cupProtectionEnabled'))$('cupProtectionEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
   $('operationalWallS').addEventListener('input',R.updateConfigGroups);
   document.querySelectorAll('#workflowPanel input,#workflowPanel select').forEach(el=>{
-    const brewIds=['brewByWeight','goalWeightG','operationalWallS','bbwProtectionS','weightOffsetBaselineG','cupProtectionEnabled','stopIfCupRemoved','requireCupToStart','fastExtractionGuardEnabled','maxRecoveryWeightG','minBrewTimeS','slowExtractionGuardEnabled','minRecoveryWeightG','maxBrewTimeS','autoToManualGuardEnabled','autoToManualGuardLimitMode','autoToManualGuardManualLimitS','autoToManualGuardBaselineS'];
+    const brewIds=['brewByWeight','goalWeightG','operationalWallS','bbwProtectionS','weightOffsetBaselineG','cupProtectionEnabled','stopIfCupRemoved','requireCupToStart','fastExtractionGuardEnabled','avoidAccidentalTouchEnabled','maxRecoveryWeightG','minBrewTimeS','slowExtractionGuardEnabled','minRecoveryWeightG','maxBrewTimeS','autoToManualGuardEnabled','autoToManualGuardLimitMode','autoToManualGuardManualLimitS','autoToManualGuardBaselineS'];
     const fn=()=>brewIds.includes(el.id)?R.markBrewDirty():R.markConfigDirty();
     el.addEventListener('input',fn);el.addEventListener('change',fn);
   });

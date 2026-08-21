@@ -89,6 +89,7 @@ void p01_defaults_are_valid() {
   CHECK(settings.runtime.cupProtectionEnabled);
   CHECK(settings.runtime.stopIfCupRemoved);
   CHECK(!settings.runtime.requireCupToStart);
+  CHECK(settings.runtime.avoidAccidentalTouchEnabled);
   CHECK(std::fabs(settings.runtime.cupPresentWeightG -
                   DEFAULT_CUP_PRESENT_WEIGHT_G) < 0.001f);
   CHECK(std::fabs(settings.runtime.cupRemovedWeightG -
@@ -124,11 +125,13 @@ void p02_newest_valid_slot_is_loaded() {
   settings.runtime.cupProtectionEnabled = false;
   settings.runtime.stopIfCupRemoved = false;
   settings.runtime.requireCupToStart = true;
+  settings.runtime.avoidAccidentalTouchEnabled = false;
   settings.runtime.cupPresentWeightG = 4.5f;
   settings.runtime.cupRemovedWeightG = -6.0f;
   settings.presets.presets[0].cupProtectionEnabled = false;
   settings.presets.presets[0].stopIfCupRemoved = false;
   settings.presets.presets[0].requireCupToStart = true;
+  settings.presets.presets[0].avoidAccidentalTouchEnabled = false;
   settings.presets.presets[0].cupPresentWeightG = 4.5f;
   settings.presets.presets[0].cupRemovedWeightG = -6.0f;
   CHECK(savePersistedSettings(settings));
@@ -141,11 +144,13 @@ void p02_newest_valid_slot_is_loaded() {
   CHECK(!loaded.runtime.cupProtectionEnabled);
   CHECK(!loaded.runtime.stopIfCupRemoved);
   CHECK(loaded.runtime.requireCupToStart);
+  CHECK(!loaded.runtime.avoidAccidentalTouchEnabled);
   CHECK(std::fabs(loaded.runtime.cupPresentWeightG - 4.5f) < 0.001f);
   CHECK(std::fabs(loaded.runtime.cupRemovedWeightG - (-6.0f)) < 0.001f);
   CHECK(!loaded.presets.presets[0].cupProtectionEnabled);
   CHECK(!loaded.presets.presets[0].stopIfCupRemoved);
   CHECK(loaded.presets.presets[0].requireCupToStart);
+  CHECK(!loaded.presets.presets[0].avoidAccidentalTouchEnabled);
   CHECK(std::fabs(loaded.presets.presets[0].cupPresentWeightG - 4.5f) < 0.001f);
   CHECK(std::fabs(loaded.presets.presets[0].cupRemovedWeightG - (-6.0f)) <
         0.001f);
@@ -533,6 +538,7 @@ void p24_preset_bank_size_and_crud_budgets() {
   CHECK(bank.presets[0].cupProtectionEnabled);
   CHECK(bank.presets[0].stopIfCupRemoved);
   CHECK(!bank.presets[0].requireCupToStart);
+  CHECK(bank.presets[0].avoidAccidentalTouchEnabled);
   CHECK(std::fabs(bank.presets[0].cupPresentWeightG -
                   DEFAULT_CUP_PRESENT_WEIGHT_G) < 0.001f);
   CHECK(std::fabs(bank.presets[0].cupRemovedWeightG -
@@ -550,12 +556,14 @@ void p24_preset_bank_size_and_crud_budgets() {
     cfg.cupProtectionEnabled = false;
     cfg.stopIfCupRemoved = false;
     cfg.requireCupToStart = true;
+    cfg.avoidAccidentalTouchEnabled = false;
     cfg.cupPresentWeightG = 5.0f;
     cfg.cupRemovedWeightG = -8.0f;
     copyUserRecipeFromConfig(cfg, recipe);
     CHECK(!recipe.cupProtectionEnabled);
     CHECK(!recipe.stopIfCupRemoved);
     CHECK(recipe.requireCupToStart);
+    CHECK(!recipe.avoidAccidentalTouchEnabled);
     CHECK(std::fabs(recipe.cupPresentWeightG - DEFAULT_CUP_PRESENT_WEIGHT_G) <
           0.001f);
     CHECK(std::fabs(recipe.cupRemovedWeightG - DEFAULT_CUP_REMOVED_WEIGHT_G) <
@@ -564,6 +572,7 @@ void p24_preset_bank_size_and_crud_budgets() {
     CHECK(!cfg.cupProtectionEnabled);
     CHECK(!cfg.stopIfCupRemoved);
     CHECK(cfg.requireCupToStart);
+    CHECK(!cfg.avoidAccidentalTouchEnabled);
     CHECK(std::fabs(cfg.cupPresentWeightG - 5.0f) < 0.001f);
     CHECK(std::fabs(cfg.cupRemovedWeightG - (-8.0f)) < 0.001f);
   }

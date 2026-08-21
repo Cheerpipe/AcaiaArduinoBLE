@@ -109,6 +109,74 @@ void resetDirectStopConfirmation() {
   session.directStopPending = false;
 }
 
+bool accidentalTouchSessionActive() {
+  return shouldTrackWeight() && session.config.avoidAccidentalTouchEnabled &&
+         session.startedWithScale &&
+         session.weightControlState == WeightControlState::ACTIVE;
+}
+
+void noteAccidentalTouchClass(AccidentalTouchClass classified, float weight) {
+  const bool wasHolding = session.accidentalTouchHolding;
+  session.accidentalTouchClass = classified;
+  if (classified == AccidentalTouchClass::TOUCH) {
+    session.accidentalTouchHolding = true;
+    if (session.accidentalTouchPendingCount <
+        ACCIDENTAL_TOUCH_SUSTAINED_SAMPLES) {
+      session.accidentalTouchPendingG[session.accidentalTouchPendingCount++] =
+          weight;
+    } else {
+      memmove(&session.accidentalTouchPendingG[0],
+              &session.accidentalTouchPendingG[1],
+              (ACCIDENTAL_TOUCH_SUSTAINED_SAMPLES - 1U) * sizeof(float));
+      session.accidentalTouchPendingG[ACCIDENTAL_TOUCH_SUSTAINED_SAMPLES - 1U] =
+          weight;
+    }
+    if (!wasHolding) {
+      addDebugEvent(DebugCategory::SCALE, DebugCode::ACCIDENTAL_TOUCH_HOLD,
+                    weightToCentigrams(weight));
+    }
+    return;
+  }
+
+  session.accidentalTouchHolding = false;
+  session.accidentalTouchPendingCount = 0;
+  if (classified == AccidentalTouchClass::SUSTAINED) {
+    addDebugEvent(DebugCategory::SCALE, DebugCode::ACCIDENTAL_TOUCH_SUSTAINED,
+                  weightToCentigrams(weight));
+  } else if (wasHolding) {
+    addDebugEvent(DebugCategory::SCALE, DebugCode::ACCIDENTAL_TOUCH_RELEASE,
+                  weightToCentigrams(weight));
+  }
+}
+
+void maybeHandoffAccidentalTouchPhase() {
+  if (session.accidentalTouchPhase != AccidentalTouchPhase::STARTUP) {
+    return;
+  }
+  if (!accidentalTouchTrendReady(shot.timeS, shot.weight, shot.datapoints)) {
+    return;
+  }
+  session.accidentalTouchPhase = AccidentalTouchPhase::TREND;
+  addDebugEvent(DebugCategory::SCALE, DebugCode::ACCIDENTAL_TOUCH_HANDOFF,
+                static_cast<int32_t>(shot.datapoints));
+}
+
+AccidentalTouchClass evaluateAccidentalTouchSample(float weight,
+                                                   uint32_t receivedAtMs) {
+  maybeHandoffAccidentalTouchPhase();
+  const float nowS =
+      static_cast<int32_t>(receivedAtMs - shot.startMs) / 1000.0f;
+  const float lastS =
+      static_cast<int32_t>(session.lastAcceptedWeightAtMs - shot.startMs) /
+      1000.0f;
+  const AccidentalTouchClass classified = classifyAccidentalTouch(
+      session.accidentalTouchPhase, shot.timeS, shot.weight, shot.datapoints,
+      weight, nowS, session.hasWeightAnchor, session.lastAcceptedWeightG, lastS,
+      session.accidentalTouchPendingG, session.accidentalTouchPendingCount);
+  noteAccidentalTouchClass(classified, weight);
+  return classified;
+}
+
 bool bbwAutomaticScaleSession() {
   return session.active && session.bbwProtectionEnabled;
 }
@@ -498,6 +566,7 @@ bool automaticScaleStopDue() {
     return false;
   }
 
+  const bool holding = session.accidentalTouchHolding;
   const bool directStopFresh = session.directStopPending &&
       session.thresholdConfirmations >= DIRECT_STOP_CONFIRMATION_SAMPLES &&
       static_cast<int32_t>(millis() - session.lastThresholdAtMs) >= 0 &&
@@ -506,7 +575,7 @@ bool automaticScaleStopDue() {
       directStopFresh &&
       (session.directStopReason == EndReason::WEIGHT_ANOMALY ||
        session.weightControlState == WeightControlState::ACTIVE);
-  if (directStopHonored) {
+  if (!holding && directStopHonored) {
     return true;
   }
 
@@ -536,6 +605,10 @@ bool automaticScaleStopDue() {
       return true;
     }
     enterSlowExtractionExtended(session.lastAcceptedWeightG, millis());
+    return false;
+  }
+
+  if (holding) {
     return false;
   }
 

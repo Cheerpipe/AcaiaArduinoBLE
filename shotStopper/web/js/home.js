@@ -15,6 +15,7 @@ export function init(){
   if($('homeBrewByWeight'))$('homeBrewByWeight').onchange=()=>{const on=$('homeBrewByWeight').checked;R.beginHomeSwitchPending('homeBrewByWeight',on);R.renderHomePresetChips();R.homeFlushConfig=true;R.scheduleHomeGuardFlush()};
   if($('homeAvoidBbwShotWithoutScale'))$('homeAvoidBbwShotWithoutScale').onchange=()=>R.persistHomeGuard('homeAvoidBbwShotWithoutScale','homeAvoidBbwShotWithoutScaleState','avoidBbwShotWithoutScale',0);
   if($('homeFastExtractionGuardEnabled'))$('homeFastExtractionGuardEnabled').onchange=()=>R.persistHomeGuard('homeFastExtractionGuardEnabled','homeFastExtractionGuardEnabledState','fastExtractionGuardEnabled',1);
+  if($('homeAvoidAccidentalTouchEnabled'))$('homeAvoidAccidentalTouchEnabled').onchange=()=>R.persistHomeGuard('homeAvoidAccidentalTouchEnabled','homeAvoidAccidentalTouchEnabledState','avoidAccidentalTouchEnabled',1);
   if($('homeSlowExtractionGuardEnabled'))$('homeSlowExtractionGuardEnabled').onchange=()=>R.persistHomeGuard('homeSlowExtractionGuardEnabled','homeSlowExtractionGuardEnabledState','slowExtractionGuardEnabled',1);
   if($('homeAutoToManualGuardEnabled'))$('homeAutoToManualGuardEnabled').onchange=()=>R.persistHomeGuard('homeAutoToManualGuardEnabled','homeAutoToManualGuardEnabledState','autoToManualGuardEnabled',1);
   if($('homeSoundAlertsEnabled'))$('homeSoundAlertsEnabled').onchange=()=>R.persistHomeGuard('homeSoundAlertsEnabled','homeSoundAlertsEnabledState','soundAlertsEnabled',0);
