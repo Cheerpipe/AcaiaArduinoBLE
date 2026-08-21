@@ -18,7 +18,6 @@ export function init(){
   if($('homeAvoidAccidentalTouchEnabled'))$('homeAvoidAccidentalTouchEnabled').onchange=()=>R.persistHomeGuard('homeAvoidAccidentalTouchEnabled','homeAvoidAccidentalTouchEnabledState','avoidAccidentalTouchEnabled',1);
   if($('homeSlowExtractionGuardEnabled'))$('homeSlowExtractionGuardEnabled').onchange=()=>R.persistHomeGuard('homeSlowExtractionGuardEnabled','homeSlowExtractionGuardEnabledState','slowExtractionGuardEnabled',1);
   if($('homeAutoToManualGuardEnabled'))$('homeAutoToManualGuardEnabled').onchange=()=>R.persistHomeGuard('homeAutoToManualGuardEnabled','homeAutoToManualGuardEnabledState','autoToManualGuardEnabled',1);
-  if($('homeSoundAlertsEnabled'))$('homeSoundAlertsEnabled').onchange=()=>R.persistHomeGuard('homeSoundAlertsEnabled','homeSoundAlertsEnabledState','soundAlertsEnabled',0);
   if($('homeCupProtectionEnabled'))$('homeCupProtectionEnabled').onchange=()=>R.persistHomeGuard('homeCupProtectionEnabled','homeCupProtectionEnabledState','cupProtectionEnabled',1);
 
   

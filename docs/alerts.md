@@ -26,7 +26,7 @@ Shot completion still adds one extra beep after stop (not configurable).
 
 | Setting | Default | Range / notes | Effect |
 | --- | --- | --- | --- |
-| **Sound alerts** | ON | ON / OFF | Master switch. Also on **Home → Quick Settings**, independently of brew by weight. |
+| **Sound alerts** | ON | ON / OFF | Master switch in **Settings → Alerts**. |
 | **Output channel** | **Buzzer only** with a local buzzer; **Scale only** without | Buzzer only / Scale only / Scale priority | Where each alert plays. **Buzzer only**: all sound on the local buzzer. **Scale only**: scale path; scale-incapable triples are muted. **Scale priority**: scale when connected/able, else buzzer; never both for one event. Shown only with buzzer support. |
 | **Beep when coffee starts** | ON | ON / OFF | One beep on first coffee drops during an automatic shot. Ignored when brew by weight is off. |
 | **Paddle-off reminder** | ON | ON / OFF | Repeat beeps while the **physical paddle stays ON** and **CN9 is already open**. |

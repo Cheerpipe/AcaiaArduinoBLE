@@ -334,13 +334,17 @@ if (!ui.includes("scaleConnectedLed:$('scaleConnectedLed').checked") ||
 }
 
 if (!ui.includes('id="soundAlertsEnabled"') ||
-    !ui.includes('id="homeSoundAlertsEnabled"') ||
+    ui.includes('id="homeSoundAlertsEnabled"') ||
+    ui.includes('id="homeAlertsSub"') ||
+    ui.includes("setHomeSub('homeAlertsSub'") ||
+    ui.includes('function formatAlertsChannel(') ||
+    ui.includes("persistHomeGuard('homeSoundAlertsEnabled'") ||
     !ui.includes('soundAlertsEnabled:$(\'soundAlertsEnabled\').checked') ||
-    !ui.includes('p.soundAlertsEnabled=$(\'homeSoundAlertsEnabled\').checked') ||
-    !ui.includes("k!=='soundAlertsEnabled'") ||
-    !js.includes("keys[0]==='soundAlertsEnabled'") ||
+    ui.includes('p.soundAlertsEnabled=$(\'homeSoundAlertsEnabled\').checked') ||
+    ui.includes("k!=='soundAlertsEnabled'") ||
+    js.includes("keys[0]==='soundAlertsEnabled'") ||
     !ui.includes("typeof c.soundAlertsEnabled==='boolean'")) {
-  throw new Error('Sound alerts must be mirrored by Settings and Home patch controls');
+  throw new Error('Sound alerts must be controlled from Settings, not Home Quick Settings');
 }
 
 if (html.indexOf('<summary>Brew by Weight</summary>') >
@@ -367,7 +371,7 @@ if (html.indexOf('<summary>Brew by Weight</summary>') >
     !ui.includes('cupProtectOpt') ||
     !ui.includes('place the cup after connect so presence can be detected.') ||
     !ui.includes('id="homeCupProtectionEnabled"') ||
-    html.indexOf('id="homeSoundAlertsEnabled"') >
+    html.indexOf('id="homeAvoidAccidentalTouchEnabled"') >
         html.indexOf('id="homeCupProtectionEnabled"') ||
     html.indexOf('id="homeCupProtectionEnabled"') >
         html.indexOf('id="homePresetBlock"') ||
@@ -380,7 +384,7 @@ if (html.indexOf('<summary>Brew by Weight</summary>') >
     !network.includes('stopIfCupRemoved') ||
     !network.includes('requireCupToStart') ||
     !network.includes('cupRemovedWeightG')) {
-  throw new Error('Cup protection master must precede Stop if cup is removed and Require cup to start; Home mirrors the master after Alerts');
+  throw new Error('Cup protection master must precede Stop if cup is removed and Require cup to start; Home mirrors the master after accidental touch');
 }
 
 if (!ui.includes('bleCompanionEnabled') ||
@@ -673,15 +677,15 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !ui.includes('updateHomeGuardSubs(s,live)') ||
     !ui.includes("setHomeSub('homeBbwSub'") ||
     !ui.includes("setHomeSub('homeCupSub'") ||
-    !ui.includes("setHomeSub('homeAlertsSub'") ||
+    ui.includes("setHomeSub('homeAlertsSub'") ||
     !ui.includes('function formatCupProtection(') ||
-    !ui.includes('function formatAlertsChannel(') ||
+    ui.includes('function formatAlertsChannel(') ||
     !ui.includes("Can't brew — no cup") ||
     !ui.includes('Shot aborted') ||
     !ui.includes('Brew allowed') ||
     !ui.includes("c.state==='PRESENT'||c.present?'Present':'Absent'") ||
     !network.includes('endReasonName(control.lastShot.endReason)') ||
-    !ui.includes("'scale_priority'?'Scale priority'") ||
+    !html.includes('option value="scale_priority">Scale priority') ||
     !css.includes('.swS') ||
     !css.includes('.homeSwitchGrid .swS') ||
     !css.includes('.homeGuardGrid{') ||
@@ -926,9 +930,9 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !html.includes('id="homeSlowSub"') ||
     !html.includes('id="homeAtmSub"') ||
     !html.includes('id="homeCupSub"') ||
-    !html.includes('id="homeAlertsSub"') ||
+    html.includes('id="homeAlertsSub"') ||
     !html.includes('>Cup protection<span') ||
-    !html.includes('>Alerts<span') ||
+    html.includes('>Alerts<span') ||
     !html.includes('class="swS"') ||
     html.indexOf('class="homeSwitchGrid"') > html.indexOf('id="homeBrewByWeight"') ||
     html.indexOf('id="homeBrewByWeight"') > html.indexOf('id="homeAvoidBbwShotWithoutScale"') ||
@@ -958,10 +962,6 @@ if (!ui.includes('<legend>Brew</legend>') ||
     html.indexOf('id="homeFastExtractionGuardEnabled"') >
         html.indexOf('id="homeAvoidAccidentalTouchEnabled"') ||
     html.indexOf('id="homeAvoidAccidentalTouchEnabled"') >
-        html.indexOf('id="homeSoundAlertsEnabled"') ||
-    html.indexOf('id="homeSoundAlertsEnabled"') >
-        html.indexOf('id="homePresetBlock"') ||
-    html.indexOf('id="homeSoundAlertsEnabled"') >
         html.indexOf('id="homeCupProtectionEnabled"') ||
     html.indexOf('id="homeCupProtectionEnabled"') >
         html.indexOf('id="homePresetBlock"') ||
@@ -1018,6 +1018,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes("persistHomeGuard('homeSlowExtractionGuardEnabled'") ||
     !ui.includes("persistHomeGuard('homeAutoToManualGuardEnabled'") ||
     !ui.includes("persistHomeGuard('homeCupProtectionEnabled'") ||
+    ui.includes("persistHomeGuard('homeSoundAlertsEnabled'") ||
     !ui.includes("'avoidBbwShotWithoutScale',0)") ||
     !ui.includes("'fastExtractionGuardEnabled',1)") ||
     !ui.includes("'avoidAccidentalTouchEnabled',1)") ||
@@ -1035,7 +1036,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes("typeof c[k]==='boolean'") ||
     html.includes('id="homeBrewByWeight" type="checkbox" role="switch" aria-label="Brew by weight" checked') ||
     html.includes('id="homeAvoidBbwShotWithoutScale" type="checkbox" role="switch" aria-label="No-scale BBW" checked') ||
-    html.includes('id="homeSoundAlertsEnabled" type="checkbox" role="switch" aria-label="Alerts" checked') ||
+    html.includes('id="homeSoundAlertsEnabled"') ||
     html.includes('id="homeCupProtectionEnabled" type="checkbox" role="switch" aria-label="Cup protection" checked') ||
     !css.includes('.switchRow.switchPending') ||
     !css.includes('.homeSwitchGrid .switchRow:not(.swR) .slider') ||
