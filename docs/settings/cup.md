@@ -32,4 +32,5 @@ can retare. Lifting the cup until the scale reads −3 g or below counts as
 removed.
 
 Related: [Cup protection](../features/cup-protection.md),
+[Tare and retare](../features/tare-retare.md),
 [Tare](tare.md).

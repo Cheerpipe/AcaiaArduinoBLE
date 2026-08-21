@@ -6,6 +6,7 @@ whether a late cup can trigger a second tare. Machine-level, under
 on the active brew preset.
 
 Together with [Cup](cup.md), this is the setting side of
+[Tare and retare](../features/tare-retare.md) and
 [Cup protection](../features/cup-protection.md).
 
 ## When it applies
@@ -37,5 +38,6 @@ scale tares, then you place the cup at 2 s. A second tare fires. Weight stop
 still waits for BBW protection (default 12 s) so the cup weight cannot cut
 the shot.
 
-Related: [Cup protection](../features/cup-protection.md), [Cup](cup.md),
+Related: [Tare and retare](../features/tare-retare.md),
+[Cup protection](../features/cup-protection.md), [Cup](cup.md),
 [Scales](scales.md).

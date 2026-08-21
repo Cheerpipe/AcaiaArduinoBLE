@@ -63,6 +63,13 @@ opens it at the target weight (minus a learned drip offset). You can turn
 weight stop off and keep only the timer and tare. See
 [Brew by weight](docs/features/brew-by-weight.md).
 
+### Tare and retare
+
+An automatic tare runs when the shot starts. If you put the cup down after
+paddle ON, cup-presence detection can trigger a second automatic tare inside
+the retare window—no button on the scale. See
+[Tare and retare](docs/features/tare-retare.md).
+
 ### Cup protection
 
 Late cup placement, a finger on the pan, or a bump at the start of the shot
@@ -141,6 +148,7 @@ in to save your home Wi-Fi. Step-by-step notes are in
 **Features**
 
 - [Brew by weight](docs/features/brew-by-weight.md)
+- [Tare and retare](docs/features/tare-retare.md)
 - [Cup protection](docs/features/cup-protection.md)
 - [Fast extraction guard](docs/features/fast-extraction-guard.md)
 - [Slow extraction guard](docs/features/slow-extraction-guard.md)

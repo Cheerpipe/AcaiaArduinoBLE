@@ -57,5 +57,6 @@ inside the 4 s window. Weight stop stays blocked until BBW protection ends
 (~12 s), so the empty-cup or finger weight cannot cut the shot. After that
 window, brew-by-weight arms normally.
 
-Related: [Brew by weight](brew-by-weight.md), [Cup](../settings/cup.md),
+Related: [Brew by weight](brew-by-weight.md),
+[Tare and retare](tare-retare.md), [Cup](../settings/cup.md),
 [Tare](../settings/tare.md).
