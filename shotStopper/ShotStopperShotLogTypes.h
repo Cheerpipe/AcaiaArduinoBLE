@@ -51,6 +51,14 @@ enum class ShotLogStopDetail : uint8_t {
   SLOW_MAX_TIME = 5,
   SLOW_MIN_WEIGHT = 6,
   CUP_REMOVED = 7,
+  PADDLE = 8,
+  WEB_STOP = 9,
+  PHYSICAL_OVERRIDE = 10,
+  WEB_HEARTBEAT = 11,
+  HARD_LIMIT = 12,
+  WALL_LIMIT = 13,
+  RELAY_SAFETY = 14,
+  WEIGHT_ANOMALY = 15,
   OTHER = 255
 };
 
@@ -95,6 +103,14 @@ inline const char *shotLogStopDetailName(ShotLogStopDetail detail) {
     case ShotLogStopDetail::SLOW_MAX_TIME: return "slow_max_time";
     case ShotLogStopDetail::SLOW_MIN_WEIGHT: return "slow_min_weight";
     case ShotLogStopDetail::CUP_REMOVED: return "cup_removed";
+    case ShotLogStopDetail::PADDLE: return "paddle";
+    case ShotLogStopDetail::WEB_STOP: return "web_stop";
+    case ShotLogStopDetail::PHYSICAL_OVERRIDE: return "physical_override";
+    case ShotLogStopDetail::WEB_HEARTBEAT: return "web_heartbeat";
+    case ShotLogStopDetail::HARD_LIMIT: return "hard_limit";
+    case ShotLogStopDetail::WALL_LIMIT: return "wall_limit";
+    case ShotLogStopDetail::RELAY_SAFETY: return "relay_safety";
+    case ShotLogStopDetail::WEIGHT_ANOMALY: return "weight_anomaly";
     case ShotLogStopDetail::OTHER: return "other";
   }
   return "unknown";
@@ -111,6 +127,8 @@ inline const char *actualWeightSourceName(ActualWeightSource source) {
 
 inline ShotLogStopDetail shotLogStopDetailFromEndReason(
     EndReason reason, bool extractionGuardEnabled, bool extractionExtended) {
+  (void)extractionGuardEnabled;
+  (void)extractionExtended;
   switch (reason) {
     case EndReason::FAST_EXTRACTION_MAX_WEIGHT:
       return ShotLogStopDetail::EXTENDED_MAX_WEIGHT;
@@ -125,13 +143,29 @@ inline ShotLogStopDetail shotLogStopDetailFromEndReason(
     case EndReason::CUP_REMOVED:
       return ShotLogStopDetail::CUP_REMOVED;
     case EndReason::SCALE_THRESHOLD:
+      return ShotLogStopDetail::NORMAL_TARGET;
     case EndReason::WEIGHT_ANOMALY:
-      return extractionExtended && extractionGuardEnabled
-                 ? ShotLogStopDetail::OTHER
-                 : ShotLogStopDetail::NORMAL_TARGET;
-    default:
+      return ShotLogStopDetail::WEIGHT_ANOMALY;
+    case EndReason::PADDLE:
+      return ShotLogStopDetail::PADDLE;
+    case EndReason::WEB_STOP:
+      return ShotLogStopDetail::WEB_STOP;
+    case EndReason::PHYSICAL_OVERRIDE:
+      return ShotLogStopDetail::PHYSICAL_OVERRIDE;
+    case EndReason::WEB_HEARTBEAT_TIMEOUT:
+      return ShotLogStopDetail::WEB_HEARTBEAT;
+    case EndReason::GLOBAL_LIMIT:
+      return ShotLogStopDetail::HARD_LIMIT;
+    case EndReason::CONFIGURED_WALL_LIMIT:
+      return ShotLogStopDetail::WALL_LIMIT;
+    case EndReason::RELAY_SAFETY_FAILURE:
+      return ShotLogStopDetail::RELAY_SAFETY;
+    case EndReason::NONE:
+    case EndReason::SHORT_SHOT:
+    case EndReason::RINSE_COMPLETE:
       return ShotLogStopDetail::OTHER;
   }
+  return ShotLogStopDetail::OTHER;
 }
 
 inline const char *shotLogTypeName(ShotLogType type) {

@@ -54,7 +54,7 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 | Question | Answer |
 | --- | --- |
 | **What happens after a panic or watchdog reset?** | Boot forces CN9 **open**, then starts normally. No paddle recovery gesture is required. Active hardware/feedback/timer faults can still lock out new closes. |
-| **How do I see why a shot ended?** | Shot history: `cut_type` (`auto`, `manual`, `limit`) and `stop_detail` (`normal_target`, `extended_max_weight`, `extended_min_time`, `slow_max_time`, `slow_min_weight`, `auto_to_manual`, …). |
+| **How do I see why a shot ended?** | [Shot history](features/shot-history.md): `cut_type` (`auto`, `manual`, `limit`) and `stop_detail` (`normal_target`, `paddle`, `web_stop`, `wall_limit`, `hard_limit`, `extended_max_weight`, `cup_removed`, …). `other` is only for unknown/legacy rows. |
 | **The board LED does not light with the scale connected.** | Check **Blue LED while scale connected** (on by default) and that BLE shows connected. |
 | **Is the ESP32 relay enough as a safety guarantee?** | **No.** Watchdogs and the 60 s cap reduce lockups, but a welded contact needs a second isolated barrier (K2). See [Hardware](HARDWARE.md). |
 | **After an ESP32 core bump I see `ble=fail` but the Web UI works.** | Use the IDF build in this repo (Arduino-ESP32 **3.3.11**). See [Build environment](BUILD.md). |

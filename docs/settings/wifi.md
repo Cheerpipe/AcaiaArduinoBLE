@@ -42,8 +42,8 @@ STA, SoftAP stops, and the UI moves to the DHCP address. If you later lose
 that network, the device keeps retrying STA. Recover the AP with USB
 `AP_START` (see [USB serial CLI](../SERIAL_CLI.md)) or a reboot.
 
-OTA over Wi-Fi is documented in [Build environment](../BUILD.md) once an
-image is built. Change the AP password away from the factory value before
-OTA will accept uploads.
+OTA over Wi-Fi: [OTA](../features/ota.md). Change the AP password away from
+the factory value before OTA will accept uploads. Scripts:
+[Build scripts](../SCRIPTS.md).
 
 Related: [AP](ap.md), [Factory reset](factory-reset.md).

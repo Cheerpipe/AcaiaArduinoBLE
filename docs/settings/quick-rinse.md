@@ -31,4 +31,5 @@ Rinses are not stored in shot history (they are too short).
 Default 1 s gesture / 4 s duration: flip the paddle ON and back OFF within a
 second. The group head rinses for four seconds, then CN9 opens.
 
-Related: [Paddle](paddle.md), [No-scale BBW](no-scale-bbw.md).
+Related: [Paddle](paddle.md), [No-scale BBW](no-scale-bbw.md),
+[Shot history](../features/shot-history.md).

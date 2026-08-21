@@ -5536,6 +5536,38 @@ void s01_shot_log_filters_short_and_rinse() {
   CHECK(shotLogEligible(EndReason::PADDLE, 10000));
 }
 
+void s01b_shot_log_stop_detail_names_end_reasons() {
+  CHECK(shotLogStopDetailFromEndReason(EndReason::PADDLE, true, false) ==
+        ShotLogStopDetail::PADDLE);
+  CHECK(shotLogStopDetailFromEndReason(EndReason::WEB_STOP, false, false) ==
+        ShotLogStopDetail::WEB_STOP);
+  CHECK(shotLogStopDetailFromEndReason(EndReason::PHYSICAL_OVERRIDE, false,
+                                       false) ==
+        ShotLogStopDetail::PHYSICAL_OVERRIDE);
+  CHECK(shotLogStopDetailFromEndReason(EndReason::WEB_HEARTBEAT_TIMEOUT, false,
+                                       false) ==
+        ShotLogStopDetail::WEB_HEARTBEAT);
+  CHECK(shotLogStopDetailFromEndReason(EndReason::GLOBAL_LIMIT, false, false) ==
+        ShotLogStopDetail::HARD_LIMIT);
+  CHECK(shotLogStopDetailFromEndReason(EndReason::CONFIGURED_WALL_LIMIT, false,
+                                       false) ==
+        ShotLogStopDetail::WALL_LIMIT);
+  CHECK(shotLogStopDetailFromEndReason(EndReason::RELAY_SAFETY_FAILURE, false,
+                                       false) ==
+        ShotLogStopDetail::RELAY_SAFETY);
+  CHECK(shotLogStopDetailFromEndReason(EndReason::WEIGHT_ANOMALY, true, true) ==
+        ShotLogStopDetail::WEIGHT_ANOMALY);
+  CHECK(shotLogStopDetailFromEndReason(EndReason::SCALE_THRESHOLD, true, true) ==
+        ShotLogStopDetail::NORMAL_TARGET);
+  CHECK(shotLogStopDetailFromEndReason(EndReason::CUP_REMOVED, true, false) ==
+        ShotLogStopDetail::CUP_REMOVED);
+  CHECK(strcmp(shotLogStopDetailName(ShotLogStopDetail::PADDLE), "paddle") == 0);
+  CHECK(strcmp(shotLogStopDetailName(ShotLogStopDetail::HARD_LIMIT),
+               "hard_limit") == 0);
+  CHECK(strcmp(shotLogStopDetailName(ShotLogStopDetail::WALL_LIMIT),
+               "wall_limit") == 0);
+}
+
 void s02_shot_log_appends_after_drip_delay() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -5559,6 +5591,8 @@ void s02_shot_log_appends_after_drip_delay() {
   CHECK(records[0].durationDs == 120);
   CHECK(records[0].shotType ==
         static_cast<uint8_t>(ShotLogType::MANUAL));
+  CHECK(records[0].stopDetail == static_cast<uint8_t>(ShotLogStopDetail::PADDLE));
+  CHECK(records[0].cutType == static_cast<uint8_t>(ShotLogCut::MANUAL));
 }
 
 void s02b_drip_delay_is_snapshotted_and_honors_boundaries() {
@@ -8105,6 +8139,7 @@ const TestCase testCases[] = {
     {"D10", d10_companion_pauses_while_scale_disconnected},
     {"D11", d11_select_preferred_is_noop_when_unchanged},
     {"S01", s01_shot_log_filters_short_and_rinse},
+    {"S01b", s01b_shot_log_stop_detail_names_end_reasons},
     {"S02", s02_shot_log_appends_after_drip_delay},
     {"S02B", s02b_drip_delay_is_snapshotted_and_honors_boundaries},
     {"S17", s17_new_cycle_commits_pending_log_as_last_known},

@@ -105,6 +105,42 @@ Beeps and an optional local buzzer mark tare, first drops, paddle-off
 reminders, scale lost/connected, and extended-shot pulses. See
 [Alerts](docs/alerts.md).
 
+### Quick rinse
+
+A short paddle ON→OFF (within the gesture window) is a timed group-head
+rinse, not a shot. CN9 stays closed for the rinse duration, then opens.
+Rinses are not stored in shot history. See
+[Quick rinse](docs/settings/quick-rinse.md).
+
+### Shot history
+
+Finished shots are logged in the Web UI with goal, actual weight, duration,
+flow, first drop, cut type, and stop detail. Export CSV or clear the log from
+the same view. See [Shot history](docs/features/shot-history.md).
+
+### Presets
+
+Brew recipes live in presets (factory **Single** and **Double**, plus custom
+copies). Target weight, BBW protection, Fast/Slow/A→M guards, and the learned
+stop offset are per preset. Load, save, duplicate, or delete from
+**Settings → Brew**. See [Presets](docs/features/presets.md).
+
+## Technical features
+
+### OTA
+
+Update firmware over Wi-Fi without USB. The AP password is the OTA token
+(change it from the factory default first). Dual-slot update with rollback if
+the new image fails to serve the Web UI. See [OTA](docs/features/ota.md) and
+[Build scripts](docs/SCRIPTS.md).
+
+### Recovery mode
+
+If Wi-Fi, Web UI, BLE, and USB are all unavailable, power on with the paddle
+ON to enter a 60 s recovery window. Three `OFF→ON` cycles restore network
+access; five do a factory reset. CN9 stays open. See
+[Emergency recovery](docs/EMERGENCY_RECOVERY.md).
+
 ## Main settings
 
 Each group is edited in the Web UI. Defaults are chosen so most people never
@@ -154,6 +190,14 @@ in to save your home Wi-Fi. Step-by-step notes are in
 - [Slow extraction guard](docs/features/slow-extraction-guard.md)
 - [A→M time guard](docs/features/auto-to-manual.md)
 - [Alerts](docs/alerts.md)
+- [Quick rinse](docs/settings/quick-rinse.md)
+- [Shot history](docs/features/shot-history.md)
+- [Presets](docs/features/presets.md)
+
+**Technical**
+
+- [OTA](docs/features/ota.md) — Wi-Fi firmware update; scripts in [Build scripts](docs/SCRIPTS.md)
+- [Emergency recovery](docs/EMERGENCY_RECOVERY.md) — paddle recovery mode
 
 **Settings**
 
