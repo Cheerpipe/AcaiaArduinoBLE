@@ -964,7 +964,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !css.includes('.homeSwitchGrid .switchRow:not(.swR) .switchOn') ||
     !css.includes('.homeSwitchGrid .switchRow:not(.swR) .slider,.homeSwitchGrid .switchRow:not(.swR) input:checked+.slider{background:#9ca3af}') ||
     !css.includes('.homeSwitchGrid') ||
-    !css.includes('justify-content:flex-start') ||
+    !css.includes('justify-content:space-between') ||
     !css.includes('.homeSwitchGrid{') ||
     !css.includes('border-bottom:1px solid') ||
     !css.includes('.homeSwitchGrid .switchState{display:none}') ||
@@ -972,6 +972,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !css.includes('.homeGuardGrid{') ||
     !css.includes('.homeGuardGrid .swL{padding-right:3ch}') ||
     !css.includes('grid-template-columns:subgrid') ||
+    !css.includes('#brewModeRow{width:100%') ||
     !css.includes('#brewModeRow{width:auto') ||
     !css.includes('#brewModeRow .switch{width:5.7rem') ||
     !css.includes('.ruleChartHead{') ||

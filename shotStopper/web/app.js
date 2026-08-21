@@ -158,9 +158,19 @@ async function renderRoute(pathname) {
   startView(view);
 }
 
+function setNav(open) {
+  document.body.classList.toggle('navOpen', !!open);
+  const btn = document.getElementById('navToggle');
+  if (btn) {
+    btn.type = 'button';
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+}
+
 function navigate(path) {
   const known = knownPath(path);
   const target = known ? known : '/';
+  setNav(false);
   if (location.pathname !== target) history.pushState({}, '', target);
   renderRoute(target);
 }
@@ -181,7 +191,32 @@ document.querySelectorAll('a[data-route]').forEach((a) => {
     navigate(a.getAttribute('data-route') || '/');
   });
 });
-window.addEventListener('popstate', () => renderRoute(location.pathname));
+const pageNav = document.querySelector('.pageNav');
+if (pageNav) {
+  pageNav.setAttribute('aria-label', 'Primary');
+  pageNav.addEventListener('click', (e) => {
+    if (e.target === pageNav) setNav(false);
+  });
+}
+const msgEl = document.getElementById('message');
+if (msgEl) {
+  msgEl.setAttribute('role', 'status');
+  msgEl.setAttribute('aria-live', 'polite');
+}
+setNav(false);
+const navToggle = document.getElementById('navToggle');
+if (navToggle) {
+  navToggle.addEventListener('click', () => {
+    setNav(!document.body.classList.contains('navOpen'));
+  });
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') setNav(false);
+});
+window.addEventListener('popstate', () => {
+  setNav(false);
+  renderRoute(location.pathname);
+});
 document.addEventListener('visibilitychange', () => R.armStatusTimer());
 document.addEventListener('pointerdown', R.noteWebUiInteraction, true);
 document.addEventListener('click', R.noteWebUiInteraction, true);
