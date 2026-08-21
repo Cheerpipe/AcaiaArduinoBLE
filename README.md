@@ -200,6 +200,7 @@ in to save your home Wi-Fi. Step-by-step notes are in
 
 **Technical**
 
+- [Firmware state machines](docs/STATE_MACHINES.md) — states, events, and how the FSMs interact
 - [OTA](docs/features/ota.md) — Wi-Fi firmware update; scripts in [Build scripts](docs/SCRIPTS.md)
 - [Emergency recovery](docs/EMERGENCY_RECOVERY.md) — paddle recovery mode
 
@@ -230,8 +231,7 @@ in to save your home Wi-Fi. Step-by-step notes are in
 **For contributors**
 
 - [Manual test plan](docs/MANUAL_TEST_PLAN.md)
-- [Domain separation](docs/DOMAIN_SEPARATION.md)
-- [Machine control abstraction](docs/MACHINE_CONTROL_ABSTRACTION.md)
+- [Firmware state machines](docs/STATE_MACHINES.md)
 - [Local AcaiaArduinoBLE library](libraries/AcaiaArduinoBLE/README.md)
 
 ## Disclaimer
