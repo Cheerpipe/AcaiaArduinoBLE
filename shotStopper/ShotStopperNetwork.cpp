@@ -4,6 +4,7 @@
 #include "ShotStopperPsram.h"
 #include "ShotStopperRecovery.h"
 #include "ShotStopperSerialCli.h"
+#include "ShotStopperShotCurveTypes.h"
 #include "ShotStopperVersion.h"
 #include "ShotStopperWatchdog.h"
 
@@ -33,10 +34,10 @@ namespace shotstopper {
 WallClock g_wallClock;
 
 struct NetworkWorkBuf {
-  static constexpr size_t kStatusJson = 7680;
+  static constexpr size_t kStatusJson = 8192;
   static constexpr size_t kPresetsJson = 2800;
   static constexpr size_t kHistoryJson = 1400;
-  static constexpr size_t kJsonItem = 768;
+  static constexpr size_t kJsonItem = 1280;
   // Worst case is ~493 B: the envelope with the longest state and lock reason,
   // plus two fully populated tags at OTA_ARCH_CAPACITY + OTA_VERSION_CAPACITY.
   static constexpr size_t kOtaJson = 640;
@@ -47,6 +48,7 @@ struct NetworkWorkBuf {
   char otaJson[kOtaJson]{};
   DebugEvent logBatch[kNetworkLogBatchSize]{};
   ShotLogRecord shotRecords[SHOT_LOG_CAPACITY]{};
+  ShotCurveRecord shotCurves[SHOT_CURVE_CAPACITY]{};
   ControlStatusSnapshot control{};
   // Must match ShotStopperNetwork::REQUEST_BODY_CAPACITY (asserted in begin()).
   char requestBody[2048]{};
@@ -3846,6 +3848,17 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.noScaleShotGuardArmed ? "true" : "false",
         cupPresenceStateName(control.cupPresenceState),
         control.cupPresent ? "true" : "false");
+    if (ok) {
+      ShotCurveRecord curve = {};
+      curve.count = control.shotCurveCount;
+      curve.intervalS = control.shotCurveIntervalS;
+      curve.extendedEnteredDs = control.shotCurveExtendedDs;
+      memcpy(curve.weightCg, control.shotCurveWeightCg, sizeof(curve.weightCg));
+      char curveJson[384] = {};
+      if (formatShotCurveJsonBody(curveJson, sizeof(curveJson), curve)) {
+        ok = statusJsonAppend(&used, ",\"shotCurve\":{%s}", curveJson);
+      }
+    }
   } else if (ok && page == StatusPage::Settings) {
     ok = statusJsonAppend(
         &used,
@@ -4128,6 +4141,10 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
       self.callbacks_.copyShotRecords != nullptr
           ? self.callbacks_.copyShotRecords(work.shotRecords, SHOT_LOG_CAPACITY)
           : 0;
+  const size_t curveCount =
+      self.callbacks_.copyShotCurves != nullptr
+          ? self.callbacks_.copyShotCurves(work.shotCurves, SHOT_CURVE_CAPACITY)
+          : 0;
 
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
   httpd_resp_set_hdr(request, "Cache-Control", "no-store");
@@ -4183,6 +4200,18 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
       snprintf(targetEarly, sizeof(targetEarly), "%.1f",
                static_cast<double>(record.targetReachedEarlyDs) / 10.0);
     }
+    ShotCurveRecord emptyCurve = {};
+    emptyCurve.intervalS = SHOT_CURVE_INTERVAL_S;
+    emptyCurve.extendedEnteredDs = SHOT_LOG_METRIC_MISSING;
+    const ShotCurveRecord *curve = findShotCurveById(
+        work.shotCurves, curveCount, record.id);
+    if (curve == nullptr) {
+      curve = &emptyCurve;
+    }
+    char curveJson[384] = {};
+    if (!formatShotCurveJsonBody(curveJson, sizeof(curveJson), *curve)) {
+      curveJson[0] = '\0';
+    }
     snprintf(work.jsonItem, NetworkWorkBuf::kJsonItem,
              "%s{\"id\":%lu,\"bootId\":%lu,\"endedAtMs\":%lu,"
              "\"hasWallTime\":%s,\"endedAtLocalSec\":%lu,"
@@ -4195,7 +4224,7 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
              "\"slowExtractionGuardEnabled\":%s,\"slowExtractionExtended\":%s,"
              "\"stopDetail\":\"%s\",\"maxRecoveryWeightG\":%s,"
              "\"minBrewTimeS\":%s,\"targetReachedEarlyS\":%s,"
-             "\"actualWeightSource\":\"%s\"}",
+             "\"actualWeightSource\":\"%s\",%s}",
              index == 0 ? "" : ",",
              static_cast<unsigned long>(record.id),
              static_cast<unsigned long>(record.bootId),
@@ -4221,7 +4250,8 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
                  static_cast<ShotLogStopDetail>(record.stopDetail)),
              maxRecovery, minBrewTime, targetEarly,
              actualWeightSourceName(
-                 static_cast<ActualWeightSource>(record.actualWeightSource)));
+                 static_cast<ActualWeightSource>(record.actualWeightSource)),
+             curveJson);
     if (sendCopiedChunk(request, work.jsonItem, strlen(work.jsonItem)) !=
         ESP_OK) {
       self.unlockWorkBuf();

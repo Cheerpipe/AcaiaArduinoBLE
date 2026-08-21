@@ -12,6 +12,7 @@ void resetShotTrajectory(uint32_t startedAtMs) {
   shot.expectedEndS = session.config.operationalWallMs / 1000.0f;
   shot.datapoints = 0;
   shot.automaticBrew = false;
+  shotCurveSampler.reset(startedAtMs);
 }
 
 void calculateExpectedEndTime() {
@@ -96,6 +97,7 @@ bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
   shot.timeS[index] =
       static_cast<uint32_t>(receivedAtMs - shot.startMs) / 1000.0f;
   shot.weight[index] = weight;
+  shotCurveSampler.accept(weight, receivedAtMs);
   session.receivedFreshWeightInCycle = true;
   session.hasWeightAnchor = true;
   session.lastAcceptedWeightAtMs = receivedAtMs;

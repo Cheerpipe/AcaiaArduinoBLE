@@ -23,10 +23,11 @@
 
 namespace shotstopper {
 
-// Large enough for 2× PersistedSettings (NVS budget) or one ShotLogStore
-// (120×48 records + header ≈ 5784 B). Keep in sync with static_asserts at the
-// call sites that reinterpret these bytes.
-constexpr size_t FLASH_IO_SCRATCH_BYTES = 2 * PERSISTED_SETTINGS_NVS_BUDGET;
+// Large enough for 2× PersistedSettings (NVS budget), one ShotLogStore
+// (120×48 records + header ≈ 5784 B), or one ShotCurveStore (~8660 B).
+constexpr size_t FLASH_IO_SCRATCH_BYTES = 8704;
+static_assert(FLASH_IO_SCRATCH_BYTES >= 2 * PERSISTED_SETTINGS_NVS_BUDGET,
+              "Flash I/O scratch must cover settings dual-slot I/O");
 constexpr uint32_t FLASH_IO_LOCK_TIMEOUT_MS = 5000;
 // Control-loop NVS must fail fast: waiting the full durable timeout equals the
 // task watchdog budget and can panic mid-pour.
@@ -40,7 +41,7 @@ inline uint8_t *&flashIoScratchBlock() {
   return block;
 }
 
-// Internal SRAM, heap-accounted. Do not use BSS: ALLOW_BSS would put 6 KiB in
+// Internal SRAM, heap-accounted. Do not use BSS: ALLOW_BSS would put this block in
 // PSRAM (SET_WIFI load fails), and a forced .dram0.bss object can overlap the
 // heap (IWDT on a corrupted malloc spinlock, magic 0x53544F50 / "STOP").
 inline uint8_t *flashIoScratchBytes() {

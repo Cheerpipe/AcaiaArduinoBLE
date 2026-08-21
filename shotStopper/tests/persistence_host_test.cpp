@@ -5,6 +5,7 @@
 #include "../ShotStopperRecovery.h"
 #include "../ShotStopperRecoveryGesture.h"
 #include "../ShotStopperShotLog.h"
+#include "../ShotStopperShotCurve.h"
 #include "../ShotStopperLastShot.h"
 
 #include <cmath>
@@ -31,6 +32,7 @@ int testsRun = 0;
 void resetHostPersistence() {
   persistence_host::reset();
   resetDurableStorageRevision();
+  ShotCurveLog::resetHostStorage();
 }
 
 void p01_defaults_are_valid() {
@@ -1114,6 +1116,16 @@ void p58_reset_all_durable_stores_and_mid_fail_keeps_settings() {
   record.actualWeightCg = 3600;
   CHECK(log.append(record));
 
+  ShotCurveLog curves;
+  CHECK(curves.load());
+  ShotCurveRecord curve = {};
+  curve.shotId = 1;
+  curve.count = 2;
+  curve.intervalS = SHOT_CURVE_INTERVAL_S;
+  curve.weightCg[0] = 0;
+  curve.weightCg[1] = 1800;
+  CHECK(curves.append(curve));
+
   LastShotStore lastShot;
   CHECK(lastShot.load());
   PersistedLastShot shot = {};
@@ -1125,9 +1137,10 @@ void p58_reset_all_durable_stores_and_mid_fail_keeps_settings() {
   ble.enabled = 0;
   CHECK(saveBleCompanionSettings(ble));
 
-  CHECK(resetAllDurableStores(settings, ble, log, lastShot));
+  CHECK(resetAllDurableStores(settings, ble, log, lastShot, curves));
   CHECK(verifyFactorySettings(settings));
   CHECK(log.count() == 0);
+  CHECK(curves.count() == 0);
   CHECK(!lastShot.get().valid);
   CHECK(ble.enabled == 1);
 
@@ -1136,7 +1149,7 @@ void p58_reset_all_durable_stores_and_mid_fail_keeps_settings() {
   CHECK(savePersistedSettings(settings));
   CHECK(log.append(record));
   persistence_host::failNextWrite = true;
-  CHECK(!resetAllDurableStores(settings, ble, log, lastShot));
+  CHECK(!resetAllDurableStores(settings, ble, log, lastShot, curves));
   PersistedSettings loaded;
   CHECK(loadPersistedSettings(loaded));
   CHECK(loaded.runtime.goalWeightG == 40);
@@ -1180,12 +1193,52 @@ void p60_factory_intent_survives_failed_store_reset() {
   CHECK(lastShot.load());
   BleCompanionPersistedSettings ble;
   ble.enabled = 1;
+  ShotCurveLog curves;
+  CHECK(curves.load());
   persistence_host::failNextWrite = true;
-  CHECK(!resetAllDurableStores(settings, ble, log, lastShot));
+  CHECK(!resetAllDurableStores(settings, ble, log, lastShot, curves));
   RecoveryIntent intent;
   CHECK(loadRecoveryIntent(intent));
   CHECK(intent.operation ==
         static_cast<uint8_t>(RecoveryOperation::FACTORY_RESET));
+}
+
+void p61_shot_curve_dual_slot_round_trip_and_delete() {
+  resetHostPersistence();
+  ShotCurveLog curves;
+  CHECK(curves.load());
+  CHECK(curves.count() == 0);
+  ShotCurveRecord first = {};
+  first.shotId = 7;
+  first.count = 3;
+  first.intervalS = SHOT_CURVE_INTERVAL_S;
+  first.extendedEnteredDs = 180;
+  first.weightCg[0] = 0;
+  first.weightCg[1] = 900;
+  first.weightCg[2] = 1800;
+  CHECK(curves.append(first));
+  ShotCurveRecord second = {};
+  second.shotId = 8;
+  second.count = 2;
+  second.intervalS = SHOT_CURVE_INTERVAL_S;
+  second.weightCg[0] = 10;
+  second.weightCg[1] = 400;
+  CHECK(curves.append(second));
+  ShotCurveLog reloaded;
+  CHECK(reloaded.load());
+  CHECK(reloaded.count() == 2);
+  ShotCurveRecord newest[2] = {};
+  CHECK(reloaded.copyNewestFirst(newest, 2) == 2);
+  CHECK(newest[0].shotId == 8);
+  CHECK(newest[1].shotId == 7);
+  CHECK(newest[1].extendedEnteredDs == 180);
+  CHECK(newest[1].weightCg[2] == 1800);
+  CHECK(reloaded.removeById(7));
+  CHECK(reloaded.count() == 1);
+  CHECK(reloaded.copyNewestFirst(newest, 2) == 1);
+  CHECK(newest[0].shotId == 8);
+  CHECK(reloaded.clear());
+  CHECK(reloaded.count() == 0);
 }
 
 struct TestCase {
@@ -1232,6 +1285,7 @@ const TestCase tests[] = {
     {"P58", p58_reset_all_durable_stores_and_mid_fail_keeps_settings},
     {"P59", p59_deferred_shot_log_append_writes_only_on_flush},
     {"P60", p60_factory_intent_survives_failed_store_reset},
+    {"P61", p61_shot_curve_dual_slot_round_trip_and_delete},
 };
 
 }  // namespace

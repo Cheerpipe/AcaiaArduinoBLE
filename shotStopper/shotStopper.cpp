@@ -48,6 +48,7 @@
 #include "ShotStopperRecoveryGesture.h"
 #include "ShotStopperSafety.h"
 #include "ShotStopperShotLog.h"
+#include "ShotStopperShotCurve.h"
 #include "ShotStopperLastShot.h"
 #include "ShotStopperTime.h"
 #include "ShotStopperWatchdog.h"
@@ -126,6 +127,8 @@ constexpr size_t OFFSET_ADDR = 1;
 constexpr size_t TREND_POINT_COUNT = WEIGHT_TREND_POINT_COUNT;
 static_assert(MAX_SHOT_DATAPOINTS >= WEIGHT_TREND_POINT_COUNT,
               "Shot trajectory must hold the prediction window");
+static_assert(SHOT_CURVE_MAX_POINTS == 31,
+              "ControlStatusSnapshot shotCurveWeightCg must match sampler");
 
 enum class ScaleLinkState : uint8_t {
   DISCONNECTED,
@@ -294,6 +297,7 @@ struct PendingShotFinalize {
   float lastKnownWeightG = 0.0f;
   uint8_t activePresetId = 0;
   uint32_t cycleId = 0;
+  ShotCurveRecord curve = {};
 };
 
 struct ScaleCommand {
@@ -359,6 +363,9 @@ LogLevel serialLogLevel = LogLevel::NONE;
 LogLevel ringRetainLogLevel = LogLevel::NONE;
 uint32_t lastReportedLogOverwritten = 0;
 ShotLog shotLog;
+ShotCurveLog shotCurves;
+ShotCurveSampler shotCurveSampler;
+ShotCurveRecord lastShotCurve;
 LastShotStore lastShotStore;
 PersistedLastShot persistedLastShot;
 bool lastShotNvsDirty = false;
@@ -758,29 +765,39 @@ size_t copyShotRecords(ShotLogRecord *output, size_t capacity) {
   return shotLog.copyNewestFirst(output, capacity);
 }
 
+size_t copyShotCurves(ShotCurveRecord *output, size_t capacity) {
+  return shotCurves.copyNewestFirst(output, capacity);
+}
+
 bool deleteShotRecord(uint32_t id) {
-  return shotLog.removeById(id);
+  const bool removedLog = shotLog.removeById(id);
+  (void)shotCurves.removeById(id);
+  return removedLog;
 }
 
 bool clearShotLog() {
-  return shotLog.clear();
+  const bool logCleared = shotLog.clear();
+  (void)shotCurves.clear();
+  return logCleared;
 }
 
 bool clearLastShot() {
   persistedLastShot = PersistedLastShot{};
+  lastShotCurve = ShotCurveRecord{};
   lastShotNvsDirty = false;
   return lastShotStore.clear();
 }
 
 void clearLastShotSnapshot() {
   persistedLastShot = PersistedLastShot{};
+  lastShotCurve = ShotCurveRecord{};
   lastShotNvsDirty = false;
 }
 
 #ifndef SHOT_STOPPER_HOST_TEST
 bool resetAllDurableStoresForNetwork(PersistedSettings &settings) {
   if (!resetAllDurableStores(settings, bleCompanionPersistedSettings, shotLog,
-                             lastShotStore)) {
+                             lastShotStore, shotCurves)) {
     return false;
   }
   // Status/UI read this snapshot, not LastShotStore. Drop it only after NVS
@@ -855,6 +872,7 @@ void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
   strncpy(last.scaleProtocol, scaleProtocolName, sizeof(last.scaleProtocol) - 1);
   last.scaleProtocol[sizeof(last.scaleProtocol) - 1] = '\0';
   persistLastShotSnapshot(last);
+  lastShotCurve = shotCurveSampler.snapshot();
 }
 
 bool controlAllowsConfigurationNow();
@@ -1616,6 +1634,11 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
                                        ? session.activePresetId
                                        : presetBank.activeId;
   pendingFinalize.cycleId = session.id;
+  if (session.hasWeightAnchor) {
+    shotCurveSampler.accept(session.lastAcceptedWeightG, millis());
+  }
+  shotCurveSampler.captureEnd(millis());
+  pendingFinalize.curve = shotCurveSampler.snapshot();
 }
 
 void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeightG,
@@ -1690,6 +1713,7 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
     }
   }
 
+  const uint32_t newId = shotLog.nextRecordId();
   if (!shotLog.append(record, false)) {
     const size_t nextCount =
         shotLog.count() < SHOT_LOG_CAPACITY ? shotLog.count() + 1U
@@ -1699,6 +1723,16 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
     addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
                   static_cast<int32_t>(blobBytes),
                   static_cast<int32_t>(shotLog.count()));
+    return;
+  }
+  if (snapshot.curve.count > 0) {
+    ShotCurveRecord curve = snapshot.curve;
+    curve.shotId = newId;
+    if (!shotCurves.append(curve, false)) {
+      addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
+                    static_cast<int32_t>(sizeof(ShotCurveStore)),
+                    static_cast<int32_t>(shotCurves.count()));
+    }
   }
 }
 
@@ -4300,6 +4334,10 @@ void serviceShotStorePersistence() {
     addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
                   static_cast<int32_t>(shotLog.count()), 0);
   }
+  if (shotCurves.dirty() && !shotCurves.flush()) {
+    addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
+                  static_cast<int32_t>(shotCurves.count()), 1);
+  }
   if (lastShotNvsDirty &&
       lastShotStore.save(FLASH_IO_CONTROL_LOCK_TIMEOUT_MS)) {
     lastShotNvsDirty = false;
@@ -5071,6 +5109,16 @@ void publishControlStatus() {
   next.presets = presetBank;
   next.lastCycle = lastCycle;
   next.lastShot = persistedLastShot;
+  {
+    const ShotCurveRecord curve =
+        session.active ? shotCurveSampler.snapshot() : lastShotCurve;
+    next.shotCurveCount = curve.count;
+    next.shotCurveIntervalS =
+        curve.intervalS == 0 ? SHOT_CURVE_INTERVAL_S : curve.intervalS;
+    next.shotCurveExtendedDs = curve.extendedEnteredDs;
+    memcpy(next.shotCurveWeightCg, curve.weightCg,
+           sizeof(next.shotCurveWeightCg));
+  }
   strncpy(next.scaleProtocol, scaleLink.protocolName,
           sizeof(next.scaleProtocol) - 1);
   next.scaleProtocol[sizeof(next.scaleProtocol) - 1] = '\0';
@@ -5922,13 +5970,27 @@ void setup() {
   shotLog.load();
   shotLog.onBoot();
   shotLog.save();
+  shotCurves.load();
   lastShotStore.load();
   persistedLastShot = lastShotStore.get();
+  if (persistedLastShot.valid) {
+    ShotCurveRecord newest = {};
+    if (shotCurves.copyNewestFirst(&newest, 1) == 1) {
+      lastShotCurve = newest;
+    }
+  }
 #else
   shotLog.load();
   shotLog.onBoot();
+  shotCurves.load();
   lastShotStore.load();
   persistedLastShot = lastShotStore.get();
+  if (persistedLastShot.valid) {
+    ShotCurveRecord newest = {};
+    if (shotCurves.copyNewestFirst(&newest, 1) == 1) {
+      lastShotCurve = newest;
+    }
+  }
 #endif
 
   addDebugEvent(DebugCategory::BOOT, DebugCode::BOOT_BANNER,
@@ -5998,6 +6060,7 @@ void setup() {
     callbacks.reportTaskWatchdogFault = reportTaskWatchdogFault;
     callbacks.requestSafeRestart = requestSafeRestart;
     callbacks.copyShotRecords = copyShotRecords;
+    callbacks.copyShotCurves = copyShotCurves;
     callbacks.deleteShotRecord = deleteShotRecord;
     callbacks.clearShotLog = clearShotLog;
     callbacks.clearLastShot = clearLastShot;

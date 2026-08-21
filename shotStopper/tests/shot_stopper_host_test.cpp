@@ -110,6 +110,10 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   persistedLastShot = PersistedLastShot{};
   lastShotNvsDirty = false;
   lastShotStore.clear();
+  shotCurveSampler.reset(0);
+  lastShotCurve = ShotCurveRecord{};
+  ShotCurveLog::resetHostStorage();
+  shotCurves.load();
   noScaleShotGuardArmed = true;
   noScaleShotGuardActivityAtMs = 0;
   noScaleShotGuardScaleWasAvailable = false;
@@ -5592,6 +5596,46 @@ void s02_shot_log_appends_after_drip_delay() {
   CHECK(records[0].cutType == static_cast<uint8_t>(ShotLogCut::MANUAL));
 }
 
+void s02c_shot_curve_samples_on_two_second_grid_and_latches_slow() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  shotLog.clear();
+  ShotCurveLog::resetHostStorage();
+  shotCurves.load();
+  session.active = true;
+  session.startedWithScale = true;
+  session.hasWeightAnchor = true;
+  session.startedAtMs = hostMillis;
+  session.cn9ClosedAtMs = hostMillis;
+  resetShotTrajectory(hostMillis);
+  CHECK(shotCurveSampler.count == 0);
+  acceptWeightIntoTrajectory(0.2f, hostMillis, 1);
+  CHECK(shotCurveSampler.count == 1);
+  CHECK(shotCurveSampler.weightCg[0] == 20);
+  hostMillis += 2100;
+  acceptWeightIntoTrajectory(8.5f, hostMillis, 2);
+  CHECK(shotCurveSampler.count == 2);
+  CHECK(shotCurveSampler.weightCg[1] == 850);
+  enterSlowExtractionExtended(12.0f, hostMillis);
+  CHECK(shotCurveSampler.extendedEnteredDs == 21);
+  hostMillis += 4000;
+  acceptWeightIntoTrajectory(18.0f, hostMillis, 3);
+  session.lastAcceptedWeightG = 18.0f;
+  schedulePendingShotFinalize(EndReason::SLOW_EXTRACTION_MAX_TIME, 12000);
+  CHECK(pendingFinalize.curve.count >= 2);
+  CHECK(pendingFinalize.curve.extendedEnteredDs == 21);
+  pendingFinalize.endedAtMs = hostMillis;
+  pendingFinalize.dripDelayMs = 0;
+  runLoopAfter(0);
+  CHECK(shotLog.count() == 1);
+  CHECK(shotCurves.count() == 1);
+  ShotCurveRecord curves[1] = {};
+  CHECK(shotCurves.copyNewestFirst(curves, 1) == 1);
+  CHECK(curves[0].shotId != 0);
+  CHECK(curves[0].count >= 2);
+  CHECK(curves[0].intervalS == SHOT_CURVE_INTERVAL_S);
+}
+
 void s02b_drip_delay_is_snapshotted_and_honors_boundaries() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -8282,6 +8326,7 @@ const TestCase testCases[] = {
     {"S01", s01_shot_log_filters_short_and_rinse},
     {"S01b", s01b_shot_log_stop_detail_names_end_reasons},
     {"S02", s02_shot_log_appends_after_drip_delay},
+    {"S02C", s02c_shot_curve_samples_on_two_second_grid_and_latches_slow},
     {"S02B", s02b_drip_delay_is_snapshotted_and_honors_boundaries},
     {"S17", s17_new_cycle_commits_pending_log_as_last_known},
     {"W90", w90_save_unknown_preset_id_does_not_overwrite_active},

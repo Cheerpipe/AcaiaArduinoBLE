@@ -17,8 +17,10 @@ const firmware = [
   fs.readFileSync(path.join(sketchDir, 'ShotStopperScaleSense.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperCupPresence.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperShotCurveTypes.h'), 'utf8'),
 ].join('\n');
 const shotLogIo = fs.readFileSync(path.join(sketchDir, 'ShotStopperShotLog.h'), 'utf8');
+const shotCurveIo = fs.readFileSync(path.join(sketchDir, 'ShotStopperShotCurve.h'), 'utf8');
 const lastShotIo = fs.readFileSync(path.join(sketchDir, 'ShotStopperLastShot.h'), 'utf8');
 const jsonArena = fs.readFileSync(path.join(sketchDir, 'ShotStopperJsonArena.h'), 'utf8');
 const domainCore = fs.readFileSync(path.join(sketchDir, 'ShotStopperDomain.h'), 'utf8');
@@ -529,6 +531,10 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
 if (!ui.includes('id="shotPanel"') ||
     !ui.includes('id="shotBar"') ||
     !ui.includes('id="shotCard"') ||
+    !html.includes('id="shotSparkHost"') ||
+    !css.includes('.shotSparkHost') ||
+    !css.includes('.shotSpark{') ||
+    !ui.includes('function renderShotSpark(') ||
     !css.includes('.shotCard{') ||
     !css.includes('grid-template-areas:"dur dur actual actual" "goal err flow drop" "ended ended shot shot"') ||
     !ui.includes('id="shotElapsed"') ||
@@ -1031,10 +1037,20 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('function persistHomeBrewByWeight(') ||
     !ui.includes("onchange=R.persistHomeBrewByWeight") ||
     !ui.includes('beginHomeSwitchPending(h,on)') ||
-    ui.includes('id="clearLastShotButton"') ||
+    !ui.includes('id="clearLastShotButton"') ||
+    html.indexOf('id="shotPanel"') > html.indexOf('id="clearLastShotButton"') ||
+    (html.includes('id="clearLastShotButton"') &&
+     html.includes('<span class="t">Clear</span>')) ||
+    !css.includes('#shotPanel{position:relative') ||
+    !css.includes('#shotPanel .btnGlyph{min-height:2.85rem') ||
     html.includes('id="lastCycle"') ||
     !ui.includes('function renderShotPanel(') ||
+    !ui.includes('function renderShotSpark(') ||
+    !ui.includes("confirm:'CLEAR_LAST_SHOT'") ||
+    !ui.includes('/api/v1/last-shot/clear') ||
     !network.includes('\\"lastShot\\"') ||
+    !network.includes('\\"shotCurve\\"') ||
+    !network.includes('formatShotCurveJsonBody') ||
     !network.includes('lastShotClearHandler') ||
     !network.includes('LAST_SHOT_CLEAR_NOT_CONFIRMED') ||
     !firmware.includes('persistLastShotFromEndedCycle') ||
@@ -1042,6 +1058,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !firmware.includes('clearLastShotSnapshot') ||
     !firmware.includes('serviceShotStorePersistence') ||
     !shotLogIo.includes('copyToFlashIoScratch(&store_') ||
+    !shotCurveIo.includes('copyToFlashIoScratch(&store_') ||
     !lastShotIo.includes('copyToFlashIoScratch(&blob_') ||
     !jsonArena.includes('size > JSON_ARENA_CAPACITY') ||
     !network.includes('workBuf_->~NetworkWorkBuf()') ||
@@ -1785,11 +1802,9 @@ for (const [route, handler] of expected) {
     const browserIcon = uri === '/favicon.ico' ||
         uri === '/apple-touch-icon.png' ||
         uri === '/apple-touch-icon-precomposed.png';
-    const lastShotClear = uri === '/api/v1/last-shot/clear';
     if (!(statusPage && ui.includes('function statusUrl(') && ui.includes('/api/v1/status/')) &&
         !(lazyAsset && (ui.includes('/partials/') || ui.includes('/js/'))) &&
-        !browserIcon &&
-        !lastShotClear) {
+        !browserIcon) {
       throw new Error(`Registered API is not referenced by the UI: ${uri}`);
     }
   }

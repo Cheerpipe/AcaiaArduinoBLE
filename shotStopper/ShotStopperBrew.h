@@ -292,6 +292,7 @@ void enterFastExtractionExtended(float weightG, uint32_t atMs) {
   session.extractionExtended = true;
   session.targetReachedEarly = true;
   session.targetReachedAtMs = atMs;
+  shotCurveSampler.latchExtended(atMs);
   addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_ENTERED,
                 static_cast<int32_t>(weightG * 100.0f),
                 static_cast<int32_t>(elapsedMs(session.startedAtMs)));
@@ -307,10 +308,10 @@ void enterSlowExtractionExtended(float weightG, uint32_t atMs) {
     return;
   }
   session.slowExtractionExtended = true;
+  shotCurveSampler.latchExtended(atMs);
   addDebugEvent(DebugCategory::SCALE, DebugCode::SLOW_EXTRACTION_ENTERED,
                 static_cast<int32_t>(weightG * 100.0f),
                 static_cast<int32_t>(elapsedMs(session.startedAtMs)));
-  (void)atMs;
   if (buzzerPatternForExtendedPulseRate(
           runtimeConfig.buzzerSlowExtendedPulseRate) != BuzzerPattern::NONE) {
     emitAlert(AlertEvent::EXTENDED_PULSE, session.id);

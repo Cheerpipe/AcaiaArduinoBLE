@@ -3,6 +3,7 @@
 #include "ShotStopperBleCompanionPersistence.h"
 #include "ShotStopperLastShot.h"
 #include "ShotStopperPersistence.h"
+#include "ShotStopperShotCurve.h"
 #include "ShotStopperShotLog.h"
 
 namespace shotstopper {
@@ -43,10 +44,11 @@ inline bool resetPersistedNetworkAccess(PersistedSettings &settings) {
 inline bool resetAllDurableStores(PersistedSettings &settings,
                                   BleCompanionPersistedSettings &ble,
                                   ShotLog &shotLog,
-                                  LastShotStore &lastShot) {
+                                  LastShotStore &lastShot,
+                                  ShotCurveLog &shotCurves) {
   yieldFlashIo();
   feedFlashIoWatchdog();
-  if (!shotLog.clear() || !lastShot.clear()) {
+  if (!shotLog.clear() || !shotCurves.clear() || !lastShot.clear()) {
     return false;
   }
   yieldFlashIo();
@@ -65,11 +67,12 @@ inline bool resetAllDurableStores(PersistedSettings &settings,
   PersistedSettings verifiedSettings;
   BleCompanionPersistedSettings verifiedBle;
   const bool shotLogVerified = shotLog.load() && shotLog.count() == 0;
+  const bool shotCurvesVerified = shotCurves.load() && shotCurves.count() == 0;
   const bool lastShotVerified = lastShot.load() && !lastShot.get().valid;
   return loadPersistedSettings(verifiedSettings) &&
          verifyFactorySettings(verifiedSettings) &&
          loadBleCompanionSettings(verifiedBle) && verifiedBle.enabled == 1 &&
-         shotLogVerified && lastShotVerified;
+         shotLogVerified && shotCurvesVerified && lastShotVerified;
 }
 
 }  // namespace shotstopper

@@ -212,6 +212,8 @@ class ShotLog {
 
   uint32_t bootId() const { return store_.header.bootId; }
 
+  uint32_t nextRecordId() const { return store_.header.nextRecordId; }
+
   bool append(const ShotLogRecord &record, bool persistNow = true) {
     const uint16_t previousWriteIndex = store_.header.writeIndex;
     const uint16_t previousCount = store_.header.count;

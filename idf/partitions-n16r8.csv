@@ -2,8 +2,9 @@
 #
 # Matches Arduino FQBN PartitionScheme=app3M_fat9M_16MB.
 # The ffat region is reserved for FQBN / OTA layout parity with existing
-# field devices. Firmware does not mount FAT today; do not shrink or move
-# it without a coordinated migration (full reflash + otadata reset).
+# field devices. Do not shrink or move it without a coordinated migration
+# (full reflash + otadata reset). Firmware does not mount FAT; the first
+# 24 KiB stores the dual-slot shot-curve sidecar.
 nvs,      data, nvs,     0x9000,  0x5000,
 otadata,  data, ota,     0xe000,  0x2000,
 app0,     app,  ota_0,   0x10000, 0x300000,

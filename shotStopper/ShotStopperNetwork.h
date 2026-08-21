@@ -3,6 +3,7 @@
 #include "ShotStopperDomain.h"
 #include "ShotStopperBleCompanion.h"
 #include "ShotStopperPersistence.h"
+#include "ShotStopperShotCurveTypes.h"
 #include "ShotStopperShotLogTypes.h"
 #include "ShotStopperTime.h"
 
@@ -125,6 +126,7 @@ struct NetworkBridgeCallbacks {
   void (*reportTaskWatchdogFault)() = nullptr;
   void (*requestSafeRestart)() = nullptr;
   size_t (*copyShotRecords)(ShotLogRecord *output, size_t capacity) = nullptr;
+  size_t (*copyShotCurves)(ShotCurveRecord *output, size_t capacity) = nullptr;
   bool (*deleteShotRecord)(uint32_t id) = nullptr;
   bool (*clearShotLog)() = nullptr;
   bool (*clearLastShot)() = nullptr;

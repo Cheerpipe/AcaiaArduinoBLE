@@ -1618,6 +1618,10 @@ struct ControlStatusSnapshot {
   ShotPresetBank presets = {};
   LastCycleSummary lastCycle = {};
   PersistedLastShot lastShot = {};
+  uint8_t shotCurveCount = 0;
+  uint8_t shotCurveIntervalS = 2;
+  uint16_t shotCurveExtendedDs = UINT16_MAX;
+  int16_t shotCurveWeightCg[31] = {};
   HwmonSnapshot hwmon = {};
   uint32_t debugEventsDropped = 0;
   bool cycleFlowDuringRetare = false;
