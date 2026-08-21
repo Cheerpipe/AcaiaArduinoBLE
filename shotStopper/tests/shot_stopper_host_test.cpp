@@ -5390,14 +5390,11 @@ void rs05_coffee_during_min_duration_wait_skips_retare() {
   CHECK(executeNextScaleCommand());
   establishPostTareBaseline();
   runLoopAfter(runtimeConfig.rinseGestureMs + 1);
-  const uint32_t baseMs = hostMillis + 1000U;
-  publishWeight(150.0f, baseMs, 1, 10);
-  publishWeight(150.0f, baseMs + 40U, 1, 11);
   simulateFirstDrops(0.0f, 20);
-  publishWeight(150.0f, baseMs + 300U, 1, 21);
-  CHECK(!session.retarePerformed);
-  CHECK(session.flowDuringRetare);
   CHECK(session.firstDropMs != 0);
+  CHECK(session.flowDuringRetare);
+  publishStableCupWeight(150.0f, 30);
+  CHECK(!session.retarePerformed);
   CHECK(session.retareFlowFirstDetectedAtMs != 0);
 }
 
@@ -7095,6 +7092,62 @@ void ff01_classifier_seeking_touch_and_release() {
   CHECK(stepFirstFlow(state, 6.1f, 300, 3, 0.0f) == FirstFlowClass::TOUCH);
 }
 
+void ff12_cupmin_parameter_gates_touch_and_residual() {
+  FirstFlowState state;
+  CHECK(stepFirstFlow(state, 15.0f, 100, 1, 0.0f, 10.0f) ==
+        FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 15.4f, 200, 2, 0.0f, 10.0f) ==
+        FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 15.8f, 300, 3, 0.0f, 10.0f) ==
+        FirstFlowClass::TOUCH);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 18.0f, 100, 1, 0.0f, 15.0f) ==
+        FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 18.4f, 200, 2, 0.0f, 15.0f) ==
+        FirstFlowClass::TOUCH);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 8.0f, 100, 1, 0.0f, 10.0f) ==
+        FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 12.0f, 200, 2, 0.0f, 10.0f) ==
+        FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 15.0f, 300, 3, 0.0f, 10.0f) ==
+        FirstFlowClass::TOUCH);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 8.0f, 100, 1, 0.0f, 10.0f) ==
+        FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 1.2f, 200, 2, 0.0f, 10.0f) ==
+        FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 1.3f, 300, 3, 0.0f, 10.0f) ==
+        FirstFlowClass::FIRE);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 8.0f, 100, 1, 0.0f, 15.0f) ==
+        FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 1.2f, 200, 2, 0.0f, 15.0f) ==
+        FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 1.3f, 300, 3, 0.0f, 15.0f) ==
+        FirstFlowClass::FIRE);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 8.0f, 100, 1, 0.0f, 5.0f) ==
+        FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 1.2f, 200, 2, 0.0f, 5.0f) ==
+        FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 1.3f, 300, 3, 0.0f, 5.0f) ==
+        FirstFlowClass::TOUCH);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 15.0f, 100, 1, 0.0f, 10.0f) ==
+        FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 1.2f, 200, 2, 0.0f, 10.0f) ==
+        FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 1.3f, 300, 3, 0.0f, 10.0f) ==
+        FirstFlowClass::TOUCH);
+}
+
 void at01_classifier_startup_and_trend_math() {
   float times[WEIGHT_TREND_POINT_COUNT];
   float weights[WEIGHT_TREND_POINT_COUNT];
@@ -7514,6 +7567,90 @@ void rt15_cup_settle_creep_still_retares() {
   CHECK(session.firstDropMs == 0);
   CHECK(session.retarePerformed);
   CHECK(!session.flowDuringRetare);
+}
+
+void prepareOpenRetareWindow(float minCupG) {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.autoRetare = true;
+  runtimeConfig.bbwProtectionMs = minimumBbwProtectionMs(runtimeConfig);
+  runtimeConfig.minimumCupWeightG = minCupG;
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+  CHECK(!session.awaitingPostTareBaseline);
+  CHECK(retareWindowOpen());
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+}
+
+void expectRetareWithoutFirstDrop() {
+  CHECK(session.retarePerformed);
+  CHECK(session.firstDropMs == 0);
+  CHECK(!session.flowDuringRetare);
+}
+
+void rt16_configured_min_cup_weight_retares() {
+  prepareOpenRetareWindow(10.0f);
+  publishStableCupWeight(15.0f, 10);
+  expectRetareWithoutFirstDrop();
+
+  prepareOpenRetareWindow(10.0f);
+  publishStableCupWeight(20.0f, 10);
+  expectRetareWithoutFirstDrop();
+
+  prepareOpenRetareWindow(10.0f);
+  publishStableCupWeight(10.5f, 10);
+  expectRetareWithoutFirstDrop();
+
+  prepareOpenRetareWindow(15.0f);
+  publishStableCupWeight(18.0f, 10);
+  expectRetareWithoutFirstDrop();
+
+  prepareOpenRetareWindow(15.0f);
+  publishStableCupWeight(12.0f, 10);
+  CHECK(!session.retarePerformed);
+  CHECK(session.firstDropMs == 0);
+
+  prepareOpenRetareWindow(20.0f);
+  publishStableCupWeight(25.0f, 10);
+  expectRetareWithoutFirstDrop();
+}
+
+void rt17_light_cup_landing_and_overshoot_retares() {
+  prepareOpenRetareWindow(10.0f);
+  const uint32_t landMs = hostMillis + 1000U;
+  publishWeight(12.0f, landMs, 1, 10);
+  publishWeight(15.0f, landMs + 100U, 1, 11);
+  CHECK(session.firstDropMs == 0);
+  publishStableCupWeight(15.0f, 20);
+  expectRetareWithoutFirstDrop();
+
+  prepareOpenRetareWindow(10.0f);
+  const uint32_t overshootMs = hostMillis + 1000U;
+  publishWeight(18.0f, overshootMs, 1, 10);
+  publishWeight(15.0f, overshootMs + 100U, 1, 11);
+  publishWeight(15.1f, overshootMs + 200U, 1, 12);
+  CHECK(session.firstDropMs == 0);
+  publishStableCupWeight(15.0f, 20);
+  expectRetareWithoutFirstDrop();
+}
+
+void rt18_late_combined_start_does_not_rearm_after_retare() {
+  prepareOpenRetareWindow(10.0f);
+  publishStableCupWeight(15.0f, 10);
+  expectRetareWithoutFirstDrop();
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+  CHECK(!session.awaitingPostTareBaseline);
+  ScaleEvent startResult;
+  startResult.type = ScaleEventType::TIMER_START_RESULT;
+  startResult.cycleId = session.id;
+  startResult.commandAttempted = true;
+  startResult.writeSucceeded = true;
+  startResult.usedCombinedTareStart = true;
+  CHECK(publishScaleEvent(startResult, true));
+  processScaleWorkerEvents();
+  CHECK(!session.awaitingPostTareBaseline);
 }
 
 void pm01_original_bbw_release_after_rinse_keeps_cn9_closed() {
@@ -7949,6 +8086,7 @@ const TestCase testCases[] = {
     {"FF09", ff09_stream_past_half_goal_still_fires},
     {"FF10", ff10_control_ramp_records_first_flow},
     {"FF11", ff11_cup_and_finger_are_not_first_drop},
+    {"FF12", ff12_cupmin_parameter_gates_touch_and_residual},
     {"R65", r65_slow_extended_shot_does_not_learn_weight_offset},
     {"R32", r32_old_connection_generation_cannot_update_weight},
     {"R33", r33_weight_mailbox_keeps_latest_and_reports_gap},
@@ -8005,6 +8143,9 @@ const TestCase testCases[] = {
     {"RT13", rt13_auto_tare_off_skips_automatic_retare},
     {"RT14", rt14_cup_overshoot_still_retares},
     {"RT15", rt15_cup_settle_creep_still_retares},
+    {"RT16", rt16_configured_min_cup_weight_retares},
+    {"RT17", rt17_light_cup_landing_and_overshoot_retares},
+    {"RT18", rt18_late_combined_start_does_not_rearm_after_retare},
     {"RS01", rs01_fast_samples_wait_for_min_duration},
     {"RS02", rs02_slow_samples_meet_min_duration_at_third_sample},
     {"RS03", rs03_broken_streak_before_min_duration_does_not_retare},

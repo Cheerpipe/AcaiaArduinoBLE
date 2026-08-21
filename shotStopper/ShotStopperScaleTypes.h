@@ -243,8 +243,9 @@ inline bool firstFlowIsCoffeeLeftover(float delta, float cupMinG) {
 }
 
 // SEEKING: small coffee steps (< 2 g, below cup min) confirm first flow.
-// TOUCH: a ≥2 g jump or cup-sized mass is a finger or cup, not first drop.
-// FIRE from TOUCH only on coffee leftover (< 2 g) or +2 g more below cup min.
+// TOUCH: a ≥2 g jump or mass ≥ cup min is a finger or cup, not first drop.
+// Residual FIRE only if leftover is coffee-sized and the peak was below cup min.
+// Through FIRE only while current weight is still below cup min.
 inline FirstFlowClass stepFirstFlow(
     FirstFlowState &state, float weight, uint32_t receivedAtMs,
     uint32_t packetSequence, float baselineG,
@@ -302,7 +303,8 @@ inline FirstFlowClass stepFirstFlow(
 
   const bool released = weight <= state.peakG - FIRST_DROP_FINGER_STEP_G;
   if (released) {
-    if (firstFlowIsCoffeeLeftover(delta, cupMinG)) {
+    if (firstFlowIsCoffeeLeftover(delta, cupMinG) &&
+        !firstFlowIsCupMass(state.peakG - baselineG, cupMinG)) {
       state.confirmations = 0;
       state.residualConfirmations =
           consecutive && state.residualConfirmations > 0

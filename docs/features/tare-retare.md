@@ -17,16 +17,18 @@ tare zero.
 ## Automatic late-cup retare
 
 If the cup is not on the scale yet, you can place it after the shot has
-started. Cup-presence detection watches for a stable load above the minimum
-cup weight. When a cup is **placed** inside the **retare window** (default
-**4 s**), the firmware tares again once—automatically—without restarting
-the shot timer.
+started. Cup-presence detection watches for a stable load at or above
+**Minimum cup weight** (`minimumCupWeightG`, default **10 g**; cardboard
+cups around 12–20 g use this same setting). When a cup is **placed** inside
+the **retare window** (default **4 s**), the firmware tares again
+once—automatically—without restarting the shot timer.
 
-Putting the cup down (including a short overshoot around 150–200 g) or a
-finger tap is not treated as first drop and does not block retare. After
-the late tare, post-tare grace runs again so the empty-cup weight cannot
-cut the shot; [Cup protection](cup-protection.md) still blocks weight stop
-for the full BBW protection window.
+Putting the cup down is not first drop and does not block retare, whether
+the cup is a light cardboard cup just above the configured minimum or a
+heavier ceramic cup. A finger tap is also not first drop. After the late
+tare, post-tare grace runs again so the empty-cup weight cannot cut the
+shot; [Cup protection](cup-protection.md) still blocks weight stop for the
+full BBW protection window.
 
 ## When it applies
 

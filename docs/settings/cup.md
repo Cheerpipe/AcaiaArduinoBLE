@@ -17,7 +17,7 @@ counts as **lifted**. Placement also requires a short run of stable samples.
 
 | Setting | Default | Range / notes | Effect on the shot |
 | --- | --- | --- | --- |
-| **Minimum cup weight (g)** | 10 g | Positive hysteresis bound | Stable load that counts as a cup being placed. |
+| **Minimum cup weight (g)** | 10 g | 1–500 g | Stable load that counts as a cup being placed. First-flow and retare use this same value (not a hardcoded 10 g or 150 g). |
 | **Cup-removed threshold (g)** | −3 g | — | Confirmed weight at or below this means the cup was lifted. |
 | **Placement samples** | 3 | — | Number of stable samples required before cup-present. |
 | **Placement tolerance (g)** | 2.0 g | — | How much those samples may differ. |

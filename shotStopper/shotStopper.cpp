@@ -3451,8 +3451,15 @@ void processScaleWorkerEvents() {
               stopperState == StopperState::BREW &&
               (event.usedCombinedTareStart ||
                session.awaitingPostTareBaseline)) {
-            armPostTareBaselineWindow();
-            markTareZeroReady();
+            const bool skipCombinedRearm =
+                event.usedCombinedTareStart &&
+                (session.retarePerformed ||
+                 (cupPresenceState() == CupPresenceState::PRESENT &&
+                  !session.awaitingPostTareBaseline));
+            if (!skipCombinedRearm) {
+              armPostTareBaselineWindow();
+              markTareZeroReady();
+            }
           }
         }
         emitCommandAlert(event.usedCombinedTareStart ? AlertEvent::TARE_START
