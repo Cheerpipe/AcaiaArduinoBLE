@@ -29,6 +29,7 @@ struct PeripheralState {
     std::string address = "01:02:03:04:05:06";
     std::string localName;
     bool connectResult = true;
+    int connectFailRemaining = 0;
     bool discoveryResult = true;
     bool connected = false;
     int connectCalls = 0;
@@ -138,6 +139,11 @@ public:
             return false;
         }
         ++state_->connectCalls;
+        if (state_->connectFailRemaining > 0) {
+            --state_->connectFailRemaining;
+            state_->connected = false;
+            return false;
+        }
         state_->connected = state_->connectResult;
         return state_->connected;
     }

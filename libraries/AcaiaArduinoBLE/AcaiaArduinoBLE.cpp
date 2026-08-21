@@ -175,6 +175,7 @@ AcaiaArduinoBLE::AcaiaArduinoBLE(bool debug) :
     _debug(debug),
     _connectStep(ConnectStep::Idle),
     _connectStartedAt(0),
+    _connectAttempts(0),
     _scanMac{},
     _address{},
     _localName{},
@@ -287,6 +288,7 @@ void AcaiaArduinoBLE::clearConnectingState() {
     _connecting = false;
     _connectStep = ConnectStep::Idle;
     _connectStartedAt = 0;
+    _connectAttempts = 0;
 }
 
 bool AcaiaArduinoBLE::takeSeenAdvertisement(char *macOut, size_t macCapacity,
@@ -348,10 +350,13 @@ bool AcaiaArduinoBLE::pollScan() {
         // Unfiltered: first compatible name. Filtered: matching MAC (name
         // optional — preferred scales may advertise briefly without a name).
         if ((!filtered && nameOk) || macOk) {
+            // Retain the peer before stopScan(); ArduinoBLE may free the
+            // scan-result handle when the scanner is disabled.
+            rememberPeripheral(peripheral);
             BLE.stopScan();
             _scanning = false;
             _scanStartedAt = 0;
-            return beginConnection(peripheral);
+            return beginConnection(_peripheral);
         }
     }
 
@@ -362,12 +367,16 @@ bool AcaiaArduinoBLE::beginConnection(BLEDevice& peripheral) {
     if (_debug) {
         Serial.println("Connecting ...");
     }
-    rememberPeripheral(peripheral);
+    if (!_hasPeripheral) {
+        rememberPeripheral(peripheral);
+    }
     _connecting = true;
-    _connectStep = ConnectStep::Connect;
+    _connectStep = ConnectStep::Settle;
     _connectStartedAt = static_cast<uint32_t>(millis());
-    // Advance the first step immediately so one pollScan still makes progress.
-    return advanceConnection();
+    _connectAttempts = 0;
+    // Do not GAP-connect on the same tick as stopScan(); the next pollScan
+    // settles HCI then retries connect() with a longer timeout.
+    return false;
 }
 
 bool AcaiaArduinoBLE::advanceConnection() {
@@ -378,19 +387,35 @@ bool AcaiaArduinoBLE::advanceConnection() {
         if (_debug) {
             Serial.println("Scale connect budget exceeded");
         }
+        BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
         resetConnection(true, AcaiaDisconnectReason::CONNECT_FAILED);
         return false;
     }
 
     switch (_connectStep) {
+        case ConnectStep::Settle:
+            BLE.poll();
+            _connectStep = ConnectStep::Connect;
+            return false;
+
         case ConnectStep::Connect:
+            BLE.setTimeout(BLE_CONNECT_TIMEOUT_MS);
             if (!_peripheral.connect()) {
+                ++_connectAttempts;
                 if (_debug) {
-                    Serial.println("Failed to connect!");
+                    Serial.print("Failed to connect (attempt ");
+                    Serial.print(_connectAttempts);
+                    Serial.println(")");
                 }
+                if (_connectAttempts < SCALE_CONNECT_ATTEMPTS) {
+                    BLE.poll();
+                    return false;
+                }
+                BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
                 resetConnection(false, AcaiaDisconnectReason::CONNECT_FAILED);
                 return false;
             }
+            BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
             if (_debug) {
                 Serial.println("Connected");
                 Serial.println("Discovering attributes ...");

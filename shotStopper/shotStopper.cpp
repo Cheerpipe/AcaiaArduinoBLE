@@ -2662,6 +2662,21 @@ ScaleMacCacheMode currentScaleMacCacheMode() {
   return static_cast<ScaleMacCacheMode>(runtimeConfig.scaleMacCacheMode);
 }
 
+// Pause companion advertising while discovering/connecting a scale, and while
+// CN9 is closed (existing brew RF preference). Scan can coexist with
+// advertising; GAP connect as central usually cannot.
+bool companionAdvertisingShouldPause() {
+  return !scale.isConnected() || getRelaySafetySnapshot().closed;
+}
+
+void syncCompanionAdvertisingForScaleLink() {
+#if !defined(SHOT_STOPPER_HOST_TEST)
+  if (bleCompanion != nullptr) {
+    bleCompanion->setAdvertisingPaused(companionAdvertisingShouldPause());
+  }
+#endif
+}
+
 void noteScaleHistory(const char *mac, const char *name) {
   if (mac == nullptr || !validPreferredScaleMac(mac) || mac[0] == '\0') {
     return;
@@ -2759,6 +2774,9 @@ void clearPreferredScaleSelectionOnly() {
 
 void selectPreferredScale(const char *mac, const char *name) {
   if (mac == nullptr || mac[0] == '\0') {
+    if (!hasPreferredScaleMac()) {
+      return;
+    }
     clearPreferredScaleSelectionOnly();
     return;
   }
@@ -2768,6 +2786,11 @@ void selectPreferredScale(const char *mac, const char *name) {
   char canonicalMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
   strncpy(canonicalMac, mac, PREFERRED_SCALE_MAC_CAPACITY - 1);
   canonicalizePreferredScaleMac(canonicalMac, sizeof(canonicalMac));
+  char currentMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+  copyPreferredScaleMac(currentMac, sizeof(currentMac));
+  if (preferredScaleMacEqual(currentMac, canonicalMac)) {
+    return;
+  }
   char resolvedName[PREFERRED_SCALE_NAME_CAPACITY] = {};
   if (name != nullptr && validPreferredScaleName(name) && name[0] != '\0') {
     strncpy(resolvedName, name, PREFERRED_SCALE_NAME_CAPACITY - 1);
@@ -3178,6 +3201,7 @@ void scaleWorkerTask(void *) {
   copyBleCompanionRuntimeSnapshot(initialBleSnapshot);
   if (bleCompanionProfileAllocated()) {
     bleCompanion->begin(enqueueBleCompanionRequest);
+    syncCompanionAdvertisingForScaleLink();
     publishBleCompanionStatus(bleCompanion->status());
   } else {
     BleCompanionStatusSnapshot inactiveStatus;
@@ -3196,6 +3220,7 @@ void scaleWorkerTask(void *) {
     // unavailable, preventing stale prediction data from ending a shot.
     markScaleWorkerProgress();
     BLE.poll();
+    syncCompanionAdvertisingForScaleLink();
 
 #if !defined(SHOT_STOPPER_HOST_TEST)
     if (bleCompanion != nullptr) {

@@ -3904,6 +3904,80 @@ void d08_select_none_clears_without_pause() {
   CHECK(!scale.directedScan);
 }
 
+void d09_first_mode_connects_seen_advertisement() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
+  scalePreferredMac[0] = '\0';
+  memset(scaleHistory, 0, sizeof(scaleHistory));
+  scaleHistorySeq = 0;
+  hostMillis = SCALE_CONNECT_RETRY_MS;
+  uint32_t lastScanCycleMs = 0;
+  uint32_t lastConnectLogMs = 0;
+  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
+  bool connectAttemptSeriesActive = false;
+  uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.scanning);
+  CHECK(!scale.directedScan);
+  CHECK(scale.lastStartScanMac[0] == '\0');
+
+  strncpy(scale.seenMac, "AA:BB:CC:DD:EE:FF", sizeof(scale.seenMac) - 1);
+  strncpy(scale.seenName, "LUNAR", sizeof(scale.seenName) - 1);
+  scale.seenPending = true;
+  scale.pollScanConnects = true;
+  scale.pollScanStepsToConnect = 1;
+  hostMillis += SCALE_DISCOVERY_TICK_MS;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.connected);
+  CHECK(getScaleLinkSnapshot().state == ScaleLinkState::CONNECTED);
+  CHECK(preferredScaleMacEqual(scaleHistory[0].mac, "AA:BB:CC:DD:EE:FF"));
+  CHECK(scalePreferredMac[0] == '\0');
+}
+
+void d10_companion_pauses_while_scale_disconnected() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  scale.connected = false;
+  CHECK(companionAdvertisingShouldPause());
+  scale.connected = true;
+  CHECK(!companionAdvertisingShouldPause());
+}
+
+void d11_select_preferred_is_noop_when_unchanged() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
+  hostMillis = SCALE_CONNECT_RETRY_MS;
+  uint32_t lastScanCycleMs = 0;
+  uint32_t lastConnectLogMs = 0;
+  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
+  bool connectAttemptSeriesActive = false;
+  uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.scanning);
+  const size_t calls = scale.startScanCalls;
+  selectPreferredScale("", "");
+  CHECK(scale.scanning);
+  CHECK(scale.startScanCalls == calls);
+
+  setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
+  strncpy(scalePreferredName, "LUNAR", sizeof(scalePreferredName) - 1);
+  selectPreferredScale("AA:BB:CC:DD:EE:FF", "LUNAR");
+  CHECK(scale.scanning);
+  CHECK(scale.startScanCalls == calls);
+}
+
 void w62_local_buzzer_drive_matches_compile_flag() {
   resetHarness(false, false);
   CHECK(localBuzzer.ready);
@@ -7787,6 +7861,9 @@ const TestCase testCases[] = {
     {"D06", d06_forget_pauses_discovery_for_30s},
     {"D07", d07_prefer_falls_back_after_grace},
     {"D08", d08_select_none_clears_without_pause},
+    {"D09", d09_first_mode_connects_seen_advertisement},
+    {"D10", d10_companion_pauses_while_scale_disconnected},
+    {"D11", d11_select_preferred_is_noop_when_unchanged},
     {"S01", s01_shot_log_filters_short_and_rinse},
     {"S02", s02_shot_log_appends_after_drip_delay},
     {"S02B", s02b_drip_delay_is_snapshotted_and_honors_boundaries},

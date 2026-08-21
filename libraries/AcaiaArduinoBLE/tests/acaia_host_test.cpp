@@ -307,6 +307,7 @@ void testCleanupOnInitializationFailures() {
     CHECK(!connectFailure.init());
     CHECK(connectFailure.lastDisconnectReason() ==
           AcaiaDisconnectReason::CONNECT_FAILED);
+    CHECK(fixture.peripheral->connectCalls == SCALE_CONNECT_ATTEMPTS);
 
     resetFake();
     fixture = makeScale(NEW);
@@ -337,6 +338,41 @@ void testCleanupOnInitializationFailures() {
     CHECK(fixture.peripheral->disconnectCalls == 1);
     CHECK(writeFailure.lastDisconnectReason() ==
           AcaiaDisconnectReason::INITIALIZATION_WRITE_FAILED);
+}
+
+void testConnectRetriesThenSucceeds() {
+    resetFake();
+    ScaleFixture fixture = makeScale(NEW);
+    fixture.peripheral->connectFailRemaining = SCALE_CONNECT_ATTEMPTS - 1;
+    AcaiaArduinoBLE scale(false);
+    CHECK(scale.startScan());
+    bool connected = false;
+    for (int i = 0; i < 24 && !connected; ++i) {
+        connected = scale.pollScan();
+    }
+    CHECK(connected);
+    CHECK(scale.isConnected());
+    CHECK(fixture.peripheral->connectCalls == SCALE_CONNECT_ATTEMPTS);
+    CHECK(BLE.timeoutMs == BLE_OPERATION_TIMEOUT_MS);
+}
+
+void testConnectFailedOnlyAfterRetries() {
+    resetFake();
+    ScaleFixture fixture = makeScale(NEW);
+    fixture.peripheral->connectResult = false;
+    AcaiaArduinoBLE scale(false);
+    CHECK(scale.startScan());
+    bool connected = false;
+    for (int i = 0; i < 24 && !connected; ++i) {
+        connected = scale.pollScan();
+    }
+    CHECK(!connected);
+    CHECK(!scale.isConnected());
+    CHECK(!scale.isConnecting());
+    CHECK(fixture.peripheral->connectCalls == SCALE_CONNECT_ATTEMPTS);
+    CHECK(scale.lastDisconnectReason() ==
+          AcaiaDisconnectReason::CONNECT_FAILED);
+    CHECK(BLE.timeoutMs == BLE_OPERATION_TIMEOUT_MS);
 }
 
 void testFirstPacketAndSteadyStateTimeouts() {
@@ -767,6 +803,8 @@ int main() {
     testNameScanIgnoresEmptyLocalName();
     testStartScanRestartsOnFilterChange();
     testCleanupOnInitializationFailures();
+    testConnectRetriesThenSucceeds();
+    testConnectFailedOnlyAfterRetries();
     testFirstPacketAndSteadyStateTimeouts();
     testAcaiaValidationAndDebugBounds();
     testFelicitaAsciiValidation();

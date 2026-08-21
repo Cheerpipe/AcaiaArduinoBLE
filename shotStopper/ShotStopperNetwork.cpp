@@ -3747,7 +3747,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"controlAccepted\":%s,\"currentWeightG\":%s,"
         "\"observedWeightG\":%s,\"timerMs\":%s,"
         "\"preferredMac\":\"%s\",\"preferredName\":\"%s\","
-        "\"macCachePauseRemainingMs\":%lu},"
+        "\"macCachePauseRemainingMs\":%lu,"
+        "\"lastDisconnectReasonName\":\"%s\"},"
         "\"presets\":%s,"
         "\"cycle\":{\"active\":%s,\"shotType\":\"%s\","
         "\"retarePerformed\":%s,\"firstDropElapsedMs\":%lu,"
@@ -3792,6 +3793,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         observedWeight, scaleTimer, safePreferredScaleMac,
         safePreferredScaleName,
         static_cast<unsigned long>(control.scaleMacCachePauseRemainingMs),
+        scaleDisconnectReasonName(control.scaleLastDisconnectReason),
         g_work->presetsJson, control.activeCycle ? "true" : "false",
         activeCycleShotTypeLabel(control),
         control.cycleRetarePerformed ? "true" : "false",

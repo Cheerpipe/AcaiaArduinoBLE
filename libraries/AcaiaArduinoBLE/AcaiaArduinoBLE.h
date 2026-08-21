@@ -29,6 +29,8 @@
 #define GENERIC_MAX_PACKET_PERIOD_MS     8000UL
 #define SCALE_SCAN_TIMEOUT_MS            3000UL
 #define BLE_OPERATION_TIMEOUT_MS          1000UL
+#define BLE_CONNECT_TIMEOUT_MS            4000UL
+#define SCALE_CONNECT_ATTEMPTS           3U
 #define SCALE_CONNECT_BUDGET_MS         10000UL
 #define MAX_SUPPORTED_WEIGHT_GRAMS      10000.0f
 #define MAX_CONSECUTIVE_REJECTED_PACKETS 8U
@@ -223,6 +225,7 @@ class AcaiaArduinoBLE {
         bool                _debug;
         enum class ConnectStep : uint8_t {
             Idle = 0,
+            Settle,
             Connect,
             Discover,
             Configure,
@@ -231,6 +234,7 @@ class AcaiaArduinoBLE {
         };
         ConnectStep         _connectStep;
         uint32_t            _connectStartedAt;
+        uint8_t             _connectAttempts;
         char                _scanMac[ACAIA_MAC_CAPACITY];
         char                _address[ACAIA_MAC_CAPACITY];
         char                _localName[ACAIA_NAME_CAPACITY];

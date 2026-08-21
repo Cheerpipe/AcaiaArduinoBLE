@@ -217,8 +217,12 @@ class ShotStopperBleCompanion {
     otaRequested_.writeValue(static_cast<byte>(0));
     firmwareVersion_.writeValue(BLE_COMPANION_PROTOCOL_VERSION);
     status_.stackReady = true;
-    status_.advertising = BLE.advertise() != 0;
-    return status_.advertising;
+    // Stay off-air until the scale worker unpauses. Advertising as a
+    // peripheral while connecting to a scale as central makes GAP connect
+    // fail on ESP32-S3 (scan still sees ads; connect returns false).
+    advertisingPaused_ = true;
+    status_.advertising = false;
+    return true;
   }
 
   void service(const BleCompanionRuntimeSnapshot &snapshot, uint32_t nowMs) {
@@ -226,6 +230,15 @@ class ShotStopperBleCompanion {
       return;
     }
     status_.apActive = snapshot.apActive;
+
+    // Do not poll BLE.central() while paused and idle: that GAP query races
+    // an in-flight scale connect. Keep servicing an already-connected phone.
+    if (advertisingPaused_ && !status_.connected) {
+      expirePending(nowMs);
+      processWrites(nowMs);
+      sync(snapshot);
+      return;
+    }
 
     BLEDevice central = BLE.central();
     const bool connectedNow = static_cast<bool>(central) && central.connected();

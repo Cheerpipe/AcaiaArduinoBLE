@@ -57,6 +57,25 @@ if (!bleLibrary.includes('readValue(input, MAX_BLE_PACKET_LENGTH)') ||
   throw new Error(
       'Acaia BLE reads must clamp to MAX_BLE_PACKET_LENGTH');
 }
+if (!bleLibrary.includes('BLE_CONNECT_TIMEOUT_MS') ||
+    !bleLibrary.includes('SCALE_CONNECT_ATTEMPTS') ||
+    !bleLibrary.includes('ConnectStep::Settle') ||
+    !bleLibrary.includes('rememberPeripheral(peripheral)') ||
+    !bleLibrary.includes('_connectAttempts < SCALE_CONNECT_ATTEMPTS')) {
+  throw new Error(
+      'GAP connect must settle after stopScan, use a longer timeout, and retry');
+}
+if (!firmwareCore.includes('companionAdvertisingShouldPause') ||
+    !firmwareCore.includes('syncCompanionAdvertisingForScaleLink') ||
+    !bleCompanion.includes('advertisingPaused_ && !status_.connected')) {
+  throw new Error(
+      'Companion advertising must pause while the scale is not connected');
+}
+if (!network.includes('\\"lastDisconnectReasonName\\":\\"%s\\"},') ||
+    !network.includes('\\"macCachePauseRemainingMs\\":%lu,')) {
+  throw new Error(
+      'Home status must include lastDisconnectReasonName on scale');
+}
 
 const htmlMatch = asset.match(/R"HTML\(([\s\S]*?)\)HTML"/);
 if (!htmlMatch) throw new Error('Embedded HTML raw string not found');
@@ -412,6 +431,7 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !ui.includes('function formatScaleWeight(') ||
     !ui.includes('function formatScaleLink(') ||
     !ui.includes('function formatScaleTimer(') ||
+    !ui.includes('lastDisconnectReasonName') ||
     !ui.includes("BLE up (no weight)") ||
     !ui.includes('formatScaleLink(s)') ||
     !ui.includes('id="preferredScale"') ||
@@ -435,6 +455,8 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     // `prevupdateScalePreferenceOptions` and broke Settings status refresh.
     ui.includes(':prevupdateScalePreferenceOptions') ||
     !ui.includes(':prev;updateScalePreferenceOptions()') ||
+    !ui.includes('preferredScaleSelectSyncing') ||
+    !ui.includes("mac===(sel.dataset.applied||'')") ||
     !ui.includes("scaleMacCacheMode:(()=>{const el=$('scalePreference')") ||
     !ui.includes("el.id==='preferredScaleSelect'") ||
     ui.includes('id="alwaysUseThisScale"') ||
