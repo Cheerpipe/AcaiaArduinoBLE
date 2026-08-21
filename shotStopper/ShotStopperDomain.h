@@ -1629,6 +1629,7 @@ struct ControlStatusSnapshot {
   uint32_t scaleMacCachePauseRemainingMs = 0;
   bool noScaleShotGuardEnabled = true;
   bool noScaleShotGuardArmed = true;
+  bool cupPresent = false;
   bool configPersistPending = false;
   bool configPersistFailed = false;
   bool bleCompanionEnabled = true;

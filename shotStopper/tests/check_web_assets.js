@@ -550,12 +550,23 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !network.includes('noScaleShotGuard') ||
     !network.includes('noScaleShotGuardEnabled') ||
     !network.includes('noScaleShotGuardArmed') ||
+    !network.includes('cupPresence') ||
+    !network.includes('control.cupPresent') ||
     !firmware.includes('last.noScaleShotGuardEnabled') ||
     !firmware.includes('last.noScaleShotGuardArmed') ||
+    !firmware.includes('next.cupPresent') ||
+    !firmware.includes('cupPresenceState() == CupPresenceState::PRESENT') ||
+    !domain.includes('bool cupPresent = false') ||
     !ui.includes('A→M ·') ||
     !ui.includes('function updateHomeGuardSubs(') ||
     !ui.includes('updateHomeGuardSubs(s,live)') ||
     !ui.includes("setHomeSub('homeBbwSub'") ||
+    !ui.includes("setHomeSub('homeCupSub'") ||
+    !ui.includes("setHomeSub('homeAlertsSub'") ||
+    !ui.includes('function formatCupPresence(') ||
+    !ui.includes('function formatAlertsChannel(') ||
+    !ui.includes("d.present?'Present':'Absent'") ||
+    !ui.includes("'scale_priority'?'Scale priority'") ||
     !css.includes('.swS') ||
     !css.includes('.homeSwitchGrid .swS') ||
     !css.includes('.homeGuardGrid{') ||
@@ -784,6 +795,10 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !html.includes('id="homeFastSub"') ||
     !html.includes('id="homeSlowSub"') ||
     !html.includes('id="homeAtmSub"') ||
+    !html.includes('id="homeCupSub"') ||
+    !html.includes('id="homeAlertsSub"') ||
+    !html.includes('>Cup protection<span') ||
+    !html.includes('>Alerts<span') ||
     !html.includes('class="swS"') ||
     html.indexOf('class="homeSwitchGrid"') > html.indexOf('id="homeBrewByWeight"') ||
     html.indexOf('id="homeBrewByWeight"') > html.indexOf('id="homeAvoidBbwShotWithoutScale"') ||
@@ -1569,6 +1584,14 @@ if (soundAlertStatusFields.length !== 2 ||
     !statusFormat.includes('page == StatusPage::Settings')) {
   throw new Error(
       'soundAlertsEnabled must be projected only by status/home and status/settings');
+}
+const alertChannelStatusFields =
+    statusFormat.match(/\\"alertOutputChannel\\":\\"%s\\"/g) || [];
+if (alertChannelStatusFields.length !== 2 ||
+    !statusFormat.includes('page == StatusPage::Home') ||
+    !statusFormat.includes('page == StatusPage::Settings')) {
+  throw new Error(
+      'alertOutputChannel must be projected only by status/home and status/settings');
 }
 // Shared status envelope: firmware/bootId/mutable/liveShot/ringRetain only.
 // NTP → admin; serialDebug/diagnostics → diagnostic; buzzerSupported → settings.

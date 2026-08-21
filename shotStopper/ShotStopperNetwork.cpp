@@ -3601,7 +3601,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   if (ok && page == StatusPage::Home) {
     ok = statusJsonAppend(
         &used,
-        ",\"soundAlertsEnabled\":%s,\"brewByWeight\":%s,\"goalWeightG\":%u,"
+        ",\"soundAlertsEnabled\":%s,\"alertOutputChannel\":\"%s\","
+        "\"brewByWeight\":%s,\"goalWeightG\":%u,"
         "\"operationalWallMs\":%lu,\"minBrewTimeMs\":%lu,\"maxBrewTimeMs\":%lu,"
         "\"minRecoveryWeightG\":%.1f,\"maxRecoveryWeightG\":%.1f,"
         "\"fastExtractionGuardEnabled\":%s,\"slowExtractionGuardEnabled\":%s,"
@@ -3611,6 +3612,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"avoidBbwShotWithoutScale\":%s,"
         "\"scaleMacCacheMode\":\"%s\"",
         control.config.soundAlertsMuted ? "false" : "true",
+        alertOutputChannelId(control.config.alertOutputChannel),
         control.config.timerOnly ? "false" : "true",
         static_cast<unsigned>(control.config.goalWeightG),
         static_cast<unsigned long>(control.config.operationalWallMs),
@@ -3764,7 +3766,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"autoToManualGuardRemainingMs\":%lu,"
         "\"noScaleShotGuardEnabled\":%s,"
         "\"noScaleShotGuardArmed\":%s},"
-        "\"noScaleShotGuard\":{\"enabled\":%s,\"armed\":%s}",
+        "\"noScaleShotGuard\":{\"enabled\":%s,\"armed\":%s},"
+        "\"cupPresence\":{\"present\":%s}",
         stopperStateName(control.state), stateLabel(control.state),
         control.relayClosed ? "true" : "false",
         control.physicalPaddleOn ? "true" : "false",
@@ -3817,7 +3820,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.lastShot.noScaleShotGuardEnabled ? "true" : "false",
         control.lastShot.noScaleShotGuardArmed ? "true" : "false",
         control.noScaleShotGuardEnabled ? "true" : "false",
-        control.noScaleShotGuardArmed ? "true" : "false");
+        control.noScaleShotGuardArmed ? "true" : "false",
+        control.cupPresent ? "true" : "false");
   } else if (ok && page == StatusPage::Settings) {
     ok = statusJsonAppend(
         &used,

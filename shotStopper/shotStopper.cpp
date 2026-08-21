@@ -5015,6 +5015,7 @@ void publishControlStatus() {
   }
   next.noScaleShotGuardEnabled = runtimeConfig.avoidBbwShotWithoutScale;
   next.noScaleShotGuardArmed = noScaleShotGuardArmed;
+  next.cupPresent = cupPresenceState() == CupPresenceState::PRESENT;
   next.configPersistPending = runtimePersistPending;
   next.configPersistFailed = runtimePersistFailed;
   {
