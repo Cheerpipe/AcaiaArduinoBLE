@@ -29,7 +29,11 @@
 #define GENERIC_MAX_PACKET_PERIOD_MS     8000UL
 #define SCALE_SCAN_TIMEOUT_MS            3000UL
 #define BLE_OPERATION_TIMEOUT_MS          1000UL
-#define BLE_CONNECT_TIMEOUT_MS            4000UL
+// GAP connect() cannot feed a task watchdog mid-call. Keep this well under
+// Shot Stopper's 5 s TWDT so one attempt plus prior BLE.poll/companion work
+// cannot panic scale_worker. Failed attempts return to the caller so the
+// worker can feed the watchdog between retries.
+#define BLE_CONNECT_TIMEOUT_MS            2000UL
 #define SCALE_CONNECT_ATTEMPTS           3U
 #define SCALE_CONNECT_BUDGET_MS         10000UL
 #define MAX_SUPPORTED_WEIGHT_GRAMS      10000.0f

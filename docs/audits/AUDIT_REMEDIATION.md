@@ -21,15 +21,18 @@ Stock ArduinoBLE ESP32 VHCI / host paths could block indefinitely:
 | ATT indication confirm | unbounded `while (!_cnf)` | bounded by `ATT::_timeout` |
 
 `BLE.setTimeout(1000)` (Shot Stopper / AcaiaArduinoBLE) still bounds public ATT
-request/response waits. Together with the HCI patch, every known host-side wait
-on the ESP32 VHCI path has a hard deadline ≤ ~1 s (indication confirm uses the
-configured ATT timeout).
+request/response waits. GAP `connect()` uses `BLE_CONNECT_TIMEOUT_MS` (2 s),
+stepped across `pollScan()` ticks with a TWDT feed immediately before each
+attempt. Together with the HCI patch, every known host-side wait on the ESP32
+VHCI path has a hard deadline ≤ ~1 s except that one GAP connect (≤ 2 s;
+indication confirm uses the configured ATT timeout).
 
 ## Residual risk
 
 - A single ATT or HCI op can still stall the owner task for up to the configured
-  timeout (~1 s). Shot Stopper mitigates TWDT pressure by **stepped GATT connect**
-  and mid-command `BLE.poll()` + `esp_task_wdt_reset` between scale writes.
+  timeout (~1 s); GAP `connect()` can stall up to 2 s. Shot Stopper mitigates
+  TWDT pressure by **stepped GATT connect**, a pre-connect `esp_task_wdt_reset`,
+  and mid-command `BLE.poll()` + watchdog feed between scale writes.
 - Controller/radio soft-locks outside the host are not covered; the 60 s idle
   GAP restart (advert-gated) and packet silence disconnect remain the recovery
   path.

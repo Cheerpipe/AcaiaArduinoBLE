@@ -73,6 +73,7 @@ inline void initJsonArenaHooks() {
 
 inline void resetJsonArena() {
   detail::g_jsonArenaUsed = 0;
+  detail::g_jsonArenaAllocFailures = 0;
 }
 
 inline size_t jsonArenaBytesUsed() {

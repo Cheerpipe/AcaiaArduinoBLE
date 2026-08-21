@@ -12,7 +12,7 @@ export function init(){
   $('rinseButton').onclick=()=>R.command('/api/v1/control/rinse');
   $('stopButton').onclick=()=>R.command('/api/v1/control/stop');
   $('clearLastShotButton').onclick=R.clearLastShot;
-  if($('homeBrewByWeight'))$('homeBrewByWeight').onchange=()=>{const on=$('homeBrewByWeight').checked;R.beginHomeSwitchPending('homeBrewByWeight',on);R.renderHomePresetChips();R.homeFlushConfig=true;R.scheduleHomeGuardFlush()};
+  if($('homeBrewByWeight'))$('homeBrewByWeight').onchange=R.persistHomeBrewByWeight;
   if($('homeAvoidBbwShotWithoutScale'))$('homeAvoidBbwShotWithoutScale').onchange=()=>R.persistHomeGuard('homeAvoidBbwShotWithoutScale','homeAvoidBbwShotWithoutScaleState','avoidBbwShotWithoutScale',0);
   if($('homeFastExtractionGuardEnabled'))$('homeFastExtractionGuardEnabled').onchange=()=>R.persistHomeGuard('homeFastExtractionGuardEnabled','homeFastExtractionGuardEnabledState','fastExtractionGuardEnabled',1);
   if($('homeAvoidAccidentalTouchEnabled'))$('homeAvoidAccidentalTouchEnabled').onchange=()=>R.persistHomeGuard('homeAvoidAccidentalTouchEnabled','homeAvoidAccidentalTouchEnabledState','avoidAccidentalTouchEnabled',1);

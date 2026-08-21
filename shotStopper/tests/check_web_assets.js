@@ -65,6 +65,10 @@ if (!bleLibrary.includes('BLE_CONNECT_TIMEOUT_MS') ||
   throw new Error(
       'GAP connect must settle after stopScan, use a longer timeout, and retry');
 }
+if (/#define\s+BLE_CONNECT_TIMEOUT_MS\s+4000UL/.test(bleLibrary)) {
+  throw new Error(
+      'GAP connect timeout must stay under the 5 s task watchdog (not 4 s)');
+}
 if (!firmwareCore.includes('companionAdvertisingShouldPause') ||
     !firmwareCore.includes('syncCompanionAdvertisingForScaleLink') ||
     !bleCompanion.includes('advertisingPaused_ && !status_.connected')) {
@@ -798,6 +802,13 @@ if (!html.includes('<summary>AtomHeart Eclair</summary>') ||
     html.includes('id="eclair')) {
   throw new Error('Machine settings must include an informational AtomHeart Eclair subgroup without settings');
 }
+if (/R\.(homeFlushConfig|homeFlushPreset|configLoaded|formRev|brewDirty)\s*=/.test(js) ||
+    !js.includes('function persistHomeBrewByWeight(') ||
+    !js.includes('function invalidateSettingsHydration(') ||
+    !js.includes('function clearBrewDirty(')) {
+  throw new Error(
+      'View modules must call runtime helpers instead of assigning read-only ESM namespace exports');
+}
 if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('<legend>Machine and scale</legend>') ||
     !ui.includes('<legend>Security and connectivity</legend>') ||
@@ -966,7 +977,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !css.includes('.ruleChartHead{') ||
     !css.includes('.ruleChartHead strong,.ruleChartMode{display:none}') ||
     !css.includes('background:#c9a227') ||
-    !ui.includes("beginHomeSwitchPending('homeBrewByWeight'") ||
+    !ui.includes('function persistHomeBrewByWeight(') ||
+    !ui.includes("onchange=R.persistHomeBrewByWeight") ||
     !ui.includes('beginHomeSwitchPending(h,on)') ||
     !ui.includes('id="clearLastShotButton"') ||
     html.indexOf('id="shotPanel"') > html.indexOf('id="clearLastShotButton"') ||

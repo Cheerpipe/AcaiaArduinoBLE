@@ -375,7 +375,7 @@ bool AcaiaArduinoBLE::beginConnection(BLEDevice& peripheral) {
     _connectStartedAt = static_cast<uint32_t>(millis());
     _connectAttempts = 0;
     // Do not GAP-connect on the same tick as stopScan(); the next pollScan
-    // settles HCI then retries connect() with a longer timeout.
+    // settles HCI then retries connect() with BLE_CONNECT_TIMEOUT_MS.
     return false;
 }
 

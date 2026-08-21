@@ -12,6 +12,8 @@
 
 namespace FakeBLE {
 
+extern unsigned long currentTimeoutMs;
+
 struct CharacteristicState {
     std::string uuid;
     bool readable = false;
@@ -34,6 +36,7 @@ struct PeripheralState {
     bool connected = false;
     int connectCalls = 0;
     int disconnectCalls = 0;
+    unsigned long timeoutMsAtConnect = 0;
     std::map<std::string, std::shared_ptr<CharacteristicState> >
         characteristics;
 };
@@ -139,6 +142,7 @@ public:
             return false;
         }
         ++state_->connectCalls;
+        state_->timeoutMsAtConnect = FakeBLE::currentTimeoutMs;
         if (state_->connectFailRemaining > 0) {
             --state_->connectFailRemaining;
             state_->connected = false;
@@ -221,7 +225,10 @@ public:
         return BLEDevice(availableState);
     }
     void poll() {}
-    void setTimeout(unsigned long timeout) { timeoutMs = timeout; }
+    void setTimeout(unsigned long timeout) {
+        timeoutMs = timeout;
+        FakeBLE::currentTimeoutMs = timeout;
+    }
     bool disconnect() {
         if (!availableState) {
             return false;
@@ -241,6 +248,7 @@ public:
         scanForAddressCalls = 0;
         stopScanCalls = 0;
         timeoutMs = 0;
+        FakeBLE::currentTimeoutMs = 0;
         lastScanAddress.clear();
         lastWithDuplicates = false;
         availableState.reset();

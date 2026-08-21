@@ -20,6 +20,7 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 | **Why does it not stop exactly on the target grams?** | A **learned stop offset** (default 1.5 g, max 5 g) compensates for drip after CN9 opens. History shows `cut_type` and `stop_detail`, not a “prediction” type. See [Brew by weight](features/brew-by-weight.md). |
 | **The scale disconnected mid-shot. What happens?** | Weight stop pauses; reconnect continues for the whole cycle. If three coherent samples return, BBW resumes. If [A→M](features/auto-to-manual.md) is on, CN9 may still open on the deadline. If A→M is off, the shot runs until paddle OFF or the 60 s wall. |
 | **I turned Brew by weight off. Why no weight stop?** | Tare and the timer remain. Weight stop, retare, BBW protection, and offset learning do not. Cut is paddle, time limit, or remote **Stop**. Fast, Slow, A→M, and No-scale BBW become read-only on Home. |
+| **Home Brew by weight is OFF but Settings is ON.** | Both can be right. **Home** is the live session (Manual) and is what the next shot uses. **Settings → Brew** is the saved recipe and does not flip off when you turn Home off. Turn Home ON to resume weight stop without changing the recipe. |
 | **BBW is on, scale is off, a long paddle does nothing (triple beep, CN9 open).** | [No-scale BBW](settings/no-scale-bbw.md) (*Avoid BBW shot without scale*, on by default). A long paddle does not close CN9. A short ON→OFF still rinses. The next start is a manual no-scale shot. |
 
 ## Network and access

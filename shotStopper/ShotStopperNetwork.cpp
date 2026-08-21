@@ -1160,7 +1160,7 @@ bool ShotStopperNetwork::startNetwork() {
   WiFi.setAutoReconnect(false);
   portENTER_CRITICAL(&dataMux_);
   status_.wifiConfigured = settings.staConfigured;
-  strncpy(status_.apIp, AP_IP, sizeof(status_.apIp) - 1);
+  copyCString(status_.apIp, sizeof(status_.apIp), AP_IP);
   portEXIT_CRITICAL(&dataMux_);
   publishConfiguredAddressStatus();
   if (settings.staConfigured) {
@@ -1182,7 +1182,7 @@ void ShotStopperNetwork::publishConfiguredAddressStatus() {
   char configuredDns1[16] = {};
   char configuredDns2[16] = {};
   if (settings.staConfigured) {
-    strncpy(staSsid, settings.staSsid, sizeof(staSsid) - 1);
+    copyCString(staSsid, sizeof(staSsid), settings.staSsid);
   }
   if (settings.staIpMode == static_cast<uint8_t>(StaIpMode::STATIC)) {
     formatIpv4(settings.staIp, configuredIp);
@@ -1198,16 +1198,16 @@ void ShotStopperNetwork::publishConfiguredAddressStatus() {
   status_.staIpMode = settings.staIpMode;
   status_.staConfigState = settings.staConfigState;
   memset(status_.staSsid, 0, sizeof(status_.staSsid));
-  strncpy(status_.staSsid, staSsid, sizeof(status_.staSsid) - 1);
-  strncpy(status_.configuredIp, configuredIp, sizeof(status_.configuredIp) - 1);
-  strncpy(status_.configuredNetmask, configuredNetmask,
-          sizeof(status_.configuredNetmask) - 1);
-  strncpy(status_.configuredGateway, configuredGateway,
-          sizeof(status_.configuredGateway) - 1);
-  strncpy(status_.configuredDns1, configuredDns1,
-          sizeof(status_.configuredDns1) - 1);
-  strncpy(status_.configuredDns2, configuredDns2,
-          sizeof(status_.configuredDns2) - 1);
+  copyCString(status_.staSsid, sizeof(status_.staSsid), staSsid);
+  copyCString(status_.configuredIp, sizeof(status_.configuredIp), configuredIp);
+  copyCString(status_.configuredNetmask, sizeof(status_.configuredNetmask),
+              configuredNetmask);
+  copyCString(status_.configuredGateway, sizeof(status_.configuredGateway),
+              configuredGateway);
+  copyCString(status_.configuredDns1, sizeof(status_.configuredDns1),
+              configuredDns1);
+  copyCString(status_.configuredDns2, sizeof(status_.configuredDns2),
+              configuredDns2);
   portEXIT_CRITICAL(&dataMux_);
 }
 
@@ -4745,8 +4745,8 @@ esp_err_t ShotStopperNetwork::preferredScaleSelectHandler(httpd_req_t *request) 
   command.type = WebCommandType::SELECT_PREFERRED_SCALE;
   command.requestId = self.allocateRequestId();
   command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
-  strncpy(command.scaleSelectMac, mac, sizeof(command.scaleSelectMac) - 1);
-  strncpy(command.scaleSelectName, name, sizeof(command.scaleSelectName) - 1);
+  copyCString(command.scaleSelectMac, sizeof(command.scaleSelectMac), mac);
+  copyCString(command.scaleSelectName, sizeof(command.scaleSelectName), name);
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; nothing was selected.");
@@ -4874,7 +4874,7 @@ esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
 
   command.presetAction = static_cast<uint8_t>(presetAction);
   command.presetId = presetId;
-  strncpy(command.presetName, presetName, sizeof(command.presetName) - 1);
+  copyCString(command.presetName, sizeof(command.presetName), presetName);
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; nothing was saved.");

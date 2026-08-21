@@ -140,6 +140,20 @@ void testArenaRejectsOversizedAlloc() {
   CHECK(jsonArenaBytesUsed() >= 64);
 }
 
+void testArenaResetClearsAllocFailures() {
+  initJsonArenaHooks();
+  resetJsonArena();
+  CHECK(shotstopper::detail::jsonArenaMalloc(
+            shotstopper::JSON_ARENA_CAPACITY - 8) != nullptr);
+  CHECK(shotstopper::detail::jsonArenaMalloc(64) == nullptr);
+  CHECK(shotstopper::jsonArenaAllocFailures() > 0);
+  CHECK(shotstopper::jsonArenaExhaustedRecently());
+  resetJsonArena();
+  CHECK(shotstopper::jsonArenaAllocFailures() == 0);
+  CHECK(!shotstopper::jsonArenaExhaustedRecently());
+  CHECK(jsonArenaBytesUsed() == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -147,6 +161,7 @@ int main() {
   testConfigPatchWorstCaseFitsArena();
   testRepeatedParsesReuseArena();
   testArenaRejectsOversizedAlloc();
+  testArenaResetClearsAllocFailures();
   if (failures != 0) {
     std::cerr << failures << " json arena host test(s) failed\n";
     return 1;

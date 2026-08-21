@@ -33,6 +33,18 @@
 
 namespace shotstopper {
 
+inline void copyCString(char *destination, size_t capacity, const char *source) {
+  if (destination == nullptr || capacity == 0) {
+    return;
+  }
+  if (source == nullptr) {
+    destination[0] = '\0';
+    return;
+  }
+  strncpy(destination, source, capacity - 1);
+  destination[capacity - 1] = '\0';
+}
+
 constexpr uint32_t SERIAL_BAUD = 115200;
 constexpr uint32_t CONFIG_SCHEMA_VERSION = 11;
 

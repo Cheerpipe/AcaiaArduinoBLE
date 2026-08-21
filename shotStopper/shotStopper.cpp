@@ -112,6 +112,9 @@ static_assert(SCALE_WORKER_STALE_MS > PADDLE_DEBOUNCE_MS &&
 static_assert(FLASH_IO_CONTROL_LOCK_TIMEOUT_MS * 20U <
                   TASK_WATCHDOG_TIMEOUT_MS,
               "Control flash lock must stay well under the task watchdog");
+static_assert(BLE_CONNECT_TIMEOUT_MS + SCALE_ATT_TIMEOUT_MS <
+                  TASK_WATCHDOG_TIMEOUT_MS,
+              "GAP connect plus one ATT wait must fit under the task watchdog");
 
 // ---------------------------------------------------------------------------
 // Persistent storage and scale prediction
@@ -917,8 +920,8 @@ void publishBleCompanionRuntimeSnapshot() {
 #if !defined(SHOT_STOPPER_HOST_TEST)
   const NetworkStatusSnapshot network = networkManager.snapshot();
   next.apActive = network.apActive;
-  strncpy(next.wifiSsid, network.staSsid, sizeof(next.wifiSsid) - 1);
-  strncpy(next.wifiIp, network.staIp, sizeof(next.wifiIp) - 1);
+  copyCString(next.wifiSsid, sizeof(next.wifiSsid), network.staSsid);
+  copyCString(next.wifiIp, sizeof(next.wifiIp), network.staIp);
 #endif
   portENTER_CRITICAL(&bleCompanionMux);
   // Active state is immutable until reboot; the configured state may change
@@ -2948,6 +2951,8 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
   const ScaleMacCacheMode cacheMode = currentScaleMacCacheMode();
 
   if (scale.isConnecting()) {
+    // connect() can block up to BLE_CONNECT_TIMEOUT_MS with no inner WDT feed.
+    (void)feedCurrentTaskWatchdog();
     const bool connected = scale.pollScan();
     if (connected) {
       connectAttemptSeriesActive = false;
@@ -2968,6 +2973,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
   }
 
   if (scale.isScanning()) {
+    (void)feedCurrentTaskWatchdog();
     const bool connected = scale.pollScan();
     char seenMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
     char seenName[PREFERRED_SCALE_NAME_CAPACITY] = {};

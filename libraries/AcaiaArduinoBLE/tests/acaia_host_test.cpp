@@ -13,6 +13,10 @@ uint32_t fakeMillis = 0;
 FakeSerialClass Serial;
 BLEClass BLE;
 
+namespace FakeBLE {
+unsigned long currentTimeoutMs = 0;
+}
+
 namespace {
 
 int checks = 0;
@@ -21,6 +25,8 @@ static_assert(!std::is_copy_constructible<AcaiaArduinoBLE>::value,
               "AcaiaArduinoBLE must remain a single owner");
 static_assert(!std::is_copy_assignable<AcaiaArduinoBLE>::value,
               "AcaiaArduinoBLE must not use BLECharacteristic assignment");
+static_assert(BLE_CONNECT_TIMEOUT_MS + BLE_OPERATION_TIMEOUT_MS < 5000UL,
+              "GAP connect plus one ATT wait must remain under a 5 s TWDT");
 
 #define CHECK(condition)                                                       \
     do {                                                                       \
@@ -353,6 +359,7 @@ void testConnectRetriesThenSucceeds() {
     CHECK(connected);
     CHECK(scale.isConnected());
     CHECK(fixture.peripheral->connectCalls == SCALE_CONNECT_ATTEMPTS);
+    CHECK(fixture.peripheral->timeoutMsAtConnect == BLE_CONNECT_TIMEOUT_MS);
     CHECK(BLE.timeoutMs == BLE_OPERATION_TIMEOUT_MS);
 }
 

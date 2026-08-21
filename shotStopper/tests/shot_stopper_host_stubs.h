@@ -33,6 +33,12 @@ using portMUX_TYPE = int;
 #define portMUX_INITIALIZER_UNLOCKED 0
 #define pdMS_TO_TICKS(ms) (ms)
 
+// Match libraries/AcaiaArduinoBLE/AcaiaArduinoBLE.h so shotStopper.cpp can
+// static_assert GAP connect vs the 5 s task watchdog in host builds.
+#ifndef BLE_CONNECT_TIMEOUT_MS
+#define BLE_CONNECT_TIMEOUT_MS 2000UL
+#endif
+
 inline uint32_t hostMillis = 0;
 inline std::array<int, 64> hostPinLevel = {};
 inline std::array<int, 64> hostPinMode = {};

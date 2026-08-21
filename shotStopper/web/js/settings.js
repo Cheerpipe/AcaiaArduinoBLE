@@ -9,10 +9,10 @@ export function init(){
   R.registerViewStatus('settings',applyStatus);
   
   $('saveConfigButton').onclick=R.saveMachineConfig;
-  if($('presetNewBtn'))$('presetNewBtn').onclick=()=>{if(R.brewDirty&&!confirm('You have unsaved preset changes. Discard them and create a new preset?'))return;R.configLoaded=false;R.formRev=0;R.command('/api/v1/presets',{action:'new'})};
-  if($('presetDupBtn'))$('presetDupBtn').onclick=()=>{if(R.brewDirty&&!confirm('You have unsaved preset changes. Discard them and duplicate?'))return;R.configLoaded=false;R.formRev=0;R.command('/api/v1/presets',{action:'duplicate',id:R.presetState.selectedId||R.presetState.activeId})};
+  if($('presetNewBtn'))$('presetNewBtn').onclick=()=>{if(R.brewDirty&&!confirm('You have unsaved preset changes. Discard them and create a new preset?'))return;R.invalidateSettingsHydration();R.command('/api/v1/presets',{action:'new'})};
+  if($('presetDupBtn'))$('presetDupBtn').onclick=()=>{if(R.brewDirty&&!confirm('You have unsaved preset changes. Discard them and duplicate?'))return;R.invalidateSettingsHydration();R.command('/api/v1/presets',{action:'duplicate',id:R.presetState.selectedId||R.presetState.activeId})};
   if($('saveBrewPresetButton'))$('saveBrewPresetButton').onclick=R.saveBrewPreset;
-  if($('presetResetBtn'))$('presetResetBtn').onclick=()=>{const p=R.selectedPreset();if(!p||!p.isFactory)return;if(!confirm('Reset this factory preset to its default values?'))return;if(R.brewDirty){R.brewDirty=false;if($('brewDirtyHint'))$('brewDirtyHint').classList.add('hidden')}R.configLoaded=false;R.formRev=0;R.command('/api/v1/presets',{action:'restore_factory_values',id:p.id})};
+  if($('presetResetBtn'))$('presetResetBtn').onclick=()=>{const p=R.selectedPreset();if(!p||!p.isFactory)return;if(!confirm('Reset this factory preset to its default values?'))return;if(R.brewDirty)R.clearBrewDirty();R.invalidateSettingsHydration();R.command('/api/v1/presets',{action:'restore_factory_values',id:p.id})};
   if($('presetDeleteBtn'))$('presetDeleteBtn').onclick=()=>{const p=R.selectedPreset();if(!p||p.isFactory)return;if(confirm('Delete this preset?'))R.command('/api/v1/presets',{action:'delete',id:p.id})};
   if($('scalePreference'))$('scalePreference').onchange=()=>{R.updateScalePreferenceOptions();R.markConfigDirty()};
   $('forgetPairedScale').onclick=R.forgetPairedScale;

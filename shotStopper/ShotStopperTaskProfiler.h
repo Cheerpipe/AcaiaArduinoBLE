@@ -219,6 +219,7 @@ class TaskProfiler {
     tracked.core = coreFor_(task.xCoreID);
     if (task.pcTaskName != nullptr) {
       strncpy(tracked.name, task.pcTaskName, sizeof(tracked.name) - 1);
+      tracked.name[sizeof(tracked.name) - 1] = '\0';
     }
     tracked.idle = idleTaskName_(tracked.name);
   }
@@ -323,6 +324,7 @@ class TaskProfiler {
       }
       TaskProfilerRow row;
       strncpy(row.name, tracked.name, sizeof(row.name) - 1);
+      row.name[sizeof(row.name) - 1] = '\0';
       row.taskNumber = tracked.taskNumber;
       row.core = tracked.core;
       row.stackMinWords = tracked.stackMinWords;
