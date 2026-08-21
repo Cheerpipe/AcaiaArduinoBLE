@@ -1209,6 +1209,34 @@ if (html.includes('id="debugPanel"') ||
     network.includes('StatusPage::Debug')) {
   throw new Error('Debug tab/API must be removed from Web UI and network handlers');
 }
+{
+  const machineFn = runtimeJs.slice(
+      runtimeJs.indexOf('function machinePayload('),
+      runtimeJs.indexOf('function dateTimePayload('));
+  const dateTimeFn = runtimeJs.slice(
+      runtimeJs.indexOf('function dateTimePayload('),
+      runtimeJs.indexOf('function brewPayload('));
+  if (!machineFn.includes("scaleConnectedLed:$('scaleConnectedLed').checked") ||
+      machineFn.includes('ntpServerPreset') ||
+      machineFn.includes('timezoneOffsetMinutes') ||
+      machineFn.includes('serialDebugOutput') ||
+      machineFn.includes('ringRetainLogLevel') ||
+      machineFn.includes('goalWeightG') ||
+      machineFn.includes('brewByWeight') ||
+      !dateTimeFn.includes('timezoneOffsetMinutes') ||
+      !dateTimeFn.includes('ntpServerPreset') ||
+      !dateTimeFn.includes('ntpServerCustom') ||
+      dateTimeFn.includes('scaleConnectedLed') ||
+      !ui.includes("saveDateTimeButton').onclick=R.saveDateTimeConfig") ||
+      ui.includes("saveDateTimeButton').onclick=R.saveMachineConfig") ||
+      (ui.includes("function markConfigDirty(") &&
+       runtimeJs.slice(runtimeJs.indexOf('function markConfigDirty('),
+                       runtimeJs.indexOf('function markDateTimeDirty('))
+           .includes('dateTimeDirtyHint'))) {
+    throw new Error(
+        'Save machine must send only machine fields; Date & time has its own payload and dirty flag');
+  }
+}
 if (!(ui.includes("if($('serialDebugOutput'))$('serialDebugOutput').checked=!!c.serialDebugOutput") ||
          ui.includes("$('serialDebugOutput').checked=!!c.serialDebugOutput")) ||
     !(ui.includes("if($('ringRetainLogLevel'))$('ringRetainLogLevel').value=c.ringRetainLogLevel||'none'") ||
@@ -1220,8 +1248,8 @@ if (!(ui.includes("if($('serialDebugOutput'))$('serialDebugOutput').checked=!!c.
         firmware.indexOf('BOOT_RESET_REASON') ||
     firmware.indexOf('ringRetainLogLevel =',
                      firmware.indexOf('persistenceReady = EEPROM.begin')) < 0 ||
-    !ui.includes("serialDebugOutput:!!($('serialDebugOutput')") ||
-    !ui.includes("ringRetainLogLevel:($('ringRetainLogLevel')") ||
+    !ui.includes("serialDebugOutput:!!$('serialDebugOutput').checked") ||
+    !ui.includes("ringRetainLogLevel:$('ringRetainLogLevel').value||'none'") ||
     !ui.includes("serialDebugOutput').onchange") ||
     !ui.includes("ringRetainLogLevel').onchange") ||
     !ui.includes('baseRevision') ||

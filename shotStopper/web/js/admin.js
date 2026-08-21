@@ -15,9 +15,9 @@ export function init(){
   $('staNetwork').onchange=R.selectDetectedNetwork;
   $('staOpen').onchange=R.updateNetworkPasswordState;
   $('staIpMode').onchange=R.updateStaticIpFieldsState;
-  $('saveDateTimeButton').onclick=R.saveMachineConfig;
+  $('saveDateTimeButton').onclick=R.saveDateTimeConfig;
   document.querySelectorAll('#dateTimePanel input,#dateTimePanel select').forEach(el=>{
-    const fn=()=>R.markConfigDirty();
+    const fn=()=>R.markDateTimeDirty();
     el.addEventListener('input',fn);el.addEventListener('change',fn);
   });
   $('syncTimeButton').onclick=()=>R.command('/api/v1/time/sync');

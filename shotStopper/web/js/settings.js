@@ -23,12 +23,12 @@ export function init(){
   $('soundAlertsEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
   $('paddleReturnReminderBeep').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('alertOutputChannel').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
-  $('fastExtractionGuardEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
-  if($('avoidAccidentalTouchEnabled'))$('avoidAccidentalTouchEnabled').onchange=()=>{R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
-  $('slowExtractionGuardEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
-  $('autoToManualGuardLimitMode').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
-  $('autoToManualGuardEnabled').onchange=()=>{R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
-  if($('cupProtectionEnabled'))$('cupProtectionEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
+  $('fastExtractionGuardEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings()};
+  if($('avoidAccidentalTouchEnabled'))$('avoidAccidentalTouchEnabled').onchange=()=>{R.syncHomeGuardSwitchesFromSettings()};
+  $('slowExtractionGuardEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings()};
+  $('autoToManualGuardLimitMode').onchange=()=>{R.updateConfigGroups()};
+  $('autoToManualGuardEnabled').onchange=()=>{R.syncHomeGuardSwitchesFromSettings()};
+  if($('cupProtectionEnabled'))$('cupProtectionEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings()};
   $('operationalWallS').addEventListener('input',R.updateConfigGroups);
   document.querySelectorAll('#workflowPanel input,#workflowPanel select').forEach(el=>{
     if(el.id==='preferredScaleSelect')return;
