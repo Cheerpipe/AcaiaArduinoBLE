@@ -73,10 +73,12 @@ input[type=number],input[type=text],input[type=password],select{width:100%;max-w
 .cfgGroup .cfgGroup{margin:.45rem 0}
 .cfgGroup summary,summary{cursor:pointer;font-weight:600}
 .configSaveBar{position:sticky;bottom:0;z-index:2;background:var(--sf);padding:.55rem 0 calc(.55rem + env(safe-area-inset-bottom));margin:.55rem -0.15rem 0;border-top:1px solid var(--ln);display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
-.shotTrack{position:relative;height:1rem;background:var(--ln);border-radius:.5rem;margin:.35rem 0}
-.shotTrack #shotBar{height:100%;background:var(--ok);border-radius:.5rem;width:0;max-width:150%}
-.shotMark{position:absolute;left:100%;top:0;bottom:0;width:2px;background:var(--fg);transform:translateX(-1px)}
-.shotCard{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-template-areas:"dur dur actual actual" "goal err flow drop" "ended ended shot shot";gap:.5rem .4rem;align-items:start;margin:.45rem 0 .15rem}
+.shotTrack{position:relative;height:1rem;background:var(--ln);border-radius:.5rem;margin:.35rem 0 .95rem;overflow:hidden}
+.shotTrack #shotBar,.shotTrack #shotBarFast{position:absolute;top:0;height:100%;width:0}
+.shotTrack #shotBar{left:0;background:var(--ok)}
+.shotTrack #shotBarFast{background:#d97706}
+.shotMark{position:absolute;left:100%;top:0;bottom:0;width:2px;background:var(--fg);transform:translateX(-1px);z-index:1}
+.shotCard{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"dur dur dur actual actual actual" "goal goal flow flow drop drop" "err err shot shot ended ended";gap:.5rem .4rem;align-items:start;margin:.45rem 0 .15rem}
 .shotCard .shotDur{grid-area:dur}
 .shotCard .shotActual{grid-area:actual}
 .shotCard > :nth-child(3){grid-area:goal}
@@ -175,7 +177,7 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 #shotTable{width:100%;border-collapse:collapse;font-size:.82rem}
 #shotTable thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 #shotTable,#shotTable tbody{display:block}
-#shotTable tr{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-template-areas:"dur dur actual actual" "time time time time" "goal err flow drop" "ended ended shot shot" "spark spark spark spark";gap:.5rem .4rem;align-items:start;position:relative;background:var(--sf);border:1px solid var(--ln);border-radius:var(--r);padding:.8rem 2.4rem .8rem .85rem;margin:0 0 .65rem}
+#shotTable tr{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"dur dur dur actual actual actual" "time time time time time time" "goal goal flow flow drop drop" "err err shot shot ended ended" "spark spark spark spark spark spark";gap:.5rem .4rem;align-items:start;position:relative;background:var(--sf);border:1px solid var(--ln);border-radius:var(--r);padding:.8rem 2.4rem .8rem .85rem;margin:0 0 .65rem}
 #shotTable th,#shotTable td{border:0;padding:0;text-align:left;white-space:normal;overflow-wrap:anywhere}
 #shotTable td{display:flex;flex-direction:column;gap:.08rem;min-width:0;font-weight:650}
 #shotTable td::before{content:attr(data-label);font-size:.62rem;font-weight:600;color:var(--mu);letter-spacing:.02em;text-transform:uppercase}

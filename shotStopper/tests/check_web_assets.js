@@ -539,6 +539,12 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
 }
 if (!ui.includes('id="shotPanel"') ||
     !ui.includes('id="shotBar"') ||
+    !ui.includes('id="shotBarFast"') ||
+    !ui.includes('id="shotMark"') ||
+    !ui.includes('Math.max(goal,wt)') ||
+    !css.includes('.shotTrack{position:relative;height:1rem;background:var(--ln);border-radius:.5rem;margin:.35rem 0 .95rem;overflow:hidden}') ||
+    !css.includes('.shotTrack #shotBarFast{background:#d97706}') ||
+    css.includes('max-width:150%') ||
     !ui.includes('id="shotCard"') ||
     !html.includes('id="shotSparkHost"') ||
     !css.includes('.shotSparkHost') ||
@@ -549,7 +555,7 @@ if (!ui.includes('id="shotPanel"') ||
     css.includes('#statusPanel .metric::before,#scalePanel .metric::before,.shotCard > *::before{') ||
     css.includes('font-size:1rem;font-weight:700;color:var(--mu)') ||
     !css.includes('.shotCard .shotDur > div,.shotCard .shotActual > div') ||
-    !css.includes('grid-template-areas:"dur dur actual actual" "goal err flow drop" "ended ended shot shot"') ||
+    !css.includes('grid-template-areas:"dur dur dur actual actual actual" "goal goal flow flow drop drop" "err err shot shot ended ended"') ||
     !ui.includes('id="shotElapsed"') ||
     !ui.includes('id="shotFirstDrop"') ||
     !ui.includes('id="shotCurrentWeight"') ||
@@ -1274,7 +1280,7 @@ if (!ui.includes('id="shotTable"') ||
     !js.includes("'shotDur'") ||
     !js.includes("'shotActual'") ||
     !css.includes('#shotTable .shotDur,#shotTable .shotActual') ||
-    !css.includes('grid-template-areas:"dur dur actual actual" "time time time time" "goal err flow drop" "ended ended shot shot"') ||
+    !css.includes('grid-template-areas:"dur dur dur actual actual actual" "time time time time time time" "goal goal flow flow drop drop" "err err shot shot ended ended"') ||
     css.includes('grid-area:guard') ||
     css.includes('grid-area:ext') ||
     css.includes('grid-area:stop') ||
