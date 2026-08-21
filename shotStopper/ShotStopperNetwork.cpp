@@ -11,6 +11,7 @@
 
 #include <Arduino.h>
 #include <cJSON.h>
+#include <esp_log.h>
 #include <esp_sntp.h>
 #include <esp_wifi.h>
 #include <esp_system.h>
@@ -62,6 +63,16 @@ static WifiScanSnapshot g_wifiScanWorking;
 namespace {
 
 NetworkWorkBuf *g_work = nullptr;
+
+void quietIdfWifiDriverWarnings() {
+  // Home APs often advertise 802.11r (FT-PSK). STA leaves FT off on purpose:
+  // the machine does not roam, and enabling 11r has broken IoT joins on some
+  // mesh/UniFi setups. The closed-source driver then WARNs on every matching
+  // BSS and falls back to WPA2-PSK. Association still succeeds; Shot Stopper
+  // logs join/fail itself. Drop the wifi tag to ERROR so that expected
+  // fallback does not flood USB serial. Other IDF tags stay at WARN.
+  esp_log_level_set("wifi", ESP_LOG_ERROR);
+}
 
 void formatWifiMac(const uint8_t mac[6], char *output, size_t outputCapacity) {
   if (mac == nullptr || output == nullptr || outputCapacity < 18) {
@@ -733,6 +744,7 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
       callbacks.requestSafeRestart == nullptr) {
     return false;
   }
+  quietIdfWifiDriverWarnings();
   settings_ = settings;
   callbacks_ = callbacks;
   acceptedCommandQueue_ =
