@@ -68,7 +68,9 @@ void maybeLatchFirstFlowFromAcceptedWeight(float weight,
     session.firstFlowAcceptedConfirmations = 0;
     return;
   }
-  if (weight - session.scaleBaselineG < FIRST_DROP_THRESHOLD_G) {
+  const float delta = weight - session.scaleBaselineG;
+  if (delta < FIRST_DROP_THRESHOLD_G ||
+      firstFlowIsCupMass(delta, runtimeConfig.minimumCupWeightG)) {
     session.firstFlowAcceptedConfirmations = 0;
     return;
   }
@@ -120,14 +122,16 @@ void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
     session.scaleBaselineReady = true;
     return;
   }
-  if (fabsf(weight) < FIRST_DROP_THRESHOLD_G &&
-      fabsf(weight) <= FIRST_DROP_BASELINE_SETTLE_G) {
+  if (session.firstFlow.phase == FirstFlowPhase::SEEKING &&
+      session.firstFlow.confirmations == 0 &&
+      fabsf(weight) <= FIRST_DROP_BASELINE_LOCK_G &&
+      fabsf(weight) <= fabsf(session.scaleBaselineG)) {
     session.scaleBaselineG = weight;
   }
 
   const FirstFlowClass classified =
       stepFirstFlow(session.firstFlow, weight, receivedAtMs, packetSequence,
-                    session.scaleBaselineG);
+                    session.scaleBaselineG, runtimeConfig.minimumCupWeightG);
   if (classified == FirstFlowClass::FIRE) {
     const uint32_t detectedAtMs = session.firstFlow.candidateMs != 0
                                       ? session.firstFlow.candidateMs

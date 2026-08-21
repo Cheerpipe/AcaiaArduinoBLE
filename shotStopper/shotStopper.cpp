@@ -3448,7 +3448,9 @@ void processScaleWorkerEvents() {
           session.remoteTimerStarted = event.writeSucceeded;
           if (event.writeSucceeded && session.config.autoTare &&
               session.startedWithScale && session.active &&
-              stopperState == StopperState::BREW) {
+              stopperState == StopperState::BREW &&
+              (event.usedCombinedTareStart ||
+               session.awaitingPostTareBaseline)) {
             armPostTareBaselineWindow();
             markTareZeroReady();
           }

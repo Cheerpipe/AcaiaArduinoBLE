@@ -95,7 +95,11 @@ constexpr uint32_t DIRECT_STOP_CONFIRMATION_WINDOW_MS = 1000;
 constexpr float FIRST_DROP_THRESHOLD_G = 0.3f;
 constexpr float FIRST_DROP_FINGER_STEP_G = 2.0f;
 constexpr float FIRST_DROP_BASELINE_SETTLE_G = 0.5f;
+// Rewrite tare zero only for noise this close to 0; 0.25 g of coffee is not zero.
+constexpr float FIRST_DROP_BASELINE_LOCK_G = 0.15f;
 constexpr uint8_t FIRST_DROP_CONFIRMATION_SAMPLES = 2;
+// Matches DEFAULT_MINIMUM_CUP_WEIGHT_G. Callers pass runtime min-cup.
+constexpr float FIRST_DROP_DEFAULT_CUP_MIN_G = 10.0f;
 constexpr float MAX_RECOVERY_WEIGHT_DROP_G = 2.0f;
 constexpr size_t WEIGHT_TREND_POINT_COUNT = 10;
 constexpr float WEIGHT_TREND_MIN_LAST_SAMPLE_G = 10.0f;
@@ -223,13 +227,33 @@ inline FirstFlowClass enterFirstFlowTouch(FirstFlowState &state, float weight,
   return FirstFlowClass::TOUCH;
 }
 
-inline FirstFlowClass stepFirstFlow(FirstFlowState &state, float weight,
-                                    uint32_t receivedAtMs,
-                                    uint32_t packetSequence, float baselineG) {
+inline float firstFlowCupMinG(float cupMinG) {
+  return (isfinite(cupMinG) && cupMinG > FIRST_DROP_THRESHOLD_G)
+             ? cupMinG
+             : FIRST_DROP_DEFAULT_CUP_MIN_G;
+}
+
+inline bool firstFlowIsCupMass(float delta, float cupMinG) {
+  return delta >= firstFlowCupMinG(cupMinG);
+}
+
+inline bool firstFlowIsCoffeeLeftover(float delta, float cupMinG) {
+  return delta >= FIRST_DROP_THRESHOLD_G &&
+         delta < FIRST_DROP_FINGER_STEP_G && !firstFlowIsCupMass(delta, cupMinG);
+}
+
+// SEEKING: small coffee steps (< 2 g, below cup min) confirm first flow.
+// TOUCH: a ≥2 g jump or cup-sized mass is a finger or cup, not first drop.
+// FIRE from TOUCH only on coffee leftover (< 2 g) or +2 g more below cup min.
+inline FirstFlowClass stepFirstFlow(
+    FirstFlowState &state, float weight, uint32_t receivedAtMs,
+    uint32_t packetSequence, float baselineG,
+    float cupMinG = FIRST_DROP_DEFAULT_CUP_MIN_G) {
   if (!isfinite(weight) || !isfinite(baselineG)) {
     return FirstFlowClass::NONE;
   }
 
+  const float objectMinG = firstFlowCupMinG(cupMinG);
   const float delta = weight - baselineG;
   const float step =
       state.hasLastSample ? (weight - state.lastWeightG) : delta;
@@ -244,7 +268,7 @@ inline FirstFlowClass stepFirstFlow(FirstFlowState &state, float weight,
       noteFirstFlowSample(state, weight, receivedAtMs, packetSequence);
       return FirstFlowClass::NONE;
     }
-    if (step >= FIRST_DROP_FINGER_STEP_G) {
+    if (step >= FIRST_DROP_FINGER_STEP_G || delta >= objectMinG) {
       const FirstFlowClass classified =
           enterFirstFlowTouch(state, weight, receivedAtMs);
       noteFirstFlowSample(state, weight, receivedAtMs, packetSequence);
@@ -278,7 +302,7 @@ inline FirstFlowClass stepFirstFlow(FirstFlowState &state, float weight,
 
   const bool released = weight <= state.peakG - FIRST_DROP_FINGER_STEP_G;
   if (released) {
-    if (delta >= FIRST_DROP_THRESHOLD_G) {
+    if (firstFlowIsCoffeeLeftover(delta, cupMinG)) {
       state.confirmations = 0;
       state.residualConfirmations =
           consecutive && state.residualConfirmations > 0
@@ -293,6 +317,12 @@ inline FirstFlowClass stepFirstFlow(FirstFlowState &state, float weight,
       }
       return FirstFlowClass::TOUCH;
     }
+    if (delta >= FIRST_DROP_THRESHOLD_G) {
+      state.confirmations = 0;
+      state.residualConfirmations = 0;
+      noteFirstFlowSample(state, weight, receivedAtMs, packetSequence);
+      return FirstFlowClass::TOUCH;
+    }
     state.phase = FirstFlowPhase::SEEKING;
     state.confirmations = 0;
     state.residualConfirmations = 0;
@@ -301,7 +331,8 @@ inline FirstFlowClass stepFirstFlow(FirstFlowState &state, float weight,
     return FirstFlowClass::NONE;
   }
 
-  if (weight >= state.postJumpG + FIRST_DROP_THRESHOLD_G &&
+  if (delta < objectMinG &&
+      weight >= state.postJumpG + FIRST_DROP_FINGER_STEP_G &&
       step < FIRST_DROP_FINGER_STEP_G) {
     state.residualConfirmations = 0;
     state.confirmations =

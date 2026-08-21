@@ -7029,10 +7029,36 @@ void ff01_classifier_seeking_touch_and_release() {
   CHECK(state.candidateMs == 200);
 
   resetFirstFlowState(state);
-  CHECK(stepFirstFlow(state, 8.0f, 100, 1, 0.0f) == FirstFlowClass::TOUCH);
-  CHECK(stepFirstFlow(state, 8.4f, 200, 2, 0.0f) == FirstFlowClass::TOUCH);
-  CHECK(stepFirstFlow(state, 8.8f, 300, 3, 0.0f) == FirstFlowClass::FIRE);
+  CHECK(stepFirstFlow(state, 4.0f, 100, 1, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 5.9f, 200, 2, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 6.1f, 300, 3, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 6.2f, 400, 4, 0.0f) == FirstFlowClass::FIRE);
   CHECK(state.candidateMs == 100);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 200.0f, 100, 1, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 200.2f, 200, 2, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 199.8f, 300, 3, 0.0f) == FirstFlowClass::TOUCH);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 160.0f, 100, 1, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 150.0f, 200, 2, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 150.1f, 300, 3, 0.0f) == FirstFlowClass::TOUCH);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 150.0f, 100, 1, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 150.4f, 200, 2, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 150.8f, 300, 3, 0.0f) == FirstFlowClass::TOUCH);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 3.0f, 100, 1, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 3.4f, 200, 2, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 3.8f, 300, 3, 0.0f) == FirstFlowClass::TOUCH);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 8.0f, 100, 1, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 6.0f, 200, 2, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 6.1f, 300, 3, 0.0f) == FirstFlowClass::TOUCH);
 }
 
 void at01_classifier_startup_and_trend_math() {
@@ -7357,10 +7383,11 @@ void ff06_touch_during_drops_fires_on_residual() {
 void ff07_gush_then_flow_backdates_to_jump() {
   startFirstFlowBrew();
   const uint32_t jumpAtMs = hostMillis + 50;
-  publishWeight(8.0f, jumpAtMs, 1, 20);
-  publishWeight(8.4f, jumpAtMs + 100, 1, 21);
+  publishWeight(4.0f, jumpAtMs, 1, 20);
+  publishWeight(5.9f, jumpAtMs + 100, 1, 21);
+  publishWeight(6.1f, jumpAtMs + 200, 1, 22);
   CHECK(session.firstDropMs == 0);
-  publishWeight(8.8f, jumpAtMs + 200, 1, 22);
+  publishWeight(6.2f, jumpAtMs + 300, 1, 23);
   CHECK(session.firstDropMs == jumpAtMs);
 }
 
@@ -7382,16 +7409,77 @@ void ff09_stream_past_half_goal_still_fires() {
   startFirstFlowBrew();
   runtimeConfig.goalWeightG = 36;
   session.config.goalWeightG = 36;
-  publishWeight(19.0f, hostMillis + 50, 1, 20);
-  publishWeight(19.4f, hostMillis + 150, 1, 21);
-  publishWeight(19.8f, hostMillis + 250, 1, 22);
+  publishWeight(0.4f, hostMillis + 50, 1, 20);
+  publishWeight(0.9f, hostMillis + 150, 1, 21);
   CHECK(session.firstDropMs != 0);
+  const uint32_t firstDropMs = session.firstDropMs;
+  publishWeight(19.0f, hostMillis + 250, 1, 22);
+  publishWeight(19.4f, hostMillis + 350, 1, 23);
+  CHECK(session.firstDropMs == firstDropMs);
 }
 
 void ff10_control_ramp_records_first_flow() {
   startFirstFlowBrew();
   publishControlRamp(0.2f, 5.0f, 0.4f, 100, 10);
   CHECK(session.firstDropMs != 0);
+}
+
+void ff11_cup_and_finger_are_not_first_drop() {
+  startFirstFlowBrew();
+  publishWeight(200.0f, hostMillis + 50, 1, 20);
+  publishWeight(200.2f, hostMillis + 150, 1, 21);
+  publishWeight(199.8f, hostMillis + 250, 1, 22);
+  CHECK(session.firstDropMs == 0);
+  CHECK(session.firstFlow.phase == FirstFlowPhase::TOUCH);
+
+  startFirstFlowBrew();
+  publishWeight(3.0f, hostMillis + 50, 1, 20);
+  publishWeight(3.4f, hostMillis + 150, 1, 21);
+  publishWeight(3.8f, hostMillis + 250, 1, 22);
+  CHECK(session.firstDropMs == 0);
+  CHECK(session.firstFlow.phase == FirstFlowPhase::TOUCH);
+}
+
+void rt14_cup_overshoot_still_retares() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.autoRetare = true;
+  runtimeConfig.bbwProtectionMs = minimumBbwProtectionMs(runtimeConfig);
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+  CHECK(!session.awaitingPostTareBaseline);
+  CHECK(retareWindowOpen());
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  const uint32_t baseMs = hostMillis + 1000U;
+  publishWeight(160.0f, baseMs, 1, 10);
+  publishWeight(150.0f, baseMs + 100U, 1, 11);
+  publishWeight(150.1f, baseMs + 200U, 1, 12);
+  CHECK(session.firstDropMs == 0);
+  publishStableCupWeight(150.0f, 20);
+  CHECK(session.retarePerformed);
+  CHECK(session.firstDropMs == 0);
+  CHECK(!session.flowDuringRetare);
+}
+
+void rt15_cup_settle_creep_still_retares() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.autoRetare = true;
+  runtimeConfig.bbwProtectionMs = minimumBbwProtectionMs(runtimeConfig);
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+  CHECK(!session.awaitingPostTareBaseline);
+  CHECK(retareWindowOpen());
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  const uint32_t baseMs = hostMillis + 1000U;
+  publishWeight(150.0f, baseMs, 1, 10);
+  publishWeight(150.4f, baseMs + 150U, 1, 11);
+  publishWeight(150.8f, baseMs + 300U, 1, 12);
+  CHECK(session.firstDropMs == 0);
+  CHECK(session.retarePerformed);
+  CHECK(!session.flowDuringRetare);
 }
 
 void pm01_original_bbw_release_after_rinse_keeps_cn9_closed() {
@@ -7826,6 +7914,7 @@ const TestCase testCases[] = {
     {"FF08", ff08_coffee_during_post_tare_grace_fires},
     {"FF09", ff09_stream_past_half_goal_still_fires},
     {"FF10", ff10_control_ramp_records_first_flow},
+    {"FF11", ff11_cup_and_finger_are_not_first_drop},
     {"R65", r65_slow_extended_shot_does_not_learn_weight_offset},
     {"R32", r32_old_connection_generation_cannot_update_weight},
     {"R33", r33_weight_mailbox_keeps_latest_and_reports_gap},
@@ -7880,6 +7969,8 @@ const TestCase testCases[] = {
     {"RT11", rt11_late_retare_records_first_drops_and_keeps_weight_control},
     {"RT12", rt12_early_retare_then_first_drops_are_recorded},
     {"RT13", rt13_auto_tare_off_skips_automatic_retare},
+    {"RT14", rt14_cup_overshoot_still_retares},
+    {"RT15", rt15_cup_settle_creep_still_retares},
     {"RS01", rs01_fast_samples_wait_for_min_duration},
     {"RS02", rs02_slow_samples_meet_min_duration_at_third_sample},
     {"RS03", rs03_broken_streak_before_min_duration_does_not_retare},

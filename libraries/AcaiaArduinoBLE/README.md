@@ -147,7 +147,7 @@ Join the discord for updates and support: https://discord.gg/NMXb5VYtre
 
 The following notes describe the upstream example from which the main
 application evolved. They are retained for provenance; current configuration
-is documented in the repository's [main README](../../README.md).
+is documented in the [main README](../../README.md) and under [docs/](../../docs/).
 
 The following variables at the top of the shotStopper.cpp file can be configured by the user:
 
