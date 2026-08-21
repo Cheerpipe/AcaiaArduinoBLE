@@ -512,7 +512,10 @@ LED while scale connected**. Override the pin at compile time with
 ├── shotStopper/web/app.css         # Authored Web UI stylesheet (embedded via generator)
 ├── shotStopper/                    # Main firmware sketch and host tests
 │   ├── shotStopper.ino          # Arduino sketch stub (sources in .cpp)
-│   ├── shotStopper.cpp          # Application setup()/loop() and firmware core
+│   ├── shotStopper.cpp          # Orchestrator: setup()/loop() glue
+│   ├── ShotStopperMachine.h     # Paddle + CN9 machine driver
+│   ├── ShotStopperScaleSense.h  # Weight detectors / prediction
+│   ├── ShotStopperBrew.h        # BBW policy and brew guards
 │   ├── ShotStopperSerialCli.h      # USB serial command parser
 │   └── tests/                      # Host tests, web asset + firmware checks
 ├── libraries/
@@ -520,7 +523,8 @@ LED while scale connected**. Override the pin at compile time with
 ├── docs/
 │   ├── FAQ.md
 │   ├── SERIAL_CLI.md
-│   ├── PLAN_WEB_SOCKETS_SESSION.md
+│   ├── DOMAIN_SEPARATION.md
+│   ├── MACHINE_CONTROL_ABSTRACTION.md
 │   └── MANUAL_TEST_PLAN.md
 └── LICENSE
 ```
@@ -1411,6 +1415,8 @@ mandatory before real use.
 - [FAQ (Spanish)](docs/FAQ.md) — confusing automatic behaviors, defaults, and compatibility
 - [USB serial CLI](docs/SERIAL_CLI.md)
 - [Manual test plan](docs/MANUAL_TEST_PLAN.md)
+- [Domain separation](docs/DOMAIN_SEPARATION.md) — Machine / Scale / Brew / orchestrator
+- [Machine control abstraction](docs/MACHINE_CONTROL_ABSTRACTION.md) — paddle vs future Momentary
 - [Local AcaiaArduinoBLE library](libraries/AcaiaArduinoBLE/README.md)
 
 ## License and acknowledgements

@@ -726,11 +726,15 @@ class ShotLog {
     bool needsRewrite = false;
     uint8_t activeSlot = 0;
     const bool haveActive =
+        preferences.isKey(SHOT_LOG_ACTIVE_KEY) &&
         preferences.getBytesLength(SHOT_LOG_ACTIVE_KEY) == 1 &&
         preferences.getBytes(SHOT_LOG_ACTIVE_KEY, &activeSlot, 1) == 1 &&
         activeSlot <= 1;
 
     auto tryLoadKey = [&](const char *key) -> bool {
+      if (!preferences.isKey(key)) {
+        return false;
+      }
       const size_t length = preferences.getBytesLength(key);
       if (length == 0 || length > sizeof(store_)) {
         return false;
@@ -771,7 +775,7 @@ class ShotLog {
       loaded = tryLoadKey(SHOT_LOG_KEY_A) || tryLoadKey(SHOT_LOG_KEY_B);
     }
     // Legacy single-key blob from schema ≤6.
-    if (!loaded) {
+    if (!loaded && preferences.isKey(SHOT_LOG_KEY_LEGACY)) {
       const size_t length = preferences.getBytesLength(SHOT_LOG_KEY_LEGACY);
       if (length > 0 && length <= sizeof(store_)) {
         memset(&store_, 0, sizeof(store_));
@@ -860,7 +864,8 @@ class ShotLog {
       return false;
     }
     uint8_t activeSlot = 0;
-    if (preferences.getBytesLength(SHOT_LOG_ACTIVE_KEY) == 1) {
+    if (preferences.isKey(SHOT_LOG_ACTIVE_KEY) &&
+        preferences.getBytesLength(SHOT_LOG_ACTIVE_KEY) == 1) {
       (void)preferences.getBytes(SHOT_LOG_ACTIVE_KEY, &activeSlot, 1);
     }
     if (activeSlot > 1) {
@@ -879,7 +884,7 @@ class ShotLog {
     const bool pointed =
         preferences.putBytes(SHOT_LOG_ACTIVE_KEY, &targetSlot, 1) == 1;
     // Best-effort cleanup of the pre-dual-slot key after a durable write.
-    if (pointed) {
+    if (pointed && preferences.isKey(SHOT_LOG_KEY_LEGACY)) {
       preferences.remove(SHOT_LOG_KEY_LEGACY);
     }
     preferences.end();

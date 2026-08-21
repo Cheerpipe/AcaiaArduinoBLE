@@ -1,4 +1,5 @@
 #include "ShotStopperNetwork.h"
+#include "ShotStopperBleCompanionPersistence.h"
 #include "ShotStopperJsonArena.h"
 #include "ShotStopperOta.h"
 #include "ShotStopperPsram.h"
@@ -1019,6 +1020,21 @@ void ShotStopperNetwork::service() {
   // the automatic retry that would otherwise fight the user's command.
   processAcceptedCommands();
 
+  if (restartPending_) {
+    // NVS is already committed. Do not touch the radio on the way to
+    // ESP.restart(): Arduino WiFi.mode(WIFI_OFF) deinits the driver
+    // (esp_wifi_deinit) and tears down BT coexistence while bleTask is
+    // still sending VHCI packets. The S3 restart path already resets
+    // Wi-Fi/BT MAC in esp_system_reset_modules_on_exit().
+    if (controlAllowsNetworkMutation() &&
+        static_cast<uint32_t>(now - restartRequestedAtMs_) >=
+            RESTART_DELAY_MS) {
+      restartPending_ = false;
+      callbacks_.requestSafeRestart();
+    }
+    return;
+  }
+
   if (!startupComplete_ &&
       static_cast<int32_t>(now - networkRetryAtMs_) >= 0) {
     if (startNetwork()) {
@@ -1027,6 +1043,10 @@ void ShotStopperNetwork::service() {
       portENTER_CRITICAL(&dataMux_);
       status_.startupFailures = 0;
       portEXIT_CRITICAL(&dataMux_);
+      // startStation/beginStationConnect delay and wait for STA_START, so
+      // `now` is stale. serviceStaState would treat the connect timer as
+      // expired (uint32 wrap) and nest SoftAP+httpd on this stack.
+      return;
     } else {
       if (startupFailures_ < UINT8_MAX) {
         ++startupFailures_;
@@ -1105,11 +1125,6 @@ void ShotStopperNetwork::service() {
     }
   }
 
-  if (restartPending_ && safeForNetworkChange &&
-      static_cast<uint32_t>(now - restartRequestedAtMs_) >= RESTART_DELAY_MS) {
-    restartPending_ = false;
-    callbacks_.requestSafeRestart();
-  }
 }
 
 bool ShotStopperNetwork::controlAllowsNetworkMutation(
@@ -1290,14 +1305,18 @@ bool ShotStopperNetwork::revertPendingNetwork(uint32_t now,
   // Keep staEverConnected_: SoftAP auto-raise stays boot-only after any prior
   // successful STA join this process (AP_START / reboot still available).
   if (next.staConfigured) {
-    startStation(next, now);
+    // Do not startStation/ensureAccessPoint here: this frame already holds
+    // settingsCopy() plus service()/serviceStaState. httpd_start on that nest
+    // overflows the 10 KiB network task (pthread TLS LoadProhibited).
+    startupComplete_ = false;
     return true;
   }
   if (staEverConnected_) {
     stopHttpServer();
     WiFi.softAPdisconnect(true);
-    WiFi.disconnect(false, false);
-    WiFi.mode(WIFI_OFF);
+    if (WiFi.status() == WL_CONNECTED) {
+      WiFi.disconnect(false, false);
+    }
     portENTER_CRITICAL(&dataMux_);
     status_.networkActive = false;
     status_.apActive = false;
@@ -1310,7 +1329,8 @@ bool ShotStopperNetwork::revertPendingNetwork(uint32_t now,
         "WiFi STA cleared after prior connect; SoftAP suppressed (AP_START or reboot)");
     return true;
   }
-  return ensureAccessPoint(now);
+  startupComplete_ = false;
+  return true;
 }
 
 void ShotStopperNetwork::applyStationAddressConfig(
@@ -1331,10 +1351,9 @@ void ShotStopperNetwork::applyStationAddressConfig(
     } else {
       WiFi.config(ip, gateway, netmask, dns1);
     }
-  } else {
-    const IPAddress none;
-    WiFi.config(none, none, none);
   }
+  // DHCP: do not WiFi.config(INADDR_NONE,...). That path calls STA.begin()
+  // with tryConnect=true and can disconnect while STA_START is in flight.
 }
 
 void ShotStopperNetwork::clearStaLinkMetrics() {
@@ -1369,7 +1388,6 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   } else {
     WiFi.mode(WIFI_STA);
   }
-  applyStationAddressConfig(settings);
   // Drop any UI scan so association owns the radio.
   abortWifiScan(now, false);
   portENTER_CRITICAL(&dataMux_);
@@ -1387,8 +1405,6 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   } else {
     lifecycleLog("WiFi STA connecting; AP disabled");
   }
-  WiFi.disconnect(false, false);
-
   // Do NOT pre-scan and lock a BSSID: an incomplete scan (BLE coexistence)
   // often sees only the weak BSS and then forces sticky association to it.
   // Let the IDF connect path scan every channel and sort by RSSI.
@@ -1403,21 +1419,30 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   if (!brewRfActive) {
     preferStaWifiCoex(true);
   }
-  vTaskDelay(pdMS_TO_TICKS(100));
   (void)feedCurrentTaskWatchdog();
 
   staConnectStartedAtMs_ = millis();
   staReconnectAttemptAtMs_ = staConnectStartedAtMs_;
   lifecycleLog("WiFi STA associating with all-channel RSSI sort");
-  WiFi.begin(settings.staSsid,
-             settings.staOpen ? nullptr : settings.staPassword);
+  // begin(false): enable STA and wait for STA_START without connect().
+  // WiFi.begin() uses begin(true) then connect(ssid), and that extra connect()
+  // can disconnect while the start handler runs (ESP_ERR_WIFI_STOP_STATE 12308).
+  if (!WiFi.STA.begin(false)) {
+    lifecycleLog("WiFi STA enable failed");
+    return;
+  }
+  applyStationAddressConfig(settings);
+  (void)WiFi.STA.connect(settings.staSsid,
+                         settings.staOpen ? nullptr : settings.staPassword);
 }
 
 void ShotStopperNetwork::startStation(const PersistedSettings &settings,
                                       uint32_t now) {
   stopHttpServer();
   abortWifiScan(now, false);
-  WiFi.softAPdisconnect(true);
+  if (WiFi.getMode() != WIFI_OFF) {
+    WiFi.softAPdisconnect(true);
+  }
   WiFi.mode(WIFI_STA);
   // Do not clear staEverConnected_: once STA has joined this boot, SoftAP must
   // not auto-raise again (serial AP_START or reboot only).
@@ -1529,7 +1554,9 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
     stopHttpServer();
   }
   if (!keepStation) {
-    WiFi.disconnect(false, false);
+    if (WiFi.getMode() != WIFI_OFF) {
+      WiFi.disconnect(false, false);
+    }
     WiFi.mode(WIFI_AP);
   } else {
     // Preserve any in-flight STA association attempt while SoftAP is raised.
@@ -1569,9 +1596,7 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
       stopHttpServer();
     }
     WiFi.softAPdisconnect(true);
-    if (!keepStation) {
-      WiFi.mode(WIFI_OFF);
-    }
+    // Keep the driver initialized: WIFI_OFF deinits and breaks BLE coexistence.
     portENTER_CRITICAL(&dataMux_);
     status_.apActive = false;
     status_.networkActive = false;
@@ -1587,8 +1612,11 @@ void ShotStopperNetwork::stopNetwork() {
   WiFi.scanDelete();
   stopHttpServer();
   WiFi.softAPdisconnect(true);
-  WiFi.disconnect(false, false);
-  WiFi.mode(WIFI_OFF);
+  if (WiFi.getMode() != WIFI_OFF && WiFi.status() == WL_CONNECTED) {
+    WiFi.disconnect(false, false);
+  }
+  // Do not WiFi.mode(WIFI_OFF): Arduino 3.x deinits the driver there
+  // (esp_wifi_deinit) and breaks BLE VHCI coexistence.
   portENTER_CRITICAL(&dataMux_);
   scanRequested_ = false;
   g_wifiScan = WifiScanSnapshot{};
@@ -1731,7 +1759,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
   }
 
   if (status.staState == StaState::CONNECTING &&
-      static_cast<uint32_t>(now - staConnectStartedAtMs_) >=
+      static_cast<uint32_t>(millis() - staConnectStartedAtMs_) >=
           STA_CONNECT_TIMEOUT_MS &&
       !status.apActive) {
     // SoftAP auto-raise is boot/bootstrap only (never after a prior CONNECTED).
@@ -1820,7 +1848,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
   if (!staEverConnected_ && !status.apActive && !brewRfActive &&
       (status.staState == StaState::DISCONNECTED ||
        status.staState == StaState::FAILED) &&
-      static_cast<uint32_t>(now - staConnectStartedAtMs_) >=
+      static_cast<uint32_t>(millis() - staConnectStartedAtMs_) >=
           STA_CONNECT_TIMEOUT_MS &&
       !wifiScanInProgress()) {
     if (apStartHeld_) {
@@ -1848,7 +1876,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
                               wifiStatus == WL_NO_SSID_AVAIL ||
                               wifiStatus == WL_CONNECTION_LOST;
     const bool attemptAged =
-        static_cast<uint32_t>(now - staConnectStartedAtMs_) >=
+        static_cast<uint32_t>(millis() - staConnectStartedAtMs_) >=
         STA_RECOVERY_ATTEMPT_MS;
     if (terminalFail || attemptAged) {
       portENTER_CRITICAL(&dataMux_);
@@ -2324,6 +2352,10 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
       }
       if (callbacks_.clearLastShot != nullptr) {
         callbacks_.clearLastShot();
+      }
+      {
+        BleCompanionPersistedSettings bleFactory{};
+        (void)resetBleCompanionSettings(bleFactory);
       }
       factoryReset = true;
       restartPending_ = true;

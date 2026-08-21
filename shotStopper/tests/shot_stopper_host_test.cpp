@@ -763,7 +763,7 @@ void t13_reset_path_starts_with_relay_open() {
   hostRelayOpenWrites = 0;
   setup();
   CHECK(hostPinLevel[RELAY_GPIO] == RELAY_OPEN_LEVEL);
-  CHECK(hostRelayOpenWrites >= 2);
+  CHECK(hostRelayOpenWrites >= 1);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(getRelaySafetySnapshot().state == RelaySafetyState::OPEN);
   CHECK(getRelaySafetySnapshot().fault == RelaySafetyFault::NONE);

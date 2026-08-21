@@ -70,11 +70,11 @@ void resetSafety() {
   platformClockReady = true;
   safetyResetStatus = SafetyResetSnapshot{};
 
-  digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
   pinMode(RELAY_GPIO, OUTPUT);
+  digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
   pinMode(CN9_FEEDBACK_GPIO, INPUT_PULLUP);
-  digitalWrite(SAFETY_HEARTBEAT_GPIO, LOW);
   pinMode(SAFETY_HEARTBEAT_GPIO, OUTPUT);
+  digitalWrite(SAFETY_HEARTBEAT_GPIO, LOW);
   taskWatchdogReady =
       configureTaskWatchdog() && subscribeCurrentTaskToWatchdog();
   relaySafetyTimersReady = initializeRelaySafetyTimer();

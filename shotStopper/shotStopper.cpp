@@ -52,6 +52,7 @@
 #include "ShotStopperWatchdog.h"
 #include "ShotStopperHwmon.h"
 #include "ShotStopperPsram.h"
+#include "ShotStopperHardware.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -74,7 +75,6 @@ static inline uint32_t BLEHostAllocFallbackCount(void) { return 0; }
 // User configuration
 // ---------------------------------------------------------------------------
 
-constexpr uint32_t PADDLE_DEBOUNCE_MS = 30;
 constexpr uint32_t SCALE_CONNECT_RETRY_MS = 1000;
 constexpr uint32_t SCALE_CONNECT_RETRY_MAX_MS = 10000;
 constexpr uint32_t SCALE_CONNECT_LOG_MS = 10000;
@@ -105,115 +105,6 @@ constexpr BaseType_t CONTROL_TASK_CORE = 1;
 
 constexpr bool DEBUG = false;
 
-// ---------------------------------------------------------------------------
-// Board hardware — ESP32-S3 only (N8R4 QSPI PSRAM or N16R8 OPI PSRAM)
-// ---------------------------------------------------------------------------
-
-#if !defined(SHOT_STOPPER_HOST_TEST)
-#if !defined(ARDUINO_ESP32S3_DEV)
-#error "Unsupported board: Shot Stopper requires ESP32-S3 (esp32:esp32:esp32s3)"
-#endif
-#if !defined(BOARD_HAS_PSRAM)
-#error "Shot Stopper requires PSRAM. Compile n8r4 (QSPI 4MB) or n16r8 (OPI 8MB)"
-#endif
-#endif
-
-#if defined(ARDUINO_ESP32S3_DEV)
-constexpr uint8_t PADDLE_GPIO = 21;
-constexpr uint8_t RELAY_GPIO = 2;
-#ifndef SHOT_STOPPER_SCALE_CONNECTED_LED_GPIO
-#define SHOT_STOPPER_SCALE_CONNECTED_LED_GPIO 1
-#endif
-#ifndef SHOT_STOPPER_BUZZER_GPIO
-#define SHOT_STOPPER_BUZZER_GPIO 14
-#endif
-#else
-#error "Unsupported board: Shot Stopper requires ESP32-S3"
-#endif
-
-constexpr uint8_t SCALE_CONNECTED_LED_GPIO =
-    SHOT_STOPPER_SCALE_CONNECTED_LED_GPIO;
-constexpr uint8_t BUZZER_GPIO = SHOT_STOPPER_BUZZER_GPIO;
-
-constexpr uint8_t PADDLE_ACTIVE_LEVEL = LOW;
-// Active-HIGH relay: GPIO HIGH energizes the coil and closes NO.
-constexpr uint8_t RELAY_CLOSED_LEVEL = HIGH;
-constexpr uint8_t RELAY_OPEN_LEVEL = LOW;
-
-#if defined(SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO) != \
-    defined(SHOT_STOPPER_CN9_FEEDBACK_GPIO)
-#error "Define both safety heartbeat and CN9 feedback GPIOs, or neither"
-#endif
-
-#if defined(SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO)
-constexpr bool EXTERNAL_SAFETY_HARDWARE_PRESENT = true;
-constexpr uint8_t SAFETY_HEARTBEAT_GPIO =
-    SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO;
-constexpr uint8_t CN9_FEEDBACK_GPIO = SHOT_STOPPER_CN9_FEEDBACK_GPIO;
-#ifndef SHOT_STOPPER_CN9_FEEDBACK_CLOSED_LEVEL
-#define SHOT_STOPPER_CN9_FEEDBACK_CLOSED_LEVEL LOW
-#endif
-constexpr uint8_t CN9_FEEDBACK_CLOSED_LEVEL =
-    SHOT_STOPPER_CN9_FEEDBACK_CLOSED_LEVEL;
-#else
-constexpr bool EXTERNAL_SAFETY_HARDWARE_PRESENT = false;
-constexpr uint8_t SAFETY_HEARTBEAT_GPIO = 0;
-constexpr uint8_t CN9_FEEDBACK_GPIO = 0;
-constexpr uint8_t CN9_FEEDBACK_CLOSED_LEVEL = LOW;
-#endif
-
-constexpr uint32_t SAFETY_HEARTBEAT_TOGGLE_MS = 50;
-constexpr uint32_t CN9_FEEDBACK_SETTLE_MS = 100;
-
-static_assert(PADDLE_GPIO != RELAY_GPIO,
-              "Paddle and relay must use different GPIOs");
-static_assert(PADDLE_ACTIVE_LEVEL == LOW,
-              "Micra paddle wiring requires INPUT_PULLUP and active LOW");
-static_assert(RELAY_CLOSED_LEVEL != RELAY_OPEN_LEVEL,
-              "Relay open and closed levels must differ");
-static_assert((RELAY_OPEN_LEVEL == LOW || RELAY_OPEN_LEVEL == HIGH) &&
-                  (RELAY_CLOSED_LEVEL == LOW || RELAY_CLOSED_LEVEL == HIGH),
-              "Relay levels must be LOW or HIGH");
-static_assert(SCALE_CONNECTED_LED_GPIO != PADDLE_GPIO &&
-                  SCALE_CONNECTED_LED_GPIO != RELAY_GPIO,
-              "Scale-connected LED GPIO must not share paddle or relay GPIOs");
-static_assert(BUZZER_GPIO != PADDLE_GPIO && BUZZER_GPIO != RELAY_GPIO &&
-                  BUZZER_GPIO != SCALE_CONNECTED_LED_GPIO,
-              "Buzzer GPIO must be distinct from paddle, relay, and LED GPIOs");
-#ifndef SHOT_STOPPER_HOST_TEST
-static_assert(GPIO_IS_VALID_OUTPUT_GPIO(SCALE_CONNECTED_LED_GPIO),
-              "Scale-connected LED must use a valid output-capable GPIO");
-static_assert(!BUZZER_SUPPORT_ENABLED ||
-                  GPIO_IS_VALID_OUTPUT_GPIO(BUZZER_GPIO),
-              "Buzzer must use a valid output-capable GPIO");
-#endif
-#if defined(SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO)
-static_assert(SAFETY_HEARTBEAT_GPIO != RELAY_GPIO &&
-                  SAFETY_HEARTBEAT_GPIO != PADDLE_GPIO &&
-                  CN9_FEEDBACK_GPIO != RELAY_GPIO &&
-                  CN9_FEEDBACK_GPIO != PADDLE_GPIO &&
-                  CN9_FEEDBACK_GPIO != SAFETY_HEARTBEAT_GPIO,
-              "Safety GPIOs must be unique");
-static_assert(SAFETY_HEARTBEAT_GPIO != SCALE_CONNECTED_LED_GPIO &&
-                  CN9_FEEDBACK_GPIO != SCALE_CONNECTED_LED_GPIO,
-              "Safety GPIOs must not share the scale-connected LED pin");
-static_assert(BUZZER_GPIO != SAFETY_HEARTBEAT_GPIO &&
-                  BUZZER_GPIO != CN9_FEEDBACK_GPIO,
-              "Buzzer GPIO must be distinct from safety GPIOs");
-#ifndef SHOT_STOPPER_HOST_TEST
-static_assert(GPIO_IS_VALID_OUTPUT_GPIO(SAFETY_HEARTBEAT_GPIO),
-              "Heartbeat must use a valid output-capable GPIO");
-static_assert(GPIO_IS_VALID_GPIO(CN9_FEEDBACK_GPIO),
-              "CN9 feedback must use a valid input GPIO");
-#endif
-static_assert(CN9_FEEDBACK_CLOSED_LEVEL == LOW ||
-                  CN9_FEEDBACK_CLOSED_LEVEL == HIGH,
-              "CN9 feedback level must be LOW or HIGH");
-#endif
-static_assert(PADDLE_DEBOUNCE_MS > 0,
-              "Paddle debounce must be greater than zero");
-static_assert(PADDLE_DEBOUNCE_MS < 100,
-              "Paddle debounce must fit every valid rinse gesture");
 static_assert(SCALE_WORKER_STALE_MS > PADDLE_DEBOUNCE_MS &&
                   SCALE_WORKER_STALE_MS < HARD_MAX_CN9_CLOSED_MS,
               "Scale worker stale timeout must be useful and safety-bounded");
@@ -226,10 +117,6 @@ constexpr size_t EEPROM_SIZE = 2;
 constexpr size_t WEIGHT_ADDR = 0;
 constexpr size_t OFFSET_ADDR = 1;
 constexpr size_t TREND_POINT_COUNT = WEIGHT_TREND_POINT_COUNT;
-// Sliding window for brew-by-weight prediction. Only the last
-// WEIGHT_TREND_POINT_COUNT samples are used; keep a small internal-RAM buffer
-// rather than 1000 points (~8 KiB) or a PSRAM array on the hot weight path.
-constexpr size_t MAX_SHOT_DATAPOINTS = 32;
 static_assert(MAX_SHOT_DATAPOINTS >= WEIGHT_TREND_POINT_COUNT,
               "Shot trajectory must hold the prediction window");
 
@@ -1221,6 +1108,11 @@ bool enqueueScaleCommand(const ScaleCommand &command) {
 }
 
 RelaySafetySnapshot getRelaySafetySnapshot();
+bool machineRunningElapsed(uint32_t &elapsedOut);
+uint32_t machineElapsedMs();
+bool machineIsRunning();
+bool machineRequestStart(uint32_t operationalLimitMs);
+bool machineRequestStop();
 void requestRemoteTimerStop();
 uint32_t cycleShotElapsedMs();
 
@@ -1232,8 +1124,7 @@ uint32_t cycleShotElapsedMs() {
   if (!session.active) {
     return 0U;
   }
-  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
-  return relay.closed ? elapsedMs(relay.closedAtMs) : 0U;
+  return machineElapsedMs();
 }
 
 void flushPendingScaleTimerStopNow() {
@@ -1288,11 +1179,11 @@ void maybeCaptureScaleStartLag() {
   if (!link.timerValid || link.timerMs == 0U) {
     return;
   }
-  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
-  if (!relay.closed) {
+  uint32_t elapsedMsValue = 0U;
+  if (!machineRunningElapsed(elapsedMsValue)) {
     return;
   }
-  session.scaleStartLagMs = elapsedMs(relay.closedAtMs);
+  session.scaleStartLagMs = elapsedMsValue;
   session.scaleStartLagCaptured = true;
 }
 
@@ -1309,7 +1200,6 @@ void transitionTo(StopperState nextState) {
 }
 
 void initializeScaleConnectedLed() {
-  digitalWrite(SCALE_CONNECTED_LED_GPIO, LOW);
   pinMode(SCALE_CONNECTED_LED_GPIO, OUTPUT);
   digitalWrite(SCALE_CONNECTED_LED_GPIO, LOW);
   lastScaleConnectedLedOn = false;
@@ -1327,520 +1217,7 @@ void serviceScaleConnectedLed() {
   scaleConnectedLedInitialized = true;
 }
 
-// ---------------------------------------------------------------------------
-// Relay and independent hard limit
-// ---------------------------------------------------------------------------
-
-bool readCn9FeedbackClosed() {
-  return EXTERNAL_SAFETY_HARDWARE_PRESENT &&
-         digitalRead(CN9_FEEDBACK_GPIO) == CN9_FEEDBACK_CLOSED_LEVEL;
-}
-
-void stopRelayDeadlineTimers() {
-  independentSafetyTimer.stop();
-  if (relaySafetyTimer != nullptr) {
-    (void)esp_timer_stop(relaySafetyTimer);
-  }
-  if (operationalLimitTimer != nullptr) {
-    (void)esp_timer_stop(operationalLimitTimer);
-  }
-}
-
-void tripRelaySafetyLocked(RelaySafetyFault fault, bool hardLimit,
-                           bool operationalLimit, bool lockout) {
-  // The electrical action is deliberately first. State publication, logging,
-  // timer cleanup and recovery all happen after the relay is de-energized.
-  digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
-  recordRelayCommandedClosed(false);
-  cn9Closed = false;
-  ++relaySafetyGeneration;
-  relaySafetyState = lockout ? RelaySafetyState::LOCKOUT
-                             : RelaySafetyState::TRIPPED;
-  relaySafetyFault = fault;
-  relaySafetyTripped = relaySafetyTripped || hardLimit;
-  operationalLimitTripped =
-      operationalLimitTripped || operationalLimit;
-  feedbackExpectedClosed = false;
-  feedbackTransitionPending = EXTERNAL_SAFETY_HARDWARE_PRESENT;
-  feedbackTransitionStartedAtMs = millis();
-  feedbackTransitionStampPending = false;
-}
-
-void tripRelaySafety(RelaySafetyFault fault, bool hardLimit = false,
-                     bool operationalLimit = false, bool lockout = true) {
-  portENTER_CRITICAL(&relayMux);
-  tripRelaySafetyLocked(fault, hardLimit, operationalLimit, lockout);
-  portEXIT_CRITICAL(&relayMux);
-  stopRelayDeadlineTimers();
-}
-
-void relaySafetyTimerCallback(void *) {
-  const uint32_t callbackAtMs = millis();
-  portENTER_CRITICAL(&relayMux);
-  // Ignore a callback queued by a previous generation. ARMING is included so
-  // a timeout that races the close transaction cancels that transaction.
-  if ((relaySafetyState == RelaySafetyState::ARMING ||
-       relaySafetyState == RelaySafetyState::CLOSED) &&
-      static_cast<uint32_t>(callbackAtMs - cn9ClosedAtMs) >=
-          HARD_MAX_CN9_CLOSED_MS) {
-    tripRelaySafetyLocked(RelaySafetyFault::HARD_LIMIT, true, false, false);
-  }
-  portEXIT_CRITICAL(&relayMux);
-}
-
-void operationalLimitTimerCallback(void *) {
-  const uint32_t callbackAtMs = millis();
-  portENTER_CRITICAL(&relayMux);
-  if ((relaySafetyState == RelaySafetyState::ARMING ||
-       relaySafetyState == RelaySafetyState::CLOSED) &&
-      operationalLimitAtArmMs < HARD_MAX_CN9_CLOSED_MS &&
-      static_cast<uint32_t>(callbackAtMs - cn9ClosedAtMs) >=
-          operationalLimitAtArmMs) {
-    tripRelaySafetyLocked(RelaySafetyFault::OPERATIONAL_LIMIT, false, true,
-                          false);
-  }
-  portEXIT_CRITICAL(&relayMux);
-}
-
-#ifndef SHOT_STOPPER_HOST_TEST
-void IRAM_ATTR writeGpioFromIsr(uint8_t pin, uint8_t level) {
-  const uint32_t mask = (pin < 32) ? (uint32_t{1} << pin)
-                                   : (uint32_t{1} << (pin - 32));
-  if (level == LOW) {
-    if (pin < 32) {
-      REG_WRITE(GPIO_OUT_W1TC_REG, mask);
-    }
-#ifdef GPIO_OUT1_W1TC_REG
-    else {
-      REG_WRITE(GPIO_OUT1_W1TC_REG, mask);
-    }
-#endif
-  } else {
-    if (pin < 32) {
-      REG_WRITE(GPIO_OUT_W1TS_REG, mask);
-    }
-#ifdef GPIO_OUT1_W1TS_REG
-    else {
-      REG_WRITE(GPIO_OUT1_W1TS_REG, mask);
-    }
-#endif
-  }
-}
-
-void IRAM_ATTR openRelayElectricalFromIsr() {
-  // Arduino-ESP32 does not place digitalWrite()/gpio_set_level() in IRAM in
-  // the standard board configurations. Write the GPIO register directly so
-  // the GPTimer deadline can de-energize K1 while flash cache is disabled.
-  // Supports both active-HIGH and active-LOW relay modules: the correct
-  // register (W1TS or W1TC) is selected at compile time via RELAY_OPEN_LEVEL.
-  writeGpioFromIsr(RELAY_GPIO, RELAY_OPEN_LEVEL);
-}
-
-// FreeRTOS calls this before aborting when stack canaries are enabled. Open
-// CN9 first (IRAM GPIO path), then clear the RTC close marker. Avoid heap or
-// Serial here.
-extern "C" void vApplicationStackOverflowHook(TaskHandle_t, char *) {
-  openRelayElectricalFromIsr();
-  recordRelayCommandedClosed(false);
-}
-#else
-void openRelayElectricalFromIsr() {
-  digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
-}
-#endif
-
-#ifndef SHOT_STOPPER_HOST_TEST
-void IRAM_ATTR shotStopperPanicHandler(arduino_panic_info_t *, void *) {
-  // The Arduino core invokes this before its normal panic/reboot path. Keep
-  // it allocation-free and flash-independent: only de-energize K1 through
-  // the same direct-register path used by the independent safety timer.
-  openRelayElectricalFromIsr();
-}
-#endif
-
-void IRAM_ATTR independentSafetyTimerCallback(void *) {
-  portENTER_CRITICAL_ISR(&relayMux);
-  if (relaySafetyState == RelaySafetyState::ARMING ||
-      relaySafetyState == RelaySafetyState::CLOSED) {
-    const bool operational =
-        operationalLimitAtArmMs < HARD_MAX_CN9_CLOSED_MS;
-    // Keep this ISR minimal and IRAM-safe. The control task performs timer
-    // cleanup, RTC OPEN publication and logging after observing the latched
-    // trip flags. If reset wins that race, the retained CLOSE marker causes a
-    // conservative boot lockout.
-    openRelayElectricalFromIsr();
-    cn9Closed = false;
-    ++relaySafetyGeneration;
-    relaySafetyState = RelaySafetyState::TRIPPED;
-    relaySafetyFault = operational ? RelaySafetyFault::OPERATIONAL_LIMIT
-                                   : RelaySafetyFault::HARD_LIMIT;
-    relaySafetyTripped = !operational;
-    operationalLimitTripped = operational;
-    feedbackExpectedClosed = false;
-    feedbackTransitionPending = EXTERNAL_SAFETY_HARDWARE_PRESENT;
-    feedbackTransitionStampPending = EXTERNAL_SAFETY_HARDWARE_PRESENT;
-  }
-  portEXIT_CRITICAL_ISR(&relayMux);
-}
-
-bool initializeRelaySafetyTimer() {
-  esp_timer_create_args_t hardArgs = {};
-  hardArgs.callback = &relaySafetyTimerCallback;
-  hardArgs.arg = nullptr;
-  hardArgs.dispatch_method = ESP_TIMER_TASK;
-  hardArgs.name = "cn9_hard_limit";
-  if (esp_timer_create(&hardArgs, &relaySafetyTimer) != ESP_OK) {
-    return false;
-  }
-
-  esp_timer_create_args_t operationalArgs = {};
-  operationalArgs.callback = &operationalLimitTimerCallback;
-  operationalArgs.arg = nullptr;
-  operationalArgs.dispatch_method = ESP_TIMER_TASK;
-  operationalArgs.name = "cn9_oper_limit";
-  if (esp_timer_create(&operationalArgs, &operationalLimitTimer) != ESP_OK) {
-    return false;
-  }
-  return independentSafetyTimer.begin(&independentSafetyTimerCallback,
-                                      nullptr);
-}
-
-RelaySafetySnapshot getRelaySafetySnapshot() {
-  RelaySafetySnapshot snapshot;
-  portENTER_CRITICAL(&relayMux);
-  snapshot.state = relaySafetyState;
-  snapshot.fault = relaySafetyFault;
-  snapshot.closed = cn9Closed;
-  snapshot.commandedClosed = relaySafetyState == RelaySafetyState::ARMING ||
-                             relaySafetyState == RelaySafetyState::CLOSED;
-  snapshot.feedbackAvailable = EXTERNAL_SAFETY_HARDWARE_PRESENT;
-  snapshot.externalSafetyPresent = EXTERNAL_SAFETY_HARDWARE_PRESENT;
-  snapshot.watchdogReady = taskWatchdogReady;
-  snapshot.timersReady = relaySafetyTimersReady;
-  snapshot.tripped = relaySafetyTripped;
-  snapshot.operationalTripped = operationalLimitTripped;
-  snapshot.generation = relaySafetyGeneration;
-  snapshot.closedAtMs = cn9ClosedAtMs;
-  snapshot.operationalLimitMs = operationalLimitAtArmMs;
-  snapshot.resetReasonCode = safetyResetStatus.reasonCode;
-  snapshot.unsafeResetCount = safetyResetStatus.unsafeResetCount;
-  snapshot.resetRecoveryRequired = safetyResetStatus.recoveryRequired;
-  snapshot.bootLoopDetected = safetyResetStatus.bootLoopDetected;
-  portEXIT_CRITICAL(&relayMux);
-  snapshot.feedbackClosed = readCn9FeedbackClosed();
-  return snapshot;
-}
-
-void applyBrewRfPreference(bool preferBluetooth) {
-#if defined(SHOT_STOPPER_HAS_COEX)
-  // Prefer BLE airtime while an automatic brew needs a fresh weight stream.
-  // Restore balance as soon as CN9 opens so the Web UI stays responsive.
-  (void)esp_coex_preference_set(preferBluetooth ? ESP_COEX_PREFER_BT
-                                                : ESP_COEX_PREFER_BALANCE);
-#else
-  (void)preferBluetooth;
-#endif
-#if !defined(SHOT_STOPPER_HOST_TEST)
-  if (bleCompanion != nullptr) {
-    bleCompanion->setAdvertisingPaused(preferBluetooth);
-  }
-#endif
-}
-
-bool setCn9Closed(bool closed,
-                  uint32_t operationalLimitMs = HARD_MAX_CN9_CLOSED_MS) {
-  if (closed) {
-    const RelaySafetySnapshot before = getRelaySafetySnapshot();
-    if (before.closed) {
-      return true;
-    }
-
-    if (operationalLimitMs < 1 ||
-        operationalLimitMs > HARD_MAX_CN9_CLOSED_MS) {
-      tripRelaySafety(RelaySafetyFault::INVALID_LIMIT);
-      addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
-                    static_cast<int32_t>(Cn9ArmFailReason::INVALID_LIMIT));
-      return false;
-    }
-    if (before.state == RelaySafetyState::LOCKOUT) {
-      addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
-                    static_cast<int32_t>(Cn9ArmFailReason::SAFETY_LOCKOUT));
-      return false;
-    }
-    if (!platformClockReady || !relaySafetyTimersReady || !taskWatchdogReady ||
-        relaySafetyTimer == nullptr || operationalLimitTimer == nullptr ||
-        !independentSafetyTimer.ready() || criticalTaskWatchdogFault) {
-      tripRelaySafety(!taskWatchdogReady || criticalTaskWatchdogFault
-                          ? RelaySafetyFault::WATCHDOG_UNAVAILABLE
-                          : RelaySafetyFault::INITIALIZATION_FAILED);
-      addDebugEvent(
-          DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
-          static_cast<int32_t>(Cn9ArmFailReason::SUPERVISOR_UNAVAILABLE));
-      return false;
-    }
-    if (EXTERNAL_SAFETY_HARDWARE_PRESENT && readCn9FeedbackClosed()) {
-      tripRelaySafety(RelaySafetyFault::FEEDBACK_STUCK_CLOSED);
-      addDebugEvent(
-          DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
-          static_cast<int32_t>(Cn9ArmFailReason::FEEDBACK_STUCK_CLOSED));
-      return false;
-    }
-
-    stopRelayDeadlineTimers();
-    const uint32_t closingAtMs = millis();
-    uint32_t generation;
-    portENTER_CRITICAL(&relayMux);
-    generation = ++relaySafetyGeneration;
-    cn9ClosedAtMs = closingAtMs;
-    operationalLimitAtArmMs = operationalLimitMs;
-    relaySafetyTripped = false;
-    operationalLimitTripped = false;
-    relaySafetyFault = RelaySafetyFault::NONE;
-    relaySafetyState = RelaySafetyState::ARMING;
-    cn9Closed = false;
-    portEXIT_CRITICAL(&relayMux);
-
-    bool armed = independentSafetyTimer.arm(
-        operationalLimitMs < HARD_MAX_CN9_CLOSED_MS
-            ? operationalLimitMs
-            : HARD_MAX_CN9_CLOSED_MS);
-    if (esp_timer_start_once(
-            relaySafetyTimer,
-            static_cast<uint64_t>(HARD_MAX_CN9_CLOSED_MS) * 1000ULL) !=
-        ESP_OK) {
-      armed = false;
-    }
-    if (operationalLimitMs < HARD_MAX_CN9_CLOSED_MS &&
-        esp_timer_start_once(
-            operationalLimitTimer,
-            static_cast<uint64_t>(operationalLimitMs) * 1000ULL) != ESP_OK) {
-      armed = false;
-    }
-
-    if (!armed) {
-      tripRelaySafety(RelaySafetyFault::TIMER_ARM_FAILED);
-      addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
-                    static_cast<int32_t>(Cn9ArmFailReason::TIMER_ARM_FAILED));
-      return false;
-    }
-
-#ifdef SHOT_STOPPER_HOST_TEST
-    if (hostCn9ArmBeforeCommitHook != nullptr) {
-      hostCn9ArmBeforeCommitHook();
-    }
-#endif
-
-    bool committed = false;
-    portENTER_CRITICAL(&relayMux);
-    // A timer callback may have run while the timers were being armed. It
-    // increments the generation and changes ARMING to TRIPPED, so this stale
-    // continuation can no longer energize the relay.
-    if (relaySafetyGeneration == generation &&
-        relaySafetyState == RelaySafetyState::ARMING &&
-        static_cast<uint32_t>(millis() - closingAtMs) <
-            operationalLimitMs) {
-      // Conservatively mark CLOSE before energizing K1. A reset between these
-      // two writes produces a safe false-positive lockout, never a missed one.
-      recordRelayCommandedClosed(true);
-      digitalWrite(RELAY_GPIO, RELAY_CLOSED_LEVEL);
-      cn9Closed = true;
-      relaySafetyState = RelaySafetyState::CLOSED;
-      feedbackExpectedClosed = true;
-      feedbackTransitionPending = EXTERNAL_SAFETY_HARDWARE_PRESENT;
-      feedbackTransitionStartedAtMs = millis();
-      feedbackTransitionStampPending = false;
-      committed = true;
-    }
-    portEXIT_CRITICAL(&relayMux);
-    if (!committed) {
-      stopRelayDeadlineTimers();
-      addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
-                    static_cast<int32_t>(Cn9ArmFailReason::ARM_CANCELED));
-      return false;
-    }
-    addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_CLOSED,
-                  static_cast<int32_t>(operationalLimitMs));
-    if (session.automaticEnabled) {
-      applyBrewRfPreference(true);
-    }
-    return true;
-  }
-
-  portENTER_CRITICAL(&relayMux);
-  const bool wasClosed = cn9Closed ||
-                         relaySafetyState == RelaySafetyState::ARMING;
-  // Open before stopping either timer. A preemption after this write is safe.
-  const bool alreadyOpenedBySafety =
-      !cn9Closed && (relaySafetyState == RelaySafetyState::TRIPPED ||
-                     relaySafetyState == RelaySafetyState::LOCKOUT);
-  if (!alreadyOpenedBySafety) {
-    digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
-  }
-  recordRelayCommandedClosed(false);
-  cn9Closed = false;
-  ++relaySafetyGeneration;
-  if (relaySafetyState != RelaySafetyState::TRIPPED &&
-      relaySafetyState != RelaySafetyState::LOCKOUT) {
-    relaySafetyState = RelaySafetyState::OPEN;
-  }
-  feedbackExpectedClosed = false;
-  feedbackTransitionPending = EXTERNAL_SAFETY_HARDWARE_PRESENT;
-  feedbackTransitionStartedAtMs = millis();
-  feedbackTransitionStampPending = false;
-  portEXIT_CRITICAL(&relayMux);
-  stopRelayDeadlineTimers();
-  applyBrewRfPreference(false);
-  if (wasClosed) {
-    addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_OPENED);
-  }
-  return true;
-}
-
-bool consumeRelaySafetyTrip() {
-  bool tripped;
-  portENTER_CRITICAL(&relayMux);
-  tripped = relaySafetyTripped;
-  relaySafetyTripped = false;
-  portEXIT_CRITICAL(&relayMux);
-  return tripped;
-}
-
-bool consumeOperationalLimitTrip() {
-  bool tripped;
-  portENTER_CRITICAL(&relayMux);
-  tripped = operationalLimitTripped;
-  operationalLimitTripped = false;
-  portEXIT_CRITICAL(&relayMux);
-  return tripped;
-}
-
-void serviceRelaySafety() {
-  if (criticalTaskWatchdogFault) {
-    tripRelaySafety(RelaySafetyFault::TASK_WATCHDOG_FAILURE);
-    safeRestartRequested = true;
-    return;
-  }
-
-  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
-  if ((relay.state == RelaySafetyState::ARMING || relay.closed) &&
-      elapsedMs(relay.closedAtMs) >= relay.operationalLimitMs) {
-    const bool operational =
-        relay.operationalLimitMs < HARD_MAX_CN9_CLOSED_MS;
-    tripRelaySafety(operational ? RelaySafetyFault::OPERATIONAL_LIMIT
-                               : RelaySafetyFault::HARD_LIMIT,
-                    !operational, operational, false);
-    return;
-  }
-
-  if (!EXTERNAL_SAFETY_HARDWARE_PRESENT) {
-    return;
-  }
-
-  const bool feedbackClosed = readCn9FeedbackClosed();
-  bool pending = false;
-  bool expectedClosed = false;
-  uint32_t settleStartedAtMs = 0;
-  portENTER_CRITICAL(&relayMux);
-  if (feedbackTransitionStampPending) {
-    feedbackTransitionStartedAtMs = millis();
-    feedbackTransitionStampPending = false;
-  }
-  pending = feedbackTransitionPending;
-  expectedClosed = feedbackExpectedClosed;
-  settleStartedAtMs = feedbackTransitionStartedAtMs;
-  portEXIT_CRITICAL(&relayMux);
-
-  if (pending) {
-    if (elapsedMs(settleStartedAtMs) < CN9_FEEDBACK_SETTLE_MS) {
-      return;
-    }
-    portENTER_CRITICAL(&relayMux);
-    const bool stillPending = feedbackTransitionPending &&
-        elapsedMs(feedbackTransitionStartedAtMs) >= CN9_FEEDBACK_SETTLE_MS;
-    expectedClosed = feedbackExpectedClosed;
-    if (stillPending) {
-      feedbackTransitionPending = false;
-    }
-    portEXIT_CRITICAL(&relayMux);
-    if (stillPending && feedbackClosed != expectedClosed) {
-      tripRelaySafety(expectedClosed
-                          ? RelaySafetyFault::FEEDBACK_FAILED_TO_CLOSE
-                          : RelaySafetyFault::FEEDBACK_STUCK_CLOSED);
-    }
-    return;
-  }
-
-  if (relay.closed != feedbackClosed) {
-    tripRelaySafety(relay.closed
-                        ? RelaySafetyFault::FEEDBACK_CHANGED_UNEXPECTEDLY
-                        : RelaySafetyFault::FEEDBACK_STUCK_CLOSED);
-  }
-}
-
-void serviceSafetyHeartbeat(bool healthyLoopCompleted) {
-  if (!EXTERNAL_SAFETY_HARDWARE_PRESENT) {
-    return;
-  }
-  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
-  const bool healthy = healthyLoopCompleted && relay.watchdogReady &&
-                       relay.timersReady && !criticalTaskWatchdogFault &&
-                       relay.state != RelaySafetyState::LOCKOUT &&
-                       relay.state != RelaySafetyState::TRIPPED;
-  if (!healthy) {
-    safetyHeartbeatLevel = false;
-    digitalWrite(SAFETY_HEARTBEAT_GPIO, LOW);
-    return;
-  }
-  if (elapsedMs(safetyHeartbeatToggledAtMs) >=
-      SAFETY_HEARTBEAT_TOGGLE_MS) {
-    safetyHeartbeatLevel = !safetyHeartbeatLevel;
-    digitalWrite(SAFETY_HEARTBEAT_GPIO,
-                 safetyHeartbeatLevel ? HIGH : LOW);
-    safetyHeartbeatToggledAtMs = millis();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Paddle input and debounce
-// ---------------------------------------------------------------------------
-
-bool readRawPaddleOn() {
-  return digitalRead(PADDLE_GPIO) == PADDLE_ACTIVE_LEVEL;
-}
-
-void initializePaddleInput() {
-  pinMode(PADDLE_GPIO, INPUT_PULLUP);
-  rawPaddleOn = readRawPaddleOn();
-  paddleOn = rawPaddleOn;
-  rawPaddleChangedAtMs = millis();
-}
-
-void updatePaddleInput() {
-  paddleTurnedOn = false;
-  paddleTurnedOff = false;
-
-  const bool sampledOn = readRawPaddleOn();
-  if (sampledOn != rawPaddleOn) {
-    rawPaddleOn = sampledOn;
-    rawPaddleChangedAtMs = millis();
-  }
-
-  if (paddleOn != rawPaddleOn &&
-      elapsedMs(rawPaddleChangedAtMs) >= PADDLE_DEBOUNCE_MS) {
-    const bool previous = paddleOn;
-    paddleOn = rawPaddleOn;
-    paddleTurnedOn = !previous && paddleOn;
-    paddleTurnedOff = previous && !paddleOn;
-
-    addDebugEvent(DebugCategory::PADDLE,
-                  paddleOn ? DebugCode::PADDLE_ON : DebugCode::PADDLE_OFF);
-  }
-}
-
-bool paddleIsStablyOff() {
-  return !paddleOn && !rawPaddleOn &&
-         elapsedMs(rawPaddleChangedAtMs) >= PADDLE_DEBOUNCE_MS;
-}
+#include "ShotStopperMachine.h"
 
 // ---------------------------------------------------------------------------
 // Scale timer session
@@ -1929,527 +1306,12 @@ void serviceRemoteTimerStopRetry() {
   }
   (void)tryQueueRemoteTimerStop();
 }
-
 // ---------------------------------------------------------------------------
-// Shot weight-cut prediction and offset analysis
+// Brew policy + scale sense (domain headers). Orchestrator glue follows.
 // ---------------------------------------------------------------------------
 
-bool fastExtractionGuardSession();
-bool slowExtractionGuardSession();
-float effectiveStopThreshold();
-float effectiveMaxStopThreshold();
-float effectiveMinStopThreshold();
-
-void resetShotTrajectory(uint32_t startedAtMs) {
-  shot.startMs = startedAtMs;
-  shot.expectedEndS = session.config.operationalWallMs / 1000.0f;
-  shot.datapoints = 0;
-  shot.automaticBrew = false;
-}
-
-float activeWeightCutTargetG() {
-  if (session.extractionExtended && fastExtractionGuardSession()) {
-    return effectiveMaxStopThreshold();
-  }
-  if (session.slowExtractionExtended && slowExtractionGuardSession()) {
-    return effectiveMinStopThreshold();
-  }
-  return effectiveStopThreshold();
-}
-
-void calculateExpectedEndTime() {
-  shot.expectedEndS = predictedWeightStopTimeS(
-      shot.timeS, shot.weight, shot.datapoints, activeWeightCutTargetG(),
-      session.config.operationalWallMs / 1000.0f);
-}
-
-bool shouldTrackWeight() {
-  return session.active && !session.config.timerOnly &&
-         session.weightControlState != WeightControlState::INACTIVE &&
-         session.weightControlState != WeightControlState::FAULT_STOPPED &&
-         stopperState == StopperState::BREW;
-}
-
-float effectiveStopThreshold() {
-  return static_cast<float>(session.config.goalWeightG) -
-         session.config.weightOffsetG;
-}
-
-float effectiveMaxStopThreshold() {
-  return session.config.maxRecoveryWeightG - session.config.weightOffsetG;
-}
-
-float effectiveMinStopThreshold() {
-  return session.config.minRecoveryWeightG - session.config.weightOffsetG;
-}
-
-bool fastExtractionGuardSession() {
-  return session.active && session.config.fastExtractionGuardEnabled &&
-         !session.config.timerOnly && session.startedWithScale;
-}
-
-bool slowExtractionGuardSession() {
-  return session.active && session.config.slowExtractionGuardEnabled &&
-         !session.config.timerOnly && session.startedWithScale;
-}
-
-bool minBrewTimeReached() {
-  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
-  if (!relay.closed) {
-    return false;
-  }
-  return elapsedMs(relay.closedAtMs) >= session.config.minBrewTimeMs;
-}
-
-bool maxBrewTimeReached() {
-  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
-  if (!relay.closed) {
-    return false;
-  }
-  return elapsedMs(relay.closedAtMs) >= session.config.maxBrewTimeMs;
-}
-
-bool targetWeightReached(float weight) {
-  return weight >= effectiveStopThreshold();
-}
-
-bool minRecoveryWeightReached(float weight) {
-  return weight >= effectiveMinStopThreshold();
-}
-
-void requestScaleBrewBeep(uint32_t cycleId);
-void enterBrewOrManualFromStart();
-void demoteActiveCycleToRinseOrEnd();
-
-void recordFirstDropTimestamp(uint32_t receivedAtMs) {
-  if (session.firstDropMs == 0) {
-    session.firstDropMs = receivedAtMs;
-  }
-}
-
-void requestFirstDropBeep() {
-  if (!session.firstDropsBeepSent && session.config.firstDropBeep) {
-    emitAlert(AlertEvent::FIRST_DROP, session.id);
-    session.firstDropsBeepSent = true;
-  }
-}
-
-bool retareWindowOpen();
-
-void notifyRetareFlowDetected(uint32_t receivedAtMs) {
-  if (!retareWindowOpen()) {
-    return;
-  }
-  if (session.retareFlowFirstDetectedAtMs == 0) {
-    session.retareFlowFirstDetectedAtMs = receivedAtMs;
-    addDebugEvent(DebugCategory::SCALE, DebugCode::FIRST_DROP_DURING_RETARE,
-                  static_cast<int32_t>(session.id),
-                  static_cast<int32_t>(elapsedMs(session.startedAtMs)));
-  }
-  session.flowDuringRetare = true;
-}
-
-void resetDirectStopConfirmation() {
-  session.thresholdConfirmations = 0;
-  session.lastThresholdAtMs = 0;
-  session.lastThresholdPacketSequence = 0;
-  session.lastThresholdConnectionGeneration = 0;
-  session.directStopPending = false;
-}
-
-bool bbwAutomaticScaleSession() {
-  return session.active && session.bbwProtectionEnabled;
-}
-
-bool retareWindowOpen() {
-  if (!bbwAutomaticScaleSession() || !session.config.autoRetare) {
-    return false;
-  }
-  if (session.retareEnded || session.retarePerformed) {
-    return false;
-  }
-  return elapsedMs(session.startedAtMs) < session.config.retareWindowMs;
-}
-
-bool bbwProtectionActive() {
-  if (!bbwAutomaticScaleSession()) {
-    return false;
-  }
-  return !session.bbwProtectionEnded;
-}
-
-void resetRetareStabilityStreak();
-
-void markRetareEnded(uint32_t endedAtMs) {
-  (void)endedAtMs;
-  if (session.retareEnded) {
-    return;
-  }
-  session.retareEnded = true;
-  session.retareDisabled = true;
-  resetRetareStabilityStreak();
-}
-
-bool bbwWeightStopInhibited() {
-  if (!bbwAutomaticScaleSession()) {
-    return false;
-  }
-  return bbwProtectionActive();
-}
-
-bool withinRinseGestureWindow() {
-  return elapsedMs(session.startedAtMs) <= session.config.rinseGestureMs;
-}
-
-void resetRetareStabilityStreak() {
-  session.retareStabilitySamples = 0;
-  session.retareStabilityStartedAtMs = 0;
-  session.retareLastSampleAtMs = 0;
-}
-
-void onFirstDropsDetected(uint32_t receivedAtMs) {
-  recordFirstDropTimestamp(receivedAtMs);
-  requestFirstDropBeep();
-  notifyRetareFlowDetected(receivedAtMs);
-}
-
-void performAutomaticRetare() {
-  if (session.retarePerformed || session.retareDisabled || !retareWindowOpen()) {
-    return;
-  }
-  if (!requestRemoteRetare()) {
-    return;
-  }
-  session.retarePerformed = true;
-  resetRetareStabilityStreak();
-  emitImmediateCommandAlertIfBuzzer();
-  markRetareEnded(millis());
-}
-
-void considerRetareCupCandidate(float weight, uint32_t receivedAtMs) {
-  if (!retareWindowOpen() || session.retareDisabled || session.retarePerformed) {
-    return;
-  }
-  if (weight < session.config.minimumCupWeightG) {
-    resetRetareStabilityStreak();
-    return;
-  }
-
-  if (session.retareStabilitySamples == 0) {
-    session.retareCandidateWeightG = weight;
-    session.retareStabilitySamples = 1;
-    session.retareStabilityStartedAtMs = receivedAtMs;
-    session.retareLastSampleAtMs = receivedAtMs;
-    return;
-  }
-
-  if (static_cast<uint32_t>(receivedAtMs - session.retareLastSampleAtMs) >
-          session.config.retareStabilityMaxGapMs ||
-      fabsf(weight - session.retareCandidateWeightG) >
-          session.config.retareStabilityToleranceG) {
-    session.retareCandidateWeightG = weight;
-    session.retareStabilitySamples = 1;
-    session.retareStabilityStartedAtMs = receivedAtMs;
-    session.retareLastSampleAtMs = receivedAtMs;
-    return;
-  }
-
-  session.retareCandidateWeightG = weight;
-  session.retareLastSampleAtMs = receivedAtMs;
-  if (session.retareStabilitySamples < UINT8_MAX) {
-    ++session.retareStabilitySamples;
-  }
-  const uint32_t stableDurationMs =
-      static_cast<uint32_t>(receivedAtMs - session.retareStabilityStartedAtMs);
-  const bool samplesMet =
-      session.retareStabilitySamples >= session.config.retareStabilitySamples;
-  const bool durationMet =
-      session.config.retareStabilityMinDurationMs == 0U ||
-      stableDurationMs >= session.config.retareStabilityMinDurationMs;
-  if (samplesMet && durationMet &&
-      session.retareCandidateWeightG >= session.config.minimumCupWeightG) {
-    performAutomaticRetare();
-  }
-}
-
-void initializeBbwProtection() {
-  session.bbwProtectionEnabled = false;
-  session.retareEnded = false;
-  session.bbwProtectionEnded = false;
-  session.flowDuringRetare = false;
-  session.retareFlowFirstDetectedAtMs = 0;
-  session.retarePerformed = false;
-  session.retareDisabled = false;
-  session.firstDropsBeepSent = false;
-  session.retareCandidateWeightG = 0.0f;
-  resetRetareStabilityStreak();
-  session.firstDropConfirmations = 0;
-  session.firstDropLastAtMs = 0;
-  session.firstDropLastPacketSequence = 0;
-
-  if (!session.startedWithScale || session.config.timerOnly ||
-      !session.automaticEnabled) {
-    session.retareEnded = true;
-    session.bbwProtectionEnded = true;
-    return;
-  }
-  session.bbwProtectionEnabled = true;
-  if (!session.config.autoRetare) {
-    session.retareEnded = true;
-  }
-}
-
-void serviceBbwProtectionPhases() {
-  if (!session.active || !session.bbwProtectionEnabled) {
-    return;
-  }
-  const uint32_t nowMs = millis();
-  if (!session.retareEnded && session.config.autoRetare &&
-      !session.retarePerformed &&
-      elapsedMs(session.startedAtMs) >= session.config.retareWindowMs) {
-    markRetareEnded(nowMs);
-  }
-  if (!session.bbwProtectionEnded &&
-      elapsedMs(session.startedAtMs) >= session.config.bbwProtectionMs) {
-    session.bbwProtectionEnded = true;
-    resetDirectStopConfirmation();
-  }
-}
-
-void rejectScaleSample(DebugCode code, float weightG, float referenceG = 0.0f) {
-  addDebugEvent(DebugCategory::SCALE, code, weightToCentigrams(weightG),
-                weightToCentigrams(referenceG));
-}
-
-void armPostTareBaselineWindow() {
-  session.awaitingPostTareBaseline = true;
-  session.postTareBaselineDeadlineMs =
-      millis() + session.config.postTareBaselineGraceMs;
-  session.hasWeightAnchor = false;
-  session.recoveryConfirmations = 0;
-  session.recoveryLastAtMs = 0;
-  session.recoveryLastPacketSequence = 0;
-  resetWeightTrend();
-  if (session.weightControlState == WeightControlState::VALIDATING) {
-    setWeightControlState(WeightControlState::ACTIVE);
-  }
-}
-
-void expirePostTareBaselineIfNeeded() {
-  if (!session.awaitingPostTareBaseline) {
-    return;
-  }
-  if (static_cast<int32_t>(millis() - session.postTareBaselineDeadlineMs) <
-      0) {
-    return;
-  }
-  session.awaitingPostTareBaseline = false;
-  addDebugEvent(DebugCategory::SCALE,
-                DebugCode::SCALE_POST_TARE_BASELINE_TIMEOUT,
-                static_cast<int32_t>(session.id),
-                static_cast<int32_t>(session.config.postTareBaselineGraceMs));
-}
-
-void enterFastExtractionExtended(float weightG, uint32_t atMs) {
-  if (session.extractionExtended) {
-    return;
-  }
-  session.extractionExtended = true;
-  session.targetReachedEarly = true;
-  session.targetReachedAtMs = atMs;
-  addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_ENTERED,
-                static_cast<int32_t>(weightG * 100.0f),
-                static_cast<int32_t>(elapsedMs(session.startedAtMs)));
-  if (buzzerPatternForExtendedPulseRate(
-          runtimeConfig.buzzerExtendedPulseRate) != BuzzerPattern::NONE) {
-    emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
-  }
-  calculateExpectedEndTime();
-}
-
-void enterSlowExtractionExtended(float weightG, uint32_t atMs) {
-  if (session.slowExtractionExtended || session.extractionExtended) {
-    return;
-  }
-  session.slowExtractionExtended = true;
-  addDebugEvent(DebugCategory::SCALE, DebugCode::SLOW_EXTRACTION_ENTERED,
-                static_cast<int32_t>(weightG * 100.0f),
-                static_cast<int32_t>(elapsedMs(session.startedAtMs)));
-  (void)atMs;
-  if (buzzerPatternForExtendedPulseRate(
-          runtimeConfig.buzzerSlowExtendedPulseRate) != BuzzerPattern::NONE) {
-    emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
-  }
-  calculateExpectedEndTime();
-}
-
-void considerDirectStopSample(float weight, uint32_t receivedAtMs,
-                              uint32_t packetSequence,
-                              uint32_t connectionGeneration) {
-  if (!shouldTrackWeight() || packetSequence == 0 || !isfinite(weight) ||
-      bbwWeightStopInhibited()) {
-    return;
-  }
-
-  const bool overload = fabsf(weight) > MAX_AUTOMATION_WEIGHT_G;
-  const bool active =
-      session.weightControlState == WeightControlState::ACTIVE;
-  const bool validating =
-      session.weightControlState == WeightControlState::VALIDATING;
-  if (!overload && !active) {
-    return;
-  }
-  if (overload && !active && !validating) {
-    return;
-  }
-  const bool overMax =
-      fastExtractionGuardSession() && session.extractionExtended &&
-      weight >= effectiveMaxStopThreshold();
-  const bool overMin =
-      slowExtractionGuardSession() && session.slowExtractionExtended &&
-      weight >= effectiveMinStopThreshold();
-  const bool overThreshold = weight >= effectiveStopThreshold();
-  if (!overThreshold && !overload && !overMax && !overMin) {
-    resetDirectStopConfirmation();
-    return;
-  }
-
-  const bool consecutive = session.thresholdConfirmations > 0 &&
-      connectionGeneration == session.lastThresholdConnectionGeneration &&
-      packetSequence == session.lastThresholdPacketSequence + 1U &&
-      static_cast<int32_t>(receivedAtMs - session.lastThresholdAtMs) >= 0 &&
-      static_cast<uint32_t>(receivedAtMs - session.lastThresholdAtMs) <=
-          DIRECT_STOP_CONFIRMATION_WINDOW_MS;
-  session.thresholdConfirmations = consecutive
-      ? static_cast<uint8_t>(session.thresholdConfirmations + 1U)
-      : 1U;
-  session.lastThresholdAtMs = receivedAtMs;
-  session.lastThresholdPacketSequence = packetSequence;
-  session.lastThresholdConnectionGeneration = connectionGeneration;
-
-  if (session.thresholdConfirmations < DIRECT_STOP_CONFIRMATION_SAMPLES) {
-    return;
-  }
-
-  if (overload) {
-    session.directStopPending = true;
-    session.directStopReason = EndReason::WEIGHT_ANOMALY;
-    weightStreamState = WeightStreamState::OVERLOAD;
-    session.calibrationEligible = false;
-    setWeightControlState(WeightControlState::FAULT_STOPPED);
-    addDebugEvent(DebugCategory::SCALE,
-                  DebugCode::SCALE_OVERLOAD_CONFIRMED,
-                  static_cast<int32_t>(weight));
-    return;
-  }
-
-  if (overMax) {
-    session.directStopPending = true;
-    session.directStopReason = EndReason::FAST_EXTRACTION_MAX_WEIGHT;
-    addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_STOP_MAX,
-                  static_cast<int32_t>(weight * 100.0f));
-    return;
-  }
-
-  if (overMin) {
-    session.directStopPending = true;
-    session.directStopReason = EndReason::SLOW_EXTRACTION_MIN_WEIGHT;
-    addDebugEvent(DebugCategory::SCALE,
-                  DebugCode::SLOW_EXTRACTION_STOP_MIN_WEIGHT,
-                  static_cast<int32_t>(weight * 100.0f));
-    return;
-  }
-
-  if (overThreshold && fastExtractionGuardSession() &&
-      (!minBrewTimeReached() || session.extractionExtended)) {
-    enterFastExtractionExtended(weight, receivedAtMs);
-    resetDirectStopConfirmation();
-    return;
-  }
-
-  session.directStopPending = true;
-  session.directStopReason = EndReason::SCALE_THRESHOLD;
-  addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_THRESHOLD_CONFIRMED,
-                static_cast<int32_t>(weight * 100.0f));
-}
-
-bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
-                                uint32_t packetSequence) {
-  size_t index;
-  if (shot.datapoints < MAX_SHOT_DATAPOINTS) {
-    index = shot.datapoints++;
-  } else {
-    memmove(&shot.timeS[0], &shot.timeS[1],
-            (MAX_SHOT_DATAPOINTS - 1U) * sizeof(float));
-    memmove(&shot.weight[0], &shot.weight[1],
-            (MAX_SHOT_DATAPOINTS - 1U) * sizeof(float));
-    index = MAX_SHOT_DATAPOINTS - 1U;
-  }
-  shot.timeS[index] =
-      static_cast<uint32_t>(receivedAtMs - shot.startMs) / 1000.0f;
-  shot.weight[index] = weight;
-  session.receivedFreshWeightInCycle = true;
-  session.hasWeightAnchor = true;
-  session.lastAcceptedWeightAtMs = receivedAtMs;
-  session.lastAcceptedWeightG = weight;
-  session.lastAcceptedPacketSequence = packetSequence;
-  calculateExpectedEndTime();
-
-  serialTracef(LogLevel::DEBUG, "%.2fg, t=%.2fs, expected end=%.2fs",
-               weight, shot.timeS[index], shot.expectedEndS);
-  return true;
-}
-
-void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
-                              uint32_t packetSequence);
-
-void considerCupRemovedSample(float weight, uint32_t receivedAtMs,
-                              uint32_t packetSequence) {
-  if (!session.active || stopperState != StopperState::BREW ||
-      session.config.timerOnly || !session.config.cupProtectionEnabled ||
-      !session.config.stopIfCupRemoved || !session.startedWithScale) {
-    return;
-  }
-  if (session.awaitingPostTareBaseline) {
-    if (isfinite(weight) && weight > session.config.cupRemovedWeightG) {
-      session.cupRemovedArmed = true;
-    }
-    session.cupRemovedConfirmations = 0;
-    session.lastCupRemovedAtMs = 0;
-    session.lastCupRemovedPacketSequence = 0;
-    return;
-  }
-  if (!isfinite(weight) || weight > session.config.cupRemovedWeightG) {
-    session.cupRemovedArmed = true;
-    session.cupRemovedConfirmations = 0;
-    session.lastCupRemovedAtMs = 0;
-    session.lastCupRemovedPacketSequence = 0;
-    return;
-  }
-  if (!session.cupRemovedArmed) {
-    return;
-  }
-
-  const bool consecutive = session.cupRemovedConfirmations > 0 &&
-      static_cast<int32_t>(receivedAtMs - session.lastCupRemovedAtMs) >= 0 &&
-      static_cast<uint32_t>(receivedAtMs - session.lastCupRemovedAtMs) <=
-          DIRECT_STOP_CONFIRMATION_WINDOW_MS &&
-      (packetSequence == 0 || session.lastCupRemovedPacketSequence == 0 ||
-       packetSequence == session.lastCupRemovedPacketSequence + 1U);
-  session.cupRemovedConfirmations = consecutive
-      ? static_cast<uint8_t>(session.cupRemovedConfirmations + 1U)
-      : 1U;
-  session.lastCupRemovedAtMs = receivedAtMs;
-  session.lastCupRemovedPacketSequence = packetSequence;
-
-  if (session.cupRemovedConfirmations < DIRECT_STOP_CONFIRMATION_SAMPLES) {
-    return;
-  }
-  session.cupRemovedPending = true;
-  addDebugEvent(DebugCategory::SCALE, DebugCode::CUP_REMOVED_CONFIRMED,
-                weightToCentigrams(weight),
-                static_cast<int32_t>(elapsedMs(session.startedAtMs)));
-}
+#include "ShotStopperBrew.h"
+#include "ShotStopperScaleSense.h"
 
 bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
                                       uint32_t packetSequence,
@@ -2630,54 +1492,6 @@ bool recordWeightSample(float weight, uint32_t receivedAtMs) {
       session.ownedConnectionGeneration);
 }
 
-void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
-                              uint32_t packetSequence) {
-  if (!session.active || !session.startedWithScale || session.firstDropMs != 0) {
-    return;
-  }
-  if (session.awaitingPostTareBaseline) {
-    if (fabsf(weight) <= POST_TARE_BASELINE_MAX_ABS_G) {
-      session.scaleBaselineG = weight;
-      session.scaleBaselineReady = true;
-    }
-    return;
-  }
-  if (!session.scaleBaselineReady) {
-    if (fabsf(weight) > POST_TARE_BASELINE_MAX_ABS_G) {
-      return;
-    }
-    session.scaleBaselineG = weight;
-    session.scaleBaselineReady = true;
-    return;
-  }
-  const float deltaFromBaseline = weight - session.scaleBaselineG;
-  if (deltaFromBaseline < FIRST_DROP_THRESHOLD_G) {
-    session.firstDropConfirmations = 0;
-    return;
-  }
-  const float firstDropMaxWeightG =
-      static_cast<float>(session.config.goalWeightG) * 0.5f;
-  if (weight >= firstDropMaxWeightG) {
-    session.firstDropConfirmations = 0;
-    return;
-  }
-
-  const bool consecutive =
-      session.firstDropConfirmations > 0 &&
-      packetSequence == session.firstDropLastPacketSequence + 1U &&
-      static_cast<int32_t>(receivedAtMs - session.firstDropLastAtMs) >= 0 &&
-      static_cast<uint32_t>(receivedAtMs - session.firstDropLastAtMs) <=
-          DIRECT_STOP_CONFIRMATION_WINDOW_MS;
-  session.firstDropConfirmations =
-      consecutive ? static_cast<uint8_t>(session.firstDropConfirmations + 1U)
-                  : 1U;
-  session.firstDropLastAtMs = receivedAtMs;
-  session.firstDropLastPacketSequence = packetSequence;
-
-  if (session.firstDropConfirmations >= FIRST_DROP_CONFIRMATION_SAMPLES) {
-    onFirstDropsDetected(receivedAtMs);
-  }
-}
 
 void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   const bool logEligible = shotLogEligible(reason, durationMs);
@@ -4589,111 +3403,6 @@ void maybeRequestNtpSyncOnActivity();
 bool beginRinseCycle(ControlSource source);
 void enterRinse();
 
-void armNoScaleShotGuard() {
-  if (noScaleShotGuardArmed) {
-    return;
-  }
-  noScaleShotGuardArmed = true;
-  addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_ARMED);
-}
-
-void consumeNoScaleShotGuard() {
-  noScaleShotGuardArmed = false;
-  noScaleShotGuardActivityAtMs = millis();
-  addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED);
-}
-
-bool noScaleShotGuardWouldBlock() {
-  const RuntimeConfig effective = effectiveRuntimeConfig();
-  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
-  const bool scaleUsable =
-      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
-  return runtimeConfig.avoidBbwShotWithoutScale && !effective.timerOnly &&
-         !scaleUsable && noScaleShotGuardArmed;
-}
-
-void maybeEmitManualNoScaleBeep() {
-  if (!runtimeConfig.buzzerManualNoScaleBeep) {
-    return;
-  }
-  const RuntimeConfig effective = effectiveRuntimeConfig();
-  if (effective.timerOnly) {
-    return;
-  }
-  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
-  const bool scaleUsable =
-      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
-  if (scaleUsable) {
-    return;
-  }
-  emitAlert(AlertEvent::MANUAL_NO_SCALE);
-}
-
-void blockNoScaleShotGuard() {
-  noScaleShotGuardHold = false;
-  consumeNoScaleShotGuard();
-  addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED);
-}
-
-void serviceNoScaleShotGuard() {
-  const bool available = scaleAvailable();
-  if (available && !noScaleShotGuardScaleWasAvailable) {
-    armNoScaleShotGuard();
-  }
-  noScaleShotGuardScaleWasAvailable = available;
-  if (noScaleShotGuardHold) {
-    if (!noScaleShotGuardWouldBlock()) {
-      noScaleShotGuardHold = false;
-    } else if (rawPaddleOn &&
-               elapsedMs(noScaleShotGuardHoldAtMs) >
-                   runtimeConfig.rinseGestureMs) {
-      blockNoScaleShotGuard();
-    }
-  }
-  if (!noScaleShotGuardArmed && !session.active &&
-      noScaleShotGuardActivityAtMs != 0 &&
-      elapsedMs(noScaleShotGuardActivityAtMs) >=
-          runtimeConfig.lastShotCooldownMs) {
-    armNoScaleShotGuard();
-  }
-}
-
-bool cupStartGuardWouldBlock() {
-  const RuntimeConfig effective = effectiveRuntimeConfig();
-  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
-  const bool scaleUsable =
-      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
-  return effective.cupProtectionEnabled && effective.requireCupToStart &&
-         !effective.timerOnly && scaleUsable &&
-         currentWeight < effective.cupPresentWeightG;
-}
-
-void serviceCupStartGuard() {
-  if (!cupStartGuardHold) {
-    return;
-  }
-  const RuntimeConfig effective = effectiveRuntimeConfig();
-  if (!effective.cupProtectionEnabled || !effective.requireCupToStart ||
-      effective.timerOnly) {
-    cupStartGuardHold = false;
-    return;
-  }
-  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
-  const bool scaleUsable =
-      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
-  if (scaleUsable && currentWeight >= effective.cupPresentWeightG) {
-    cupStartGuardHold = false;
-    return;
-  }
-  if (rawPaddleOn &&
-      elapsedMs(cupStartGuardHoldAtMs) > runtimeConfig.rinseGestureMs) {
-    cupStartGuardHold = false;
-    addDebugEvent(DebugCategory::STATE, DebugCode::CUP_START_GUARD_BLOCKED,
-                  weightToCentigrams(currentWeight));
-    emitAlert(AlertEvent::CUP_START_BLOCKED);
-  }
-}
-
 void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   maybeEmitManualNoScaleBeep();
   if (noScaleShotGuardWouldBlock()) {
@@ -4773,7 +3482,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   const uint32_t closeLimitMs = originalBbwStart
                                     ? HARD_MAX_CN9_CLOSED_MS
                                     : session.config.operationalWallMs;
-  if (!setCn9Closed(true, closeLimitMs)) {
+  if (!machineRequestStart(closeLimitMs)) {
     session.active = false;
     session.endReason = EndReason::RELAY_SAFETY_FAILURE;
     transitionTo(StopperState::REQUIRES_OFF);
@@ -4805,7 +3514,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   const uint32_t durationMs = elapsedMs(relayBeforeOpen.closedAtMs);
 
   // Physical flow always stops before the non-blocking BLE command is queued.
-  setCn9Closed(false);
+  machineRequestStop();
   stopPulseTrains();
   cancelScaleBrewBeep(session.id);
   cancelScaleCompletionBeep();
@@ -4871,7 +3580,7 @@ bool beginRinseCycle(ControlSource source) {
   session.automaticEnabled = false;
   virtualPaddleOn = false;
   resetShotTrajectory(session.startedAtMs);
-  if (!setCn9Closed(true, session.config.operationalWallMs)) {
+  if (!machineRequestStart(session.config.operationalWallMs)) {
     session.active = false;
     session.endReason = EndReason::RELAY_SAFETY_FAILURE;
     transitionTo(StopperState::REQUIRES_OFF);
@@ -4913,41 +3622,6 @@ void enterRinse() {
   maybeRequestNtpSyncOnActivity();
 }
 
-void armAutoToManualGuardForAutomaticBrew() {
-  if (!session.config.autoToManualGuardEnabled ||
-      session.config.timerOnly || !session.startedWithScale ||
-      session.weightControlState == WeightControlState::INACTIVE) {
-    return;
-  }
-  const uint32_t limitMs = autoToManualGuardLimitMs(
-      true,
-      static_cast<AutoToManualGuardLimitMode>(
-          session.config.autoToManualGuardLimitMode),
-      session.config.autoToManualGuardManualLimitMs,
-      session.config.autoToManualGuardSamplesDs,
-      session.config.operationalWallMs);
-  session.autoToManualGuardArmed = true;
-  session.autoToManualGuardDeadlineAtMs = session.startedAtMs + limitMs;
-  addDebugEvent(DebugCategory::SCALE, DebugCode::AUTO_TO_MANUAL_GUARD_ARMED,
-                static_cast<int32_t>(limitMs));
-  if (session.weightControlState == WeightControlState::SUSPENDED &&
-      !session.autoToManualGuardEnforced) {
-    session.autoToManualGuardEnforced = true;
-    addDebugEvent(DebugCategory::SCALE,
-                  DebugCode::AUTO_TO_MANUAL_GUARD_ENFORCED,
-                  static_cast<int32_t>(elapsedMs(session.startedAtMs)),
-                  static_cast<int32_t>(limitMs));
-  }
-}
-
-bool autoToManualGuardDeadlineDue() {
-  if (!session.active || !session.autoToManualGuardEnforced) {
-    return false;
-  }
-  return static_cast<int32_t>(millis() -
-                              session.autoToManualGuardDeadlineAtMs) >= 0;
-}
-
 void enterBrewOrManualFromStart() {
   if (session.config.timerOnly && session.startedWithScale) {
     addDebugEvent(DebugCategory::STATE, DebugCode::TIMER_ONLY_BREW_STARTED);
@@ -4968,30 +3642,6 @@ void enterBrewOrManualFromStart() {
   transitionTo(StopperState::MANUAL_NO_SCALE);
 }
 
-bool paddleModeOriginal() {
-  return session.config.paddleMode ==
-         static_cast<uint8_t>(PaddleMode::ORIGINAL);
-}
-
-bool paddleModeAuto() {
-  return session.config.paddleMode == static_cast<uint8_t>(PaddleMode::AUTO);
-}
-
-bool originalBbwSemanticsActive() {
-  return session.active && paddleModeOriginal() &&
-         !session.paddlePromotedToNatural && session.startedWithScale &&
-         !session.config.timerOnly && stopperState == StopperState::BREW;
-}
-
-bool autoBbwSemanticsActive() {
-  return session.active && paddleModeAuto() && session.startedWithScale &&
-         !session.config.timerOnly && stopperState == StopperState::BREW;
-}
-
-bool originalBbwHoldOverride() {
-  return originalBbwSemanticsActive() && (paddleOn || rawPaddleOn);
-}
-
 void demoteActiveCycleToRinseOrEnd() {
   if (withinRinseGestureWindow()) {
     enterRinse();
@@ -5006,101 +3656,13 @@ void demoteActiveCycleToRinseOrEnd() {
   finalizeCycle(EndReason::PADDLE, StopperState::READY);
 }
 
-bool automaticScaleStopDue() {
-  if (session.config.timerOnly || stopperState != StopperState::BREW ||
-      bbwWeightStopInhibited()) {
-    return false;
-  }
-
-  const bool directStopFresh = session.directStopPending &&
-      session.thresholdConfirmations >= DIRECT_STOP_CONFIRMATION_SAMPLES &&
-      static_cast<int32_t>(millis() - session.lastThresholdAtMs) >= 0 &&
-      elapsedMs(session.lastThresholdAtMs) <= MAX_AUTOMATION_WEIGHT_AGE_MS;
-  const bool directStopHonored =
-      directStopFresh &&
-      (session.directStopReason == EndReason::WEIGHT_ANOMALY ||
-       session.weightControlState == WeightControlState::ACTIVE);
-  if (directStopHonored) {
-    return true;
-  }
-
-  if (session.extractionExtended && fastExtractionGuardSession()) {
-    if (minBrewTimeReached() &&
-        targetWeightReached(session.lastAcceptedWeightG)) {
-      session.directStopPending = true;
-      session.directStopReason = EndReason::FAST_EXTRACTION_MIN_TIME;
-      addDebugEvent(DebugCategory::SCALE,
-                    DebugCode::FAST_EXTRACTION_STOP_MIN_TIME,
-                    static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f),
-                    static_cast<int32_t>(elapsedMs(session.startedAtMs)));
-      return true;
-    }
-  }
-
-  if (slowExtractionGuardSession() && !session.extractionExtended &&
-      !session.slowExtractionExtended && maxBrewTimeReached() &&
-      !targetWeightReached(session.lastAcceptedWeightG)) {
-    if (minRecoveryWeightReached(session.lastAcceptedWeightG)) {
-      session.directStopPending = true;
-      session.directStopReason = EndReason::SLOW_EXTRACTION_MAX_TIME;
-      addDebugEvent(DebugCategory::SCALE,
-                    DebugCode::SLOW_EXTRACTION_STOP_MAX_TIME,
-                    static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f),
-                    static_cast<int32_t>(elapsedMs(session.startedAtMs)));
-      return true;
-    }
-    enterSlowExtractionExtended(session.lastAcceptedWeightG, millis());
-    return false;
-  }
-
-  if (!session.receivedFreshWeightInCycle ||
-      session.weightControlState != WeightControlState::ACTIVE ||
-      currentWeightSequence == session.weightSequenceAtStart ||
-      scaleAutomationUnavailableForSession()) {
-    return false;
-  }
-  const float elapsedS = cycleElapsedSeconds();
-  if (elapsedS < shot.expectedEndS) {
-    return false;
-  }
-
-  if (fastExtractionGuardSession() && !minBrewTimeReached() &&
-      !session.extractionExtended) {
-    enterFastExtractionExtended(session.lastAcceptedWeightG, millis());
-    return false;
-  }
-
-  if (session.extractionExtended && fastExtractionGuardSession()) {
-    session.directStopPending = true;
-    session.directStopReason = EndReason::FAST_EXTRACTION_MAX_WEIGHT;
-    addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_STOP_MAX,
-                  static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f));
-    return true;
-  }
-
-  if (session.slowExtractionExtended && slowExtractionGuardSession()) {
-    session.directStopPending = true;
-    session.directStopReason = EndReason::SLOW_EXTRACTION_MIN_WEIGHT;
-    addDebugEvent(DebugCategory::SCALE,
-                  DebugCode::SLOW_EXTRACTION_STOP_MIN_WEIGHT,
-                  static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f));
-    return true;
-  }
-
-  session.directStopPending = true;
-  session.directStopReason = EndReason::SCALE_THRESHOLD;
-  addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_THRESHOLD_CONFIRMED,
-                static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f));
-  return true;
-}
-
 void handleGlobalLimitTrip() {
   const bool wasAlreadyOpenedByTimer = consumeRelaySafetyTrip();
   if (wasAlreadyOpenedByTimer) {
     addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_OPENED);
   }
   if (!wasAlreadyOpenedByTimer && getRelaySafetySnapshot().closed) {
-    setCn9Closed(false);
+    machineRequestStop();
   }
 
   if (!session.active) {
@@ -5149,7 +3711,7 @@ void stateMachineTask() {
 
   if (maintenanceLease.active) {
     if (relay.closed) {
-      setCn9Closed(false);
+      machineRequestStop();
     }
     if (paddleOn || rawPaddleOn) {
       if (!maintenanceLease.forwarded) {
@@ -5366,7 +3928,7 @@ bool beginMaintenanceLease(const WebCommand &networkCommand,
   if (!controlAllowsConfigurationNow() && !networkCommand.unsafeWebUiOverride) {
     return false;
   }
-  setCn9Closed(false);
+  machineRequestStop();
   maintenanceLease = MaintenanceLease{};
   maintenanceLease.active = true;
   maintenanceLease.applyRuntimeOnSuccess = applyRuntimeOnSuccess;
@@ -6887,20 +5449,6 @@ void serviceSerialCli() {
   }
 }
 
-void initializeRelaySafetyStateAfterBoot() {
-  portENTER_CRITICAL(&relayMux);
-  relaySafetyState = platformClockReady && relaySafetyTimersReady &&
-                             taskWatchdogReady
-                         ? RelaySafetyState::OPEN
-                         : RelaySafetyState::LOCKOUT;
-  relaySafetyFault =
-      !platformClockReady || !relaySafetyTimersReady
-          ? RelaySafetyFault::INITIALIZATION_FAILED
-          : (!taskWatchdogReady ? RelaySafetyFault::WATCHDOG_UNAVAILABLE
-                                : RelaySafetyFault::NONE);
-  portEXIT_CRITICAL(&relayMux);
-}
-
 #ifndef SHOT_STOPPER_HOST_TEST
 void serviceBootRecoverySafety() {
   serviceRelaySafety();
@@ -7076,17 +5624,17 @@ void maybeRunBootRecoveryGesture() {
 
 void setup() {
   bootStartedAtMs = millis();
-  // Establish the relay's safe electrical state before Serial, EEPROM or BLE.
+  // Safe OPEN before Serial, EEPROM or BLE. Arduino-ESP32 3.x rejects
+  // digitalWrite until the pad is a GPIO. After reset the pin is Hi-Z and
+  // the output latch is 0, which is OPEN for the active-HIGH relay.
+  pinMode(RELAY_GPIO, OUTPUT);
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
 
   if (EXTERNAL_SAFETY_HARDWARE_PRESENT) {
-    digitalWrite(SAFETY_HEARTBEAT_GPIO, LOW);
     pinMode(SAFETY_HEARTBEAT_GPIO, OUTPUT);
     digitalWrite(SAFETY_HEARTBEAT_GPIO, LOW);
     pinMode(CN9_FEEDBACK_GPIO, INPUT_PULLUP);
   }
-  pinMode(RELAY_GPIO, OUTPUT);
-  digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
   initializeScaleConnectedLed();
 #ifndef SHOT_STOPPER_HOST_TEST
   set_arduino_panic_handler(shotStopperPanicHandler, nullptr);
@@ -7401,6 +5949,20 @@ void loop() {
     }
   }
   lastLoopAtMs = loopStartedAtMs;
+  // Relay and paddle control never wait for BLE. The worker owns every scale,
+  // heartbeat, packet, timer and connection operation. Restart before heap
+  // walks: a failed Wi-Fi stop can leave TLSF unwalkable.
+  serviceRelaySafety();
+  if (safeRestartRequested) {
+    machineRequestStop();
+    serviceSafetyHeartbeat(false);
+#ifndef SHOT_STOPPER_HOST_TEST
+    ESP.restart();
+#else
+    safeRestartRequested = false;
+#endif
+    return;
+  }
   if (elapsedMs(healthTelemetryAtMs) >= HEALTH_TELEMETRY_INTERVAL_MS) {
     const uint32_t intervalMs = elapsedMs(healthTelemetryAtMs);
     healthTelemetryAtMs = loopStartedAtMs;
@@ -7422,19 +5984,6 @@ void loop() {
     serviceHealthThresholdAlerts(healthIntervalMaxGapMs);
     loopIntervalGapMs = healthIntervalMaxGapMs;
     healthIntervalMaxGapMs = 0;
-  }
-  // Relay and paddle control never wait for BLE. The worker owns every scale,
-  // heartbeat, packet, timer and connection operation.
-  serviceRelaySafety();
-  if (safeRestartRequested) {
-    setCn9Closed(false);
-    serviceSafetyHeartbeat(false);
-#ifndef SHOT_STOPPER_HOST_TEST
-    ESP.restart();
-#else
-    safeRestartRequested = false;
-#endif
-    return;
   }
   updatePaddleInput();
   // Consume only the latest attributed weight before making automatic

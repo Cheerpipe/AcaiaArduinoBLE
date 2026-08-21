@@ -52,7 +52,8 @@ inline bool validBleCompanionSettings(
 
 inline bool readBleCompanionSlot(Preferences &preferences, const char *key,
                                  BleCompanionPersistedSettings &settings) {
-  if (preferences.getBytesLength(key) != sizeof(settings) ||
+  if (!preferences.isKey(key) ||
+      preferences.getBytesLength(key) != sizeof(settings) ||
       preferences.getBytes(key, &settings, sizeof(settings)) !=
           sizeof(settings)) {
     return false;

@@ -16,9 +16,24 @@ remote_policy_binary=${TMPDIR:-/tmp}/shot_stopper_remote_policy_host_test
 ota_image_binary=${TMPDIR:-/tmp}/shot_stopper_ota_image_host_test
 ota_image_sanitized=${TMPDIR:-/tmp}/shot_stopper_ota_image_host_test_sanitized
 active_buzzer_binary=${TMPDIR:-/tmp}/shot_stopper_host_test_active_buzzer
-firmware_file="$test_dir/../shotStopper.cpp"
-ble_companion_file="$test_dir/../ShotStopperBleCompanion.h"
+firmware_dir="$test_dir/.."
+firmware_file="$firmware_dir/shotStopper.cpp"
+ble_companion_file="$firmware_dir/ShotStopperBleCompanion.h"
 cxx=${CXX:-c++}
+
+# Domain split moved paddle/CN9/BBW out of shotStopper.cpp. Forbidden-symbol
+# greps must cover those headers or a regression there would miss CI.
+scan_firmware_sources() {
+  grep -n "$1" \
+    "$firmware_file" \
+    "$firmware_dir/ShotStopperHardware.h" \
+    "$firmware_dir/ShotStopperMachine.h" \
+    "$firmware_dir/ShotStopperMachineTypes.h" \
+    "$firmware_dir/ShotStopperScaleSense.h" \
+    "$firmware_dir/ShotStopperScaleTypes.h" \
+    "$firmware_dir/ShotStopperBrew.h" \
+    "$firmware_dir/ShotStopperBrewTypes.h"
+}
 
 "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
   "$test_dir/shot_stopper_host_test.cpp" \
@@ -111,7 +126,7 @@ else
 fi
 
 for removed_symbol in MOMENTARY REEDSWITCH REED_IN BUTTON_STATE_ARRAY_LENGTH; do
-  if grep -n "$removed_symbol" "$firmware_file"; then
+  if scan_firmware_sources "$removed_symbol"; then
     echo "Removed legacy symbol remains in firmware: $removed_symbol" >&2
     exit 1
   fi
@@ -121,7 +136,7 @@ echo "Legacy Micra-incompatible paths: absent"
 
 for removed_led_path in LED_RED_PIN LED_BLUE_PIN LED_GREEN_PIN 'analogWrite(' \
     SHOT_STOPPER_ENABLE_ALED rgbLedWrite status_indicator WS2812; do
-  if grep -n "$removed_led_path" "$firmware_file"; then
+  if scan_firmware_sources "$removed_led_path"; then
     echo "Removed discrete RGB LED path remains in firmware: $removed_led_path" >&2
     exit 1
   fi

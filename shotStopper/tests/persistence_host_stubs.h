@@ -103,6 +103,15 @@ class Preferences {
     return length;
   }
 
+  bool isKey(const char *key) const {
+    if (!active_ || key == nullptr) {
+      return false;
+    }
+    return persistence_host::records.find(
+               persistence_host::storageKey(nameSpace_.c_str(), key)) !=
+           persistence_host::records.end();
+  }
+
   bool remove(const char *key) {
     if (!active_ || readOnly_ || key == nullptr) {
       return false;

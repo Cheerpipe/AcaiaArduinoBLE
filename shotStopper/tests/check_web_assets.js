@@ -9,8 +9,21 @@ const sketchDir = path.resolve(__dirname, '..');
 const asset = fs.readFileSync(path.join(sketchDir, 'ShotStopperWebAssets.h'), 'utf8');
 const network = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.cpp'), 'utf8');
 const networkHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.h'), 'utf8');
-const firmware = fs.readFileSync(path.join(sketchDir, 'shotStopper.cpp'), 'utf8');
-const domain = fs.readFileSync(path.join(sketchDir, 'ShotStopperDomain.h'), 'utf8');
+const firmwareCore = fs.readFileSync(path.join(sketchDir, 'shotStopper.cpp'), 'utf8');
+const firmware = [
+  firmwareCore,
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperHardware.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperMachine.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperScaleSense.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8'),
+].join('\n');
+const domainCore = fs.readFileSync(path.join(sketchDir, 'ShotStopperDomain.h'), 'utf8');
+const domain = [
+  domainCore,
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineTypes.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperScaleTypes.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperBrewTypes.h'), 'utf8'),
+].join('\n');
 const serialCli = fs.readFileSync(path.join(sketchDir, 'ShotStopperSerialCli.h'), 'utf8');
 const buzzer = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzer.h'), 'utf8');
 const bleLibrary = fs.readFileSync(
@@ -1216,7 +1229,8 @@ if (!ui.includes('id="staIpMode"') ||
     !network.includes('No pending network configuration to confirm.')) {
   throw new Error('DHCP/static IP mode must be wired in UI, status, WiFi.config, and confirm/revert path');
 }
-if (!network.includes('startStation(next, now)')) {
+if (!network.includes('restoreLkgToActive(next)') ||
+    !network.includes('startStation(settings, now)')) {
   throw new Error('STA confirm timeout must reassociate last-known-good before SoftAP fallback');
 }
 {

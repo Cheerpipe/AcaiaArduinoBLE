@@ -2,6 +2,11 @@
 
 #include "ShotStopperPersistence.h"
 
+#if !defined(SHOT_STOPPER_HOST_TEST) &&                                        \
+    !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
+#include <nvs.h>
+#endif
+
 namespace shotstopper {
 
 constexpr uint32_t RECOVERY_INTENT_MAGIC = 0x52454356U;  // "RECV"
@@ -52,6 +57,7 @@ inline bool validRecoveryIntent(const RecoveryIntent &intent) {
 }
 
 inline bool loadRecoveryIntent(RecoveryIntent &intent) {
+#if defined(SHOT_STOPPER_HOST_TEST) || defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
   Preferences preferences;
   if (!preferences.begin(RECOVERY_NAMESPACE, true)) {
     return false;
@@ -63,9 +69,23 @@ inline bool loadRecoveryIntent(RecoveryIntent &intent) {
       validRecoveryIntent(intent);
   preferences.end();
   return loaded;
+#else
+  // Read-only Preferences.begin() ESP_LOGEs when the namespace is absent.
+  nvs_handle_t handle = 0;
+  if (nvs_open(RECOVERY_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+    return false;
+  }
+  size_t length = sizeof(intent);
+  const esp_err_t err =
+      nvs_get_blob(handle, RECOVERY_INTENT_KEY, &intent, &length);
+  nvs_close(handle);
+  return err == ESP_OK && length == sizeof(intent) &&
+         validRecoveryIntent(intent);
+#endif
 }
 
 inline bool recoveryIntentRecordPresent() {
+#if defined(SHOT_STOPPER_HOST_TEST) || defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
   Preferences preferences;
   if (!preferences.begin(RECOVERY_NAMESPACE, true)) {
     return false;
@@ -73,6 +93,17 @@ inline bool recoveryIntentRecordPresent() {
   const bool present = preferences.getBytesLength(RECOVERY_INTENT_KEY) != 0;
   preferences.end();
   return present;
+#else
+  nvs_handle_t handle = 0;
+  if (nvs_open(RECOVERY_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+    return false;
+  }
+  size_t length = 0;
+  const esp_err_t err =
+      nvs_get_blob(handle, RECOVERY_INTENT_KEY, nullptr, &length);
+  nvs_close(handle);
+  return err == ESP_ERR_NVS_INVALID_LENGTH || (err == ESP_OK && length != 0);
+#endif
 }
 
 inline bool saveRecoveryIntent(RecoveryOperation operation) {

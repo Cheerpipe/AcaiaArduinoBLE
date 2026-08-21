@@ -67,6 +67,11 @@ class LastShotStore {
       return false;
     }
     LastShotBlob candidate = {};
+    if (!preferences.isKey(LAST_SHOT_KEY)) {
+      preferences.end();
+      resetLastShotBlob(blob_);
+      return true;
+    }
     const size_t length = preferences.getBytesLength(LAST_SHOT_KEY);
     bool loaded = false;
     if (length == sizeof(LastShotBlob) &&

@@ -1,0 +1,593 @@
+#pragma once
+
+#include "ShotStopperBrewTypes.h"
+
+// Brew-by-weight policy, extraction guards, paddle-mode semantics.
+// Included from shotStopper.cpp after Machine and session BSS. No heap.
+
+bool fastExtractionGuardSession();
+bool slowExtractionGuardSession();
+float effectiveStopThreshold();
+float effectiveMaxStopThreshold();
+float effectiveMinStopThreshold();
+float activeWeightCutTargetG() {
+  if (session.extractionExtended && fastExtractionGuardSession()) {
+    return effectiveMaxStopThreshold();
+  }
+  if (session.slowExtractionExtended && slowExtractionGuardSession()) {
+    return effectiveMinStopThreshold();
+  }
+  return effectiveStopThreshold();
+}
+bool shouldTrackWeight() {
+  return session.active && !session.config.timerOnly &&
+         session.weightControlState != WeightControlState::INACTIVE &&
+         session.weightControlState != WeightControlState::FAULT_STOPPED &&
+         stopperState == StopperState::BREW;
+}
+
+float effectiveStopThreshold() {
+  return static_cast<float>(session.config.goalWeightG) -
+         session.config.weightOffsetG;
+}
+
+float effectiveMaxStopThreshold() {
+  return session.config.maxRecoveryWeightG - session.config.weightOffsetG;
+}
+
+float effectiveMinStopThreshold() {
+  return session.config.minRecoveryWeightG - session.config.weightOffsetG;
+}
+
+bool fastExtractionGuardSession() {
+  return session.active && session.config.fastExtractionGuardEnabled &&
+         !session.config.timerOnly && session.startedWithScale;
+}
+
+bool slowExtractionGuardSession() {
+  return session.active && session.config.slowExtractionGuardEnabled &&
+         !session.config.timerOnly && session.startedWithScale;
+}
+
+bool minBrewTimeReached() {
+  uint32_t elapsedMsValue = 0U;
+  return machineRunningElapsed(elapsedMsValue) &&
+         elapsedMsValue >= session.config.minBrewTimeMs;
+}
+
+bool maxBrewTimeReached() {
+  uint32_t elapsedMsValue = 0U;
+  return machineRunningElapsed(elapsedMsValue) &&
+         elapsedMsValue >= session.config.maxBrewTimeMs;
+}
+
+bool targetWeightReached(float weight) {
+  return weight >= effectiveStopThreshold();
+}
+
+bool minRecoveryWeightReached(float weight) {
+  return weight >= effectiveMinStopThreshold();
+}
+
+void requestScaleBrewBeep(uint32_t cycleId);
+void enterBrewOrManualFromStart();
+void demoteActiveCycleToRinseOrEnd();
+void calculateExpectedEndTime();
+
+void recordFirstDropTimestamp(uint32_t receivedAtMs) {
+  if (session.firstDropMs == 0) {
+    session.firstDropMs = receivedAtMs;
+  }
+}
+
+void requestFirstDropBeep() {
+  if (!session.firstDropsBeepSent && session.config.firstDropBeep) {
+    emitAlert(AlertEvent::FIRST_DROP, session.id);
+    session.firstDropsBeepSent = true;
+  }
+}
+bool retareWindowOpen();
+
+void notifyRetareFlowDetected(uint32_t receivedAtMs) {
+  if (!retareWindowOpen()) {
+    return;
+  }
+  if (session.retareFlowFirstDetectedAtMs == 0) {
+    session.retareFlowFirstDetectedAtMs = receivedAtMs;
+    addDebugEvent(DebugCategory::SCALE, DebugCode::FIRST_DROP_DURING_RETARE,
+                  static_cast<int32_t>(session.id),
+                  static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+  }
+  session.flowDuringRetare = true;
+}
+
+void resetDirectStopConfirmation() {
+  session.thresholdConfirmations = 0;
+  session.lastThresholdAtMs = 0;
+  session.lastThresholdPacketSequence = 0;
+  session.lastThresholdConnectionGeneration = 0;
+  session.directStopPending = false;
+}
+
+bool bbwAutomaticScaleSession() {
+  return session.active && session.bbwProtectionEnabled;
+}
+
+bool retareWindowOpen() {
+  if (!bbwAutomaticScaleSession() || !session.config.autoRetare) {
+    return false;
+  }
+  if (session.retareEnded || session.retarePerformed) {
+    return false;
+  }
+  return elapsedMs(session.startedAtMs) < session.config.retareWindowMs;
+}
+
+bool bbwProtectionActive() {
+  if (!bbwAutomaticScaleSession()) {
+    return false;
+  }
+  return !session.bbwProtectionEnded;
+}
+
+void resetRetareStabilityStreak();
+
+void markRetareEnded(uint32_t endedAtMs) {
+  (void)endedAtMs;
+  if (session.retareEnded) {
+    return;
+  }
+  session.retareEnded = true;
+  session.retareDisabled = true;
+  resetRetareStabilityStreak();
+}
+
+bool bbwWeightStopInhibited() {
+  if (!bbwAutomaticScaleSession()) {
+    return false;
+  }
+  return bbwProtectionActive();
+}
+
+bool withinRinseGestureWindow() {
+  return elapsedMs(session.startedAtMs) <= session.config.rinseGestureMs;
+}
+
+void resetRetareStabilityStreak() {
+  session.retareStabilitySamples = 0;
+  session.retareStabilityStartedAtMs = 0;
+  session.retareLastSampleAtMs = 0;
+}
+
+void onFirstDropsDetected(uint32_t receivedAtMs) {
+  recordFirstDropTimestamp(receivedAtMs);
+  requestFirstDropBeep();
+  notifyRetareFlowDetected(receivedAtMs);
+}
+
+void performAutomaticRetare() {
+  if (session.retarePerformed || session.retareDisabled || !retareWindowOpen()) {
+    return;
+  }
+  if (!requestRemoteRetare()) {
+    return;
+  }
+  session.retarePerformed = true;
+  resetRetareStabilityStreak();
+  emitImmediateCommandAlertIfBuzzer();
+  markRetareEnded(millis());
+}
+void initializeBbwProtection() {
+  session.bbwProtectionEnabled = false;
+  session.retareEnded = false;
+  session.bbwProtectionEnded = false;
+  session.flowDuringRetare = false;
+  session.retareFlowFirstDetectedAtMs = 0;
+  session.retarePerformed = false;
+  session.retareDisabled = false;
+  session.firstDropsBeepSent = false;
+  session.retareCandidateWeightG = 0.0f;
+  resetRetareStabilityStreak();
+  session.firstDropConfirmations = 0;
+  session.firstDropLastAtMs = 0;
+  session.firstDropLastPacketSequence = 0;
+
+  if (!session.startedWithScale || session.config.timerOnly ||
+      !session.automaticEnabled) {
+    session.retareEnded = true;
+    session.bbwProtectionEnded = true;
+    return;
+  }
+  session.bbwProtectionEnabled = true;
+  if (!session.config.autoRetare) {
+    session.retareEnded = true;
+  }
+}
+
+void serviceBbwProtectionPhases() {
+  if (!session.active || !session.bbwProtectionEnabled) {
+    return;
+  }
+  const uint32_t nowMs = millis();
+  if (!session.retareEnded && session.config.autoRetare &&
+      !session.retarePerformed &&
+      elapsedMs(session.startedAtMs) >= session.config.retareWindowMs) {
+    markRetareEnded(nowMs);
+  }
+  if (!session.bbwProtectionEnded &&
+      elapsedMs(session.startedAtMs) >= session.config.bbwProtectionMs) {
+    session.bbwProtectionEnded = true;
+    resetDirectStopConfirmation();
+  }
+}
+void enterFastExtractionExtended(float weightG, uint32_t atMs) {
+  if (session.extractionExtended) {
+    return;
+  }
+  session.extractionExtended = true;
+  session.targetReachedEarly = true;
+  session.targetReachedAtMs = atMs;
+  addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_ENTERED,
+                static_cast<int32_t>(weightG * 100.0f),
+                static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+  if (buzzerPatternForExtendedPulseRate(
+          runtimeConfig.buzzerExtendedPulseRate) != BuzzerPattern::NONE) {
+    emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
+  }
+  calculateExpectedEndTime();
+}
+
+void enterSlowExtractionExtended(float weightG, uint32_t atMs) {
+  if (session.slowExtractionExtended || session.extractionExtended) {
+    return;
+  }
+  session.slowExtractionExtended = true;
+  addDebugEvent(DebugCategory::SCALE, DebugCode::SLOW_EXTRACTION_ENTERED,
+                static_cast<int32_t>(weightG * 100.0f),
+                static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+  (void)atMs;
+  if (buzzerPatternForExtendedPulseRate(
+          runtimeConfig.buzzerSlowExtendedPulseRate) != BuzzerPattern::NONE) {
+    emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
+  }
+  calculateExpectedEndTime();
+}
+
+void considerDirectStopSample(float weight, uint32_t receivedAtMs,
+                              uint32_t packetSequence,
+                              uint32_t connectionGeneration) {
+  if (!shouldTrackWeight() || packetSequence == 0 || !isfinite(weight) ||
+      bbwWeightStopInhibited()) {
+    return;
+  }
+
+  const bool overload = fabsf(weight) > MAX_AUTOMATION_WEIGHT_G;
+  const bool active =
+      session.weightControlState == WeightControlState::ACTIVE;
+  const bool validating =
+      session.weightControlState == WeightControlState::VALIDATING;
+  if (!overload && !active) {
+    return;
+  }
+  if (overload && !active && !validating) {
+    return;
+  }
+  const bool overMax =
+      fastExtractionGuardSession() && session.extractionExtended &&
+      weight >= effectiveMaxStopThreshold();
+  const bool overMin =
+      slowExtractionGuardSession() && session.slowExtractionExtended &&
+      weight >= effectiveMinStopThreshold();
+  const bool overThreshold = weight >= effectiveStopThreshold();
+  if (!overThreshold && !overload && !overMax && !overMin) {
+    resetDirectStopConfirmation();
+    return;
+  }
+
+  const bool consecutive = session.thresholdConfirmations > 0 &&
+      connectionGeneration == session.lastThresholdConnectionGeneration &&
+      packetSequence == session.lastThresholdPacketSequence + 1U &&
+      static_cast<int32_t>(receivedAtMs - session.lastThresholdAtMs) >= 0 &&
+      static_cast<uint32_t>(receivedAtMs - session.lastThresholdAtMs) <=
+          DIRECT_STOP_CONFIRMATION_WINDOW_MS;
+  session.thresholdConfirmations = consecutive
+      ? static_cast<uint8_t>(session.thresholdConfirmations + 1U)
+      : 1U;
+  session.lastThresholdAtMs = receivedAtMs;
+  session.lastThresholdPacketSequence = packetSequence;
+  session.lastThresholdConnectionGeneration = connectionGeneration;
+
+  if (session.thresholdConfirmations < DIRECT_STOP_CONFIRMATION_SAMPLES) {
+    return;
+  }
+
+  if (overload) {
+    session.directStopPending = true;
+    session.directStopReason = EndReason::WEIGHT_ANOMALY;
+    weightStreamState = WeightStreamState::OVERLOAD;
+    session.calibrationEligible = false;
+    setWeightControlState(WeightControlState::FAULT_STOPPED);
+    addDebugEvent(DebugCategory::SCALE,
+                  DebugCode::SCALE_OVERLOAD_CONFIRMED,
+                  static_cast<int32_t>(weight));
+    return;
+  }
+
+  if (overMax) {
+    session.directStopPending = true;
+    session.directStopReason = EndReason::FAST_EXTRACTION_MAX_WEIGHT;
+    addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_STOP_MAX,
+                  static_cast<int32_t>(weight * 100.0f));
+    return;
+  }
+
+  if (overMin) {
+    session.directStopPending = true;
+    session.directStopReason = EndReason::SLOW_EXTRACTION_MIN_WEIGHT;
+    addDebugEvent(DebugCategory::SCALE,
+                  DebugCode::SLOW_EXTRACTION_STOP_MIN_WEIGHT,
+                  static_cast<int32_t>(weight * 100.0f));
+    return;
+  }
+
+  if (overThreshold && fastExtractionGuardSession() &&
+      (!minBrewTimeReached() || session.extractionExtended)) {
+    enterFastExtractionExtended(weight, receivedAtMs);
+    resetDirectStopConfirmation();
+    return;
+  }
+
+  session.directStopPending = true;
+  session.directStopReason = EndReason::SCALE_THRESHOLD;
+  addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_THRESHOLD_CONFIRMED,
+                static_cast<int32_t>(weight * 100.0f));
+}
+void armNoScaleShotGuard() {
+  if (noScaleShotGuardArmed) {
+    return;
+  }
+  noScaleShotGuardArmed = true;
+  addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_ARMED);
+}
+
+void consumeNoScaleShotGuard() {
+  noScaleShotGuardArmed = false;
+  noScaleShotGuardActivityAtMs = millis();
+  addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED);
+}
+
+bool noScaleShotGuardWouldBlock() {
+  const RuntimeConfig effective = effectiveRuntimeConfig();
+  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
+  const bool scaleUsable =
+      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
+  return runtimeConfig.avoidBbwShotWithoutScale && !effective.timerOnly &&
+         !scaleUsable && noScaleShotGuardArmed;
+}
+
+void maybeEmitManualNoScaleBeep() {
+  if (!runtimeConfig.buzzerManualNoScaleBeep) {
+    return;
+  }
+  const RuntimeConfig effective = effectiveRuntimeConfig();
+  if (effective.timerOnly) {
+    return;
+  }
+  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
+  const bool scaleUsable =
+      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
+  if (scaleUsable) {
+    return;
+  }
+  emitAlert(AlertEvent::MANUAL_NO_SCALE);
+}
+
+void blockNoScaleShotGuard() {
+  noScaleShotGuardHold = false;
+  consumeNoScaleShotGuard();
+  addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED);
+}
+
+void serviceNoScaleShotGuard() {
+  const bool available = scaleAvailable();
+  if (available && !noScaleShotGuardScaleWasAvailable) {
+    armNoScaleShotGuard();
+  }
+  noScaleShotGuardScaleWasAvailable = available;
+  if (noScaleShotGuardHold) {
+    if (!noScaleShotGuardWouldBlock()) {
+      noScaleShotGuardHold = false;
+    } else if (rawPaddleOn &&
+               elapsedMs(noScaleShotGuardHoldAtMs) >
+                   runtimeConfig.rinseGestureMs) {
+      blockNoScaleShotGuard();
+    }
+  }
+  if (!noScaleShotGuardArmed && !session.active &&
+      noScaleShotGuardActivityAtMs != 0 &&
+      elapsedMs(noScaleShotGuardActivityAtMs) >=
+          runtimeConfig.lastShotCooldownMs) {
+    armNoScaleShotGuard();
+  }
+}
+
+bool cupStartGuardWouldBlock() {
+  const RuntimeConfig effective = effectiveRuntimeConfig();
+  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
+  const bool scaleUsable =
+      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
+  return effective.cupProtectionEnabled && effective.requireCupToStart &&
+         !effective.timerOnly && scaleUsable &&
+         currentWeight < effective.cupPresentWeightG;
+}
+
+void serviceCupStartGuard() {
+  if (!cupStartGuardHold) {
+    return;
+  }
+  const RuntimeConfig effective = effectiveRuntimeConfig();
+  if (!effective.cupProtectionEnabled || !effective.requireCupToStart ||
+      effective.timerOnly) {
+    cupStartGuardHold = false;
+    return;
+  }
+  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
+  const bool scaleUsable =
+      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
+  if (scaleUsable && currentWeight >= effective.cupPresentWeightG) {
+    cupStartGuardHold = false;
+    return;
+  }
+  if (rawPaddleOn &&
+      elapsedMs(cupStartGuardHoldAtMs) > runtimeConfig.rinseGestureMs) {
+    cupStartGuardHold = false;
+    addDebugEvent(DebugCategory::STATE, DebugCode::CUP_START_GUARD_BLOCKED,
+                  weightToCentigrams(currentWeight));
+    emitAlert(AlertEvent::CUP_START_BLOCKED);
+  }
+}
+void armAutoToManualGuardForAutomaticBrew() {
+  if (!session.config.autoToManualGuardEnabled ||
+      session.config.timerOnly || !session.startedWithScale ||
+      session.weightControlState == WeightControlState::INACTIVE) {
+    return;
+  }
+  const uint32_t limitMs = autoToManualGuardLimitMs(
+      true,
+      static_cast<AutoToManualGuardLimitMode>(
+          session.config.autoToManualGuardLimitMode),
+      session.config.autoToManualGuardManualLimitMs,
+      session.config.autoToManualGuardSamplesDs,
+      session.config.operationalWallMs);
+  session.autoToManualGuardArmed = true;
+  session.autoToManualGuardDeadlineAtMs = session.startedAtMs + limitMs;
+  addDebugEvent(DebugCategory::SCALE, DebugCode::AUTO_TO_MANUAL_GUARD_ARMED,
+                static_cast<int32_t>(limitMs));
+  if (session.weightControlState == WeightControlState::SUSPENDED &&
+      !session.autoToManualGuardEnforced) {
+    session.autoToManualGuardEnforced = true;
+    addDebugEvent(DebugCategory::SCALE,
+                  DebugCode::AUTO_TO_MANUAL_GUARD_ENFORCED,
+                  static_cast<int32_t>(elapsedMs(session.startedAtMs)),
+                  static_cast<int32_t>(limitMs));
+  }
+}
+
+bool autoToManualGuardDeadlineDue() {
+  if (!session.active || !session.autoToManualGuardEnforced) {
+    return false;
+  }
+  return static_cast<int32_t>(millis() -
+                              session.autoToManualGuardDeadlineAtMs) >= 0;
+}
+bool paddleModeOriginal() {
+  return session.config.paddleMode ==
+         static_cast<uint8_t>(PaddleMode::ORIGINAL);
+}
+
+bool paddleModeAuto() {
+  return session.config.paddleMode == static_cast<uint8_t>(PaddleMode::AUTO);
+}
+
+bool originalBbwSemanticsActive() {
+  return session.active && paddleModeOriginal() &&
+         !session.paddlePromotedToNatural && session.startedWithScale &&
+         !session.config.timerOnly && stopperState == StopperState::BREW;
+}
+
+bool autoBbwSemanticsActive() {
+  return session.active && paddleModeAuto() && session.startedWithScale &&
+         !session.config.timerOnly && stopperState == StopperState::BREW;
+}
+
+bool originalBbwHoldOverride() {
+  return originalBbwSemanticsActive() && (paddleOn || rawPaddleOn);
+}
+
+bool automaticScaleStopDue() {
+  if (session.config.timerOnly || stopperState != StopperState::BREW ||
+      bbwWeightStopInhibited()) {
+    return false;
+  }
+
+  const bool directStopFresh = session.directStopPending &&
+      session.thresholdConfirmations >= DIRECT_STOP_CONFIRMATION_SAMPLES &&
+      static_cast<int32_t>(millis() - session.lastThresholdAtMs) >= 0 &&
+      elapsedMs(session.lastThresholdAtMs) <= MAX_AUTOMATION_WEIGHT_AGE_MS;
+  const bool directStopHonored =
+      directStopFresh &&
+      (session.directStopReason == EndReason::WEIGHT_ANOMALY ||
+       session.weightControlState == WeightControlState::ACTIVE);
+  if (directStopHonored) {
+    return true;
+  }
+
+  if (session.extractionExtended && fastExtractionGuardSession()) {
+    if (minBrewTimeReached() &&
+        targetWeightReached(session.lastAcceptedWeightG)) {
+      session.directStopPending = true;
+      session.directStopReason = EndReason::FAST_EXTRACTION_MIN_TIME;
+      addDebugEvent(DebugCategory::SCALE,
+                    DebugCode::FAST_EXTRACTION_STOP_MIN_TIME,
+                    static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f),
+                    static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+      return true;
+    }
+  }
+
+  if (slowExtractionGuardSession() && !session.extractionExtended &&
+      !session.slowExtractionExtended && maxBrewTimeReached() &&
+      !targetWeightReached(session.lastAcceptedWeightG)) {
+    if (minRecoveryWeightReached(session.lastAcceptedWeightG)) {
+      session.directStopPending = true;
+      session.directStopReason = EndReason::SLOW_EXTRACTION_MAX_TIME;
+      addDebugEvent(DebugCategory::SCALE,
+                    DebugCode::SLOW_EXTRACTION_STOP_MAX_TIME,
+                    static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f),
+                    static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+      return true;
+    }
+    enterSlowExtractionExtended(session.lastAcceptedWeightG, millis());
+    return false;
+  }
+
+  if (!session.receivedFreshWeightInCycle ||
+      session.weightControlState != WeightControlState::ACTIVE ||
+      currentWeightSequence == session.weightSequenceAtStart ||
+      scaleAutomationUnavailableForSession()) {
+    return false;
+  }
+  const float elapsedS = cycleElapsedSeconds();
+  if (elapsedS < shot.expectedEndS) {
+    return false;
+  }
+
+  if (fastExtractionGuardSession() && !minBrewTimeReached() &&
+      !session.extractionExtended) {
+    enterFastExtractionExtended(session.lastAcceptedWeightG, millis());
+    return false;
+  }
+
+  if (session.extractionExtended && fastExtractionGuardSession()) {
+    session.directStopPending = true;
+    session.directStopReason = EndReason::FAST_EXTRACTION_MAX_WEIGHT;
+    addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_STOP_MAX,
+                  static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f));
+    return true;
+  }
+
+  if (session.slowExtractionExtended && slowExtractionGuardSession()) {
+    session.directStopPending = true;
+    session.directStopReason = EndReason::SLOW_EXTRACTION_MIN_WEIGHT;
+    addDebugEvent(DebugCategory::SCALE,
+                  DebugCode::SLOW_EXTRACTION_STOP_MIN_WEIGHT,
+                  static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f));
+    return true;
+  }
+
+  session.directStopPending = true;
+  session.directStopReason = EndReason::SCALE_THRESHOLD;
+  addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_THRESHOLD_CONFIRMED,
+                static_cast<int32_t>(session.lastAcceptedWeightG * 100.0f));
+  return true;
+}

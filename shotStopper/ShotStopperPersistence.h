@@ -280,8 +280,8 @@ inline void finalizePersistedSettings(PersistedSettings &settings) {
 }
 
 // Dual-slot scratch shared with shot-log flash I/O (see FlashIoScratch).
-// Must stay in internal SRAM: source/destination of Preferences putBytes/
-// getBytes while flash cache is disabled (PSRAM is then inaccessible).
+// Allocated from internal SRAM (heap, not BSS): source/destination of
+// Preferences putBytes/getBytes while flash cache is disabled.
 inline PersistedSettings &persistedSettingsScratch(uint8_t index) {
   static_assert(2 * sizeof(PersistedSettings) <= FLASH_IO_SCRATCH_BYTES,
                 "PersistedSettings dual-slot scratch exceeds flash I/O buffer");
@@ -292,7 +292,8 @@ inline PersistedSettings &persistedSettingsScratch(uint8_t index) {
 
 inline bool readSettingsSlot(Preferences &preferences, const char *key,
                              PersistedSettings &settings) {
-  if (preferences.getBytesLength(key) != sizeof(PersistedSettings)) {
+  if (!preferences.isKey(key) ||
+      preferences.getBytesLength(key) != sizeof(PersistedSettings)) {
     return false;
   }
   // Read directly into the out-param to avoid borrowing scratch slots that
@@ -317,8 +318,8 @@ inline void yieldSettingsNvs() { vTaskDelay(pdMS_TO_TICKS(1)); }
 
 inline void feedSettingsNvsWatchdog() { (void)esp_task_wdt_reset(); }
 #else
-inline bool lockSettingsNvs() { return true; }
-inline void unlockSettingsNvs() {}
+inline bool lockSettingsNvs() { return lockFlashIo(); }
+inline void unlockSettingsNvs() { unlockFlashIo(); }
 inline void yieldSettingsNvs() {}
 inline void feedSettingsNvsWatchdog() {}
 #endif
@@ -402,15 +403,15 @@ inline void resetDurableStorageRevision() {
 inline bool savePersistedSettings(PersistedSettings &settings) {
   // Slots 0 and 1 only: candidate in [1], scratch [0] for revision probe /
   // verify. Never call loadPersistedSettings here — it needs both slots.
-  PersistedSettings &candidate = persistedSettingsScratch(1);
-  PersistedSettings &scratch = persistedSettingsScratch(0);
-  candidate = settings;
   yieldSettingsNvs();
   feedSettingsNvsWatchdog();
   if (!lockSettingsNvs()) {
     feedSettingsNvsWatchdog();
     return false;
   }
+  PersistedSettings &candidate = persistedSettingsScratch(1);
+  PersistedSettings &scratch = persistedSettingsScratch(0);
+  candidate = settings;
   if (durableStorageRevisionValid()) {
     candidate.storageRevision = durableStorageRevision();
   } else if (candidate.storageRevision == 0) {
@@ -481,9 +482,13 @@ inline bool initializeDefaultSettings(PersistedSettings &settings) {
 }
 
 inline bool resetPersistedSettingsToFactory(PersistedSettings &settings) {
+  if (!lockSettingsNvs()) {
+    return false;
+  }
   PersistedSettings &first = persistedSettingsScratch(0);
   first = PersistedSettings{};
   if (!initializeDefaultSettings(first)) {
+    unlockSettingsNvs();
     return false;
   }
   first.storageRevision = 1;
@@ -493,9 +498,6 @@ inline bool resetPersistedSettingsToFactory(PersistedSettings &settings) {
   second.storageRevision = 2;
   finalizePersistedSettings(second);
 
-  if (!lockSettingsNvs()) {
-    return false;
-  }
   Preferences preferences;
   if (!preferences.begin(SETTINGS_NAMESPACE, false)) {
     unlockSettingsNvs();
