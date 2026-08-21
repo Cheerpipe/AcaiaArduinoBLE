@@ -72,11 +72,20 @@ input[type=number],input[type=text],input[type=password],select{width:100%;max-w
 .cfgGroup .cfgGroup{margin:.45rem 0}
 .cfgGroup summary,summary{cursor:pointer;font-weight:600}
 .configSaveBar{position:sticky;bottom:0;z-index:2;background:var(--sf);padding:.55rem 0 calc(.55rem + env(safe-area-inset-bottom));margin:.55rem -0.15rem 0;border-top:1px solid var(--ln);display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
-.shotHero{margin:.35rem 0}
-.shotWt{font-size:2.15rem;font-weight:700}
 .shotTrack{position:relative;height:1rem;background:var(--ln);border-radius:.5rem;margin:.35rem 0}
 .shotTrack #shotBar{height:100%;background:var(--ok);border-radius:.5rem;width:0;max-width:150%}
 .shotMark{position:absolute;left:100%;top:0;bottom:0;width:2px;background:var(--fg);transform:translateX(-1px)}
+.shotCard{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-template-areas:"dur dur actual actual" "goal err flow drop" "ended ended shot shot";gap:.5rem .4rem;align-items:start;margin:.45rem 0 .15rem}
+.shotCard > *{display:flex;flex-direction:column;gap:.08rem;min-width:0;font-weight:650}
+.shotCard .shotDur{grid-area:dur}
+.shotCard .shotActual{grid-area:actual}
+.shotCard > :nth-child(3){grid-area:goal}
+.shotCard > :nth-child(4){grid-area:err}
+.shotCard > :nth-child(5){grid-area:flow}
+.shotCard > :nth-child(6){grid-area:drop}
+.shotCard > :nth-child(7){grid-area:ended}
+.shotCard > :nth-child(8){grid-area:shot}
+.shotCard > :nth-child(n+3){font-size:.75rem;font-weight:600;color:var(--mu)}
 #log{width:100%;height:12rem;font-family:monospace;white-space:pre;overflow:auto;box-sizing:border-box;border:1px solid var(--ln);border-radius:.5rem;background:var(--sf);color:var(--fg)}
 small{display:block;color:var(--mu)}
 .fieldHint{display:block;font-size:.82em;color:var(--mu);margin:.1rem 0 .2rem;line-height:1.35;max-width:34rem;font-weight:400}
@@ -167,10 +176,10 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 #shotTable{width:100%;border-collapse:collapse;font-size:.82rem}
 #shotTable thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 #shotTable,#shotTable tbody{display:block}
-#shotTable tr{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-template-areas:"dur dur actual actual" "time time time time" "goal err flow drop" "guard ext stop shot" "cut . . .";gap:.5rem .4rem;align-items:start;position:relative;background:var(--sf);border:1px solid var(--ln);border-radius:var(--r);padding:.8rem 2.4rem .8rem .85rem;margin:0 0 .65rem}
+#shotTable tr{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-template-areas:"dur dur actual actual" "time time time time" "goal err flow drop" "ended ended shot shot";gap:.5rem .4rem;align-items:start;position:relative;background:var(--sf);border:1px solid var(--ln);border-radius:var(--r);padding:.8rem 2.4rem .8rem .85rem;margin:0 0 .65rem}
 #shotTable th,#shotTable td{border:0;padding:0;text-align:left;white-space:normal;overflow-wrap:anywhere}
 #shotTable td{display:flex;flex-direction:column;gap:.08rem;min-width:0;font-weight:650}
-#shotTable td::before{content:attr(data-label);font-size:.62rem;font-weight:600;color:var(--mu);letter-spacing:.02em;text-transform:uppercase}
+#shotTable td::before,.shotCard > *::before{content:attr(data-label);font-size:.62rem;font-weight:600;color:var(--mu);letter-spacing:.02em;text-transform:uppercase}
 #shotTable td:nth-child(1){grid-area:time}
 #shotTable td:nth-child(2){grid-area:dur}
 #shotTable td:nth-child(3){grid-area:goal}
@@ -178,22 +187,19 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 #shotTable td:nth-child(5){grid-area:err}
 #shotTable td:nth-child(6){grid-area:flow}
 #shotTable td:nth-child(7){grid-area:drop}
-#shotTable td:nth-child(8){grid-area:guard}
-#shotTable td:nth-child(9){grid-area:ext}
-#shotTable td:nth-child(10){grid-area:stop}
-#shotTable td:nth-child(11){grid-area:shot}
-#shotTable td:nth-child(12){grid-area:cut}
+#shotTable td:nth-child(8){grid-area:ended}
+#shotTable td:nth-child(9){grid-area:shot}
 #shotTable td:first-child{font-size:.8rem;font-weight:600;color:var(--mu);align-self:center}
 #shotTable td:first-child::before{content:none}
 #shotTable .shotDel{position:absolute;top:.15rem;right:.15rem;z-index:1;align-items:center;justify-content:center}
 #shotTable .shotDel::before{content:none}
-#shotTable .shotDur,#shotTable .shotActual{font-size:1.55rem;font-weight:800;line-height:1.05;color:var(--ac);letter-spacing:-.02em;padding-bottom:.1rem}
-#shotTable .shotDur::before,#shotTable .shotActual::before{font-size:.62rem;font-weight:700;color:var(--ac);opacity:.72;letter-spacing:.04em}
-#shotTable td:nth-child(n+6):nth-child(-n+12){font-size:.75rem;font-weight:600;color:var(--mu)}
+#shotTable .shotDur,#shotTable .shotActual,.shotCard .shotDur,.shotCard .shotActual{font-size:1.55rem;font-weight:800;line-height:1.05;color:var(--ac);letter-spacing:-.02em;padding-bottom:.1rem}
+#shotTable .shotDur::before,#shotTable .shotActual::before,.shotCard .shotDur::before,.shotCard .shotActual::before{font-size:.62rem;font-weight:700;color:var(--ac);opacity:.72;letter-spacing:.04em}
+#shotTable td:nth-child(n+6):nth-child(-n+9){font-size:.75rem;font-weight:600;color:var(--mu)}
 #shotTable td[colspan]{grid-area:auto;grid-column:1/-1;grid-row:1;align-items:flex-start;font-weight:500;color:var(--mu)}
 #shotTable td[colspan]::before{content:none}
-#shotTable .shotErrHi{color:var(--ac)}
-#shotTable .shotErrLo{color:var(--ok)}
+#shotTable .shotErrHi,.shotCard .shotErrHi{color:var(--ac)}
+#shotTable .shotErrLo,.shotCard .shotErrLo{color:var(--ok)}
 #shotTable .btnGlyph{border:0;border-radius:.4rem;border-left:0;min-height:2.35rem;min-width:2.35rem;padding:0;flex:0 0 auto;background:transparent;color:#c62828;box-shadow:none}
 #shotTable .btnGlyph.btnDanger{border:0;box-shadow:none;background:transparent;color:#c62828}
 #shotTable .btnGlyph .g{display:inline-flex;width:1.25rem;height:1.25rem;font-size:1.45rem}

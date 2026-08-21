@@ -528,13 +528,22 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
 }
 if (!ui.includes('id="shotPanel"') ||
     !ui.includes('id="shotBar"') ||
+    !ui.includes('id="shotCard"') ||
+    !css.includes('.shotCard{') ||
+    !css.includes('grid-template-areas:"dur dur actual actual" "goal err flow drop" "ended ended shot shot"') ||
     !ui.includes('id="shotElapsed"') ||
     !ui.includes('id="shotFirstDrop"') ||
-    !ui.includes('id="shotRetare"') ||
     !ui.includes('id="shotCurrentWeight"') ||
     !ui.includes('id="shotGoalWeight"') ||
+    !ui.includes('id="shotErr"') ||
+    !ui.includes('id="shotFlow"') ||
+    !ui.includes('id="shotEnded"') ||
     !ui.includes('id="shotType"') ||
-    !ui.includes('id="shotScale"') ||
+    ui.includes('id="shotRetare"') ||
+    ui.includes('id="shotScale"') ||
+    ui.includes('id="shotGuard"') ||
+    ui.includes('id="shotPct"') ||
+    ui.includes('class="shotHero"') ||
     !ui.includes('function updateShot(') ||
     !network.includes('firstDropElapsedMs') ||
     !network.includes('retarePerformed') ||
@@ -572,20 +581,19 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     html.indexOf('id="autoToManualGuardBaselineS"') >
         html.indexOf('id="resetGuardSamplesButton"') ||
     !ui.includes('Reset A→M samples to baseline') ||
-    !ui.includes('id="shotAtmGuard"') ||
-    !ui.includes('id="shotNoScaleGuard"') ||
-    !ui.includes('No-scale guard') ||
+    !ui.includes('id="homeAtmSub"') ||
+    !ui.includes('id="homeNoScaleSub"') ||
     !ui.includes('id="avoidBbwShotWithoutScale"') ||
     !ui.includes('id="lastShotCooldownMin"') ||
     !ui.includes('Avoid BBW shot without scale') ||
     !ui.includes('Last shot cooldown') ||
     !ui.includes('function formatNoScaleGuard(') ||
     !ui.includes('function formatSlowExtractionGuard(') ||
-    !ui.includes('d.slowExtended?formatSlowExtractionGuard(') ||
+    !ui.includes("setHomeSub('homeSlowSub',formatSlowExtractionGuard(") ||
     !ui.includes('function updateStatusGuards(') ||
     ui.includes('function updateNoScaleGuard(') ||
-    html.indexOf('id="shotNoScaleGuard"') <
-        html.indexOf('id="shotAtmGuard"') ||
+    html.includes('id="shotAtmGuard"') ||
+    html.includes('id="shotNoScaleGuard"') ||
     html.includes('id="statusExtractionGuard"') ||
     html.includes('id="statusSlowExtractionGuard"') ||
     html.includes('id="statusAtmGuard"') ||
@@ -1234,11 +1242,24 @@ if (!ui.includes('id="shotTable"') ||
     !js.includes("'shotDur'") ||
     !js.includes("'shotActual'") ||
     !css.includes('#shotTable .shotDur,#shotTable .shotActual') ||
-    !css.includes('grid-template-areas:"dur dur actual actual"') ||
+    !css.includes('grid-template-areas:"dur dur actual actual" "time time time time" "goal err flow drop" "ended ended shot shot"') ||
+    css.includes('grid-area:guard') ||
+    css.includes('grid-area:ext') ||
+    css.includes('grid-area:stop') ||
+    css.includes('grid-area:cut') ||
     !css.includes('#shotTable .shotDel') ||
     !js.includes("className='shotDel'") ||
     runtimeJs.includes('<span class="t">Delete</span>') ||
     !ui.includes('formatShotTime(r)') ||
+    !runtimeJs.includes('function formatShotEnded(') ||
+    !runtimeJs.includes('formatShotEnded(r.stopDetail)') ||
+    !runtimeJs.includes("labels=['Time','Dur','Goal','Actual','Err%','Flow','1st drop','Ended','Shot']") ||
+    runtimeJs.includes("labels=['Time','Dur','Goal','Actual','Err%','Flow','1st drop','Guard','Ext','Stop','Shot','Cut']") ||
+    partialHtml.history.includes('<th>Guard</th>') ||
+    partialHtml.history.includes('<th>Ext</th>') ||
+    partialHtml.history.includes('<th>Stop</th>') ||
+    partialHtml.history.includes('>Cut</th>') ||
+    !partialHtml.history.includes('<th>Ended</th>') ||
     !ui.includes('no time') ||
     !ui.includes('id="timezoneOffsetMinutes"') ||
     !js.includes('m+=15') ||
