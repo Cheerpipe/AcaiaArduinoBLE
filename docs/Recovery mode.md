@@ -1,4 +1,9 @@
- # Recuperación local mediante paddle
+# Local paddle recovery (design record)
+
+This file is an implementation spec, not the user guide. For the procedure,
+see [Emergency recovery](EMERGENCY_RECOVERY.md).
+
+# Recuperación local mediante paddle
 
 ## Resumen
 

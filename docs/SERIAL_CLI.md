@@ -4,6 +4,29 @@ Shot Stopper accepts **line-based commands** on the same USB serial port as
 the logs (**115200** baud). Verbs are case-insensitive. SSIDs and passwords
 are case-sensitive; wrap values with spaces in double quotes.
 
+These commands are the same whether you built with ESP-IDF or the legacy
+Arduino-cli path. How you **open the port** differs. Build/flash wrappers
+are in [Build scripts](SCRIPTS.md), not here.
+
+## Open the port
+
+**Supported (ESP-IDF):**
+
+```sh
+./scripts/monitor-idf --port /dev/cu.usbmodem2101 --speed 115200
+```
+
+On Linux the port is often `/dev/ttyACM0` or `/dev/ttyUSB0`. Exit with
+**Ctrl+]**. The script prompts for and remembers the port in `.shotstopper`.
+
+**Legacy Arduino-cli (unsupported):**
+
+```sh
+./scripts/monitor --port /dev/cu.usbmodem2101 --speed 115200
+```
+
+Prefer `monitor-idf` even if you only need this CLI.
+
 Do not type into a scrolling monitor if you cannot see what you send. Close
 any other serial client, then pipe the command:
 
@@ -12,8 +35,7 @@ any other serial client, then pipe the command:
 ```
 
 The `sleep 4` waits for the USB-serial chip to reopen (opening the port often
-resets the ESP32). Replace the example port with yours, or use
-`./scripts/monitor-idf`, which prompts/remembers the port from `.shotstopper`.
+resets the ESP32).
 
 Successful mutating commands print `OK queued …`, `OK …`, or a status dump.
 Rejections print `ERR …`. Passwords are never echoed.

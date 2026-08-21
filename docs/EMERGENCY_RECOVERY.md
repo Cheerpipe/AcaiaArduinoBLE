@@ -1,12 +1,16 @@
 # Emergency Recovery with Paddle
 
-This procedure allows you to recover the Micra Shot Stopper when there is no
-access via Web UI, Wi-Fi, BLE, or USB/serial. It does not require the scale to
-be powered on or connected.
+Use this when there is no access via Web UI, Wi-Fi, BLE, or USB/serial. The
+scale does not need to be on.
+
+This is the **user procedure**. Implementation notes live in
+[Recovery mode.md](Recovery%20mode.md) (design record). Related:
+[Factory reset](settings/factory-reset.md), [FAQ](FAQ.md),
+[USB serial CLI](SERIAL_CLI.md).
 
 > **Safety:** During recovery, the firmware keeps CN9 open and does not allow
-> starting an extraction or rinse. Do not attempt to make coffee until the
-> procedure completes and the controller restarts.
+> a brew or rinse. Do not make coffee until the procedure finishes and the
+> controller restarts.
 
 ## Choosing the Procedure
 
@@ -70,7 +74,8 @@ Example of valid timing:
 
 > **Warning:** This procedure erases presets, configuration, learned
 > calibration, networks, scales, BLE Companion, history, and last shot. It
-> cannot be undone.
+> cannot be undone. Same erase as [Factory reset](settings/factory-reset.md)
+> from the Web UI or USB.
 
 1. Power off the Shot Stopper.
 2. Move the paddle to **ON**.
