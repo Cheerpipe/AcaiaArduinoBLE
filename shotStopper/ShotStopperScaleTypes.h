@@ -92,6 +92,10 @@ constexpr float MAX_PARSED_WEIGHT_G = 10000.0f;
 constexpr uint8_t DIRECT_STOP_CONFIRMATION_SAMPLES = 2;
 constexpr uint8_t WEIGHT_RECOVERY_CONFIRMATION_SAMPLES = 3;
 constexpr uint32_t DIRECT_STOP_CONFIRMATION_WINDOW_MS = 1000;
+constexpr float FIRST_DROP_THRESHOLD_G = 0.3f;
+constexpr float FIRST_DROP_FINGER_STEP_G = 2.0f;
+constexpr float FIRST_DROP_BASELINE_SETTLE_G = 0.5f;
+constexpr uint8_t FIRST_DROP_CONFIRMATION_SAMPLES = 2;
 constexpr float MAX_RECOVERY_WEIGHT_DROP_G = 2.0f;
 constexpr size_t WEIGHT_TREND_POINT_COUNT = 10;
 constexpr float WEIGHT_TREND_MIN_LAST_SAMPLE_G = 10.0f;
@@ -158,6 +162,165 @@ enum class AccidentalTouchClass : uint8_t {
   TOUCH = 1,
   SUSTAINED = 2
 };
+
+enum class FirstFlowPhase : uint8_t {
+  SEEKING = 0,
+  TOUCH = 1
+};
+
+enum class FirstFlowClass : uint8_t {
+  NONE = 0,
+  CANDIDATE = 1,
+  TOUCH = 2,
+  FIRE = 3
+};
+
+struct FirstFlowState {
+  FirstFlowPhase phase = FirstFlowPhase::SEEKING;
+  uint8_t confirmations = 0;
+  uint8_t residualConfirmations = 0;
+  bool hasLastSample = false;
+  float lastWeightG = 0.0f;
+  uint32_t lastAtMs = 0;
+  uint32_t lastPacketSequence = 0;
+  float peakG = 0.0f;
+  float postJumpG = 0.0f;
+  uint32_t jumpAtMs = 0;
+  uint32_t candidateMs = 0;
+};
+
+inline void resetFirstFlowState(FirstFlowState &state) {
+  state = FirstFlowState{};
+}
+
+inline bool firstFlowPacketsConsecutive(const FirstFlowState &state,
+                                        uint32_t receivedAtMs,
+                                        uint32_t packetSequence) {
+  return state.hasLastSample &&
+         packetSequence == state.lastPacketSequence + 1U &&
+         static_cast<int32_t>(receivedAtMs - state.lastAtMs) >= 0 &&
+         static_cast<uint32_t>(receivedAtMs - state.lastAtMs) <=
+             DIRECT_STOP_CONFIRMATION_WINDOW_MS;
+}
+
+inline void noteFirstFlowSample(FirstFlowState &state, float weight,
+                                uint32_t receivedAtMs, uint32_t packetSequence) {
+  state.hasLastSample = true;
+  state.lastWeightG = weight;
+  state.lastAtMs = receivedAtMs;
+  state.lastPacketSequence = packetSequence;
+}
+
+inline FirstFlowClass enterFirstFlowTouch(FirstFlowState &state, float weight,
+                                          uint32_t receivedAtMs) {
+  state.phase = FirstFlowPhase::TOUCH;
+  state.postJumpG = weight;
+  state.peakG = weight;
+  state.jumpAtMs = receivedAtMs;
+  state.confirmations = 0;
+  state.residualConfirmations = 0;
+  state.candidateMs = receivedAtMs;
+  return FirstFlowClass::TOUCH;
+}
+
+inline FirstFlowClass stepFirstFlow(FirstFlowState &state, float weight,
+                                    uint32_t receivedAtMs,
+                                    uint32_t packetSequence, float baselineG) {
+  if (!isfinite(weight) || !isfinite(baselineG)) {
+    return FirstFlowClass::NONE;
+  }
+
+  const float delta = weight - baselineG;
+  const float step =
+      state.hasLastSample ? (weight - state.lastWeightG) : delta;
+  const bool consecutive =
+      firstFlowPacketsConsecutive(state, receivedAtMs, packetSequence);
+
+  if (state.phase == FirstFlowPhase::SEEKING) {
+    if (delta < FIRST_DROP_THRESHOLD_G) {
+      state.confirmations = 0;
+      state.residualConfirmations = 0;
+      state.candidateMs = 0;
+      noteFirstFlowSample(state, weight, receivedAtMs, packetSequence);
+      return FirstFlowClass::NONE;
+    }
+    if (step >= FIRST_DROP_FINGER_STEP_G) {
+      const FirstFlowClass classified =
+          enterFirstFlowTouch(state, weight, receivedAtMs);
+      noteFirstFlowSample(state, weight, receivedAtMs, packetSequence);
+      return classified;
+    }
+    state.confirmations =
+        consecutive && state.confirmations > 0
+            ? static_cast<uint8_t>(state.confirmations + 1U)
+            : 1U;
+    if (state.confirmations == 1U) {
+      state.candidateMs = receivedAtMs;
+    }
+    noteFirstFlowSample(state, weight, receivedAtMs, packetSequence);
+    if (state.confirmations >= FIRST_DROP_CONFIRMATION_SAMPLES) {
+      return FirstFlowClass::FIRE;
+    }
+    return FirstFlowClass::CANDIDATE;
+  }
+
+  state.peakG = fmaxf(state.peakG, weight);
+  if (step >= FIRST_DROP_FINGER_STEP_G) {
+    state.postJumpG = weight;
+    state.peakG = fmaxf(state.peakG, weight);
+    state.jumpAtMs = receivedAtMs;
+    state.confirmations = 0;
+    state.residualConfirmations = 0;
+    state.candidateMs = receivedAtMs;
+    noteFirstFlowSample(state, weight, receivedAtMs, packetSequence);
+    return FirstFlowClass::TOUCH;
+  }
+
+  const bool released = weight <= state.peakG - FIRST_DROP_FINGER_STEP_G;
+  if (released) {
+    if (delta >= FIRST_DROP_THRESHOLD_G) {
+      state.confirmations = 0;
+      state.residualConfirmations =
+          consecutive && state.residualConfirmations > 0
+              ? static_cast<uint8_t>(state.residualConfirmations + 1U)
+              : 1U;
+      if (state.residualConfirmations == 1U) {
+        state.candidateMs = receivedAtMs;
+      }
+      noteFirstFlowSample(state, weight, receivedAtMs, packetSequence);
+      if (state.residualConfirmations >= FIRST_DROP_CONFIRMATION_SAMPLES) {
+        return FirstFlowClass::FIRE;
+      }
+      return FirstFlowClass::TOUCH;
+    }
+    state.phase = FirstFlowPhase::SEEKING;
+    state.confirmations = 0;
+    state.residualConfirmations = 0;
+    state.candidateMs = 0;
+    noteFirstFlowSample(state, weight, receivedAtMs, packetSequence);
+    return FirstFlowClass::NONE;
+  }
+
+  if (weight >= state.postJumpG + FIRST_DROP_THRESHOLD_G &&
+      step < FIRST_DROP_FINGER_STEP_G) {
+    state.residualConfirmations = 0;
+    state.confirmations =
+        consecutive && state.confirmations > 0
+            ? static_cast<uint8_t>(state.confirmations + 1U)
+            : 1U;
+    noteFirstFlowSample(state, weight, receivedAtMs, packetSequence);
+    if (state.confirmations >= FIRST_DROP_CONFIRMATION_SAMPLES) {
+      state.candidateMs = state.jumpAtMs;
+      return FirstFlowClass::FIRE;
+    }
+    return FirstFlowClass::TOUCH;
+  }
+
+  state.confirmations = 0;
+  state.residualConfirmations = 0;
+  noteFirstFlowSample(state, weight, receivedAtMs, packetSequence);
+  return FirstFlowClass::TOUCH;
+}
 
 inline const char *weightStreamStateName(WeightStreamState state) {
   switch (state) {

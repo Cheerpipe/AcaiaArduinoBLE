@@ -74,6 +74,17 @@ void enterBrewOrManualFromStart();
 void demoteActiveCycleToRinseOrEnd();
 void calculateExpectedEndTime();
 
+void resetFirstFlowDetector() {
+  resetFirstFlowState(session.firstFlow);
+  session.firstFlowAcceptedConfirmations = 0;
+}
+
+void markTareZeroReady() {
+  session.scaleBaselineG = 0.0f;
+  session.scaleBaselineReady = true;
+  resetFirstFlowDetector();
+}
+
 void recordFirstDropTimestamp(uint32_t receivedAtMs) {
   if (session.firstDropMs == 0) {
     session.firstDropMs = receivedAtMs;
@@ -244,9 +255,7 @@ void initializeBbwProtection() {
   session.retarePerformed = false;
   session.retareDisabled = false;
   session.firstDropsBeepSent = false;
-  session.firstDropConfirmations = 0;
-  session.firstDropLastAtMs = 0;
-  session.firstDropLastPacketSequence = 0;
+  resetFirstFlowDetector();
 
   if (!session.startedWithScale || session.config.timerOnly ||
       !session.automaticEnabled) {

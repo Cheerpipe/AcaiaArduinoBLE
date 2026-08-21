@@ -83,7 +83,6 @@ constexpr uint32_t MIN_RETARE_STABILITY_MAX_GAP_MS = 100;
 constexpr uint32_t MAX_RETARE_STABILITY_MAX_GAP_MS = 5000;
 constexpr uint32_t MIN_RETARE_STABILITY_MIN_DURATION_MS = 0;
 constexpr uint32_t MAX_RETARE_STABILITY_MIN_DURATION_MS = 2000;
-constexpr uint8_t FIRST_DROP_CONFIRMATION_SAMPLES = 2;
 constexpr uint8_t MIN_GOAL_WEIGHT_G = 10;
 constexpr uint8_t MAX_GOAL_WEIGHT_G = 200;
 constexpr uint8_t DEFAULT_GOAL_WEIGHT_G = 36;

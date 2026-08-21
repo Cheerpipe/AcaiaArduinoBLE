@@ -5422,10 +5422,13 @@ void rt11_late_retare_records_first_drops_and_keeps_weight_control() {
   CHECK(session.retarePerformed);
   CHECK(executeNextScaleCommand());
   CHECK(session.awaitingPostTareBaseline);
-  CHECK(!session.scaleBaselineReady);
+  CHECK(session.scaleBaselineReady);
+  CHECK(fabsf(session.scaleBaselineG) < 0.001f);
   publishWeight(150.0f, hostMillis + 50, 1, 20);
   CHECK(session.awaitingPostTareBaseline);
-  CHECK(!session.scaleBaselineReady);
+  CHECK(session.scaleBaselineReady);
+  CHECK(fabsf(session.scaleBaselineG) < 0.001f);
+  CHECK(session.firstFlow.phase == FirstFlowPhase::TOUCH);
   CHECK(session.firstDropMs == 0);
   const uint32_t settledAtMs = hostMillis + 100;
   publishWeight(0.0f, settledAtMs, 1, 21);
@@ -6990,6 +6993,48 @@ void publishControlRamp(float startG, float endG, float stepG, uint32_t interval
   }
 }
 
+void ff01_classifier_seeking_touch_and_release() {
+  FirstFlowState state;
+  CHECK(stepFirstFlow(state, 0.35f, 100, 1, 0.0f) == FirstFlowClass::CANDIDATE);
+  CHECK(stepFirstFlow(state, 0.40f, 200, 2, 0.0f) == FirstFlowClass::FIRE);
+  CHECK(state.candidateMs == 100);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 0.4f, 100, 1, 0.0f) == FirstFlowClass::CANDIDATE);
+  CHECK(stepFirstFlow(state, 0.9f, 200, 2, 0.0f) == FirstFlowClass::FIRE);
+  CHECK(stepFirstFlow(state, 1.5f, 300, 3, 0.0f) == FirstFlowClass::FIRE);
+  CHECK(stepFirstFlow(state, 2.4f, 400, 4, 0.0f) == FirstFlowClass::FIRE);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 3.0f, 100, 1, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 3.1f, 200, 2, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 3.05f, 300, 3, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(state.phase == FirstFlowPhase::TOUCH);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 8.0f, 100, 1, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 0.0f, 200, 2, 0.0f) == FirstFlowClass::NONE);
+  CHECK(stepFirstFlow(state, 0.05f, 300, 3, 0.0f) == FirstFlowClass::NONE);
+  CHECK(state.phase == FirstFlowPhase::SEEKING);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 8.0f, 100, 1, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 1.2f, 200, 2, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 0.0f, 300, 3, 0.0f) == FirstFlowClass::NONE);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 8.0f, 100, 1, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 1.2f, 200, 2, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 1.3f, 300, 3, 0.0f) == FirstFlowClass::FIRE);
+  CHECK(state.candidateMs == 200);
+
+  resetFirstFlowState(state);
+  CHECK(stepFirstFlow(state, 8.0f, 100, 1, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 8.4f, 200, 2, 0.0f) == FirstFlowClass::TOUCH);
+  CHECK(stepFirstFlow(state, 8.8f, 300, 3, 0.0f) == FirstFlowClass::FIRE);
+  CHECK(state.candidateMs == 100);
+}
+
 void at01_classifier_startup_and_trend_math() {
   float times[WEIGHT_TREND_POINT_COUNT];
   float weights[WEIGHT_TREND_POINT_COUNT];
@@ -7253,6 +7298,100 @@ void at11_pre_cycle_anchor_does_not_treat_first_pour_as_touch() {
   publishWeight(2.0f);
   CHECK(!session.accidentalTouchHolding);
   CHECK(session.lastAcceptedWeightG > 1.5f);
+}
+
+void startFirstFlowBrew() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+}
+
+void ff02_chorrito_fires_on_second_sample() {
+  startFirstFlowBrew();
+  publishWeight(0.4f, hostMillis + 50, 1, 20);
+  CHECK(session.firstDropMs == 0);
+  publishWeight(0.9f, hostMillis + 150, 1, 21);
+  CHECK(session.firstDropMs != 0);
+  publishWeight(1.5f, hostMillis + 250, 1, 22);
+  publishWeight(2.4f, hostMillis + 350, 1, 23);
+  CHECK(session.firstDropMs != 0);
+}
+
+void ff03_finger_hold_does_not_fire() {
+  startFirstFlowBrew();
+  publishWeight(3.0f, hostMillis + 50, 1, 20);
+  publishWeight(3.1f, hostMillis + 150, 1, 21);
+  publishWeight(3.05f, hostMillis + 250, 1, 22);
+  CHECK(session.firstDropMs == 0);
+  CHECK(session.firstFlow.phase == FirstFlowPhase::TOUCH);
+}
+
+void ff04_finger_release_to_zero_does_not_fire() {
+  startFirstFlowBrew();
+  publishWeight(8.0f, hostMillis + 50, 1, 20);
+  publishWeight(0.0f, hostMillis + 150, 1, 21);
+  publishWeight(0.05f, hostMillis + 250, 1, 22);
+  CHECK(session.firstDropMs == 0);
+}
+
+void ff05_bounce_through_residual_does_not_fire() {
+  startFirstFlowBrew();
+  publishWeight(8.0f, hostMillis + 50, 1, 20);
+  publishWeight(1.2f, hostMillis + 150, 1, 21);
+  publishWeight(0.0f, hostMillis + 250, 1, 22);
+  CHECK(session.firstDropMs == 0);
+}
+
+void ff06_touch_during_drops_fires_on_residual() {
+  startFirstFlowBrew();
+  publishWeight(8.0f, hostMillis + 50, 1, 20);
+  CHECK(session.firstDropMs == 0);
+  publishWeight(1.2f, hostMillis + 150, 1, 21);
+  CHECK(session.firstDropMs == 0);
+  publishWeight(1.3f, hostMillis + 250, 1, 22);
+  CHECK(session.firstDropMs != 0);
+}
+
+void ff07_gush_then_flow_backdates_to_jump() {
+  startFirstFlowBrew();
+  const uint32_t jumpAtMs = hostMillis + 50;
+  publishWeight(8.0f, jumpAtMs, 1, 20);
+  publishWeight(8.4f, jumpAtMs + 100, 1, 21);
+  CHECK(session.firstDropMs == 0);
+  publishWeight(8.8f, jumpAtMs + 200, 1, 22);
+  CHECK(session.firstDropMs == jumpAtMs);
+}
+
+void ff08_coffee_during_post_tare_grace_fires() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  CHECK(session.awaitingPostTareBaseline);
+  CHECK(session.scaleBaselineReady);
+  publishWeight(0.4f, hostMillis + 50, 1, 20);
+  publishWeight(0.8f, hostMillis + 150, 1, 21);
+  publishWeight(1.2f, hostMillis + 250, 1, 22);
+  CHECK(session.firstDropMs != 0);
+  CHECK(session.scaleBaselineG < FIRST_DROP_THRESHOLD_G);
+}
+
+void ff09_stream_past_half_goal_still_fires() {
+  startFirstFlowBrew();
+  runtimeConfig.goalWeightG = 36;
+  session.config.goalWeightG = 36;
+  publishWeight(19.0f, hostMillis + 50, 1, 20);
+  publishWeight(19.4f, hostMillis + 150, 1, 21);
+  publishWeight(19.8f, hostMillis + 250, 1, 22);
+  CHECK(session.firstDropMs != 0);
+}
+
+void ff10_control_ramp_records_first_flow() {
+  startFirstFlowBrew();
+  publishControlRamp(0.2f, 5.0f, 0.4f, 100, 10);
+  CHECK(session.firstDropMs != 0);
 }
 
 void pm01_original_bbw_release_after_rinse_keeps_cn9_closed() {
@@ -7666,6 +7805,7 @@ const TestCase testCases[] = {
     {"R62", r62_fast_extended_is_not_cut_by_slow},
     {"R63", r63_slow_guard_disabled_continues_past_max_time},
     {"R64", r64_slow_guard_min_weight_cut_from_predicted_time},
+    {"FF01", ff01_classifier_seeking_touch_and_release},
     {"AT01", at01_classifier_startup_and_trend_math},
     {"AT02", at02_early_spike_skips_control_trajectory},
     {"AT03", at03_late_spike_does_not_cut_then_recovers},
@@ -7677,6 +7817,15 @@ const TestCase testCases[] = {
     {"AT09", at09_slew_recovery_advances_control_weight},
     {"AT10", at10_holding_does_not_block_slow_extended_at_max_time},
     {"AT11", at11_pre_cycle_anchor_does_not_treat_first_pour_as_touch},
+    {"FF02", ff02_chorrito_fires_on_second_sample},
+    {"FF03", ff03_finger_hold_does_not_fire},
+    {"FF04", ff04_finger_release_to_zero_does_not_fire},
+    {"FF05", ff05_bounce_through_residual_does_not_fire},
+    {"FF06", ff06_touch_during_drops_fires_on_residual},
+    {"FF07", ff07_gush_then_flow_backdates_to_jump},
+    {"FF08", ff08_coffee_during_post_tare_grace_fires},
+    {"FF09", ff09_stream_past_half_goal_still_fires},
+    {"FF10", ff10_control_ramp_records_first_flow},
     {"R65", r65_slow_extended_shot_does_not_learn_weight_offset},
     {"R32", r32_old_connection_generation_cannot_update_weight},
     {"R33", r33_weight_mailbox_keeps_latest_and_reports_gap},

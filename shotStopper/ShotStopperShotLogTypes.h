@@ -15,7 +15,6 @@ constexpr uint32_t SHOT_LOG_MAGIC = 0x534C4F47U;  // "SLOG"
 constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 7;
 constexpr size_t SHOT_LOG_CAPACITY = 120;
 constexpr uint32_t MIN_SHOT_LOG_DURATION_MS = 10000;
-constexpr float FIRST_DROP_THRESHOLD_G = 0.3f;
 // INT16_MIN leaves the full positive int16 centigram range usable.
 constexpr int16_t SHOT_LOG_WEIGHT_MISSING = INT16_MIN;
 constexpr int16_t SHOT_LOG_WEIGHT_MISSING_LEGACY = INT16_MAX;

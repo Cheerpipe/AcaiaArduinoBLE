@@ -57,6 +57,28 @@ void expirePostTareBaselineIfNeeded() {
                 static_cast<int32_t>(session.config.postTareBaselineGraceMs));
 }
 
+void maybeLatchFirstFlowFromAcceptedWeight(float weight,
+                                           uint32_t receivedAtMs) {
+  if (!session.active || !session.startedWithScale || session.firstDropMs != 0 ||
+      !session.scaleBaselineReady) {
+    return;
+  }
+  if (session.accidentalTouchHolding ||
+      session.firstFlow.phase == FirstFlowPhase::TOUCH) {
+    session.firstFlowAcceptedConfirmations = 0;
+    return;
+  }
+  if (weight - session.scaleBaselineG < FIRST_DROP_THRESHOLD_G) {
+    session.firstFlowAcceptedConfirmations = 0;
+    return;
+  }
+  ++session.firstFlowAcceptedConfirmations;
+  if (session.firstFlowAcceptedConfirmations >=
+      FIRST_DROP_CONFIRMATION_SAMPLES) {
+    onFirstDropsDetected(receivedAtMs);
+  }
+}
+
 bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
                                 uint32_t packetSequence) {
   size_t index;
@@ -81,6 +103,7 @@ bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
 
   serialTracef(LogLevel::DEBUG, "%.2fg, t=%.2fs, expected end=%.2fs",
                weight, shot.timeS[index], shot.expectedEndS);
+  maybeLatchFirstFlowFromAcceptedWeight(weight, receivedAtMs);
   return true;
 }
 
@@ -89,46 +112,26 @@ void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
   if (!session.active || !session.startedWithScale || session.firstDropMs != 0) {
     return;
   }
-  if (session.awaitingPostTareBaseline) {
-    if (fabsf(weight) <= POST_TARE_BASELINE_MAX_ABS_G) {
-      session.scaleBaselineG = weight;
-      session.scaleBaselineReady = true;
-    }
-    return;
-  }
   if (!session.scaleBaselineReady) {
-    if (fabsf(weight) > POST_TARE_BASELINE_MAX_ABS_G) {
+    if (fabsf(weight) > FIRST_DROP_BASELINE_SETTLE_G) {
       return;
     }
     session.scaleBaselineG = weight;
     session.scaleBaselineReady = true;
     return;
   }
-  const float deltaFromBaseline = weight - session.scaleBaselineG;
-  if (deltaFromBaseline < FIRST_DROP_THRESHOLD_G) {
-    session.firstDropConfirmations = 0;
-    return;
-  }
-  const float firstDropMaxWeightG =
-      static_cast<float>(session.config.goalWeightG) * 0.5f;
-  if (weight >= firstDropMaxWeightG) {
-    session.firstDropConfirmations = 0;
-    return;
+  if (fabsf(weight) < FIRST_DROP_THRESHOLD_G &&
+      fabsf(weight) <= FIRST_DROP_BASELINE_SETTLE_G) {
+    session.scaleBaselineG = weight;
   }
 
-  const bool consecutive =
-      session.firstDropConfirmations > 0 &&
-      packetSequence == session.firstDropLastPacketSequence + 1U &&
-      static_cast<int32_t>(receivedAtMs - session.firstDropLastAtMs) >= 0 &&
-      static_cast<uint32_t>(receivedAtMs - session.firstDropLastAtMs) <=
-          DIRECT_STOP_CONFIRMATION_WINDOW_MS;
-  session.firstDropConfirmations =
-      consecutive ? static_cast<uint8_t>(session.firstDropConfirmations + 1U)
-                  : 1U;
-  session.firstDropLastAtMs = receivedAtMs;
-  session.firstDropLastPacketSequence = packetSequence;
-
-  if (session.firstDropConfirmations >= FIRST_DROP_CONFIRMATION_SAMPLES) {
-    onFirstDropsDetected(receivedAtMs);
+  const FirstFlowClass classified =
+      stepFirstFlow(session.firstFlow, weight, receivedAtMs, packetSequence,
+                    session.scaleBaselineG);
+  if (classified == FirstFlowClass::FIRE) {
+    const uint32_t detectedAtMs = session.firstFlow.candidateMs != 0
+                                      ? session.firstFlow.candidateMs
+                                      : receivedAtMs;
+    onFirstDropsDetected(detectedAtMs);
   }
 }

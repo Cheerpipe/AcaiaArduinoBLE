@@ -2002,6 +2002,7 @@ if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
     !firmware.includes('retareFlowFirstDetectedAtMs') ||
     !firmware.includes('bbwProtectionActive') ||
     !firmware.includes('classifyAccidentalTouch') ||
+    !firmware.includes('stepFirstFlow') ||
     !firmware.includes('accidentalTouchHolding') ||
     !firmware.includes('retareWindowOpen') ||
     !firmware.includes('scale.supportsTareStartTimer()') ||

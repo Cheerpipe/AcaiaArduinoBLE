@@ -237,9 +237,8 @@ struct CycleSession {
   bool retarePerformed = false;
   bool retareDisabled = false;
   bool firstDropsBeepSent = false;
-  uint8_t firstDropConfirmations = 0;
-  uint32_t firstDropLastAtMs = 0;
-  uint32_t firstDropLastPacketSequence = 0;
+  FirstFlowState firstFlow = {};
+  uint8_t firstFlowAcceptedConfirmations = 0;
   ControlSource source = ControlSource::NONE;
   CycleConfigSnapshot config = {};
   EndReason endReason = EndReason::NONE;
@@ -3451,6 +3450,7 @@ void processScaleWorkerEvents() {
               session.startedWithScale && session.active &&
               stopperState == StopperState::BREW) {
             armPostTareBaselineWindow();
+            markTareZeroReady();
           }
         }
         emitCommandAlert(event.usedCombinedTareStart ? AlertEvent::TARE_START
@@ -3470,11 +3470,7 @@ void processScaleWorkerEvents() {
             session.startedWithScale && session.active &&
             stopperState == StopperState::BREW) {
           armPostTareBaselineWindow();
-          session.scaleBaselineReady = false;
-          session.scaleBaselineG = 0.0f;
-          session.firstDropConfirmations = 0;
-          session.firstDropLastAtMs = 0;
-          session.firstDropLastPacketSequence = 0;
+          markTareZeroReady();
           resetDirectStopConfirmation();
         }
         emitCommandAlert(AlertEvent::TARE, event.commandAttempted,
@@ -3596,6 +3592,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   if (session.startedWithScale) {
     if (session.config.autoTare) {
       armPostTareBaselineWindow();
+      markTareZeroReady();
     } else {
       session.hasWeightAnchor = true;
       session.lastAcceptedWeightG = currentWeight;

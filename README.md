@@ -211,7 +211,7 @@ panel and persisted in **NVS** (`Preferences`, dual slots `settingsA` /
 | **Slow extraction guard** | **On by default**. See [Slow extraction guard](#slow-extraction-guard). |
 | **Auto-to-manual time guard** | **On by default**. See [Auto-to-manual time guard](#auto-to-manual-time-guard). |
 | **Automatic tare** | Send an initial tare when an automatic shot starts (default ON). |
-| **Post-tare grace (s)** | Machine-level (**Settings → Machine and scale → Tare**). After a tare (start or late-cup retare), wait this long for the scale to report ~0 g before using weight for first drop and stop. Default **2 s**; 0.5–10 s. Inactive when Automatic tare is off. |
+| **Post-tare grace (s)** | Machine-level (**Settings → Machine and scale → Tare**). After a tare (start or late-cup retare), wait this long for the scale to report ~0 g before using weight for **stop/control**. Default **2 s**; 0.5–10 s. Inactive when Automatic tare is off. First-drop / first-flow detection runs against the tare zero even while this window is open. |
 | **Brew by weight** | **On by default**. Stop the shot by scale weight. Off keeps tare/timer but disables weight stop, BBW protection, automatic retare, and offset learning (same as the former Timer only setting). |
 | **Bookoo combined command** | Use the scale’s combined tare + start-timer command (requires auto tare; default ON). |
 | **Mute scale in Buzzer only** | Bookoo/generic: when enabled (default ON), send silence (volume 0) on connect/reconnect, when Output channel is saved as Buzzer only, and when this option is turned on. Applies only in **Buzzer only**. |
