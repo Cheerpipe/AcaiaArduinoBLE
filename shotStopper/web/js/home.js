@@ -11,7 +11,6 @@ export function init(){
   $('virtualPaddle').onchange=()=>R.command('/api/v1/control/paddle',{on:$('virtualPaddle').checked});
   $('rinseButton').onclick=()=>R.command('/api/v1/control/rinse');
   $('stopButton').onclick=()=>R.command('/api/v1/control/stop');
-  $('clearLastShotButton').onclick=R.clearLastShot;
   if($('homeBrewByWeight'))$('homeBrewByWeight').onchange=R.persistHomeBrewByWeight;
   if($('homeAvoidBbwShotWithoutScale'))$('homeAvoidBbwShotWithoutScale').onchange=()=>R.persistHomeGuard('homeAvoidBbwShotWithoutScale','homeAvoidBbwShotWithoutScaleState','avoidBbwShotWithoutScale',0);
   if($('homeFastExtractionGuardEnabled'))$('homeFastExtractionGuardEnabled').onchange=()=>R.persistHomeGuard('homeFastExtractionGuardEnabled','homeFastExtractionGuardEnabledState','fastExtractionGuardEnabled',1);

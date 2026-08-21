@@ -1031,12 +1031,9 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('function persistHomeBrewByWeight(') ||
     !ui.includes("onchange=R.persistHomeBrewByWeight") ||
     !ui.includes('beginHomeSwitchPending(h,on)') ||
-    !ui.includes('id="clearLastShotButton"') ||
-    html.indexOf('id="shotPanel"') > html.indexOf('id="clearLastShotButton"') ||
+    ui.includes('id="clearLastShotButton"') ||
     html.includes('id="lastCycle"') ||
     !ui.includes('function renderShotPanel(') ||
-    !ui.includes("confirm:'CLEAR_LAST_SHOT'") ||
-    !ui.includes('/api/v1/last-shot/clear') ||
     !network.includes('\\"lastShot\\"') ||
     !network.includes('lastShotClearHandler') ||
     !network.includes('LAST_SHOT_CLEAR_NOT_CONFIRMED') ||
@@ -1788,9 +1785,11 @@ for (const [route, handler] of expected) {
     const browserIcon = uri === '/favicon.ico' ||
         uri === '/apple-touch-icon.png' ||
         uri === '/apple-touch-icon-precomposed.png';
+    const lastShotClear = uri === '/api/v1/last-shot/clear';
     if (!(statusPage && ui.includes('function statusUrl(') && ui.includes('/api/v1/status/')) &&
         !(lazyAsset && (ui.includes('/partials/') || ui.includes('/js/'))) &&
-        !browserIcon) {
+        !browserIcon &&
+        !lastShotClear) {
       throw new Error(`Registered API is not referenced by the UI: ${uri}`);
     }
   }
