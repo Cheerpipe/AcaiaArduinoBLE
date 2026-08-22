@@ -26,6 +26,7 @@ const shotLogIo = fs.readFileSync(path.join(sketchDir, 'ShotStopperShotLog.h'), 
 const shotCurveIo = fs.readFileSync(path.join(sketchDir, 'ShotStopperShotCurve.h'), 'utf8');
 const lastShotIo = fs.readFileSync(path.join(sketchDir, 'ShotStopperLastShot.h'), 'utf8');
 const jsonArena = fs.readFileSync(path.join(sketchDir, 'ShotStopperJsonArena.h'), 'utf8');
+const wallClock = fs.readFileSync(path.join(sketchDir, 'ShotStopperTime.h'), 'utf8');
 const domainCore = fs.readFileSync(path.join(sketchDir, 'ShotStopperDomain.h'), 'utf8');
 const domain = [
   domainCore,
@@ -1192,6 +1193,12 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !firmware.includes('clearLastShot') ||
     !firmware.includes('clearLastShotSnapshot') ||
     !firmware.includes('serviceShotStorePersistence') ||
+    !firmwareCore.includes('shotLogPersistFailLatched') ||
+    !firmwareCore.includes('noteScaleHistory(seenMac, seenName, false)') ||
+    !firmwareCore.includes('constexpr uint32_t kTryLockMs = 0') ||
+    wallClock.includes('monotonicMs >= anchorMonotonicMs_') ||
+    !wallClock.includes('monotonicElapsedMs(monotonicMs, anchorMonotonicMs_)') ||
+    !network.includes('StaJoinHints ShotStopperNetwork::staJoinHints()') ||
     !shotLogIo.includes('copyToFlashIoScratch(&store_') ||
     !shotCurveIo.includes('copyToFlashIoScratch(&store_') ||
     !lastShotIo.includes('copyToFlashIoScratch(&blob_') ||
@@ -3153,6 +3160,10 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
     if (!networkFn.includes('requireAdminUnlock(request)') ||
         !networkFn.includes('strcmp(action, "confirm") != 0')) {
       throw new Error('Network save/forget must require admin unlock; confirm may stay ungated');
+    }
+    if (networkFn.includes('settingsCopy()')) {
+      throw new Error(
+          'networkHandler must not return PersistedSettings by value on the httpd stack');
     }
   }
   if ((statusFormat.match(/\\"adminUnlocked\\":%s/g) || []).length < 2) {

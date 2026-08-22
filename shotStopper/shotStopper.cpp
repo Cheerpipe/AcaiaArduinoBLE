@@ -83,6 +83,7 @@ static inline uint32_t BLEHostAllocFallbackCount(void) { return 0; }
 constexpr uint32_t SCALE_CONNECT_RETRY_MS = 1000;
 constexpr uint32_t SCALE_CONNECT_RETRY_MAX_MS = 10000;
 constexpr uint32_t SCALE_CONNECT_LOG_MS = 10000;
+constexpr uint32_t SCALE_PACKET_GAP_LOG_MIN_MS = 1000;
 constexpr uint32_t SCALE_DISCOVERY_TICK_MS = 3000;
 constexpr uint32_t SCALE_SCAN_HCI_RESTART_MS = 60000;
 constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;
@@ -360,6 +361,8 @@ ShotCurveRecord lastShotCurve = emptyShotCurveRecord();
 LastShotStore lastShotStore;
 PersistedLastShot persistedLastShot;
 bool lastShotNvsDirty = false;
+bool shotLogPersistFailLatched = false;
+bool shotCurvePersistFailLatched = false;
 
 bool noScaleShotGuardArmed = true;
 uint32_t noScaleShotGuardActivityAtMs = 0;
@@ -399,6 +402,7 @@ uint32_t scaleDisconnectSequence = 0;
 uint32_t scaleConnectionGeneration = 0;
 uint32_t scalePacketSequence = 0;
 uint32_t scalePacketGaps = 0;
+uint32_t lastScalePacketGapLogMs = 0;
 uint32_t scaleRejectedPackets = 0;
 uint32_t scaleReconnects = 0;
 uint8_t scaleLastDisconnectReason = 0;
@@ -1961,8 +1965,14 @@ bool publishScaleEvent(const ScaleEvent &event, bool critical) {
       portENTER_CRITICAL(&scaleLinkMux);
       ++scalePacketGaps;
       portEXIT_CRITICAL(&scaleLinkMux);
-      addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_PACKET_GAP,
-                    static_cast<int32_t>(stamped.packetSequence));
+      const uint32_t nowMs = millis();
+      if (lastScalePacketGapLogMs == 0 ||
+          static_cast<uint32_t>(nowMs - lastScalePacketGapLogMs) >=
+              SCALE_PACKET_GAP_LOG_MIN_MS) {
+        lastScalePacketGapLogMs = nowMs;
+        addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_PACKET_GAP,
+                      static_cast<int32_t>(stamped.packetSequence));
+      }
     }
     return true;
   }
@@ -2699,21 +2709,20 @@ void syncCompanionAdvertisingForScaleLink() {
 #endif
 }
 
-void noteScaleHistory(const char *mac, const char *name) {
+void noteScaleHistory(const char *mac, const char *name, bool persist) {
   if (mac == nullptr || !validPreferredScaleMac(mac) || mac[0] == '\0') {
     return;
   }
-  bool changed = false;
   portENTER_CRITICAL(&scalePreferredMacMux);
-  changed = upsertScaleHistory(scaleHistory, scaleHistorySeq, mac, name);
-  if (changed) {
+  (void)upsertScaleHistory(scaleHistory, scaleHistorySeq, mac, name);
+  if (persist) {
     scalePreferredMacDirty = true;
   }
   portEXIT_CRITICAL(&scalePreferredMacMux);
 }
 
 void notePreferredScale(const char *mac, const char *name) {
-  noteScaleHistory(mac, name);
+  noteScaleHistory(mac, name, true);
   const ScaleMacCacheMode cacheMode = currentScaleMacCacheMode();
   // FIRST: never auto-write preferred. PREFER/ONLY: refresh name only when the
   // connected MAC already matches the user-selected preferred (never auto-fill
@@ -2821,7 +2830,7 @@ void selectPreferredScale(const char *mac, const char *name) {
                          sizeof(resolvedName));
     portEXIT_CRITICAL(&scalePreferredMacMux);
   }
-  noteScaleHistory(canonicalMac, resolvedName);
+  noteScaleHistory(canonicalMac, resolvedName, true);
   portENTER_CRITICAL(&scalePreferredMacMux);
   memcpy(scalePreferredMac, canonicalMac, sizeof(scalePreferredMac));
   copyCString(scalePreferredName, sizeof(scalePreferredName), resolvedName);
@@ -2998,7 +3007,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     bool sawCompatibleAd = false;
     if (scale.takeSeenAdvertisement(seenMac, sizeof(seenMac), seenName,
                                     sizeof(seenName))) {
-      noteScaleHistory(seenMac, seenName);
+      noteScaleHistory(seenMac, seenName, false);
       sawCompatibleAd = true;
       scanLastAdvertAtMs = millis();
     }
@@ -4317,16 +4326,29 @@ void serviceShotStorePersistence() {
   if (session.active || getRelaySafetySnapshot().closed) {
     return;
   }
-  if (shotLog.dirty() && !shotLog.flush()) {
-    addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
-                  static_cast<int32_t>(shotLog.count()), 0);
+  // Do not wait on the durable flash mutex from the 1 ms control loop: a
+  // 50 ms take while settings_persist holds the lock stalls pala/weight and
+  // can spam SHOT_LOG_PERSIST_FAILED into the 96-event ring.
+  constexpr uint32_t kTryLockMs = 0;
+  if (shotLog.dirty()) {
+    if (shotLog.flush(kTryLockMs)) {
+      shotLogPersistFailLatched = false;
+    } else if (!shotLogPersistFailLatched) {
+      shotLogPersistFailLatched = true;
+      addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
+                    static_cast<int32_t>(shotLog.count()), 0);
+    }
   }
-  if (shotCurves.dirty() && !shotCurves.flush()) {
-    addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
-                  static_cast<int32_t>(shotCurves.count()), 1);
+  if (shotCurves.dirty()) {
+    if (shotCurves.flush(kTryLockMs)) {
+      shotCurvePersistFailLatched = false;
+    } else if (!shotCurvePersistFailLatched) {
+      shotCurvePersistFailLatched = true;
+      addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
+                    static_cast<int32_t>(shotCurves.count()), 1);
+    }
   }
-  if (lastShotNvsDirty &&
-      lastShotStore.save(FLASH_IO_CONTROL_LOCK_TIMEOUT_MS)) {
+  if (lastShotNvsDirty && lastShotStore.save(kTryLockMs)) {
     lastShotNvsDirty = false;
   }
 }

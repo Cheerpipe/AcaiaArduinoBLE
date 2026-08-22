@@ -48,6 +48,15 @@ struct WifiScanSnapshot {
   WifiScanNetwork networks[MAX_WIFI_SCAN_RESULTS] = {};
 };
 
+// Fields httpd needs from persisted STA config. Do not return PersistedSettings
+// by value on the 8 KiB httpd stack.
+struct StaJoinHints {
+  bool staConfigured = false;
+  bool staOpen = false;
+  uint8_t staConfigState = 0;
+  char staSsid[WIFI_SSID_CAPACITY] = {};
+};
+
 struct NetworkStatusSnapshot {
   bool networkActive = false;
   bool apActive = false;
@@ -157,6 +166,7 @@ class ShotStopperNetwork {
                        const ShotPresetBank *presets);
   void syncDurableStorageRevision(uint32_t storageRevision);
   PersistedSettings settingsCopy();
+  StaJoinHints staJoinHints();
 
   private:
   void mergePreferredScaleMac(PersistedSettings &settings);

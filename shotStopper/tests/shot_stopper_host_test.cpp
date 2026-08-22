@@ -111,7 +111,10 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   lastCycle = LastCycleSummary{};
   persistedLastShot = PersistedLastShot{};
   lastShotNvsDirty = false;
+  shotLogPersistFailLatched = false;
+  shotCurvePersistFailLatched = false;
   lastShotStore.clear();
+  g_hostFlashIoMutexAvailable = true;
   shotCurveSampler.reset(0);
   lastShotCurve = emptyShotCurveRecord();
   ShotCurveLog::resetHostStorage();
@@ -179,6 +182,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scaleConnectionGeneration = 0;
   scalePacketSequence = 0;
   scalePacketGaps = 0;
+  lastScalePacketGapLogMs = 0;
   scaleRejectedPackets = 0;
   scaleReconnects = 0;
   scaleLastDisconnectReason = 0;
@@ -3984,6 +3988,49 @@ void d09_first_mode_connects_seen_advertisement() {
   CHECK(scalePreferredMac[0] == '\0');
 }
 
+void d12_advertisement_history_does_not_dirty_persist() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
+  scalePreferredMac[0] = '\0';
+  memset(scaleHistory, 0, sizeof(scaleHistory));
+  scaleHistorySeq = 0;
+  scalePreferredMacDirty = false;
+  hostMillis = SCALE_CONNECT_RETRY_MS;
+  uint32_t lastScanCycleMs = 0;
+  uint32_t lastConnectLogMs = 0;
+  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
+  bool connectAttemptSeriesActive = false;
+  uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  strncpy(scale.seenMac, "AA:BB:CC:DD:EE:01", sizeof(scale.seenMac) - 1);
+  strncpy(scale.seenName, "LUNAR", sizeof(scale.seenName) - 1);
+  scale.seenPending = true;
+  scale.pollScanConnects = false;
+  hostMillis += SCALE_DISCOVERY_TICK_MS;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(preferredScaleMacEqual(scaleHistory[0].mac, "AA:BB:CC:DD:EE:01"));
+  CHECK(!scalePreferredMacDirty);
+
+  scale.pollScanConnects = true;
+  scale.pollScanStepsToConnect = 1;
+  strncpy(scale.seenMac, "AA:BB:CC:DD:EE:01", sizeof(scale.seenMac) - 1);
+  strncpy(scale.seenName, "LUNAR", sizeof(scale.seenName) - 1);
+  scale.seenPending = true;
+  hostMillis += SCALE_DISCOVERY_TICK_MS;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.connected);
+  CHECK(scalePreferredMacDirty);
+}
+
 void d10_companion_pauses_while_scale_disconnected() {
   resetHarness(false, false);
   reachReadyFromBoot();
@@ -4575,10 +4622,21 @@ void r33_weight_mailbox_keeps_latest_and_reports_gap() {
   ScaleEvent latest = first;
   latest.weightG = 2.0f;
   CHECK(publishScaleEvent(first, false));
+  debugLog.clear();
   CHECK(publishScaleEvent(latest, false));
   CHECK(scalePacketGaps == 1);
+  CHECK(debugEventExists(DebugCode::SCALE_PACKET_GAP));
+  debugLog.clear();
+  latest.weightG = 3.0f;
+  CHECK(publishScaleEvent(latest, false));
+  CHECK(scalePacketGaps == 2);
+  CHECK(!debugEventExists(DebugCode::SCALE_PACKET_GAP));
+  hostMillis += SCALE_PACKET_GAP_LOG_MIN_MS;
+  latest.weightG = 4.0f;
+  CHECK(publishScaleEvent(latest, false));
+  CHECK(debugEventExists(DebugCode::SCALE_PACKET_GAP));
   processScaleWorkerEvents();
-  CHECK(observedWeight == 2.0f);
+  CHECK(observedWeight == 4.0f);
 }
 
 void r34_suspended_control_recovers_after_three_attributed_samples() {
@@ -6134,6 +6192,27 @@ void n01_wall_clock_tracks_utc_from_anchor() {
   CHECK(g_wallClock.nowUtcSec(6000) == 1'700'000'005U);
 }
 
+void n01b_wall_clock_survives_millis_wrap() {
+  g_wallClock.reset();
+  g_wallClock.setSyncing("pool.ntp.org", 1000);
+  g_wallClock.queueSyncFromCallback(1'700'000'000U);
+  CHECK(g_wallClock.applyPendingSync(1000));
+  constexpr uint32_t afterWrap = 50;
+  const uint32_t elapsedMs = static_cast<uint32_t>(afterWrap - 1000U);
+  CHECK(g_wallClock.nowUtcSec(afterWrap) ==
+        1'700'000'000U + elapsedMs / 1000U);
+  CHECK(g_wallClock.synced());
+  const TimeStatusSnapshot snap = g_wallClock.snapshot(afterWrap);
+  CHECK(snap.utcSec == 1'700'000'000U + elapsedMs / 1000U);
+  CHECK(snap.lastSyncAgeMs == elapsedMs);
+  CHECK(snap.state == TimeSyncState::STALE);
+
+  g_wallClock.reset();
+  g_wallClock.markFailed(UINT32_MAX - 1000U, 5);
+  CHECK(g_wallClock.snapshot(UINT32_MAX - 500U).nextRetryInMs == 14500U);
+  CHECK(g_wallClock.snapshot(100U).nextRetryInMs == 13899U);
+}
+
 void n02_ntp_hostname_validation() {
   CHECK(validNtpHostname("pool.ntp.org"));
   CHECK(validNtpHostname("time.google.com"));
@@ -6899,6 +6978,28 @@ void s13_persist_debug_messages_identify_origin() {
   CHECK(formatPersistDebugMessage(runtimeEvent, message, sizeof(message)));
   CHECK(strstr(message, "A->M samples+offset") != nullptr);
   CHECK(strlen(message) < sizeof(message));
+}
+
+void s19_shot_store_persist_failure_logs_once_until_success() {
+  resetHarness(false, true);
+  ShotLogRecord record = {};
+  record.durationDs = 120;
+  record.bootId = shotLog.bootId();
+  CHECK(shotLog.append(record, false));
+  CHECK(shotLog.dirty());
+  g_hostFlashIoMutexAvailable = false;
+  debugLog.clear();
+  serviceShotStorePersistence();
+  CHECK(debugEventExists(DebugCode::SHOT_LOG_PERSIST_FAILED,
+                         static_cast<int32_t>(shotLog.count()), 0));
+  CHECK(shotLog.dirty());
+  debugLog.clear();
+  serviceShotStorePersistence();
+  CHECK(!debugEventExists(DebugCode::SHOT_LOG_PERSIST_FAILED));
+  g_hostFlashIoMutexAvailable = true;
+  serviceShotStorePersistence();
+  CHECK(!shotLog.dirty());
+  CHECK(!shotLogPersistFailLatched);
 }
 
 void h01_health_threshold_alerts_fire_once_per_crossing() {
@@ -8686,6 +8787,7 @@ const TestCase testCases[] = {
     {"D07", d07_prefer_falls_back_after_grace},
     {"D08", d08_select_none_clears_without_pause},
     {"D09", d09_first_mode_connects_seen_advertisement},
+    {"D12", d12_advertisement_history_does_not_dirty_persist},
     {"D10", d10_companion_pauses_while_scale_disconnected},
     {"D11", d11_select_preferred_is_noop_when_unchanged},
     {"S01", s01_shot_log_filters_short_and_rinse},
@@ -8711,9 +8813,11 @@ const TestCase testCases[] = {
     {"S08", s08_shot_log_without_sync_has_no_wall_time},
     {"S11", s11_shot_log_record_stays_fixed_size},
     {"S13", s13_persist_debug_messages_identify_origin},
+    {"S19", s19_shot_store_persist_failure_logs_once_until_success},
     {"H01", h01_health_threshold_alerts_fire_once_per_crossing},
     {"H02", h02_hwmon_cpu_load_uses_idle_and_ema},
     {"N01", n01_wall_clock_tracks_utc_from_anchor},
+    {"N01b", n01b_wall_clock_survives_millis_wrap},
     {"N02", n02_ntp_hostname_validation},
     {"N03", n03_unsynced_retry_is_fifteen_seconds},
     {"N04", n04_brew_start_requests_ntp_when_unsynced},

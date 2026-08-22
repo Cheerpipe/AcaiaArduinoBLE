@@ -930,6 +930,17 @@ PersistedSettings ShotStopperNetwork::settingsCopy() {
   return copy;
 }
 
+StaJoinHints ShotStopperNetwork::staJoinHints() {
+  StaJoinHints hints;
+  portENTER_CRITICAL(&dataMux_);
+  hints.staConfigured = settings_.staConfigured;
+  hints.staOpen = settings_.staOpen;
+  hints.staConfigState = settings_.staConfigState;
+  memcpy(hints.staSsid, settings_.staSsid, sizeof(hints.staSsid));
+  portEXIT_CRITICAL(&dataMux_);
+  return hints;
+}
+
 void ShotStopperNetwork::mergePreferredScaleMac(PersistedSettings &settings) {
   if (callbacks_.copyPreferredScaleMac != nullptr) {
     callbacks_.copyPreferredScaleMac(settings.preferredScaleMac,
@@ -4945,7 +4956,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   if (self.callbacks_.copyPresetBank != nullptr) {
     self.callbacks_.copyPresetBank(&livePresets);
   } else {
-    livePresets = self.settingsCopy().presets;
+    portENTER_CRITICAL(&self.dataMux_);
+    livePresets = self.settings_.presets;
+    portEXIT_CRITICAL(&self.dataMux_);
   }
   const RuntimeConfig effective =
       composeEffectiveConfig(candidate, livePresets);
@@ -5444,11 +5457,11 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
     if (!parsed) {
       networkError = "Confirm request must include only action=\"confirm\".";
     } else {
-      const PersistedSettings settings = self.settingsCopy();
+      const StaJoinHints sta = self.staJoinHints();
       const NetworkStatusSnapshot network = self.snapshot();
-      if (settings.staConfigState !=
+      if (sta.staConfigState !=
               static_cast<uint8_t>(StaConfigState::PENDING) ||
-          !settings.staConfigured || network.apActive ||
+          !sta.staConfigured || network.apActive ||
           network.staState != StaState::CONNECTED) {
         parsed = false;
         networkError = "No pending network configuration to confirm.";
@@ -5547,16 +5560,16 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
       parsed = false;
       networkError = "SSID must be 1–32 characters.";
     } else if (parsed) {
-      const PersistedSettings settings = self.settingsCopy();
+      const StaJoinHints sta = self.staJoinHints();
       const bool reusePassword = shouldReuseSavedWifiCredentials(
           command.ssid, command.password, command.openNetwork,
-          settings.staConfigured, settings.staSsid, settings.staOpen);
+          sta.staConfigured, sta.staSsid, sta.staOpen);
       if (!reusePassword &&
           !validWifiPassword(command.password, command.openNetwork)) {
         parsed = false;
         networkError = command.openNetwork
                            ? "Open network password must be empty."
-                           : (settings.staConfigured
+                           : (sta.staConfigured
                                   ? "Wi-Fi password must be 8–63 characters, "
                                     "or empty to keep the saved password."
                                   : "Wi-Fi password must be 8–63 characters for a "

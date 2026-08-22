@@ -58,6 +58,18 @@ inline uint32_t ntpRetryDelayMs(uint8_t /*consecutiveFailures*/) {
   return NTP_UNSYNCED_RETRY_MS;
 }
 
+// millis() wraps at ~49.7 d. Unsigned subtraction is the wrap-safe elapsed.
+// Remaining-until-deadline uses int32 so intervals stay < ~24.8 d (NTP retry
+// is 15 s; stale/resync are 24 h / 1 h).
+inline uint32_t monotonicElapsedMs(uint32_t nowMs, uint32_t thenMs) {
+  return nowMs - thenMs;
+}
+
+inline uint32_t monotonicRemainingMs(uint32_t deadlineMs, uint32_t nowMs) {
+  const int32_t remaining = static_cast<int32_t>(deadlineMs - nowMs);
+  return remaining > 0 ? static_cast<uint32_t>(remaining) : 0U;
+}
+
 class WallClock {
  public:
   void reset(TimeSyncState state = TimeSyncState::OFF) {
@@ -186,9 +198,9 @@ class WallClock {
     portENTER_CRITICAL(&mux_);
 #endif
     uint32_t utcSec = 0;
-    if (state_ == TimeSyncState::SYNCED && anchorUtcSec_ >= 1000000000U &&
-        monotonicMs >= anchorMonotonicMs_) {
-      utcSec = anchorUtcSec_ + (monotonicMs - anchorMonotonicMs_) / 1000U;
+    if (state_ == TimeSyncState::SYNCED && anchorUtcSec_ >= 1000000000U) {
+      utcSec = anchorUtcSec_ +
+               monotonicElapsedMs(monotonicMs, anchorMonotonicMs_) / 1000U;
     }
 #if !defined(SHOT_STOPPER_HOST_TEST) && \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
@@ -204,20 +216,19 @@ class WallClock {
     portENTER_CRITICAL(&mux_);
 #endif
     output.state = state_;
-    if (state_ == TimeSyncState::SYNCED && anchorUtcSec_ >= 1000000000U &&
-        monotonicMs >= anchorMonotonicMs_) {
-      output.utcSec =
-          anchorUtcSec_ + (monotonicMs - anchorMonotonicMs_) / 1000U;
-      if (lastSyncMonotonicMs_ <= monotonicMs) {
-        output.lastSyncAgeMs = monotonicMs - lastSyncMonotonicMs_;
-      }
+    if (state_ == TimeSyncState::SYNCED && anchorUtcSec_ >= 1000000000U) {
+      output.utcSec = anchorUtcSec_ +
+                      monotonicElapsedMs(monotonicMs, anchorMonotonicMs_) /
+                          1000U;
+      output.lastSyncAgeMs =
+          monotonicElapsedMs(monotonicMs, lastSyncMonotonicMs_);
       if (output.lastSyncAgeMs > NTP_STALE_AFTER_MS) {
         output.state = TimeSyncState::STALE;
       }
     }
     output.consecutiveFailures = consecutiveFailures_;
-    if (nextRetryAtMs_ > monotonicMs) {
-      output.nextRetryInMs = nextRetryAtMs_ - monotonicMs;
+    if (nextRetryAtMs_ != 0) {
+      output.nextRetryInMs = monotonicRemainingMs(nextRetryAtMs_, monotonicMs);
     }
     strncpy(output.activeServer, activeServer_, sizeof(output.activeServer) - 1);
     output.activeServer[sizeof(output.activeServer) - 1] = '\0';
