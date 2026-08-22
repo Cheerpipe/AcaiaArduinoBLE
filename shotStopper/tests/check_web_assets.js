@@ -96,6 +96,13 @@ if (network.includes('ControlStatusSnapshot status;') ||
   throw new Error(
       'Network/httpd gate checks must copy ControlGateSnapshot, not a stack ControlStatusSnapshot');
 }
+if (network.includes('composeEffectiveConfig(candidate, status.presets)') ||
+    network.includes('status.presets') ||
+    !network.includes('self.callbacks_.copyPresetBank(&livePresets)') ||
+    !network.includes('composeEffectiveConfig(candidate, livePresets)')) {
+  throw new Error(
+      'configHandler must composeEffectiveConfig against copyPresetBank, not ControlGateSnapshot.presets');
+}
 if (!flashIoScratch.includes('inline void feedFlashIoWatchdog()') ||
     !flashIoScratch.includes('esp_task_wdt_status(nullptr) == ESP_OK') ||
     !flashIoScratch.includes('(void)esp_task_wdt_reset()')) {

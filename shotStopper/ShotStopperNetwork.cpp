@@ -558,6 +558,9 @@ esp_err_t sendCopiedBody(httpd_req_t *request, const void *data,
 }
 
 esp_err_t sendJsonStringChunk(httpd_req_t *request, const char *value) {
+  if (value == nullptr) {
+    value = "";
+  }
   if (httpd_resp_send_chunk(request, "\"", 1) != ESP_OK) {
     return ESP_FAIL;
   }
@@ -4936,8 +4939,16 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   candidate.soundAlertsMuted = !soundAlertsEnabled;
   memcpy(candidate.ntpServerCustom, customNtp, sizeof(candidate.ntpServerCustom));
   memset(customNtp, 0, sizeof(customNtp));
+  // ControlGateSnapshot is gate-only (no recipe bank). Validate the patched
+  // machine config against the live preset overlay, same as APPLY_CONFIG.
+  ShotPresetBank livePresets = {};
+  if (self.callbacks_.copyPresetBank != nullptr) {
+    self.callbacks_.copyPresetBank(&livePresets);
+  } else {
+    livePresets = self.settingsCopy().presets;
+  }
   const RuntimeConfig effective =
-      composeEffectiveConfig(candidate, status.presets);
+      composeEffectiveConfig(candidate, livePresets);
   const ConfigValidationError error = validateRuntimeConfig(effective);
   if (error != ConfigValidationError::NONE) {
     self.log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED,

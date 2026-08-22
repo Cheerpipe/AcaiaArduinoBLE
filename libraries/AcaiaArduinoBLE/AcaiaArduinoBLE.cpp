@@ -118,6 +118,10 @@ bool macAddressEqual(const char *left, const char *right) {
 
 float decimalDivisor(byte exponent) {
     static const float divisors[] = {1.0f, 10.0f, 100.0f, 1000.0f, 10000.0f};
+    const size_t count = sizeof(divisors) / sizeof(divisors[0]);
+    if (exponent >= count) {
+        return 1.0f;
+    }
     return divisors[exponent];
 }
 
