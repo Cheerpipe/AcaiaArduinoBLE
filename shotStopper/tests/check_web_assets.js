@@ -2918,6 +2918,13 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
       !html.includes('id="adminUnlockButton"') ||
       !html.includes('Unlock administration') ||
       !html.includes('id="adminControls"') ||
+      !html.includes('15 minutes while this Admin page is open') ||
+      !html.includes('this window will confirm automatically') ||
+      html.includes('unlock to confirm') ||
+      js.includes('Unlock to confirm') ||
+      js.includes('unlock to confirm') ||
+      !js.includes('function lockAdminUi()') ||
+      !js.includes('stopViewPolls();lockAdminUi();setMutable(false)') ||
       !js.includes('/api/v1/admin/unlock') ||
       !js.includes("closest('#adminLockPanel')") ||
       !network.includes('/api/v1/admin/unlock') ||

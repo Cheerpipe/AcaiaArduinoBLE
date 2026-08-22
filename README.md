@@ -167,7 +167,7 @@ need to change them after first setup.
 
 ## Admin
 
-The Admin page is locked until you enter the device password (**Unlock administration**). The unlock is temporary (15 minutes of activity on that window). USB serial does not ask for the password.
+The Admin page is locked until you enter the device password (**Unlock administration**). The unlock is temporary (15 minutes while the Admin page is open). USB serial does not ask for the password.
 
 | Group | What it covers |
 | --- | --- |
