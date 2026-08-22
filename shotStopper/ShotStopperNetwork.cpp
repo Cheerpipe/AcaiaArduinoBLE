@@ -2889,7 +2889,7 @@ bool ShotStopperNetwork::startHttpServer() {
   // makes the last registerHandler fail, which tears down the whole Web UI, so
   // check_web_assets.js fails the build before the margin is gone.
   // Shell + app.js/css/runtime + secondary + settings + 4 HTML partials + APIs.
-  config.max_uri_handlers = 56;
+  config.max_uri_handlers = 57;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
   // the IDF default (1024) is enough most of the time but intermittent
   // long browser headers have returned 431 Request Header Fields Too Large.
@@ -2962,6 +2962,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/network/scan", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/device/password", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/admin/unlock", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/admin/lock", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/admin/ble-compat", HTTP_PUT, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/ota", HTTP_GET, otaStatusHandler) &&
       registerHandler(server_, "/api/v1/ota", HTTP_POST, otaUploadHandler) &&
@@ -3277,6 +3278,18 @@ esp_err_t ShotStopperNetwork::adminUnlockHandler(httpd_req_t *request) {
   return sendJson(request, STATUS_OK, "{\"unlocked\":true}");
 }
 
+esp_err_t ShotStopperNetwork::adminLockHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  const esp_err_t bodyStatus =
+      self.lockJsonBody(request, "A JSON request is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
+  }
+  self.unlockJsonBody();
+  self.clearAdminUnlock();
+  return sendJson(request, STATUS_OK, "{\"unlocked\":false}");
+}
+
 bool ShotStopperNetwork::requireActiveWebUiClient(httpd_req_t *request) {
   char clientId[WEB_UI_CLIENT_ID_CAPACITY] = {};
   if (!readWebUiClientId(request, clientId, sizeof(clientId))) {
@@ -3333,6 +3346,7 @@ esp_err_t ShotStopperNetwork::ownedApiHandler(httpd_req_t *request) {
   if (apiUriMatches(request->uri, "/api/v1/network")) return networkHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/device/password")) return devicePasswordHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/admin/unlock")) return adminUnlockHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/admin/lock")) return adminLockHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/admin/ble-compat")) return bleCompatHandler(request);
   return sendError(request, STATUS_NOT_FOUND, "NOT_FOUND", "Unknown API route.");
 }
@@ -3626,7 +3640,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   bool adminUnlocked = false;
   if (page == StatusPage::Admin || page == StatusPage::Home) {
     adminUnlocked = self.adminUnlockAllowed(request);
-    if (adminUnlocked) {
+    if (adminUnlocked && page == StatusPage::Admin) {
       self.touchAdminUnlock();
     }
   }

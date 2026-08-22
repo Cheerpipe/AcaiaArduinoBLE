@@ -180,8 +180,8 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 45056) {
-  throw new Error('Web UI HTML source exceeds the 44 KiB authoring budget');
+if (htmlBytes > 46080) {
+  throw new Error('Web UI HTML source exceeds the 45 KiB authoring budget');
 }
 if (jsBytes > 110000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
@@ -1735,6 +1735,7 @@ const expected = new Map([
   ['GET /api/v1/network/scan', 'ownedApiHandler'],
   ['POST /api/v1/device/password', 'ownedApiHandler'],
   ['POST /api/v1/admin/unlock', 'ownedApiHandler'],
+  ['POST /api/v1/admin/lock', 'ownedApiHandler'],
   // OTA authenticates with the device password instead of the exclusive
   // WebUI claim, so a command line client can update firmware without stealing
   // control from an open browser window.
@@ -2921,16 +2922,28 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
       !html.includes('id="adminUnlockButton"') ||
       !html.includes('Unlock administration') ||
       !html.includes('id="adminControls"') ||
-      !html.includes('15 minutes while this Admin page is open') ||
+      !html.includes('15 minutes after the last privileged action') ||
+      !html.includes('Lock closes it now') ||
+      !html.includes('id="navAdminLock"') ||
+      !html.includes('id="adminLockButton"') ||
+      !html.includes('id="homeAdminLock"') ||
       !html.includes('this window will confirm automatically') ||
       html.includes('unlock to confirm') ||
       js.includes('Unlock to confirm') ||
       js.includes('unlock to confirm') ||
       !js.includes('function lockAdminUi()') ||
+      !js.includes('function lockAdmin()') ||
+      !js.includes("aria-expanded','false');clearTimeout(scanTimer);scanTimer=0;api('/api/v1/admin/lock'") ||
+      !js.includes('function syncAdminSessionUi(unlocked)') ||
       !js.includes('stopViewPolls();lockAdminUi();setMutable(false)') ||
       !js.includes('/api/v1/admin/unlock') ||
+      !js.includes('/api/v1/admin/lock') ||
       !js.includes("closest('#adminLockPanel')") ||
+      !css.includes('.navLock.hidden,.textLock.hidden{display:none}') ||
+      !css.includes('.textLock') ||
       !network.includes('/api/v1/admin/unlock') ||
+      !network.includes('/api/v1/admin/lock') ||
+      !network.includes('ShotStopperNetwork::adminLockHandler') ||
       !network.includes('ADMIN_LOCKED') ||
       !network.includes('ADMIN_UNLOCK_COOLDOWN') ||
       !network.includes('ADMIN_UNLOCK_IDLE_MS') ||
@@ -2975,10 +2988,25 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
     throw new Error('status/home and status/admin must report adminUnlocked');
   }
   if (!network.includes('page == StatusPage::Admin || page == StatusPage::Home') ||
+      !network.includes('adminUnlocked && page == StatusPage::Admin') ||
       !ui.includes("v==='home'?!!(typeof s.adminUnlocked==='boolean'") ||
-      !js.includes('updateHomeAdminActions(unlocked)') ||
-      !js.includes('updateHomeAdminActions(admin)')) {
+      !js.includes('function syncAdminSessionUi(unlocked)') ||
+      !js.includes('syncAdminSessionUi(admin)') ||
+      !js.includes('updateHomeAdminActions(on)')) {
     throw new Error('Home must report and honor adminUnlocked for the Actions panel');
+  }
+  if (!network.includes('if (adminUnlocked && page == StatusPage::Admin)') ||
+      /if \(adminUnlocked\) \{\s*self\.touchAdminUnlock\(\);/.test(network)) {
+    throw new Error('Home status must report adminUnlocked without sliding idle; Admin polls may renew');
+  }
+  {
+    const start = network.indexOf('ShotStopperNetwork::adminLockHandler');
+    const end = network.indexOf('bool ShotStopperNetwork::requireActiveWebUiClient');
+    const body = start >= 0 && end > start ? network.slice(start, end) : '';
+    if (!body.includes('clearAdminUnlock()') ||
+        body.includes('requireAdminUnlock')) {
+      throw new Error('Admin lock must clear unlock without requiring a still-valid unlock');
+    }
   }
   if (!statusFormat.includes('!adminUnlocked') ||
       !js.includes('s.adminUnlocked')) {

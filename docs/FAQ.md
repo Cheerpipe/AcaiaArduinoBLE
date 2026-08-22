@@ -34,6 +34,7 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 | **I lost Wi-Fi or the device password. How do I recover over USB?** | 115200 baud. `HELLO` replies `how are you` even if serial debug is off. `RESET_DEVICE_PASSWORD`, `CLEAR_WIFI`, or `FACTORY_RESET`. Destructive commands need paddle OFF. |
 | **No Web UI, Wi-Fi, BLE, or USB. How do I recover?** | [Emergency recovery with the paddle](EMERGENCY_RECOVERY.md). Power on with paddle ON: three cycles restore access; five do a factory reset. |
 | **Can I control the shot from my phone?** | Monitoring always. **Start shot**, **Start rinse**, and **Stop shot** need Admin unlock (device password) on that window. Start and rinse also need a build with `SHOT_STOPPER_ENABLE_REMOTE_CN9=1`. The physical paddle always wins. |
+| **How do I close Admin unlock?** | **Lock** in the header, at the top of Admin, or under Home Actions. Unlock stays while the Admin page is open, or for 15 minutes after Start/Stop, rinse, Wi-Fi, or OTA. Leaving Home polling does not renew it. |
 | **The Web UI looks like garbage in `curl`.** | HTML is gzip. Browsers decode it. Use `curl --compressed http://<ip>/`. |
 | **Serial shows `FT-PSK present but FT disabled, falling back to WPA2-PSK`.** | Harmless WPA2 fallback: the router advertises 802.11r and the ESP32 does not use it. Current firmware silences that IDF `wifi` warning. Not a failed join. |
 

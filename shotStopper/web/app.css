@@ -18,6 +18,12 @@ body{font-family:system-ui;max-width:760px;margin:0 auto;padding:0 1rem 1.25rem;
 .pageNav a{display:flex;align-items:center;min-height:var(--tap);padding:.35rem .55rem;border-radius:.5rem;color:var(--ac);text-decoration:none;font-weight:600;white-space:nowrap}
 .pageNav a.active{background:var(--sf);color:var(--ac);box-shadow:inset 0 0 0 1px var(--ac);font-weight:700;text-decoration:none}
 .pageNav a:hover{text-decoration:none;background:var(--sf)}
+.navLock,.textLock{margin:0;border:0;background:transparent;color:var(--mu);font:inherit;font-size:.78rem;font-weight:600;padding:.2rem .35rem;cursor:pointer;line-height:1.2}
+.navLock:hover,.textLock:hover{color:var(--ac);text-decoration:underline}
+.navLock:focus-visible,.textLock:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+.pageNav .navLock{display:flex;align-items:center;min-height:var(--tap);padding:.35rem .55rem;border-radius:.5rem;font-size:inherit;text-align:left}
+.navLock.hidden,.textLock.hidden{display:none}
+.adminSession{display:flex;align-items:baseline;flex-wrap:wrap;gap:.15rem;margin:0 0 .55rem;color:var(--mu);font-size:.82rem;line-height:1.35}
 @media(min-width:700px){
 :root{--hdr:4.7rem}
 .navToggle{display:none}
@@ -29,6 +35,7 @@ body{font-family:system-ui;max-width:760px;margin:0 auto;padding:0 1rem 1.25rem;
 .pageNav{display:flex;position:static;inset:auto;flex-direction:row;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:.1rem;padding:0;background:transparent;z-index:auto}
 .pageNav a{min-height:2.25rem;padding:.3rem .5rem;font-size:.88rem;border-radius:.4rem}
 .pageNav a.active{background:transparent;box-shadow:inset 0 -2px 0 var(--ac)}
+.pageNav .navLock{min-height:2.25rem;padding:.3rem .5rem;font-size:.88rem;border-radius:.4rem}
 .navOpen{overflow:visible}
 .navMeta{display:none}
 }
@@ -39,7 +46,7 @@ body{font-family:system-ui;max-width:760px;margin:0 auto;padding:0 1rem 1.25rem;
 .navMeta small{display:block}
 .navMeta a,.navMeta a:link,.navMeta a:visited{display:inline;min-height:0;padding:0;font-weight:600;color:var(--ac);text-decoration:none}
 .navMeta a:hover{text-decoration:underline}
-body.homeAdminActions #view-home:not(.hidden){padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
+body.homeAdminActions #view-home:not(.hidden){padding-bottom:calc(7rem + env(safe-area-inset-bottom))}
 body.homeAdminActions #view-home:not(.hidden)~.pageFooter{display:none}
 body.webUiInactive{overflow:hidden}
 .inactiveOverlay{position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;align-items:center;padding:1.25rem 1.25rem max(1.25rem,env(safe-area-inset-bottom));box-sizing:border-box;background:var(--bg);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .5s ease,visibility 0s linear .5s}
@@ -175,6 +182,7 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 #actionsPanel .btnBar{border:0;background:transparent;overflow:visible;gap:.55rem}
 #actionsPanel .btnGlyph{flex:1;border:1.5px solid var(--ac);border-radius:2rem;background:transparent;color:var(--ac);min-height:2.85rem}
 #actionsPanel .btnGlyph.btnDanger{background:var(--ac);color:var(--on);border-color:var(--ac);box-shadow:none}
+#actionsPanel .textLock{display:block;margin:.25rem 0 0 auto;min-height:1.5rem;padding:.1rem .15rem}
 
 #shotHistoryPanel .btnBar{position:sticky;top:var(--hdr);z-index:6;background:var(--sf);margin:0 0 .65rem;border:0;overflow:visible}
 #shotHistoryPanel .btnGlyph:not(.btnInvert){background:var(--bg);color:var(--ac);border-color:var(--ln)}

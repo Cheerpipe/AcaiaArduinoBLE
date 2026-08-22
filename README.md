@@ -167,7 +167,7 @@ need to change them after first setup.
 
 ## Admin
 
-The Admin page is locked until you enter the device password (**Unlock administration**). The unlock is temporary (15 minutes while the Admin page is open). USB serial does not ask for the password.
+The Admin page is locked until you enter the device password (**Unlock administration**). The unlock stays active while that Admin page is open, or for 15 minutes after the last privileged action (Start/Stop, rinse, Wi-Fi, OTA). **Lock** (header, Admin, or Home Actions) closes it immediately. USB serial does not ask for the password.
 
 | Group | What it covers |
 | --- | --- |

@@ -5,8 +5,9 @@ its own access point. Details for the fallback AP itself are in [AP](ap.md).
 
 The Web UI is reachable from any client on the same network. Home and
 Settings use exclusive claim (`Reload`). **Admin** is additionally locked
-behind the device password (temporary unlock while that Admin page is open). Use a trusted
-network.
+behind the device password. Unlock stays active while that Admin page is
+open, or for 15 minutes after the last privileged action; **Lock** closes
+it immediately. Use a trusted network.
 
 ## When it applies
 

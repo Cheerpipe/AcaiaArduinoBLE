@@ -182,8 +182,8 @@ class ShotStopperNetwork {
   static constexpr uint32_t HTTP_RETRY_MS = 1000;
   static constexpr uint32_t HEALTH_TELEMETRY_INTERVAL_MS = 5000;
   static constexpr uint8_t COMMAND_MAX_ATTEMPTS = 5;
-  // Admin unlock is RAM-only and tied to the exclusive WebUI claim. Sliding
-  // idle matches WebUI inactivity and the OTA upload budget.
+  // Admin unlock is RAM-only and tied to the exclusive WebUI claim. Idle
+  // slides on Admin page polls and privileged APIs, not on Home polls.
   static constexpr uint32_t ADMIN_UNLOCK_IDLE_MS = 15 * 60 * 1000;
   static constexpr uint32_t ADMIN_UNLOCK_COOLDOWN_MS = 30000;
   static constexpr uint8_t ADMIN_UNLOCK_FAILURES_BEFORE_COOLDOWN = 5;
@@ -334,6 +334,7 @@ class ShotStopperNetwork {
   static esp_err_t claimHandler(httpd_req_t *request);
   static esp_err_t unlockHandler(httpd_req_t *request);
   static esp_err_t adminUnlockHandler(httpd_req_t *request);
+  static esp_err_t adminLockHandler(httpd_req_t *request);
   static esp_err_t ownedApiHandler(httpd_req_t *request);
   static esp_err_t statusHandler(httpd_req_t *request);
   static esp_err_t logHandler(httpd_req_t *request);

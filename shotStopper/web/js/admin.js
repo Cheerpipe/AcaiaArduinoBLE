@@ -13,6 +13,7 @@ export function init(){
   const unlock=()=>{const pw=$('adminUnlockPassword').value;if(!pw){R.showFieldError('adminUnlockPassword','Device password is required.');return}R.clearFieldErrors();R.api('/api/v1/admin/unlock',{method:'POST',body:R.body({password:pw})}).then(()=>{$('adminUnlockPassword').value='';return R.refreshStatus()}).catch(e=>R.message(e&&e.message?e.message:'Unlock failed.','error'))};
   $('adminUnlockButton').onclick=unlock;
   $('adminUnlockPassword').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();unlock()}});
+  $('adminLockButton').onclick=R.lockAdmin;
   $('restartButton').onclick=()=>{if(confirm('Restart the controller?'))R.command('/api/v1/control/restart')};
   $('scanNetworkButton').onclick=R.startWifiScan;
   $('staNetwork').onchange=R.selectDetectedNetwork;
