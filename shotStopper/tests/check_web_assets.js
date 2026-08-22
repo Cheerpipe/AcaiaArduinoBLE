@@ -2951,7 +2951,7 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
       !html.includes('Lock closes it now') ||
       !html.includes('id="navAdminLock"') ||
       !html.includes('id="adminLockButton"') ||
-      !html.includes('id="homeAdminLock"') ||
+      html.includes('id="homeAdminLock"') ||
       !html.includes('this window will confirm automatically') ||
       html.includes('unlock to confirm') ||
       js.includes('Unlock to confirm') ||

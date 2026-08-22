@@ -182,7 +182,6 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 #actionsPanel .btnBar{border:0;background:transparent;overflow:visible;gap:.55rem}
 #actionsPanel .btnGlyph{flex:1;border:1.5px solid var(--ac);border-radius:2rem;background:transparent;color:var(--ac);min-height:2.85rem}
 #actionsPanel .btnGlyph.btnDanger{background:var(--ac);color:var(--on);border-color:var(--ac);box-shadow:none}
-#actionsPanel .textLock{display:block;margin:.25rem 0 0 auto;min-height:1.5rem;padding:.1rem .15rem}
 
 #shotHistoryPanel .btnBar{position:sticky;top:var(--hdr);z-index:6;background:var(--sf);margin:0 0 .65rem;border:0;overflow:visible}
 #shotHistoryPanel .btnGlyph:not(.btnInvert){background:var(--bg);color:var(--ac);border-color:var(--ln)}

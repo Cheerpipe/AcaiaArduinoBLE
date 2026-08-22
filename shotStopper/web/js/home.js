@@ -9,7 +9,6 @@ export function init(){
   R.registerViewStatus('home',applyStatus);
   
   $('rinseButton').onclick=()=>R.command('/api/v1/control/rinse');
-  if($('homeAdminLock'))$('homeAdminLock').onclick=R.lockAdmin;
   $('stopButton').onclick=()=>$('stopButton').dataset.mode==='stop'?R.command('/api/v1/control/stop'):R.command('/api/v1/control/paddle',{on:true});
   $('clearLastShotButton').onclick=R.clearLastShot;
   if($('homeBrewByWeight'))$('homeBrewByWeight').onchange=R.persistHomeBrewByWeight;
