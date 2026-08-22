@@ -1395,8 +1395,9 @@ if (!ui.includes('id="firmwareFooter"') ||
     !ui.includes("const inactive=$('inactiveFirmware')") ||
     !shellHtml.includes('id="navFirmware"') ||
     !shellHtml.includes('class="navMeta"') ||
-    !css.includes('#view-home:not(.hidden)~.pageFooter{display:none}') ||
+    !css.includes('body.homeAdminActions #view-home:not(.hidden)~.pageFooter{display:none}') ||
     css.includes('#view-home:not(.hidden)~.pageFooter{padding-bottom:8.5rem}') ||
+    !css.includes('body.homeAdminActions #view-home:not(.hidden){padding-bottom:') ||
     !css.includes('#actionsPanel{position:fixed;left:0;right:0') ||
     !css.includes('@media(min-width:700px){#actionsPanel{left:1rem;right:1rem') ||
     !network.includes('\\"firmwareVersion\\"') ||
@@ -1818,13 +1819,15 @@ if (network.includes('return "safety_recovery"') ||
   throw new Error('Safety recovery must not lock the WebUI');
 }
 if (!ui.includes("s.safety.recoveryRequired||s.safety.state==='LOCKOUT'") ||
-    !ui.includes('remoteReady&&relayStartReady&&canControl') ||
+    !ui.includes('admin&&remoteReady&&relayStartReady&&canControl') ||
     !ui.includes("live?'Stop shot':'Start shot'") ||
     !ui.includes("dataset.mode==='stop'") ||
     !ui.includes("/api/v1/control/paddle") ||
     !ui.includes("/api/v1/control/stop") ||
-    !ui.includes('shot.disabled=!live&&!(remoteReady&&relayStartReady&&canControl)')) {
-  throw new Error('CN9 Actions must preserve Stop while inhibiting unsafe starts');
+    !ui.includes('function updateHomeAdminActions(') ||
+    !ui.includes("id=\"actionsPanel\" class=\"hidden\"") ||
+    !ui.includes('shot.disabled=!admin||(!live&&!(remoteReady&&relayStartReady&&canControl))')) {
+  throw new Error('CN9 Actions must stay behind admin unlock and preserve Stop only while unlocked');
 }
 if (!network.includes('/api/v1/status/home') ||
     !network.includes('/api/v1/status/settings') ||
@@ -2950,7 +2953,10 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
       ['ble-compat', bleFnStart],
       ['time-sync', timeFnStart],
       ['wifi-scan-start', network.indexOf('ShotStopperNetwork::wifiScanStartHandler')],
-      ['wifi-scan-status', network.indexOf('ShotStopperNetwork::wifiScanStatusHandler')]
+      ['wifi-scan-status', network.indexOf('ShotStopperNetwork::wifiScanStatusHandler')],
+      ['paddle', network.indexOf('ShotStopperNetwork::paddleHandler')],
+      ['rinse', network.indexOf('ShotStopperNetwork::rinseHandler')],
+      ['stop', network.indexOf('ShotStopperNetwork::stopHandler')]
     ]) {
       if (start < 0 ||
           !network.slice(start, start + 500).includes('requireAdminUnlock(request)')) {
@@ -2965,9 +2971,14 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
       throw new Error('Network save/forget must require admin unlock; confirm may stay ungated');
     }
   }
-  if (!statusFormat.includes('"adminUnlocked":%s') &&
-      !statusFormat.includes('\\"adminUnlocked\\":%s')) {
-    throw new Error('status/admin must report adminUnlocked');
+  if ((statusFormat.match(/\\"adminUnlocked\\":%s/g) || []).length < 2) {
+    throw new Error('status/home and status/admin must report adminUnlocked');
+  }
+  if (!network.includes('page == StatusPage::Admin || page == StatusPage::Home') ||
+      !ui.includes("v==='home'?!!(typeof s.adminUnlocked==='boolean'") ||
+      !js.includes('updateHomeAdminActions(unlocked)') ||
+      !js.includes('updateHomeAdminActions(admin)')) {
+    throw new Error('Home must report and honor adminUnlocked for the Actions panel');
   }
   if (!statusFormat.includes('!adminUnlocked') ||
       !js.includes('s.adminUnlocked')) {

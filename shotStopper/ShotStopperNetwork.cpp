@@ -3624,7 +3624,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   const bool configMutable = controlAllowsConfiguration(control);
   const bool webUiOverrideActive = self.webUiOverrideAllowed(request);
   bool adminUnlocked = false;
-  if (page == StatusPage::Admin) {
+  if (page == StatusPage::Admin || page == StatusPage::Home) {
     adminUnlocked = self.adminUnlockAllowed(request);
     if (adminUnlocked) {
       self.touchAdminUnlock();
@@ -3889,6 +3889,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
     ok = statusJsonAppend(&used, "}");
   }
 
+  if (ok && page == StatusPage::Home) {
+    ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s",
+                          adminUnlocked ? "true" : "false");
+  }
   if (ok && page == StatusPage::Home) {
     ok = statusJsonAppend(
         &used,
@@ -5180,6 +5184,9 @@ esp_err_t ShotStopperNetwork::resetGuardSamplesHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
+  if (!self.requireAdminUnlock(request)) {
+    return ESP_OK;
+  }
   const esp_err_t bodyStatus =
       self.lockJsonBody(request, "A JSON body is required.");
   if (bodyStatus != ESP_OK) {
@@ -5225,6 +5232,9 @@ esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::rinseHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
+  if (!self.requireAdminUnlock(request)) {
+    return ESP_OK;
+  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!REMOTE_CN9_CONTROL_ENABLED) {
@@ -5248,6 +5258,9 @@ esp_err_t ShotStopperNetwork::rinseHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::stopHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
+  if (!self.requireAdminUnlock(request)) {
+    return ESP_OK;
+  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!status.activeCycle || !status.relayClosed) {

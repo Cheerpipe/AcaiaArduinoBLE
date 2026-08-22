@@ -13,7 +13,8 @@ demotes the cycle to a rinse. Holding ON past that time keeps a brew (or, if
 [No-scale BBW](no-scale-bbw.md) is Armed, may refuse to close CN9).
 
 A web quick rinse (when remote CN9 is compiled in) follows the same rinse
-duration.
+duration and requires Admin unlock on that window. Without unlock, Home shows
+the version footer instead of the Actions panel.
 
 ## Parameters
 
