@@ -33,7 +33,14 @@ scan_firmware_sources() {
     "$firmware_dir/ShotStopperCupPresence.h" \
     "$firmware_dir/ShotStopperScaleTypes.h" \
     "$firmware_dir/ShotStopperBrew.h" \
-    "$firmware_dir/ShotStopperBrewTypes.h"
+    "$firmware_dir/ShotStopperBrewTypes.h" \
+    "$firmware_dir/ShotStopperAlert.h" \
+    "$firmware_dir/ShotStopperAlertChannel.h" \
+    "$firmware_dir/ShotStopperAlertTone.h" \
+    "$firmware_dir/ShotStopperBuzzer.h" \
+    "$firmware_dir/ShotStopperBuzzerActive.h" \
+    "$firmware_dir/ShotStopperBuzzerPassive.h" \
+    "$firmware_dir/ShotStopperBuzzerRtttl.h"
 }
 
 "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \

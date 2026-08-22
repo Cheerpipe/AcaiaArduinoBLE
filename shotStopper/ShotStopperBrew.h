@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ShotStopperAlert.h"
 #include "ShotStopperBrewTypes.h"
 
 // Brew-by-weight policy, extraction guards, paddle-mode semantics.
@@ -246,7 +247,7 @@ void performAutomaticRetare() {
     return;
   }
   session.retarePerformed = true;
-  emitImmediateCommandAlertIfBuzzer();
+  emitImmediateCommandAlertIfBuzzer(AlertEvent::TARE);
   markRetareEnded(millis());
 }
 void initializeBbwProtection() {

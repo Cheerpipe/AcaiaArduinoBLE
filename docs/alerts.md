@@ -15,7 +15,9 @@ kept.
 
 Sounds are event-first: tare/start/stop, first drop, paddle reminder,
 completion extra, and the triple alerts follow **Output channel** when a
-local buzzer is compiled in (`SHOT_STOPPER_ENABLE_BUZZER`).
+local buzzer is compiled in (`SHOT_STOPPER_ENABLE_BUZZER`). `=1` plays
+RTTTL melodies on a passive piezo; `=2` plays on/off beeps on an active
+buzzer. Channel selection is the same for both.
 
 Without buzzer support, Output channel and the triple checkboxes are hidden.
 The default channel is then **Scale only**.

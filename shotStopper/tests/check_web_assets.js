@@ -18,6 +18,9 @@ const firmware = [
   fs.readFileSync(path.join(sketchDir, 'ShotStopperCupPresence.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperShotCurveTypes.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperAlert.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperAlertChannel.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperAlertTone.h'), 'utf8'),
 ].join('\n');
 const shotLogIo = fs.readFileSync(path.join(sketchDir, 'ShotStopperShotLog.h'), 'utf8');
 const shotCurveIo = fs.readFileSync(path.join(sketchDir, 'ShotStopperShotCurve.h'), 'utf8');
@@ -32,6 +35,13 @@ const domain = [
 ].join('\n');
 const serialCli = fs.readFileSync(path.join(sketchDir, 'ShotStopperSerialCli.h'), 'utf8');
 const buzzer = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzer.h'), 'utf8');
+const buzzerActive = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzerActive.h'), 'utf8');
+const buzzerPassive = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzerPassive.h'), 'utf8');
+const buzzerRtttl = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzerRtttl.h'), 'utf8');
+const alertChannel = fs.readFileSync(path.join(sketchDir, 'ShotStopperAlertChannel.h'), 'utf8');
+const alertTone = fs.readFileSync(path.join(sketchDir, 'ShotStopperAlertTone.h'), 'utf8');
+const kconfig = fs.readFileSync(
+  path.resolve(sketchDir, '..', 'idf', 'main', 'Kconfig.projbuild'), 'utf8');
 const bleLibrary = fs.readFileSync(
   path.resolve(sketchDir, '..', 'libraries', 'AcaiaArduinoBLE', 'AcaiaArduinoBLE.cpp'),
   'utf8'
@@ -438,14 +448,44 @@ if (!ui.includes('bleCompanionEnabled') ||
 if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0') ||
     !domain.includes('BUZZER_ACTIVE_DRIVE = SHOT_STOPPER_ENABLE_BUZZER == 2') ||
     !domain.includes('SHOT_STOPPER_ENABLE_BUZZER must be 0, 1, or 2') ||
+    !domain.includes('compiledBuzzerModeId') ||
     !domain.includes('DEFAULT_ALERT_OUTPUT_CHANNEL') ||
     !domain.includes(
         'BUZZER_SUPPORT_ENABLED ? AlertOutputChannel::BUZZER_ONLY') ||
     !domain.includes('static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL)') ||
     !buzzer.includes('BUZZER_ACTIVE_DRIVE') ||
-    !buzzer.includes('ledcAttach') ||
-    !buzzer.includes('digitalWrite(pin, HIGH)') ||
-    !buzzer.includes('BUZZER_ECHO_INVERTED_NOTES') ||
+    !buzzer.includes('requestTone') ||
+    !buzzerPassive.includes('ledcAttach') ||
+    !buzzerPassive.includes('parseRtttl') ||
+    !buzzerActive.includes('buzzerActiveSetTone') ||
+    !buzzerActive.includes('BUZZER_ECHO_INVERTED_NOTES') ||
+    !buzzerRtttl.includes('RTTTL_TARE') ||
+    !buzzerRtttl.includes('RTTTL_START_TIMER') ||
+    !buzzerRtttl.includes('RTTTL_STOP_TIMER') ||
+    !buzzerRtttl.includes('RTTTL_TARE_START') ||
+    !buzzerRtttl.includes('RTTTL_FIRST_DROP') ||
+    !buzzerRtttl.includes('RTTTL_PADDLE_OFF') ||
+    !buzzerRtttl.includes('RTTTL_SHOT_END') ||
+    !buzzerRtttl.includes('RTTTL_SCALE_CONNECTED') ||
+    !buzzerRtttl.includes('RTTTL_NO_CUP') ||
+    !buzzerRtttl.includes('RTTTL_ABNORMAL_FAST') ||
+    !buzzerRtttl.includes('RTTTL_ABNORMAL') ||
+    !buzzerRtttl.includes('RTTTL_SCALE_LOST') ||
+    !buzzerRtttl.includes('RTTTL_GUARD_STOP') ||
+    !buzzerRtttl.includes('RTTTL_NO_SCALE') ||
+    !buzzerRtttl.includes('RTTTL_RECOVERY_START') ||
+    !buzzerRtttl.includes('RTTTL_NETWORK_RESET_OK') ||
+    !buzzerRtttl.includes('RTTTL_FACTORY_RESET_OK') ||
+    !buzzerRtttl.includes('RTTTL_RECOVERY_ERROR') ||
+    !alertChannel.includes('selectAlertSink') ||
+    !alertChannel.includes('AlertKind::Recovery') ||
+    !alertChannel.includes('AlertKind::CommandImmediate') ||
+    !alertChannel.includes('AlertKind::CommandFallback') ||
+    !alertTone.includes('deriveBuzzerTone') ||
+    !alertTone.includes('buzzerCueForAlertEvent') ||
+    !buzzer.includes('startRtttl') ||
+    !buzzer.includes('!BUZZER_ACTIVE_DRIVE') ||
+    !buzzer.includes('memcpy(rtttlBuf') ||
     !domain.includes('ECHO_INVERTED') ||
     !firmware.includes('startExtendedPulseTrain') ||
     !firmware.includes('startPulseTrain') ||
@@ -453,7 +493,8 @@ if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0')
     !firmware.includes('serviceExtendedPulseAlert') ||
     !firmware.includes('buzzerPatternForExtendedPulseRate') ||
     !domain.includes('DEFAULT_EXTENDED_PULSE_RATE') ||
-    !firmware.includes('localBuzzer.request(command.buzzerPattern)')) {
+    !firmware.includes('localBuzzer.request(command.buzzerPattern)') ||
+    !kconfig.includes('1=passive RTTTL, 2=active beep')) {
   throw new Error('Local buzzer must support compile-time passive (1) and active (2) drives');
 }
 if (ui.includes('authenticatedOnly') ||
@@ -2151,7 +2192,7 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
         'statusPageOk(admin) must accept a locked payload and validate unlocked network/BLE/NTP/OTA');
   }
   if (!ui.includes(
-          "v==='diagnostic'?!!(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalPaddleOn==='boolean'&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean')")) {
+          "v==='diagnostic'?!!(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalPaddleOn==='boolean'&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags)")) {
     throw new Error(
         'statusPageOk(diagnostic) must validate states, machine I/O, and diagnostic metrics');
   }
@@ -2179,7 +2220,8 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'resetReasonCode', 'packetGaps', 'rejectedPackets', 'reconnects',
     'eventsDropped', 'lastCommand', 'loopIntervalGapMs', 'loopMaxGapMs',
     'machineState', 'physicalPaddleOn', 'controlSource', 'cupPresence',
-    'streamState', 'controlState', 'taskWatchdogReady', 'recoveryRequired'
+    'streamState', 'controlState', 'taskWatchdogReady', 'recoveryRequired',
+    'compileFlags'
   ]) {
     if (!diagBody.includes(field)) {
       throw new Error('status/diagnostic missing required field: ' + field);
@@ -2193,7 +2235,12 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
       !statusFormat.includes('\\"ringRetainLogLevel\\"') ||
       !statusFormat.includes('\\"timezoneOffsetMinutes\\":%d') ||
       !ui.includes("typeof s.bootId==='number'") ||
-      !ui.includes('function applyDiagnosticStatus(')) {
+      !ui.includes('function applyDiagnosticStatus(') ||
+      !ui.includes('dBz') ||
+      !ui.includes('dCn9') ||
+      !ui.includes('dArch') ||
+      !ui.includes('Compile flags') ||
+      !ui.includes('s.compileFlags')) {
     throw new Error(
         'status/diagnostic must keep transversal bootId/firmware/liveShot/ringRetain for the Diagnostic page');
   }
@@ -2432,8 +2479,8 @@ if (!safeBeep.includes('return setBeepLevel(1)') ||
 if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
     !firmware.includes('emitAlert(AlertEvent::SCALE_CONNECTED') ||
     !firmware.includes('emitAlert(AlertEvent::SCALE_LOST') ||
-    !firmware.includes('BuzzerPattern::ECHO') ||
-    !firmware.includes('BuzzerPattern::ECHO_INVERTED') ||
+    !alertTone.includes('BuzzerPattern::ECHO') ||
+    !alertTone.includes('BuzzerPattern::ECHO_INVERTED') ||
     !firmware.includes('requestScaleBrewBeep(') ||
     !firmware.includes('cancelScaleBrewBeep(session.id)') ||
     !firmware.includes('onFirstDropsDetected') ||
@@ -2464,19 +2511,21 @@ const emitCommandImplEnd = firmware.indexOf(
 const emitCommandImpl = emitCommandImplStart < 0 || emitCommandImplEnd < 0
     ? ''
     : firmware.slice(emitCommandImplStart, emitCommandImplEnd);
-if (!emitCommandImpl.includes('AlertOutputChannel::BUZZER_ONLY') ||
+if (!alertChannel.includes('AlertKind::CommandImmediate') ||
+    !alertChannel.includes('AlertKind::CommandFallback') ||
+    !alertChannel.includes('AlertOutputChannel::BUZZER_ONLY') ||
     emitCommandImpl.includes('if (commandAlertUsesBuzzer())') ||
     /if \(channel == AlertOutputChannel::BUZZER_ONLY\) \{\s*emitLocalAlertBuzzer/.test(
         emitCommandImpl)) {
   throw new Error('Buzzer-routed command alerts must not wait for BLE results');
 }
 const immediateCommandAlertCalls =
-    firmware.split('emitImmediateCommandAlertIfBuzzer();').length - 1;
+    firmware.split('emitImmediateCommandAlertIfBuzzer(').length - 1;
 if (immediateCommandAlertCalls < 4 ||
-    !firmware.includes('emitImmediateCommandAlertIfBuzzer();\n    if (!requestRemoteTimerStart())') ||
+    !firmware.includes('emitImmediateCommandAlertIfBuzzer(\n        session.config.autoTare && session.config.canTareStartTimer') ||
     !firmware.includes(
-        'if (shotCompletionGetsLongBeep(reason)) {\n    // Completion LONG replaces the stop-timer SINGLE so ends are one cue.\n    requestCompletionAlert();\n  } else {\n    emitImmediateCommandAlertIfBuzzer();') ||
-    !firmware.includes('emitImmediateCommandAlertIfBuzzer();\n  markRetareEnded')) {
+        'if (shotCompletionGetsLongBeep(reason)) {\n    // Completion LONG replaces the stop-timer SINGLE so ends are one cue.\n    requestCompletionAlert();\n  } else {\n    emitImmediateCommandAlertIfBuzzer(AlertEvent::STOP_TIMER);') ||
+    !firmware.includes('emitImmediateCommandAlertIfBuzzer(AlertEvent::TARE);\n  markRetareEnded')) {
   throw new Error('Command alerts must fire at CN9/paddle/retare, not after BLE');
 }
 if (firmware.includes('SCALE_COMPLETION_BEEP_DELAY_MS') ||

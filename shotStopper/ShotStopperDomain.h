@@ -119,6 +119,16 @@ static_assert(SHOT_STOPPER_ENABLE_BUZZER == 0 ||
                   SHOT_STOPPER_ENABLE_BUZZER == 2,
               "SHOT_STOPPER_ENABLE_BUZZER must be 0, 1, or 2");
 
+inline const char *compiledBuzzerModeId() {
+  if (SHOT_STOPPER_ENABLE_BUZZER == 2) {
+    return "active";
+  }
+  if (SHOT_STOPPER_ENABLE_BUZZER == 1) {
+    return "passive";
+  }
+  return "off";
+}
+
 enum class BuzzerPattern : uint8_t {
   NONE = 0,
   SINGLE = 1,

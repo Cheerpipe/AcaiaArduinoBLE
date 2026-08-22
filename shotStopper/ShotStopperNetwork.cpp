@@ -4157,7 +4157,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"packetGaps\":%lu,\"rejectedPackets\":%lu,"
         "\"reconnects\":%lu,\"lastDisconnectReasonName\":\"%s\","
         "\"eventsDropped\":%lu},"
-        "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"}",
+        "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"},"
+        "\"compileFlags\":{\"buzzer\":\"%s\",\"remoteCn9\":%s,\"arch\":\"%s\"}",
         stopperStateName(control.state),
         machineRunStateName(control.machineRunState),
         control.relayClosed ? "true" : "false",
@@ -4218,7 +4219,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         scaleDisconnectReasonName(control.scaleLastDisconnectReason),
         static_cast<unsigned long>(control.scaleEventsDropped),
         static_cast<unsigned long>(network.lastCommandRequestId),
-        commandResultStateName(network.lastCommandState));
+        commandResultStateName(network.lastCommandState),
+        compiledBuzzerModeId(),
+        REMOTE_CN9_CONTROL_ENABLED ? "true" : "false",
+        FW_BOARD_ARCH_STRING);
   }
 
   if (ok) {

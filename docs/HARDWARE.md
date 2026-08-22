@@ -35,7 +35,7 @@ They are **not** editable from the Web UI.
 | Physical paddle (to GND) | **21** | Active **LOW** (internal pull-up; ON = GPIO LOW) |
 | Onboard relay coil | **2** | Active **HIGH** (HIGH energizes the coil and closes NO) |
 | Scale-connected LED | **1** | Active HIGH while a BLE scale is connected (switchable in Alerts) |
-| Optional buzzer | **14** | Compile with `SHOT_STOPPER_ENABLE_BUZZER=1` (passive) or `=2` (active) |
+| Optional buzzer | **14** | Compile with `SHOT_STOPPER_ENABLE_BUZZER=1` (passive piezo, RTTTL on the same pin) or `=2` (active on/off beep) |
 
 Optional external K2 safety (both pins or neither; no defaults, because they
 depend on a reviewed board):

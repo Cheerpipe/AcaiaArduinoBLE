@@ -40,6 +40,9 @@
 #include "ShotStopperBleCompanionPersistence.h"
 #endif
 #include "ShotStopperBuzzer.h"
+#include "ShotStopperAlert.h"
+#include "ShotStopperAlertChannel.h"
+#include "ShotStopperAlertTone.h"
 #include "ShotStopperPresets.h"
 #include "ShotStopperSerialCli.h"
 #include "ShotStopperVersion.h"
@@ -149,27 +152,11 @@ enum class ScaleEventType : uint8_t {
   TIMER_STOP_RESULT
 };
 
-enum class AlertEvent : uint8_t {
-  TARE = 0,
-  START_TIMER,
-  STOP_TIMER,
-  TARE_START,
-  FIRST_DROP,
-  PADDLE_REMINDER,
-  COMPLETION_EXTRA,
-  SCALE_LOST,
-  ATM_END,
-  MANUAL_NO_SCALE,
-  CUP_START_BLOCKED,
-  EXTENDED_PULSE,
-  SCALE_CONNECTED
-};
-
 bool startExtendedPulseTrain(uint32_t durationMs);
 bool startPulseTrain(BuzzerPattern pattern, uint32_t durationMs);
 bool emitAlert(AlertEvent event, uint32_t cycleId = 0);
 bool commandAlertUsesBuzzer();
-void emitImmediateCommandAlertIfBuzzer();
+void emitImmediateCommandAlertIfBuzzer(AlertEvent event);
 void emitCommandAlert(AlertEvent event, bool commandAttempted,
                       bool writeSucceeded, bool commandFeedbackExpected);
 
@@ -2266,18 +2253,26 @@ void requestBookooAlertVolumeRestore() {
   }
 }
 
-bool alertEventScaleCapable(AlertEvent event) {
-  switch (event) {
-    case AlertEvent::SCALE_LOST:
-    case AlertEvent::ATM_END:
-    case AlertEvent::MANUAL_NO_SCALE:
-    case AlertEvent::CUP_START_BLOCKED:
-    case AlertEvent::EXTENDED_PULSE:
-    case AlertEvent::SCALE_CONNECTED:
-      return false;
-    default:
-      return true;
+AlertChannelContext currentAlertChannelContext() {
+  AlertChannelContext ctx;
+  ctx.channel = currentAlertOutputChannel();
+  ctx.soundAlertsEnabled = soundAlertsEnabled();
+  ctx.buzzerSupportEnabled = BUZZER_SUPPORT_ENABLED;
+  ctx.buzzerReady = BUZZER_SUPPORT_ENABLED && localBuzzer.ready;
+  ctx.scaleAvailable = scaleAvailable();
+  ctx.scaleSupportsIndependentBeep = scale.supportsIndependentBeep();
+  ctx.scaleSupportsCommandFeedback = scale.supportsCommandFeedback();
+  return ctx;
+}
+
+bool playLocalAlertTone(const BuzzerToneCommand &cmd, bool honorMute) {
+  if (honorMute && !soundAlertsEnabled()) {
+    return false;
   }
+  if (!BUZZER_SUPPORT_ENABLED || !localBuzzer.ready || !cmd.valid) {
+    return false;
+  }
+  return localBuzzer.requestTone(cmd);
 }
 
 bool startPulseTrain(BuzzerPattern pattern, uint32_t durationMs) {
@@ -2296,22 +2291,16 @@ bool startExtendedPulseTrain(uint32_t durationMs) {
 }
 
 void stopPulseTrains() {
-  if (buzzerPatternIsPulseTrain(localBuzzer.pending)) {
+  if (localBuzzer.pending != BuzzerPattern::NONE &&
+      (buzzerPatternIsPulseTrain(localBuzzer.pending) ||
+       localBuzzer.pendingCue == BuzzerCue::ABNORMAL_FAST ||
+       localBuzzer.pendingCue == BuzzerCue::ABNORMAL)) {
     localBuzzer.stopIf(localBuzzer.pending);
   }
-  if (buzzerPatternIsPulseTrain(localBuzzer.active)) {
+  if (localBuzzer.active != BuzzerPattern::NONE &&
+      (buzzerPatternIsPulseTrain(localBuzzer.active) || localBuzzer.looping)) {
     localBuzzer.stopIf(localBuzzer.active);
   }
-}
-
-bool emitLocalAlertBuzzer(BuzzerPattern pattern) {
-  if (!soundAlertsEnabled() || !BUZZER_SUPPORT_ENABLED || !localBuzzer.ready) {
-    return false;
-  }
-  if (buzzerPatternIsPulseTrain(pattern)) {
-    return startPulseTrain(pattern, 0);
-  }
-  return localBuzzer.request(pattern);
 }
 
 bool queueScaleIndependentAlert(AlertEvent event, uint32_t cycleId) {
@@ -2333,75 +2322,53 @@ bool queueScaleIndependentAlert(AlertEvent event, uint32_t cycleId) {
   }
 }
 
-// Independent / multi-tone alerts: first drop, paddle, completion, triples.
-bool emitAlert(AlertEvent event, uint32_t cycleId) {
-  if (!soundAlertsEnabled()) {
+bool dispatchAlert(AlertKind kind, AlertEvent event, uint32_t cycleId,
+                   bool commandAttempted, bool writeSucceeded,
+                   bool commandFeedbackExpected) {
+  AlertChannelContext ctx = currentAlertChannelContext();
+  ctx.commandAttempted = commandAttempted;
+  ctx.writeSucceeded = writeSucceeded;
+  ctx.commandFeedbackExpected = commandFeedbackExpected;
+  const AlertSink sink = selectAlertSink(kind, event, ctx);
+  if (sink == AlertSink::None) {
     return false;
   }
-  const AlertOutputChannel channel = currentAlertOutputChannel();
-  const bool scaleCapable = alertEventScaleCapable(event);
-  BuzzerPattern buzzerPattern = BuzzerPattern::SINGLE;
-  if (event == AlertEvent::SCALE_CONNECTED) {
-    buzzerPattern = BuzzerPattern::ECHO;
-  } else if (event == AlertEvent::SCALE_LOST) {
-    buzzerPattern = BuzzerPattern::ECHO_INVERTED;
-  } else if (event == AlertEvent::ATM_END ||
-             event == AlertEvent::MANUAL_NO_SCALE) {
-    buzzerPattern = BuzzerPattern::TRIPLE;
-  } else if (event == AlertEvent::CUP_START_BLOCKED) {
-    buzzerPattern = BuzzerPattern::DOUBLE;
-  } else if (event == AlertEvent::COMPLETION_EXTRA) {
-    buzzerPattern = BuzzerPattern::LONG;
-  } else if (event == AlertEvent::EXTENDED_PULSE) {
-    const uint8_t rate = session.slowExtractionExtended
-                             ? runtimeConfig.buzzerSlowExtendedPulseRate
-                             : runtimeConfig.buzzerExtendedPulseRate;
-    buzzerPattern = buzzerPatternForExtendedPulseRate(rate);
-    if (buzzerPattern == BuzzerPattern::NONE) {
-      return false;
-    }
-  }
-
-  if (!scaleCapable) {
-    if (channel == AlertOutputChannel::SCALE_ONLY) {
-      return false;
-    }
-    return emitLocalAlertBuzzer(buzzerPattern);
-  }
-
-  if (channel == AlertOutputChannel::BUZZER_ONLY) {
-    return emitLocalAlertBuzzer(buzzerPattern);
-  }
-  if (channel == AlertOutputChannel::SCALE_ONLY) {
+  if (sink == AlertSink::Scale) {
     return queueScaleIndependentAlert(event, cycleId);
   }
-  // SCALE_PRIORITY: scale if available, else buzzer. Never both.
-  if (queueScaleIndependentAlert(event, cycleId)) {
-    return true;
-  }
-  return emitLocalAlertBuzzer(buzzerPattern);
+  const BuzzerToneCommand tone =
+      deriveBuzzerTone(event, session.slowExtractionExtended,
+                       runtimeConfig.buzzerExtendedPulseRate,
+                       runtimeConfig.buzzerSlowExtendedPulseRate);
+  return playLocalAlertTone(tone, kind != AlertKind::Recovery);
+}
+
+// Independent / multi-tone alerts: first drop, paddle, completion, triples.
+bool emitAlert(AlertEvent event, uint32_t cycleId) {
+  return dispatchAlert(AlertKind::Independent, event, cycleId, false, false,
+                       false);
 }
 
 bool commandAlertUsesBuzzer() {
-  if (!soundAlertsEnabled() || !BUZZER_SUPPORT_ENABLED || !localBuzzer.ready) {
-    return false;
-  }
-  const AlertOutputChannel channel = currentAlertOutputChannel();
-  if (channel == AlertOutputChannel::BUZZER_ONLY) {
-    return true;
-  }
-  if (channel == AlertOutputChannel::SCALE_PRIORITY) {
-    return !scaleAvailable() || !scale.supportsCommandFeedback();
-  }
-  return false;
+  AlertChannelContext ctx = currentAlertChannelContext();
+  return selectAlertSink(AlertKind::CommandImmediate, AlertEvent::START_TIMER,
+                         ctx) == AlertSink::Buzzer;
 }
 
 // Tare/start/stop replacement sounds: fire at the local CN9/paddle/retare
 // moment when the buzzer is the routed output. Never wait for BLE.
-void emitImmediateCommandAlertIfBuzzer() {
-  if (commandAlertUsesBuzzer()) {
-    emitLocalAlertBuzzer(BuzzerPattern::SINGLE);
+void emitImmediateCommandAlertIfBuzzer(AlertEvent event) {
+  (void)dispatchAlert(AlertKind::CommandImmediate, event, 0, false, false,
+                      false);
+}
+
+void playRecoveryCue(BuzzerCue cue) {
+  AlertChannelContext ctx = currentAlertChannelContext();
+  if (selectAlertSink(AlertKind::Recovery, AlertEvent::TARE, ctx) !=
+      AlertSink::Buzzer) {
+    return;
   }
+  (void)playLocalAlertTone(deriveRecoveryTone(cue), false);
 }
 
 // BLE-result fallback only. Buzzer only already played at the local event.
@@ -2409,25 +2376,8 @@ void emitImmediateCommandAlertIfBuzzer() {
 // scale dropped while the ATT write was in flight.
 void emitCommandAlert(AlertEvent event, bool commandAttempted,
                       bool writeSucceeded, bool commandFeedbackExpected) {
-  if (!soundAlertsEnabled()) {
-    return;
-  }
-  const AlertOutputChannel channel = currentAlertOutputChannel();
-  if (channel == AlertOutputChannel::BUZZER_ONLY) {
-    return;
-  }
-  if (channel == AlertOutputChannel::SCALE_ONLY) {
-    (void)event;
-    return;
-  }
-  if (!commandFeedbackExpected) {
-    // Eclair has no documented audible confirmation for tare/timer commands.
-    // The local alert was already emitted at the physical control event.
-    return;
-  }
-  if (!commandAttempted || !writeSucceeded) {
-    emitLocalAlertBuzzer(BuzzerPattern::SINGLE);
-  }
+  (void)dispatchAlert(AlertKind::CommandFallback, event, 0, commandAttempted,
+                      writeSucceeded, commandFeedbackExpected);
 }
 
 void requestScaleBrewBeep(uint32_t cycleId) {
@@ -3698,7 +3648,10 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   session.cn9ClosedAtMs = getRelaySafetySnapshot().closedAtMs;
 
   if (session.startedWithScale) {
-    emitImmediateCommandAlertIfBuzzer();
+    emitImmediateCommandAlertIfBuzzer(
+        session.config.autoTare && session.config.canTareStartTimer
+            ? AlertEvent::TARE_START
+            : AlertEvent::START_TIMER);
     if (!requestRemoteTimerStart()) {
       session.automaticEnabled = false;
       session.scaleWasLost = true;
@@ -3735,7 +3688,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
     // Completion LONG replaces the stop-timer SINGLE so ends are one cue.
     requestCompletionAlert();
   } else {
-    emitImmediateCommandAlertIfBuzzer();
+    emitImmediateCommandAlertIfBuzzer(AlertEvent::STOP_TIMER);
   }
 
   schedulePendingShotFinalize(reason, durationMs);
@@ -3807,7 +3760,7 @@ bool beginRinseCycle(ControlSource source) {
     }
   }
   if (session.startedWithScale) {
-    emitImmediateCommandAlertIfBuzzer();
+    emitImmediateCommandAlertIfBuzzer(AlertEvent::START_TIMER);
     if (!requestRemoteTimerStart()) {
       session.startedWithScale = false;
       session.automaticEnabled = false;
@@ -5723,7 +5676,7 @@ void waitForRecoveryBuzzer() {
 void completeBootRecovery(RecoveryOperation operation);
 
 void holdFailedBootRecovery() {
-  (void)localBuzzer.request(BuzzerPattern::RECOVERY_ERROR);
+  (void)playRecoveryCue(BuzzerCue::RECOVERY_ERROR);
   waitForRecoveryBuzzer();
   RecoveryGestureRecognizer gesture;
   gesture.begin(millis());
@@ -5763,11 +5716,11 @@ void completeBootRecovery(RecoveryOperation operation) {
     holdFailedBootRecovery();
   }
 
-  const BuzzerPattern success =
+  const BuzzerCue success =
       operation == RecoveryOperation::FACTORY_RESET
-          ? BuzzerPattern::RECOVERY_FACTORY_OK
-          : BuzzerPattern::RECOVERY_NETWORK_OK;
-  (void)localBuzzer.request(success);
+          ? BuzzerCue::FACTORY_RESET_OK
+          : BuzzerCue::NETWORK_RESET_OK;
+  (void)playRecoveryCue(success);
   waitForRecoveryBuzzer();
   // Preserve the final 50 ms pause specified by the recovery cue before the
   // reset cuts power to the buzzer output.
@@ -5820,7 +5773,7 @@ void maybeRunBootRecoveryGesture() {
 
   RecoveryGestureRecognizer recognizer;
   recognizer.begin(millis());
-  (void)localBuzzer.request(BuzzerPattern::RECOVERY_LONG);
+  (void)playRecoveryCue(BuzzerCue::RECOVERY_START);
 
   for (;;) {
     updatePaddleInput();
@@ -5833,7 +5786,7 @@ void maybeRunBootRecoveryGesture() {
       completeBootRecovery(RecoveryOperation::FACTORY_RESET);
     }
     if (result == RecoveryGestureResult::TIMED_OUT) {
-      (void)localBuzzer.request(BuzzerPattern::RECOVERY_LONG);
+      (void)playRecoveryCue(BuzzerCue::RECOVERY_START);
       waitForRecoveryBuzzer();
       return;
     }

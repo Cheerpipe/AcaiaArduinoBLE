@@ -74,6 +74,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   hostRelayOpenWrites = 0;
   hostRelayClosedWrites = 0;
   hostLedcAttachCalls = 0;
+  hostLedcLastFreq = 0;
   hostEspTimerCreateSucceeds = true;
   hostEspTimerStartSucceeds = true;
   hostGptimerCreateSucceeds = true;
@@ -2519,6 +2520,8 @@ void w50d_recovery_buzzer_patterns_have_exact_timings() {
   CHECK(localBuzzer.gapMs == 50);
 }
 
+void checkLocalCompletionTone();
+
 void w51_local_buzzer_echo_inverted_on_scale_lost_during_bbw() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -2841,8 +2844,7 @@ void w56_atm_beep_queued_when_scale_lost_after_deadline() {
   }
   CHECK(sawCompletionLong);
   CHECK(localBuzzer.acceptedRequests >= before + 3);
-  CHECK(localBuzzer.active == BuzzerPattern::LONG);
-  CHECK(localBuzzer.onMs == BUZZER_LONG_ON_MS);
+  checkLocalCompletionTone();
 }
 
 void w63_scale_priority_paddle_uses_scale_when_connected() {
@@ -2923,6 +2925,15 @@ void drainLocalBuzzer() {
     runLoopAfter(40);
   }
   CHECK(!localBuzzer.busy());
+}
+
+void checkLocalCompletionTone() {
+  CHECK(localBuzzer.active == BuzzerPattern::LONG);
+#if SHOT_STOPPER_ENABLE_BUZZER == 2
+  CHECK(localBuzzer.onMs == BUZZER_LONG_ON_MS);
+#else
+  CHECK(localBuzzer.activeCue == BuzzerCue::SHOT_END);
+#endif
 }
 
 void w59_local_buzzer_plays_short_long_and_double_patterns() {
@@ -3123,7 +3134,11 @@ void w93_scale_connected_echo_on_rising_edge() {
   CHECK(localBuzzer.acceptedRequests == before + 1);
   CHECK(localBuzzer.active == BuzzerPattern::ECHO);
   CHECK(localBuzzer.beepCount == 4);
+#if SHOT_STOPPER_ENABLE_BUZZER == 2
   CHECK(localBuzzer.onMs == BUZZER_ECHO_NOTES[0].onMs);
+#else
+  CHECK(localBuzzer.activeCue == BuzzerCue::SCALE_CONNECTED);
+#endif
   const uint32_t afterConnect = localBuzzer.acceptedRequests;
   setScaleConnected(true);
   CHECK(localBuzzer.acceptedRequests == afterConnect);
@@ -3466,7 +3481,7 @@ void w74b_sound_alert_master_mutes_and_cancels_all_routes() {
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
   const uint32_t accepted = localBuzzer.acceptedRequests;
-  emitImmediateCommandAlertIfBuzzer();
+  emitImmediateCommandAlertIfBuzzer(AlertEvent::START_TIMER);
   CHECK(localBuzzer.acceptedRequests == accepted);
   requestCompletionAlert();
   CHECK(!scaleCompletionBeepScheduled);
@@ -3539,8 +3554,7 @@ void w77_scale_priority_disconnected_beeps_on_cn9_without_ble() {
   finalizeCycle(EndReason::PADDLE, StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(localBuzzer.acceptedRequests == afterStart + 1);
-  CHECK(localBuzzer.active == BuzzerPattern::LONG);
-  CHECK(localBuzzer.onMs == BUZZER_LONG_ON_MS);
+  checkLocalCompletionTone();
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
 }
 
@@ -3572,8 +3586,7 @@ void w79_buzzer_only_stop_beeps_before_timer_stop_result() {
   finalizeCycle(EndReason::PADDLE, StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(localBuzzer.acceptedRequests == before + 1);
-  CHECK(localBuzzer.active == BuzzerPattern::LONG);
-  CHECK(localBuzzer.onMs == BUZZER_LONG_ON_MS);
+  checkLocalCompletionTone();
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
   CHECK(executeNextScaleCommand());
   CHECK(localBuzzer.acceptedRequests == before + 1);
@@ -3647,7 +3660,7 @@ void w94_eclair_scale_priority_uses_local_alerts() {
 
   const uint32_t retareAlerts = localBuzzer.acceptedRequests;
   CHECK(requestRemoteRetare());
-  emitImmediateCommandAlertIfBuzzer();
+  emitImmediateCommandAlertIfBuzzer(AlertEvent::TARE);
   CHECK(localBuzzer.acceptedRequests == retareAlerts + 1);
   CHECK(commandCount(ScaleCommandType::TARE_ONLY) == 1);
 
@@ -4015,6 +4028,134 @@ void w62_local_buzzer_drive_matches_compile_flag() {
   CHECK(!BUZZER_ACTIVE_DRIVE);
   CHECK(hostLedcAttachCalls == 1);
 #endif
+}
+
+void w99_rtttl_parser_decodes_notes_and_rests() {
+  RtttlNote notes[RTTTL_MAX_NOTES];
+  uint8_t count = 0;
+  CHECK(parseRtttl(RTTTL_TARE, notes, count));
+  CHECK(count == 1);
+  CHECK(notes[0].freqHz >= 780 && notes[0].freqHz <= 790);
+  CHECK(notes[0].durationMs >= 60 && notes[0].durationMs <= 80);
+  CHECK(parseRtttl(RTTTL_PADDLE_OFF, notes, count));
+  CHECK(count == 3);
+  CHECK(notes[0].freqHz >= 780 && notes[0].freqHz <= 790);
+  CHECK(notes[1].freqHz == 0);
+  CHECK(notes[2].freqHz >= 780 && notes[2].freqHz <= 790);
+  CHECK(parseRtttl(RTTTL_START_TIMER, notes, count));
+  CHECK(count == 1);
+  CHECK(notes[0].freqHz >= 1040 && notes[0].freqHz <= 1055);
+  for (uint8_t i = 1; i <= static_cast<uint8_t>(BuzzerCue::RECOVERY_ERROR);
+       ++i) {
+    CHECK(parseRtttl(rtttlForCue(static_cast<BuzzerCue>(i)), notes, count));
+    CHECK(count > 0);
+  }
+#if SHOT_STOPPER_ENABLE_BUZZER == 1
+  resetHarness(false, false);
+  CHECK(localBuzzer.cueNoteCount[static_cast<uint8_t>(BuzzerCue::TARE)] == 1);
+  CHECK(localBuzzer.cueNoteCount[static_cast<uint8_t>(
+            BuzzerCue::PADDLE_REMINDER)] == 3);
+#endif
+}
+
+void w99b_passive_cue_drives_ledc_note_frequency() {
+  resetHarness(false, false);
+  const BuzzerToneCommand cmd =
+      deriveBuzzerTone(AlertEvent::TARE, false, 0, 0);
+  CHECK(cmd.valid);
+  CHECK(cmd.cue == BuzzerCue::TARE);
+  CHECK(localBuzzer.requestTone(cmd));
+  CHECK(localBuzzer.active == BuzzerPattern::SINGLE);
+  CHECK(localBuzzer.activeCue == BuzzerCue::TARE);
+#if SHOT_STOPPER_ENABLE_BUZZER == 2
+  CHECK(hostLedcAttachCalls == 0);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+#else
+  CHECK(hostLedcLastFreq >= 780 && hostLedcLastFreq <= 790);
+  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
+#endif
+}
+
+void w99c_select_alert_sink_preserves_channel_rules() {
+  AlertChannelContext ctx;
+  ctx.soundAlertsEnabled = true;
+  ctx.buzzerSupportEnabled = true;
+  ctx.buzzerReady = true;
+  ctx.channel = AlertOutputChannel::SCALE_ONLY;
+  CHECK(selectAlertSink(AlertKind::Independent, AlertEvent::SCALE_LOST, ctx) ==
+        AlertSink::None);
+  ctx.channel = AlertOutputChannel::BUZZER_ONLY;
+  CHECK(selectAlertSink(AlertKind::Independent, AlertEvent::SCALE_LOST, ctx) ==
+        AlertSink::Buzzer);
+  ctx.scaleAvailable = true;
+  ctx.scaleSupportsIndependentBeep = true;
+  ctx.channel = AlertOutputChannel::SCALE_PRIORITY;
+  CHECK(selectAlertSink(AlertKind::Independent, AlertEvent::FIRST_DROP, ctx) ==
+        AlertSink::Scale);
+  ctx.channel = AlertOutputChannel::BUZZER_ONLY;
+  CHECK(selectAlertSink(AlertKind::CommandImmediate, AlertEvent::START_TIMER,
+                        ctx) == AlertSink::Buzzer);
+  ctx.channel = AlertOutputChannel::SCALE_ONLY;
+  CHECK(selectAlertSink(AlertKind::CommandImmediate, AlertEvent::START_TIMER,
+                        ctx) == AlertSink::None);
+  ctx.soundAlertsEnabled = false;
+  ctx.channel = AlertOutputChannel::BUZZER_ONLY;
+  CHECK(selectAlertSink(AlertKind::Independent, AlertEvent::FIRST_DROP, ctx) ==
+        AlertSink::None);
+  CHECK(selectAlertSink(AlertKind::Recovery, AlertEvent::TARE, ctx) ==
+        AlertSink::Buzzer);
+  ctx.soundAlertsEnabled = true;
+  ctx.scaleAvailable = false;
+  ctx.channel = AlertOutputChannel::SCALE_PRIORITY;
+  CHECK(selectAlertSink(AlertKind::Independent, AlertEvent::FIRST_DROP, ctx) ==
+        AlertSink::Buzzer);
+  ctx.commandFeedbackExpected = true;
+  ctx.commandAttempted = true;
+  ctx.writeSucceeded = false;
+  CHECK(selectAlertSink(AlertKind::CommandFallback, AlertEvent::START_TIMER,
+                        ctx) == AlertSink::Buzzer);
+  const BuzzerToneCommand tareTone =
+      deriveBuzzerTone(AlertEvent::TARE, false, 0, 0);
+  CHECK(tareTone.valid && tareTone.cue == BuzzerCue::TARE &&
+        tareTone.pattern == BuzzerPattern::SINGLE);
+  const BuzzerToneCommand endTone =
+      deriveBuzzerTone(AlertEvent::COMPLETION_EXTRA, false, 0, 0);
+  CHECK(endTone.valid && endTone.cue == BuzzerCue::SHOT_END &&
+        endTone.pattern == BuzzerPattern::LONG);
+  const BuzzerToneCommand lostTone =
+      deriveBuzzerTone(AlertEvent::SCALE_LOST, false, 0, 0);
+  CHECK(lostTone.valid && lostTone.cue == BuzzerCue::SCALE_LOST &&
+        lostTone.pattern == BuzzerPattern::ECHO_INVERTED);
+}
+
+void w99d_pending_rtttl_starts_from_preparsed_catalog() {
+  resetHarness(false, false);
+  const BuzzerToneCommand tare =
+      deriveBuzzerTone(AlertEvent::TARE, false, 0, 0);
+  const BuzzerToneCommand end =
+      deriveBuzzerTone(AlertEvent::COMPLETION_EXTRA, false, 0, 0);
+  CHECK(localBuzzer.requestTone(tare));
+  CHECK(localBuzzer.activeCue == BuzzerCue::TARE);
+  CHECK(localBuzzer.requestTone(end));
+  CHECK(localBuzzer.pending == BuzzerPattern::LONG);
+  CHECK(localBuzzer.pendingCue == BuzzerCue::SHOT_END);
+  localBuzzer.stopIf(BuzzerPattern::SINGLE);
+  CHECK(localBuzzer.active == BuzzerPattern::LONG);
+  CHECK(localBuzzer.activeCue == BuzzerCue::SHOT_END);
+#if SHOT_STOPPER_ENABLE_BUZZER == 1
+  CHECK(localBuzzer.rtttlPlayback);
+  CHECK(localBuzzer.beepCount ==
+        localBuzzer.cueNoteCount[static_cast<uint8_t>(BuzzerCue::SHOT_END)]);
+#endif
+}
+
+void w99e_recovery_cue_bypasses_mute_via_pipeline() {
+  resetHarness(false, false);
+  runtimeConfig.soundAlertsMuted = true;
+  CHECK(!soundAlertsEnabled());
+  playRecoveryCue(BuzzerCue::RECOVERY_START);
+  CHECK(localBuzzer.active == BuzzerPattern::RECOVERY_LONG);
+  CHECK(localBuzzer.activeCue == BuzzerCue::RECOVERY_START);
 }
 
 void w39_history_mutation_blocked_while_brew_rf_active() {
@@ -8487,6 +8628,11 @@ const TestCase testCases[] = {
     {"W60", w60_web_buzzer_test_plays_requested_pattern},
     {"W61", w61_web_buzzer_test_rejected_while_active},
     {"W62", w62_local_buzzer_drive_matches_compile_flag},
+    {"W99", w99_rtttl_parser_decodes_notes_and_rests},
+    {"W99b", w99b_passive_cue_drives_ledc_note_frequency},
+    {"W99c", w99c_select_alert_sink_preserves_channel_rules},
+    {"W99d", w99d_pending_rtttl_starts_from_preparsed_catalog},
+    {"W99e", w99e_recovery_cue_bypasses_mute_via_pipeline},
     {"W63", w63_scale_priority_paddle_uses_scale_when_connected},
     {"W64", w64_buzzer_only_first_drop_uses_local_buzzer},
     {"W65", w65_scale_only_mutes_scale_lost},

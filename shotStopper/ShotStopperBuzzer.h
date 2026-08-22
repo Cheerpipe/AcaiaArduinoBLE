@@ -2,170 +2,35 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #ifndef SHOT_STOPPER_HOST_TEST
 #include <esp_timer.h>
 #endif
 
+#include "ShotStopperAlertTone.h"
+#include "ShotStopperBuzzerActive.h"
+#include "ShotStopperBuzzerPassive.h"
 #include "ShotStopperDomain.h"
 
 namespace shotstopper {
 
-constexpr uint32_t BUZZER_TONE_HZ = 2700;
-constexpr uint32_t BUZZER_BEEP_ON_MS = 80;
-constexpr uint32_t BUZZER_BEEP_GAP_MS = 70;
-constexpr uint32_t BUZZER_SINGLE_ON_MS = 120;
-constexpr uint32_t BUZZER_LONG_ON_MS = 800;
-constexpr uint32_t BUZZER_RECOVERY_LONG_ON_MS = 1500;
-constexpr uint32_t BUZZER_RECOVERY_PULSE_ON_MS = 50;
-constexpr uint32_t BUZZER_RECOVERY_PULSE_GAP_MS = 50;
-constexpr uint32_t BUZZER_PULSE_TRAIN_ON_MS = 20;
-constexpr uint32_t BUZZER_PULSE_TRAIN_PERIOD_MS = 500;
-constexpr uint32_t BUZZER_PULSE_TRAIN_GAP_MS =
-    BUZZER_PULSE_TRAIN_PERIOD_MS - BUZZER_PULSE_TRAIN_ON_MS;
-constexpr uint32_t BUZZER_PULSE_TRAIN_3HZ_PERIOD_MS = 333;
-constexpr uint32_t BUZZER_PULSE_TRAIN_3HZ_GAP_MS =
-    BUZZER_PULSE_TRAIN_3HZ_PERIOD_MS - BUZZER_PULSE_TRAIN_ON_MS;
-constexpr uint32_t BUZZER_PULSE_TRAIN_4HZ_PERIOD_MS = 250;
-constexpr uint32_t BUZZER_PULSE_TRAIN_4HZ_GAP_MS =
-    BUZZER_PULSE_TRAIN_4HZ_PERIOD_MS - BUZZER_PULSE_TRAIN_ON_MS;
-constexpr uint32_t BUZZER_PULSE_TRAIN_5HZ_PERIOD_MS = 200;
-constexpr uint32_t BUZZER_PULSE_TRAIN_5HZ_GAP_MS =
-    BUZZER_PULSE_TRAIN_5HZ_PERIOD_MS - BUZZER_PULSE_TRAIN_ON_MS;
-constexpr uint32_t BUZZER_PULSE_TRAIN_DEBUG_MS = 3000;
-
-struct BuzzerNote {
-  uint16_t onMs;
-  uint16_t gapMs;
-};
-
-// Irregular finite motifs (not equal beeps, not a metronome).
-constexpr BuzzerNote BUZZER_CHIME_NOTES[] = {{60, 50}, {60, 80}, {220, 0}};
-constexpr BuzzerNote BUZZER_SWING_NOTES[] = {{180, 40}, {50, 40}, {50, 0}};
-constexpr BuzzerNote BUZZER_ECHO_NOTES[] = {
-    {50, 50}, {50, 220}, {50, 50}, {50, 0}};
-// Echo inverted: long bookends with short middle ticks (trailing gap 0).
-constexpr BuzzerNote BUZZER_ECHO_INVERTED_NOTES[] = {
-    {220, 50}, {50, 50}, {50, 50}, {220, 0}};
-constexpr BuzzerNote BUZZER_MORSE_NOTES[] = {{250, 80}, {50, 80}, {250, 0}};
-constexpr BuzzerNote BUZZER_SNAP_NOTES[] = {
-    {70, 30}, {200, 50}, {70, 30}, {200, 0}};
-constexpr BuzzerNote BUZZER_RECOVERY_NETWORK_NOTES[] = {
-    {BUZZER_RECOVERY_PULSE_ON_MS, BUZZER_RECOVERY_PULSE_GAP_MS},
-    {BUZZER_RECOVERY_PULSE_ON_MS, BUZZER_RECOVERY_PULSE_GAP_MS},
-    {BUZZER_RECOVERY_PULSE_ON_MS, 0}};
-constexpr BuzzerNote BUZZER_RECOVERY_FACTORY_NOTES[] = {
-    {BUZZER_RECOVERY_PULSE_ON_MS, BUZZER_RECOVERY_PULSE_GAP_MS},
-    {BUZZER_RECOVERY_PULSE_ON_MS, BUZZER_RECOVERY_PULSE_GAP_MS},
-    {BUZZER_RECOVERY_PULSE_ON_MS, BUZZER_RECOVERY_PULSE_GAP_MS},
-    {BUZZER_RECOVERY_PULSE_ON_MS, BUZZER_RECOVERY_PULSE_GAP_MS},
-    {BUZZER_RECOVERY_PULSE_ON_MS, 0}};
-// A deliberately distinct long-short-long failure motif.
-constexpr BuzzerNote BUZZER_RECOVERY_ERROR_NOTES[] = {
-    {300, 100}, {70, 100}, {300, 0}};
-
-constexpr bool buzzerNotesStartAndEndWithSound(const BuzzerNote *notes,
-                                               size_t count) {
-  if (notes == nullptr || count == 0) {
-    return false;
-  }
-  if (notes[count - 1].gapMs != 0) {
-    return false;
-  }
-  for (size_t i = 0; i < count; ++i) {
-    if (notes[i].onMs == 0) {
-      return false;
-    }
-  }
-  return true;
-}
-
-template <size_t N>
-constexpr bool buzzerSequenceStartsAndEndsWithSound(
-    const BuzzerNote (&notes)[N]) {
-  return buzzerNotesStartAndEndWithSound(notes, N);
-}
-
-static_assert(BUZZER_BEEP_ON_MS > 0 && BUZZER_SINGLE_ON_MS > 0 &&
-                  BUZZER_LONG_ON_MS > 0 && BUZZER_RECOVERY_LONG_ON_MS > 0 &&
-                  BUZZER_RECOVERY_PULSE_ON_MS > 0 &&
-                  BUZZER_PULSE_TRAIN_ON_MS > 0,
-              "fixed-length beeps must start with sound");
-static_assert(buzzerSequenceStartsAndEndsWithSound(BUZZER_CHIME_NOTES),
-              "CHIME must start and end with sound");
-static_assert(buzzerSequenceStartsAndEndsWithSound(BUZZER_SWING_NOTES),
-              "SWING must start and end with sound");
-static_assert(buzzerSequenceStartsAndEndsWithSound(BUZZER_ECHO_NOTES),
-              "ECHO must start and end with sound");
-static_assert(buzzerSequenceStartsAndEndsWithSound(BUZZER_ECHO_INVERTED_NOTES),
-              "ECHO_INVERTED must start and end with sound");
-static_assert(buzzerSequenceStartsAndEndsWithSound(BUZZER_MORSE_NOTES),
-              "MORSE must start and end with sound");
-static_assert(buzzerSequenceStartsAndEndsWithSound(BUZZER_SNAP_NOTES),
-              "SNAP must start and end with sound");
-static_assert(
-    buzzerSequenceStartsAndEndsWithSound(BUZZER_RECOVERY_NETWORK_NOTES),
-    "RECOVERY_NETWORK_OK must start and end with sound");
-static_assert(
-    buzzerSequenceStartsAndEndsWithSound(BUZZER_RECOVERY_FACTORY_NOTES),
-    "RECOVERY_FACTORY_OK must start and end with sound");
-static_assert(buzzerSequenceStartsAndEndsWithSound(BUZZER_RECOVERY_ERROR_NOTES),
-              "RECOVERY_ERROR must start and end with sound");
-
-inline const BuzzerNote *buzzerSequenceNotes(BuzzerPattern pattern,
-                                             uint8_t &count) {
-  switch (pattern) {
-    case BuzzerPattern::CHIME:
-      count = static_cast<uint8_t>(sizeof(BUZZER_CHIME_NOTES) /
-                                   sizeof(BUZZER_CHIME_NOTES[0]));
-      return BUZZER_CHIME_NOTES;
-    case BuzzerPattern::SWING:
-      count = static_cast<uint8_t>(sizeof(BUZZER_SWING_NOTES) /
-                                   sizeof(BUZZER_SWING_NOTES[0]));
-      return BUZZER_SWING_NOTES;
-    case BuzzerPattern::ECHO:
-      count = static_cast<uint8_t>(sizeof(BUZZER_ECHO_NOTES) /
-                                   sizeof(BUZZER_ECHO_NOTES[0]));
-      return BUZZER_ECHO_NOTES;
-    case BuzzerPattern::ECHO_INVERTED:
-      count = static_cast<uint8_t>(sizeof(BUZZER_ECHO_INVERTED_NOTES) /
-                                   sizeof(BUZZER_ECHO_INVERTED_NOTES[0]));
-      return BUZZER_ECHO_INVERTED_NOTES;
-    case BuzzerPattern::MORSE:
-      count = static_cast<uint8_t>(sizeof(BUZZER_MORSE_NOTES) /
-                                   sizeof(BUZZER_MORSE_NOTES[0]));
-      return BUZZER_MORSE_NOTES;
-    case BuzzerPattern::SNAP:
-      count = static_cast<uint8_t>(sizeof(BUZZER_SNAP_NOTES) /
-                                   sizeof(BUZZER_SNAP_NOTES[0]));
-      return BUZZER_SNAP_NOTES;
-    case BuzzerPattern::RECOVERY_NETWORK_OK:
-      count = static_cast<uint8_t>(sizeof(BUZZER_RECOVERY_NETWORK_NOTES) /
-                                   sizeof(BUZZER_RECOVERY_NETWORK_NOTES[0]));
-      return BUZZER_RECOVERY_NETWORK_NOTES;
-    case BuzzerPattern::RECOVERY_FACTORY_OK:
-      count = static_cast<uint8_t>(sizeof(BUZZER_RECOVERY_FACTORY_NOTES) /
-                                   sizeof(BUZZER_RECOVERY_FACTORY_NOTES[0]));
-      return BUZZER_RECOVERY_FACTORY_NOTES;
-    case BuzzerPattern::RECOVERY_ERROR:
-      count = static_cast<uint8_t>(sizeof(BUZZER_RECOVERY_ERROR_NOTES) /
-                                   sizeof(BUZZER_RECOVERY_ERROR_NOTES[0]));
-      return BUZZER_RECOVERY_ERROR_NOTES;
-    default:
-      count = 0;
-      return nullptr;
-  }
+inline bool buzzerPatternIsHighPriority(BuzzerPattern pattern) {
+  return pattern == BuzzerPattern::TRIPLE || pattern == BuzzerPattern::ECHO ||
+         pattern == BuzzerPattern::ECHO_INVERTED;
 }
 
 // Non-blocking local-buzzer driver. Passive (ENABLE=1) uses hardware PWM
-// (ledc); active (ENABLE=2) uses GPIO HIGH/LOW. Host stubs map both to a
-// digital level so patterns can be asserted without LEDC. Phase edges are
-// armed on esp_timer so Serial/loop stalls cannot stretch beeps.
+// (ledc) and RTTTL for operational cues; active (ENABLE=2) uses GPIO
+// HIGH/LOW. Host stubs map both to a digital level. Phase edges are armed
+// on esp_timer so Serial/loop stalls cannot stretch beeps.
 struct LocalBuzzer {
   uint8_t pin = 0;
   bool ready = false;
   BuzzerPattern active = BuzzerPattern::NONE;
   BuzzerPattern pending = BuzzerPattern::NONE;
+  BuzzerCue activeCue = BuzzerCue::NONE;
+  BuzzerCue pendingCue = BuzzerCue::NONE;
   uint8_t beepIndex = 0;
   uint8_t beepCount = 0;
   bool toneOn = false;
@@ -176,7 +41,17 @@ struct LocalBuzzer {
   uint32_t deadlineAtMs = 0;
   uint32_t pendingDurationMs = 0;
   uint32_t acceptedRequests = 0;
+  uint32_t toneHz = BUZZER_TONE_HZ;
   const BuzzerNote *sequenceNotes = nullptr;
+  RtttlNote rtttlBuf[RTTTL_MAX_NOTES] = {};
+  uint8_t rtttlCount = 0;
+  bool rtttlPlayback = false;
+#if SHOT_STOPPER_ENABLE_BUZZER == 1
+  static constexpr uint8_t kRtttlCueCount =
+      static_cast<uint8_t>(BuzzerCue::RECOVERY_ERROR) + 1;
+  RtttlNote cueNotes[kRtttlCueCount][RTTTL_MAX_NOTES] = {};
+  uint8_t cueNoteCount[kRtttlCueCount] = {};
+#endif
   esp_timer_handle_t phaseTimer = nullptr;
   portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -189,6 +64,7 @@ struct LocalBuzzer {
   // only for pulse trains (0 = until stopIf). Returns false if unsupported,
   // not ready, or not accepted.
   bool request(BuzzerPattern pattern, uint32_t durationMs = 0);
+  bool requestTone(const BuzzerToneCommand &cmd);
   void stopIf(BuzzerPattern pattern);
   void service(uint32_t nowMs);
   bool busy() const {
@@ -204,7 +80,12 @@ struct LocalBuzzer {
   void armPhaseTimer(uint32_t delayMs);
   void finish(uint32_t nowMs);
   bool startPattern(BuzzerPattern pattern, uint32_t nowMs);
+  bool startRtttl(const BuzzerToneCommand &cmd, uint32_t nowMs);
   void applySequenceNote(uint8_t index);
+  void applyRtttlNote(uint8_t index);
+  void clearPlayback();
+  bool acceptLocked(BuzzerPattern pattern, BuzzerCue cue, uint32_t durationMs,
+                    bool rtttl, const BuzzerToneCommand *cmd);
   static void phaseTimerCallback(void *arg);
 };
 
@@ -230,22 +111,28 @@ inline void LocalBuzzer::phaseTimerCallback(void *arg) {
   static_cast<LocalBuzzer *>(arg)->service(millis());
 }
 
+inline void LocalBuzzer::clearPlayback() {
+  active = BuzzerPattern::NONE;
+  activeCue = BuzzerCue::NONE;
+  beepIndex = 0;
+  beepCount = 0;
+  looping = false;
+  deadlineAtMs = 0;
+  sequenceNotes = nullptr;
+  rtttlCount = 0;
+  rtttlPlayback = false;
+  toneHz = BUZZER_TONE_HZ;
+}
+
 inline void LocalBuzzer::begin(uint8_t gpioPin) {
   pin = gpioPin;
   ready = false;
-  active = BuzzerPattern::NONE;
   pending = BuzzerPattern::NONE;
-  beepIndex = 0;
-  beepCount = 0;
-  toneOn = false;
-  looping = false;
-  phaseStartedAtMs = 0;
-  onMs = 0;
-  gapMs = 0;
-  deadlineAtMs = 0;
+  pendingCue = BuzzerCue::NONE;
   pendingDurationMs = 0;
   acceptedRequests = 0;
-  sequenceNotes = nullptr;
+  toneOn = false;
+  clearPlayback();
   cancelPhaseTimer();
   if (!BUZZER_SUPPORT_ENABLED || pin == 0) {
     return;
@@ -261,27 +148,35 @@ inline void LocalBuzzer::begin(uint8_t gpioPin) {
     }
   }
   if (BUZZER_ACTIVE_DRIVE) {
-    pinMode(pin, OUTPUT);
-    digitalWrite(pin, LOW);
+    buzzerActiveBegin(pin);
     ready = true;
     return;
   }
-  // Passive piezo: Arduino-ESP32 3.x API attach then writeTone.
-  if (!ledcAttach(pin, BUZZER_TONE_HZ, 10)) {
+  if (!buzzerPassiveBegin(pin)) {
     return;
   }
-  ledcWriteTone(pin, 0);
+#if SHOT_STOPPER_ENABLE_BUZZER == 1
+  for (uint8_t i = 1; i < kRtttlCueCount; ++i) {
+    uint8_t count = 0;
+    if (!parseRtttl(rtttlForCue(static_cast<BuzzerCue>(i)), cueNotes[i],
+                    count) ||
+        count == 0) {
+      return;
+    }
+    cueNoteCount[i] = count;
+  }
+#endif
   ready = true;
 }
 
 inline void LocalBuzzer::startTone() {
-  if (!ready || toneOn) {
+  if (!ready || toneOn || toneHz == 0) {
     return;
   }
   if (BUZZER_ACTIVE_DRIVE) {
-    digitalWrite(pin, HIGH);
+    buzzerActiveSetTone(pin, true);
   } else {
-    ledcWriteTone(pin, BUZZER_TONE_HZ);
+    buzzerPassiveSetTone(pin, toneHz);
   }
   toneOn = true;
 }
@@ -292,9 +187,9 @@ inline void LocalBuzzer::stopTone() {
     return;
   }
   if (BUZZER_ACTIVE_DRIVE) {
-    digitalWrite(pin, LOW);
+    buzzerActiveSetTone(pin, false);
   } else {
-    ledcWriteTone(pin, 0);
+    buzzerPassiveSetTone(pin, 0);
   }
   toneOn = false;
 }
@@ -310,21 +205,31 @@ inline bool LocalBuzzer::deadlineReached(uint32_t nowMs) const {
 
 inline void LocalBuzzer::finish(uint32_t nowMs) {
   stopTone();
-  active = BuzzerPattern::NONE;
-  beepIndex = 0;
-  beepCount = 0;
-  looping = false;
-  deadlineAtMs = 0;
-  sequenceNotes = nullptr;
+  clearPlayback();
   if (pending == BuzzerPattern::NONE) {
     cancelPhaseTimer();
     return;
   }
   const BuzzerPattern next = pending;
+  const BuzzerCue nextCue = pendingCue;
   const uint32_t nextDurationMs = pendingDurationMs;
   pending = BuzzerPattern::NONE;
+  pendingCue = BuzzerCue::NONE;
   pendingDurationMs = 0;
-  if (!startPattern(next, nowMs)) {
+  bool started = false;
+  if (nextCue != BuzzerCue::NONE && !BUZZER_ACTIVE_DRIVE) {
+    BuzzerToneCommand cmd = deriveRecoveryTone(nextCue);
+    cmd.pattern = next;
+    cmd.looping = buzzerCueIsLooping(nextCue) || buzzerPatternIsPulseTrain(next);
+    cmd.durationMs = nextDurationMs;
+    started = startRtttl(cmd, nowMs);
+  } else {
+    started = startPattern(next, nowMs);
+    if (started) {
+      activeCue = nextCue;
+    }
+  }
+  if (!started) {
     cancelPhaseTimer();
     return;
   }
@@ -337,12 +242,64 @@ inline void LocalBuzzer::applySequenceNote(uint8_t index) {
   }
   onMs = sequenceNotes[index].onMs;
   gapMs = sequenceNotes[index].gapMs;
+  toneHz = BUZZER_TONE_HZ;
+}
+
+inline void LocalBuzzer::applyRtttlNote(uint8_t index) {
+  if (index >= rtttlCount) {
+    return;
+  }
+  toneHz = rtttlBuf[index].freqHz;
+  if (toneHz == 0) {
+    onMs = 0;
+    gapMs = rtttlBuf[index].durationMs;
+  } else {
+    onMs = rtttlBuf[index].durationMs;
+    gapMs = 0;
+  }
+}
+
+inline bool LocalBuzzer::startRtttl(const BuzzerToneCommand &cmd,
+                                    uint32_t nowMs) {
+#if SHOT_STOPPER_ENABLE_BUZZER != 1
+  (void)cmd;
+  (void)nowMs;
+  return false;
+#else
+  const uint8_t id = static_cast<uint8_t>(cmd.cue);
+  if (id == 0 || id >= kRtttlCueCount || cueNoteCount[id] == 0) {
+    return false;
+  }
+  rtttlCount = cueNoteCount[id];
+  memcpy(rtttlBuf, cueNotes[id], sizeof(RtttlNote) * rtttlCount);
+  rtttlPlayback = true;
+  sequenceNotes = nullptr;
+  looping = cmd.looping;
+  deadlineAtMs = 0;
+  active = cmd.pattern;
+  activeCue = cmd.cue;
+  beepCount = rtttlCount;
+  beepIndex = 0;
+  applyRtttlNote(0);
+  phaseStartedAtMs = nowMs;
+  if (toneHz > 0) {
+    startTone();
+    armPhaseTimer(onMs);
+  } else {
+    armPhaseTimer(gapMs);
+  }
+  return true;
+#endif
 }
 
 inline bool LocalBuzzer::startPattern(BuzzerPattern pattern, uint32_t nowMs) {
   looping = false;
   deadlineAtMs = 0;
   sequenceNotes = nullptr;
+  rtttlPlayback = false;
+  rtttlCount = 0;
+  activeCue = BuzzerCue::NONE;
+  toneHz = BUZZER_TONE_HZ;
   if (pattern == BuzzerPattern::SINGLE) {
     beepCount = 1;
     onMs = BUZZER_SINGLE_ON_MS;
@@ -395,9 +352,67 @@ inline bool LocalBuzzer::startPattern(BuzzerPattern pattern, uint32_t nowMs) {
   return true;
 }
 
-inline bool buzzerPatternIsHighPriority(BuzzerPattern pattern) {
-  return pattern == BuzzerPattern::TRIPLE || pattern == BuzzerPattern::ECHO ||
-         pattern == BuzzerPattern::ECHO_INVERTED;
+inline bool LocalBuzzer::acceptLocked(BuzzerPattern pattern, BuzzerCue cue,
+                                      uint32_t durationMs, bool rtttl,
+                                      const BuzzerToneCommand *cmd) {
+  const uint32_t nowMs = millis();
+  bool started = false;
+  bool accepted = false;
+  if (buzzerPatternIsPulseTrain(active) ||
+      (active != BuzzerPattern::NONE && looping && rtttlPlayback)) {
+    if (pattern == active && cue == activeCue) {
+      applyDeadline(durationMs, nowMs);
+      ++acceptedRequests;
+      accepted = true;
+    } else {
+      pending = BuzzerPattern::NONE;
+      pendingCue = BuzzerCue::NONE;
+      pendingDurationMs = 0;
+      stopTone();
+      if (rtttl && cmd != nullptr) {
+        started = startRtttl(*cmd, nowMs);
+      } else {
+        started = startPattern(pattern, nowMs);
+      }
+      if (started) {
+        if (!rtttl) {
+          activeCue = cue;
+        }
+        applyDeadline(durationMs, nowMs);
+        ++acceptedRequests;
+        accepted = true;
+      }
+    }
+  } else if (active == BuzzerPattern::NONE) {
+    if (rtttl && cmd != nullptr) {
+      started = startRtttl(*cmd, nowMs);
+    } else {
+      started = startPattern(pattern, nowMs);
+    }
+    if (started) {
+      if (!rtttl) {
+        activeCue = cue;
+      }
+      applyDeadline(durationMs, nowMs);
+      ++acceptedRequests;
+      accepted = true;
+    }
+  } else if (pending == BuzzerPattern::NONE) {
+    pending = pattern;
+    pendingCue = cue;
+    pendingDurationMs = durationMs;
+    ++acceptedRequests;
+    accepted = true;
+  } else if (buzzerPatternIsHighPriority(pattern) &&
+             !buzzerPatternIsHighPriority(pending)) {
+    pending = pattern;
+    pendingCue = cue;
+    pendingDurationMs = buzzerPatternIsPulseTrain(pattern) ? durationMs : 0;
+    accepted = true;
+  } else {
+    accepted = pattern == pending && cue == pendingCue;
+  }
+  return accepted;
 }
 
 inline bool LocalBuzzer::request(BuzzerPattern pattern, uint32_t durationMs) {
@@ -405,41 +420,22 @@ inline bool LocalBuzzer::request(BuzzerPattern pattern, uint32_t durationMs) {
     return false;
   }
   portENTER_CRITICAL(&mux);
-  const uint32_t nowMs = millis();
-  bool accepted = false;
-  if (buzzerPatternIsPulseTrain(active)) {
-    if (pattern == active) {
-      applyDeadline(durationMs, nowMs);
-      ++acceptedRequests;
-      accepted = true;
-    } else {
-      pending = BuzzerPattern::NONE;
-      pendingDurationMs = 0;
-      if (startPattern(pattern, nowMs)) {
-        applyDeadline(durationMs, nowMs);
-        ++acceptedRequests;
-        accepted = true;
-      }
-    }
-  } else if (active == BuzzerPattern::NONE) {
-    if (startPattern(pattern, nowMs)) {
-      applyDeadline(durationMs, nowMs);
-      ++acceptedRequests;
-      accepted = true;
-    }
-  } else if (pending == BuzzerPattern::NONE) {
-    pending = pattern;
-    pendingDurationMs = durationMs;
-    ++acceptedRequests;
-    accepted = true;
-  } else if (buzzerPatternIsHighPriority(pattern) &&
-             !buzzerPatternIsHighPriority(pending)) {
-    pending = pattern;
-    pendingDurationMs = buzzerPatternIsPulseTrain(pattern) ? durationMs : 0;
-    accepted = true;
-  } else {
-    accepted = pattern == pending;
+  const bool accepted =
+      acceptLocked(pattern, BuzzerCue::NONE, durationMs, false, nullptr);
+  portEXIT_CRITICAL(&mux);
+  return accepted;
+}
+
+inline bool LocalBuzzer::requestTone(const BuzzerToneCommand &cmd) {
+  if (!BUZZER_SUPPORT_ENABLED || !ready || !cmd.valid ||
+      cmd.pattern == BuzzerPattern::NONE) {
+    return false;
   }
+  const bool useRtttl = !BUZZER_ACTIVE_DRIVE && cmd.cue != BuzzerCue::NONE &&
+                        rtttlForCue(cmd.cue) != nullptr;
+  portENTER_CRITICAL(&mux);
+  const bool accepted =
+      acceptLocked(cmd.pattern, cmd.cue, cmd.durationMs, useRtttl, &cmd);
   portEXIT_CRITICAL(&mux);
   return accepted;
 }
@@ -451,6 +447,7 @@ inline void LocalBuzzer::stopIf(BuzzerPattern pattern) {
   portENTER_CRITICAL(&mux);
   if (pending == pattern) {
     pending = BuzzerPattern::NONE;
+    pendingCue = BuzzerCue::NONE;
     pendingDurationMs = 0;
   }
   if (active != pattern) {
@@ -459,22 +456,32 @@ inline void LocalBuzzer::stopIf(BuzzerPattern pattern) {
   }
   const uint32_t nowMs = millis();
   stopTone();
-  active = BuzzerPattern::NONE;
-  beepIndex = 0;
-  beepCount = 0;
-  looping = false;
-  deadlineAtMs = 0;
-  sequenceNotes = nullptr;
+  clearPlayback();
   if (pending == BuzzerPattern::NONE) {
     cancelPhaseTimer();
     portEXIT_CRITICAL(&mux);
     return;
   }
   const BuzzerPattern next = pending;
+  const BuzzerCue nextCue = pendingCue;
   const uint32_t nextDurationMs = pendingDurationMs;
   pending = BuzzerPattern::NONE;
+  pendingCue = BuzzerCue::NONE;
   pendingDurationMs = 0;
-  if (!startPattern(next, nowMs)) {
+  bool started = false;
+  if (nextCue != BuzzerCue::NONE && !BUZZER_ACTIVE_DRIVE) {
+    BuzzerToneCommand cmd = deriveRecoveryTone(nextCue);
+    cmd.pattern = next;
+    cmd.looping = buzzerCueIsLooping(nextCue) || buzzerPatternIsPulseTrain(next);
+    cmd.durationMs = nextDurationMs;
+    started = startRtttl(cmd, nowMs);
+  } else {
+    started = startPattern(next, nowMs);
+    if (started) {
+      activeCue = nextCue;
+    }
+  }
+  if (!started) {
     cancelPhaseTimer();
     portEXIT_CRITICAL(&mux);
     return;
@@ -506,7 +513,7 @@ inline void LocalBuzzer::service(uint32_t nowMs) {
     }
     stopTone();
     phaseStartedAtMs = nowMs;
-    if (looping) {
+    if (looping && !rtttlPlayback) {
       if (deadlineReached(nowMs)) {
         finish(nowMs);
       } else {
@@ -516,7 +523,27 @@ inline void LocalBuzzer::service(uint32_t nowMs) {
       return;
     }
     if (beepIndex + 1U >= beepCount) {
-      finish(nowMs);
+      if (looping && rtttlPlayback && !deadlineReached(nowMs)) {
+        beepIndex = 0;
+        applyRtttlNote(0);
+        if (gapMs == 0 && toneHz > 0) {
+          startTone();
+          armPhaseTimer(onMs);
+        } else {
+          armPhaseTimer(gapMs == 0 ? 1 : gapMs);
+        }
+      } else {
+        finish(nowMs);
+      }
+    } else if (gapMs == 0 && rtttlPlayback) {
+      ++beepIndex;
+      applyRtttlNote(beepIndex);
+      if (toneHz > 0) {
+        startTone();
+        armPhaseTimer(onMs);
+      } else {
+        armPhaseTimer(gapMs == 0 ? 1 : gapMs);
+      }
     } else {
       armPhaseTimer(gapMs);
     }
@@ -527,7 +554,7 @@ inline void LocalBuzzer::service(uint32_t nowMs) {
     portEXIT_CRITICAL(&mux);
     return;
   }
-  if (looping) {
+  if (looping && !rtttlPlayback) {
     if (deadlineReached(nowMs)) {
       finish(nowMs);
       portEXIT_CRITICAL(&mux);
@@ -539,16 +566,42 @@ inline void LocalBuzzer::service(uint32_t nowMs) {
     portEXIT_CRITICAL(&mux);
     return;
   }
+  if (rtttlPlayback && toneHz == 0 && beepIndex + 1U >= beepCount) {
+    if (looping && !deadlineReached(nowMs)) {
+      beepIndex = 0;
+      applyRtttlNote(0);
+      phaseStartedAtMs = nowMs;
+      if (toneHz > 0) {
+        startTone();
+        armPhaseTimer(onMs);
+      } else {
+        armPhaseTimer(gapMs == 0 ? 1 : gapMs);
+      }
+      portEXIT_CRITICAL(&mux);
+      return;
+    }
+    finish(nowMs);
+    portEXIT_CRITICAL(&mux);
+    return;
+  }
   ++beepIndex;
   if (beepIndex >= beepCount) {
     finish(nowMs);
     portEXIT_CRITICAL(&mux);
     return;
   }
-  applySequenceNote(beepIndex);
+  if (rtttlPlayback) {
+    applyRtttlNote(beepIndex);
+  } else {
+    applySequenceNote(beepIndex);
+  }
   phaseStartedAtMs = nowMs;
-  startTone();
-  armPhaseTimer(onMs);
+  if (toneHz > 0) {
+    startTone();
+    armPhaseTimer(onMs);
+  } else {
+    armPhaseTimer(gapMs == 0 ? 1 : gapMs);
+  }
   portEXIT_CRITICAL(&mux);
 }
 
