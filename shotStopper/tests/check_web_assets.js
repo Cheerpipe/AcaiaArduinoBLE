@@ -568,7 +568,15 @@ if (!ui.includes('id="shotPanel"') ||
     !html.includes('id="shotSparkHost"') ||
     !css.includes('.shotSparkHost') ||
     !css.includes('.shotSpark{') ||
+    !css.includes('.shotSparkHost[hidden]') ||
+    !css.includes('#shotTable tr.noSpark{') ||
+    !css.includes('.shotSpark{display:block;width:100%;height:100%;color:var(--ok);overflow:visible}') ||
     !ui.includes('function renderShotSpark(') ||
+    !runtimeJs.includes('lastCurveWeightG(w)===null') ||
+    !runtimeJs.includes('typeof first===\'number\'&&first>0&&dur>0') ||
+    !runtimeJs.includes('stroke="\'+cN+\'"') ||
+    runtimeJs.includes('stroke="currentColor"') ||
+    !runtimeJs.includes("if(spark.hidden)row.classList.add('noSpark')") ||
     !css.includes('.shotCard{') ||
     !css.includes('.metric,.shotCard > *{') ||
     !css.includes('.metric strong,.shotCard strong{') ||
@@ -1313,7 +1321,8 @@ if (!ui.includes('id="shotTable"') ||
     !js.includes("'shotDur'") ||
     !js.includes("'shotActual'") ||
     !css.includes('#shotTable .shotDur,#shotTable .shotActual') ||
-    !css.includes('grid-template-areas:"dur dur dur actual actual actual" "time time time time time time" "goal goal flow flow drop drop" "err err shot shot ended ended"') ||
+    !css.includes('grid-template-areas:"dur dur dur actual actual actual" "time time time time time time" "goal goal flow flow drop drop" "err err shot shot ended ended" "spark spark spark spark spark spark"') ||
+    !css.includes('#shotTable tr.noSpark{grid-template-areas:"dur dur dur actual actual actual" "time time time time time time" "goal goal flow flow drop drop" "err err shot shot ended ended"}') ||
     css.includes('grid-area:guard') ||
     css.includes('grid-area:ext') ||
     css.includes('grid-area:stop') ||
@@ -1349,9 +1358,11 @@ if (!ui.includes('id="shotTable"') ||
   throw new Error('Shot history UI/API must expose table, CSV export, clear confirmation, and timezone setting');
 }
 if (!ui.includes('id="firmwareFooter"') ||
+    !ui.includes('id="inactiveFirmware"') ||
     !ui.includes('firmwareVersion') ||
     !ui.includes('updateFirmwareFooter()') ||
     !ui.includes("const nav=$('navFirmware')") ||
+    !ui.includes("const inactive=$('inactiveFirmware')") ||
     !shellHtml.includes('id="navFirmware"') ||
     !shellHtml.includes('class="navMeta"') ||
     !css.includes('#view-home:not(.hidden)~.pageFooter{display:none}') ||
@@ -1379,9 +1390,14 @@ if (!shellHtml.includes('id="message"') ||
     !runtimeJs.includes("kind==='ok'?5e3") ||
     !runtimeJs.includes("kind==='warn'&&!e.querySelector('button:not(#messageClose)')?15e3") ||
     !runtimeJs.includes('setTimeout(clearMessage,ms)') ||
-    !css.includes('.messageClose') ||
-    !css.includes('#message[hidden]')) {
+    !css.includes('.messageClose')) {
   throw new Error('Status message bar must auto-hide ok/warn and stay for errors');
+}
+if (!css.includes('#message[hidden]') ||
+    css.includes('#message[hidden]{display:none}') ||
+    !css.includes('#message[hidden]{display:flex!important;visibility:hidden') ||
+    !/#message\{[^}]*min-height:2\.6rem/.test(css)) {
+  throw new Error('Status message bar must keep its layout height while hidden');
 }
 if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     /authenticatedOnly[^>]*><legend>Log<\/legend>/.test(html) ||
@@ -1702,9 +1718,12 @@ if (!network.includes('/api/v1/ui/claim') ||
 }
 if (!ui.includes('function claimWebUiOwnership()') ||
     !ui.includes('function deactivateWebUi()') ||
-    !ui.includes('Reactivate') ||
+    !ui.includes('function showInactiveOverlay()') ||
+    !ui.includes('function hideInactiveOverlay()') ||
+    !ui.includes('id="webUiReload"') ||
+    !ui.includes('>Reload<') ||
     !ui.includes('X-WebUI-Client')) {
-  throw new Error('Inactive WebUI windows must become passive and offer Reactivate');
+  throw new Error('Inactive WebUI windows must become passive and offer Reload');
 }
 if (!ui.includes('const WEB_UI_INACTIVITY_MS=15*60*1000') ||
     !ui.includes('function resetWebUiInactivity()') ||
@@ -1718,11 +1737,21 @@ if (!ui.includes('const WEB_UI_INACTIVITY_MS=15*60*1000') ||
     ui.includes("addEventListener('scroll', R.noteWebUiInteraction")) {
   throw new Error('WebUI inactivity must expire after 15 minutes of direct control interaction, never scrolling');
 }
-if (!ui.includes('This WebUI window is inactive. Reactivate to continue.') ||
+if (!ui.includes('Press Reload to enable this window again.') ||
+    !ui.includes('id="webUiInactive"') ||
+    !ui.includes('id="inactiveHint"') ||
+    !ui.includes('id="inactiveError"') ||
+    !css.includes('.inactiveOverlay') ||
+    !css.includes('.inactiveOverlay.isVisible') ||
+    !css.includes('opacity .5s') ||
     !network.includes('This WebUI window is inactive. Reactivate to continue.') ||
     ui.includes('Another WebUI window controls this device.') ||
-    network.includes('Another WebUI window has taken control.')) {
-  throw new Error('WebUI inactive notice must be neutral and offer Reactivate');
+    network.includes('Another WebUI window has taken control.') ||
+    ui.includes('function ownershipBanner(') ||
+    ui.includes('webUiOwnership') ||
+    ui.includes('btnTakeControl') ||
+    ui.includes('Reactivate')) {
+  throw new Error('WebUI inactive notice must be a full-screen Reload overlay');
 }
 if (!ui.includes('clearTimeout(webUiInactivityTimer)') ||
     !ui.includes('clearTimeout(scanTimer)') ||

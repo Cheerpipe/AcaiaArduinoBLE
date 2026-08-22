@@ -8,8 +8,8 @@ body{font-family:system-ui;max-width:760px;margin:0 auto;padding:0 1rem 1.25rem;
 .brandMark{width:2.55rem;height:3.35rem;flex:0 0 auto;display:block;overflow:visible;fill:currentColor}
 .brandMark .hole{fill-rule:evenodd}
 .brandMark .cup{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.brand a span{display:flex;flex-direction:column;justify-content:center;gap:.08rem;min-width:0;line-height:1.05;font-size:1.55rem;font-weight:800;letter-spacing:-.02em;white-space:nowrap}
-.brand a small{font-size:.92rem;font-weight:600;letter-spacing:.02em}
+.brand a span,.inactiveOverlay .brand span{display:flex;flex-direction:column;justify-content:center;gap:.08rem;min-width:0;line-height:1.05;font-size:1.55rem;font-weight:800;letter-spacing:-.02em;white-space:nowrap}
+.brand a small,.inactiveOverlay .brand small{font-size:.92rem;font-weight:600;letter-spacing:.02em}
 .navToggle{flex-shrink:0;width:var(--tap);height:var(--tap);margin:0;border:0;border-radius:.4rem;background:transparent;color:var(--ac);font:inherit;font-size:2rem;line-height:1;cursor:pointer;position:relative;z-index:22}
 .navToggle:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
 .pageNav{display:none;position:fixed;inset:0;z-index:20;flex-direction:column;gap:.15rem;padding:calc(var(--hdr) + .85rem) 1.25rem 1.5rem;background:var(--bg)}
@@ -24,8 +24,8 @@ body{font-family:system-ui;max-width:760px;margin:0 auto;padding:0 1rem 1.25rem;
 .brand,.navToggle{z-index:auto}
 .brand{flex-shrink:0;--brandGap:.65rem}
 .brandMark{width:2.95rem;height:3.85rem}
-.brand a span{font-size:1.75rem;gap:.1rem}
-.brand a small{font-size:1.05rem}
+.brand a span,.inactiveOverlay .brand span{font-size:1.75rem;gap:.1rem}
+.brand a small,.inactiveOverlay .brand small{font-size:1.05rem}
 .pageNav{display:flex;position:static;inset:auto;flex-direction:row;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:.1rem;padding:0;background:transparent;z-index:auto}
 .pageNav a{min-height:2.25rem;padding:.3rem .5rem;font-size:.88rem;border-radius:.4rem}
 .pageNav a.active{background:transparent;box-shadow:inset 0 -2px 0 var(--ac)}
@@ -41,6 +41,18 @@ body{font-family:system-ui;max-width:760px;margin:0 auto;padding:0 1rem 1.25rem;
 .navMeta a:hover{text-decoration:underline}
 #view-home:not(.hidden){padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
 #view-home:not(.hidden)~.pageFooter{display:none}
+body.webUiInactive{overflow:hidden}
+.inactiveOverlay{position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;align-items:center;padding:1.25rem 1.25rem max(1.25rem,env(safe-area-inset-bottom));box-sizing:border-box;background:var(--bg);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .5s ease,visibility 0s linear .5s}
+.inactiveOverlay.isVisible{opacity:1;visibility:visible;pointer-events:auto;transition:opacity .5s ease,visibility 0s}
+.inactiveOverlay .brand{z-index:auto;display:inline-flex;align-items:center;gap:var(--brandGap);color:var(--ac)}
+.inactiveMain{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.1rem;max-width:22rem;width:100%;text-align:center}
+#webUiReload{min-height:var(--tap);min-width:10rem;padding:.7rem 1.6rem;border:1.5px solid var(--ac);border-radius:2rem;background:var(--ac);color:var(--on);font:inherit;font-weight:700;cursor:pointer}
+#webUiReload:disabled{opacity:.4;cursor:not-allowed}
+#webUiReload:focus-visible{outline:2px solid var(--ac);outline-offset:3px}
+#inactiveHint{margin:0;color:var(--mu);font-size:.78rem;line-height:1.45;font-weight:400}
+#inactiveError{margin:0;font-size:.86rem}
+#inactiveError[hidden]{display:none}
+.inactiveOverlay .pageFooter{margin-top:auto;width:100%}
 
 fieldset{margin:.85rem 0;padding:.85rem;border:1px solid var(--ln);border-radius:var(--r);background:var(--sf)}
 legend{font-weight:700;padding:0 .3rem;color:var(--ac)}
@@ -66,9 +78,8 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
 .stateFault{color:var(--dn);font-weight:700}
 .error{color:var(--dn)}.ok{color:var(--ok)}.warn{color:var(--wn)}
 .hidden{display:none}.fieldOff{opacity:.45}
-#message{position:sticky;top:var(--hdr);z-index:12;display:flex;align-items:center;gap:.45rem;background:var(--bg);padding:.45rem 0;margin:0 0 .5rem;font-weight:600}
-#message[hidden]{display:none}
-#message.error,#message.ok,#message.warn{padding:.55rem .45rem .55rem .65rem;border-radius:.4rem;border-left:4px solid}
+#message{position:sticky;top:var(--hdr);z-index:12;display:flex;align-items:center;gap:.45rem;background:var(--bg);padding:.55rem .45rem .55rem .65rem;margin:0 0 .5rem;font-weight:600;box-sizing:border-box;min-height:2.6rem;border-radius:.4rem;border-left:4px solid transparent}
+#message[hidden]{display:flex!important;visibility:hidden;pointer-events:none}
 #messageText{flex:1;min-width:0}
 .messageClose{flex:none;margin-left:auto;border:0;background:transparent;color:inherit;opacity:.7;font:inherit;font-size:1.25rem;font-weight:700;line-height:1;cursor:pointer;padding:0 .15rem;min-width:1.5rem;min-height:1.5rem}
 .messageClose:hover{opacity:1}
@@ -154,7 +165,6 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 .btnGlyph.btnDanger{border-left-color:var(--ac)}
 .btnGlyph.btnInvert{position:relative;z-index:1}
 .btnGlyph.btnWarn{color:var(--ac);background:#fff4e5;box-shadow:inset 0 0 0 1px var(--ac);position:relative;z-index:1}
-.btnGlyph.btnTakeControl{color:var(--wn);background:#fff4e5;border:1px solid var(--wn);border-radius:.4rem;box-shadow:none}
 .btnBar:has(>.btnWarn:only-child),.btnBar:has(>.btnInvert:only-child),.btnBar:has(>.btnDanger:only-child){border-color:var(--ac)}
 .btnBar:has(>.btnWarn:only-child)>.btnGlyph.btnWarn,.btnBar:has(>.btnInvert:only-child)>.btnGlyph.btnInvert,.btnBar:has(>.btnDanger:only-child)>.btnGlyph{box-shadow:none}
 .btnGlyph:disabled{opacity:.4;cursor:not-allowed}
@@ -201,7 +211,9 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 #shotTable .shotErrLo,.shotCard .shotErrLo{color:var(--ok)}
 .shotSparkHost,.shotSparkCell{grid-area:spark;height:1.35rem;margin:.15rem 0 0}
 #shotPanel .shotSparkHost{height:1.85rem;margin:.25rem 0 .1rem}
-.shotSpark{display:block;width:100%;height:100%;color:var(--fg);overflow:visible}
+.shotSparkHost[hidden],#shotTable td.shotSparkCell[hidden]{display:none}
+#shotTable tr.noSpark{grid-template-areas:"dur dur dur actual actual actual" "time time time time time time" "goal goal flow flow drop drop" "err err shot shot ended ended"}
+.shotSpark{display:block;width:100%;height:100%;color:var(--ok);overflow:visible}
 .shotSparkCell{min-height:1.35rem}
 .shotSparkCell::before{content:none}
 #shotTable .btnGlyph,#shotPanel .btnGlyph{border:0;border-radius:.4rem;border-left:0;min-height:2.35rem;min-width:2.35rem;padding:0;flex:0 0 auto;background:transparent;color:#c62828;box-shadow:none}
@@ -260,7 +272,7 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 @media(prefers-color-scheme:dark){
 html,input,select,textarea{color-scheme:dark}
 .presetCard.active{background:#3a2a10}
-.btnGlyph.btnWarn,.btnGlyph.btnTakeControl{background:#3a2a10}
+.btnGlyph.btnWarn{background:#3a2a10}
 #shotTable .btnGlyph,#shotPanel .btnGlyph{color:#f07167}
 #message,.configSaveBar,#shotHistoryPanel .btnBar{background:var(--bg)}
 #actionsPanel{box-shadow:0 -6px 18px rgba(0,0,0,.4)}
