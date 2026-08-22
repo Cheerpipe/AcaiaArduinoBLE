@@ -150,23 +150,19 @@ small{display:block;color:var(--mu)}
 }
 @supports not (grid-template-columns:subgrid){.homeGuardGrid .switchRow{display:flex;gap:0;grid-column:auto;grid-template-columns:none;margin-left:0;align-items:center}@media(min-width:520px){.homeGuardGrid{grid-template-columns:1fr 1fr;width:auto;column-gap:.85rem}.homeGuardGrid .switchRow{width:100%}}}
 
-.btnBar,.presetActions{display:flex;gap:0;margin:.35rem 0 .15rem;border:1px solid var(--ln);border-radius:.5rem;overflow:hidden;width:100%;max-width:100%}
+.btnBar,.presetActions{display:flex;gap:.45rem;margin:.35rem 0 .15rem;border:0;background:transparent;overflow:visible;width:100%;max-width:100%}
 .btnBar{flex-wrap:wrap;align-items:center}
 .presetActions{flex-wrap:nowrap;align-items:stretch;width:fit-content}
 menu.btnBar{padding:0;margin:.75rem 0 0}
-.btnGlyph{display:inline-flex;flex-direction:row;align-items:center;justify-content:center;gap:.45rem;box-sizing:border-box;margin:0;border:0;border-left:1px solid var(--ln);border-radius:0;background:var(--bg);line-height:1.2;cursor:pointer;box-shadow:none;color:var(--ac);min-height:var(--tap);min-width:4.5rem;padding:.45rem .75rem;white-space:nowrap;flex:1}
-.btnBar>.btnGlyph:first-child,.presetActions>.btnGlyph:first-child{border-left:0}
+.btnGlyph{display:inline-flex;flex-direction:row;align-items:center;justify-content:center;gap:.45rem;box-sizing:border-box;margin:0;border:1px solid var(--ln);border-radius:.5rem;background:var(--bg);line-height:1.2;cursor:pointer;box-shadow:none;color:var(--ac);min-height:var(--tap);min-width:4.5rem;padding:.45rem .75rem;white-space:nowrap;flex:1}
 .btnGlyph .g{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:1.1rem;height:1.1rem;font-size:1.05rem;font-weight:700;line-height:1;font-variant-emoji:text}
 .btnGlyph .t{font-size:.86rem;font-weight:600;letter-spacing:0;text-transform:none;line-height:1.2}
 .presetActions>.btnGlyph{flex-direction:column;gap:.05rem;min-height:2.05rem;min-width:2.55rem;padding:.18rem .32rem;white-space:normal;flex:0 1 auto}
 .presetActions>.btnGlyph .g{width:.92rem;height:.92rem;font-size:.88rem}
 .presetActions>.btnGlyph .t{font-size:.58rem;letter-spacing:.01em;text-transform:uppercase;line-height:1}
-.btnGlyph.btnDanger,.btnGlyph.btnInvert{background:var(--ac);color:var(--on);box-shadow:inset 0 0 0 1px var(--ac)}
-.btnGlyph.btnDanger{border-left-color:var(--ac)}
-.btnGlyph.btnInvert{position:relative;z-index:1}
-.btnGlyph.btnWarn{color:var(--ac);background:#fff4e5;box-shadow:inset 0 0 0 1px var(--ac);position:relative;z-index:1}
-.btnBar:has(>.btnWarn:only-child),.btnBar:has(>.btnInvert:only-child),.btnBar:has(>.btnDanger:only-child){border-color:var(--ac)}
-.btnBar:has(>.btnWarn:only-child)>.btnGlyph.btnWarn,.btnBar:has(>.btnInvert:only-child)>.btnGlyph.btnInvert,.btnBar:has(>.btnDanger:only-child)>.btnGlyph{box-shadow:none}
+.btnGlyph.btnInvert{background:var(--ac);color:var(--on);border-color:var(--ac);box-shadow:none}
+.btnGlyph.btnDanger{background:var(--bg);color:var(--ac);border-color:var(--ac);box-shadow:none}
+.btnGlyph.btnWarn{color:var(--ac);background:#fff4e5;border-color:var(--ac);box-shadow:none}
 .btnGlyph:disabled{opacity:.4;cursor:not-allowed}
 
 #actionsPanel{position:fixed;left:0;right:0;bottom:0;z-index:8;max-width:760px;margin:0 auto;border-radius:var(--r) var(--r) 0 0;border:1px solid var(--ln);border-bottom:0;padding:.7rem 1rem calc(.7rem + env(safe-area-inset-bottom));background:var(--sf);box-shadow:0 -6px 18px rgba(42,33,24,.12)}
@@ -179,8 +175,8 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 #actionsPanel .btnGlyph{flex:1;border:1.5px solid var(--ac);border-radius:2rem;background:transparent;color:var(--ac);min-height:2.85rem}
 #actionsPanel .btnGlyph.btnDanger{background:var(--ac);color:var(--on);border-color:var(--ac);box-shadow:none}
 
-#shotHistoryPanel .btnBar{position:sticky;top:var(--hdr);z-index:6;background:var(--sf);margin:0 0 .65rem;border:1px solid var(--ln);border-radius:var(--r);overflow:hidden}
-#shotHistoryPanel .btnGlyph:not(.btnInvert){background:var(--bg);color:var(--ac);border-left-color:var(--ln)}
+#shotHistoryPanel .btnBar{position:sticky;top:var(--hdr);z-index:6;background:var(--sf);margin:0 0 .65rem;border:0;overflow:visible}
+#shotHistoryPanel .btnGlyph:not(.btnInvert){background:var(--bg);color:var(--ac);border-color:var(--ln)}
 #shotTableWrap{overflow:visible;max-height:none;margin:.5rem 0}
 #shotTable{width:100%;border-collapse:collapse;font-size:.82rem}
 #shotTable thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}

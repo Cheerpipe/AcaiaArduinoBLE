@@ -1479,6 +1479,16 @@ if (!ui.includes('id="factoryResetButton"') ||
     !css.includes('.btnGlyph.btnInvert')) {
   throw new Error('Factory reset must require UI and server-side confirmation');
 }
+if (!css.includes('.btnBar,.presetActions{display:flex;gap:.45rem') ||
+    css.includes('.btnBar,.presetActions{display:flex;gap:0') ||
+    css.includes('.btnGlyph.btnDanger,.btnGlyph.btnInvert{background:var(--ac)') ||
+    !css.includes('.btnGlyph.btnInvert{background:var(--ac)') ||
+    !css.includes('.btnGlyph.btnDanger{background:var(--bg)') ||
+    !css.includes('#shotHistoryPanel .btnBar{') ||
+    !css.includes('#shotHistoryPanel .btnBar{position:sticky;top:var(--hdr);z-index:6;background:var(--sf);margin:0 0 .65rem;border:0;overflow:visible}') ||
+    css.includes('#shotHistoryPanel .btnBar{position:sticky;top:var(--hdr);z-index:6;background:var(--sf);margin:0 0 .65rem;border:1px solid var(--ln);border-radius:var(--r);overflow:hidden}')) {
+  throw new Error('Action buttons must be separate with a gap; btnDanger must not share invert fill');
+}
 if (html.includes('id="debugPanel"') ||
     html.includes('id="view-debug"') ||
     html.includes('data-route="/debug"') ||
