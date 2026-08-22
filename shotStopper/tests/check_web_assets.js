@@ -183,7 +183,7 @@ const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 46080) {
   throw new Error('Web UI HTML source exceeds the 45 KiB authoring budget');
 }
-if (jsBytes > 112000) {
+if (jsBytes > 113000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
 if (htmlBytes + jsBytes > 160000) {
@@ -581,10 +581,11 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
 if (!ui.includes('id="shotPanel"') ||
     !ui.includes('id="shotBar"') ||
     !ui.includes('id="shotBarFast"') ||
-    !ui.includes('id="shotMark"') ||
+    ui.includes('shotMark') ||
     !ui.includes('Math.max(goal,wt)') ||
     !css.includes('.shotTrack{position:relative;height:1rem;background:var(--ln);border-radius:.5rem;margin:.35rem 0 .95rem;overflow:hidden}') ||
     !css.includes('.shotTrack #shotBarFast{background:#d97706}') ||
+    css.includes('.shotMark') ||
     css.includes('max-width:150%') ||
     !ui.includes('id="shotCard"') ||
     !html.includes('id="shotSparkHost"') ||
@@ -1411,6 +1412,47 @@ if (!runtimeJs.includes('SHOTS_PAGE_SIZE=10') ||
     !network.includes('index == start ? "" : ","') ||
     !appJsSource.includes('mod.activate()')) {
   throw new Error('Shot history must page 10 shots with infinite scroll and poll only the first page');
+}
+const shotLogTypes = fs.readFileSync(
+    path.join(sketchDir, 'ShotStopperShotLogTypes.h'), 'utf8');
+const statsSection = partialHtml.history.match(
+    /<fieldset id="shotStatsPanel"><legend>Averages<\/legend>([\s\S]*?)<\/fieldset>/);
+if (!statsSection ||
+    partialHtml.history.indexOf('id="shotStatsPanel"') < 0 ||
+    partialHtml.history.indexOf('id="shotStatsPanel"') >
+        partialHtml.history.indexOf('id="shotHistoryPanel"') ||
+    !statsSection[1].includes('class="shotCard"') ||
+    !statsSection[1].includes('class="shotDur"') ||
+    !statsSection[1].includes('class="shotActual"') ||
+    !statsSection[1].includes('<strong>Avg time</strong>') ||
+    !statsSection[1].includes('<strong>Avg weight</strong>') ||
+    !statsSection[1].includes('<strong>Daily shots</strong>') ||
+    !statsSection[1].includes('<strong>Avg error</strong>') ||
+    !statsSection[1].includes('<strong>Avg flow</strong>') ||
+    !statsSection[1].includes('id="histAvgDur"') ||
+    !statsSection[1].includes('id="histAvgWeight"') ||
+    !statsSection[1].includes('id="histAvgDaily"') ||
+    !statsSection[1].includes('id="histAvgErr"') ||
+    !statsSection[1].includes('id="histAvgFlow"') ||
+    !statsSection[1].includes('class="fieldHint"') ||
+    !statsSection[1].includes('Based on the last 10 shots.') ||
+    !runtimeJs.includes('function renderShotStats(){') ||
+    !runtimeJs.includes('shotHistory.shots.slice(0,SHOTS_PAGE_SIZE)') ||
+    !runtimeJs.includes('renderShotStats();') ||
+    runtimeJs.includes('slice(0,20)') ||
+    !css.includes('.shotCard:has(>:nth-child(5):last-child){grid-template-areas:"dur dur dur actual actual actual" "goal goal err err flow flow"}') ||
+    !css.includes('.shotCard+.fieldHint{margin-top:.44rem}') ||
+    css.includes('#shotStatsPanel') ||
+    css.includes('#histAvgDur') ||
+    css.includes('histAvgDaily') ||
+    network.includes('shotLogComputeAverages') ||
+    network.includes('SHOT_LOG_STATS_WINDOW') ||
+    network.includes('\\"avgDailyShots\\"') ||
+    network.includes('/api/v1/shots/stats') ||
+    shotLogTypes.includes('shotLogComputeAverages') ||
+    shotLogTypes.includes('SHOT_LOG_STATS_WINDOW')) {
+  throw new Error(
+      'History averages must be a 2+3 shotCard above the table, last-10 window in JS, and no stats API/firmware');
 }
 if (!ui.includes('id="firmwareFooter"') ||
     !ui.includes('id="inactiveFirmware"') ||

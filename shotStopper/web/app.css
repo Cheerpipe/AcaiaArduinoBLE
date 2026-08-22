@@ -105,7 +105,6 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
 .shotTrack #shotBar,.shotTrack #shotBarFast{position:absolute;top:0;height:100%;width:0}
 .shotTrack #shotBar{left:0;background:var(--ok)}
 .shotTrack #shotBarFast{background:#d97706}
-.shotMark{position:absolute;left:100%;top:0;bottom:0;width:2px;background:var(--fg);transform:translateX(-1px);z-index:1}
 .shotCard{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"dur dur dur actual actual actual" "goal goal flow flow drop drop" "err err shot shot ended ended";gap:.5rem .4rem;align-items:start;margin:.45rem 0 .15rem}
 .shotCard .shotDur{grid-area:dur}
 .shotCard .shotActual{grid-area:actual}
@@ -115,9 +114,11 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
 .shotCard > :nth-child(6){grid-area:drop}
 .shotCard > :nth-child(7){grid-area:ended}
 .shotCard > :nth-child(8){grid-area:shot}
+.shotCard:has(>:nth-child(5):last-child){grid-template-areas:"dur dur dur actual actual actual" "goal goal err err flow flow"}
 #log{width:100%;height:12rem;font-family:monospace;white-space:pre;overflow:auto;box-sizing:border-box;border:1px solid var(--ln);border-radius:.5rem;background:var(--sf);color:var(--fg)}
 small{display:block;color:var(--mu)}
 .fieldHint{display:block;font-size:.82em;color:var(--mu);margin:.22rem 0 .2rem;line-height:1.35;max-width:34rem;font-weight:400}
+.shotCard+.fieldHint{margin-top:.44rem}
 .locked{opacity:.55}
 .switchRow{display:flex;align-items:center;gap:.7rem;margin:.55rem 0;justify-content:space-between}
 .switch{position:relative;display:inline-block;width:5.7rem;height:2.15rem;flex-shrink:0}
