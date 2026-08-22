@@ -101,7 +101,7 @@ Named parameters (long and short):
   -a, --arch <arch>        n8r4 | n16r8
   -s, --speed <baud>       Serial monitor baud rate, e.g. 115200
   -H, --host <ip|name>     Controller address for OTA
-  -t, --token <key>        OTA token (the SoftAP password)
+  -t, --token <key>        OTA token (the device password)
   -f, --flags "<flags>"    Extra compile flags (single string)
   -b, --build-dir <path>   Build directory (static / static-idf only)
   -o, --output-dir <path>  Reports directory (static / static-idf only)
@@ -310,7 +310,7 @@ ss_prompt_text() {
     arch) printf 'Architecture (n8r4 or n16r8)' ;;
     speed) printf 'Monitor baud rate' ;;
     host) printf 'Controller address (IP or hostname)' ;;
-    token) printf 'OTA token = SoftAP password' ;;
+    token) printf 'OTA token = device password' ;;
     flags) printf 'Extra compile flags' ;;
     build_dir) printf 'Build directory' ;;
     output_dir) printf 'Reports directory' ;;

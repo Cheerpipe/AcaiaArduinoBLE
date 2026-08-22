@@ -3,9 +3,8 @@
 How the controller joins your home network (STA) and when it falls back to
 its own access point. Details for the fallback AP itself are in [AP](ap.md).
 
-The Web UI is reachable from any client on the same network. There is no
-separate Web UI login beyond the sign-in password used for configuration.
-Use a trusted network.
+The Web UI is reachable from any client on the same network. Ownership is
+exclusive claim (`Reload`), not a login password. Use a trusted network.
 
 ## When it applies
 
@@ -22,7 +21,7 @@ stays available.
 | --- | --- | --- |
 | **Home Wi-Fi (STA)** | none on a fresh flash | Saved SSID/password. Device joins your network and serves the Web UI at the STA IP. |
 | **IP mode** | DHCP | **DHCP** or **static** (`ip` / `netmask` / `gateway` / `dns1` / `dns2`). |
-| **Confirm window** | 3 minutes | After any STA save, sign in at the new device IP within 3 minutes or the previous network settings are restored. |
+| **Confirm window** | 3 minutes | After any STA save, open the UI at the new device IP within 3 minutes or the previous network settings are restored. |
 | **Boot with no credentials** | SoftAP up | See [AP](ap.md). |
 | **Boot with credentials** | STA first | SoftAP only if STA does not associate in about **15 s**. Then AP+STA until STA connects; SoftAP is then stopped. |
 | **STA drops after a successful join** | retry STA only | SoftAP is **not** raised automatically. Use USB `AP_START` or reboot. |
@@ -37,12 +36,12 @@ the same maintenance window.
 
 ## Example
 
-Sign in at `http://192.168.4.1`, save your home SSID. The controller joins
+Open `http://192.168.4.1`, save your home SSID. The controller joins
 STA, SoftAP stops, and the UI moves to the DHCP address. If you later lose
 that network, the device keeps retrying STA. Recover the AP with USB
 `AP_START` (see [USB serial CLI](../SERIAL_CLI.md)) or a reboot.
 
-OTA over Wi-Fi: [OTA](../features/ota.md). Change the AP password away from
+OTA over Wi-Fi: [OTA](../features/ota.md). Change the device password away from
 the factory value before OTA will accept uploads. Scripts:
 [Build scripts](../SCRIPTS.md).
 

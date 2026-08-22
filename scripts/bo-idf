@@ -15,7 +15,7 @@ Usage: ./scripts/bo-idf [flags]
 Runs, in order: build-idf and o-idf (ota-idf). No USB cable required.
 
 Required parameters: --arch, --host, and --token. --flags is optional.
-The token is the MicraShotStopperAP SoftAP password.
+The token is the device password.
 
 $(ss_flag_help)
 

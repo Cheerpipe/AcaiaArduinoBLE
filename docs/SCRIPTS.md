@@ -37,7 +37,7 @@ prompting. The same applies with `SHOTSTOPPER_NONINTERACTIVE=1`.
 | `-a`, `--arch` | `SHOTSTOPPER_ARCH` | `n8r4` or `n16r8` (alias `esp32s3` → `n16r8`). |
 | `-s`, `--speed` | `SHOTSTOPPER_SPEED` | Serial monitor baud, e.g. `115200`. |
 | `-H`, `--host` | `SHOTSTOPPER_HOST` | Controller IP or hostname for OTA. |
-| `-t`, `--token` | `SHOTSTOPPER_OTA_TOKEN` | OTA token: the SoftAP password. Never persisted. |
+| `-t`, `--token` | `SHOTSTOPPER_OTA_TOKEN` | OTA token: the device password. Never persisted. |
 | `-f`, `--flags` | `SHOTSTOPPER_FLAGS` | Extra compile flags, as a single string. |
 | `-b`, `--build-dir` | `SHOTSTOPPER_BUILD_DIR_OVERRIDE` | Build directory (`static` legacy only). |
 | `-o`, `--output-dir` | `SHOTSTOPPER_OUTPUT_DIR` | Reports directory (`static` / `static-idf` only). |

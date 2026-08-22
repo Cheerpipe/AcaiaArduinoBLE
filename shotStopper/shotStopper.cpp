@@ -4185,8 +4185,8 @@ void serviceMaintenanceLease() {
     const WebCommandType forwardedType = maintenanceLease.command.type;
     if (forwardedType == WebCommandType::SAVE_NETWORK ||
         forwardedType == WebCommandType::FORGET_NETWORK ||
-        forwardedType == WebCommandType::CHANGE_AP_PASSWORD ||
-        forwardedType == WebCommandType::RESET_AP_PASSWORD ||
+        forwardedType == WebCommandType::CHANGE_DEVICE_PASSWORD ||
+        forwardedType == WebCommandType::RESET_DEVICE_PASSWORD ||
         forwardedType == WebCommandType::RESET_NETWORK_AP ||
         forwardedType == WebCommandType::RESTART) {
       hostLastFlushedRuntime = runtimeConfig;
@@ -4734,8 +4734,8 @@ void processWebCommand(const WebCommand &command) {
 
     case WebCommandType::SAVE_NETWORK:
     case WebCommandType::FORGET_NETWORK:
-    case WebCommandType::CHANGE_AP_PASSWORD:
-    case WebCommandType::RESET_AP_PASSWORD:
+    case WebCommandType::CHANGE_DEVICE_PASSWORD:
+    case WebCommandType::RESET_DEVICE_PASSWORD:
     case WebCommandType::RESTART:
     case WebCommandType::RESET_NETWORK_AP:
     case WebCommandType::FACTORY_RESET:
@@ -5319,7 +5319,7 @@ void serialCliFillNetworkDump(SerialCliNetworkDump &dump) {
   dump.staReconnectHeld = snap.staReconnectHeld;
   dump.apStartHeld = snap.apStartHeld;
   dump.httpStartHeld = snap.httpStartHeld;
-  dump.apPasswordFactory = snap.apPasswordFactory;
+  dump.devicePasswordFactory = snap.devicePasswordFactory;
   dump.ntpMayArm = snap.ntpMayArm;
   dump.apClients = snap.apClients;
   dump.staState = static_cast<uint8_t>(snap.staState);
@@ -5555,15 +5555,15 @@ void dispatchSerialCliRequest(SerialCliRequest &request) {
       serialCliQueueIfSafe(command, request.verb);
       return;
     }
-    case SerialCliVerb::RESET_AP_PASSWORD: {
+    case SerialCliVerb::RESET_DEVICE_PASSWORD: {
       WebCommand command;
-      command.type = WebCommandType::RESET_AP_PASSWORD;
+      command.type = WebCommandType::RESET_DEVICE_PASSWORD;
       serialCliQueueIfSafe(command, request.verb);
       return;
     }
-    case SerialCliVerb::SET_AP_PASSWORD: {
+    case SerialCliVerb::SET_DEVICE_PASSWORD: {
       WebCommand command;
-      command.type = WebCommandType::CHANGE_AP_PASSWORD;
+      command.type = WebCommandType::CHANGE_DEVICE_PASSWORD;
       copyCString(command.password, sizeof(command.password), request.arg1);
       serialCliQueueIfSafe(command, request.verb);
       memset(request.arg1, 0, sizeof(request.arg1));

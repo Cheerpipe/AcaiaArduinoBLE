@@ -228,11 +228,11 @@ void p05_password_change_updates_hash() {
   resetHostPersistence();
   PersistedSettings settings;
   CHECK(initializeDefaultSettings(settings));
-  CHECK(!setAccessPointPassword(settings, DEFAULT_AP_PASSWORD));
-  CHECK(setAccessPointPassword(settings, "NuevaClaveSegura"));
+  CHECK(!setDevicePassword(settings, DEFAULT_DEVICE_PASSWORD));
+  CHECK(setDevicePassword(settings, "NuevaClaveSegura"));
   finalizePersistedSettings(settings);
   CHECK(validPersistedSettings(settings));
-  CHECK(strcmp(settings.apPassword, "NuevaClaveSegura") == 0);
+  CHECK(strcmp(settings.devicePassword, "NuevaClaveSegura") == 0);
   CHECK(!passwordIsFactoryDefault(settings));
 }
 
@@ -956,7 +956,7 @@ void p55_network_access_reset_preserves_non_network_settings() {
   strcpy(settings.lkgSsid, "OldCafeLAN");
   strcpy(settings.lkgPassword, "OldCafe1");
   settings.lkgIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
-  CHECK(setAccessPointPassword(settings, "NewAccess1"));
+  CHECK(setDevicePassword(settings, "NewAccess1"));
   finalizePersistedSettings(settings);
   CHECK(savePersistedSettings(settings));
 

@@ -22,7 +22,7 @@ inline bool resetPersistedNetworkAccess(PersistedSettings &settings) {
     return false;
   }
   clearStaNetwork(candidate);
-  if (!initializeDefaultAccessPointPassword(candidate) ||
+  if (!initializeDefaultDevicePassword(candidate) ||
       !savePersistedSettings(candidate)) {
     return false;
   }

@@ -16,13 +16,13 @@ This is the **user procedure**. Implementation notes live in
 
 | Procedure | Gesture | Erases | Preserves |
 | --- | --- | --- | --- |
-| Recover access | `OFF→ON ×3` | Wi-Fi STA, static IP, last-known-good network, AP/Web UI password | Machine configuration, presets, calibration, scales, and history |
+| Recover access | `OFF→ON ×3` | Wi-Fi STA, static IP, last-known-good network, device password | Machine configuration, presets, calibration, scales, and history |
 | Factory reset | `OFF→ON ×5` | All configuration, network, calibration, scales, BLE Companion, history, and last shot | Firmware only |
 
 After either procedure, local access returns to:
 
 - Network: **`MicraShotStopperAP`**
-- AP and Web UI password: **`Micra1234`**
+- Device password: **`Micra1234`**
 - Address: **`http://192.168.4.1`**
 
 Passwords are case-sensitive.

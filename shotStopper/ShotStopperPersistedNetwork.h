@@ -1,6 +1,6 @@
 #pragma once
 
-// STA / LKG / AP password policy on PersistedSettings. Not NVS I/O.
+// STA / LKG / device password policy on PersistedSettings. Not NVS I/O.
 
 #include "ShotStopperPersistedSettings.h"
 
@@ -19,41 +19,42 @@ inline bool isFactoryDefaultPassword(const char *password) {
   size_t storedLength = 0;
   size_t defaultLength = 0;
   if (!boundedCString(password, WIFI_PASSWORD_CAPACITY, &storedLength) ||
-      !boundedCString(DEFAULT_AP_PASSWORD, WIFI_PASSWORD_CAPACITY,
+      !boundedCString(DEFAULT_DEVICE_PASSWORD, WIFI_PASSWORD_CAPACITY,
                       &defaultLength) ||
       storedLength != defaultLength) {
     return false;
   }
   return constantTimeEqual(reinterpret_cast<const uint8_t *>(password),
-                           reinterpret_cast<const uint8_t *>(DEFAULT_AP_PASSWORD),
+                           reinterpret_cast<const uint8_t *>(DEFAULT_DEVICE_PASSWORD),
                            storedLength);
 }
 
 inline bool passwordIsFactoryDefault(const PersistedSettings &settings) {
-  return isFactoryDefaultPassword(settings.apPassword);
+  return isFactoryDefaultPassword(settings.devicePassword);
 }
 
-inline bool setAccessPointPassword(PersistedSettings &settings,
-                                   const char *newPassword) {
-  if (!validAccessPointPassword(newPassword)) {
+inline bool setDevicePassword(PersistedSettings &settings,
+                              const char *newPassword) {
+  if (!validDevicePassword(newPassword)) {
     return false;
   }
   // Refuse re-selecting the published factory credential.
   if (isFactoryDefaultPassword(newPassword)) {
     return false;
   }
-  memset(settings.apPassword, 0, sizeof(settings.apPassword));
-  copyCString(settings.apPassword, sizeof(settings.apPassword), newPassword);
+  memset(settings.devicePassword, 0, sizeof(settings.devicePassword));
+  copyCString(settings.devicePassword, sizeof(settings.devicePassword),
+              newPassword);
   return true;
 }
 
-inline bool initializeDefaultAccessPointPassword(PersistedSettings &settings) {
-  if (!validAccessPointPassword(DEFAULT_AP_PASSWORD)) {
+inline bool initializeDefaultDevicePassword(PersistedSettings &settings) {
+  if (!validDevicePassword(DEFAULT_DEVICE_PASSWORD)) {
     return false;
   }
-  memset(settings.apPassword, 0, sizeof(settings.apPassword));
-  copyCString(settings.apPassword, sizeof(settings.apPassword),
-              DEFAULT_AP_PASSWORD);
+  memset(settings.devicePassword, 0, sizeof(settings.devicePassword));
+  copyCString(settings.devicePassword, sizeof(settings.devicePassword),
+              DEFAULT_DEVICE_PASSWORD);
   return true;
 }
 

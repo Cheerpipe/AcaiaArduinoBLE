@@ -9,7 +9,7 @@ constexpr uint32_t PERSISTED_SETTINGS_MAGIC = 0x53544F50U;  // "STOP"
 constexpr const char *SETTINGS_NAMESPACE = "shotstopper";
 constexpr const char *SETTINGS_SLOT_A = "settingsA";
 constexpr const char *SETTINGS_SLOT_B = "settingsB";
-constexpr const char *DEFAULT_AP_PASSWORD = "Micra1234";
+constexpr const char *DEFAULT_DEVICE_PASSWORD = "Micra1234";
 
 struct PersistedSettings {
   uint32_t magic = PERSISTED_SETTINGS_MAGIC;
@@ -39,7 +39,7 @@ struct PersistedSettings {
   uint8_t lkgGateway[4] = {};
   uint8_t lkgDns1[4] = {};
   uint8_t lkgDns2[4] = {};
-  char apPassword[WIFI_PASSWORD_CAPACITY] = {};
+  char devicePassword[WIFI_PASSWORD_CAPACITY] = {};
   char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
   char preferredScaleName[PREFERRED_SCALE_NAME_CAPACITY] = {};
   ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY] = {};

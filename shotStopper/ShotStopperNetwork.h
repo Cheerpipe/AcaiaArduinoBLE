@@ -71,7 +71,7 @@ struct NetworkStatusSnapshot {
   bool staReconnectHeld = false;
   bool apStartHeld = false;
   bool httpStartHeld = false;
-  bool apPasswordFactory = false;
+  bool devicePasswordFactory = false;
   bool ntpMayArm = false;
   uint8_t wifiMode = 0;
   uint8_t channel = 0;
@@ -345,9 +345,9 @@ class ShotStopperNetwork {
   static esp_err_t networkHandler(httpd_req_t *request);
   static esp_err_t wifiScanStartHandler(httpd_req_t *request);
   static esp_err_t wifiScanStatusHandler(httpd_req_t *request);
-  static esp_err_t apPasswordHandler(httpd_req_t *request);
+  static esp_err_t devicePasswordHandler(httpd_req_t *request);
   static esp_err_t bleCompatHandler(httpd_req_t *request);
-  // OTA routes authenticate with the access point password instead of the
+  // OTA routes authenticate with the device password instead of the
   // exclusive WebUI claim, so the command line client works without stealing
   // control from an open browser window.
   static esp_err_t otaStatusHandler(httpd_req_t *request);

@@ -16,7 +16,7 @@ Upload the already-built image to the controller, verify it, and leave it
 ready to boot.
 
 Required parameters: --arch, --host, and --token.
-The token is the MicraShotStopperAP SoftAP password. The controller rejects
+The token is the device password. The controller rejects
 updates while that password is still the factory default.
 
 $(ss_flag_help)
@@ -25,7 +25,7 @@ $(shotstopper_arch_help)
 
 Examples:
   ./scripts/ota --arch n16r8 --host 192.168.1.50
-  ./scripts/ota -a n16r8 -H 192.168.4.1 -t "my-AP-password"
+  ./scripts/ota -a n16r8 -H 192.168.4.1 -t "my-device-password"
 
 The image comes from build/<architecture>/shotStopper.ino.bin, so compile
 first (./scripts/build / ./scripts/b) or use ./scripts/bo, which does both.

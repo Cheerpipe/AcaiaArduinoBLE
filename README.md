@@ -137,7 +137,7 @@ stop offset are per preset. Load, save, duplicate, or delete from
 
 ### OTA
 
-Update firmware over Wi-Fi without USB. The AP password is the OTA token
+Update firmware over Wi-Fi without USB. The device password is the OTA token
 (change it from the factory default first). Dual-slot update with rollback if
 the new image fails to serve the Web UI. See [OTA](docs/features/ota.md) and
 [Build scripts](docs/SCRIPTS.md).
@@ -169,7 +169,8 @@ need to change them after first setup.
 | Group | What it covers |
 | --- | --- |
 | **[Wi-Fi](docs/settings/wifi.md)** | Join your home network (STA), DHCP or static IP, first-boot fallback. |
-| **[AP](docs/settings/ap.md)** | Fallback access point `MicraShotStopperAP` and its password. |
+| **Device password** | Single firmware password: SoftAP WPA2, OTA, and future uses. Changed from **Admin → Device password**. |
+| **[AP](docs/settings/ap.md)** | Fallback access point `MicraShotStopperAP`. Uses the device password. |
 | **[Factory reset](docs/settings/factory-reset.md)** | Erase settings, Wi-Fi, calibration, and shot history. |
 
 ## First connection
@@ -179,12 +180,11 @@ On a fresh flash or after factory reset:
 | | Value |
 | --- | --- |
 | **Fallback Wi-Fi (AP) name** | `MicraShotStopperAP` |
-| **Fallback Wi-Fi (AP) password** | `Micra1234` |
+| **Device password** | `Micra1234` (SoftAP WPA2 and OTA token) |
 | **Web UI address (AP mode)** | `http://192.168.4.1` |
-| **Web UI sign-in password** | `Micra1234` |
 
-Passwords are case-sensitive. Join the AP, open the address above, then sign
-in to save your home Wi-Fi. Step-by-step notes are in
+The password is case-sensitive. Join the AP, open the address above, then
+claim the Web UI to save your home Wi-Fi. Step-by-step notes are in
 [Wi-Fi](docs/settings/wifi.md) and [AP](docs/settings/ap.md).
 
 ## Documentation

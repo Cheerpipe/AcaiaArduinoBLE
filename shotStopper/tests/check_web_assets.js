@@ -260,7 +260,7 @@ if (!ui.includes('function rangeCheck(') ||
     !ui.includes('fieldError') ||
     !ui.includes('id="goalWeightG" type="number" min="10" max="200" step="1"') ||
     !ui.includes('validateNetworkClient') ||
-    !ui.includes('validateApClient') ||
+    !ui.includes('validateDevicePasswordClient') ||
     !network.includes('Max recovery must be from 10 to 200 g.') ||
     !network.includes('Fast guard requires max recovery') ||
     !network.includes('SSID must be 1–32 characters.') ||
@@ -938,7 +938,8 @@ if (/R\.(homeFlushConfig|homeFlushPreset|configLoaded|formRev|brewDirty)\s*=/.te
 }
 if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('<legend>Machine and scale</legend>') ||
-    !ui.includes('<legend>Security and connectivity</legend>') ||
+    !ui.includes('<legend>Wi-Fi</legend>') ||
+    !ui.includes('<legend>Device password</legend>') ||
     !ui.includes('id="presetCards"') ||
     !ui.includes('id="presetNewBtn"') ||
     !ui.includes('id="presetDupBtn"') ||
@@ -964,7 +965,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
     html.indexOf('id="saveConfigButton"') <
         html.indexOf('<summary>Alerts</summary>') ||
     html.indexOf('id="saveConfigButton"') >
-        html.indexOf('<legend>Security and connectivity</legend>') ||
+        html.indexOf('<legend>Wi-Fi</legend>') ||
     !ui.includes('id="presetResetBtn"') ||
     !ui.includes('id="presetDeleteBtn"') ||
     !ui.includes('id="presetRenameDialog"') ||
@@ -1721,8 +1722,8 @@ const expected = new Map([
   ['POST /api/v1/network', 'ownedApiHandler'],
   ['POST /api/v1/network/scan', 'ownedApiHandler'],
   ['GET /api/v1/network/scan', 'ownedApiHandler'],
-  ['POST /api/v1/access-point/password', 'ownedApiHandler'],
-  // OTA authenticates with the access point password instead of the exclusive
+  ['POST /api/v1/device/password', 'ownedApiHandler'],
+  // OTA authenticates with the device password instead of the exclusive
   // WebUI claim, so a command line client can update firmware without stealing
   // control from an open browser window.
   ['GET /api/v1/ota', 'otaStatusHandler'],
@@ -1951,7 +1952,7 @@ for (const [route, handler] of expected) {
   }
 }
 
-const forbiddenResponseFields = ['staPassword', 'apPassword', 'authHash', 'authSalt'];
+const forbiddenResponseFields = ['staPassword', 'devicePassword', 'authHash', 'authSalt'];
 const statusHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::statusHandler');
 const statusHandlerEnd = network.indexOf('esp_err_t ShotStopperNetwork::logHandler', statusHandlerStart);
 if (statusHandlerStart < 0 || statusHandlerEnd < 0) {
@@ -2873,18 +2874,18 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
     throw new Error(
       'OTA authentication must reject the factory default password and compare in constant time');
   }
-  const currentApAt = html.indexOf('id="currentApPassword"');
-  const newApAt = html.indexOf('id="newApPassword"');
-  const confirmApAt = html.indexOf('id="confirmApPassword"');
-  if (currentApAt < 0 || newApAt < 0 || confirmApAt < 0 ||
-      !(currentApAt < newApAt && newApAt < confirmApAt)) {
-    throw new Error('AP password form must ask for the current password before a new one');
+  const currentDeviceAt = html.indexOf('id="currentDevicePassword"');
+  const newDeviceAt = html.indexOf('id="newDevicePassword"');
+  const confirmDeviceAt = html.indexOf('id="confirmDevicePassword"');
+  if (currentDeviceAt < 0 || newDeviceAt < 0 || confirmDeviceAt < 0 ||
+      !(currentDeviceAt < newDeviceAt && newDeviceAt < confirmDeviceAt)) {
+    throw new Error('Device password form must ask for the current password before a new one');
   }
-  if (!js.includes('currentPassword:$(\'currentApPassword\').value') ||
+  if (!js.includes('currentPassword:$(\'currentDevicePassword\').value') ||
       !network.includes('"currentPassword"') ||
-      !network.includes('AP_PASSWORD_INVALID') ||
+      !network.includes('DEVICE_PASSWORD_INVALID') ||
       !network.includes('secretsMatch(currentPassword, expected)')) {
-    throw new Error('Web AP password change must verify the current password');
+    throw new Error('Web device password change must verify the current password');
   }
   if (!network.includes('serviceOtaRollback(now)') ||
       !networkHeader.includes('OTA_CONFIRM_MIN_UPTIME_MS') ||

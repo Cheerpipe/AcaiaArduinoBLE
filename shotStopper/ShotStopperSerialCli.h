@@ -15,8 +15,8 @@ enum class SerialCliVerb : uint8_t {
   HELLO,
   REBOOT,
   FACTORY_RESET,
-  RESET_AP_PASSWORD,
-  SET_AP_PASSWORD,
+  RESET_DEVICE_PASSWORD,
+  SET_DEVICE_PASSWORD,
   SET_WIFI,
   CLEAR_SHOTS,
   CLEAR_WIFI,
@@ -71,8 +71,8 @@ inline const char *serialCliVerbName(SerialCliVerb verb) {
     case SerialCliVerb::HELLO: return "HELLO";
     case SerialCliVerb::REBOOT: return "REBOOT";
     case SerialCliVerb::FACTORY_RESET: return "FACTORY_RESET";
-    case SerialCliVerb::RESET_AP_PASSWORD: return "RESET_AP_PASSWORD";
-    case SerialCliVerb::SET_AP_PASSWORD: return "SET_AP_PASSWORD";
+    case SerialCliVerb::RESET_DEVICE_PASSWORD: return "RESET_DEVICE_PASSWORD";
+    case SerialCliVerb::SET_DEVICE_PASSWORD: return "SET_DEVICE_PASSWORD";
     case SerialCliVerb::SET_WIFI: return "SET_WIFI";
     case SerialCliVerb::CLEAR_SHOTS: return "CLEAR_SHOTS";
     case SerialCliVerb::CLEAR_WIFI: return "CLEAR_WIFI";
@@ -268,8 +268,8 @@ inline bool serialCliParseLine(const char *line, SerialCliRequest &request) {
   if (serialCliEqualsIgnoreCase(verb, "factory_reset")) {
     return requireNoArgs(SerialCliVerb::FACTORY_RESET);
   }
-  if (serialCliEqualsIgnoreCase(verb, "reset_ap_password")) {
-    return requireNoArgs(SerialCliVerb::RESET_AP_PASSWORD);
+  if (serialCliEqualsIgnoreCase(verb, "reset_device_password")) {
+    return requireNoArgs(SerialCliVerb::RESET_DEVICE_PASSWORD);
   }
   if (serialCliEqualsIgnoreCase(verb, "clear_shots")) {
     return requireNoArgs(SerialCliVerb::CLEAR_SHOTS);
@@ -353,24 +353,24 @@ inline bool serialCliParseLine(const char *line, SerialCliRequest &request) {
     return requireNoArgs(SerialCliVerb::BLE_COMPAT_STATUS);
   }
 
-  if (serialCliEqualsIgnoreCase(verb, "set_ap_password")) {
+  if (serialCliEqualsIgnoreCase(verb, "set_device_password")) {
     if (argCount != 1) {
       request.verb = SerialCliVerb::INVALID_ARGS;
-      request.error = "SET_AP_PASSWORD requires a password";
+      request.error = "SET_DEVICE_PASSWORD requires a password";
       return true;
     }
-    if (!validAccessPointPassword(args[0])) {
+    if (!validDevicePassword(args[0])) {
       request.verb = SerialCliVerb::INVALID_ARGS;
-      request.error = "AP password must be 8-63 characters";
+      request.error = "Device password must be 8-63 characters";
       return true;
     }
     if (strcmp(args[0], "Micra1234") == 0) {
       request.verb = SerialCliVerb::INVALID_ARGS;
       request.error =
-          "password cannot be the factory default; use RESET_AP_PASSWORD";
+          "password cannot be the factory default; use RESET_DEVICE_PASSWORD";
       return true;
     }
-    request.verb = SerialCliVerb::SET_AP_PASSWORD;
+    request.verb = SerialCliVerb::SET_DEVICE_PASSWORD;
     copyCString(request.arg1, sizeof(request.arg1), args[0]);
     return true;
   }
@@ -414,22 +414,22 @@ inline void serialCliPrintHelp() {
   Serial.println("HELLO  probe CLI  e.g. HELLO");
   Serial.println("REBOOT  restart firmware  e.g. REBOOT");
   Serial.println(
-      "FACTORY_RESET  wipe Wi-Fi, settings, shots; AP password Micra1234; "
+      "FACTORY_RESET  wipe Wi-Fi, settings, shots; device password Micra1234; "
       "restart  e.g. FACTORY_RESET");
   Serial.println(
-      "RESET_AP_PASSWORD  restore AP password Micra1234 (STA Wi-Fi "
-      "unchanged)  e.g. RESET_AP_PASSWORD");
+      "RESET_DEVICE_PASSWORD  restore device password Micra1234 (STA Wi-Fi "
+      "unchanged)  e.g. RESET_DEVICE_PASSWORD");
   Serial.println(
-      "SET_AP_PASSWORD <password>  set AP password (8-63 chars, not "
+      "SET_DEVICE_PASSWORD <password>  set device password (8-63 chars, not "
       "Micra1234; USB does not require the current password)  e.g. "
-      "SET_AP_PASSWORD password1234");
+      "SET_DEVICE_PASSWORD password1234");
   Serial.println(
       "SET_WIFI <ssid> [password]  save STA Wi-Fi (DHCP) and restart; omit "
       "password if open; quote spaces  e.g. SET_WIFI CafeLAN CafePass1");
   Serial.println("CLEAR_WIFI  forget STA Wi-Fi only; restart  e.g. CLEAR_WIFI");
   Serial.println("CLEAR_SHOTS  clear shot history  e.g. CLEAR_SHOTS");
   Serial.println(
-      "RESET_NETWORK_AP  forget STA Wi-Fi and restore AP password "
+      "RESET_NETWORK_AP  forget STA Wi-Fi and restore device password "
       "Micra1234; restart  e.g. RESET_NETWORK_AP");
   Serial.println(
       "SERIAL_DEBUG_ON  enable USB debug traces (any time)  e.g. "
@@ -534,7 +534,7 @@ struct SerialCliNetworkDump {
   bool staReconnectHeld = false;
   bool apStartHeld = false;
   bool httpStartHeld = false;
-  bool apPasswordFactory = false;
+  bool devicePasswordFactory = false;
   bool ntpMayArm = false;
   uint8_t apClients = 0;
   uint8_t staState = 0;
@@ -716,7 +716,7 @@ inline void serialCliPrintApStatus(const SerialCliNetworkDump &dump) {
   Serial.print("wifiMode=");
   Serial.println(serialCliWifiModeName(dump.wifiMode));
   Serial.print("passwordFactory=");
-  Serial.println(dump.apPasswordFactory ? "true" : "false");
+  Serial.println(dump.devicePasswordFactory ? "true" : "false");
   Serial.print("apStartHeld=");
   Serial.println(dump.apStartHeld ? "true" : "false");
 }

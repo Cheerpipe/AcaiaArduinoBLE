@@ -1579,7 +1579,7 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
   const IPAddress ip(192, 168, 4, 1);
   const bool configured =
       WiFi.softAPConfig(ip, ip, IPAddress(255, 255, 255, 0));
-  const bool apReady = configured && WiFi.softAP(AP_SSID, settings.apPassword);
+  const bool apReady = configured && WiFi.softAP(AP_SSID, settings.devicePassword);
   const bool httpReady =
       keepHttp || (wantHttp && apReady && startHttpServer());
   networkStartedAtMs_ = now;
@@ -2221,8 +2221,8 @@ bool ShotStopperNetwork::enqueueMaintenanceCompletion(
       succeeded ? (command.type == WebCommandType::PERSIST_RUNTIME ||
                            command.type == WebCommandType::SAVE_NETWORK ||
                            command.type == WebCommandType::FORGET_NETWORK ||
-                           command.type == WebCommandType::CHANGE_AP_PASSWORD ||
-                           command.type == WebCommandType::RESET_AP_PASSWORD ||
+                           command.type == WebCommandType::CHANGE_DEVICE_PASSWORD ||
+                           command.type == WebCommandType::RESET_DEVICE_PASSWORD ||
                            command.type == WebCommandType::RESET_NETWORK_AP ||
                            command.type == WebCommandType::FACTORY_RESET ||
                            command.type == WebCommandType::RESTART
@@ -2323,8 +2323,8 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
       restartPending_ = true;
       break;
 
-    case WebCommandType::CHANGE_AP_PASSWORD:
-      if (!setAccessPointPassword(next, command.password)) {
+    case WebCommandType::CHANGE_DEVICE_PASSWORD:
+      if (!setDevicePassword(next, command.password)) {
         log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
         return false;
       }
@@ -2332,18 +2332,18 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
       apRestartPending_ = snapshot().apActive;
       break;
 
-    case WebCommandType::RESET_AP_PASSWORD:
-      if (!initializeDefaultAccessPointPassword(next)) {
+    case WebCommandType::RESET_DEVICE_PASSWORD:
+      if (!initializeDefaultDevicePassword(next)) {
         return false;
       }
       persist = true;
       apRestartPending_ = snapshot().apActive;
-      log(DebugCategory::SECURITY, DebugCode::AP_PASSWORD_RESET);
+      log(DebugCategory::SECURITY, DebugCode::DEVICE_PASSWORD_RESET);
       break;
 
     case WebCommandType::RESET_NETWORK_AP:
       clearStaNetwork(next);
-      if (!initializeDefaultAccessPointPassword(next)) {
+      if (!initializeDefaultDevicePassword(next)) {
         return false;
       }
       persist = true;
@@ -2726,7 +2726,7 @@ void ShotStopperNetwork::refreshExtendedStatus(uint32_t now) {
   status_.staReconnectHeld = staReconnectHeld_;
   status_.apStartHeld = apStartHeld_;
   status_.httpStartHeld = httpStartHeld_;
-  status_.apPasswordFactory = factoryPassword;
+  status_.devicePasswordFactory = factoryPassword;
   status_.scanState = static_cast<uint8_t>(g_wifiScan.state);
   status_.ntpState = static_cast<uint8_t>(timeStatus.state);
   status_.ntpMayArm = ntpArm;
@@ -2960,7 +2960,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/network", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/network/scan", HTTP_GET, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/network/scan", HTTP_POST, ownedApiHandler) &&
-      registerHandler(server_, "/api/v1/access-point/password", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/device/password", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/admin/ble-compat", HTTP_PUT, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/ota", HTTP_GET, otaStatusHandler) &&
       registerHandler(server_, "/api/v1/ota", HTTP_POST, otaUploadHandler) &&
@@ -3192,7 +3192,7 @@ esp_err_t ShotStopperNetwork::ownedApiHandler(httpd_req_t *request) {
                                        : wifiScanStartHandler(request);
   }
   if (apiUriMatches(request->uri, "/api/v1/network")) return networkHandler(request);
-  if (apiUriMatches(request->uri, "/api/v1/access-point/password")) return apPasswordHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/device/password")) return devicePasswordHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/admin/ble-compat")) return bleCompatHandler(request);
   return sendError(request, STATUS_NOT_FOUND, "NOT_FOUND", "Unknown API route.");
 }
@@ -5416,7 +5416,7 @@ esp_err_t ShotStopperNetwork::wifiScanStatusHandler(httpd_req_t *request) {
   return sent;
 }
 
-esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
+esp_err_t ShotStopperNetwork::devicePasswordHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
@@ -5431,7 +5431,7 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
     return bodyStatus;
   }
   WebCommand command;
-  command.type = WebCommandType::CHANGE_AP_PASSWORD;
+  command.type = WebCommandType::CHANGE_DEVICE_PASSWORD;
   command.requestId = self.allocateRequestId();
   command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   char currentPassword[WIFI_PASSWORD_CAPACITY] = {};
@@ -5450,29 +5450,29 @@ esp_err_t ShotStopperNetwork::apPasswordHandler(httpd_req_t *request) {
   if (!parsed) {
     memset(command.password, 0, sizeof(command.password));
     memset(currentPassword, 0, sizeof(currentPassword));
-    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_AP_PASSWORD",
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_DEVICE_PASSWORD",
                      "Current and new password fields are required.");
   }
   char expected[WIFI_PASSWORD_CAPACITY] = {};
   portENTER_CRITICAL(&self.dataMux_);
-  memcpy(expected, self.settings_.apPassword, sizeof(expected));
+  memcpy(expected, self.settings_.devicePassword, sizeof(expected));
   portEXIT_CRITICAL(&self.dataMux_);
   const bool currentMatches = secretsMatch(currentPassword, expected);
   memset(currentPassword, 0, sizeof(currentPassword));
   memset(expected, 0, sizeof(expected));
   if (!currentMatches) {
     memset(command.password, 0, sizeof(command.password));
-    return sendError(request, STATUS_UNAUTHORIZED, "AP_PASSWORD_INVALID",
+    return sendError(request, STATUS_UNAUTHORIZED, "DEVICE_PASSWORD_INVALID",
                      "Current password is incorrect.");
   }
-  if (!validAccessPointPassword(command.password)) {
+  if (!validDevicePassword(command.password)) {
     memset(command.password, 0, sizeof(command.password));
-    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_AP_PASSWORD",
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_DEVICE_PASSWORD",
                      "New password must be 8–63 characters.");
   }
   if (isFactoryDefaultPassword(command.password)) {
     memset(command.password, 0, sizeof(command.password));
-    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_AP_PASSWORD",
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_DEVICE_PASSWORD",
                      "New password cannot be the factory default.");
   }
   if (!self.callbacks_.enqueueWebCommand(command)) {
@@ -5632,7 +5632,7 @@ bool ShotStopperNetwork::authorizeOtaRequest(httpd_req_t *request) {
       httpd_req_get_hdr_value_str(request, OTA_TOKEN_HEADER, token,
                                   sizeof(token)) == ESP_OK) {
     portENTER_CRITICAL(&dataMux_);
-    memcpy(expected, settings_.apPassword, sizeof(expected));
+    memcpy(expected, settings_.devicePassword, sizeof(expected));
     portEXIT_CRITICAL(&dataMux_);
     // A controller still on the published factory credential has no secret to
     // authenticate with, so firmware updates stay closed until it is changed.
@@ -5668,7 +5668,7 @@ void ShotStopperNetwork::buildOtaJson(char *buffer, size_t capacity,
       ota_.pendingVerify ? "true" : "false",
       ota_.confirmed ? "true" : "false", safe ? "true" : "false",
       configLockReason(control),
-      network.apPasswordFactory ? "false" : "true",
+      network.devicePasswordFactory ? "false" : "true",
       otaRestartPending_ ? "true" : "false");
   if (written <= 0 || static_cast<size_t>(written) >= capacity) {
     snprintf(buffer, capacity, "{\"available\":false}");
@@ -5750,7 +5750,7 @@ esp_err_t ShotStopperNetwork::otaStatusHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   if (!self.authorizeOtaRequest(request)) {
     return sendError(request, STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
-                     "Send the access point password in X-OTA-Token.");
+                     "Send the device password in X-OTA-Token.");
   }
   ControlStatusSnapshot control;
   self.callbacks_.copyControlStatus(control);
@@ -5773,7 +5773,7 @@ esp_err_t ShotStopperNetwork::otaUploadHandler(httpd_req_t *request) {
   };
   if (!self.authorizeOtaRequest(request)) {
     return rejectUpload(STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
-                        "Send the access point password in X-OTA-Token.");
+                        "Send the device password in X-OTA-Token.");
   }
   ShotStopperOta &ota = ShotStopperOta::instance();
 
@@ -5842,7 +5842,7 @@ esp_err_t ShotStopperNetwork::otaFlashHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   if (!self.authorizeOtaRequest(request)) {
     return sendError(request, STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
-                     "Send the access point password in X-OTA-Token.");
+                     "Send the device password in X-OTA-Token.");
   }
   ShotStopperOta &ota = ShotStopperOta::instance();
   ControlStatusSnapshot control;
@@ -5886,7 +5886,7 @@ esp_err_t ShotStopperNetwork::otaAbortHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   if (!self.authorizeOtaRequest(request)) {
     return sendError(request, STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
-                     "Send the access point password in X-OTA-Token.");
+                     "Send the device password in X-OTA-Token.");
   }
   ShotStopperOta::instance().discard();
   ControlStatusSnapshot control;

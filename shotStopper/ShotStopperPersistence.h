@@ -25,7 +25,7 @@ inline bool validPersistedSettings(const PersistedSettings &settings) {
       validateRuntimeConfig(settings.runtime) != ConfigValidationError::NONE ||
       !validateShotPresetBank(settings.presets, settings.runtime.retareWindowMs,
                               settings.runtime.autoRetare) ||
-      !validAccessPointPassword(settings.apPassword) ||
+      !validDevicePassword(settings.devicePassword) ||
       !validPreferredScaleMac(settings.preferredScaleMac) ||
       !validPreferredScaleName(settings.preferredScaleName) ||
       !validScaleHistoryEntries(settings.scaleHistory) ||
@@ -234,7 +234,7 @@ inline bool savePersistedSettings(PersistedSettings &settings) {
 
 inline bool initializeDefaultSettings(PersistedSettings &settings) {
   settings = PersistedSettings{};
-  if (!initializeDefaultAccessPointPassword(settings)) {
+  if (!initializeDefaultDevicePassword(settings)) {
     return false;
   }
   finalizePersistedSettings(settings);

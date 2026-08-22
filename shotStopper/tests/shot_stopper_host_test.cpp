@@ -1838,7 +1838,7 @@ void w04_wifi_credentials_have_strict_bounds() {
   CHECK(validWifiPassword("12345678", false));
   CHECK(!validWifiPassword("1234", false));
   CHECK(validWifiPassword("", true));
-  CHECK(validAccessPointPassword("Micra1234"));
+  CHECK(validDevicePassword("Micra1234"));
   CHECK(shouldReuseSavedWifiCredentials("CafeLAN", "", false, true, "CafeLAN",
                                         false));
   CHECK(shouldReuseSavedWifiCredentials("CafeLAN", "", true, true, "CafeLAN",
@@ -6120,8 +6120,8 @@ void sc05_serial_cli_parser_covers_supported_commands() {
   CHECK(request.verb == SerialCliVerb::HELLO);
   CHECK(serialCliParseLine("REBOOT", request));
   CHECK(request.verb == SerialCliVerb::REBOOT);
-  CHECK(serialCliParseLine("SET_AP_PASSWORD password1234", request));
-  CHECK(request.verb == SerialCliVerb::SET_AP_PASSWORD);
+  CHECK(serialCliParseLine("SET_DEVICE_PASSWORD password1234", request));
+  CHECK(request.verb == SerialCliVerb::SET_DEVICE_PASSWORD);
   CHECK(strcmp(request.arg1, "password1234") == 0);
   CHECK(serialCliParseLine("SET_WIFI ssid_de_wifi pass_del_wifi", request));
   CHECK(request.verb == SerialCliVerb::SET_WIFI);
@@ -6137,8 +6137,8 @@ void sc05_serial_cli_parser_covers_supported_commands() {
   CHECK(request.openNetwork);
   CHECK(serialCliParseLine("FACTORY_RESET", request));
   CHECK(request.verb == SerialCliVerb::FACTORY_RESET);
-  CHECK(serialCliParseLine("RESET_AP_PASSWORD", request));
-  CHECK(request.verb == SerialCliVerb::RESET_AP_PASSWORD);
+  CHECK(serialCliParseLine("RESET_DEVICE_PASSWORD", request));
+  CHECK(request.verb == SerialCliVerb::RESET_DEVICE_PASSWORD);
   CHECK(serialCliParseLine("CLEAR_WIFI", request));
   CHECK(request.verb == SerialCliVerb::CLEAR_WIFI);
   CHECK(serialCliParseLine("RESET_NETWORK_AP", request));
@@ -6197,9 +6197,9 @@ void sc05_serial_cli_parser_covers_supported_commands() {
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(!serialCliParseLine("SERIAL_DEBUG_ON extra", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
-  CHECK(serialCliParseLine("SET_AP_PASSWORD Micra1234", request));
+  CHECK(serialCliParseLine("SET_DEVICE_PASSWORD Micra1234", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
-  CHECK(serialCliParseLine("SET_AP_PASSWORD oldpass newpass", request));
+  CHECK(serialCliParseLine("SET_DEVICE_PASSWORD oldpass newpass", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(serialCliParseLine("SET_WIFI Cafe short", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
@@ -6325,14 +6325,14 @@ void bc04_ble_companion_enablement_is_next_boot_only() {
   CHECK(!canceled.restartRequired);
 }
 
-void sc07_reset_ap_password_and_clear_wifi_queue() {
+void sc07_reset_device_password_and_clear_wifi_queue() {
   resetHarness(false, false);
   reachReadyFromBoot();
-  feedSerial("RESET_AP_PASSWORD\n");
-  CHECK(serialTxContains("OK queued RESET_AP_PASSWORD"));
+  feedSerial("RESET_DEVICE_PASSWORD\n");
+  CHECK(serialTxContains("OK queued RESET_DEVICE_PASSWORD"));
   runLoopAfter(MAINTENANCE_LEASE_SETTLE_MS);
   CHECK(hostLastForwardedNetworkCommand.type ==
-        WebCommandType::RESET_AP_PASSWORD);
+        WebCommandType::RESET_DEVICE_PASSWORD);
 
   resetHarness(false, false);
   reachReadyFromBoot();
@@ -6343,14 +6343,14 @@ void sc07_reset_ap_password_and_clear_wifi_queue() {
         WebCommandType::FORGET_NETWORK);
 }
 
-void sc08_set_ap_password_queues_change() {
+void sc08_set_device_password_queues_change() {
   resetHarness(false, false);
   reachReadyFromBoot();
-  feedSerial("SET_AP_PASSWORD password1234\n");
-  CHECK(serialTxContains("OK queued SET_AP_PASSWORD"));
+  feedSerial("SET_DEVICE_PASSWORD password1234\n");
+  CHECK(serialTxContains("OK queued SET_DEVICE_PASSWORD"));
   runLoopAfter(MAINTENANCE_LEASE_SETTLE_MS);
   CHECK(hostLastForwardedNetworkCommand.type ==
-        WebCommandType::CHANGE_AP_PASSWORD);
+        WebCommandType::CHANGE_DEVICE_PASSWORD);
   CHECK(strcmp(hostLastForwardedNetworkCommand.password, "password1234") == 0);
 }
 
@@ -6407,8 +6407,8 @@ void sc10_help_prints_one_line_per_command() {
   CHECK(serialTxContains("HELLO  probe CLI"));
   CHECK(serialTxContains("REBOOT  restart firmware"));
   CHECK(serialTxContains("FACTORY_RESET  wipe Wi-Fi"));
-  CHECK(serialTxContains("RESET_AP_PASSWORD  restore AP password"));
-  CHECK(serialTxContains("SET_AP_PASSWORD <password>"));
+  CHECK(serialTxContains("RESET_DEVICE_PASSWORD  restore device password"));
+  CHECK(serialTxContains("SET_DEVICE_PASSWORD <password>"));
   CHECK(serialTxContains("SET_WIFI <ssid> [password]"));
   CHECK(serialTxContains("CLEAR_WIFI  forget STA Wi-Fi"));
   CHECK(serialTxContains("CLEAR_SHOTS  clear shot history"));
@@ -8544,8 +8544,8 @@ const TestCase testCases[] = {
     {"SC04", sc04_clear_shots_empties_log},
     {"SC05", sc05_serial_cli_parser_covers_supported_commands},
     {"SC06", sc06_serial_cli_feed_completes_on_crlf},
-    {"SC07", sc07_reset_ap_password_and_clear_wifi_queue},
-    {"SC08", sc08_set_ap_password_queues_change},
+    {"SC07", sc07_reset_device_password_and_clear_wifi_queue},
+    {"SC08", sc08_set_device_password_queues_change},
     {"SC09", sc09_serial_debug_toggles_without_ready},
     {"SC10", sc10_help_prints_one_line_per_command},
     {"SC11", sc11_reboot_queues_restart_when_ready},

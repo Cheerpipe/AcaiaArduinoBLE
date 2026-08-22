@@ -6,7 +6,7 @@ your network.
 
 ## Requirements
 
-- Change the SoftAP / Web UI password away from the factory default
+- Change the device password away from the factory default
   (`Micra1234`). That password is the **OTA token**; scripts never store it.
 - Pass the token every run (`--token` or `SHOTSTOPPER_OTA_TOKEN`).
 - Image must match the board architecture and must not be older than the

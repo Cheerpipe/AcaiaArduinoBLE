@@ -18,7 +18,7 @@ Upload the already-built ESP-IDF image to the controller, verify it, and leave
 it ready to boot.
 
 Required parameters: --arch, --host, and --token.
-The token is the MicraShotStopperAP SoftAP password. The controller rejects
+The token is the device password. The controller rejects
 updates while that password is still the factory default.
 
 $(ss_flag_help)
@@ -27,7 +27,7 @@ $(shotstopper_arch_help)
 
 Examples:
   ./scripts/ota-idf --arch n16r8 --host 192.168.1.50
-  ./scripts/ota-idf -a n16r8 -H 192.168.4.1 -t "my-AP-password"
+  ./scripts/ota-idf -a n16r8 -H 192.168.4.1 -t "my-device-password"
 
 The image comes from build-idf/<architecture>/shotstopper.bin, so compile first
 (./scripts/build-idf / ./scripts/b-idf) or use ./scripts/bo-idf, which does both.

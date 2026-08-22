@@ -1173,7 +1173,7 @@ inline bool selectBestStaAp(const StaApScanEntry *entries, size_t count,
   return true;
 }
 
-inline bool validAccessPointPassword(const char *password) {
+inline bool validDevicePassword(const char *password) {
   return validWifiPassword(password, false);
 }
 
@@ -1309,8 +1309,8 @@ enum class WebCommandType : uint8_t {
   PRESET_OP,
   SAVE_NETWORK,
   FORGET_NETWORK,
-  CHANGE_AP_PASSWORD,
-  RESET_AP_PASSWORD,
+  CHANGE_DEVICE_PASSWORD,
+  RESET_DEVICE_PASSWORD,
   RESTART,
   RESET_NETWORK_AP,
   FACTORY_RESET,
@@ -1350,9 +1350,9 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::PRESET_OP: return "preset operation";
     case WebCommandType::SAVE_NETWORK: return "save STA network";
     case WebCommandType::FORGET_NETWORK: return "forget STA network";
-    case WebCommandType::CHANGE_AP_PASSWORD: return "change AP password";
-    case WebCommandType::RESET_AP_PASSWORD:
-      return "restore AP password";
+    case WebCommandType::CHANGE_DEVICE_PASSWORD: return "change device password";
+    case WebCommandType::RESET_DEVICE_PASSWORD:
+      return "restore device password";
     case WebCommandType::RESTART: return "restart";
     case WebCommandType::RESET_NETWORK_AP: return "recover network/AP";
     case WebCommandType::FACTORY_RESET: return "restore factory settings";
@@ -1810,7 +1810,7 @@ enum class DebugCode : uint8_t {
   CUP_REMOVED_CONFIRMED,
   RINSE_CLASSIFIED,
   SYSTEM_LOG_OVERRUN,
-  AP_PASSWORD_RESET,
+  DEVICE_PASSWORD_RESET,
   HEALTH_HEAP_LOW,
   HEALTH_STACK_LOW,
   HEALTH_LOOP_GAP,
@@ -2206,7 +2206,7 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::WEB_STOP: return "web safe stop";
     case DebugCode::RESTART_REQUESTED: return "restart requested";
     case DebugCode::NETWORK_RESET: return "network settings reset";
-    case DebugCode::AP_PASSWORD_RESET: return "AP password restored";
+    case DebugCode::DEVICE_PASSWORD_RESET: return "Device password restored";
     case DebugCode::FACTORY_RESET: return "factory settings restored";
     case DebugCode::MAINTENANCE_RESERVED:
       return "maintenance lease reserved";
