@@ -2582,6 +2582,7 @@ if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
     !firmware.includes('requestBookooSilenceIfConfigured') ||
     !firmware.includes('emitCommandAlert') ||
     !firmware.includes('emitImmediateCommandAlertIfBuzzer') ||
+    !firmware.includes('emitCn9CycleAlert') ||
     !firmware.includes('commandAlertUsesBuzzer') ||
     /enum class ScaleCommandType[\s\S]*BEEP/.test(
       firmware.slice(firmware.indexOf('enum class ScaleCommandType'),
@@ -2606,11 +2607,14 @@ if (!alertChannel.includes('AlertKind::CommandImmediate') ||
 }
 const immediateCommandAlertCalls =
     firmware.split('emitImmediateCommandAlertIfBuzzer(').length - 1;
-if (immediateCommandAlertCalls < 4 ||
-    !firmware.includes('emitImmediateCommandAlertIfBuzzer(\n        session.config.autoTare && session.config.canTareStartTimer') ||
+const cn9CycleAlertCalls = firmware.split('emitCn9CycleAlert(').length - 1;
+if (immediateCommandAlertCalls < 3 || cn9CycleAlertCalls < 4 ||
     !firmware.includes(
-        'if (shotCompletionGetsLongBeep(reason)) {\n    // Completion LONG replaces the stop-timer SINGLE so ends are one cue.\n    requestCompletionAlert();\n  } else {\n    emitImmediateCommandAlertIfBuzzer(AlertEvent::STOP_TIMER);') ||
-    !firmware.includes('emitImmediateCommandAlertIfBuzzer(AlertEvent::TARE);\n  markRetareEnded')) {
+        'emitCn9CycleAlert(session.startedWithScale && session.config.autoTare &&\n                            session.config.canTareStartTimer\n                        ? AlertEvent::TARE_START\n                        : AlertEvent::START_TIMER,\n                    false);') ||
+    !firmware.includes(
+        'if (shotCompletionGetsLongBeep(reason)) {\n    // Completion LONG replaces the stop-timer SINGLE so ends are one cue.\n    requestCompletionAlert();\n  } else {\n    emitCn9CycleAlert(AlertEvent::STOP_TIMER, true);') ||
+    !firmware.includes('emitImmediateCommandAlertIfBuzzer(AlertEvent::TARE);\n  markRetareEnded') ||
+    !firmware.includes('emitCn9CycleAlert(AlertEvent::START_TIMER, false);')) {
   throw new Error('Command alerts must fire at CN9/paddle/retare, not after BLE');
 }
 if (firmware.includes('SCALE_COMPLETION_BEEP_DELAY_MS') ||

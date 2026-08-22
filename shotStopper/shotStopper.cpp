@@ -158,6 +158,7 @@ bool startPulseTrain(BuzzerPattern pattern, uint32_t durationMs);
 bool emitAlert(AlertEvent event, uint32_t cycleId = 0);
 bool commandAlertUsesBuzzer();
 void emitImmediateCommandAlertIfBuzzer(AlertEvent event);
+bool emitCn9CycleAlert(AlertEvent event, bool preempt);
 void emitCommandAlert(AlertEvent event, bool commandAttempted,
                       bool writeSucceeded, bool commandFeedbackExpected);
 
@@ -2379,6 +2380,34 @@ void emitImmediateCommandAlertIfBuzzer(AlertEvent event) {
                       false);
 }
 
+// Shot start/stop follow the relay, not the scale timer or Output channel.
+// Start may queue behind a no-scale/no-cup warning; stop preempts so the
+// CN9-open cue is not stuck behind echo or a pulse train remnant.
+bool emitCn9CycleAlert(AlertEvent event, bool preempt) {
+  if (!soundAlertsEnabled()) {
+    return false;
+  }
+  if (BUZZER_SUPPORT_ENABLED && localBuzzer.ready) {
+    if (preempt) {
+      if (localBuzzer.pending != BuzzerPattern::NONE) {
+        localBuzzer.stopIf(localBuzzer.pending);
+      }
+      if (localBuzzer.active != BuzzerPattern::NONE) {
+        localBuzzer.stopIf(localBuzzer.active);
+      }
+    }
+    const BuzzerToneCommand tone =
+        deriveBuzzerTone(event, session.slowExtractionExtended,
+                         runtimeConfig.buzzerExtendedPulseRate,
+                         runtimeConfig.buzzerSlowExtendedPulseRate);
+    return playLocalAlertTone(tone, true);
+  }
+  if (event == AlertEvent::COMPLETION_EXTRA) {
+    return emitAlert(event);
+  }
+  return false;
+}
+
 void playRecoveryCue(BuzzerCue cue) {
   AlertChannelContext ctx = currentAlertChannelContext();
   if (selectAlertSink(AlertKind::Recovery, AlertEvent::TARE, ctx) !=
@@ -2492,12 +2521,11 @@ void requestCompletionAlert() {
   if (!soundAlertsEnabled()) {
     return;
   }
-  if (emitAlert(AlertEvent::COMPLETION_EXTRA)) {
+  if (emitCn9CycleAlert(AlertEvent::COMPLETION_EXTRA, true)) {
     scaleCompletionBeepScheduled = false;
     return;
   }
-  const AlertOutputChannel channel = currentAlertOutputChannel();
-  if (channel != AlertOutputChannel::SCALE_ONLY && BUZZER_SUPPORT_ENABLED) {
+  if (BUZZER_SUPPORT_ENABLED) {
     scaleCompletionBeepScheduled = true;
     return;
   }
@@ -3663,11 +3691,12 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   }
   session.cn9ClosedAtMs = getRelaySafetySnapshot().closedAtMs;
 
+  emitCn9CycleAlert(session.startedWithScale && session.config.autoTare &&
+                            session.config.canTareStartTimer
+                        ? AlertEvent::TARE_START
+                        : AlertEvent::START_TIMER,
+                    false);
   if (session.startedWithScale) {
-    emitImmediateCommandAlertIfBuzzer(
-        session.config.autoTare && session.config.canTareStartTimer
-            ? AlertEvent::TARE_START
-            : AlertEvent::START_TIMER);
     if (!requestRemoteTimerStart()) {
       session.automaticEnabled = false;
       session.scaleWasLost = true;
@@ -3695,17 +3724,17 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   cancelScaleBrewBeep(session.id);
   cancelScaleCompletionBeep();
   session.endReason = reason;
-  scheduleScaleTimerStopAfterCycle();
-  if (reason == EndReason::AUTO_TO_MANUAL_GUARD &&
-      runtimeConfig.buzzerAutoToManualGuardEndBeep) {
-    emitAlert(AlertEvent::ATM_END);
-  }
   if (shotCompletionGetsLongBeep(reason)) {
     // Completion LONG replaces the stop-timer SINGLE so ends are one cue.
     requestCompletionAlert();
   } else {
-    emitImmediateCommandAlertIfBuzzer(AlertEvent::STOP_TIMER);
+    emitCn9CycleAlert(AlertEvent::STOP_TIMER, true);
   }
+  if (reason == EndReason::AUTO_TO_MANUAL_GUARD &&
+      runtimeConfig.buzzerAutoToManualGuardEndBeep) {
+    emitAlert(AlertEvent::ATM_END);
+  }
+  scheduleScaleTimerStopAfterCycle();
 
   schedulePendingShotFinalize(reason, durationMs);
 
@@ -3765,6 +3794,7 @@ bool beginRinseCycle(ControlSource source) {
     return false;
   }
   session.cn9ClosedAtMs = getRelaySafetySnapshot().closedAtMs;
+  emitCn9CycleAlert(AlertEvent::START_TIMER, false);
   // Only an Armed no-scale rinse clears the latch; keep Armed when the scale
   // is usable (e.g. web rinse with a connected scale).
   if (noScaleShotGuardArmed) {
@@ -3776,7 +3806,6 @@ bool beginRinseCycle(ControlSource source) {
     }
   }
   if (session.startedWithScale) {
-    emitImmediateCommandAlertIfBuzzer(AlertEvent::START_TIMER);
     if (!requestRemoteTimerStart()) {
       session.startedWithScale = false;
       session.automaticEnabled = false;

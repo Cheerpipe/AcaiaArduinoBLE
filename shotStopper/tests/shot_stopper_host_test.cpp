@@ -2539,6 +2539,9 @@ void w51_local_buzzer_echo_inverted_on_scale_lost_during_bbw() {
   CHECK(session.automaticEnabled ||
         session.weightControlState == WeightControlState::ACTIVE ||
         session.weightControlState == WeightControlState::VALIDATING);
+  for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
+    runLoopAfter(40);
+  }
   const uint32_t before = localBuzzer.acceptedRequests;
   setScaleConnected(false);
   CHECK(localBuzzer.acceptedRequests == before + 1);
@@ -2574,7 +2577,8 @@ void w52_local_buzzer_triple_on_manual_bbw_without_scale() {
   const uint32_t before = localBuzzer.acceptedRequests;
   startCycle();
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
-  CHECK(localBuzzer.acceptedRequests == before + 1);
+  // No-scale TRIPLE (warning) then CN9 start cue, which queues behind it.
+  CHECK(localBuzzer.acceptedRequests == before + 2);
 }
 
 void w53_local_buzzer_silent_when_bbw_off_without_scale() {
@@ -2588,7 +2592,8 @@ void w53_local_buzzer_silent_when_bbw_off_without_scale() {
   const uint32_t before = localBuzzer.acceptedRequests;
   startCycle();
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
-  CHECK(localBuzzer.acceptedRequests == before);
+  // No-scale TRIPLE is suppressed when BBW is off; CN9 start still beeps.
+  CHECK(localBuzzer.acceptedRequests == before + 1);
 }
 
 bool debugEventExists(DebugCode code, int32_t argument1 = INT32_MIN,
@@ -2747,7 +2752,7 @@ void ns09_armed_rinse_gesture_runs_and_consumes_guard() {
   CHECK(debugEventExists(DebugCode::RINSE_CLASSIFIED));
   CHECK(debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED));
   CHECK(!debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED));
-  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 2);
 }
 
 void ns10_idle_rinse_gesture_does_not_rearm() {
@@ -2756,14 +2761,17 @@ void ns10_idle_rinse_gesture_does_not_rearm() {
   reachReadyFromBoot();
   attemptBlockedNoScaleStart();
   CHECK(!noScaleShotGuardArmed);
+  for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
+    runLoopAfter(40);
+  }
   const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
   const uint32_t rawOnAt = startCycle();
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
-  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 2);
   releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
   CHECK(stopperState == StopperState::RINSE);
   CHECK(!noScaleShotGuardArmed);
-  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 2);
 }
 
 void ns11_web_rinse_with_scale_keeps_armed() {
@@ -2798,10 +2806,14 @@ void w54_local_buzzer_triple_on_auto_to_manual_guard_end() {
   reachReadyFromBoot();
   startCycle();
   advanceToBrew();
+  for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
+    runLoopAfter(40);
+  }
   const uint32_t before = localBuzzer.acceptedRequests;
   finalizeCycle(EndReason::AUTO_TO_MANUAL_GUARD, StopperState::REQUIRES_OFF);
-  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(localBuzzer.acceptedRequests == before + 2);
   CHECK(session.endReason == EndReason::AUTO_TO_MANUAL_GUARD);
+  checkLocalCompletionTone();
 }
 
 void w55_local_buzzer_queues_second_triple_while_busy() {
@@ -2840,19 +2852,9 @@ void w56_atm_beep_queued_when_scale_lost_after_deadline() {
   setScaleConnected(false);
   loop();
   CHECK(session.endReason == EndReason::AUTO_TO_MANUAL_GUARD);
-  // Scale-lost Echo inverted + ATM TRIPLE. Completion LONG retries behind
-  // those cues with no extra delay.
-  CHECK(localBuzzer.acceptedRequests == before + 2);
-  bool sawCompletionLong = false;
-  for (uint32_t step = 0; step < 120; ++step) {
-    if (localBuzzer.active == BuzzerPattern::LONG) {
-      sawCompletionLong = true;
-      break;
-    }
-    runLoopAfter(40);
-  }
-  CHECK(sawCompletionLong);
-  CHECK(localBuzzer.acceptedRequests >= before + 3);
+  // Scale-lost Echo inverted is preempted by CN9 completion LONG; ATM TRIPLE
+  // queues behind it.
+  CHECK(localBuzzer.acceptedRequests == before + 3);
   checkLocalCompletionTone();
 }
 
@@ -3553,7 +3555,7 @@ void w77_scale_priority_disconnected_beeps_on_cn9_without_ble() {
   startCycle();
   CHECK(getRelaySafetySnapshot().closed);
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
-  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(localBuzzer.acceptedRequests == before + 2);
   CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 0);
   // Drain manual-no-scale TRIPLE so stop completion LONG can start cleanly.
   for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
@@ -3567,7 +3569,7 @@ void w77_scale_priority_disconnected_beeps_on_cn9_without_ble() {
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
 }
 
-void w78_scale_priority_connected_start_does_not_use_buzzer() {
+void w78_scale_priority_connected_start_beeps_at_cn9() {
   resetHarness(false, true);
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
@@ -3575,10 +3577,10 @@ void w78_scale_priority_connected_start_does_not_use_buzzer() {
   const uint32_t before = localBuzzer.acceptedRequests;
   startCycle();
   CHECK(getRelaySafetySnapshot().closed);
-  CHECK(localBuzzer.acceptedRequests == before);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
   CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
   CHECK(executeNextScaleCommand());
-  CHECK(localBuzzer.acceptedRequests == before);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
 }
 
 void w79_buzzer_only_stop_beeps_before_timer_stop_result() {
@@ -3599,6 +3601,60 @@ void w79_buzzer_only_stop_beeps_before_timer_stop_result() {
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
   CHECK(executeNextScaleCommand());
   CHECK(localBuzzer.acceptedRequests == before + 1);
+}
+
+void w79b_stop_beeps_at_cn9_while_scale_timer_stop_still_pending() {
+  resetHarness(false, true);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  runtimeConfig.scaleTimerStopExtraDelayMs = 200;
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  drainLocalBuzzer();
+  const uint32_t before = localBuzzer.acceptedRequests;
+  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  checkLocalCompletionTone();
+  CHECK(pendingScaleTimerStop.pending);
+  CHECK(!session.stopTimerRequested);
+  CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
+}
+
+void w79c_rinse_without_scale_beeps_at_cn9_open_and_close() {
+  resetHarness(false, false);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  runtimeConfig.buzzerManualNoScaleBeep = false;
+  reachReadyFromBoot();
+  const uint32_t before = localBuzzer.acceptedRequests;
+  processWebCommand(webControlCommand(WebCommandType::RINSE));
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  drainLocalBuzzer();
+  const uint32_t afterStart = localBuzzer.acceptedRequests;
+  finalizeCycle(EndReason::RINSE_COMPLETE, StopperState::READY);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(localBuzzer.acceptedRequests == afterStart + 1);
+}
+
+void w79d_scale_only_start_and_stop_still_use_local_cn9_beeps() {
+  resetHarness(false, true);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_ONLY);
+  reachReadyFromBoot();
+  const uint32_t before = localBuzzer.acceptedRequests;
+  startCycle();
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(localBuzzer.acceptedRequests == before + 1);
+  CHECK(executeNextScaleCommand());
+  drainLocalBuzzer();
+  const uint32_t afterStart = localBuzzer.acceptedRequests;
+  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  CHECK(localBuzzer.acceptedRequests == afterStart + 1);
+  checkLocalCompletionTone();
 }
 
 void w80_buzzer_only_retare_beeps_before_tare_result() {
@@ -3629,6 +3685,9 @@ void w81_scale_priority_failed_start_falls_back_after_disconnect() {
   reachReadyFromBoot();
   startCycle();
   CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
+  for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
+    runLoopAfter(40);
+  }
   const uint32_t before = localBuzzer.acceptedRequests;
   setScaleConnected(false);
   // Scale-lost Echo inverted on disconnect, then command fallback SINGLE.
@@ -3689,12 +3748,14 @@ void w95_eclair_scale_only_omits_unsupported_alerts() {
   reachReadyFromBoot();
   const uint32_t alerts = localBuzzer.acceptedRequests;
   startCycle();
-  CHECK(localBuzzer.acceptedRequests == alerts);
+  CHECK(localBuzzer.acceptedRequests == alerts + 1);
   CHECK(executeNextScaleCommand());
   establishPostTareBaseline();
   advanceToBrew();
+  drainLocalBuzzer();
+  const uint32_t afterStart = localBuzzer.acceptedRequests;
   simulateFirstDrops();
-  CHECK(localBuzzer.acceptedRequests == alerts);
+  CHECK(localBuzzer.acceptedRequests == afterStart);
   CHECK(!scaleBeepPending);
   CHECK(scale.beepCalls == 0);
   CHECK(scale.setBeepLevelCalls == 0);
@@ -4883,7 +4944,7 @@ void cp05_rinse_without_cup_still_starts() {
   CHECK(stopperState == StopperState::RINSE);
   CHECK(getRelaySafetySnapshot().closed);
   CHECK(!cupStartGuardHold);
-  CHECK(localBuzzer.acceptedRequests == beforeBeeps);
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
 }
 
 void cp06_cup_removed_stops_during_bbw_protection() {
@@ -8756,8 +8817,11 @@ const TestCase testCases[] = {
     {"W75", w75_bookoo_discovery_connect_applies_beep_policy},
     {"W76", w76_buzzer_only_start_beeps_at_cn9_not_ble_result},
     {"W77", w77_scale_priority_disconnected_beeps_on_cn9_without_ble},
-    {"W78", w78_scale_priority_connected_start_does_not_use_buzzer},
+    {"W78", w78_scale_priority_connected_start_beeps_at_cn9},
     {"W79", w79_buzzer_only_stop_beeps_before_timer_stop_result},
+    {"W79b", w79b_stop_beeps_at_cn9_while_scale_timer_stop_still_pending},
+    {"W79c", w79c_rinse_without_scale_beeps_at_cn9_open_and_close},
+    {"W79d", w79d_scale_only_start_and_stop_still_use_local_cn9_beeps},
     {"W80", w80_buzzer_only_retare_beeps_before_tare_result},
     {"W81", w81_scale_priority_failed_start_falls_back_after_disconnect},
     {"W94", w94_eclair_scale_priority_uses_local_alerts},
