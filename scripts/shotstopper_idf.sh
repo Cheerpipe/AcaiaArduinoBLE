@@ -198,6 +198,21 @@ ss_idf_verify_firmware() {
     exit 1
   fi
 
+  local symbol
+  for symbol in shotLog shotCurves persistedSettings; do
+    nm_line="$(xtensa-esp32s3-elf-nm "$IDF_ELF" | grep -E "[[:space:]]${symbol}$" || true)"
+    if [[ -z "$nm_line" ]]; then
+      echo "nm did not find ${symbol} in $IDF_ELF." >&2
+      exit 1
+    fi
+    addr="0x$(printf '%s' "$nm_line" | awk '{print $1}')"
+    echo "${symbol}: $nm_line"
+    if ! ss_idf_probe_in_psram "$addr"; then
+      echo "${symbol} is NOT in PSRAM ($addr). Expected 0x3c.... Internal DRAM is 0x3fc....." >&2
+      exit 1
+    fi
+  done
+
   if [[ ! -f "$IDF_IMAGE" ]]; then
     echo "$IDF_IMAGE does not exist, so the OTA marker could not be verified." >&2
     echo "Do not upload an unverified image over Wi-Fi." >&2

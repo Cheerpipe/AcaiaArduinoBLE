@@ -33,6 +33,7 @@ void resetHostPersistence() {
   persistence_host::reset();
   resetDurableStorageRevision();
   ShotCurveLog::resetHostStorage();
+  g_hostFlashIoMutexAvailable = true;
 }
 
 void p01_defaults_are_valid() {
@@ -526,6 +527,8 @@ void p24_preset_bank_size_and_crud_budgets() {
   CHECK(sizeof(ShotPreset) <= 136);
   CHECK(sizeof(ShotPresetBank) <= 1100);
   CHECK(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET);
+  CHECK(sizeof(SettingsPersistRequest) <= PERSISTED_SETTINGS_NVS_BUDGET + 16);
+  CHECK(sizeof(ControlStatusSnapshot) <= 4096);
   CHECK(sizeof(WebCommand) <= 512);
   ShotPresetBank bank;
   seedDefaultShotPresetBank(bank);
@@ -1262,6 +1265,16 @@ void p62_shot_curve_v1_schema_is_rejected() {
   CHECK(!validShotCurveStore(store));
 }
 
+void p63_flash_io_lock_fails_closed_without_mutex() {
+  resetHostPersistence();
+  g_hostFlashIoMutexAvailable = false;
+  CHECK(!tryLockFlashIo());
+  CHECK(!lockFlashIo());
+  g_hostFlashIoMutexAvailable = true;
+  CHECK(tryLockFlashIo());
+  unlockFlashIo();
+}
+
 struct TestCase {
   const char *id;
   void (*function)();
@@ -1308,6 +1321,7 @@ const TestCase tests[] = {
     {"P60", p60_factory_intent_survives_failed_store_reset},
     {"P61", p61_shot_curve_dual_slot_round_trip_and_delete},
     {"P62", p62_shot_curve_v1_schema_is_rejected},
+    {"P63", p63_flash_io_lock_fails_closed_without_mutex},
 };
 
 }  // namespace

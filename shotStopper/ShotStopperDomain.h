@@ -33,18 +33,6 @@
 
 namespace shotstopper {
 
-inline void copyCString(char *destination, size_t capacity, const char *source) {
-  if (destination == nullptr || capacity == 0) {
-    return;
-  }
-  if (source == nullptr) {
-    destination[0] = '\0';
-    return;
-  }
-  strncpy(destination, source, capacity - 1);
-  destination[capacity - 1] = '\0';
-}
-
 constexpr uint32_t SERIAL_BAUD = 115200;
 constexpr uint32_t CONFIG_SCHEMA_VERSION = 11;
 
@@ -1674,6 +1662,10 @@ struct ControlStatusSnapshot {
   uint32_t bleCompanionRejectedWrites = 0;
   uint8_t bleCompanionLastReject = 0;
 };
+
+// Staging and the published copy live in BSS, not on the 8 KiB loop stack.
+static_assert(sizeof(ControlStatusSnapshot) <= 4096,
+              "ControlStatusSnapshot grew past the loop-stack staging budget");
 
 inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {
   // Relay safety is enforced independently when CN9 is armed. A safety

@@ -55,6 +55,10 @@ inline bool configureTaskWatchdog() {
   return applyTaskWatchdogTimeout(TASK_WATCHDOG_TIMEOUT_MS);
 }
 
+// Set when an OTA window widened the TWDT but could not restore 5 s. The
+// control loop trips CN9 and requests a safe restart so 30 s never sticks.
+inline volatile bool taskWatchdogRestoreFailed = false;
+
 // Widens the task watchdog for the duration of a scope and always restores the
 // production timeout, including on every early return from an OTA transfer.
 class TaskWatchdogOtaWindow {
@@ -62,8 +66,11 @@ class TaskWatchdogOtaWindow {
   TaskWatchdogOtaWindow()
       : widened_(applyTaskWatchdogTimeout(TASK_WATCHDOG_OTA_TIMEOUT_MS)) {}
   ~TaskWatchdogOtaWindow() {
-    if (widened_) {
-      applyTaskWatchdogTimeout(TASK_WATCHDOG_TIMEOUT_MS);
+    if (!widened_) {
+      return;
+    }
+    if (!applyTaskWatchdogTimeout(TASK_WATCHDOG_TIMEOUT_MS)) {
+      taskWatchdogRestoreFailed = true;
     }
   }
   TaskWatchdogOtaWindow(const TaskWatchdogOtaWindow &) = delete;

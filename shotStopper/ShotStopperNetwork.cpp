@@ -59,8 +59,8 @@ struct NetworkWorkBuf {
 // Match the published snapshot capacity — larger fetches were discarded.
 constexpr uint16_t kWifiScanFetchMax = MAX_WIFI_SCAN_RESULTS;
 static wifi_ap_record_t *g_wifiApRecords = nullptr;
-static WifiScanSnapshot g_wifiScan;
-static WifiScanSnapshot g_wifiScanWorking;
+static SHOT_STOPPER_PSRAM_BSS WifiScanSnapshot g_wifiScan;
+static SHOT_STOPPER_PSRAM_BSS WifiScanSnapshot g_wifiScanWorking;
 
 namespace {
 
@@ -82,11 +82,6 @@ void formatWifiMac(const uint8_t mac[6], char *output, size_t outputCapacity) {
   }
   snprintf(output, outputCapacity, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0],
            mac[1], mac[2], mac[3], mac[4], mac[5]);
-}
-
-cJSON *parseJsonInArena(const char *body) {
-  resetJsonArena();
-  return cJSON_Parse(body);
 }
 
 const char *jsonParseFailureMessage(const char *fallback) {
@@ -496,6 +491,8 @@ bool registerHandler(httpd_handle_t server, const char *uri,
 
 // lwIP on ESP32-S3 cannot DMA a PSRAM or flash pointer in one tcp_write.
 // Stream through a small internal bounce buffer; no full-body staging in DRAM.
+// Single httpd server task (HTTPD_DEFAULT_CONFIG). Do not raise workers without
+// giving this bounce its own lock or per-handler stack storage.
 constexpr size_t HTTP_DRAM_BOUNCE_BYTES = 512;
 
 static uint8_t g_httpSendBounce[HTTP_DRAM_BOUNCE_BYTES];
@@ -935,15 +932,13 @@ void ShotStopperNetwork::syncPreferredScale(const char *mac, const char *name) {
   }
   char safeName[PREFERRED_SCALE_NAME_CAPACITY] = {};
   if (name != nullptr && validPreferredScaleName(name)) {
-    strncpy(safeName, name, sizeof(safeName) - 1);
+    copyCString(safeName, sizeof(safeName), name);
   }
   portENTER_CRITICAL(&dataMux_);
-  strncpy(settings_.preferredScaleMac, mac,
-          sizeof(settings_.preferredScaleMac) - 1);
-  settings_.preferredScaleMac[sizeof(settings_.preferredScaleMac) - 1] = '\0';
-  strncpy(settings_.preferredScaleName, safeName,
-          sizeof(settings_.preferredScaleName) - 1);
-  settings_.preferredScaleName[sizeof(settings_.preferredScaleName) - 1] = '\0';
+  copyCString(settings_.preferredScaleMac, sizeof(settings_.preferredScaleMac),
+              mac);
+  copyCString(settings_.preferredScaleName, sizeof(settings_.preferredScaleName),
+              safeName);
   portEXIT_CRITICAL(&dataMux_);
 }
 
@@ -1753,13 +1748,12 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       portENTER_CRITICAL(&dataMux_);
       status_.staState = StaState::CONNECTED;
       status_.networkActive = httpReady;
-      strncpy(status_.staIp, address, sizeof(status_.staIp) - 1);
+      copyCString(status_.staIp, sizeof(status_.staIp), address);
       status_.staLinkMetricsValid = true;
       status_.staRssi = clampWifiRssi(rssi);
       status_.staSignalQualityPct = wifiRssiToSignalQualityPct(rssi);
       status_.windowRemainingMs = 0;
-      memset(status_.staBssid, 0, sizeof(status_.staBssid));
-      strncpy(status_.staBssid, bssidText, sizeof(status_.staBssid) - 1);
+      copyCString(status_.staBssid, sizeof(status_.staBssid), bssidText);
       portEXIT_CRITICAL(&dataMux_);
       log(DebugCategory::NETWORK, DebugCode::STA_CONNECTED);
       lifecycleLogf("WiFi STA connected; IP: %s bssid=%s rssi=%ld http=%s",
@@ -2289,6 +2283,7 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
           next.staConfigured, next.staSsid, next.staOpen);
       strncpy(password, reusePassword ? next.staPassword : command.password,
               sizeof(password) - 1);
+      password[sizeof(password) - 1] = '\0';
       if (!validWifiSsid(command.ssid) ||
           !validWifiPassword(password, command.openNetwork) ||
           !validStaAddressConfig(command.staIpMode, command.staIp,
@@ -2307,8 +2302,8 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
       next.staOpen = command.openNetwork;
       memset(next.staSsid, 0, sizeof(next.staSsid));
       memset(next.staPassword, 0, sizeof(next.staPassword));
-      strncpy(next.staSsid, command.ssid, sizeof(next.staSsid) - 1);
-      strncpy(next.staPassword, password, sizeof(next.staPassword) - 1);
+      copyCString(next.staSsid, sizeof(next.staSsid), command.ssid);
+      copyCString(next.staPassword, sizeof(next.staPassword), password);
       memset(password, 0, sizeof(password));
       next.staIpMode = command.staIpMode;
       memcpy(next.staIp, command.staIp, sizeof(next.staIp));
@@ -2746,12 +2741,12 @@ void ShotStopperNetwork::refreshExtendedStatus(uint32_t now) {
   memset(status_.staMac, 0, sizeof(status_.staMac));
   memset(status_.staBssid, 0, sizeof(status_.staBssid));
   memset(status_.apMac, 0, sizeof(status_.apMac));
-  strncpy(status_.staMac, staMac, sizeof(status_.staMac) - 1);
-  strncpy(status_.staBssid, staBssid, sizeof(status_.staBssid) - 1);
-  strncpy(status_.apMac, apMac, sizeof(status_.apMac) - 1);
+  copyCString(status_.staMac, sizeof(status_.staMac), staMac);
+  copyCString(status_.staBssid, sizeof(status_.staBssid), staBssid);
+  copyCString(status_.apMac, sizeof(status_.apMac), apMac);
   memset(status_.ntpActiveServer, 0, sizeof(status_.ntpActiveServer));
-  strncpy(status_.ntpActiveServer, timeStatus.activeServer,
-          sizeof(status_.ntpActiveServer) - 1);
+  copyCString(status_.ntpActiveServer, sizeof(status_.ntpActiveServer),
+              timeStatus.activeServer);
   portEXIT_CRITICAL(&dataMux_);
 }
 
@@ -4107,7 +4102,7 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
     } else if (formatPersistDebugMessage(event, message, sizeof(message))) {
     } else if (formatLifecycleDebugMessage(event, message, sizeof(message))) {
     } else {
-      strncpy(message, debugCodeName(event.code), sizeof(message) - 1);
+      copyCString(message, sizeof(message), debugCodeName(event.code));
     }
     snprintf(work.jsonItem, NetworkWorkBuf::kJsonItem,
              "%s{\"sequence\":%lu,\"atMs\":%lu,\"wallSec\":%lu,"

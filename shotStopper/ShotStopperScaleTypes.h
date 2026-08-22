@@ -7,6 +7,18 @@
 
 namespace shotstopper {
 
+inline void copyCString(char *destination, size_t capacity, const char *source) {
+  if (destination == nullptr || capacity == 0) {
+    return;
+  }
+  if (source == nullptr) {
+    destination[0] = '\0';
+    return;
+  }
+  strncpy(destination, source, capacity - 1);
+  destination[capacity - 1] = '\0';
+}
+
 constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;
 constexpr size_t PREFERRED_SCALE_NAME_CAPACITY = 32;
 constexpr size_t SCALE_HISTORY_CAPACITY = 8;
@@ -695,11 +707,11 @@ inline bool upsertScaleHistory(ScaleHistoryEntry *entries, uint32_t &seqCounter,
     return false;
   }
   char canonicalMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
-  strncpy(canonicalMac, mac, PREFERRED_SCALE_MAC_CAPACITY - 1);
+  copyCString(canonicalMac, sizeof(canonicalMac), mac);
   canonicalizePreferredScaleMac(canonicalMac, sizeof(canonicalMac));
   char safeName[PREFERRED_SCALE_NAME_CAPACITY] = {};
   if (name != nullptr && validPreferredScaleName(name)) {
-    strncpy(safeName, name, PREFERRED_SCALE_NAME_CAPACITY - 1);
+    copyCString(safeName, sizeof(safeName), name);
   }
   ++seqCounter;
   if (seqCounter == 0) {
@@ -766,8 +778,7 @@ inline bool findScaleHistoryName(const ScaleHistoryEntry *entries,
   nameOut[0] = '\0';
   for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
     if (preferredScaleMacEqual(entries[i].mac, mac)) {
-      strncpy(nameOut, entries[i].name, nameOutCapacity - 1);
-      nameOut[nameOutCapacity - 1] = '\0';
+      copyCString(nameOut, nameOutCapacity, entries[i].name);
       return true;
     }
   }

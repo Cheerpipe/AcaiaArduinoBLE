@@ -56,6 +56,28 @@ if (!taskProfiler.includes('allocExternalOrInternal(sizeof(ActiveWorkspace))') |
   throw new Error(
       'TaskProfiler workspace must use allocExternalOrInternal/heapCapsFree, not calloc/free');
 }
+const psram = fs.readFileSync(path.join(sketchDir, 'ShotStopperPsram.h'), 'utf8');
+if (!psram.includes('#define SHOT_STOPPER_PSRAM_BSS EXT_RAM_BSS_ATTR') ||
+    !firmwareCore.includes('SHOT_STOPPER_PSRAM_BSS ShotLog shotLog') ||
+    !firmwareCore.includes('SHOT_STOPPER_PSRAM_BSS ShotCurveLog shotCurves') ||
+    !firmwareCore.includes(
+        'SHOT_STOPPER_PSRAM_BSS PersistedSettings persistedSettings') ||
+    !firmwareCore.includes(
+        'SHOT_STOPPER_PSRAM_BSS SettingsPersistRequest settingsPersistRequest') ||
+    !firmwareCore.includes(
+        'SHOT_STOPPER_PSRAM_BSS SettingsPersistRequest settingsPersistReceive') ||
+    !firmwareCore.includes(
+        'xQueueReceive(settingsPersistQueue, &settingsPersistReceive') ||
+    !firmwareCore.includes(
+        'constexpr uint32_t SETTINGS_PERSIST_TASK_STACK_SIZE = 4096') ||
+    !network.includes(
+        'static SHOT_STOPPER_PSRAM_BSS WifiScanSnapshot g_wifiScan') ||
+    !flashIoScratch.includes('allocInternal(FLASH_IO_SCRATCH_BYTES)') ||
+    firmwareCore.includes('SHOT_STOPPER_PSRAM_BSS ControlStatusSnapshot') ||
+    firmwareCore.includes('SHOT_STOPPER_PSRAM_BSS DebugRingBuffer')) {
+  throw new Error(
+      'Large history/settings BSS must use SHOT_STOPPER_PSRAM_BSS; flash scratch, debug ring, and status snapshots stay internal');
+}
 if (!flashIoScratch.includes('inline void feedFlashIoWatchdog()') ||
     !flashIoScratch.includes('esp_task_wdt_status(nullptr) == ESP_OK') ||
     !flashIoScratch.includes('(void)esp_task_wdt_reset()')) {

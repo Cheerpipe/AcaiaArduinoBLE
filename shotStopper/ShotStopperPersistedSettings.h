@@ -46,6 +46,15 @@ struct PersistedSettings {
   uint32_t checksum = 0;
 };
 
+struct SettingsPersistRequest {
+  PersistedSettings blob;
+  uint32_t runtimeRevision = 0;
+};
+
+static_assert(sizeof(SettingsPersistRequest) <=
+                  PERSISTED_SETTINGS_NVS_BUDGET + 16,
+              "SettingsPersistRequest must stay a single NVS blob plus revision");
+
 struct PersistedSettingsHeader {
   uint32_t magic = 0;
   uint32_t schemaVersion = 0;

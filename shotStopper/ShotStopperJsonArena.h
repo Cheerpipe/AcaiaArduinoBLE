@@ -11,6 +11,8 @@ namespace shotstopper {
 constexpr size_t JSON_ARENA_CAPACITY = 16384;
 
 inline void initJsonArenaHooks();
+inline bool jsonArenaHooksInstalled();
+inline cJSON *parseJsonInArena(const char *body);
 inline void resetJsonArena();
 inline size_t jsonArenaBytesUsed();
 inline uint32_t jsonArenaAllocFailures();
@@ -70,6 +72,26 @@ inline void initJsonArenaHooks() {
   cJSON_InitHooks(&hooks);
   detail::g_jsonArenaHooksInstalled = true;
 }
+
+inline bool jsonArenaHooksInstalled() {
+  return detail::g_jsonArenaHooksInstalled;
+}
+
+// Fail closed: never parse through the process-global cJSON heap if the
+// bump arena could not be installed. HTTP JSON is httpd-task only.
+inline cJSON *parseJsonInArena(const char *body) {
+  resetJsonArena();
+  if (body == nullptr || !detail::g_jsonArenaHooksInstalled) {
+    return nullptr;
+  }
+  return cJSON_Parse(body);
+}
+
+#ifdef SHOT_STOPPER_HOST_TEST
+inline void hostSetJsonArenaHooksInstalled(bool installed) {
+  detail::g_jsonArenaHooksInstalled = installed;
+}
+#endif
 
 inline void resetJsonArena() {
   detail::g_jsonArenaUsed = 0;

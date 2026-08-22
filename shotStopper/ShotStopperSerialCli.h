@@ -371,7 +371,7 @@ inline bool serialCliParseLine(const char *line, SerialCliRequest &request) {
       return true;
     }
     request.verb = SerialCliVerb::SET_AP_PASSWORD;
-    strncpy(request.arg1, args[0], sizeof(request.arg1) - 1);
+    copyCString(request.arg1, sizeof(request.arg1), args[0]);
     return true;
   }
 
@@ -393,9 +393,9 @@ inline bool serialCliParseLine(const char *line, SerialCliRequest &request) {
       return true;
     }
     request.verb = SerialCliVerb::SET_WIFI;
-    strncpy(request.arg1, args[0], sizeof(request.arg1) - 1);
+    copyCString(request.arg1, sizeof(request.arg1), args[0]);
     if (!openNetwork) {
-      strncpy(request.arg2, args[1], sizeof(request.arg2) - 1);
+      copyCString(request.arg2, sizeof(request.arg2), args[1]);
     }
     request.openNetwork = openNetwork;
     return true;

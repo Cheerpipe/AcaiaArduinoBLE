@@ -13,11 +13,17 @@
 #include <esp_attr.h>
 #endif
 
-// EXT_RAM_BSS_ATTR works when CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY is
-// enabled (official ./scripts/build-idf). The legacy arduino-cli core ships
-// that option off, so large buffers must still use allocExternalOrInternal()
-// for dual-path safety. This macro is documentation only.
+// Place large BSS in PSRAM on the official IDF build
+// (CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y). Arduino-cli cores that ship
+// that Kconfig off compile EXT_RAM_BSS_ATTR as empty, so the same objects stay
+// in DRAM. Never mark flash DMA sources, OTA chunks, httpd bounce, or stacks of
+// tasks that write flash: cache-off cannot reach PSRAM.
+#if defined(SHOT_STOPPER_HOST_TEST) ||                                         \
+    defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
 #define SHOT_STOPPER_PSRAM_BSS
+#else
+#define SHOT_STOPPER_PSRAM_BSS EXT_RAM_BSS_ATTR
+#endif
 
 namespace shotstopper {
 

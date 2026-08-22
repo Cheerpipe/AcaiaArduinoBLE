@@ -83,6 +83,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   hostTaskWatchdogConfigured = false;
   hostTaskWatchdogSubscriptions = 0;
   hostTaskWatchdogFeeds = 0;
+  taskWatchdogRestoreFailed = false;
   hostCpuFrequencySetSucceeds = true;
   EEPROM.beginSucceeds = true;
   BLE.beginSucceeds = true;
@@ -126,6 +127,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   serialLogLevel = LogLevel::NONE;
   ringRetainLogLevel = LogLevel::INFO;
   publishedControlStatus = ControlStatusSnapshot{};
+  stagingControlStatus = ControlStatusSnapshot{};
   bleCompanionRuntimeSnapshot = BleCompanionRuntimeSnapshot{};
   bleCompanionRuntimeSnapshot.enabled = true;
   bleCompanionStatusSnapshot = BleCompanionStatusSnapshot{};
@@ -1559,6 +1561,23 @@ void r18_watchdog_fault_opens_cn9_and_requests_safe_restart() {
   CHECK(relay.fault == RelaySafetyFault::TASK_WATCHDOG_FAILURE);
   CHECK(safeRestartRequested);
   CHECK(hostPinLevel[RELAY_GPIO] == RELAY_OPEN_LEVEL);
+}
+
+void r18b_ota_watchdog_restore_failure_requests_safe_restart() {
+  resetHarness(false, false);
+  CHECK(setCn9Closed(true, 5000));
+  hostTaskWatchdogOperationsSucceed = true;
+  {
+    TaskWatchdogOtaWindow window;
+    CHECK(window.widened());
+    hostTaskWatchdogOperationsSucceed = false;
+  }
+  CHECK(taskWatchdogRestoreFailed);
+  runLoopAfter(0);
+  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
+  CHECK(!relay.closed);
+  CHECK(relay.fault == RelaySafetyFault::TASK_WATCHDOG_FAILURE);
+  CHECK(!taskWatchdogRestoreFailed);
 }
 
 void r19_reset_during_close_reopens_without_recovery_lockout() {
@@ -6355,8 +6374,17 @@ void sc09_serial_debug_toggles_without_ready() {
   Serial.tx.clear();
   addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED);
   serialTrace(LogLevel::WARNING, "Scale name scan: no advertisement");
-  CHECK(serialTxContains("configuration accepted"));
-  CHECK(serialTxContains("Scale name scan: no advertisement"));
+  CHECK(!serialTxContains("configuration accepted"));
+  CHECK(!serialTxContains("Scale name scan: no advertisement"));
+  DebugEvent events[DEBUG_EVENT_CAPACITY] = {};
+  const size_t count = copyDebugEvents(0, events, DEBUG_EVENT_CAPACITY);
+  bool sawAccepted = false;
+  for (size_t i = 0; i < count; ++i) {
+    if (events[i].code == DebugCode::CONFIG_ACCEPTED) {
+      sawAccepted = true;
+    }
+  }
+  CHECK(sawAccepted);
   feedSerial("SERIAL_DEBUG_OFF\n");
   CHECK(serialTxContains("OK serial debug off"));
   CHECK(!runtimeConfig.serialDebugOutput);
@@ -6446,7 +6474,16 @@ void sc13_debug_full_and_off_during_cycle() {
   CHECK(runtimePersistPending);
   Serial.tx.clear();
   addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_CONNECTING);
-  CHECK(serialTxContains("scale connecting"));
+  CHECK(!serialTxContains("scale connecting"));
+  DebugEvent events[DEBUG_EVENT_CAPACITY] = {};
+  const size_t count = copyDebugEvents(0, events, DEBUG_EVENT_CAPACITY);
+  bool sawConnecting = false;
+  for (size_t i = 0; i < count; ++i) {
+    if (events[i].code == DebugCode::SCALE_CONNECTING) {
+      sawConnecting = true;
+    }
+  }
+  CHECK(sawConnecting);
   feedSerial("DEBUG_OFF\n");
   CHECK(serialTxContains("OK debug off"));
   CHECK(!runtimeConfig.serialDebugOutput);
@@ -8221,6 +8258,7 @@ const TestCase testCases[] = {
     {"R16", r16_timeout_during_arm_transaction_can_never_close_cn9},
     {"R17", r17_gptimer_arm_failure_prevents_relay_energization},
     {"R18", r18_watchdog_fault_opens_cn9_and_requests_safe_restart},
+    {"R18b", r18b_ota_watchdog_restore_failure_requests_safe_restart},
     {"R19", r19_reset_during_close_reopens_without_recovery_lockout},
     {"R19b", r19b_panic_boot_is_ready_for_webui_and_next_cn9_cycle},
     {"R20", r20_three_unsafe_resets_are_latched_as_a_boot_loop},

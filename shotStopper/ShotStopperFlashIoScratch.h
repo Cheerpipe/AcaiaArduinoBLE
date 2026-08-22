@@ -78,16 +78,27 @@ inline uint32_t flashIoLockTimeouts() { return flashIoLockTimeoutCount(); }
 
 #if !defined(SHOT_STOPPER_HOST_TEST) &&                                        \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
-inline SemaphoreHandle_t flashIoMutexHandle() {
-  static SemaphoreHandle_t handle = xSemaphoreCreateRecursiveMutex();
+inline SemaphoreHandle_t &flashIoMutexSlot() {
+  static SemaphoreHandle_t handle = nullptr;
   return handle;
 }
 
-inline bool tryLockFlashIo(uint32_t timeoutMs = FLASH_IO_LOCK_TIMEOUT_MS) {
-  SemaphoreHandle_t handle = flashIoMutexHandle();
-  if (handle == nullptr) {
-    return ensureFlashIoScratch();
+inline bool ensureFlashIoMutex() {
+  SemaphoreHandle_t &handle = flashIoMutexSlot();
+  if (handle != nullptr) {
+    return true;
   }
+  handle = xSemaphoreCreateRecursiveMutex();
+  return handle != nullptr;
+}
+
+inline SemaphoreHandle_t flashIoMutexHandle() { return flashIoMutexSlot(); }
+
+inline bool tryLockFlashIo(uint32_t timeoutMs = FLASH_IO_LOCK_TIMEOUT_MS) {
+  if (!ensureFlashIoMutex()) {
+    return false;
+  }
+  SemaphoreHandle_t handle = flashIoMutexHandle();
   if (xSemaphoreTakeRecursive(handle, pdMS_TO_TICKS(timeoutMs)) == pdTRUE) {
     if (!ensureFlashIoScratch()) {
       xSemaphoreGiveRecursive(handle);
@@ -106,7 +117,14 @@ inline void unlockFlashIo() {
   }
 }
 #else
+inline bool g_hostFlashIoMutexAvailable = true;
+
+inline bool ensureFlashIoMutex() { return g_hostFlashIoMutexAvailable; }
+
 inline bool tryLockFlashIo(uint32_t = FLASH_IO_LOCK_TIMEOUT_MS) {
+  if (!g_hostFlashIoMutexAvailable) {
+    return false;
+  }
   return ensureFlashIoScratch();
 }
 inline void unlockFlashIo() {}

@@ -178,7 +178,7 @@ class ShotLog {
     const char *target = slotKey(targetSlot);
     // Write the inactive slot first so a failed put never erases the last
     // good history. Only flip the active pointer after a size-matched write.
-    // Source is internal SRAM scratch: store_ may later land in PSRAM BSS.
+    // Source is internal SRAM scratch: the live store_ sits in PSRAM BSS.
     const size_t written = preferences.putBytes(target, nvsSource, bytes);
     yieldFlashIo();
     feedFlashIoWatchdog();

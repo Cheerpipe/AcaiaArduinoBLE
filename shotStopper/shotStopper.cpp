@@ -92,7 +92,9 @@ constexpr size_t BLE_COMPANION_RESULT_QUEUE_LENGTH = 8;
 // Measured high-water headroom with the full Companion profile is over 6 KiB.
 // Keep spare above that while returning scarce internal RAM to LwIP/httpd.
 constexpr uint32_t SCALE_WORKER_TASK_STACK_SIZE = 6656;
-constexpr uint32_t SETTINGS_PERSIST_TASK_STACK_SIZE = 6144;
+// Persist blob is PSRAM BSS, not a 3 KiB stack local. Keep headroom for
+// Preferences / TWDT on the flash-writing task (stack stays internal).
+constexpr uint32_t SETTINGS_PERSIST_TASK_STACK_SIZE = 4096;
 constexpr uint32_t SCALE_STOP_RETRY_INTERVAL_MS = 250;
 constexpr uint32_t SCALE_STOP_RETRY_WINDOW_MS = 5000;
 constexpr uint8_t SCALE_STOP_MAX_ATTEMPTS = 3;
@@ -362,8 +364,10 @@ DebugRingBuffer debugLog;
 LogLevel serialLogLevel = LogLevel::NONE;
 LogLevel ringRetainLogLevel = LogLevel::NONE;
 uint32_t lastReportedLogOverwritten = 0;
-ShotLog shotLog;
-ShotCurveLog shotCurves;
+// Working copies: NVS/partition I/O copies through internal flash scratch
+// first. Safe in PSRAM BSS because putBytes/erase/write never DMA these.
+SHOT_STOPPER_PSRAM_BSS ShotLog shotLog;
+SHOT_STOPPER_PSRAM_BSS ShotCurveLog shotCurves;
 ShotCurveSampler shotCurveSampler;
 ShotCurveRecord lastShotCurve = emptyShotCurveRecord();
 LastShotStore lastShotStore;
@@ -450,7 +454,9 @@ bool paddleTurnedOn = false;
 bool paddleTurnedOff = false;
 uint32_t rawPaddleChangedAtMs = 0;
 bool virtualPaddleOn = false;
+// Keep status snapshots in internal DRAM: loop copies ~4 KiB every 50 ms.
 ControlStatusSnapshot publishedControlStatus;
+ControlStatusSnapshot stagingControlStatus;
 MaintenanceLease maintenanceLease;
 WebCommand maintenanceCancellationCommand;
 bool maintenanceCancellationPending = false;
@@ -475,10 +481,8 @@ uint32_t runtimePersistRetryAtMs = 0;
 int32_t runtimePersistReasonBits = 0;
 uint32_t nextInternalRequestId = 0x80000000UL;
 #ifndef SHOT_STOPPER_HOST_TEST
-struct SettingsPersistRequest {
-  PersistedSettings blob;
-  uint32_t runtimeRevision = 0;
-};
+SHOT_STOPPER_PSRAM_BSS SettingsPersistRequest settingsPersistRequest;
+SHOT_STOPPER_PSRAM_BSS SettingsPersistRequest settingsPersistReceive;
 QueueHandle_t settingsPersistQueue = nullptr;
 TaskHandle_t settingsPersistTaskHandle = nullptr;
 portMUX_TYPE settingsPersistMux = portMUX_INITIALIZER_UNLOCKED;
@@ -519,7 +523,7 @@ void queueRuntimePersist(int32_t reasonBits);
 void commitLiveRuntimeConfig(const RuntimeConfig &composed, int32_t reasonBits);
 
 #ifndef SHOT_STOPPER_HOST_TEST
-PersistedSettings persistedSettings;
+SHOT_STOPPER_PSRAM_BSS PersistedSettings persistedSettings;
 ShotStopperNetwork networkManager;
 #endif
 
@@ -645,11 +649,17 @@ void serialTrace(LogLevel level, const char *message) {
   if (message == nullptr || !logLevelAtMost(level, serialLogLevel)) {
     return;
   }
+  if (session.active || cn9Closed) {
+    return;
+  }
   Serial.println(message);
 }
 
 void serialTracef(LogLevel level, const char *fmt, ...) {
   if (fmt == nullptr || !logLevelAtMost(level, serialLogLevel)) {
+    return;
+  }
+  if (session.active || cn9Closed) {
     return;
   }
   char line[192] = {};
@@ -708,7 +718,9 @@ void logEmit(LogLevel level, DebugCategory category, DebugCode code,
   }
   portEXIT_CRITICAL(&debugLogMux);
 
-  if (toSerial) {
+  // USB CDC TX can block if the host is not draining. During a pour keep the
+  // control path off Serial; the RAM ring still captures the event.
+  if (toSerial && !session.active && !cn9Closed) {
     writeSerialLogLine(event);
   }
 }
@@ -878,7 +890,8 @@ void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
             ? 0U
             : session.config.minBrewTimeMs - durationMs;
   }
-  strncpy(last.scaleProtocol, scaleProtocolName, sizeof(last.scaleProtocol) - 1);
+  copyCString(last.scaleProtocol, sizeof(last.scaleProtocol),
+              scaleProtocolName);
   last.scaleProtocol[sizeof(last.scaleProtocol) - 1] = '\0';
   persistLastShotSnapshot(last);
   lastShotCurve = shotCurveSampler.snapshot();
@@ -2009,9 +2022,8 @@ void updateWorkerLinkState() {
   scaleReconnects = scale.reconnectCount();
   scaleLastDisconnectReason =
       static_cast<uint8_t>(scale.lastDisconnectReason());
-  strncpy(scaleProtocolName, scale.connectedProtocolName(),
-          sizeof(scaleProtocolName) - 1);
-  scaleProtocolName[sizeof(scaleProtocolName) - 1] = '\0';
+  copyCString(scaleProtocolName, sizeof(scaleProtocolName),
+              scale.connectedProtocolName());
   scaleTimerValid = timerValid;
   scaleTimerMs = timerMs;
   scaleTimerAgeMs = timerAgeMs;
@@ -2764,11 +2776,11 @@ void notePreferredScale(const char *mac, const char *name) {
     return;
   }
   char canonicalMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
-  strncpy(canonicalMac, mac, PREFERRED_SCALE_MAC_CAPACITY - 1);
+  copyCString(canonicalMac, sizeof(canonicalMac), mac);
   canonicalizePreferredScaleMac(canonicalMac, sizeof(canonicalMac));
   char safeName[PREFERRED_SCALE_NAME_CAPACITY] = {};
   if (name != nullptr && validPreferredScaleName(name)) {
-    strncpy(safeName, name, PREFERRED_SCALE_NAME_CAPACITY - 1);
+    copyCString(safeName, sizeof(safeName), name);
   }
   bool changed = false;
   portENTER_CRITICAL(&scalePreferredMacMux);
@@ -2780,8 +2792,7 @@ void notePreferredScale(const char *mac, const char *name) {
   const bool nameChanged =
       strncmp(scalePreferredName, safeName, PREFERRED_SCALE_NAME_CAPACITY) != 0;
   if (nameChanged) {
-    strncpy(scalePreferredName, safeName, PREFERRED_SCALE_NAME_CAPACITY - 1);
-    scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY - 1] = '\0';
+    copyCString(scalePreferredName, sizeof(scalePreferredName), safeName);
     scalePreferredMacDirty = true;
     changed = true;
   }
@@ -2842,7 +2853,7 @@ void selectPreferredScale(const char *mac, const char *name) {
     return;
   }
   char canonicalMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
-  strncpy(canonicalMac, mac, PREFERRED_SCALE_MAC_CAPACITY - 1);
+  copyCString(canonicalMac, sizeof(canonicalMac), mac);
   canonicalizePreferredScaleMac(canonicalMac, sizeof(canonicalMac));
   char currentMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
   copyPreferredScaleMac(currentMac, sizeof(currentMac));
@@ -2851,7 +2862,7 @@ void selectPreferredScale(const char *mac, const char *name) {
   }
   char resolvedName[PREFERRED_SCALE_NAME_CAPACITY] = {};
   if (name != nullptr && validPreferredScaleName(name) && name[0] != '\0') {
-    strncpy(resolvedName, name, PREFERRED_SCALE_NAME_CAPACITY - 1);
+    copyCString(resolvedName, sizeof(resolvedName), name);
   } else {
     portENTER_CRITICAL(&scalePreferredMacMux);
     findScaleHistoryName(scaleHistory, canonicalMac, resolvedName,
@@ -2861,8 +2872,7 @@ void selectPreferredScale(const char *mac, const char *name) {
   noteScaleHistory(canonicalMac, resolvedName);
   portENTER_CRITICAL(&scalePreferredMacMux);
   memcpy(scalePreferredMac, canonicalMac, sizeof(scalePreferredMac));
-  strncpy(scalePreferredName, resolvedName, PREFERRED_SCALE_NAME_CAPACITY - 1);
-  scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY - 1] = '\0';
+  copyCString(scalePreferredName, sizeof(scalePreferredName), resolvedName);
   scalePreferredMacDirty = true;
   scaleDiscoveryPausedUntilMs = 0;
   ++scalePreferredDirectedResetGeneration;
@@ -4232,10 +4242,9 @@ void settingsPersistTask(void *parameter) {
   if (!subscribeCurrentTaskToWatchdog()) {
     reportTaskWatchdogFault();
   }
-  SettingsPersistRequest request;
   for (;;) {
     // Must not block forever: this task is subscribed to the TWDT.
-    if (xQueueReceive(settingsPersistQueue, &request,
+    if (xQueueReceive(settingsPersistQueue, &settingsPersistReceive,
                       pdMS_TO_TICKS(SETTINGS_PERSIST_IDLE_WAIT_MS)) !=
         pdTRUE) {
       (void)feedCurrentTaskWatchdog();
@@ -4243,14 +4252,15 @@ void settingsPersistTask(void *parameter) {
     }
     yieldSettingsNvs();
     (void)feedCurrentTaskWatchdog();
-    const bool ok = savePersistedSettings(request.blob);
+    const bool ok = savePersistedSettings(settingsPersistReceive.blob);
     (void)feedCurrentTaskWatchdog();
     portENTER_CRITICAL(&settingsPersistMux);
     settingsPersistResultReady = true;
     settingsPersistResultOk = ok;
-    settingsPersistResultRuntimeRevision = request.runtimeRevision;
+    settingsPersistResultRuntimeRevision =
+        settingsPersistReceive.runtimeRevision;
     settingsPersistResultStorageRevision =
-        ok ? request.blob.storageRevision : 0;
+        ok ? settingsPersistReceive.blob.storageRevision : 0;
     portEXIT_CRITICAL(&settingsPersistMux);
   }
 }
@@ -4321,7 +4331,7 @@ bool dispatchSettingsPersist() {
     }
     return false;
   }
-  SettingsPersistRequest request;
+  SettingsPersistRequest &request = settingsPersistRequest;
   request.blob = networkManager.settingsCopy();
   request.blob.runtime = runtimeConfig;
   request.blob.presets = presetBank;
@@ -5012,11 +5022,11 @@ void processBleCompanionRequests() {
       WebCommand command;
       command.type = WebCommandType::SAVE_NETWORK;
       command.requestId = request.sequence;
-      strncpy(command.ssid, request.ssid, sizeof(command.ssid) - 1);
+      copyCString(command.ssid, sizeof(command.ssid), request.ssid);
       command.openNetwork = request.openNetwork;
       if (!request.openNetwork) {
-        strncpy(command.password, request.password,
-                sizeof(command.password) - 1);
+        copyCString(command.password, sizeof(command.password),
+                    request.password);
       }
       const bool queued = enqueueWebCommand(command);
       memset(command.password, 0, sizeof(command.password));
@@ -5049,7 +5059,8 @@ void publishControlStatus() {
   const uint32_t now = millis();
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
-  ControlStatusSnapshot next;
+  ControlStatusSnapshot &next = stagingControlStatus;
+  next = ControlStatusSnapshot{};
   next.state = stopperState;
   next.activeCycle = session.active;
   next.relayClosed = relay.closed;
@@ -5143,9 +5154,8 @@ void publishControlStatus() {
         next.shotCurveEndedCg, next.shotCurveWeightCg,
         sizeof(next.shotCurveWeightCg) / sizeof(next.shotCurveWeightCg[0]));
   }
-  strncpy(next.scaleProtocol, scaleLink.protocolName,
-          sizeof(next.scaleProtocol) - 1);
-  next.scaleProtocol[sizeof(next.scaleProtocol) - 1] = '\0';
+  copyCString(next.scaleProtocol, sizeof(next.scaleProtocol),
+              scaleLink.protocolName);
   copyPreferredScaleMac(next.preferredScaleMac, sizeof(next.preferredScaleMac));
   copyPreferredScaleName(next.preferredScaleName,
                          sizeof(next.preferredScaleName));
@@ -5330,23 +5340,23 @@ void serialCliFillNetworkDump(SerialCliNetworkDump &dump) {
   dump.staConnectAgeMs = snap.staConnectAgeMs;
   dump.staReconnectAgeMs = snap.staReconnectAgeMs;
   dump.lastCommandState = snap.lastCommandState;
-  strncpy(dump.apIp, snap.apIp, sizeof(dump.apIp) - 1);
-  strncpy(dump.staIp, snap.staIp, sizeof(dump.staIp) - 1);
-  strncpy(dump.staSsid, snap.staSsid, sizeof(dump.staSsid) - 1);
-  strncpy(dump.configuredIp, snap.configuredIp, sizeof(dump.configuredIp) - 1);
-  strncpy(dump.configuredNetmask, snap.configuredNetmask,
-          sizeof(dump.configuredNetmask) - 1);
-  strncpy(dump.configuredGateway, snap.configuredGateway,
-          sizeof(dump.configuredGateway) - 1);
-  strncpy(dump.configuredDns1, snap.configuredDns1,
-          sizeof(dump.configuredDns1) - 1);
-  strncpy(dump.configuredDns2, snap.configuredDns2,
-          sizeof(dump.configuredDns2) - 1);
-  strncpy(dump.staMac, snap.staMac, sizeof(dump.staMac) - 1);
-  strncpy(dump.staBssid, snap.staBssid, sizeof(dump.staBssid) - 1);
-  strncpy(dump.apMac, snap.apMac, sizeof(dump.apMac) - 1);
-  strncpy(dump.ntpActiveServer, snap.ntpActiveServer,
-          sizeof(dump.ntpActiveServer) - 1);
+  copyCString(dump.apIp, sizeof(dump.apIp), snap.apIp);
+  copyCString(dump.staIp, sizeof(dump.staIp), snap.staIp);
+  copyCString(dump.staSsid, sizeof(dump.staSsid), snap.staSsid);
+  copyCString(dump.configuredIp, sizeof(dump.configuredIp), snap.configuredIp);
+  copyCString(dump.configuredNetmask, sizeof(dump.configuredNetmask),
+              snap.configuredNetmask);
+  copyCString(dump.configuredGateway, sizeof(dump.configuredGateway),
+              snap.configuredGateway);
+  copyCString(dump.configuredDns1, sizeof(dump.configuredDns1),
+              snap.configuredDns1);
+  copyCString(dump.configuredDns2, sizeof(dump.configuredDns2),
+              snap.configuredDns2);
+  copyCString(dump.staMac, sizeof(dump.staMac), snap.staMac);
+  copyCString(dump.staBssid, sizeof(dump.staBssid), snap.staBssid);
+  copyCString(dump.apMac, sizeof(dump.apMac), snap.apMac);
+  copyCString(dump.ntpActiveServer, sizeof(dump.ntpActiveServer),
+              snap.ntpActiveServer);
 #else
   (void)dump;
 #endif
@@ -5433,10 +5443,10 @@ void serialCliPrintLiveNtpStatus() {
   dump.lastSyncAgeMs = time.lastSyncAgeMs;
   dump.nextRetryInMs = time.nextRetryInMs;
   dump.consecutiveFailures = time.consecutiveFailures;
-  strncpy(dump.activeServer, time.activeServer, sizeof(dump.activeServer) - 1);
+  copyCString(dump.activeServer, sizeof(dump.activeServer), time.activeServer);
   dump.ntpServerPreset = runtimeConfig.ntpServerPreset;
-  strncpy(dump.ntpServerCustom, runtimeConfig.ntpServerCustom,
-          sizeof(dump.ntpServerCustom) - 1);
+  copyCString(dump.ntpServerCustom, sizeof(dump.ntpServerCustom),
+              runtimeConfig.ntpServerCustom);
   dump.timezoneOffsetMinutes = runtimeConfig.timezoneOffsetMinutes;
 #ifndef SHOT_STOPPER_HOST_TEST
   dump.staUp = networkManager.snapshot().staState == StaState::CONNECTED;
@@ -5554,7 +5564,7 @@ void dispatchSerialCliRequest(SerialCliRequest &request) {
     case SerialCliVerb::SET_AP_PASSWORD: {
       WebCommand command;
       command.type = WebCommandType::CHANGE_AP_PASSWORD;
-      strncpy(command.password, request.arg1, sizeof(command.password) - 1);
+      copyCString(command.password, sizeof(command.password), request.arg1);
       serialCliQueueIfSafe(command, request.verb);
       memset(request.arg1, 0, sizeof(request.arg1));
       return;
@@ -5562,8 +5572,8 @@ void dispatchSerialCliRequest(SerialCliRequest &request) {
     case SerialCliVerb::SET_WIFI: {
       WebCommand command;
       command.type = WebCommandType::SAVE_NETWORK;
-      strncpy(command.ssid, request.arg1, sizeof(command.ssid) - 1);
-      strncpy(command.password, request.arg2, sizeof(command.password) - 1);
+      copyCString(command.ssid, sizeof(command.ssid), request.arg1);
+      copyCString(command.password, sizeof(command.password), request.arg2);
       command.openNetwork = request.openNetwork;
       serialCliQueueIfSafe(command, request.verb);
       memset(request.arg1, 0, sizeof(request.arg1));
@@ -5885,6 +5895,10 @@ void setup() {
 
   persistenceReady = EEPROM.begin(EEPROM_SIZE);
 #ifndef SHOT_STOPPER_HOST_TEST
+  if (!ensureFlashIoMutex()) {
+    addDebugEvent(DebugCategory::CONFIG, DebugCode::INITIALIZATION_FAILED,
+                  BOOT_SUBSYSTEM_PERSISTENCE);
+  }
   bool settingsLoaded = false;
   if (persistenceReady && loadPersistedSettings(persistedSettings)) {
     settingsLoaded = true;
@@ -5934,16 +5948,14 @@ void setup() {
     ensureShotPresetBank(presetBank, runtimeConfig.retareWindowMs,
                          runtimeConfig.autoRetare);
     if (validPreferredScaleMac(persistedSettings.preferredScaleMac)) {
-      strncpy(scalePreferredMac, persistedSettings.preferredScaleMac,
-              PREFERRED_SCALE_MAC_CAPACITY - 1);
-      scalePreferredMac[PREFERRED_SCALE_MAC_CAPACITY - 1] = '\0';
+      copyCString(scalePreferredMac, sizeof(scalePreferredMac),
+                  persistedSettings.preferredScaleMac);
       canonicalizePreferredScaleMac(scalePreferredMac,
                                     sizeof(scalePreferredMac));
     }
     if (validPreferredScaleName(persistedSettings.preferredScaleName)) {
-      strncpy(scalePreferredName, persistedSettings.preferredScaleName,
-              PREFERRED_SCALE_NAME_CAPACITY - 1);
-      scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY - 1] = '\0';
+      copyCString(scalePreferredName, sizeof(scalePreferredName),
+                  persistedSettings.preferredScaleName);
     }
     memcpy(scaleHistory, persistedSettings.scaleHistory, sizeof(scaleHistory));
     scaleHistorySeq = 0;
@@ -6189,6 +6201,12 @@ void loop() {
   // heartbeat, packet, timer and connection operation. Restart before heap
   // walks: a failed Wi-Fi stop can leave TLSF unwalkable.
   serviceRelaySafety();
+  if (taskWatchdogRestoreFailed) {
+    taskWatchdogRestoreFailed = false;
+    reportTaskWatchdogFault();
+    tripRelaySafety(RelaySafetyFault::TASK_WATCHDOG_FAILURE);
+    safeRestartRequested = true;
+  }
   if (safeRestartRequested) {
     machineRequestStop();
     serviceSafetyHeartbeat(false);

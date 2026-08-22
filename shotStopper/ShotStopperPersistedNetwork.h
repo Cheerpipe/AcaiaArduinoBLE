@@ -43,7 +43,7 @@ inline bool setAccessPointPassword(PersistedSettings &settings,
     return false;
   }
   memset(settings.apPassword, 0, sizeof(settings.apPassword));
-  strncpy(settings.apPassword, newPassword, sizeof(settings.apPassword) - 1);
+  copyCString(settings.apPassword, sizeof(settings.apPassword), newPassword);
   return true;
 }
 
@@ -52,8 +52,8 @@ inline bool initializeDefaultAccessPointPassword(PersistedSettings &settings) {
     return false;
   }
   memset(settings.apPassword, 0, sizeof(settings.apPassword));
-  strncpy(settings.apPassword, DEFAULT_AP_PASSWORD,
-          sizeof(settings.apPassword) - 1);
+  copyCString(settings.apPassword, sizeof(settings.apPassword),
+              DEFAULT_AP_PASSWORD);
   return true;
 }
 
@@ -98,9 +98,9 @@ inline void copyActiveStaToLkg(PersistedSettings &settings) {
   settings.lkgOpen = settings.staOpen;
   memset(settings.lkgSsid, 0, sizeof(settings.lkgSsid));
   memset(settings.lkgPassword, 0, sizeof(settings.lkgPassword));
-  strncpy(settings.lkgSsid, settings.staSsid, sizeof(settings.lkgSsid) - 1);
-  strncpy(settings.lkgPassword, settings.staPassword,
-          sizeof(settings.lkgPassword) - 1);
+  copyCString(settings.lkgSsid, sizeof(settings.lkgSsid), settings.staSsid);
+  copyCString(settings.lkgPassword, sizeof(settings.lkgPassword),
+              settings.staPassword);
   settings.lkgIpMode = settings.staIpMode;
   memcpy(settings.lkgIp, settings.staIp, sizeof(settings.lkgIp));
   memcpy(settings.lkgNetmask, settings.staNetmask, sizeof(settings.lkgNetmask));
@@ -121,9 +121,9 @@ inline bool restoreLkgToActive(PersistedSettings &settings) {
   settings.staOpen = settings.lkgOpen;
   memset(settings.staSsid, 0, sizeof(settings.staSsid));
   memset(settings.staPassword, 0, sizeof(settings.staPassword));
-  strncpy(settings.staSsid, settings.lkgSsid, sizeof(settings.staSsid) - 1);
-  strncpy(settings.staPassword, settings.lkgPassword,
-          sizeof(settings.staPassword) - 1);
+  copyCString(settings.staSsid, sizeof(settings.staSsid), settings.lkgSsid);
+  copyCString(settings.staPassword, sizeof(settings.staPassword),
+              settings.lkgPassword);
   settings.staIpMode = settings.lkgIpMode;
   memcpy(settings.staIp, settings.lkgIp, sizeof(settings.staIp));
   memcpy(settings.staNetmask, settings.lkgNetmask, sizeof(settings.staNetmask));
