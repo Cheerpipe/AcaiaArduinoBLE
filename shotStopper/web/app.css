@@ -30,12 +30,17 @@ body{font-family:system-ui;max-width:760px;margin:0 auto;padding:0 1rem 1.25rem;
 .pageNav a{min-height:2.25rem;padding:.3rem .5rem;font-size:.88rem;border-radius:.4rem}
 .pageNav a.active{background:transparent;box-shadow:inset 0 -2px 0 var(--ac)}
 .navOpen{overflow:visible}
+.navMeta{display:none}
 }
-.pageFooter{margin:1.5rem 0 .5rem;color:var(--mu);font-size:.85rem;text-align:center}
+.pageFooter{margin:.85rem 0 .4rem;color:var(--mu);font-size:.85rem;text-align:center}
 .pageFooter a{color:var(--ac);text-decoration:none}
 .pageFooter a:hover{text-decoration:underline}
-#view-home:not(.hidden){padding-bottom:8.5rem}
-#view-home:not(.hidden)~.pageFooter{padding-bottom:8.5rem}
+.navMeta{margin-top:auto;padding-top:1.25rem;color:var(--mu);font-size:.85rem;line-height:1.45}
+.navMeta small{display:block}
+.navMeta a,.navMeta a:link,.navMeta a:visited{display:inline;min-height:0;padding:0;font-weight:600;color:var(--ac);text-decoration:none}
+.navMeta a:hover{text-decoration:underline}
+#view-home:not(.hidden){padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
+#view-home:not(.hidden)~.pageFooter{display:none}
 
 fieldset{margin:.85rem 0;padding:.85rem;border:1px solid var(--ln);border-radius:var(--r);background:var(--sf)}
 legend{font-weight:700;padding:0 .3rem;color:var(--ac)}
@@ -153,6 +158,7 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 .btnGlyph:disabled{opacity:.4;cursor:not-allowed}
 
 #actionsPanel{position:fixed;left:0;right:0;bottom:0;z-index:8;max-width:760px;margin:0 auto;border-radius:var(--r) var(--r) 0 0;border:1px solid var(--ln);border-bottom:0;padding:.7rem 1rem calc(.7rem + env(safe-area-inset-bottom));background:var(--sf);box-shadow:0 -6px 18px rgba(42,33,24,.12)}
+@media(min-width:700px){#actionsPanel{left:1rem;right:1rem;bottom:max(.55rem,env(safe-area-inset-bottom));border-radius:var(--r);border-bottom:1px solid var(--ln);padding:.7rem 1rem}}
 #view-home.hidden #actionsPanel,#view-settings #actionsPanel,#view-history #actionsPanel,#view-admin #actionsPanel,#view-diagnostic #actionsPanel{position:static;box-shadow:none}
 #actionsPanel legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 #actionsPanel .switchRow{margin:.15rem 0 .55rem}
@@ -248,16 +254,11 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 
 .view{display:block}.view.hidden{display:none}
 .logSep{border:0;border-top:1px solid var(--ln);margin:1rem 0}
-#configLockBanner{position:sticky;top:var(--hdr);z-index:13;margin:0 0 .5rem;padding:.55rem .65rem;border-radius:.4rem;border-left:4px solid;display:flex;align-items:center;justify-content:space-between;gap:.7rem;font-weight:600}
-#configLockBanner.hidden{display:none}
-#configLockBanner.lockOrange{background:#fff4e5;border-color:#c76b00;color:#8a4b00}
-#configLockBanner.lockYellow{background:#fffbe6;border-color:#b08a00;color:#735b00}
-.btnGlyph.btnUnlock{background:#d97706;color:#fff;border-left-color:#9a4b00;box-shadow:inset 0 0 0 1px #9a4b00}
 
 @media(prefers-color-scheme:dark){
 .presetCard.active{background:#3a2a10}
-.btnGlyph.btnWarn,.btnGlyph.btnTakeControl,#configLockBanner.lockOrange{background:#3a2a10}
+.btnGlyph.btnWarn,.btnGlyph.btnTakeControl{background:#3a2a10}
 #shotTable .btnGlyph,#shotPanel .btnGlyph{color:#f07167}
-#message,#configLockBanner,.configSaveBar,#shotHistoryPanel .btnBar{background:var(--bg)}
+#message,.configSaveBar,#shotHistoryPanel .btnBar{background:var(--bg)}
 #actionsPanel{box-shadow:0 -6px 18px rgba(0,0,0,.4)}
 }

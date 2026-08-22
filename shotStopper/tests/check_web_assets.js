@@ -1156,6 +1156,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes('id="hApIp"') ||
       !ui.includes('id="hApClients"') ||
       !ui.includes('id="hUptime"') ||
+      !ui.includes('id="hFirmware"') ||
+      !ui.includes('id="hBoot"') ||
       !ui.includes('id="hResetReason"') ||
       !ui.includes('id="hTemp"') ||
       !ui.includes('id="hTPeak"') ||
@@ -1236,6 +1238,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('id="dStream"') ||
       !diagHtml.includes('id="dControl"') ||
       !ui.includes("t('dMachine',s.machineState)") ||
+      !ui.includes("t('hFirmware',s.firmwareVersion)") ||
+      !ui.includes("t('hBoot',typeof s.bootId==='number'&&s.bootId?'#'+s.bootId:'')") ||
       !ui.includes("t('dBrew',s.state)") ||
       !ui.includes("t('dCup',cp.state)") ||
       !ui.includes("t('dPaddle',s.physicalPaddleOn?'ON':'OFF')") ||
@@ -1251,6 +1255,10 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('<strong>Temp peak</strong>') ||
       diagHtml.includes('<details') ||
       diagHtml.includes('<summary>Diagnostics</summary>') ||
+      !diagHtml.includes('id="hFirmware"') ||
+      !diagHtml.includes('id="hBoot"') ||
+      !diagHtml.includes('<strong>Firmware</strong>') ||
+      !diagHtml.includes('<strong>Boot</strong>') ||
       !diagHtml.includes('id="currentTime"') ||
       !diagHtml.includes('id="ntpStatus"') ||
       !diagHtml.includes('id="ntpLastSync"') ||
@@ -1272,6 +1280,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       diagHtml.indexOf('id="hHeapLargest"') > diagHtml.indexOf('id="hPsramT"') ||
       diagHtml.indexOf('id="hPsramT"') > diagHtml.indexOf('id="hPsramF"') ||
       diagHtml.indexOf('id="hPsramF"') > diagHtml.indexOf('id="hPsramL"') ||
+      diagHtml.indexOf('id="hFirmware"') > diagHtml.indexOf('id="hBoot"') ||
+      diagHtml.indexOf('id="hBoot"') > diagHtml.indexOf('id="currentTime"') ||
       diagHtml.indexOf('id="currentTime"') > diagHtml.indexOf('id="ntpStatus"') ||
       diagHtml.indexOf('id="ntpStatus"') > diagHtml.indexOf('id="ntpLastSync"') ||
       adminHtml.includes('id="diagnosticsPanel"') ||
@@ -1336,16 +1346,25 @@ if (!ui.includes('id="shotTable"') ||
 if (!ui.includes('id="firmwareFooter"') ||
     !ui.includes('firmwareVersion') ||
     !ui.includes('updateFirmwareFooter()') ||
+    !ui.includes("const nav=$('navFirmware')") ||
+    !shellHtml.includes('id="navFirmware"') ||
+    !shellHtml.includes('class="navMeta"') ||
+    !css.includes('#view-home:not(.hidden)~.pageFooter{display:none}') ||
+    css.includes('#view-home:not(.hidden)~.pageFooter{padding-bottom:8.5rem}') ||
+    !css.includes('#actionsPanel{position:fixed;left:0;right:0') ||
+    !css.includes('@media(min-width:700px){#actionsPanel{left:1rem;right:1rem') ||
     !network.includes('\\"firmwareVersion\\"') ||
     !network.includes('\\"bootId\\":%lu') ||
     !network.includes('FW_VERSION')) {
-  throw new Error('Firmware version must be exposed in status API and web footer');
+  throw new Error('Firmware version must be exposed in status API, nav menu, and Diagnostic');
 }
 if (!shellHtml.includes('https://github.com/Cheerpipe/AcaiaArduinoBLE') ||
     !shellHtml.includes('https://github.com/Cheerpipe') ||
     !shellHtml.includes('Hecho por') ||
-    !shellHtml.includes('>Cheerpipe</a>')) {
-  throw new Error('Web UI footer must credit the GitHub repo and Cheerpipe');
+    !shellHtml.includes('>Cheerpipe</a>') ||
+    shellHtml.indexOf('class="navMeta"') > shellHtml.indexOf('id="app"') ||
+    !css.includes('.navMeta{margin-top:auto')) {
+  throw new Error('Web UI footer must credit the GitHub repo and Cheerpipe in the nav menu');
 }
 if (!shellHtml.includes('id="message"') ||
     !shellHtml.includes('id="messageText"') ||
@@ -1704,10 +1723,15 @@ if (!ui.includes('clearTimeout(webUiInactivityTimer)') ||
   throw new Error('WebUI inactivity must cancel poll timers and block further API calls');
 }
 if (!ui.includes('setMutable(!!s.configMutable||!!s.webUiOverrideActive)') ||
-    !ui.includes('configLockReason') || !ui.includes('webUiOverrideActive') ||
-    !ui.includes('/api/v1/ui/unlock') || !ui.includes('UNSAFE_WEBUI_OVERRIDE') ||
-    !ui.includes('Unsafe WebUI override active')) {
-  throw new Error('Web UI must expose the confirmed configuration-lock override flow');
+    !ui.includes('webUiOverrideActive') ||
+    !network.includes('/api/v1/ui/unlock') ||
+    !network.includes('UNSAFE_WEBUI_OVERRIDE')) {
+  throw new Error('Web UI must honor configMutable/webUiOverrideActive; firmware keeps the unlock API');
+}
+if (ui.includes('configLockBanner') || css.includes('configLockBanner') ||
+    ui.includes('ensureConfigLockBanner') || ui.includes('renderConfigLockBanner') ||
+    ui.includes('Controls locked:') || ui.includes('Unsafe WebUI override active')) {
+  throw new Error('Web UI must not render the configuration-lock warning banner');
 }
 if (network.includes('return "safety_recovery"') ||
     network.includes('return "safety_lockout"') ||
