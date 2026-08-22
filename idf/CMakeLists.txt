@@ -28,3 +28,9 @@ if(DEFINED ENV{SHOT_STOPPER_EXTRA_FLAGS} AND NOT "$ENV{SHOT_STOPPER_EXTRA_FLAGS}
 endif()
 
 project(shotstopper)
+
+# Arduino-ESP32 compiles Esp.cpp as C++ against IDF SPI flash HAL headers
+# that use partial designated initializers (gpspi_flash_ll.h /
+# spimem_flash_ll.h). That is Espressif noise, not firmware.
+idf_component_get_property(_ss_arduino_lib espressif__arduino-esp32 COMPONENT_LIB)
+target_compile_options(${_ss_arduino_lib} PRIVATE -Wno-missing-field-initializers)
