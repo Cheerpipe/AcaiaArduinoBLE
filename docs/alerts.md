@@ -25,7 +25,8 @@ They never wait for Bluetooth or for the scale timer to start or stop.
 Without buzzer support, Output channel and the triple checkboxes are hidden.
 The default channel is then **Scale only**.
 
-Shot completion is the CN9-open cue (one extra LONG beep; not configurable).
+Shot completion is the CN9-open cue (one extra LONG beep; not configurable),
+including rinse end.
 
 ## Parameters
 

@@ -98,9 +98,9 @@ constexpr float MAX_MIN_RECOVERY_WEIGHT_G = 200.0f;
 constexpr uint32_t DEFAULT_MAX_BREW_TIME_MS = 44000;
 constexpr uint32_t MIN_MAX_BREW_TIME_MS = 5000;
 constexpr uint32_t MAX_MAX_BREW_TIME_MS = 55000;
-// Extra delay after measured scale start lag before stopping the scale timer at
-// shot end (lets the scale display catch up to CN9 time).
-constexpr uint32_t DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 200;
+// Extra delay after the scale timer catches up to CN9 time (whole seconds)
+// before sending STOP_TIMER. 0 stops in that same instant.
+constexpr uint32_t DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 0;
 constexpr uint32_t MIN_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 0;
 constexpr uint32_t MAX_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 1000;
 constexpr uint32_t DEFAULT_DRIP_DELAY_MS = 3000;

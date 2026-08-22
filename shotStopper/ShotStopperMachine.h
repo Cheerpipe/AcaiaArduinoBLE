@@ -223,9 +223,14 @@ void applyBrewRfPreference(bool preferBluetooth) {
   (void)preferBluetooth;
 #endif
 #if !defined(SHOT_STOPPER_HOST_TEST)
-  if (bleCompanion != nullptr) {
-    bleCompanion->setAdvertisingPaused(preferBluetooth);
+  // Pause on the CN9-close path (stopAdvertise is fast). Resume is owned by
+  // the BLE worker via syncCompanionAdvertisingForScaleLink so opening CN9
+  // never blocks the control task in BLE.advertise() before the stop beep.
+  if (preferBluetooth && bleCompanion != nullptr) {
+    bleCompanion->setAdvertisingPaused(true);
   }
+#else
+  (void)preferBluetooth;
 #endif
 }
 
@@ -343,6 +348,7 @@ bool setCn9Closed(bool closed,
     addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_CLOSED,
                   static_cast<int32_t>(operationalLimitMs));
     if (session.automaticEnabled) {
+      pendingBrewRfRestore = false;
       applyBrewRfPreference(true);
     }
     return true;
@@ -371,7 +377,8 @@ bool setCn9Closed(bool closed,
   feedbackTransitionStampPending = false;
   portEXIT_CRITICAL(&relayMux);
   stopRelayDeadlineTimers();
-  applyBrewRfPreference(false);
+  // Coex restore runs after the CN9-open beep (servicePendingBrewRfRestore).
+  pendingBrewRfRestore = true;
   if (wasClosed) {
     addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_OPENED);
   }

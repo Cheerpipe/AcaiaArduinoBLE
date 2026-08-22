@@ -208,8 +208,6 @@ struct CycleSession {
   uint32_t ownedConnectionGeneration = 0;
   uint32_t startedAtMs = 0;
   uint32_t cn9ClosedAtMs = 0;
-  bool scaleStartLagCaptured = false;
-  uint32_t scaleStartLagMs = 0;
   uint32_t rinseStartedAtMs = 0;
   uint32_t postTareBaselineDeadlineMs = 0;
   uint32_t stopTimerRetryDeadlineMs = 0;
@@ -530,9 +528,13 @@ bool operationalLimitTripped = false;
 uint32_t cn9ClosedAtMs = 0;
 struct PendingScaleTimerStop {
   bool pending = false;
-  uint32_t dueAtMs = 0;
+  uint32_t targetMs = 0;
+  uint32_t extraDelayMs = 0;
+  uint32_t catchupDeadlineAtMs = 0;
+  uint32_t extraDueAtMs = 0;
 };
 PendingScaleTimerStop pendingScaleTimerStop;
+bool pendingBrewRfRestore = false;
 uint32_t operationalLimitAtArmMs = HARD_MAX_CN9_CLOSED_MS;
 RelaySafetyState relaySafetyState = RelaySafetyState::BOOT_SAFE;
 RelaySafetyFault relaySafetyFault = RelaySafetyFault::NONE;
@@ -1213,60 +1215,74 @@ void flushPendingScaleTimerStopNow() {
   if (!pendingScaleTimerStop.pending) {
     return;
   }
-  pendingScaleTimerStop.pending = false;
+  pendingScaleTimerStop = PendingScaleTimerStop{};
   requestRemoteTimerStop();
 }
 
-uint32_t scaleTimerStopDelayMsForCycle() {
-  uint32_t delayMs = session.config.scaleTimerStopExtraDelayMs;
-  if (session.scaleStartLagCaptured) {
-    delayMs += session.scaleStartLagMs;
-  }
-  if (delayMs > MAX_SCALE_TIMER_STOP_CATCHUP_MS) {
-    delayMs = MAX_SCALE_TIMER_STOP_CATCHUP_MS;
-  }
-  return delayMs;
+uint32_t scaleTimerDisplayTargetMs(uint32_t internalMs) {
+  return (internalMs / 1000U) * 1000U;
 }
 
-void scheduleScaleTimerStopAfterCycle() {
-  if (!session.timerStartCommandQueued || session.stopTimerRequested) {
-    return;
-  }
-  const uint32_t delayMs = scaleTimerStopDelayMsForCycle();
-  if (delayMs == 0U) {
-    requestRemoteTimerStop();
+void completePendingScaleTimerStop() {
+  pendingScaleTimerStop = PendingScaleTimerStop{};
+  requestRemoteTimerStop();
+}
+
+void armScaleTimerStopExtraDelay(uint32_t extraDelayMs) {
+  if (extraDelayMs == 0U) {
+    completePendingScaleTimerStop();
     return;
   }
   pendingScaleTimerStop.pending = true;
-  pendingScaleTimerStop.dueAtMs = millis() + delayMs;
+  pendingScaleTimerStop.extraDueAtMs = millis() + extraDelayMs;
+}
+
+void scheduleScaleTimerStopAfterCycle(uint32_t internalElapsedMs) {
+  if (!session.timerStartCommandQueued || session.stopTimerRequested) {
+    return;
+  }
+  const uint32_t extraDelayMs = session.config.scaleTimerStopExtraDelayMs;
+  if (!session.remoteTimerStarted) {
+    requestRemoteTimerStop();
+    return;
+  }
+  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+  if (!link.timerValid) {
+    requestRemoteTimerStop();
+    return;
+  }
+  const uint32_t targetMs = scaleTimerDisplayTargetMs(internalElapsedMs);
+  pendingScaleTimerStop = PendingScaleTimerStop{};
+  pendingScaleTimerStop.targetMs = targetMs;
+  pendingScaleTimerStop.extraDelayMs = extraDelayMs;
+  pendingScaleTimerStop.catchupDeadlineAtMs =
+      millis() + MAX_SCALE_TIMER_STOP_CATCHUP_MS;
+  if (link.timerMs >= targetMs) {
+    armScaleTimerStopExtraDelay(extraDelayMs);
+    return;
+  }
+  pendingScaleTimerStop.pending = true;
 }
 
 void servicePendingScaleTimerStop() {
   if (!pendingScaleTimerStop.pending) {
     return;
   }
-  if (static_cast<int32_t>(millis() - pendingScaleTimerStop.dueAtMs) < 0) {
+  const uint32_t nowMs = millis();
+  if (pendingScaleTimerStop.extraDueAtMs != 0U) {
+    if (static_cast<int32_t>(nowMs - pendingScaleTimerStop.extraDueAtMs) >= 0) {
+      completePendingScaleTimerStop();
+    }
     return;
   }
-  pendingScaleTimerStop.pending = false;
-  requestRemoteTimerStop();
-}
-
-void maybeCaptureScaleStartLag() {
-  if (!session.active || session.scaleStartLagCaptured ||
-      !session.remoteTimerStarted) {
-    return;
-  }
+  const bool timedOut =
+      static_cast<int32_t>(nowMs -
+                           pendingScaleTimerStop.catchupDeadlineAtMs) >= 0;
   const ScaleLinkSnapshot link = getScaleLinkSnapshot();
-  if (!link.timerValid || link.timerMs == 0U) {
-    return;
+  if (timedOut || !link.timerValid ||
+      link.timerMs >= pendingScaleTimerStop.targetMs) {
+    armScaleTimerStopExtraDelay(pendingScaleTimerStop.extraDelayMs);
   }
-  uint32_t elapsedMsValue = 0U;
-  if (!machineRunningElapsed(elapsedMsValue)) {
-    return;
-  }
-  session.scaleStartLagMs = elapsedMsValue;
-  session.scaleStartLagCaptured = true;
 }
 
 void transitionTo(StopperState nextState) {
@@ -1301,13 +1317,21 @@ void serviceScaleConnectedLed() {
 
 #include "ShotStopperMachine.h"
 
+void servicePendingBrewRfRestore() {
+  if (!pendingBrewRfRestore) {
+    return;
+  }
+  pendingBrewRfRestore = false;
+  applyBrewRfPreference(false);
+}
+
 // ---------------------------------------------------------------------------
 // Scale timer session
 // ---------------------------------------------------------------------------
 
 void requestRemoteTimerStop();
 void flushPendingScaleTimerStopNow();
-void scheduleScaleTimerStopAfterCycle();
+void scheduleScaleTimerStopAfterCycle(uint32_t internalElapsedMs);
 void servicePendingScaleTimerStop();
 
 bool requestRemoteTimerStart() {
@@ -2381,8 +2405,7 @@ void emitImmediateCommandAlertIfBuzzer(AlertEvent event) {
 }
 
 // Shot start/stop follow the relay, not the scale timer or Output channel.
-// Start may queue behind a no-scale/no-cup warning; stop preempts so the
-// CN9-open cue is not stuck behind echo or a pulse train remnant.
+// Both preempt so the CN9 edge is not stuck behind a warning, echo, or pulse.
 bool emitCn9CycleAlert(AlertEvent event, bool preempt) {
   if (!soundAlertsEnabled()) {
     return false;
@@ -2494,6 +2517,7 @@ bool shotCompletionGetsLongBeep(EndReason reason) {
     case EndReason::SLOW_EXTRACTION_MIN_WEIGHT:
     case EndReason::AUTO_TO_MANUAL_GUARD:
     case EndReason::CUP_REMOVED:
+    case EndReason::RINSE_COMPLETE:
       return true;
     default:
       return false;
@@ -3636,8 +3660,6 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   resetSessionForNewCycle(source);
   session.startedAtMs = millis();
   session.cn9ClosedAtMs = 0;
-  session.scaleStartLagCaptured = false;
-  session.scaleStartLagMs = 0;
   session.firstDropMs = 0;
   session.retareFlowFirstDetectedAtMs = 0;
   session.scaleBaselineReady = false;
@@ -3695,7 +3717,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
                             session.config.canTareStartTimer
                         ? AlertEvent::TARE_START
                         : AlertEvent::START_TIMER,
-                    false);
+                    true);
   if (session.startedWithScale) {
     if (!requestRemoteTimerStart()) {
       session.automaticEnabled = false;
@@ -3718,11 +3740,12 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   const RelaySafetySnapshot relayBeforeOpen = getRelaySafetySnapshot();
   const uint32_t durationMs = elapsedMs(relayBeforeOpen.closedAtMs);
 
-  // Physical flow always stops before the non-blocking BLE command is queued.
-  machineRequestStop();
   stopPulseTrains();
   cancelScaleBrewBeep(session.id);
   cancelScaleCompletionBeep();
+  // GPIO first, then the CN9-open cue. BLE advertising resume is not on this
+  // path (BLE worker + servicePendingBrewRfRestore after the buzzer starts).
+  machineRequestStop();
   session.endReason = reason;
   if (shotCompletionGetsLongBeep(reason)) {
     // Completion LONG replaces the stop-timer SINGLE so ends are one cue.
@@ -3734,7 +3757,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
       runtimeConfig.buzzerAutoToManualGuardEndBeep) {
     emitAlert(AlertEvent::ATM_END);
   }
-  scheduleScaleTimerStopAfterCycle();
+  scheduleScaleTimerStopAfterCycle(durationMs);
 
   schedulePendingShotFinalize(reason, durationMs);
 
@@ -3776,8 +3799,6 @@ bool beginRinseCycle(ControlSource source) {
   resetSessionForNewCycle(source);
   session.startedAtMs = millis();
   session.cn9ClosedAtMs = 0;
-  session.scaleStartLagCaptured = false;
-  session.scaleStartLagMs = 0;
   session.firstDropMs = 0;
   session.retareFlowFirstDetectedAtMs = 0;
   session.scaleBaselineReady = false;
@@ -3794,7 +3815,7 @@ bool beginRinseCycle(ControlSource source) {
     return false;
   }
   session.cn9ClosedAtMs = getRelaySafetySnapshot().closedAtMs;
-  emitCn9CycleAlert(AlertEvent::START_TIMER, false);
+  emitCn9CycleAlert(AlertEvent::START_TIMER, true);
   // Only an Armed no-scale rinse clears the latch; keep Armed when the scale
   // is usable (e.g. web rinse with a connected scale).
   if (noScaleShotGuardArmed) {
@@ -6258,8 +6279,8 @@ void loop() {
   servicePaddleReturnReminder();
   serviceExtendedPulseAlert();
   localBuzzer.service(millis());
+  servicePendingBrewRfRestore();
   serviceScaleCompletionBeep();
-  maybeCaptureScaleStartLag();
   servicePendingScaleTimerStop();
   serviceRemoteTimerStopRetry();
   pendingShotFinalizeTask();

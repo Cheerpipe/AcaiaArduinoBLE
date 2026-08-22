@@ -96,6 +96,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   resetCupPresence();
   pendingFinalize = PendingShotFinalize{};
   pendingScaleTimerStop = PendingScaleTimerStop{};
+  pendingBrewRfRestore = false;
   runtimeConfig = RuntimeConfig{};
   // Host scenarios cover scale-path alerts unless a test sets the channel.
   runtimeConfig.alertOutputChannel =
@@ -106,7 +107,8 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   runtimeConfig.slowExtractionGuardEnabled = false;
   runtimeConfig.avoidBbwShotWithoutScale = false;
   runtimeConfig.avoidAccidentalTouchEnabled = false;
-  // Host scenarios assert immediate scale timer stop; delayed stop is covered by ST02.
+  // Host scenarios assert immediate scale timer stop when the display is
+  // already at/past CN9 whole seconds; catch-up is covered by ST02–ST06.
   runtimeConfig.scaleTimerStopExtraDelayMs = 0;
   lastCycle = LastCycleSummary{};
   persistedLastShot = PersistedLastShot{};
@@ -532,6 +534,13 @@ size_t commandCount(ScaleCommandType type) {
     }
   }
   return count;
+}
+
+void publishScaleTimer(uint32_t timerMs) {
+  scale.timerValid = true;
+  scale.timerMs = timerMs;
+  scaleTimerValid = true;
+  scaleTimerMs = timerMs;
 }
 
 bool executeNextScaleCommand() {
@@ -3613,6 +3622,7 @@ void w79b_stop_beeps_at_cn9_while_scale_timer_stop_still_pending() {
   CHECK(executeNextScaleCommand());
   drainLocalBuzzer();
   const uint32_t before = localBuzzer.acceptedRequests;
+  publishScaleTimer(5000);
   finalizeCycle(EndReason::PADDLE, StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(localBuzzer.acceptedRequests == before + 1);
@@ -3638,6 +3648,7 @@ void w79c_rinse_without_scale_beeps_at_cn9_open_and_close() {
   finalizeCycle(EndReason::RINSE_COMPLETE, StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(localBuzzer.acceptedRequests == afterStart + 1);
+  checkLocalCompletionTone();
 }
 
 void w79d_scale_only_start_and_stop_still_use_local_cn9_beeps() {
@@ -5384,30 +5395,94 @@ void st01_cycle_elapsed_follows_cn9_immediately() {
   CHECK(cycleShotElapsedMs() >= 250U);
 }
 
-void st02_scale_timer_stop_waits_for_lag_plus_extra() {
+void st02_scale_timer_stop_waits_until_display_catches_internal() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.scaleTimerStopExtraDelayMs = 0;
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  CHECK(session.remoteTimerStarted);
+  runLoopAfter(4000);
+  publishScaleTimer(3000);
+
+  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  CHECK(pendingScaleTimerStop.pending);
+  CHECK(!session.stopTimerRequested);
+  CHECK(pendingScaleTimerStop.targetMs == 4000U);
+
+  runLoopAfter(0);
+  CHECK(pendingScaleTimerStop.pending);
+  CHECK(!session.stopTimerRequested);
+
+  publishScaleTimer(4000);
+  runLoopAfter(0);
+  CHECK(!pendingScaleTimerStop.pending);
+  CHECK(session.stopTimerRequested);
+}
+
+void st03_scale_timer_stop_when_display_already_at_internal() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.scaleTimerStopExtraDelayMs = 0;
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  runLoopAfter(4000);
+  publishScaleTimer(4200);
+  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  CHECK(!pendingScaleTimerStop.pending);
+  CHECK(session.stopTimerRequested);
+}
+
+void st04_scale_timer_stop_extra_delay_applies_after_catchup() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.scaleTimerStopExtraDelayMs = 100;
   startCycle();
   CHECK(executeNextScaleCommand());
-  CHECK(session.remoteTimerStarted);
-  runLoopAfter(200);
-  scaleTimerValid = true;
-  scaleTimerMs = 500;
-  runLoopAfter(0);
-  CHECK(session.scaleStartLagCaptured);
-  CHECK(session.scaleStartLagMs >= 200U);
-
+  runLoopAfter(4000);
+  publishScaleTimer(4200);
   finalizeCycle(EndReason::PADDLE, StopperState::READY);
   CHECK(pendingScaleTimerStop.pending);
   CHECK(!session.stopTimerRequested);
 
-  const uint32_t dueAt = pendingScaleTimerStop.dueAtMs;
-  runLoopAfter(dueAt - hostMillis - 1);
+  runLoopAfter(99);
   CHECK(pendingScaleTimerStop.pending);
   CHECK(!session.stopTimerRequested);
 
   runLoopAfter(1);
+  CHECK(!pendingScaleTimerStop.pending);
+  CHECK(session.stopTimerRequested);
+}
+
+void st05_scale_timer_stop_catchup_times_out() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.scaleTimerStopExtraDelayMs = 0;
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  runLoopAfter(4000);
+  publishScaleTimer(3000);
+  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  CHECK(pendingScaleTimerStop.pending);
+  CHECK(!session.stopTimerRequested);
+
+  runLoopAfter(MAX_SCALE_TIMER_STOP_CATCHUP_MS - 1);
+  CHECK(pendingScaleTimerStop.pending);
+  CHECK(!session.stopTimerRequested);
+
+  runLoopAfter(1);
+  CHECK(!pendingScaleTimerStop.pending);
+  CHECK(session.stopTimerRequested);
+}
+
+void st06_scale_timer_stop_without_valid_timer_is_immediate() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.scaleTimerStopExtraDelayMs = 0;
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  runLoopAfter(4000);
+  finalizeCycle(EndReason::PADDLE, StopperState::READY);
   CHECK(!pendingScaleTimerStop.pending);
   CHECK(session.stopTimerRequested);
 }
@@ -8694,7 +8769,11 @@ const TestCase testCases[] = {
     {"R44", r44_first_shot_after_reconnect_enters_brew},
     {"R45", r45_slew_rejection_emits_specific_debug_code},
     {"ST01", st01_cycle_elapsed_follows_cn9_immediately},
-    {"ST02", st02_scale_timer_stop_waits_for_lag_plus_extra},
+    {"ST02", st02_scale_timer_stop_waits_until_display_catches_internal},
+    {"ST03", st03_scale_timer_stop_when_display_already_at_internal},
+    {"ST04", st04_scale_timer_stop_extra_delay_applies_after_catchup},
+    {"ST05", st05_scale_timer_stop_catchup_times_out},
+    {"ST06", st06_scale_timer_stop_without_valid_timer_is_immediate},
     {"RT01", rt01_late_cup_triggers_single_retare},
     {"RT02", rt02_sub_minimum_stable_cup_is_ignored},
     {"RT03", rt03_spike_without_stable_cup_does_not_retare},

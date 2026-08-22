@@ -431,7 +431,7 @@ struct RuntimeConfig {
   // Internal polarity: true disables weight stop. UI/API brewByWeight is the inverse.
   bool timerOnly = false;
   bool canTareStartTimer = true;
-  // Added to measured scale start lag before stop at shot end.
+  // Optional pad after the scale timer catches up to CN9 whole seconds.
   uint32_t scaleTimerStopExtraDelayMs = DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS;
   // Optional beep when the first coffee drop is detected.
   bool firstDropBeep = true;

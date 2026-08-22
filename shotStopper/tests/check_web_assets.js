@@ -709,6 +709,8 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !ui.includes('id="autoToManualGuardLimitMode"') ||
     !ui.includes('id="autoToManualGuardBaselineS"') ||
     !ui.includes('id="scaleTimerStopExtraDelayMs"') ||
+    !html.includes('Added after the scale timer catches up to CN9 whole seconds') ||
+    html.includes('Added after measured scale start lag') ||
     !ui.includes('id="dripDelayS" type="number" min="0" max="10" step="0.1"') ||
     !ui.includes('id="autoToManualGuardManualLimitS"') ||
     !ui.includes('id="autoToManualGuardTrendS"') ||
@@ -2610,11 +2612,11 @@ const immediateCommandAlertCalls =
 const cn9CycleAlertCalls = firmware.split('emitCn9CycleAlert(').length - 1;
 if (immediateCommandAlertCalls < 3 || cn9CycleAlertCalls < 4 ||
     !firmware.includes(
-        'emitCn9CycleAlert(session.startedWithScale && session.config.autoTare &&\n                            session.config.canTareStartTimer\n                        ? AlertEvent::TARE_START\n                        : AlertEvent::START_TIMER,\n                    false);') ||
+        'emitCn9CycleAlert(session.startedWithScale && session.config.autoTare &&\n                            session.config.canTareStartTimer\n                        ? AlertEvent::TARE_START\n                        : AlertEvent::START_TIMER,\n                    true);') ||
     !firmware.includes(
         'if (shotCompletionGetsLongBeep(reason)) {\n    // Completion LONG replaces the stop-timer SINGLE so ends are one cue.\n    requestCompletionAlert();\n  } else {\n    emitCn9CycleAlert(AlertEvent::STOP_TIMER, true);') ||
     !firmware.includes('emitImmediateCommandAlertIfBuzzer(AlertEvent::TARE);\n  markRetareEnded') ||
-    !firmware.includes('emitCn9CycleAlert(AlertEvent::START_TIMER, false);')) {
+    !firmware.includes('emitCn9CycleAlert(AlertEvent::START_TIMER, true);')) {
   throw new Error('Command alerts must fire at CN9/paddle/retare, not after BLE');
 }
 if (firmware.includes('SCALE_COMPLETION_BEEP_DELAY_MS') ||
@@ -2622,6 +2624,12 @@ if (firmware.includes('SCALE_COMPLETION_BEEP_DELAY_MS') ||
     firmware.includes('scaleCompletionBeepDueAtMs') ||
     !firmware.includes('void requestCompletionAlert()')) {
   throw new Error('Completion beep must fire at CN9 open with no emission delay');
+}
+if (firmware.includes('maybeCaptureScaleStartLag') ||
+    firmware.includes('scaleStartLagCaptured') ||
+    firmware.includes('scaleTimerStopDelayMsForCycle') ||
+    firmware.includes('setAdvertisingPaused(preferBluetooth)')) {
+  throw new Error('Scale timer stop must catch up live; CN9 open must not BLE.advertise()');
 }
 
 (async () => {

@@ -400,7 +400,7 @@ shot (that is what suspends weight control).
 | --- | --- |
 | `START_TIMER_AND_TARE` | Shot start: tare (if enabled) and start the scale timer. |
 | `TARE_ONLY` | Late-cup retare. |
-| `STOP_TIMER` | After CN9 opens; may be delayed by measured start lag so the scale display catches up. Queued to the **front**. |
+| `STOP_TIMER` | After CN9 opens, once the scale timer has reached the internal whole-second time (or the 2 s catch-up cap). Optional extra delay is a pad after that. Queued to the **front**. |
 
 ### Scale events (`ScaleEventType`) — inbound
 

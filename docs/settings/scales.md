@@ -25,6 +25,7 @@ offset learning, and eligible A→M samples.
 | **Always use this scale** | ON (`full` MAC cache) | ON / OFF | ON: name-scan for compatible scales; when a preferred MAC is set, only that MAC is connected; other compatible advertisements are stored in history (up to 8) without connecting. OFF: connect the first compatible scale; do not lock preferred. |
 | **Preferred scale** | none until you pick one | Dropdown of BLE-seen scales | Which MAC to lock. **Clear preferred** pauses discovery 30 s and keeps history. |
 | **Drip delay (s)** | 3.0 s | 0–10 s | Wait after a shot ends before capturing the final post-drip weight. `0` finalizes on the next control loop with no intentional window. |
+| **Timer stop extra delay (ms)** | 0 ms | 0–1000 ms | Pad after the scale timer catches up to CN9 whole seconds, before `STOP_TIMER`. `0` stops in that same instant. Does not delay the local CN9 beep. |
 | **Bookoo combined command** | ON | ON / OFF | Combined tare + start-timer. Requires automatic tare. Also listed under [Tare](tare.md). |
 | **Mute scale in Buzzer only** | ON | ON / OFF | Bookoo/generic: send silence (volume 0) on connect/reconnect, when Output channel is saved as Buzzer only, and when this option is turned on. Applies only in **Buzzer only**. |
 | **Scale volume** | 4 | 1–5 or Disabled | Bookoo/generic: set on connect/reconnect. Applies only in **Scale only** and **Scale priority**. |
