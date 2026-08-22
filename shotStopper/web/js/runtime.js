@@ -43,7 +43,9 @@ function releaseDeviceSlot(){const next=deviceWaiters.shift();if(next)next();els
 // The controller serves one request at a time, so polling during a firmware
 // transfer would only time out and bury the upload's own progress message.
 function statusPollDue(){return!commandBusy&&!homeFlushBusy&&!otaBusy&&Date.now()-lastStatusAt>=900}
-function statusIntervalMs(){return document.hidden?12e3:statusLiveShot?2500:4e3}
+const SOFTAP_HOST='192.168.4.1';
+function statusOnSta(){return location.hostname!==SOFTAP_HOST}
+function statusIntervalMs(){return document.hidden?12e3:statusLiveShot&&activeView==='home'&&statusOnSta()?1e3:statusLiveShot?2500:4e3}
 function armStatusTimer(){clearInterval(statusTimer);if(!webUiPollingActive()||(activeView!=='home'&&activeView!=='settings'&&activeView!=='admin'&&activeView!=='diagnostic'))return;statusTimer=setInterval(()=>{if(webUiPollingActive()&&statusPollDue())refreshStatus()},statusIntervalMs())}
 function pad2(n){return String(n).padStart(2,'0')}
 function formatTzLabel(min){const sign=min>=0?'+':'-';const abs=Math.abs(min);return 'UTC'+sign+pad2(Math.floor(abs/60))+':'+pad2(abs%60)}

@@ -1894,6 +1894,18 @@ if (!ui.includes('function withPollGate(') ||
     ui.includes('setInterval(()=>refreshStatus(),2500)')) {
   throw new Error('Web UI must adapt/pause status polls, serialize commands, time out hung fetches, and use DEVICE_MAX_INFLIGHT without POST heartbeat');
 }
+if (!runtimeJs.includes("const SOFTAP_HOST='192.168.4.1'") ||
+    !runtimeJs.includes('function statusOnSta(){return location.hostname!==SOFTAP_HOST}') ||
+    !runtimeJs.includes("function statusIntervalMs(){return document.hidden?12e3:statusLiveShot&&activeView==='home'&&statusOnSta()?1e3:statusLiveShot?2500:4e3}") ||
+    !runtimeJs.includes('statusLiveShot') ||
+    !runtimeJs.includes("activeView==='home'") ||
+    !runtimeJs.includes('12e3') ||
+    !runtimeJs.includes('1e3') ||
+    !runtimeJs.includes('2500') ||
+    !runtimeJs.includes('4e3')) {
+  throw new Error(
+      'Home live-shot STA poll must be 1s; AP and other views stay 2.5s; idle 4s; hidden 12s');
+}
 if (!ui.includes('async function loadStatus(){') ||
     !ui.includes('async function loadShots(){') ||
     !ui.includes('async function loadLog(){') ||
