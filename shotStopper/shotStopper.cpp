@@ -84,7 +84,6 @@ constexpr uint32_t SCALE_DISCOVERY_TICK_MS = 3000;
 constexpr uint32_t SCALE_SCAN_HCI_RESTART_MS = 60000;
 constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;
 constexpr uint32_t SCALE_ATT_TIMEOUT_MS = 1000;
-constexpr uint32_t SCALE_COMPLETION_BEEP_DELAY_MS = 200;
 constexpr size_t SCALE_COMMAND_QUEUE_LENGTH = 12;
 constexpr size_t SCALE_EVENT_QUEUE_LENGTH = 32;
 constexpr size_t BLE_COMPANION_REQUEST_QUEUE_LENGTH = 8;
@@ -446,7 +445,6 @@ uint32_t paddleReturnReminderLastAtMs = 0;
 uint32_t paddleReturnReminderStartedAtMs = 0;
 bool scaleCompletionBeepPending = false;
 bool scaleCompletionBeepScheduled = false;
-uint32_t scaleCompletionBeepDueAtMs = 0;
 
 bool rawPaddleOn = false;
 bool paddleOn = false;
@@ -2523,12 +2521,20 @@ bool takeScaleCompletionBeep() {
   return pending;
 }
 
-void scheduleScaleCompletionBeep() {
+void requestCompletionAlert() {
   if (!soundAlertsEnabled()) {
     return;
   }
-  scaleCompletionBeepScheduled = true;
-  scaleCompletionBeepDueAtMs = millis() + SCALE_COMPLETION_BEEP_DELAY_MS;
+  if (emitAlert(AlertEvent::COMPLETION_EXTRA)) {
+    scaleCompletionBeepScheduled = false;
+    return;
+  }
+  const AlertOutputChannel channel = currentAlertOutputChannel();
+  if (channel != AlertOutputChannel::SCALE_ONLY && BUZZER_SUPPORT_ENABLED) {
+    scaleCompletionBeepScheduled = true;
+    return;
+  }
+  scaleCompletionBeepScheduled = false;
 }
 
 void cancelScaleCompletionBeep() {
@@ -2588,18 +2594,7 @@ void serviceScaleCompletionBeep() {
   if (!scaleCompletionBeepScheduled) {
     return;
   }
-  if (static_cast<int32_t>(millis() - scaleCompletionBeepDueAtMs) < 0) {
-    return;
-  }
-  if (!emitAlert(AlertEvent::COMPLETION_EXTRA)) {
-    // Local buzzer may still be playing ATM TRIPLE; retry briefly.
-    const AlertOutputChannel channel = currentAlertOutputChannel();
-    if (channel != AlertOutputChannel::SCALE_ONLY && BUZZER_SUPPORT_ENABLED) {
-      scaleCompletionBeepDueAtMs = millis() + 50;
-      return;
-    }
-  }
-  scaleCompletionBeepScheduled = false;
+  requestCompletionAlert();
 }
 
 void servicePaddleReturnReminder() {
@@ -3738,7 +3733,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   }
   if (shotCompletionGetsLongBeep(reason)) {
     // Completion LONG replaces the stop-timer SINGLE so ends are one cue.
-    scheduleScaleCompletionBeep();
+    requestCompletionAlert();
   } else {
     emitImmediateCommandAlertIfBuzzer();
   }

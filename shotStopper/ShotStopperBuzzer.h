@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifndef SHOT_STOPPER_HOST_TEST
@@ -62,6 +63,54 @@ constexpr BuzzerNote BUZZER_RECOVERY_FACTORY_NOTES[] = {
 // A deliberately distinct long-short-long failure motif.
 constexpr BuzzerNote BUZZER_RECOVERY_ERROR_NOTES[] = {
     {300, 100}, {70, 100}, {300, 0}};
+
+constexpr bool buzzerNotesStartAndEndWithSound(const BuzzerNote *notes,
+                                               size_t count) {
+  if (notes == nullptr || count == 0) {
+    return false;
+  }
+  if (notes[count - 1].gapMs != 0) {
+    return false;
+  }
+  for (size_t i = 0; i < count; ++i) {
+    if (notes[i].onMs == 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+template <size_t N>
+constexpr bool buzzerSequenceStartsAndEndsWithSound(
+    const BuzzerNote (&notes)[N]) {
+  return buzzerNotesStartAndEndWithSound(notes, N);
+}
+
+static_assert(BUZZER_BEEP_ON_MS > 0 && BUZZER_SINGLE_ON_MS > 0 &&
+                  BUZZER_LONG_ON_MS > 0 && BUZZER_RECOVERY_LONG_ON_MS > 0 &&
+                  BUZZER_RECOVERY_PULSE_ON_MS > 0 &&
+                  BUZZER_PULSE_TRAIN_ON_MS > 0,
+              "fixed-length beeps must start with sound");
+static_assert(buzzerSequenceStartsAndEndsWithSound(BUZZER_CHIME_NOTES),
+              "CHIME must start and end with sound");
+static_assert(buzzerSequenceStartsAndEndsWithSound(BUZZER_SWING_NOTES),
+              "SWING must start and end with sound");
+static_assert(buzzerSequenceStartsAndEndsWithSound(BUZZER_ECHO_NOTES),
+              "ECHO must start and end with sound");
+static_assert(buzzerSequenceStartsAndEndsWithSound(BUZZER_ECHO_INVERTED_NOTES),
+              "ECHO_INVERTED must start and end with sound");
+static_assert(buzzerSequenceStartsAndEndsWithSound(BUZZER_MORSE_NOTES),
+              "MORSE must start and end with sound");
+static_assert(buzzerSequenceStartsAndEndsWithSound(BUZZER_SNAP_NOTES),
+              "SNAP must start and end with sound");
+static_assert(
+    buzzerSequenceStartsAndEndsWithSound(BUZZER_RECOVERY_NETWORK_NOTES),
+    "RECOVERY_NETWORK_OK must start and end with sound");
+static_assert(
+    buzzerSequenceStartsAndEndsWithSound(BUZZER_RECOVERY_FACTORY_NOTES),
+    "RECOVERY_FACTORY_OK must start and end with sound");
+static_assert(buzzerSequenceStartsAndEndsWithSound(BUZZER_RECOVERY_ERROR_NOTES),
+              "RECOVERY_ERROR must start and end with sound");
 
 inline const BuzzerNote *buzzerSequenceNotes(BuzzerPattern pattern,
                                              uint8_t &count) {

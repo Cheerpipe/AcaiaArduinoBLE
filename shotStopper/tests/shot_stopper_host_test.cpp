@@ -214,7 +214,6 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   paddleReturnReminderStartedAtMs = 0;
   scaleCompletionBeepPending = false;
   scaleCompletionBeepScheduled = false;
-  scaleCompletionBeepDueAtMs = 0;
   hostAutoScaleWorkerProgress = true;
   setScaleLinkState(scaleConnected ? ScaleLinkState::CONNECTED
                                    : ScaleLinkState::DISCONNECTED);
@@ -2829,25 +2828,18 @@ void w56_atm_beep_queued_when_scale_lost_after_deadline() {
   setScaleConnected(false);
   loop();
   CHECK(session.endReason == EndReason::AUTO_TO_MANUAL_GUARD);
-  // Scale-lost Echo inverted + ATM TRIPLE (completion LONG is delayed ~200 ms).
+  // Scale-lost Echo inverted + ATM TRIPLE. Completion LONG retries behind
+  // those cues with no extra delay.
   CHECK(localBuzzer.acceptedRequests == before + 2);
-  // Drain ATM/scale-lost; stop once completion LONG is playing (do not drain it).
   bool sawCompletionLong = false;
   for (uint32_t step = 0; step < 120; ++step) {
     if (localBuzzer.active == BuzzerPattern::LONG) {
       sawCompletionLong = true;
       break;
     }
-    if (!localBuzzer.busy() &&
-        static_cast<int32_t>(millis() - scaleCompletionBeepDueAtMs) >= 0) {
-      runLoopAfter(10);
-      continue;
-    }
     runLoopAfter(40);
   }
-  if (!sawCompletionLong) {
-    runLoopAfter(SCALE_COMPLETION_BEEP_DELAY_MS + 60);
-  }
+  CHECK(sawCompletionLong);
   CHECK(localBuzzer.acceptedRequests >= before + 3);
   CHECK(localBuzzer.active == BuzzerPattern::LONG);
   CHECK(localBuzzer.onMs == BUZZER_LONG_ON_MS);
@@ -3242,6 +3234,20 @@ void w96_echo_inverted_uses_long_bookend_tones() {
   CHECK(localBuzzer.active == BuzzerPattern::ECHO_INVERTED);
 }
 
+void w98_buzzer_sequences_start_and_end_with_sound() {
+  const BuzzerPattern patterns[] = {
+      BuzzerPattern::CHIME,          BuzzerPattern::SWING,
+      BuzzerPattern::ECHO,           BuzzerPattern::ECHO_INVERTED,
+      BuzzerPattern::MORSE,          BuzzerPattern::SNAP,
+      BuzzerPattern::RECOVERY_NETWORK_OK, BuzzerPattern::RECOVERY_FACTORY_OK,
+      BuzzerPattern::RECOVERY_ERROR};
+  for (const BuzzerPattern pattern : patterns) {
+    uint8_t count = 0;
+    const BuzzerNote *notes = buzzerSequenceNotes(pattern, count);
+    CHECK(buzzerNotesStartAndEndWithSound(notes, count));
+  }
+}
+
 void w60_web_buzzer_test_plays_requested_pattern() {
   resetHarness(false, false);
   reachReadyFromBoot();
@@ -3462,7 +3468,7 @@ void w74b_sound_alert_master_mutes_and_cancels_all_routes() {
   const uint32_t accepted = localBuzzer.acceptedRequests;
   emitImmediateCommandAlertIfBuzzer();
   CHECK(localBuzzer.acceptedRequests == accepted);
-  scheduleScaleCompletionBeep();
+  requestCompletionAlert();
   CHECK(!scaleCompletionBeepScheduled);
 
   resetHarness(false, true);
@@ -3532,8 +3538,6 @@ void w77_scale_priority_disconnected_beeps_on_cn9_without_ble() {
   const uint32_t afterStart = localBuzzer.acceptedRequests;
   finalizeCycle(EndReason::PADDLE, StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
-  CHECK(localBuzzer.acceptedRequests == afterStart);
-  runLoopAfter(SCALE_COMPLETION_BEEP_DELAY_MS + 60);
   CHECK(localBuzzer.acceptedRequests == afterStart + 1);
   CHECK(localBuzzer.active == BuzzerPattern::LONG);
   CHECK(localBuzzer.onMs == BUZZER_LONG_ON_MS);
@@ -3567,8 +3571,6 @@ void w79_buzzer_only_stop_beeps_before_timer_stop_result() {
   const uint32_t before = localBuzzer.acceptedRequests;
   finalizeCycle(EndReason::PADDLE, StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
-  CHECK(localBuzzer.acceptedRequests == before);
-  runLoopAfter(SCALE_COMPLETION_BEEP_DELAY_MS + 60);
   CHECK(localBuzzer.acceptedRequests == before + 1);
   CHECK(localBuzzer.active == BuzzerPattern::LONG);
   CHECK(localBuzzer.onMs == BUZZER_LONG_ON_MS);
@@ -8523,6 +8525,7 @@ const TestCase testCases[] = {
     {"W94", w94_scale_connected_silent_when_flag_off_or_scale_only},
     {"W95", w95_web_buzzer_test_plays_chime_sequence},
     {"W96", w96_echo_inverted_uses_long_bookend_tones},
+    {"W98", w98_buzzer_sequences_start_and_end_with_sound},
     {"D01", d01_idle_scan_stays_enabled_between_ticks},
     {"D02", d02_first_mode_uses_name_scan},
     {"D03", d03_scan_start_failed_uses_backoff},
