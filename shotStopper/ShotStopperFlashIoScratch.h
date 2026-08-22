@@ -24,8 +24,8 @@
 namespace shotstopper {
 
 // Large enough for 2× PersistedSettings (NVS budget), one ShotLogStore
-// (120×48 records + header ≈ 5784 B), or one ShotCurveStore (~8660 B).
-constexpr size_t FLASH_IO_SCRATCH_BYTES = 8704;
+// (120×48 records + header ≈ 5784 B), or one ShotCurveStore v2 (~10580 B).
+constexpr size_t FLASH_IO_SCRATCH_BYTES = 10880;
 static_assert(FLASH_IO_SCRATCH_BYTES >= 2 * PERSISTED_SETTINGS_NVS_BUDGET,
               "Flash I/O scratch must cover settings dual-slot I/O");
 constexpr uint32_t FLASH_IO_LOCK_TIMEOUT_MS = 5000;

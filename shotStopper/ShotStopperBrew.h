@@ -231,6 +231,9 @@ bool withinRinseGestureWindow() {
 
 void onFirstDropsDetected(uint32_t receivedAtMs) {
   recordFirstDropTimestamp(receivedAtMs);
+  if (session.hasWeightAnchor && isfinite(session.lastAcceptedWeightG)) {
+    shotCurveSampler.latchFirstDrop(receivedAtMs, session.lastAcceptedWeightG);
+  }
   requestFirstDropBeep();
   notifyRetareFlowDetected(receivedAtMs);
 }
@@ -292,7 +295,7 @@ void enterFastExtractionExtended(float weightG, uint32_t atMs) {
   session.extractionExtended = true;
   session.targetReachedEarly = true;
   session.targetReachedAtMs = atMs;
-  shotCurveSampler.latchExtended(atMs);
+  shotCurveSampler.latchExtended(atMs, weightG);
   addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_ENTERED,
                 static_cast<int32_t>(weightG * 100.0f),
                 static_cast<int32_t>(elapsedMs(session.startedAtMs)));
@@ -308,7 +311,7 @@ void enterSlowExtractionExtended(float weightG, uint32_t atMs) {
     return;
   }
   session.slowExtractionExtended = true;
-  shotCurveSampler.latchExtended(atMs);
+  shotCurveSampler.latchExtended(atMs, weightG);
   addDebugEvent(DebugCategory::SCALE, DebugCode::SLOW_EXTRACTION_ENTERED,
                 static_cast<int32_t>(weightG * 100.0f),
                 static_cast<int32_t>(elapsedMs(session.startedAtMs)));
@@ -532,6 +535,7 @@ void armAutoToManualGuardForAutomaticBrew() {
   if (session.weightControlState == WeightControlState::SUSPENDED &&
       !session.autoToManualGuardEnforced) {
     session.autoToManualGuardEnforced = true;
+    latchAtmCurveFromSession(millis());
     addDebugEvent(DebugCategory::SCALE,
                   DebugCode::AUTO_TO_MANUAL_GUARD_ENFORCED,
                   static_cast<int32_t>(elapsedMs(session.startedAtMs)),

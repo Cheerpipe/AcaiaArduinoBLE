@@ -365,7 +365,7 @@ uint32_t lastReportedLogOverwritten = 0;
 ShotLog shotLog;
 ShotCurveLog shotCurves;
 ShotCurveSampler shotCurveSampler;
-ShotCurveRecord lastShotCurve;
+ShotCurveRecord lastShotCurve = emptyShotCurveRecord();
 LastShotStore lastShotStore;
 PersistedLastShot persistedLastShot;
 bool lastShotNvsDirty = false;
@@ -783,14 +783,14 @@ bool clearShotLog() {
 
 bool clearLastShot() {
   persistedLastShot = PersistedLastShot{};
-  lastShotCurve = ShotCurveRecord{};
+  lastShotCurve = emptyShotCurveRecord();
   lastShotNvsDirty = false;
   return lastShotStore.clear();
 }
 
 void clearLastShotSnapshot() {
   persistedLastShot = PersistedLastShot{};
-  lastShotCurve = ShotCurveRecord{};
+  lastShotCurve = emptyShotCurveRecord();
   lastShotNvsDirty = false;
 }
 
@@ -1082,6 +1082,12 @@ bool observedWeightIsFresh(uint32_t now = millis()) {
              MAX_AUTOMATION_WEIGHT_AGE_MS;
 }
 
+void latchAtmCurveFromSession(uint32_t atMs) {
+  if (session.hasWeightAnchor && isfinite(session.lastAcceptedWeightG)) {
+    shotCurveSampler.latchAtm(atMs, session.lastAcceptedWeightG);
+  }
+}
+
 void setWeightControlState(WeightControlState state) {
   if (session.weightControlState == state) {
     session.automaticEnabled = state == WeightControlState::ACTIVE;
@@ -1098,6 +1104,7 @@ void setWeightControlState(WeightControlState state) {
     if (session.autoToManualGuardArmed &&
         !session.autoToManualGuardEnforced) {
       session.autoToManualGuardEnforced = true;
+      latchAtmCurveFromSession(millis());
       addDebugEvent(DebugCategory::SCALE,
                     DebugCode::AUTO_TO_MANUAL_GUARD_ENFORCED,
                     static_cast<int32_t>(
@@ -1113,6 +1120,7 @@ void setWeightControlState(WeightControlState state) {
                   DebugCode::SCALE_CONTROL_RECOVERED);
     if (session.autoToManualGuardEnforced) {
       session.autoToManualGuardEnforced = false;
+      shotCurveSampler.latchAtmCleared(millis());
       addDebugEvent(DebugCategory::SCALE,
                     DebugCode::AUTO_TO_MANUAL_GUARD_CLEARED);
     }
@@ -1645,8 +1653,10 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   pendingFinalize.cycleId = session.id;
   if (session.hasWeightAnchor) {
     shotCurveSampler.accept(session.lastAcceptedWeightG, millis());
+    shotCurveSampler.captureEnd(millis(), session.lastAcceptedWeightG);
+  } else {
+    shotCurveSampler.captureEnd(millis());
   }
-  shotCurveSampler.captureEnd(millis());
   pendingFinalize.curve = shotCurveSampler.snapshot();
 }
 
@@ -1707,7 +1717,8 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
         shotLogWeightToCentigrams(finalWeightG -
                            static_cast<float>(snapshot.goalWeightG));
     if (snapshot.firstDropDs != SHOT_LOG_METRIC_MISSING &&
-        weightSource == ActualWeightSource::POST_DRIP) {
+        (weightSource == ActualWeightSource::POST_DRIP ||
+         weightSource == ActualWeightSource::LAST_KNOWN)) {
       const float durationS = snapshot.durationDs / 10.0f;
       const float firstDropS = snapshot.firstDropDs / 10.0f;
       const float brewS = durationS - firstDropS;
@@ -5123,12 +5134,14 @@ void publishControlStatus() {
   {
     const ShotCurveRecord curve =
         session.active ? shotCurveSampler.snapshot() : lastShotCurve;
-    next.shotCurveCount = curve.count;
-    next.shotCurveIntervalS =
-        curve.intervalS == 0 ? SHOT_CURVE_INTERVAL_S : curve.intervalS;
-    next.shotCurveExtendedDs = curve.extendedEnteredDs;
-    memcpy(next.shotCurveWeightCg, curve.weightCg,
-           sizeof(next.shotCurveWeightCg));
+    copyShotCurveRecordToStatusFields(
+        curve, next.shotCurveCount, next.shotCurveIntervalS,
+        next.shotCurveFirstDropDs, next.shotCurveFirstDropCg,
+        next.shotCurveExtendedDs, next.shotCurveExtendedCg,
+        next.shotCurveAtmDs, next.shotCurveAtmCg,
+        next.shotCurveAtmClearedDs, next.shotCurveEndedDs,
+        next.shotCurveEndedCg, next.shotCurveWeightCg,
+        sizeof(next.shotCurveWeightCg) / sizeof(next.shotCurveWeightCg[0]));
   }
   strncpy(next.scaleProtocol, scaleLink.protocolName,
           sizeof(next.scaleProtocol) - 1);
@@ -5147,8 +5160,9 @@ void publishControlStatus() {
     next.cycleFirstDropMs = session.firstDropMs;
     next.cycleRetareFlowFirstDetectedAtMs =
         session.retareFlowFirstDetectedAtMs;
-    next.cycleStartedAtMs =
-        relay.closed ? relay.closedAtMs : 0U;
+    next.cycleStartedAtMs = session.cn9ClosedAtMs != 0U
+                                ? session.cn9ClosedAtMs
+                                : session.startedAtMs;
     next.cycleElapsedMs = cycleShotElapsedMs();
     next.cycleExtractionExtended =
         session.extractionExtended && fastExtractionGuardSession();

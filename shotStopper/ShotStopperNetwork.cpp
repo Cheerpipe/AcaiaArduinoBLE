@@ -37,7 +37,7 @@ struct NetworkWorkBuf {
   static constexpr size_t kStatusJson = 8192;
   static constexpr size_t kPresetsJson = 2800;
   static constexpr size_t kHistoryJson = 1400;
-  static constexpr size_t kJsonItem = 1280;
+  static constexpr size_t kJsonItem = 1800;
   // Worst case is ~493 B: the envelope with the longest state and lock reason,
   // plus two fully populated tags at OTA_ARCH_CAPACITY + OTA_VERSION_CAPACITY.
   static constexpr size_t kOtaJson = 640;
@@ -3849,12 +3849,16 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         cupPresenceStateName(control.cupPresenceState),
         control.cupPresent ? "true" : "false");
     if (ok) {
-      ShotCurveRecord curve = {};
-      curve.count = control.shotCurveCount;
-      curve.intervalS = control.shotCurveIntervalS;
-      curve.extendedEnteredDs = control.shotCurveExtendedDs;
-      memcpy(curve.weightCg, control.shotCurveWeightCg, sizeof(curve.weightCg));
-      char curveJson[384] = {};
+      const ShotCurveRecord curve = shotCurveRecordFromStatusFields(
+          control.shotCurveCount, control.shotCurveIntervalS,
+          control.shotCurveFirstDropDs, control.shotCurveFirstDropCg,
+          control.shotCurveExtendedDs, control.shotCurveExtendedCg,
+          control.shotCurveAtmDs, control.shotCurveAtmCg,
+          control.shotCurveAtmClearedDs, control.shotCurveEndedDs,
+          control.shotCurveEndedCg, control.shotCurveWeightCg,
+          sizeof(control.shotCurveWeightCg) /
+              sizeof(control.shotCurveWeightCg[0]));
+      char curveJson[640] = {};
       if (formatShotCurveJsonBody(curveJson, sizeof(curveJson), curve)) {
         ok = statusJsonAppend(&used, ",\"shotCurve\":{%s}", curveJson);
       }
@@ -4200,15 +4204,13 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
       snprintf(targetEarly, sizeof(targetEarly), "%.1f",
                static_cast<double>(record.targetReachedEarlyDs) / 10.0);
     }
-    ShotCurveRecord emptyCurve = {};
-    emptyCurve.intervalS = SHOT_CURVE_INTERVAL_S;
-    emptyCurve.extendedEnteredDs = SHOT_LOG_METRIC_MISSING;
+    const ShotCurveRecord emptyCurve = emptyShotCurveRecord();
     const ShotCurveRecord *curve = findShotCurveById(
         work.shotCurves, curveCount, record.id);
     if (curve == nullptr) {
       curve = &emptyCurve;
     }
-    char curveJson[384] = {};
+    char curveJson[640] = {};
     if (!formatShotCurveJsonBody(curveJson, sizeof(curveJson), *curve)) {
       curveJson[0] = '\0';
     }

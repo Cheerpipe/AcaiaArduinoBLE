@@ -1208,16 +1208,23 @@ void p61_shot_curve_dual_slot_round_trip_and_delete() {
   ShotCurveLog curves;
   CHECK(curves.load());
   CHECK(curves.count() == 0);
-  ShotCurveRecord first = {};
+  ShotCurveRecord first = emptyShotCurveRecord();
   first.shotId = 7;
   first.count = 3;
   first.intervalS = SHOT_CURVE_INTERVAL_S;
-  first.extendedEnteredDs = 180;
+  first.firstDrop.atDs = 45;
+  first.firstDrop.weightCg = 50;
+  first.extended.atDs = 180;
+  first.extended.weightCg = 1800;
+  first.atm.atDs = 200;
+  first.atm.weightCg = 1900;
+  first.ended.atDs = 220;
+  first.ended.weightCg = 1900;
   first.weightCg[0] = 0;
   first.weightCg[1] = 900;
   first.weightCg[2] = 1800;
   CHECK(curves.append(first));
-  ShotCurveRecord second = {};
+  ShotCurveRecord second = emptyShotCurveRecord();
   second.shotId = 8;
   second.count = 2;
   second.intervalS = SHOT_CURVE_INTERVAL_S;
@@ -1231,7 +1238,10 @@ void p61_shot_curve_dual_slot_round_trip_and_delete() {
   CHECK(reloaded.copyNewestFirst(newest, 2) == 2);
   CHECK(newest[0].shotId == 8);
   CHECK(newest[1].shotId == 7);
-  CHECK(newest[1].extendedEnteredDs == 180);
+  CHECK(newest[1].firstDrop.atDs == 45);
+  CHECK(newest[1].extended.atDs == 180);
+  CHECK(newest[1].atm.atDs == 200);
+  CHECK(newest[1].ended.atDs == 220);
   CHECK(newest[1].weightCg[2] == 1800);
   CHECK(reloaded.removeById(7));
   CHECK(reloaded.count() == 1);
@@ -1239,6 +1249,17 @@ void p61_shot_curve_dual_slot_round_trip_and_delete() {
   CHECK(newest[0].shotId == 8);
   CHECK(reloaded.clear());
   CHECK(reloaded.count() == 0);
+}
+
+void p62_shot_curve_v1_schema_is_rejected() {
+  ShotCurveStore store;
+  resetShotCurveStore(store);
+  CHECK(validShotCurveStore(store));
+  CHECK(store.header.schemaVersion == SHOT_CURVE_SCHEMA_VERSION);
+  store.header.schemaVersion = 1;
+  store.header.checksum = 0;
+  store.header.checksum = shotCurveChecksum(store);
+  CHECK(!validShotCurveStore(store));
 }
 
 struct TestCase {
@@ -1286,6 +1307,7 @@ const TestCase tests[] = {
     {"P59", p59_deferred_shot_log_append_writes_only_on_flush},
     {"P60", p60_factory_intent_survives_failed_store_reset},
     {"P61", p61_shot_curve_dual_slot_round_trip_and_delete},
+    {"P62", p62_shot_curve_v1_schema_is_rejected},
 };
 
 }  // namespace

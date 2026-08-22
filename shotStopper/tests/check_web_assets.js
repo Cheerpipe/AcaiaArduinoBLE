@@ -572,8 +572,10 @@ if (!ui.includes('id="shotPanel"') ||
     !css.includes('#shotTable tr.noSpark{') ||
     !css.includes('.shotSpark{display:block;width:100%;height:100%;color:var(--ok);overflow:visible}') ||
     !ui.includes('function renderShotSpark(') ||
+    !runtimeJs.includes('function buildShotSparkModel(') ||
+    !runtimeJs.includes('function shotDisplayFlowGS(') ||
     !runtimeJs.includes('lastCurveWeightG(w)===null') ||
-    !runtimeJs.includes('typeof first===\'number\'&&first>0&&dur>0') ||
+    !runtimeJs.includes('model.firstDropS>0&&dur>0') ||
     !runtimeJs.includes('stroke="\'+cN+\'"') ||
     runtimeJs.includes('stroke="currentColor"') ||
     !runtimeJs.includes("if(spark.hidden)row.classList.add('noSpark')") ||
@@ -1335,6 +1337,11 @@ if (!ui.includes('id="shotTable"') ||
     !runtimeJs.includes('function shotDisplayActualG(') ||
     !runtimeJs.includes('shotDisplayActualG(r.actualG,r.wCg)') ||
     !runtimeJs.includes('shotDisplayActualG(ls.currentWeightG,cv.wCg)') ||
+    !runtimeJs.includes('shotDisplayFlowGS(r)') ||
+    !runtimeJs.includes('const live=!!(s.cycle&&s.cycle.active)') ||
+    runtimeJs.includes('const live=!!((s.cycle&&s.cycle.active)||s.liveShot)') ||
+    runtimeJs.includes('const live=!!((s.cycle&&s.cycle.active)||s.relayClosed)') ||
+    !runtimeJs.includes('const dropMs=live?(src.firstDropElapsedMs||0):(ls&&ls.firstDropElapsedMs||0)') ||
     !runtimeJs.includes('formatShotEnded(r.stopDetail)') ||
     !runtimeJs.includes("labels=['Time','Dur','Goal','Weight','Err%','Flow','1st drop','Ended','Shot']") ||
     runtimeJs.includes("labels=['Time','Dur','Goal','Actual','Err%','Flow','1st drop','Ended','Shot']") ||
@@ -2644,6 +2651,79 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
   if (ignoredGuards.mode !== 'timerOnly' ||
       kinds(ignoredGuards.tSeg) !== 'idle') {
     throw new Error('Rule chart: guards must be ignored when BBW is off');
+  }
+}
+
+{
+  const start = js.indexOf('function lastCurveWeightG(');
+  const end = js.indexOf('function populateTimezoneOptions(');
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error('Shot spark helpers not found for matrix checks');
+  }
+  const helpers = new Function(
+      js.slice(start, end) +
+      ';return{buildShotSparkModel:buildShotSparkModel,shotDisplayFlowGS:shotDisplayFlowGS};')();
+  if (helpers.buildShotSparkModel(null) !== null) {
+    throw new Error('Spark model must tolerate a null shot (idle Home panel)');
+  }
+  const fast15 = helpers.buildShotSparkModel({
+    wCg: [20, 800, 1600, 2400, 3200, 3600, 4000, 4370],
+    wDtS: 2,
+    durationS: 15.1,
+    firstDropS: 4.5,
+    dropS: 4.5,
+    dropCg: 50,
+    extendedS: 13.3,
+    extCg: 3600,
+    endS: 15.1,
+    endCg: 4370,
+    extractionExtended: true,
+    goalG: 36,
+  });
+  if (!fast15 || !fast15.segs.some((s) => s.color === '#d97706' &&
+      s.pts[s.pts.length - 1].t >= 15)) {
+    throw new Error('Spark 15.1s Fast guard must paint orange through ended');
+  }
+  const slowLate = helpers.buildShotSparkModel({
+    wCg: Array.from({length: 14}, (_, i) => (i + 1) * 200),
+    wDtS: 2,
+    durationS: 26.4,
+    firstDropS: 8.4,
+    extendedS: 24.1,
+    extCg: 2600,
+    endS: 26.4,
+    endCg: 2800,
+    slowExtractionExtended: true,
+    goalG: 36,
+  });
+  if (!slowLate || !slowLate.segs.some((s) => s.color === '#2563eb' &&
+      s.pts[0].t >= 24)) {
+    throw new Error('Spark late Slow guard must paint blue from extended');
+  }
+  const atm = helpers.buildShotSparkModel({
+    wCg: [100, 800, 1600, 2400, 2800, 3000, 3200, 3400],
+    wDtS: 2,
+    durationS: 18,
+    firstDropS: 4,
+    atmS: 12,
+    atmCg: 2800,
+    endS: 18,
+    endCg: 3400,
+    goalG: 36,
+  });
+  const gray = atm && atm.segs.find((s) => s.color === 'var(--mu)');
+  if (!gray || gray.pts.some((p) => p.cg !== 2800) ||
+      gray.pts[0].t < 12 || gray.pts[gray.pts.length - 1].t < 18) {
+    throw new Error('Spark A→M must be flat gray at last scale weight through ended');
+  }
+  const flow = helpers.shotDisplayFlowGS({
+    avgFlowGS: null,
+    actualG: 43.7,
+    durationS: 15.1,
+    firstDropS: 4.5,
+  });
+  if (!(flow > 4.12 && flow < 4.13)) {
+    throw new Error('History flow fallback must use actual/(duration-firstDrop)');
   }
 }
 
