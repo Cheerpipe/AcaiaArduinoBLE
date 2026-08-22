@@ -188,6 +188,7 @@ struct CycleSession {
   bool timerStartCommandQueued = false;
   bool remoteTimerMayBeRunning = false;
   bool remoteTimerStarted = false;
+  bool remoteTimerStartSettled = false;
   bool stopTimerRequested = false;
   bool stopTimerCommandQueued = false;
   bool receivedFreshWeightInCycle = false;
@@ -1178,7 +1179,10 @@ bool enqueueScaleCommand(const ScaleCommand &command) {
   }
 
   BaseType_t queued = pdFALSE;
-  if (command.type == ScaleCommandType::STOP_TIMER) {
+  // Jump the queue only after this cycle's start has left it. Otherwise STOP
+  // can run first and the later START leaves the scale timer running.
+  if (command.type == ScaleCommandType::STOP_TIMER &&
+      session.remoteTimerStartSettled) {
     queued = xQueueSendToFront(scaleCommandQueue, &command, 0);
   } else {
     queued = xQueueSend(scaleCommandQueue, &command, 0);
@@ -1237,52 +1241,51 @@ void armScaleTimerStopExtraDelay(uint32_t extraDelayMs) {
   pendingScaleTimerStop.extraDueAtMs = millis() + extraDelayMs;
 }
 
-void scheduleScaleTimerStopAfterCycle(uint32_t internalElapsedMs) {
-  if (!session.timerStartCommandQueued || session.stopTimerRequested) {
-    return;
-  }
-  const uint32_t extraDelayMs = session.config.scaleTimerStopExtraDelayMs;
-  if (!session.remoteTimerStarted) {
-    requestRemoteTimerStop();
-    return;
-  }
-  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
-  if (!link.timerValid) {
-    requestRemoteTimerStop();
-    return;
-  }
-  const uint32_t targetMs = scaleTimerDisplayTargetMs(internalElapsedMs);
-  pendingScaleTimerStop = PendingScaleTimerStop{};
-  pendingScaleTimerStop.targetMs = targetMs;
-  pendingScaleTimerStop.extraDelayMs = extraDelayMs;
-  pendingScaleTimerStop.catchupDeadlineAtMs =
-      millis() + MAX_SCALE_TIMER_STOP_CATCHUP_MS;
-  if (link.timerMs >= targetMs) {
-    armScaleTimerStopExtraDelay(extraDelayMs);
-    return;
-  }
-  pendingScaleTimerStop.pending = true;
-}
-
 void servicePendingScaleTimerStop() {
   if (!pendingScaleTimerStop.pending) {
     return;
   }
   const uint32_t nowMs = millis();
   if (pendingScaleTimerStop.extraDueAtMs != 0U) {
-    if (static_cast<int32_t>(nowMs - pendingScaleTimerStop.extraDueAtMs) >= 0) {
+    if (static_cast<int32_t>(nowMs - pendingScaleTimerStop.extraDueAtMs) >= 0 ||
+        !scaleAvailable()) {
       completePendingScaleTimerStop();
     }
+    return;
+  }
+  if (!scaleAvailable()) {
+    completePendingScaleTimerStop();
     return;
   }
   const bool timedOut =
       static_cast<int32_t>(nowMs -
                            pendingScaleTimerStop.catchupDeadlineAtMs) >= 0;
+  if (!session.remoteTimerStartSettled && !timedOut) {
+    return;
+  }
+  const uint32_t extraDelayMs = pendingScaleTimerStop.extraDelayMs;
+  if (session.remoteTimerStartSettled && !session.remoteTimerStarted) {
+    armScaleTimerStopExtraDelay(extraDelayMs);
+    return;
+  }
   const ScaleLinkSnapshot link = getScaleLinkSnapshot();
   if (timedOut || !link.timerValid ||
       link.timerMs >= pendingScaleTimerStop.targetMs) {
-    armScaleTimerStopExtraDelay(pendingScaleTimerStop.extraDelayMs);
+    armScaleTimerStopExtraDelay(extraDelayMs);
   }
+}
+
+void scheduleScaleTimerStopAfterCycle(uint32_t internalElapsedMs) {
+  if (!session.timerStartCommandQueued || session.stopTimerRequested) {
+    return;
+  }
+  pendingScaleTimerStop = PendingScaleTimerStop{};
+  pendingScaleTimerStop.pending = true;
+  pendingScaleTimerStop.targetMs = scaleTimerDisplayTargetMs(internalElapsedMs);
+  pendingScaleTimerStop.extraDelayMs = session.config.scaleTimerStopExtraDelayMs;
+  pendingScaleTimerStop.catchupDeadlineAtMs =
+      millis() + MAX_SCALE_TIMER_STOP_CATCHUP_MS;
+  servicePendingScaleTimerStop();
 }
 
 void transitionTo(StopperState nextState) {
@@ -3531,6 +3534,7 @@ void processScaleWorkerEvents() {
         if (event.cycleId == session.id) {
           session.remoteTimerMayBeRunning = event.commandAttempted;
           session.remoteTimerStarted = event.writeSucceeded;
+          session.remoteTimerStartSettled = true;
           if (event.writeSucceeded && session.config.autoTare &&
               session.startedWithScale && session.active &&
               stopperState == StopperState::BREW &&

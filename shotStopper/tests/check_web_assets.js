@@ -2628,8 +2628,11 @@ if (firmware.includes('SCALE_COMPLETION_BEEP_DELAY_MS') ||
 if (firmware.includes('maybeCaptureScaleStartLag') ||
     firmware.includes('scaleStartLagCaptured') ||
     firmware.includes('scaleTimerStopDelayMsForCycle') ||
-    firmware.includes('setAdvertisingPaused(preferBluetooth)')) {
-  throw new Error('Scale timer stop must catch up live; CN9 open must not BLE.advertise()');
+    firmware.includes('setAdvertisingPaused(preferBluetooth)') ||
+    !firmware.includes('remoteTimerStartSettled') ||
+    !firmware.includes(
+        'command.type == ScaleCommandType::STOP_TIMER &&\n      session.remoteTimerStartSettled')) {
+  throw new Error('Scale timer stop must catch up live, wait for start, and not BLE.advertise() on CN9 open');
 }
 
 (async () => {

@@ -502,7 +502,10 @@ void reachBrewState() {
   }
 }
 
+bool executeNextScaleCommand();
+
 void advanceToBrew() {
+  (void)executeNextScaleCommand();
   if (scale.connected && session.automaticEnabled && !runtimeConfig.timerOnly &&
       session.awaitingPostTareBaseline) {
     establishPostTareBaseline();
@@ -534,6 +537,13 @@ size_t commandCount(ScaleCommandType type) {
     }
   }
   return count;
+}
+
+ScaleCommand queuedCommandAt(size_t index) {
+  ScaleCommand command;
+  std::memcpy(&command, scaleCommandQueue->items.at(index).data(),
+              sizeof(command));
+  return command;
 }
 
 void publishScaleTimer(uint32_t timerMs) {
@@ -643,6 +653,7 @@ void t04_exact_rinse_boundary_and_duration() {
   resetHarness(false, true);
   reachReadyFromBoot();
   const uint32_t rawOnAt = startCycle();
+  CHECK(executeNextScaleCommand());
   releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
   CHECK(stopperState == StopperState::RINSE);
   CHECK(getRelaySafetySnapshot().closed);
@@ -664,6 +675,7 @@ void t05_release_between_rinse_and_brew_is_short_shot() {
   resetHarness(false, true);
   reachReadyFromBoot();
   const uint32_t rawOnAt = startCycle();
+  CHECK(executeNextScaleCommand());
   releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs + 1);
   CHECK(stopperState == StopperState::READY);
   CHECK(session.endReason == EndReason::PADDLE);
@@ -824,18 +836,22 @@ void t15_repeated_rinse_and_brew_reset_session_state() {
   reachReadyFromBoot();
   const uint32_t firstCycle = startCycle();
   const uint32_t firstId = session.id;
+  CHECK(executeNextScaleCommand());
   releaseAtPhysicalDuration(firstCycle, 500);
   runLoopAfter(runtimeConfig.rinseDurationMs - elapsedMs(session.rinseStartedAtMs));
   CHECK(stopperState == StopperState::READY);
+  CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
+  CHECK(executeNextScaleCommand());
 
   startCycle();
   CHECK(session.id != firstId);
   CHECK(!session.stopTimerRequested);
   CHECK(session.timerStopResult == TimerStopResult::NOT_REQUIRED);
   CHECK(session.endReason == EndReason::NONE);
+  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
   advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
-  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 2);
+  CHECK(scale.tareStartTimerCalls == 2);
 }
 
 void t16_only_micra_states_are_compiled() {
@@ -864,6 +880,7 @@ void t18_rinse_and_short_shot_each_request_one_stop() {
   resetHarness(false, true);
   reachReadyFromBoot();
   uint32_t rawOnAt = startCycle();
+  CHECK(executeNextScaleCommand());
   releaseAtPhysicalDuration(rawOnAt, 500);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
   runLoopAfter(runtimeConfig.rinseDurationMs);
@@ -872,6 +889,7 @@ void t18_rinse_and_short_shot_each_request_one_stop() {
   resetHarness(false, true);
   reachReadyFromBoot();
   rawOnAt = startCycle();
+  CHECK(executeNextScaleCommand());
   releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs + 100);
   CHECK(session.endReason == EndReason::PADDLE);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
@@ -2039,6 +2057,7 @@ void w15_web_rinse_starts_scale_timer() {
   CHECK(stopperState == StopperState::RINSE);
   CHECK(session.source == ControlSource::WEB);
   CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
+  CHECK(executeNextScaleCommand());
   runLoopAfter(runtimeConfig.rinseDurationMs);
   CHECK(stopperState == StopperState::READY);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
@@ -2049,7 +2068,8 @@ void w15_web_rinse_starts_scale_timer() {
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(session.endReason == EndReason::PHYSICAL_OVERRIDE);
   CHECK(!getRelaySafetySnapshot().closed);
-  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 2);
+  CHECK(scale.tareStartTimerCalls == 1);
+  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
 }
 
 void w16_web_stop_during_rinse_preserves_rearm() {
@@ -5487,6 +5507,55 @@ void st06_scale_timer_stop_without_valid_timer_is_immediate() {
   CHECK(session.stopTimerRequested);
 }
 
+void st07_scale_timer_stop_waits_for_start_before_queueing_stop() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.scaleTimerStopExtraDelayMs = 0;
+  startCycle();
+  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
+  CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
+  CHECK(!session.remoteTimerStartSettled);
+
+  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  CHECK(pendingScaleTimerStop.pending);
+  CHECK(!session.stopTimerRequested);
+  CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
+  CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
+  CHECK(queuedCommandAt(0).type == ScaleCommandType::START_TIMER_AND_TARE);
+
+  CHECK(executeNextScaleCommand());
+  CHECK(session.remoteTimerStartSettled);
+  CHECK(session.remoteTimerStarted);
+  CHECK(scale.tareStartTimerCalls == 1);
+  CHECK(scale.stopTimerCalls == 0);
+
+  runLoopAfter(0);
+  CHECK(!pendingScaleTimerStop.pending);
+  CHECK(session.stopTimerRequested);
+  CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
+  CHECK(executeNextScaleCommand());
+  CHECK(scale.stopTimerCalls == 1);
+}
+
+void st08_scale_timer_stop_extra_delay_applies_without_valid_timer() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.scaleTimerStopExtraDelayMs = 100;
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  CHECK(pendingScaleTimerStop.pending);
+  CHECK(!session.stopTimerRequested);
+
+  runLoopAfter(99);
+  CHECK(pendingScaleTimerStop.pending);
+  CHECK(!session.stopTimerRequested);
+
+  runLoopAfter(1);
+  CHECK(!pendingScaleTimerStop.pending);
+  CHECK(session.stopTimerRequested);
+}
+
 void rt01_late_cup_triggers_single_retare() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -8774,6 +8843,8 @@ const TestCase testCases[] = {
     {"ST04", st04_scale_timer_stop_extra_delay_applies_after_catchup},
     {"ST05", st05_scale_timer_stop_catchup_times_out},
     {"ST06", st06_scale_timer_stop_without_valid_timer_is_immediate},
+    {"ST07", st07_scale_timer_stop_waits_for_start_before_queueing_stop},
+    {"ST08", st08_scale_timer_stop_extra_delay_applies_without_valid_timer},
     {"RT01", rt01_late_cup_triggers_single_retare},
     {"RT02", rt02_sub_minimum_stable_cup_is_ignored},
     {"RT03", rt03_spike_without_stable_cup_does_not_retare},
