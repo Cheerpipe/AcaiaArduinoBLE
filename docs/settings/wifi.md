@@ -24,7 +24,7 @@ stays available.
 | --- | --- | --- |
 | **Home Wi-Fi (STA)** | none on a fresh flash | Saved SSID/password. Device joins your network and serves the Web UI at the STA IP. |
 | **IP mode** | DHCP | **DHCP** or **static** (`ip` / `netmask` / `gateway` / `dns1` / `dns2`). |
-| **Confirm window** | 3 minutes | After a Web UI or BLE Companion STA save, open the UI at the new device IP within 3 minutes or the previous network settings are restored. USB `SET_WIFI` commits immediately. |
+| **Confirm window** | 3 minutes | After a Web UI STA save, a full-screen wait overlay counts down 3 minutes and reclaims this address when the controller returns. The first successful UI claim confirms the new network. If this page never returns, previous network settings are restored (BLE Companion saves use the same window: open the UI at the new IP). USB `SET_WIFI` commits immediately. |
 | **Boot with no credentials** | SoftAP up | See [AP](ap.md). |
 | **Boot with credentials** | STA first | SoftAP only if STA does not associate in about **15 s**. Then AP+STA until STA connects; SoftAP is then stopped. |
 | **STA drops after a successful join** | retry STA only | SoftAP is **not** raised automatically. Use USB `AP_START` or reboot. |

@@ -59,6 +59,11 @@ body.webUiInactive{overflow:hidden}
 #inactiveHint{margin:0;color:var(--mu);font-size:.78rem;line-height:1.45;font-weight:400}
 #inactiveError{margin:0;font-size:.86rem}
 #inactiveError[hidden]{display:none}
+#reconnectWait[hidden],#webUiReload[hidden]{display:none}
+.inactiveOverlay.isReconnectWait #webUiReload{display:none}
+.reconnectRing{--p:100;width:7.2rem;height:7.2rem;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--ac) calc(var(--p)*1%),var(--ln) 0);font-size:1.55rem;font-weight:800;color:var(--ac);position:relative}
+.reconnectRing::before{content:"";position:absolute;inset:.62rem;border-radius:50%;background:var(--bg)}
+#reconnectSeconds{position:relative;z-index:1;font-variant-numeric:tabular-nums}
 .inactiveOverlay .pageFooter{margin-top:auto;width:100%}
 
 fieldset{margin:.85rem 0;padding:.85rem;border:1px solid var(--ln);border-radius:var(--r);background:var(--sf)}

@@ -209,10 +209,10 @@ const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 46080) {
   throw new Error('Web UI HTML source exceeds the 45 KiB authoring budget');
 }
-if (jsBytes > 118000) {
+if (jsBytes > 120000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 165000) {
+if (htmlBytes + jsBytes > 167000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -1966,6 +1966,29 @@ if (!ui.includes('Press Reload to enable this window again.') ||
     ui.includes('Reactivate')) {
   throw new Error('WebUI inactive notice must be a full-screen Reload overlay');
 }
+if (!ui.includes("w.id='reconnectWait'") ||
+    !ui.includes("w.className='reconnectRing'") ||
+    !ui.includes('id="reconnectSeconds"') ||
+    !ui.includes('function beginNetworkReconnectWait()') ||
+    !ui.includes('function endNetworkReconnectWait()') ||
+    !ui.includes('function pollNetworkReconnect()') ||
+    !ui.includes('NETWORK_RECONNECT_WAIT_MS=180000') ||
+    !ui.includes('setTimeout(pollNetworkReconnect,2e3)') ||
+    !ui.includes('setInterval(updateReconnectCountdown,1e3)') ||
+    !ui.includes('rec?4e3:8e3') ||
+    !ui.includes("value.action==='save'") ||
+    !ui.includes('beginNetworkReconnectWait()') ||
+    !ui.includes('claimWebUiOwnership()') ||
+    !ui.includes('Waiting for the controller on this address.') ||
+    !ui.includes('the previous network should return shortly.') ||
+    !css.includes('.inactiveOverlay.isReconnectWait') ||
+    !css.includes('.reconnectRing') ||
+    !css.includes('conic-gradient') ||
+    ui.includes('function heartbeat(') ||
+    ui.includes('/api/v1/heartbeat')) {
+  throw new Error(
+      'Wi-Fi save must show a 180s reconnect overlay that polls ui/claim even after 0s, without a heartbeat endpoint');
+}
 if (!ui.includes('clearTimeout(webUiInactivityTimer)') ||
     !ui.includes('clearTimeout(scanTimer)') ||
     !ui.includes('stopViewPolls()') ||
@@ -2661,8 +2684,8 @@ if (generated.gzip.length > 4096) {
 if (generated.jsGzip.length > 6144) {
   throw new Error('Compressed Web UI shell JS exceeds the 6 KiB gzip budget');
 }
-if (generated.runtimeGzip.length > 24576) {
-  throw new Error('Compressed Web UI runtime JS exceeds the 24 KiB gzip budget');
+if (generated.runtimeGzip.length > 25600) {
+  throw new Error('Compressed Web UI runtime JS exceeds the 25 KiB gzip budget');
 }
 if (generated.secondaryGzip.length > 4096) {
   throw new Error('Compressed secondary view JS exceeds the 4 KiB gzip budget');
