@@ -13,7 +13,7 @@ STA fails to associate at boot.
   Use USB `AP_START` or reboot. See [USB serial CLI](../SERIAL_CLI.md).
 
 The AP name is fixed. The WPA2 password is the **device password**. Change it
-from **Admin → Device password** (current + new) or from USB
+from **Admin** (unlock with the device password) **→ Device password** or from USB
 (`SET_DEVICE_PASSWORD` / `RESET_DEVICE_PASSWORD`). The same secret is the
 OTA token.
 

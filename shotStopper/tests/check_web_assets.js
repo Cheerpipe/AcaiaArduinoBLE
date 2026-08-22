@@ -1733,6 +1733,7 @@ const expected = new Map([
   ['POST /api/v1/network/scan', 'ownedApiHandler'],
   ['GET /api/v1/network/scan', 'ownedApiHandler'],
   ['POST /api/v1/device/password', 'ownedApiHandler'],
+  ['POST /api/v1/admin/unlock', 'ownedApiHandler'],
   // OTA authenticates with the device password instead of the exclusive
   // WebUI claim, so a command line client can update firmware without stealing
   // control from an open browser window.
@@ -2074,9 +2075,9 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
     }
   }
   if (!ui.includes(
-          "v==='admin'?!!(s.network&&s.bleCompanion&&typeof s.bleCompanion.enabled==='boolean'&&typeof s.bleCompanion.active==='boolean'&&typeof s.bleCompanion.restartRequired==='boolean'&&typeof c.timezoneOffsetMinutes==='number'&&c.ntpServerPreset!=null&&s.ota&&typeof s.ota.available==='boolean')")) {
+          "v==='admin'?!!(typeof s.adminUnlocked==='boolean'&&s.network&&(s.adminUnlocked?(s.bleCompanion&&typeof s.bleCompanion.enabled==='boolean'&&typeof s.bleCompanion.active==='boolean'&&typeof s.bleCompanion.restartRequired==='boolean'&&typeof c.timezoneOffsetMinutes==='number'&&c.ntpServerPreset!=null&&s.ota&&typeof s.ota.available==='boolean'):typeof s.network.configState==='string'))")) {
     throw new Error(
-        'statusPageOk(admin) must validate network, BLE Companion, NTP config and OTA');
+        'statusPageOk(admin) must accept a locked payload and validate unlocked network/BLE/NTP/OTA');
   }
   if (!ui.includes(
           "v==='diagnostic'?!!(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalPaddleOn==='boolean'&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean')")) {
@@ -2899,15 +2900,71 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
   const currentDeviceAt = html.indexOf('id="currentDevicePassword"');
   const newDeviceAt = html.indexOf('id="newDevicePassword"');
   const confirmDeviceAt = html.indexOf('id="confirmDevicePassword"');
-  if (currentDeviceAt < 0 || newDeviceAt < 0 || confirmDeviceAt < 0 ||
-      !(currentDeviceAt < newDeviceAt && newDeviceAt < confirmDeviceAt)) {
-    throw new Error('Device password form must ask for the current password before a new one');
+  if (currentDeviceAt >= 0) {
+    throw new Error('Device password form must not ask for the current password after admin unlock');
   }
-  if (!js.includes('currentPassword:$(\'currentDevicePassword\').value') ||
-      !network.includes('"currentPassword"') ||
+  if (newDeviceAt < 0 || confirmDeviceAt < 0 || !(newDeviceAt < confirmDeviceAt)) {
+    throw new Error('Device password form must ask for the new password and confirmation');
+  }
+  if (!js.includes("newPassword:$('newDevicePassword').value") ||
+      !network.includes('"newPassword"') ||
+      network.includes('"currentPassword"') ||
       !network.includes('DEVICE_PASSWORD_INVALID') ||
-      !network.includes('secretsMatch(currentPassword, expected)')) {
-    throw new Error('Web device password change must verify the current password');
+      !network.includes('requireAdminUnlock(request)')) {
+    throw new Error('Web device password change must require admin unlock, not the current password');
+  }
+  if (!html.includes('id="adminLockPanel"') ||
+      !html.includes('id="adminUnlockPassword"') ||
+      !html.includes('id="adminUnlockButton"') ||
+      !html.includes('Unlock administration') ||
+      !html.includes('id="adminControls"') ||
+      !js.includes('/api/v1/admin/unlock') ||
+      !js.includes("closest('#adminLockPanel')") ||
+      !network.includes('/api/v1/admin/unlock') ||
+      !network.includes('ADMIN_LOCKED') ||
+      !network.includes('ADMIN_UNLOCK_COOLDOWN') ||
+      !network.includes('ADMIN_UNLOCK_IDLE_MS') ||
+      !network.includes('grantAdminUnlock') ||
+      !network.includes('secretsMatch(password, expected)') ||
+      js.includes('loginHandler') ||
+      network.includes('ShotStopperNetwork::loginHandler')) {
+    throw new Error('Admin must gate behind a temporary device-password unlock on firmware and UI');
+  }
+  {
+    const factoryFnStart = network.indexOf('ShotStopperNetwork::factoryResetHandler');
+    const passwordFnStart = network.indexOf('ShotStopperNetwork::devicePasswordHandler');
+    const restartFnStart = network.indexOf('ShotStopperNetwork::restartHandler');
+    const bleFnStart = network.indexOf('ShotStopperNetwork::bleCompatHandler');
+    const timeFnStart = network.indexOf('ShotStopperNetwork::timeSyncHandler');
+    for (const [label, start] of [
+      ['factory-reset', factoryFnStart],
+      ['device-password', passwordFnStart],
+      ['restart', restartFnStart],
+      ['ble-compat', bleFnStart],
+      ['time-sync', timeFnStart],
+      ['wifi-scan-start', network.indexOf('ShotStopperNetwork::wifiScanStartHandler')],
+      ['wifi-scan-status', network.indexOf('ShotStopperNetwork::wifiScanStatusHandler')]
+    ]) {
+      if (start < 0 ||
+          !network.slice(start, start + 500).includes('requireAdminUnlock(request)')) {
+        throw new Error(label + ' must require admin unlock');
+      }
+    }
+    const networkFn = network.slice(
+        network.indexOf('ShotStopperNetwork::networkHandler'),
+        network.indexOf('ShotStopperNetwork::wifiScanStartHandler'));
+    if (!networkFn.includes('requireAdminUnlock(request)') ||
+        !networkFn.includes('strcmp(action, "confirm") != 0')) {
+      throw new Error('Network save/forget must require admin unlock; confirm may stay ungated');
+    }
+  }
+  if (!statusFormat.includes('"adminUnlocked":%s') &&
+      !statusFormat.includes('\\"adminUnlocked\\":%s')) {
+    throw new Error('status/admin must report adminUnlocked');
+  }
+  if (!statusFormat.includes('!adminUnlocked') ||
+      !js.includes('s.adminUnlocked')) {
+    throw new Error('Locked admin status must omit Wi-Fi/BLE/OTA bodies until unlocked');
   }
   if (!network.includes('serviceOtaRollback(now)') ||
       !networkHeader.includes('OTA_CONFIRM_MIN_UPTIME_MS') ||
@@ -2933,12 +2990,21 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
     throw new Error('Admin OTA panel must sit between Restart and Factory reset');
   }
   for (const id of [
-    'otaStatus', 'otaRunning', 'otaStaged', 'otaToken', 'otaFile',
+    'otaStatus', 'otaRunning', 'otaStaged', 'otaFile',
     'otaProgress', 'otaVerifyButton', 'otaFlashButton', 'otaDiscardButton'
   ]) {
     if (!html.includes(`id="${id}"`)) {
       throw new Error(`Admin OTA panel is missing control: ${id}`);
     }
+  }
+  if (html.includes('id="otaToken"') || js.includes('otaGuardToken') ||
+      js.includes('X-OTA-Token')) {
+    throw new Error('Web UI OTA must not collect a separate token after admin unlock');
+  }
+  if (!js.includes('xhr.setRequestHeader(WEB_UI_CLIENT_HEADER,webUiClientId)') ||
+      !network.includes('adminUnlockAllowed(request)') ||
+      !network.includes('otaTokensMatch(token, expected)')) {
+    throw new Error('OTA must accept an admin unlock session or X-OTA-Token');
   }
   // Two steps: verify writes the spare slot, a separate button flashes it.
   if (!js.includes("otaSend('/api/v1/ota',file") ||
@@ -2946,9 +3012,6 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
       !js.includes("otaSend('/api/v1/ota/abort'") ||
       !js.includes("$('otaFlashButton').disabled=!ready||!staged")) {
     throw new Error('Web UI must upload/verify and flash as two separate steps');
-  }
-  if (!js.includes('X-OTA-Token')) {
-    throw new Error('Web UI must send the OTA token header');
   }
   if (!js.includes('!otaBusy&&Date.now()-lastStatusAt')) {
     throw new Error('Web UI must pause status polling during a firmware transfer');

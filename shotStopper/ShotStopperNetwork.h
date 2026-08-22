@@ -182,6 +182,11 @@ class ShotStopperNetwork {
   static constexpr uint32_t HTTP_RETRY_MS = 1000;
   static constexpr uint32_t HEALTH_TELEMETRY_INTERVAL_MS = 5000;
   static constexpr uint8_t COMMAND_MAX_ATTEMPTS = 5;
+  // Admin unlock is RAM-only and tied to the exclusive WebUI claim. Sliding
+  // idle matches WebUI inactivity and the OTA upload budget.
+  static constexpr uint32_t ADMIN_UNLOCK_IDLE_MS = 15 * 60 * 1000;
+  static constexpr uint32_t ADMIN_UNLOCK_COOLDOWN_MS = 30000;
+  static constexpr uint8_t ADMIN_UNLOCK_FAILURES_BEFORE_COOLDOWN = 5;
   // Machine config JSON is ~1 KiB and grows with NTP custom / bool false
   // literals; keep headroom above the wire payload.
   static constexpr size_t REQUEST_BODY_CAPACITY = 2048;
@@ -200,6 +205,11 @@ class ShotStopperNetwork {
   portMUX_TYPE dataMux_ = portMUX_INITIALIZER_UNLOCKED;
   char activeWebUiClientId_[WEB_UI_CLIENT_ID_CAPACITY] = {};
   bool webUiOverrideActive_ = false;
+  char adminUnlockClientId_[WEB_UI_CLIENT_ID_CAPACITY] = {};
+  bool adminUnlocked_ = false;
+  uint32_t adminUnlockUntilMs_ = 0;
+  uint32_t adminUnlockCooldownUntilMs_ = 0;
+  uint8_t adminUnlockFailures_ = 0;
   NetworkStatusSnapshot status_ = {};
   bool startupComplete_ = false;
   // Latched for process lifetime after first STA CONNECTED. SoftAP auto-raise
@@ -323,6 +333,7 @@ class ShotStopperNetwork {
   static esp_err_t notFoundHandler(httpd_req_t *request, httpd_err_code_t error);
   static esp_err_t claimHandler(httpd_req_t *request);
   static esp_err_t unlockHandler(httpd_req_t *request);
+  static esp_err_t adminUnlockHandler(httpd_req_t *request);
   static esp_err_t ownedApiHandler(httpd_req_t *request);
   static esp_err_t statusHandler(httpd_req_t *request);
   static esp_err_t logHandler(httpd_req_t *request);
@@ -379,6 +390,11 @@ class ShotStopperNetwork {
   esp_err_t lockJsonBody(httpd_req_t *request, const char *invalidMessage);
   esp_err_t workBufBusy(httpd_req_t *request);
   bool requireActiveWebUiClient(httpd_req_t *request);
+  void clearAdminUnlock();
+  void grantAdminUnlock(const char *clientId, uint32_t now);
+  void touchAdminUnlock();
+  bool adminUnlockAllowed(httpd_req_t *request);
+  bool requireAdminUnlock(httpd_req_t *request);
   bool webUiOverrideAllowed(httpd_req_t *request);
   bool webUiConfigurationAllowed(httpd_req_t *request,
                                  const ControlStatusSnapshot &status);

@@ -200,9 +200,10 @@ is available from **Admin → Firmware update** (*Upload and verify*, then
 *Flash and restart*). The controller IP is on the Admin page. In SoftAP mode
 it is always `192.168.4.1`.
 
-OTA uses the device password as `X-OTA-Token`. A controller still on the
-factory password **`Micra1234`** cannot be updated over the air. Change it
-first from **Admin → Device password**.
+OTA uses the device password as `X-OTA-Token` for the command-line client.
+The Web UI authorises the same update after you unlock **Admin**. A controller
+still on the factory password **`Micra1234`** cannot be updated over the air.
+Change it first from **Admin → Device password**.
 
 The running firmware is never overwritten; the upload goes to the inactive
 slot. Settings in saved storage survive. If an update fails, the device keeps

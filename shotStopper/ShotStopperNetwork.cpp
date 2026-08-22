@@ -2961,6 +2961,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/network/scan", HTTP_GET, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/network/scan", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/device/password", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/admin/unlock", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/admin/ble-compat", HTTP_PUT, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/ota", HTTP_GET, otaStatusHandler) &&
       registerHandler(server_, "/api/v1/ota", HTTP_POST, otaUploadHandler) &&
@@ -3068,6 +3069,7 @@ esp_err_t ShotStopperNetwork::claimHandler(httpd_req_t *request) {
   memcpy(self.activeWebUiClientId_, clientId, sizeof(clientId));
   self.webUiOverrideActive_ = false;
   portEXIT_CRITICAL(&self.dataMux_);
+  self.clearAdminUnlock();
   memset(clientId, 0, sizeof(clientId));
   return sendJson(request, STATUS_OK, "{\"active\":true}");
 }
@@ -3138,6 +3140,143 @@ void ShotStopperNetwork::clearWebUiOverrideIfSafe(
   portEXIT_CRITICAL(&dataMux_);
 }
 
+void ShotStopperNetwork::clearAdminUnlock() {
+  portENTER_CRITICAL(&dataMux_);
+  adminUnlocked_ = false;
+  adminUnlockClientId_[0] = '\0';
+  adminUnlockUntilMs_ = 0;
+  portEXIT_CRITICAL(&dataMux_);
+}
+
+void ShotStopperNetwork::grantAdminUnlock(const char *clientId, uint32_t now) {
+  if (clientId == nullptr) {
+    return;
+  }
+  portENTER_CRITICAL(&dataMux_);
+  memcpy(adminUnlockClientId_, clientId, sizeof(adminUnlockClientId_));
+  adminUnlocked_ = true;
+  adminUnlockUntilMs_ = now + ADMIN_UNLOCK_IDLE_MS;
+  adminUnlockFailures_ = 0;
+  adminUnlockCooldownUntilMs_ = 0;
+  portEXIT_CRITICAL(&dataMux_);
+}
+
+void ShotStopperNetwork::touchAdminUnlock() {
+  const uint32_t now = millis();
+  portENTER_CRITICAL(&dataMux_);
+  if (adminUnlocked_) {
+    adminUnlockUntilMs_ = now + ADMIN_UNLOCK_IDLE_MS;
+  }
+  portEXIT_CRITICAL(&dataMux_);
+}
+
+bool ShotStopperNetwork::adminUnlockAllowed(httpd_req_t *request) {
+  char clientId[WEB_UI_CLIENT_ID_CAPACITY] = {};
+  if (!readWebUiClientId(request, clientId, sizeof(clientId))) {
+    return false;
+  }
+  const uint32_t now = millis();
+  bool allowed = false;
+  portENTER_CRITICAL(&dataMux_);
+  if (adminUnlocked_ && adminUnlockClientId_[0] != '\0' &&
+      strcmp(adminUnlockClientId_, clientId) == 0) {
+    if (static_cast<int32_t>(now - adminUnlockUntilMs_) >= 0) {
+      adminUnlocked_ = false;
+      adminUnlockClientId_[0] = '\0';
+      adminUnlockUntilMs_ = 0;
+    } else {
+      allowed = true;
+    }
+  }
+  portEXIT_CRITICAL(&dataMux_);
+  memset(clientId, 0, sizeof(clientId));
+  return allowed;
+}
+
+bool ShotStopperNetwork::requireAdminUnlock(httpd_req_t *request) {
+  if (!adminUnlockAllowed(request)) {
+    sendError(request, STATUS_UNAUTHORIZED, "ADMIN_LOCKED",
+              "Unlock administration with the device password first.");
+    return false;
+  }
+  touchAdminUnlock();
+  return true;
+}
+
+esp_err_t ShotStopperNetwork::adminUnlockHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  const esp_err_t bodyStatus =
+      self.lockJsonBody(request, "A JSON request is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
+  }
+  char password[WIFI_PASSWORD_CAPACITY] = {};
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
+  static const char *const fields[] = {"password"};
+  const bool parsed =
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
+      jsonString(root, "password", password, sizeof(password), false);
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  self.unlockJsonBody();
+  if (!parsed) {
+    memset(password, 0, sizeof(password));
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_DEVICE_PASSWORD",
+                     "password is required.");
+  }
+
+  char clientId[WEB_UI_CLIENT_ID_CAPACITY] = {};
+  if (!readWebUiClientId(request, clientId, sizeof(clientId))) {
+    memset(password, 0, sizeof(password));
+    return sendError(request, STATUS_BAD_REQUEST, "UI_CLIENT_INVALID",
+                     "X-WebUI-Client must be a 16-24 character lowercase hex id.");
+  }
+
+  const uint32_t now = millis();
+  bool coolingDown = false;
+  portENTER_CRITICAL(&self.dataMux_);
+  coolingDown = self.adminUnlockCooldownUntilMs_ != 0 &&
+                static_cast<int32_t>(now - self.adminUnlockCooldownUntilMs_) <
+                    0;
+  portEXIT_CRITICAL(&self.dataMux_);
+  if (coolingDown) {
+    memset(password, 0, sizeof(password));
+    memset(clientId, 0, sizeof(clientId));
+    return sendError(request, STATUS_TOO_MANY, "ADMIN_UNLOCK_COOLDOWN",
+                     "Too many failed unlock attempts. Try again shortly.");
+  }
+
+  char expected[WIFI_PASSWORD_CAPACITY] = {};
+  portENTER_CRITICAL(&self.dataMux_);
+  memcpy(expected, self.settings_.devicePassword, sizeof(expected));
+  portEXIT_CRITICAL(&self.dataMux_);
+  const bool matches = secretsMatch(password, expected);
+  memset(password, 0, sizeof(password));
+  memset(expected, 0, sizeof(expected));
+  if (!matches) {
+    uint8_t failures = 0;
+    portENTER_CRITICAL(&self.dataMux_);
+    if (self.adminUnlockFailures_ < 255) {
+      self.adminUnlockFailures_ =
+          static_cast<uint8_t>(self.adminUnlockFailures_ + 1);
+    }
+    failures = self.adminUnlockFailures_;
+    if (failures >= ADMIN_UNLOCK_FAILURES_BEFORE_COOLDOWN) {
+      self.adminUnlockCooldownUntilMs_ = now + ADMIN_UNLOCK_COOLDOWN_MS;
+      self.adminUnlockFailures_ = 0;
+    }
+    portEXIT_CRITICAL(&self.dataMux_);
+    memset(clientId, 0, sizeof(clientId));
+    return sendError(request, STATUS_UNAUTHORIZED, "DEVICE_PASSWORD_INVALID",
+                     "Device password is incorrect.");
+  }
+
+  self.grantAdminUnlock(clientId, now);
+  memset(clientId, 0, sizeof(clientId));
+  return sendJson(request, STATUS_OK, "{\"unlocked\":true}");
+}
+
 bool ShotStopperNetwork::requireActiveWebUiClient(httpd_req_t *request) {
   char clientId[WEB_UI_CLIENT_ID_CAPACITY] = {};
   if (!readWebUiClientId(request, clientId, sizeof(clientId))) {
@@ -3193,6 +3332,7 @@ esp_err_t ShotStopperNetwork::ownedApiHandler(httpd_req_t *request) {
   }
   if (apiUriMatches(request->uri, "/api/v1/network")) return networkHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/device/password")) return devicePasswordHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/admin/unlock")) return adminUnlockHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/admin/ble-compat")) return bleCompatHandler(request);
   return sendError(request, STATUS_NOT_FOUND, "NOT_FOUND", "Unknown API route.");
 }
@@ -3463,7 +3603,8 @@ const char *ShotStopperNetwork::wifiScanStateName(WifiScanState state) {
 
 esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  // The WebUI and every API route are deliberately public.
+  // Home/settings/diagnostic stay claim-gated only. Admin mutations and the
+  // full admin status body require a temporary device-password unlock.
   self.requestPendingNetworkConfirm();
 
   const StatusPage page = parseStatusPage(request->uri);
@@ -3482,6 +3623,13 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   self.clearWebUiOverrideIfSafe(control);
   const bool configMutable = controlAllowsConfiguration(control);
   const bool webUiOverrideActive = self.webUiOverrideAllowed(request);
+  bool adminUnlocked = false;
+  if (page == StatusPage::Admin) {
+    adminUnlocked = self.adminUnlockAllowed(request);
+    if (adminUnlocked) {
+      self.touchAdminUnlock();
+    }
+  }
   const NetworkStatusSnapshot network = self.snapshot();
   const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(millis());
 
@@ -3591,7 +3739,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.config.revision),
         logLevelName(static_cast<LogLevel>(control.config.ringRetainLogLevel)));
   }
-  if (ok && page == StatusPage::Admin) {
+  if (ok && page == StatusPage::Admin && adminUnlocked) {
     ok = statusJsonAppend(
         &used,
         ",\"timezoneOffsetMinutes\":%d,\"ntpServerPreset\":\"%s\","
@@ -3868,48 +4016,59 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.scaleMacCachePauseRemainingMs),
         g_work->historyJson, g_work->presetsJson);
   } else if (ok && page == StatusPage::Admin) {
-    // Admin page: Wi-Fi/AP status + STA address form hydration only.
-    // Diagnostics metrics live on status/diagnostic.
-    ok = statusJsonAppend(
-        &used,
-        ",\"network\":{\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
-        "\"wifiConfigured\":%s,\"ssid\":\"%s\",\"open\":%s,"
-        "\"staState\":\"%s\",\"channel\":%s,\"staIp\":\"%s\",\"ipMode\":\"%s\","
-        "\"configState\":\"%s\",\"confirmRemainingMs\":%lu,"
-        "\"rssi\":%s,\"signalQualityPct\":%s,"
-        "\"configuredIp\":\"%s\",\"configuredNetmask\":\"%s\","
-        "\"configuredGateway\":\"%s\",\"configuredDns1\":\"%s\","
-        "\"configuredDns2\":\"%s\"},"
-        "\"bleCompanion\":{\"enabled\":%s,\"active\":%s,"
-        "\"restartRequired\":%s,\"stackReady\":%s,"
-        "\"advertising\":%s,\"connected\":%s,\"protocolVersion\":%u,"
-        "\"acceptedWrites\":%lu,\"rejectedWrites\":%lu,"
-        "\"lastReject\":\"%s\"}",
-        network.apActive ? "true" : "false", network.apIp,
-        static_cast<unsigned>(network.apClients),
-        network.wifiConfigured ? "true" : "false", safeStaSsid,
-        network.staOpen ? "true" : "false", staStateName(network.staState),
-        staChannelJson, network.staIp, staIpModeName(network.staIpMode),
-        staConfigStateName(network.staConfigState),
-        static_cast<unsigned long>(network.confirmRemainingMs), staRssiJson,
-        staSignalQualityJson, network.configuredIp, network.configuredNetmask,
-        network.configuredGateway, network.configuredDns1,
-        network.configuredDns2,
-        control.bleCompanionEnabled ? "true" : "false",
-        control.bleCompanionActive ? "true" : "false",
-        control.bleCompanionRestartRequired ? "true" : "false",
-        control.bleCompanionStackReady ? "true" : "false",
-        control.bleCompanionAdvertising ? "true" : "false",
-        control.bleCompanionConnected ? "true" : "false",
-        static_cast<unsigned>(control.bleCompanionProtocolVersion),
-        static_cast<unsigned long>(control.bleCompanionAcceptedWrites),
-        static_cast<unsigned long>(control.bleCompanionRejectedWrites),
-        bleCompanionRejectReasonName(static_cast<BleCompanionRejectReason>(
-            control.bleCompanionLastReject)));
-    if (ok) {
-      self.buildOtaJson(g_work->otaJson, NetworkWorkBuf::kOtaJson, control);
-      ok = statusJsonAppend(&used, ",\"boardArch\":\"%s\",\"ota\":%s",
-                            FW_BOARD_ARCH_STRING, g_work->otaJson);
+    // Locked admin: confirm-window hint only. Unlocked: Wi-Fi/AP + BLE + OTA.
+    ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s",
+                          adminUnlocked ? "true" : "false");
+    if (ok && !adminUnlocked) {
+      ok = statusJsonAppend(
+          &used,
+          ",\"network\":{\"configState\":\"%s\",\"confirmRemainingMs\":%lu}",
+          staConfigStateName(network.staConfigState),
+          static_cast<unsigned long>(network.confirmRemainingMs));
+    } else if (ok) {
+      // Admin page: Wi-Fi/AP status + STA address form hydration only.
+      // Diagnostics metrics live on status/diagnostic.
+      ok = statusJsonAppend(
+          &used,
+          ",\"network\":{\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
+          "\"wifiConfigured\":%s,\"ssid\":\"%s\",\"open\":%s,"
+          "\"staState\":\"%s\",\"channel\":%s,\"staIp\":\"%s\",\"ipMode\":\"%s\","
+          "\"configState\":\"%s\",\"confirmRemainingMs\":%lu,"
+          "\"rssi\":%s,\"signalQualityPct\":%s,"
+          "\"configuredIp\":\"%s\",\"configuredNetmask\":\"%s\","
+          "\"configuredGateway\":\"%s\",\"configuredDns1\":\"%s\","
+          "\"configuredDns2\":\"%s\"},"
+          "\"bleCompanion\":{\"enabled\":%s,\"active\":%s,"
+          "\"restartRequired\":%s,\"stackReady\":%s,"
+          "\"advertising\":%s,\"connected\":%s,\"protocolVersion\":%u,"
+          "\"acceptedWrites\":%lu,\"rejectedWrites\":%lu,"
+          "\"lastReject\":\"%s\"}",
+          network.apActive ? "true" : "false", network.apIp,
+          static_cast<unsigned>(network.apClients),
+          network.wifiConfigured ? "true" : "false", safeStaSsid,
+          network.staOpen ? "true" : "false", staStateName(network.staState),
+          staChannelJson, network.staIp, staIpModeName(network.staIpMode),
+          staConfigStateName(network.staConfigState),
+          static_cast<unsigned long>(network.confirmRemainingMs), staRssiJson,
+          staSignalQualityJson, network.configuredIp, network.configuredNetmask,
+          network.configuredGateway, network.configuredDns1,
+          network.configuredDns2,
+          control.bleCompanionEnabled ? "true" : "false",
+          control.bleCompanionActive ? "true" : "false",
+          control.bleCompanionRestartRequired ? "true" : "false",
+          control.bleCompanionStackReady ? "true" : "false",
+          control.bleCompanionAdvertising ? "true" : "false",
+          control.bleCompanionConnected ? "true" : "false",
+          static_cast<unsigned>(control.bleCompanionProtocolVersion),
+          static_cast<unsigned long>(control.bleCompanionAcceptedWrites),
+          static_cast<unsigned long>(control.bleCompanionRejectedWrites),
+          bleCompanionRejectReasonName(static_cast<BleCompanionRejectReason>(
+              control.bleCompanionLastReject)));
+      if (ok) {
+        self.buildOtaJson(g_work->otaJson, NetworkWorkBuf::kOtaJson, control);
+        ok = statusJsonAppend(&used, ",\"boardArch\":\"%s\",\"ota\":%s",
+                              FW_BOARD_ARCH_STRING, g_work->otaJson);
+      }
     }
   } else if (ok && page == StatusPage::Diagnostic) {
     // Lean diagnostic snapshot: metrics + log controls only (no STA address
@@ -4383,6 +4542,9 @@ esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::timeSyncHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
+  if (!self.requireAdminUnlock(request)) {
+    return ESP_OK;
+  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!self.webUiConfigurationAllowed(request, status)) {
@@ -4409,6 +4571,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
     return bodyStatus;
   }
   cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
+  const bool dateTimePatch =
+      jsonFieldPresent(root, "timezoneOffsetMinutes") ||
+      jsonFieldPresent(root, "ntpServerPreset") ||
+      jsonFieldPresent(root, "ntpServerCustom");
   // Patch: seed live effective config; only present keys overwrite.
   RuntimeConfig candidate = status.config;
   bool brewByWeightPresent = false;
@@ -4693,6 +4859,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
     memset(customNtp, 0, sizeof(customNtp));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
                      parseError);
+  }
+  if (dateTimePatch && !self.requireAdminUnlock(request)) {
+    memset(customNtp, 0, sizeof(customNtp));
+    return ESP_OK;
   }
   if (baseRevisionPresent && baseRevision != status.config.revision) {
     memset(customNtp, 0, sizeof(customNtp));
@@ -5096,6 +5266,9 @@ esp_err_t ShotStopperNetwork::stopHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::restartHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
+  if (!self.requireAdminUnlock(request)) {
+    return ESP_OK;
+  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!self.webUiConfigurationAllowed(request, status)) {
@@ -5116,6 +5289,9 @@ esp_err_t ShotStopperNetwork::restartHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::factoryResetHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
+  if (!self.requireAdminUnlock(request)) {
+    return ESP_OK;
+  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!self.webUiConfigurationAllowed(request, status)) {
@@ -5181,6 +5357,16 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
   const char *networkError = nullptr;
   bool parsed = root != nullptr &&
                 jsonString(root, "action", action, sizeof(action), false);
+  if (parsed && strcmp(action, "confirm") != 0) {
+    if (!self.requireAdminUnlock(request)) {
+      if (root != nullptr) {
+        cJSON_Delete(root);
+      }
+      self.unlockJsonBody();
+      memset(command.password, 0, sizeof(command.password));
+      return ESP_OK;
+    }
+  }
   if (parsed && strcmp(action, "confirm") == 0) {
     parsed = jsonHasOnlyUniqueFields(root, confirmFields, 1);
     if (!parsed) {
@@ -5338,6 +5524,9 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::wifiScanStartHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
+  if (!self.requireAdminUnlock(request)) {
+    return ESP_OK;
+  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!self.webUiConfigurationAllowed(request, status)) {
@@ -5365,6 +5554,9 @@ esp_err_t ShotStopperNetwork::wifiScanStartHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::wifiScanStatusHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
+  if (!self.requireAdminUnlock(request)) {
+    return ESP_OK;
+  }
   if (!self.lockWorkBuf()) {
     return self.workBufBusy(request);
   }
@@ -5418,6 +5610,9 @@ esp_err_t ShotStopperNetwork::wifiScanStatusHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::devicePasswordHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
+  if (!self.requireAdminUnlock(request)) {
+    return ESP_OK;
+  }
   ControlStatusSnapshot status;
   self.callbacks_.copyControlStatus(status);
   if (!self.webUiConfigurationAllowed(request, status)) {
@@ -5434,13 +5629,10 @@ esp_err_t ShotStopperNetwork::devicePasswordHandler(httpd_req_t *request) {
   command.type = WebCommandType::CHANGE_DEVICE_PASSWORD;
   command.requestId = self.allocateRequestId();
   command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
-  char currentPassword[WIFI_PASSWORD_CAPACITY] = {};
   cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
-  static const char *const fields[] = {"currentPassword", "newPassword"};
+  static const char *const fields[] = {"newPassword"};
   const bool parsed =
-      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 2) &&
-      jsonString(root, "currentPassword", currentPassword,
-                 sizeof(currentPassword), false) &&
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
       jsonString(root, "newPassword", command.password,
                  sizeof(command.password), false);
   if (root != nullptr) {
@@ -5449,21 +5641,8 @@ esp_err_t ShotStopperNetwork::devicePasswordHandler(httpd_req_t *request) {
   self.unlockJsonBody();
   if (!parsed) {
     memset(command.password, 0, sizeof(command.password));
-    memset(currentPassword, 0, sizeof(currentPassword));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_DEVICE_PASSWORD",
-                     "Current and new password fields are required.");
-  }
-  char expected[WIFI_PASSWORD_CAPACITY] = {};
-  portENTER_CRITICAL(&self.dataMux_);
-  memcpy(expected, self.settings_.devicePassword, sizeof(expected));
-  portEXIT_CRITICAL(&self.dataMux_);
-  const bool currentMatches = secretsMatch(currentPassword, expected);
-  memset(currentPassword, 0, sizeof(currentPassword));
-  memset(expected, 0, sizeof(expected));
-  if (!currentMatches) {
-    memset(command.password, 0, sizeof(command.password));
-    return sendError(request, STATUS_UNAUTHORIZED, "DEVICE_PASSWORD_INVALID",
-                     "Current password is incorrect.");
+                     "New password is required.");
   }
   if (!validDevicePassword(command.password)) {
     memset(command.password, 0, sizeof(command.password));
@@ -5486,6 +5665,9 @@ esp_err_t ShotStopperNetwork::devicePasswordHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::bleCompatHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
+  if (!self.requireAdminUnlock(request)) {
+    return ESP_OK;
+  }
   const esp_err_t bodyStatus =
       self.lockJsonBody(request, "A JSON request is required.");
   if (bodyStatus != ESP_OK) {
@@ -5627,21 +5809,37 @@ bool ShotStopperNetwork::authorizeOtaRequest(httpd_req_t *request) {
   char token[WIFI_PASSWORD_CAPACITY] = {};
   char expected[WIFI_PASSWORD_CAPACITY] = {};
   const size_t length = httpd_req_get_hdr_value_len(request, OTA_TOKEN_HEADER);
-  bool authorized = false;
+  bool tokenAuthorized = false;
+  bool factoryPassword = true;
   if (length > 0 && length + 1 <= sizeof(token) &&
       httpd_req_get_hdr_value_str(request, OTA_TOKEN_HEADER, token,
                                   sizeof(token)) == ESP_OK) {
     portENTER_CRITICAL(&dataMux_);
     memcpy(expected, settings_.devicePassword, sizeof(expected));
     portEXIT_CRITICAL(&dataMux_);
+    factoryPassword = isFactoryDefaultPassword(expected);
     // A controller still on the published factory credential has no secret to
     // authenticate with, so firmware updates stay closed until it is changed.
-    authorized = !isFactoryDefaultPassword(expected) &&
-                 otaTokensMatch(token, expected);
+    tokenAuthorized = !factoryPassword && otaTokensMatch(token, expected);
+  } else {
+    portENTER_CRITICAL(&dataMux_);
+    memcpy(expected, settings_.devicePassword, sizeof(expected));
+    portEXIT_CRITICAL(&dataMux_);
+    factoryPassword = isFactoryDefaultPassword(expected);
   }
   memset(token, 0, sizeof(token));
   memset(expected, 0, sizeof(expected));
-  return authorized;
+  if (factoryPassword) {
+    return false;
+  }
+  if (tokenAuthorized) {
+    return true;
+  }
+  if (adminUnlockAllowed(request)) {
+    touchAdminUnlock();
+    return true;
+  }
+  return false;
 }
 
 void ShotStopperNetwork::buildOtaJson(char *buffer, size_t capacity,
@@ -5744,13 +5942,14 @@ void ShotStopperNetwork::otaTransferProgress(void *context, uint32_t received,
   transfer->network->actionLogf("ota: received %lu/%lu KiB",
                                 static_cast<unsigned long>(received / 1024U),
                                 static_cast<unsigned long>(expected / 1024U));
+  transfer->network->touchAdminUnlock();
 }
 
 esp_err_t ShotStopperNetwork::otaStatusHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   if (!self.authorizeOtaRequest(request)) {
     return sendError(request, STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
-                     "Send the device password in X-OTA-Token.");
+                     "Send the device password in X-OTA-Token, or unlock administration first.");
   }
   ControlStatusSnapshot control;
   self.callbacks_.copyControlStatus(control);
@@ -5773,7 +5972,7 @@ esp_err_t ShotStopperNetwork::otaUploadHandler(httpd_req_t *request) {
   };
   if (!self.authorizeOtaRequest(request)) {
     return rejectUpload(STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
-                        "Send the device password in X-OTA-Token.");
+                        "Send the device password in X-OTA-Token, or unlock administration first.");
   }
   ShotStopperOta &ota = ShotStopperOta::instance();
 
@@ -5842,7 +6041,7 @@ esp_err_t ShotStopperNetwork::otaFlashHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   if (!self.authorizeOtaRequest(request)) {
     return sendError(request, STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
-                     "Send the device password in X-OTA-Token.");
+                     "Send the device password in X-OTA-Token, or unlock administration first.");
   }
   ShotStopperOta &ota = ShotStopperOta::instance();
   ControlStatusSnapshot control;
@@ -5886,7 +6085,7 @@ esp_err_t ShotStopperNetwork::otaAbortHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   if (!self.authorizeOtaRequest(request)) {
     return sendError(request, STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
-                     "Send the device password in X-OTA-Token.");
+                     "Send the device password in X-OTA-Token, or unlock administration first.");
   }
   ShotStopperOta::instance().discard();
   ControlStatusSnapshot control;

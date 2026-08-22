@@ -7,8 +7,12 @@ your network.
 ## Requirements
 
 - Change the device password away from the factory default
-  (`Micra1234`). That password is the **OTA token**; scripts never store it.
-- Pass the token every run (`--token` or `SHOTSTOPPER_OTA_TOKEN`).
+  (`Micra1234`). That password is the **OTA token** for the command-line
+  scripts; they never store it.
+- Pass the token every CLI run (`--token` or `SHOTSTOPPER_OTA_TOKEN`).
+- From **Admin → Firmware update**, unlock administration first. The Web UI
+  does not ask for the token again; the factory default still cannot
+  authorise an update.
 - Image must match the board architecture and must not be older than the
   running version (downgrades are refused).
 

@@ -3,8 +3,10 @@
 How the controller joins your home network (STA) and when it falls back to
 its own access point. Details for the fallback AP itself are in [AP](ap.md).
 
-The Web UI is reachable from any client on the same network. Ownership is
-exclusive claim (`Reload`), not a login password. Use a trusted network.
+The Web UI is reachable from any client on the same network. Home and
+Settings use exclusive claim (`Reload`). **Admin** is additionally locked
+behind the device password (temporary unlock on that window). Use a trusted
+network.
 
 ## When it applies
 

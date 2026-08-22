@@ -137,8 +137,9 @@ stop offset are per preset. Load, save, duplicate, or delete from
 
 ### OTA
 
-Update firmware over Wi-Fi without USB. The device password is the OTA token
-(change it from the factory default first). Dual-slot update with rollback if
+Update firmware over Wi-Fi without USB. CLI uses the device password as
+`X-OTA-Token`; the Web UI uses the Admin unlock (change the password from
+the factory default first). Dual-slot update with rollback if
 the new image fails to serve the Web UI. See [OTA](docs/features/ota.md) and
 [Build scripts](docs/SCRIPTS.md).
 
@@ -166,10 +167,12 @@ need to change them after first setup.
 
 ## Admin
 
+The Admin page is locked until you enter the device password (**Unlock administration**). The unlock is temporary (15 minutes of activity on that window). USB serial does not ask for the password.
+
 | Group | What it covers |
 | --- | --- |
 | **[Wi-Fi](docs/settings/wifi.md)** | Join your home network (STA), DHCP or static IP, first-boot fallback. |
-| **Device password** | Single firmware password: SoftAP WPA2, OTA, and future uses. Changed from **Admin → Device password**. |
+| **Device password** | Single firmware password: SoftAP WPA2, OTA, and Admin unlock. Changed from **Admin → Device password** after unlocking. |
 | **[AP](docs/settings/ap.md)** | Fallback access point `MicraShotStopperAP`. Uses the device password. |
 | **[Factory reset](docs/settings/factory-reset.md)** | Erase settings, Wi-Fi, calibration, and shot history. |
 

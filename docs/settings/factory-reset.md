@@ -18,7 +18,7 @@ keeps CN9 open.
 
 | Path | How | Notes |
 | --- | --- | --- |
-| **Web UI** | Admin → Factory reset, confirm `ERASE_ALL_SETTINGS` | Authenticated. Device restarts. |
+| **Web UI** | Admin → unlock with the device password → Factory reset, confirm `ERASE_ALL_SETTINGS` | Device password required. Device restarts. |
 | **USB serial** | `FACTORY_RESET` | Same erase. See [USB serial CLI](../SERIAL_CLI.md). |
 | **Paddle gesture** | Power on with paddle ON, then five `OFF→ON` cycles | Last-resort. See [Emergency recovery](../EMERGENCY_RECOVERY.md). |
 

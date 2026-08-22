@@ -10,6 +10,9 @@ export function init(){
   
   R.ensureBleCompanionPanel();
   $('bleCompanionEnabled').onchange=R.setBleCompanionEnabled;
+  const unlock=()=>{const pw=$('adminUnlockPassword').value;if(!pw){R.showFieldError('adminUnlockPassword','Device password is required.');return}R.clearFieldErrors();R.api('/api/v1/admin/unlock',{method:'POST',body:R.body({password:pw})}).then(()=>{$('adminUnlockPassword').value='';return R.refreshStatus()}).catch(e=>R.message(e&&e.message?e.message:'Unlock failed.','error'))};
+  $('adminUnlockButton').onclick=unlock;
+  $('adminUnlockPassword').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();unlock()}});
   $('restartButton').onclick=()=>{if(confirm('Restart the controller?'))R.command('/api/v1/control/restart')};
   $('scanNetworkButton').onclick=R.startWifiScan;
   $('staNetwork').onchange=R.selectDetectedNetwork;
@@ -23,7 +26,7 @@ export function init(){
   $('syncTimeButton').onclick=()=>R.command('/api/v1/time/sync');
   $('saveNetworkButton').onclick=()=>{const err=R.validateNetworkClient();if(err){R.showFieldError(err.id,err.msg);return}R.clearFieldErrors();const staticMode=$('staIpMode').value==='static';if(!confirm(staticMode?'Save static IP and restart? Then open that IP within 3 min.':'Save Wi-Fi and restart? Open this UI within 3 min to confirm.'))return;R.command('/api/v1/network',R.networkSavePayload()).finally(()=>{$('staPassword').value='';R.resetNetworkAddressLoaded()})};
   $('forgetNetworkButton').onclick=()=>{if(confirm('Forget the STA network and restart?'))R.command('/api/v1/network',{action:'forget'}).finally(()=>R.resetNetworkAddressLoaded())};
-  $('changeDevicePasswordButton').onclick=()=>{const err=R.validateDevicePasswordClient();if(err){R.showFieldError(err.id,err.msg);return}R.clearFieldErrors();R.command('/api/v1/device/password',{currentPassword:$('currentDevicePassword').value,newPassword:$('newDevicePassword').value}).finally(()=>{['currentDevicePassword','newDevicePassword','confirmDevicePassword'].forEach(id=>$(id).value='')})};
+  $('changeDevicePasswordButton').onclick=()=>{const err=R.validateDevicePasswordClient();if(err){R.showFieldError(err.id,err.msg);return}R.clearFieldErrors();R.command('/api/v1/device/password',{newPassword:$('newDevicePassword').value}).finally(()=>{['newDevicePassword','confirmDevicePassword'].forEach(id=>$(id).value='')})};
   $('otaVerifyButton').onclick=R.otaUpload;
   $('otaFlashButton').onclick=R.otaFlash;
   $('otaDiscardButton').onclick=R.otaDiscard;
