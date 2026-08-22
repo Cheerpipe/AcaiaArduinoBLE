@@ -424,8 +424,8 @@ inline void serialCliPrintHelp() {
       "Micra1234; USB does not require the current password)  e.g. "
       "SET_DEVICE_PASSWORD password1234");
   Serial.println(
-      "SET_WIFI <ssid> [password]  save STA Wi-Fi (DHCP) and restart; omit "
-      "password if open; quote spaces  e.g. SET_WIFI CafeLAN CafePass1");
+      "SET_WIFI <ssid> [password]  save STA Wi-Fi (DHCP), commit, and restart; "
+      "omit password if open; quote spaces  e.g. SET_WIFI CafeLAN CafePass1");
   Serial.println("CLEAR_WIFI  forget STA Wi-Fi only; restart  e.g. CLEAR_WIFI");
   Serial.println("CLEAR_SHOTS  clear shot history  e.g. CLEAR_SHOTS");
   Serial.println(

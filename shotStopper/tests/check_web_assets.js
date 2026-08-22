@@ -1166,6 +1166,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !css.includes('grid-template-columns:subgrid') ||
     !css.includes('#brewModeRow{width:100%') ||
     !css.includes('#brewModeRow{width:auto') ||
+    !css.includes('#brewModeRow .swL{font-size:1.55rem;font-weight:800;line-height:1.05;color:var(--ac);letter-spacing:-.02em}') ||
     !css.includes('.homeGuardGrid .switch{width:4.25rem') ||
     !css.includes('.ruleChartHead{') ||
     !css.includes('.ruleChartHead strong,.ruleChartMode{display:none}') ||
@@ -1807,6 +1808,11 @@ if (!ui.includes('id="staIpMode"') ||
 if (!network.includes('restoreLkgToActive(next)') ||
     !network.includes('startStation(settings, now)')) {
   throw new Error('STA confirm timeout must reassociate last-known-good before SoftAP fallback');
+}
+if (!firmwareCore.includes('command.commitConfirmed = true') ||
+    !network.includes('finalizeSavedStaCredentials(next, command.commitConfirmed)')) {
+  throw new Error(
+      'USB SET_WIFI must commit STA credentials; Web UI / BLE Companion keep the confirm window');
 }
 {
   if (network.includes('ShotStopperNetwork::loginHandler') ||

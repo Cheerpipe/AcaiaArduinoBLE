@@ -1447,6 +1447,8 @@ struct WebCommand {
   char ssid[WIFI_SSID_CAPACITY] = {};
   char password[WIFI_PASSWORD_CAPACITY] = {};
   bool openNetwork = false;
+  // USB SET_WIFI only. Web UI / BLE Companion keep the HTTP confirm window.
+  bool commitConfirmed = false;
   uint8_t staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
   uint8_t staIp[4] = {};
   uint8_t staNetmask[4] = {};

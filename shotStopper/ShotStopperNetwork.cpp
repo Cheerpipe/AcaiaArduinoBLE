@@ -2333,7 +2333,7 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
         log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
         return false;
       }
-      if (next.staConfigured &&
+      if (!command.commitConfirmed && next.staConfigured &&
           next.staConfigState ==
               static_cast<uint8_t>(StaConfigState::CONFIRMED)) {
         copyActiveStaToLkg(next);
@@ -2351,7 +2351,7 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
       memcpy(next.staGateway, command.staGateway, sizeof(next.staGateway));
       memcpy(next.staDns1, command.staDns1, sizeof(next.staDns1));
       memcpy(next.staDns2, command.staDns2, sizeof(next.staDns2));
-      next.staConfigState = static_cast<uint8_t>(StaConfigState::PENDING);
+      finalizeSavedStaCredentials(next, command.commitConfirmed);
       persist = true;
       restartPending_ = true;
       break;

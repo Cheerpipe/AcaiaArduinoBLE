@@ -6324,6 +6324,7 @@ void sc03_set_wifi_queues_save_network() {
   CHECK(strcmp(hostLastForwardedNetworkCommand.ssid, "CafeLAN") == 0);
   CHECK(strcmp(hostLastForwardedNetworkCommand.password, "CafePass1") == 0);
   CHECK(!hostLastForwardedNetworkCommand.openNetwork);
+  CHECK(hostLastForwardedNetworkCommand.commitConfirmed);
 }
 
 void sc04_clear_shots_empties_log() {

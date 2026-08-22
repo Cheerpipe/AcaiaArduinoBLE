@@ -96,7 +96,7 @@ reboot. Automatic SoftAP from boot is still torn down when STA comes up.
 
 | Command | Parameters | Effect |
 | --- | --- | --- |
-| `SET_WIFI` | `<ssid> [password]` | Saves home Wi-Fi and restarts. Omit password if open. Quote spaces. Safety gate |
+| `SET_WIFI` | `<ssid> [password]` | Saves home Wi-Fi (DHCP), **commits** it (no 3-minute Web UI confirm window), and restarts. Omit password if open. Quote spaces. Safety gate |
 | `CLEAR_WIFI` | none | Forgets saved STA only; restarts (safety gate) |
 | `RESET_NETWORK_AP` | none | Forgets STA and restores device password `Micra1234`; restarts (safety gate) |
 

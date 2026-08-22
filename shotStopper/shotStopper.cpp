@@ -5552,6 +5552,7 @@ void dispatchSerialCliRequest(SerialCliRequest &request) {
       copyCString(command.ssid, sizeof(command.ssid), request.arg1);
       copyCString(command.password, sizeof(command.password), request.arg2);
       command.openNetwork = request.openNetwork;
+      command.commitConfirmed = true;
       serialCliQueueIfSafe(command, request.verb);
       memset(request.arg1, 0, sizeof(request.arg1));
       memset(request.arg2, 0, sizeof(request.arg2));

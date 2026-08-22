@@ -143,6 +143,7 @@ small{display:block;color:var(--mu)}
 .homeSwitchGrid .switchRow:not(.swR) .slider:before{display:none}
 .homeSwitchGrid .switchRow:not(.swR) input:disabled+.slider{opacity:1;cursor:wait}
 #brewModeRow{width:100%;max-width:none;margin:0 0 .75rem;padding:0 0 .75rem;border-bottom:1px solid var(--ln);min-height:2.15rem}
+#brewModeRow .swL{font-size:1.55rem;font-weight:800;line-height:1.05;color:var(--ac);letter-spacing:-.02em}
 .homeGuardGrid{display:flex;flex-direction:column;gap:.22rem;width:100%;justify-content:flex-start}
 .homeGuardGrid .switchRow{display:flex;width:100%;max-width:none;align-items:center}
 .homeGuardGrid .swL{padding-right:3ch}

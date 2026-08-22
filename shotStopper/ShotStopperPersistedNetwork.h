@@ -110,6 +110,19 @@ inline void copyActiveStaToLkg(PersistedSettings &settings) {
   memcpy(settings.lkgDns2, settings.staDns2, sizeof(settings.lkgDns2));
 }
 
+// USB SET_WIFI commits immediately (serial is the recovery path). Web UI and
+// BLE Companion stay PENDING until an HTTP confirm, then copy to LKG.
+inline void finalizeSavedStaCredentials(PersistedSettings &settings,
+                                        bool commitConfirmed) {
+  if (commitConfirmed) {
+    settings.staConfigState =
+        static_cast<uint8_t>(StaConfigState::CONFIRMED);
+    copyActiveStaToLkg(settings);
+    return;
+  }
+  settings.staConfigState = static_cast<uint8_t>(StaConfigState::PENDING);
+}
+
 inline bool restoreLkgToActive(PersistedSettings &settings) {
   if (!settings.lkgValid || !validWifiSsid(settings.lkgSsid) ||
       !validWifiPassword(settings.lkgPassword, settings.lkgOpen) ||

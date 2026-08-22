@@ -772,6 +772,34 @@ void p16_static_ip_address_validation() {
         static_cast<uint8_t>(StaConfigState::CONFIRMED));
 }
 
+void p16b_usb_set_wifi_commits_confirmed_lkg() {
+  PersistedSettings settings;
+  CHECK(initializeDefaultSettings(settings));
+  settings.staConfigured = true;
+  strcpy(settings.staSsid, "CafeLAN");
+  strcpy(settings.staPassword, "CafePass1");
+  finalizeSavedStaCredentials(settings, true);
+  CHECK(settings.staConfigState ==
+        static_cast<uint8_t>(StaConfigState::CONFIRMED));
+  CHECK(settings.lkgValid);
+  CHECK(strcmp(settings.lkgSsid, "CafeLAN") == 0);
+  CHECK(strcmp(settings.lkgPassword, "CafePass1") == 0);
+  finalizePersistedSettings(settings);
+  CHECK(validPersistedSettings(settings));
+
+  PersistedSettings pending;
+  CHECK(initializeDefaultSettings(pending));
+  pending.staConfigured = true;
+  strcpy(pending.staSsid, "CafeLAN");
+  strcpy(pending.staPassword, "CafePass1");
+  finalizeSavedStaCredentials(pending, false);
+  CHECK(pending.staConfigState ==
+        static_cast<uint8_t>(StaConfigState::PENDING));
+  CHECK(!pending.lkgValid);
+  finalizePersistedSettings(pending);
+  CHECK(validPersistedSettings(pending));
+}
+
 void p48_ble_companion_defaults_and_dual_slot_round_trip() {
   resetHostPersistence();
   BleCompanionPersistedSettings settings;
@@ -1304,6 +1332,7 @@ const TestCase tests[] = {
     {"P35", p35_invalid_fast_extraction_recipe_keeps_custom},
     {"P38", p38_invalid_slow_extraction_recipe_keeps_custom},
     {"P16", p16_static_ip_address_validation},
+    {"P16B", p16b_usb_set_wifi_commits_confirmed_lkg},
     {"P18", p18_shot_log_keeps_history_when_inactive_slot_write_fails},
     {"P19", p19_shot_log_weight_sentinel_allows_int16_max},
     {"P29", p29_last_shot_persists_and_clears},
