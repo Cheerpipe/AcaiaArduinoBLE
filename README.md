@@ -23,6 +23,11 @@ stopper.
 
 ## Intro
 
+This project is for people who want intelligent, reliable, safe, and advanced
+brew-by-weight without changing the machine’s human-machine interface. No extra
+buttons on the bar. You keep using the Micra with the paddle the same way you
+always have.
+
 This project started from
 [tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/AcaiaArduinoBLE),
 the original ESP32 firmware that stops an extraction by weight over Bluetooth.
@@ -34,9 +39,8 @@ The original project proved that BLE brew-by-weight stop was possible. Micra
 Shot Stopper is now the main application in this repository. The derived scale
 library remains here as a local dependency.
 
-The goal is simple day-to-day use: put the cup down, flip the paddle, walk
-away. Complexity stays in firmware defaults, not in extra screens or buttons
-on the bar.
+The day-to-day goal stays simple: put the cup down, flip the paddle, walk
+away. The intelligence lives in firmware defaults, not in a new control panel.
 
 ## How it works
 

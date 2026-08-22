@@ -181,6 +181,13 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !html.includes('id="buzzerSlowExtendedPulseRate"') ||
     !html.includes('class="buzzerOpt scaleIncapableOpt">Extended shot pulse<select id="buzzerExtendedPulseRate"') ||
     !html.includes('class="buzzerOpt scaleIncapableOpt">Slow extended pulse<select id="buzzerSlowExtendedPulseRate"') ||
+    !css.includes('input[type=text],input[type=password]{-webkit-appearance:none;appearance:none') ||
+    !css.includes('min-height:2.5rem') ||
+    !css.includes('input[type=text],input[type=password]{-webkit-appearance:none;appearance:none;height:2.5rem') ||
+    !css.includes('background-color:var(--bg)') ||
+    css.includes('input[type=text],input[type=password],select{-webkit-appearance:none') ||
+    html.includes('id="staSsid" type="number"') ||
+    html.includes('id="ntpServerCustom" type="number"') ||
     !html.includes('> Scale lost<small class="fieldHint">Echo inverted when the scale disconnects') ||
     html.includes('Scale lost (BBW)') ||
     !html.includes('option value="fast" selected') ||
@@ -282,6 +289,9 @@ if (!network.includes('"firstDropBeep"') ||
     !ui.includes('id="ntpStatus"') ||
     !ui.includes('id="ntpServerPreset"') ||
     !ui.includes('id="ntpServerCustom"') ||
+    !html.includes('id="staSsid" type="text"') ||
+    !html.includes('id="ntpServerCustom" type="text"') ||
+    !html.includes('id="presetRenameInput" type="text"') ||
     !ui.includes('id="syncTimeButton"') ||
     !ui.includes('id="autoRetare"') ||
     !ui.includes('id="fastExtractionGuardEnabled"') ||
@@ -555,7 +565,10 @@ if (!ui.includes('id="shotPanel"') ||
     !css.includes('.shotSpark{') ||
     !ui.includes('function renderShotSpark(') ||
     !css.includes('.shotCard{') ||
-    !css.includes('#diagnosticsPanel .metric,#statusPanel .metric,#scalePanel .metric,.shotCard > *{') ||
+    !css.includes('.metric,.shotCard > *{') ||
+    !css.includes('.metric strong,.shotCard strong{') ||
+    !css.includes('.metric > div,.shotCard > * > div,.swS{') ||
+    css.includes('#diagnosticsPanel .metric,#statusPanel .metric,#scalePanel .metric,.shotCard > *{') ||
     css.includes('#statusPanel .metric::before,#scalePanel .metric::before,.shotCard > *::before{') ||
     css.includes('font-size:1rem;font-weight:700;color:var(--mu)') ||
     !css.includes('.shotCard .shotDur > div,.shotCard .shotActual > div') ||
@@ -583,7 +596,7 @@ if (!ui.includes('id="shotPanel"') ||
     !network.includes('shotType') ||
     !network.includes('scaleProtocol') ||
     !network.includes('safeScaleProtocol') ||
-    !ui.includes('remoteReady&&relayStartReady&&(canControl||webShot)') ||
+    !ui.includes('remoteReady&&relayStartReady&&canControl') ||
     !ui.includes('Remote CN9 disabled by policy') ||
     !network.includes('\\"remoteControlEnabled\\"') ||
     !network.includes('\\"lastCommand\\"') ||
@@ -919,6 +932,10 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('id="presetDeleteBtn"') ||
     !ui.includes('id="presetRenameDialog"') ||
     !ui.includes('id="homePresetCards"') ||
+    !html.includes('id="homePresetLabel"') ||
+    !html.includes('>Presets</p>') ||
+    html.indexOf('id="homePresetLabel"') > html.indexOf('id="homePresetCards"') ||
+    html.indexOf('id="homePresetBlock"') > html.indexOf('id="homePresetLabel"') ||
     !ui.includes('id="homeBrewByWeight"') ||
     !ui.includes('id="quickSettingsPanel"') ||
     !html.includes('class="homeSwitchGrid"') ||
@@ -1041,20 +1058,19 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !css.includes('.switchRow.switchPending') ||
     !css.includes('.homeSwitchGrid .switchRow:not(.swR) .slider') ||
     !css.includes('.homeSwitchGrid .switchRow:not(.swR) .slider:before{display:none}') ||
-    !css.includes('.homeSwitchGrid .switchRow:not(.swR) .switchOn') ||
     !css.includes('.homeSwitchGrid .switchRow:not(.swR) .slider,.homeSwitchGrid .switchRow:not(.swR) input:checked+.slider{background:#9ca3af}') ||
     !css.includes('.homeSwitchGrid') ||
     !css.includes('justify-content:space-between') ||
     !css.includes('.homeSwitchGrid{') ||
     !css.includes('border-bottom:1px solid') ||
-    !css.includes('.homeSwitchGrid .switchState{display:none}') ||
+    !css.includes('.switchState{display:none') ||
     !css.includes('.homeSwitchGrid .swS') ||
     !css.includes('.homeGuardGrid{') ||
     !css.includes('.homeGuardGrid .swL{padding-right:3ch}') ||
     !css.includes('grid-template-columns:subgrid') ||
     !css.includes('#brewModeRow{width:100%') ||
     !css.includes('#brewModeRow{width:auto') ||
-    !css.includes('#brewModeRow .switch{width:5.7rem') ||
+    !css.includes('.homeGuardGrid .switch{width:4.25rem') ||
     !css.includes('.ruleChartHead{') ||
     !css.includes('.ruleChartHead strong,.ruleChartMode{display:none}') ||
     !css.includes('background:#c9a227') ||
@@ -1264,7 +1280,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       statusHtml.includes('id="currentTime"') ||
       statusHtml.includes('id="ntpStatus"') ||
       !css.includes('#diagnosticsPanel fieldset') ||
-      !css.includes('#diagnosticsPanel .metric,#statusPanel .metric,#scalePanel .metric,.shotCard > *{') ||
+      !css.includes('.metric,.shotCard > *{') ||
+      css.includes('#diagnosticsPanel .metric,#statusPanel .metric,#scalePanel .metric,.shotCard > *{') ||
       css.includes('diagGroup')) {
     throw new Error(
         'Diagnostics must be a non-collapsible fieldset at the top of Diagnostic, above Log, with States/Machine I/O/WiFi/AP/CPU/RAM/HEAP/Scale/MISC sections and one value per label');
@@ -1698,10 +1715,13 @@ if (network.includes('return "safety_recovery"') ||
     ui.includes("safety_lockout:'safety lockout'")) {
   throw new Error('Safety recovery must not lock the WebUI');
 }
-if (!ui.includes("webShot=s.controlSource==='web'&&s.virtualPaddleOn") ||
-    !ui.includes("s.safety.recoveryRequired||s.safety.state==='LOCKOUT'") ||
-    !ui.includes('remoteReady&&relayStartReady&&(canControl||webShot)') ||
-    !ui.includes("$('stopButton').disabled=!s.relayClosed")) {
+if (!ui.includes("s.safety.recoveryRequired||s.safety.state==='LOCKOUT'") ||
+    !ui.includes('remoteReady&&relayStartReady&&canControl') ||
+    !ui.includes("live?'Stop shot':'Start shot'") ||
+    !ui.includes("dataset.mode==='stop'") ||
+    !ui.includes("/api/v1/control/paddle") ||
+    !ui.includes("/api/v1/control/stop") ||
+    !ui.includes('shot.disabled=!live&&!(remoteReady&&relayStartReady&&canControl)')) {
   throw new Error('CN9 Actions must preserve Stop while inhibiting unsafe starts');
 }
 if (!network.includes('/api/v1/status/home') ||
@@ -2290,7 +2310,9 @@ if (roundTrip !== generated.html) {
   throw new Error('Generated gzip Web UI does not round-trip to the minified HTML');
 }
 if (!generated.html.includes('id="view-home"') ||
-    !generated.html.includes('virtualPaddle') ||
+    !generated.html.includes('id="stopButton"') ||
+    !generated.html.includes('Start shot') ||
+    generated.html.includes('virtualPaddle') ||
     generated.html.includes('<section id="view-home" class="view" data-view="home"></section>')) {
   throw new Error('Generated shell must embed home partial markup');
 }
@@ -2299,7 +2321,7 @@ if (jsRoundTrip !== generated.js) {
   throw new Error('Generated gzip Web JS does not round-trip to the minified JS');
 }
 if (!generated.js.includes('import') || !generated.runtimeJs.includes('export') ||
-    !generated.js.includes('virtualPaddle') ||
+    !generated.js.includes('/api/v1/control/paddle') ||
     generated.js.includes('/js/home.js') ||
     !generated.secondaryJs.includes('export') ||
     !generated.secondaryJs.includes('views') ||

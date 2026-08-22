@@ -8,9 +8,8 @@ export function init(){
   ready=true;
   R.registerViewStatus('home',applyStatus);
   
-  $('virtualPaddle').onchange=()=>R.command('/api/v1/control/paddle',{on:$('virtualPaddle').checked});
   $('rinseButton').onclick=()=>R.command('/api/v1/control/rinse');
-  $('stopButton').onclick=()=>R.command('/api/v1/control/stop');
+  $('stopButton').onclick=()=>$('stopButton').dataset.mode==='stop'?R.command('/api/v1/control/stop'):R.command('/api/v1/control/paddle',{on:true});
   $('clearLastShotButton').onclick=R.clearLastShot;
   if($('homeBrewByWeight'))$('homeBrewByWeight').onchange=R.persistHomeBrewByWeight;
   if($('homeAvoidBbwShotWithoutScale'))$('homeAvoidBbwShotWithoutScale').onchange=()=>R.persistHomeGuard('homeAvoidBbwShotWithoutScale','homeAvoidBbwShotWithoutScaleState','avoidBbwShotWithoutScale',0);
