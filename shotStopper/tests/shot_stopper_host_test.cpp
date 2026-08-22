@@ -6653,6 +6653,34 @@ void s04_shot_log_remove_by_id() {
   CHECK(!shotLog.removeById(99999U));
 }
 
+void s04b_shot_log_page_slice() {
+  size_t start = 99;
+  size_t pageCount = 99;
+  CHECK(shotLogPageSlice(120, 0, 10, start, pageCount) == true);
+  CHECK(start == 0);
+  CHECK(pageCount == 10);
+  CHECK(shotLogPageSlice(120, 110, 10, start, pageCount) == false);
+  CHECK(start == 110);
+  CHECK(pageCount == 10);
+  CHECK(shotLogPageSlice(120, 115, 10, start, pageCount) == false);
+  CHECK(start == 115);
+  CHECK(pageCount == 5);
+  CHECK(shotLogPageSlice(5, 0, 10, start, pageCount) == false);
+  CHECK(start == 0);
+  CHECK(pageCount == 5);
+  CHECK(shotLogPageSlice(0, 0, 10, start, pageCount) == false);
+  CHECK(start == 0);
+  CHECK(pageCount == 0);
+  CHECK(shotLogPageSlice(20, 50, 10, start, pageCount) == false);
+  CHECK(start == 20);
+  CHECK(pageCount == 0);
+  CHECK(shotLogClampPageLimit(0) == 1);
+  CHECK(shotLogClampPageLimit(10) == 10);
+  CHECK(shotLogClampPageLimit(120) == 120);
+  CHECK(shotLogClampPageLimit(999) == SHOT_LOG_CAPACITY);
+  CHECK(SHOT_LOG_PAGE_DEFAULT == 10);
+}
+
 void s06_shot_log_local_sec_from_utc() {
   CHECK(shotLogLocalSecFromUtc(1'700'000'000U, -240) ==
         1'700'000'000U - 14400U);
@@ -8523,6 +8551,7 @@ const TestCase testCases[] = {
     {"S16b", s16b_factory_reset_hides_last_shot_on_status},
     {"S18", s18_last_shot_keeps_no_scale_guard_from_cycle},
     {"S04", s04_shot_log_remove_by_id},
+    {"S04b", s04b_shot_log_page_slice},
     {"S06", s06_shot_log_local_sec_from_utc},
     {"S07", s07_shot_log_stores_fixed_wall_time},
     {"S08", s08_shot_log_without_sync_has_no_wall_time},

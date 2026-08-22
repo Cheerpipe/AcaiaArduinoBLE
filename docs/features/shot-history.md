@@ -20,6 +20,11 @@ The log holds up to **120** shots. Quick rinses are not stored.
 Open the shot history table to browse rows, delete one entry, clear the
 whole log, or export CSV. Clearing requires an explicit confirm.
 
+The table loads **10 shots at a time** as you scroll (newest first). The
+20 s poll refreshes only the first page so new shots appear at the top
+without re-downloading the whole log. Export CSV fetches the full log in
+one request.
+
 USB: `CLEAR_SHOTS` (see [USB serial CLI](../SERIAL_CLI.md)).
 
 Related: [Brew by weight](brew-by-weight.md), [FAQ](../FAQ.md),

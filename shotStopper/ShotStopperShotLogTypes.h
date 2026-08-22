@@ -14,6 +14,31 @@ namespace shotstopper {
 constexpr uint32_t SHOT_LOG_MAGIC = 0x534C4F47U;  // "SLOG"
 constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 7;
 constexpr size_t SHOT_LOG_CAPACITY = 120;
+constexpr size_t SHOT_LOG_PAGE_DEFAULT = 10;
+
+inline size_t shotLogClampPageLimit(size_t limit) {
+  if (limit < 1U) {
+    return 1U;
+  }
+  if (limit > SHOT_LOG_CAPACITY) {
+    return SHOT_LOG_CAPACITY;
+  }
+  return limit;
+}
+
+// Newest-first page into records[offset..). Returns hasMore.
+inline bool shotLogPageSlice(size_t total, size_t offset, size_t limit,
+                             size_t &start, size_t &pageCount) {
+  limit = shotLogClampPageLimit(limit);
+  if (offset > total) {
+    offset = total;
+  }
+  start = offset;
+  const size_t remaining = total - offset;
+  pageCount = remaining < limit ? remaining : limit;
+  return (start + pageCount) < total;
+}
+
 constexpr uint32_t MIN_SHOT_LOG_DURATION_MS = 10000;
 // INT16_MIN leaves the full positive int16 centigram range usable.
 constexpr int16_t SHOT_LOG_WEIGHT_MISSING = INT16_MIN;

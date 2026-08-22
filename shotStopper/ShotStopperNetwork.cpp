@@ -84,6 +84,37 @@ void formatWifiMac(const uint8_t mac[6], char *output, size_t outputCapacity) {
            mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
+void parseShotsPageQuery(httpd_req_t *request, size_t &offset, size_t &limit) {
+  offset = 0;
+  limit = SHOT_LOG_PAGE_DEFAULT;
+  if (request == nullptr) {
+    return;
+  }
+  const size_t queryLength = httpd_req_get_url_query_len(request);
+  if (queryLength == 0 || queryLength >= 80) {
+    return;
+  }
+  char query[80] = {};
+  if (httpd_req_get_url_query_str(request, query, sizeof(query)) != ESP_OK) {
+    return;
+  }
+  char value[16] = {};
+  if (httpd_query_key_value(query, "offset", value, sizeof(value)) == ESP_OK) {
+    char *end = nullptr;
+    const unsigned long parsed = strtoul(value, &end, 10);
+    if (end != value && *end == '\0') {
+      offset = static_cast<size_t>(parsed);
+    }
+  }
+  if (httpd_query_key_value(query, "limit", value, sizeof(value)) == ESP_OK) {
+    char *end = nullptr;
+    const unsigned long parsed = strtoul(value, &end, 10);
+    if (end != value && *end == '\0') {
+      limit = shotLogClampPageLimit(static_cast<size_t>(parsed));
+    }
+  }
+}
+
 const char *jsonParseFailureMessage(const char *fallback) {
   if (jsonArenaExhaustedRecently()) {
     return "JSON too large for device buffer";
@@ -4308,6 +4339,9 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
+  size_t offset = 0;
+  size_t limit = SHOT_LOG_PAGE_DEFAULT;
+  parseShotsPageQuery(request, offset, limit);
   if (!self.lockWorkBuf()) {
     return self.workBufBusy(request);
   }
@@ -4321,21 +4355,28 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
       self.callbacks_.copyShotCurves != nullptr
           ? self.callbacks_.copyShotCurves(work.shotCurves, SHOT_CURVE_CAPACITY)
           : 0;
+  size_t start = 0;
+  size_t pageCount = 0;
+  const bool hasMore =
+      shotLogPageSlice(count, offset, limit, start, pageCount);
 
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
   httpd_resp_set_hdr(request, "Cache-Control", "no-store");
   httpd_resp_set_hdr(request, "Connection", "close");
-  httpd_resp_set_hdr(request, "Access-Control-Allow-Origin", "*");  
-  char header[96] = {};
+  httpd_resp_set_hdr(request, "Access-Control-Allow-Origin", "*");
+  char header[160] = {};
   snprintf(header, sizeof(header),
-           "{\"bootId\":%lu,\"shots\":[",
-           static_cast<unsigned long>(work.control.bootId));
+           "{\"bootId\":%lu,\"total\":%u,\"offset\":%u,\"limit\":%u,"
+           "\"hasMore\":%s,\"shots\":[",
+           static_cast<unsigned long>(work.control.bootId),
+           static_cast<unsigned>(count), static_cast<unsigned>(start),
+           static_cast<unsigned>(limit), hasMore ? "true" : "false");
   if (httpd_resp_send_chunk(request, header, HTTPD_RESP_USE_STRLEN) != ESP_OK) {
     self.unlockWorkBuf();
     return ESP_FAIL;
   }
 
-  for (size_t index = 0; index < count; ++index) {
+  for (size_t index = start; index < start + pageCount; ++index) {
     const ShotLogRecord &record = work.shotRecords[index];
     char actual[16] = "null";
     char errorG[16] = "null";
@@ -4399,7 +4440,7 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
              "\"stopDetail\":\"%s\",\"maxRecoveryWeightG\":%s,"
              "\"minBrewTimeS\":%s,\"targetReachedEarlyS\":%s,"
              "\"actualWeightSource\":\"%s\",%s}",
-             index == 0 ? "" : ",",
+             index == start ? "" : ",",
              static_cast<unsigned long>(record.id),
              static_cast<unsigned long>(record.bootId),
              static_cast<unsigned long>(record.endedAtMs),

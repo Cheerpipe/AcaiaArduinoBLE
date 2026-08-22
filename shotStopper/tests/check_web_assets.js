@@ -183,7 +183,7 @@ const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 46080) {
   throw new Error('Web UI HTML source exceeds the 45 KiB authoring budget');
 }
-if (jsBytes > 110000) {
+if (jsBytes > 112000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
 if (htmlBytes + jsBytes > 160000) {
@@ -1387,6 +1387,31 @@ if (!ui.includes('id="shotTable"') ||
     !network.includes('SHOT_LOG_CLEAR_NOT_CONFIRMED')) {
   throw new Error('Shot history UI/API must expose table, CSV export, clear confirmation, and timezone setting');
 }
+if (!runtimeJs.includes('SHOTS_PAGE_SIZE=10') ||
+    !runtimeJs.includes('SHOTS_EXPORT_LIMIT=120') ||
+    !runtimeJs.includes("shotsUrl(offset,limit)") ||
+    !runtimeJs.includes("'/api/v1/shots?offset='") ||
+    !runtimeJs.includes("fetchShotPage(0,SHOTS_PAGE_SIZE,'replace')") ||
+    !runtimeJs.includes("fetchShotPage(shotHistory.shots.length,SHOTS_PAGE_SIZE,'append')") ||
+    !runtimeJs.includes("fetchShotPage(0,SHOTS_PAGE_SIZE,'poll')") ||
+    !runtimeJs.includes('async function loadMoreShots(){') ||
+    !runtimeJs.includes('function shotHistoryViewActive(){') ||
+    !runtimeJs.includes('if(ok)maybeLoadMoreShots()') ||
+    !runtimeJs.includes("shotsUrl(0,SHOTS_EXPORT_LIMIT)") ||
+    runtimeJs.includes("api('/api/v1/shots')") ||
+    !viewJs.history.includes('IntersectionObserver') ||
+    !viewJs.history.includes("R.loadMoreShots()") ||
+    !partialHtml.history.includes('id="shotHistorySentinel"') ||
+    !css.includes('#shotHistorySentinel{min-height:1px') ||
+    !network.includes('parseShotsPageQuery') ||
+    !network.includes('shotLogPageSlice') ||
+    !network.includes('SHOT_LOG_PAGE_DEFAULT') ||
+    !network.includes('\\"hasMore\\":%s') ||
+    !network.includes('\\"total\\":%u') ||
+    !network.includes('index == start ? "" : ","') ||
+    !appJsSource.includes('mod.activate()')) {
+  throw new Error('Shot history must page 10 shots with infinite scroll and poll only the first page');
+}
 if (!ui.includes('id="firmwareFooter"') ||
     !ui.includes('id="inactiveFirmware"') ||
     !ui.includes('firmwareVersion') ||
@@ -1917,7 +1942,7 @@ if (!ui.includes('async function loadStatus(){') ||
     !ui.includes('LOG_EVENTS_CAPACITY') ||
     !ui.includes('logEvents.splice(0,logEvents.length-LOG_EVENTS_CAPACITY)') ||
     !ui.includes('function refreshStatus(){return withPollGate(loadStatus)}') ||
-    !ui.includes('function refreshShots(){return withPollGate(loadShots)}') ||
+    !ui.includes('function refreshShots(){return withPollGate(pollShots)}') ||
     !ui.includes('function refreshLog(){return withPollGate(loadLog)}') ||
     !(ui.includes("name==='home'||name==='settings'||name==='admin'||name==='diagnostic'") ||
       ui.includes("name === 'home' || name === 'settings' || name === 'admin' ||") ||

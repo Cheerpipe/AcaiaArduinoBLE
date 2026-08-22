@@ -117,6 +117,8 @@ function startView(name) {
     }, 4e3);
   }
   if (name === 'history') {
+    const mod = jsMods.get('history');
+    if (mod && mod.activate) mod.activate();
     R.loadShots();
     shotsTimer = setInterval(() => {
       if (!document.hidden) R.refreshShots();
