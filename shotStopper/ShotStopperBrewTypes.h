@@ -100,7 +100,7 @@ constexpr uint32_t MIN_MAX_BREW_TIME_MS = 5000;
 constexpr uint32_t MAX_MAX_BREW_TIME_MS = 55000;
 // Extra delay after measured scale start lag before stopping the scale timer at
 // shot end (lets the scale display catch up to CN9 time).
-constexpr uint32_t DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 100;
+constexpr uint32_t DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 200;
 constexpr uint32_t MIN_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 0;
 constexpr uint32_t MAX_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 1000;
 constexpr uint32_t DEFAULT_DRIP_DELAY_MS = 3000;
