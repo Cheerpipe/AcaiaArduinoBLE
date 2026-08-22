@@ -1677,7 +1677,35 @@ struct ControlStatusSnapshot {
 static_assert(sizeof(ControlStatusSnapshot) <= 4096,
               "ControlStatusSnapshot grew past the loop-stack staging budget");
 
-inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {
+// Gate checks (Ready / CN9 / paddle / lease) do not need the ~4 KiB snapshot.
+// Network and httpd copy this onto the stack; the full snapshot stays in BSS
+// or NetworkWorkBuf (PSRAM).
+struct ControlGateSnapshot {
+  StopperState state = StopperState::REQUIRES_OFF;
+  bool activeCycle = false;
+  bool relayClosed = false;
+  bool physicalPaddleOn = false;
+  bool maintenanceLeaseActive = false;
+  uint32_t maintenanceLeaseId = 0;
+  ControlSource source = ControlSource::NONE;
+};
+
+static_assert(sizeof(ControlGateSnapshot) <= 32,
+              "ControlGateSnapshot must stay a stack-safe gate copy");
+
+inline ControlGateSnapshot controlGateOf(const ControlStatusSnapshot &status) {
+  ControlGateSnapshot gate;
+  gate.state = status.state;
+  gate.activeCycle = status.activeCycle;
+  gate.relayClosed = status.relayClosed;
+  gate.physicalPaddleOn = status.physicalPaddleOn;
+  gate.maintenanceLeaseActive = status.maintenanceLeaseActive;
+  gate.maintenanceLeaseId = status.maintenanceLeaseId;
+  gate.source = status.source;
+  return gate;
+}
+
+inline bool controlAllowsConfiguration(const ControlGateSnapshot &status) {
   // Relay safety is enforced independently when CN9 is armed. A safety
   // lockout must keep the relay open, but it must not lock the WebUI or
   // prevent recovery-time configuration and diagnostics.
@@ -1686,10 +1714,18 @@ inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {
          !status.maintenanceLeaseActive;
 }
 
+inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {
+  return controlAllowsConfiguration(controlGateOf(status));
+}
+
 // Shot-log / last-shot NVS. WebUI override may mutate config during a pour;
 // it must not disable flash cache while CN9 can be closed.
-inline bool controlAllowsHistoryMutation(const ControlStatusSnapshot &status) {
+inline bool controlAllowsHistoryMutation(const ControlGateSnapshot &status) {
   return !status.activeCycle && !status.relayClosed;
+}
+
+inline bool controlAllowsHistoryMutation(const ControlStatusSnapshot &status) {
+  return controlAllowsHistoryMutation(controlGateOf(status));
 }
 
 enum class DebugCategory : uint8_t {

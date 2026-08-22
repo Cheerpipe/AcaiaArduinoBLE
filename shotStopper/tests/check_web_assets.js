@@ -82,11 +82,19 @@ if (!psram.includes('#define SHOT_STOPPER_PSRAM_BSS EXT_RAM_BSS_ATTR') ||
         'constexpr uint32_t SETTINGS_PERSIST_TASK_STACK_SIZE = 4096') ||
     !network.includes(
         'static SHOT_STOPPER_PSRAM_BSS WifiScanSnapshot g_wifiScan') ||
+    !firmwareCore.includes(
+        'SHOT_STOPPER_PSRAM_BSS DebugRingBuffer debugLog') ||
     !flashIoScratch.includes('allocInternal(FLASH_IO_SCRATCH_BYTES)') ||
-    firmwareCore.includes('SHOT_STOPPER_PSRAM_BSS ControlStatusSnapshot') ||
-    firmwareCore.includes('SHOT_STOPPER_PSRAM_BSS DebugRingBuffer')) {
+    firmwareCore.includes('SHOT_STOPPER_PSRAM_BSS ControlStatusSnapshot')) {
   throw new Error(
-      'Large history/settings BSS must use SHOT_STOPPER_PSRAM_BSS; flash scratch, debug ring, and status snapshots stay internal');
+      'Large history/settings/debug-ring BSS must use SHOT_STOPPER_PSRAM_BSS; flash scratch and live status snapshots stay internal');
+}
+if (network.includes('ControlStatusSnapshot status;') ||
+    network.includes('ControlStatusSnapshot control;') ||
+    !network.includes('ControlGateSnapshot ShotStopperNetwork::controlGate()') ||
+    !firmwareCore.includes('void copyControlGate(ControlGateSnapshot &output)')) {
+  throw new Error(
+      'Network/httpd gate checks must copy ControlGateSnapshot, not a stack ControlStatusSnapshot');
 }
 if (!flashIoScratch.includes('inline void feedFlashIoWatchdog()') ||
     !flashIoScratch.includes('esp_task_wdt_status(nullptr) == ESP_OK') ||

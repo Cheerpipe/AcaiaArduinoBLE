@@ -346,7 +346,8 @@ RuntimeConfig runtimeConfig;
 LocalBuzzer localBuzzer;
 ShotPresetBank presetBank;
 LastCycleSummary lastCycle;
-DebugRingBuffer debugLog;
+// Debug events are not a flash DMA source and are not added from an ISR.
+SHOT_STOPPER_PSRAM_BSS DebugRingBuffer debugLog;
 LogLevel serialLogLevel = LogLevel::NONE;
 LogLevel ringRetainLogLevel = LogLevel::NONE;
 uint32_t lastReportedLogOverwritten = 0;
@@ -737,6 +738,12 @@ size_t copyDebugEvents(uint32_t afterSequence, DebugEvent *output,
 void copyControlStatus(ControlStatusSnapshot &output) {
   portENTER_CRITICAL(&webStatusMux);
   output = publishedControlStatus;
+  portEXIT_CRITICAL(&webStatusMux);
+}
+
+void copyControlGate(ControlGateSnapshot &output) {
+  portENTER_CRITICAL(&webStatusMux);
+  output = controlGateOf(publishedControlStatus);
   portEXIT_CRITICAL(&webStatusMux);
 }
 
@@ -6039,6 +6046,7 @@ void setup() {
   if (settingsLoaded && webCommandQueue != nullptr) {
     NetworkBridgeCallbacks callbacks;
     callbacks.copyControlStatus = copyControlStatus;
+    callbacks.copyControlGate = copyControlGate;
     callbacks.enqueueWebCommand = enqueueWebCommand;
     callbacks.copyDebugEvents = copyDebugEvents;
     callbacks.addDebugEvent = addDebugEvent;

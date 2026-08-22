@@ -529,6 +529,7 @@ void p24_preset_bank_size_and_crud_budgets() {
   CHECK(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET);
   CHECK(sizeof(SettingsPersistRequest) <= PERSISTED_SETTINGS_NVS_BUDGET + 16);
   CHECK(sizeof(ControlStatusSnapshot) <= 4096);
+  CHECK(sizeof(ControlGateSnapshot) <= 32);
   CHECK(sizeof(WebCommand) <= 512);
   ShotPresetBank bank;
   seedDefaultShotPresetBank(bank);

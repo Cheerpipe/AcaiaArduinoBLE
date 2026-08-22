@@ -118,6 +118,7 @@ struct NetworkWorkBuf;
 
 struct NetworkBridgeCallbacks {
   void (*copyControlStatus)(ControlStatusSnapshot &output) = nullptr;
+  void (*copyControlGate)(ControlGateSnapshot &output) = nullptr;
   bool (*enqueueWebCommand)(const WebCommand &command) = nullptr;
   size_t (*copyDebugEvents)(uint32_t afterSequence, DebugEvent *output,
                             size_t capacity) = nullptr;
@@ -295,7 +296,8 @@ class ShotStopperNetwork {
   void requestPendingNetworkConfirm();
   bool confirmPendingNetwork(const char *reason);
   bool revertPendingNetwork(uint32_t now, const char *reason);
-  bool controlAllowsNetworkMutation(ControlStatusSnapshot *copy = nullptr);
+  bool controlAllowsNetworkMutation();
+  ControlGateSnapshot controlGate() const;
   void log(DebugCategory category, DebugCode code, int32_t argument1 = 0,
            int32_t argument2 = 0);
   void actionLog(const char *message);
@@ -368,10 +370,9 @@ class ShotStopperNetwork {
   static esp_err_t otaAbortHandler(httpd_req_t *request);
 
   bool authorizeOtaRequest(httpd_req_t *request);
-  esp_err_t sendOtaSnapshot(httpd_req_t *request, const char *httpStatus,
-                            const ControlStatusSnapshot &control);
+  esp_err_t sendOtaSnapshot(httpd_req_t *request, const char *httpStatus);
   void buildOtaJson(char *buffer, size_t capacity,
-                    const ControlStatusSnapshot &control);
+                    const ControlGateSnapshot &control);
   void serviceOtaRollback(uint32_t now);
   static int otaReadChunk(void *context, uint8_t *buffer, size_t capacity);
   static bool otaTransferStillSafe(void *context);
@@ -398,10 +399,10 @@ class ShotStopperNetwork {
   bool requireAdminUnlock(httpd_req_t *request);
   bool webUiOverrideAllowed(httpd_req_t *request);
   bool webUiConfigurationAllowed(httpd_req_t *request,
-                                 const ControlStatusSnapshot &status);
+                                 const ControlGateSnapshot &status);
   bool historyMutationAllowed(httpd_req_t *request,
-                              const ControlStatusSnapshot &status);
-  void clearWebUiOverrideIfSafe(const ControlStatusSnapshot &status);
+                              const ControlGateSnapshot &status);
+  void clearWebUiOverrideIfSafe(const ControlGateSnapshot &status);
   static const char *stateLabel(StopperState state);
   static const char *controlSourceName(ControlSource source);
   static const char *endReasonName(EndReason reason);

@@ -2185,6 +2185,11 @@ void w26_status_is_a_copied_snapshot() {
   CHECK(status.relayClosed);
   CHECK(status.source == ControlSource::PHYSICAL);
   CHECK(status.config.revision == session.config.revision);
+  ControlGateSnapshot gate;
+  copyControlGate(gate);
+  CHECK(gate.activeCycle);
+  CHECK(gate.relayClosed);
+  CHECK(gate.source == ControlSource::PHYSICAL);
 }
 
 void w46_status_reports_uptime_since_boot() {

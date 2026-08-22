@@ -768,6 +768,7 @@ ShotStopperNetwork *ShotStopperNetwork::instance_ = nullptr;
 bool ShotStopperNetwork::begin(const PersistedSettings &settings,
                                const NetworkBridgeCallbacks &callbacks) {
   if (instance_ != nullptr || callbacks.copyControlStatus == nullptr ||
+      callbacks.copyControlGate == nullptr ||
       callbacks.enqueueWebCommand == nullptr ||
       callbacks.copyDebugEvents == nullptr ||
       callbacks.reportTaskWatchdogFault == nullptr ||
@@ -1143,9 +1144,9 @@ void ShotStopperNetwork::service() {
   portEXIT_CRITICAL(&dataMux_);
   refreshExtendedStatus(now);
 
-  // Copy the large control snapshot only after command processing has
-  // returned. Keeping it in this frame while httpd_stop() enters LwIP used to
-  // consume another ~1.8 KiB of the network task stack.
+  // Gate check is a 16-byte ControlGateSnapshot, not the 4 KiB status
+  // snapshot. Do not reintroduce a stack copy here: httpd_stop() / LwIP
+  // still share this frame.
   const bool safeForNetworkChange = controlAllowsNetworkMutation();
   if (apRestartPending_ && safeForNetworkChange &&
       static_cast<uint32_t>(now - restartRequestedAtMs_) >= RESTART_DELAY_MS) {
@@ -1171,14 +1172,16 @@ void ShotStopperNetwork::service() {
 
 }
 
-bool ShotStopperNetwork::controlAllowsNetworkMutation(
-    ControlStatusSnapshot *copy) {
-  ControlStatusSnapshot status;
-  callbacks_.copyControlStatus(status);
-  if (copy != nullptr) {
-    *copy = status;
+bool ShotStopperNetwork::controlAllowsNetworkMutation() {
+  return controlAllowsConfiguration(controlGate());
+}
+
+ControlGateSnapshot ShotStopperNetwork::controlGate() const {
+  ControlGateSnapshot gate;
+  if (callbacks_.copyControlGate != nullptr) {
+    callbacks_.copyControlGate(gate);
   }
-  return controlAllowsConfiguration(status);
+  return gate;
 }
 
 bool ShotStopperNetwork::startNetwork() {
@@ -1454,10 +1457,7 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   // Let the IDF connect path scan every channel and sort by RSSI.
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
-  ControlStatusSnapshot control = {};
-  if (callbacks_.copyControlStatus != nullptr) {
-    callbacks_.copyControlStatus(control);
-  }
+  const ControlGateSnapshot control = controlGate();
   const bool brewRfActive = control.activeCycle || control.relayClosed;
   // Do not override brew BT preference with WIFI while CN9/automation is live.
   if (!brewRfActive) {
@@ -1882,10 +1882,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
   // SoftAP after STA bootstrap window while still DISCONNECTED/FAILED (e.g.
   // scan delayed the reconnect begin). Never after a prior CONNECTED session.
   // Also skip while brew RF is active so SoftAP raise cannot steal airtime.
-  ControlStatusSnapshot softApControl = {};
-  if (callbacks_.copyControlStatus != nullptr) {
-    callbacks_.copyControlStatus(softApControl);
-  }
+  const ControlGateSnapshot softApControl = controlGate();
   const bool brewRfActive =
       softApControl.activeCycle || softApControl.relayClosed;
   if (!staEverConnected_ && !status.apActive && !brewRfActive &&
@@ -1943,8 +1940,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
 }
 
 void ShotStopperNetwork::serviceWifiScan(uint32_t now) {
-  ControlStatusSnapshot control;
-  callbacks_.copyControlStatus(control);
+  const ControlGateSnapshot control = controlGate();
   const bool matchingMaintenanceLease =
       scanMaintenanceLeaseId_ != 0 && control.maintenanceLeaseActive &&
       control.maintenanceLeaseId == scanMaintenanceLeaseId_ &&
@@ -2174,15 +2170,14 @@ void ShotStopperNetwork::processAcceptedCommands() {
     return;
   }
 
-  // Maintenance commands need a large ControlStatusSnapshot. Keep that
-  // object in a separate frame so CLI actions such as WEBUI_RESTART do not
-  // carry it into httpd_stop() and LwIP.
+  // Maintenance commands used to keep a 4 KiB ControlStatusSnapshot in this
+  // frame. Gate fields live in ControlGateSnapshot so WEBUI_RESTART does not
+  // carry that object into httpd_stop() / LwIP.
   processAcceptedMaintenanceCommand(now);
 }
 
 void ShotStopperNetwork::processAcceptedMaintenanceCommand(uint32_t now) {
-  ControlStatusSnapshot control;
-  callbacks_.copyControlStatus(control);
+  const ControlGateSnapshot control = controlGate();
   const bool matchingLease =
       acceptedCommand_.maintenanceLeaseId != 0 &&
       control.maintenanceLeaseActive &&
@@ -3045,13 +3040,17 @@ namespace {
 
 constexpr const char *WEB_UI_CLIENT_HEADER = "X-WebUI-Client";
 
-const char *configLockReason(const ControlStatusSnapshot &status) {
+const char *configLockReason(const ControlGateSnapshot &status) {
   if (status.activeCycle) return "active_shot";
   if (status.relayClosed) return "cn9_closed";
   if (status.physicalPaddleOn) return "paddle_on";
   if (status.maintenanceLeaseActive) return "maintenance";
   if (status.state != StopperState::READY) return "not_ready";
   return "none";
+}
+
+const char *configLockReason(const ControlStatusSnapshot &status) {
+  return configLockReason(controlGateOf(status));
 }
 
 bool apiUriMatches(const char *uri, const char *path) {
@@ -3148,7 +3147,7 @@ bool ShotStopperNetwork::webUiOverrideAllowed(httpd_req_t *request) {
 }
 
 bool ShotStopperNetwork::webUiConfigurationAllowed(
-    httpd_req_t *request, const ControlStatusSnapshot &status) {
+    httpd_req_t *request, const ControlGateSnapshot &status) {
   if (controlAllowsConfiguration(status)) {
     clearWebUiOverrideIfSafe(status);
     return true;
@@ -3157,7 +3156,7 @@ bool ShotStopperNetwork::webUiConfigurationAllowed(
 }
 
 bool ShotStopperNetwork::historyMutationAllowed(
-    httpd_req_t *request, const ControlStatusSnapshot &status) {
+    httpd_req_t *request, const ControlGateSnapshot &status) {
   if (!controlAllowsHistoryMutation(status)) {
     return false;
   }
@@ -3165,7 +3164,7 @@ bool ShotStopperNetwork::historyMutationAllowed(
 }
 
 void ShotStopperNetwork::clearWebUiOverrideIfSafe(
-    const ControlStatusSnapshot &status) {
+    const ControlGateSnapshot &status) {
   if (!controlAllowsConfiguration(status)) return;
   portENTER_CRITICAL(&dataMux_);
   webUiOverrideActive_ = false;
@@ -3665,7 +3664,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
 
   ControlStatusSnapshot &control = self.workBuf_->control;
   self.callbacks_.copyControlStatus(control);
-  self.clearWebUiOverrideIfSafe(control);
+  self.clearWebUiOverrideIfSafe(controlGateOf(control));
   const bool configMutable = controlAllowsConfiguration(control);
   const bool webUiOverrideActive = self.webUiOverrideAllowed(request);
   bool adminUnlocked = false;
@@ -4114,7 +4113,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
           bleCompanionRejectReasonName(static_cast<BleCompanionRejectReason>(
               control.bleCompanionLastReject)));
       if (ok) {
-        self.buildOtaJson(g_work->otaJson, NetworkWorkBuf::kOtaJson, control);
+        self.buildOtaJson(g_work->otaJson, NetworkWorkBuf::kOtaJson,
+                          controlGateOf(control));
         ok = statusJsonAppend(&used, ",\"boardArch\":\"%s\",\"ota\":%s",
                               FW_BOARD_ARCH_STRING, g_work->otaJson);
       }
@@ -4486,8 +4486,7 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::shotsClearHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  const ControlGateSnapshot status = self.controlGate();
   if (!self.historyMutationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -4527,8 +4526,7 @@ esp_err_t ShotStopperNetwork::shotsClearHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::lastShotClearHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  const ControlGateSnapshot status = self.controlGate();
   if (!self.historyMutationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -4568,8 +4566,7 @@ esp_err_t ShotStopperNetwork::lastShotClearHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  const ControlGateSnapshot status = self.controlGate();
   if (!self.historyMutationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -4608,8 +4605,7 @@ esp_err_t ShotStopperNetwork::timeSyncHandler(httpd_req_t *request) {
   if (!self.requireAdminUnlock(request)) {
     return ESP_OK;
   }
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -4621,8 +4617,7 @@ esp_err_t ShotStopperNetwork::timeSyncHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -4639,7 +4634,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       jsonFieldPresent(root, "ntpServerPreset") ||
       jsonFieldPresent(root, "ntpServerCustom");
   // Patch: seed live effective config; only present keys overwrite.
-  RuntimeConfig candidate = status.config;
+  RuntimeConfig candidate = {};
+  if (self.callbacks_.copyRuntimeConfig != nullptr) {
+    self.callbacks_.copyRuntimeConfig(&candidate);
+  }
   bool brewByWeightPresent = false;
   bool brewByWeight = !candidate.timerOnly;
   bool baseRevisionPresent = false;
@@ -4927,7 +4925,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
     memset(customNtp, 0, sizeof(customNtp));
     return ESP_OK;
   }
-  if (baseRevisionPresent && baseRevision != status.config.revision) {
+  if (baseRevisionPresent && baseRevision != candidate.revision) {
     memset(customNtp, 0, sizeof(customNtp));
     return sendError(request, STATUS_CONFLICT, "CONFIG_REVISION_STALE",
                      "Config changed; refresh and retry.");
@@ -4964,8 +4962,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::preferredScaleClearHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -4985,8 +4982,7 @@ esp_err_t ShotStopperNetwork::preferredScaleClearHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::preferredScaleSelectHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -5041,8 +5037,7 @@ esp_err_t ShotStopperNetwork::preferredScaleSelectHandler(httpd_req_t *request) 
 
 esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -5064,7 +5059,9 @@ esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
   command.type = WebCommandType::PRESET_OP;
   command.requestId = self.allocateRequestId();
   command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
-  command.config = status.config;
+  if (self.callbacks_.copyRuntimeConfig != nullptr) {
+    self.callbacks_.copyRuntimeConfig(&command.config);
+  }
 
   if (root == nullptr || !jsonString(root, "action", action, sizeof(action),
                                      false)) {
@@ -5169,8 +5166,7 @@ esp_err_t ShotStopperNetwork::presetsHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::resetCalibrationHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -5206,8 +5202,7 @@ esp_err_t ShotStopperNetwork::resetCalibrationHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::resetGuardSamplesHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -5265,8 +5260,7 @@ esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
                      "The on field must be boolean.");
   }
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   if (on && !REMOTE_CN9_CONTROL_ENABLED) {
     return sendError(request, "403 Forbidden", "REMOTE_CONTROL_DISABLED",
                      "Remote CN9 actuation is disabled in this firmware build.");
@@ -5294,8 +5288,7 @@ esp_err_t ShotStopperNetwork::rinseHandler(httpd_req_t *request) {
   if (!self.requireAdminUnlock(request)) {
     return ESP_OK;
   }
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   if (!REMOTE_CN9_CONTROL_ENABLED) {
     return sendError(request, "403 Forbidden", "REMOTE_CONTROL_DISABLED",
                      "Remote CN9 actuation is disabled in this firmware build.");
@@ -5320,8 +5313,7 @@ esp_err_t ShotStopperNetwork::stopHandler(httpd_req_t *request) {
   if (!self.requireAdminUnlock(request)) {
     return ESP_OK;
   }
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   if (!status.activeCycle || !status.relayClosed) {
     return sendError(request, STATUS_CONFLICT, "CONTROL_STATE_CONFLICT",
                      "There is no active shot to stop.");
@@ -5341,8 +5333,7 @@ esp_err_t ShotStopperNetwork::restartHandler(httpd_req_t *request) {
   if (!self.requireAdminUnlock(request)) {
     return ESP_OK;
   }
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -5364,8 +5355,7 @@ esp_err_t ShotStopperNetwork::factoryResetHandler(httpd_req_t *request) {
   if (!self.requireAdminUnlock(request)) {
     return ESP_OK;
   }
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -5409,8 +5399,7 @@ esp_err_t ShotStopperNetwork::factoryResetHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   const esp_err_t bodyStatus =
       self.lockJsonBody(request, "A JSON request is required.");
   if (bodyStatus != ESP_OK) {
@@ -5599,8 +5588,7 @@ esp_err_t ShotStopperNetwork::wifiScanStartHandler(httpd_req_t *request) {
   if (!self.requireAdminUnlock(request)) {
     return ESP_OK;
   }
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -5685,8 +5673,7 @@ esp_err_t ShotStopperNetwork::devicePasswordHandler(httpd_req_t *request) {
   if (!self.requireAdminUnlock(request)) {
     return ESP_OK;
   }
-  ControlStatusSnapshot status;
-  self.callbacks_.copyControlStatus(status);
+  ControlGateSnapshot status = self.controlGate();
   if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -5915,7 +5902,7 @@ bool ShotStopperNetwork::authorizeOtaRequest(httpd_req_t *request) {
 }
 
 void ShotStopperNetwork::buildOtaJson(char *buffer, size_t capacity,
-                                      const ControlStatusSnapshot &control) {
+                                      const ControlGateSnapshot &control) {
   if (buffer == nullptr || capacity == 0) {
     return;
   }
@@ -5961,9 +5948,9 @@ void ShotStopperNetwork::buildOtaJson(char *buffer, size_t capacity,
   buffer[used] = '\0';
 }
 
-esp_err_t ShotStopperNetwork::sendOtaSnapshot(
-    httpd_req_t *request, const char *httpStatus,
-    const ControlStatusSnapshot &control) {
+esp_err_t ShotStopperNetwork::sendOtaSnapshot(httpd_req_t *request,
+                                              const char *httpStatus) {
+  const ControlGateSnapshot control = controlGate();
   if (!lockWorkBuf()) {
     return workBufBusy(request);
   }
@@ -6000,9 +5987,7 @@ bool ShotStopperNetwork::otaTransferStillSafe(void *context) {
   if (transfer == nullptr || transfer->network == nullptr) {
     return false;
   }
-  ControlStatusSnapshot control;
-  transfer->network->callbacks_.copyControlStatus(control);
-  return controlAllowsConfiguration(control);
+  return controlAllowsConfiguration(transfer->network->controlGate());
 }
 
 void ShotStopperNetwork::otaTransferProgress(void *context, uint32_t received,
@@ -6023,9 +6008,7 @@ esp_err_t ShotStopperNetwork::otaStatusHandler(httpd_req_t *request) {
     return sendError(request, STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
                      "Send the device password in X-OTA-Token, or unlock administration first.");
   }
-  ControlStatusSnapshot control;
-  self.callbacks_.copyControlStatus(control);
-  return self.sendOtaSnapshot(request, STATUS_OK, control);
+  return self.sendOtaSnapshot(request, STATUS_OK);
 }
 
 esp_err_t ShotStopperNetwork::otaUploadHandler(httpd_req_t *request) {
@@ -6050,8 +6033,7 @@ esp_err_t ShotStopperNetwork::otaUploadHandler(httpd_req_t *request) {
 
   // A firmware update never honours the unsafe WebUI override: unlike a
   // setting, it cannot be undone from the Web UI if the machine is mid-shot.
-  ControlStatusSnapshot control;
-  self.callbacks_.copyControlStatus(control);
+  const ControlGateSnapshot control = self.controlGate();
   if (!controlAllowsConfiguration(control)) {
     return rejectUpload(STATUS_CONFLICT, "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
                         "Stop the cycle and wait for Ready before updating "
@@ -6105,8 +6087,7 @@ esp_err_t ShotStopperNetwork::otaUploadHandler(httpd_req_t *request) {
   self.log(DebugCategory::NETWORK, DebugCode::OTA_IMAGE_STAGED,
            static_cast<int32_t>(staged.receivedBytes / 1024U),
            static_cast<int32_t>(staged.staged.packed));
-  self.callbacks_.copyControlStatus(control);
-  return self.sendOtaSnapshot(request, STATUS_OK, control);
+  return self.sendOtaSnapshot(request, STATUS_OK);
 }
 
 esp_err_t ShotStopperNetwork::otaFlashHandler(httpd_req_t *request) {
@@ -6116,8 +6097,7 @@ esp_err_t ShotStopperNetwork::otaFlashHandler(httpd_req_t *request) {
                      "Send the device password in X-OTA-Token, or unlock administration first.");
   }
   ShotStopperOta &ota = ShotStopperOta::instance();
-  ControlStatusSnapshot control;
-  self.callbacks_.copyControlStatus(control);
+  const ControlGateSnapshot control = self.controlGate();
   if (!controlAllowsConfiguration(control)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
@@ -6150,7 +6130,7 @@ esp_err_t ShotStopperNetwork::otaFlashHandler(httpd_req_t *request) {
   }
   self.otaRestartRequestedAtMs_ = millis();
   self.otaRestartPending_ = true;
-  return self.sendOtaSnapshot(request, STATUS_ACCEPTED, control);
+  return self.sendOtaSnapshot(request, STATUS_ACCEPTED);
 }
 
 esp_err_t ShotStopperNetwork::otaAbortHandler(httpd_req_t *request) {
@@ -6160,9 +6140,7 @@ esp_err_t ShotStopperNetwork::otaAbortHandler(httpd_req_t *request) {
                      "Send the device password in X-OTA-Token, or unlock administration first.");
   }
   ShotStopperOta::instance().discard();
-  ControlStatusSnapshot control;
-  self.callbacks_.copyControlStatus(control);
-  return self.sendOtaSnapshot(request, STATUS_OK, control);
+  return self.sendOtaSnapshot(request, STATUS_OK);
 }
 
 void ShotStopperNetwork::serviceOtaRollback(uint32_t now) {
