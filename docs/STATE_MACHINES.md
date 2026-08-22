@@ -570,8 +570,8 @@ has not confirmed HTTP is refused.
 ## 17. Web command pipeline (`CommandResultState`)
 
 **Purpose.** The controller handles **one** mutating request at a time.
-The Web UI shows “Request queued successfully” when the HTTP handler
-has accepted work onto the queue, not when NVS is done.
+The Web UI shows an action-specific success or failure toast when the
+HTTP handler accepts or rejects the command, not when NVS is done.
 
 Source: `ShotStopperDomain.h`.
 

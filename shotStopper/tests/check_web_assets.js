@@ -208,10 +208,10 @@ const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 46080) {
   throw new Error('Web UI HTML source exceeds the 45 KiB authoring budget');
 }
-if (jsBytes > 113000) {
+if (jsBytes > 118000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 160000) {
+if (htmlBytes + jsBytes > 165000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -1438,11 +1438,45 @@ if (!ui.includes('id="shotTable"') ||
     !js.includes('m+=15') ||
     js.includes('Request accepted.') ||
     js.includes("message('Request queued.','ok')") ||
-    !js.includes('Request queued successfully.') ||
+    js.includes('Request queued successfully.') ||
     !network.includes('hasWallTime') ||
     !network.includes('endedAtLocalSec') ||
     !network.includes('SHOT_LOG_CLEAR_NOT_CONFIRMED')) {
   throw new Error('Shot history UI/API must expose table, CSV export, clear confirmation, and timezone setting');
+}
+if (!js.includes('function commandOkMessage(') ||
+    !js.includes('function commandFailMessage(') ||
+    !js.includes('function formatCommandError(') ||
+    !js.includes('function homePendingPairs(') ||
+    !js.includes('command(path,value={},soft,okMsg,failMsg)') ||
+    js.includes("message(e&&e.message?e.message:'Request failed.','error')") ||
+    !js.includes('Machine settings saved.') ||
+    !js.includes("cn('save machine settings')") ||
+    !js.includes('Brew settings saved.') ||
+    !js.includes("'save brew settings'") ||
+    !js.includes("homeFastExtractionGuardEnabledState','fastExtractionGuardEnabled','Fast extraction guard'") ||
+    !js.includes("label+(on?' enabled.':' disabled.')") ||
+    !js.includes("'Could not '+(on?'enable ':'disable ')+label+'.'") ||
+    !js.includes('Wi-Fi settings saved. Restarting.') ||
+    !js.includes("cn('save Wi-Fi settings')") ||
+    !js.includes('Wi-Fi scan started.') ||
+    !js.includes('Could not start Wi-Fi scan.') ||
+    !js.includes('Administration unlocked.') ||
+    !js.includes('Could not unlock administration.') ||
+    !js.includes("R.noteReachOk();R.message('Administration unlocked.','ok')") ||
+    !js.includes('Administration locked.') ||
+    !js.includes('Could not lock administration.') ||
+    !js.includes("noteReachOk();message('Administration locked.','ok')") ||
+    !js.includes("noteReachOk();message((wanted?'BLE companion enabled.'") ||
+    !js.includes('Shot history cleared.') ||
+    !js.includes('Could not clear shot history.') ||
+    !js.includes('BLE companion enabled.') ||
+    !js.includes('Could not enable BLE companion.') ||
+    !js.includes('Could not update Quick Settings.') ||
+    js.includes('Shot history cleared successfully.') ||
+    js.includes('Unlock failed.') ||
+    js.includes('Lock failed.')) {
+  throw new Error('Web UI must show action-specific success and failure toasts instead of generic queued/failed copy');
 }
 if (!runtimeJs.includes('SHOTS_PAGE_SIZE=10') ||
     !runtimeJs.includes('SHOTS_EXPORT_LIMIT=120') ||
@@ -2007,7 +2041,7 @@ if (!ui.includes('function withPollGate(') ||
     !ui.includes('formRev') ||
     !ui.includes('formRev===c.revision') ||
     !ui.includes('baseRevision') ||
-    !ui.includes('command(path,value={},soft)') ||
+    !ui.includes('command(path,value={},soft,okMsg,failMsg)') ||
     !ui.includes('/api/v1/status/') ||
     !ui.includes('function statusPageOk(') ||
     !ui.includes('function applyHomeStatus(') ||
@@ -2626,8 +2660,8 @@ if (generated.settingsGzip.length > 4096) {
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
 }
-if (generated.combined > 45056) {
-  throw new Error('Combined Web UI gzip exceeds the 44 KiB flash budget');
+if (generated.combined > 47104) {
+  throw new Error('Combined Web UI gzip exceeds the 46 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {

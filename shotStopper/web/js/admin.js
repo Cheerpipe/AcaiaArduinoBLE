@@ -10,7 +10,7 @@ export function init(){
   
   R.ensureBleCompanionPanel();
   $('bleCompanionEnabled').onchange=R.setBleCompanionEnabled;
-  const unlock=()=>{const pw=$('adminUnlockPassword').value;if(!pw){R.showFieldError('adminUnlockPassword','Device password is required.');return}R.clearFieldErrors();R.api('/api/v1/admin/unlock',{method:'POST',body:R.body({password:pw})}).then(()=>{$('adminUnlockPassword').value='';return R.refreshStatus()}).catch(e=>R.message(e&&e.message?e.message:'Unlock failed.','error'))};
+  const unlock=()=>{const pw=$('adminUnlockPassword').value;if(!pw){R.showFieldError('adminUnlockPassword','Device password is required.');return}R.clearFieldErrors();R.api('/api/v1/admin/unlock',{method:'POST',body:R.body({password:pw})}).then(()=>{$('adminUnlockPassword').value='';R.noteReachOk();R.message('Administration unlocked.','ok');return R.refreshStatus()}).catch(e=>R.message(R.formatCommandError('Could not unlock administration.',e),'error'))};
   $('adminUnlockButton').onclick=unlock;
   $('adminUnlockPassword').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();unlock()}});
   $('adminLockButton').onclick=R.lockAdmin;
