@@ -1,6 +1,6 @@
 :root{--bg:#f6f3ef;--sf:#fff;--fg:#2a2118;--mu:#6b5d4f;--ln:#e4ddd4;--ac:#a83b21;--off:rgba(168,59,33,.6);--on:#fff;--ok:#087f23;--dn:#a83b21;--wn:#8a4b00;--r:1rem;--tap:2.75rem;--hdr:4.25rem}
 @media(prefers-color-scheme:dark){:root{--bg:#1a1612;--sf:#2a241e;--fg:#f3efe9;--mu:#b5a99a;--ln:#3d342c;--ac:#c45c38;--off:rgba(168,59,33,.6);--on:#f6f3ef;--ok:#1a9a3c;--dn:#c45c38;--wn:#f2b35a}}
-html{background:var(--bg)}
+html{background:var(--bg);color-scheme:light dark}
 body{font-family:system-ui;max-width:760px;margin:0 auto;padding:0 1rem 1.25rem;color:var(--fg);background:var(--bg)}
 .topBar{position:sticky;top:0;z-index:21;display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin:0 -1rem;padding:.55rem 1rem;padding-top:max(.55rem,env(safe-area-inset-top));min-height:var(--hdr);background:var(--bg);color:var(--ac);box-sizing:border-box}
 .brand{margin:0;min-width:0;position:relative;z-index:22;--brandGap:.55rem}
@@ -47,9 +47,11 @@ legend{font-weight:700;padding:0 .3rem;color:var(--ac)}
 legend .hint{font-weight:400;font-size:.75rem;color:var(--mu)}
 label{display:block;margin:.55rem 0}
 input,select,button{font:inherit;padding:.45rem .5rem;line-height:1.2}
-input[type=number],input[type=text],input[type=password],select{display:block;width:100%;max-width:100%;box-sizing:border-box;height:2.5rem;min-height:2.5rem;border:1px solid var(--ln);border-radius:.4rem;color:var(--fg)}
-input[type=text],input[type=password]{-webkit-appearance:none;appearance:none;height:2.5rem;border:1px solid var(--ln);border-radius:.4rem;background-color:var(--bg);color:var(--fg)}
-select{-webkit-appearance:none;appearance:none;padding-right:1.85rem;background-color:var(--bg);background-image:linear-gradient(45deg,transparent 50%,var(--mu) 50%),linear-gradient(135deg,var(--mu) 50%,transparent 50%);background-position:calc(100% - 1.05rem) calc(50% - .12rem),calc(100% - .7rem) calc(50% - .12rem);background-size:.4rem .4rem,.4rem .4rem;background-repeat:no-repeat}
+input[type=number],input[type=text],input[type=password],select{display:block;width:100%;max-width:100%;box-sizing:border-box;height:2.5rem;min-height:2.5rem;border:1px solid var(--ln);border-radius:.4rem;background:var(--bg);color:var(--fg)}
+input[type=text],input[type=password]{-webkit-appearance:none;appearance:none}
+select{-webkit-appearance:none;appearance:none;padding-right:1.85rem;background-image:linear-gradient(45deg,transparent 50%,var(--mu) 50%),linear-gradient(135deg,var(--mu) 50%,transparent 50%);background-position:calc(100% - 1.05rem) calc(50% - .12rem),calc(100% - .7rem) calc(50% - .12rem);background-size:.4rem .4rem,.4rem .4rem;background-repeat:no-repeat}
+::placeholder{color:var(--mu);opacity:1}
+input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus{-webkit-text-fill-color:var(--fg);caret-color:var(--fg);-webkit-box-shadow:0 0 0 2.5rem var(--bg) inset}
 @media(min-width:520px){input[type=number],input[type=text],input[type=password],select{width:18rem}}
 .row{display:flex;gap:1rem;flex-wrap:wrap}
 .statusColumn{display:grid;grid-template-columns:1fr 1fr;gap:.65rem .75rem}
@@ -256,6 +258,7 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 .logSep{border:0;border-top:1px solid var(--ln);margin:1rem 0}
 
 @media(prefers-color-scheme:dark){
+html,input,select,textarea{color-scheme:dark}
 .presetCard.active{background:#3a2a10}
 .btnGlyph.btnWarn,.btnGlyph.btnTakeControl{background:#3a2a10}
 #shotTable .btnGlyph,#shotPanel .btnGlyph{color:#f07167}

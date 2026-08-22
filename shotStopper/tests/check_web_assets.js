@@ -181,13 +181,18 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !html.includes('id="buzzerSlowExtendedPulseRate"') ||
     !html.includes('class="buzzerOpt scaleIncapableOpt">Extended shot pulse<select id="buzzerExtendedPulseRate"') ||
     !html.includes('class="buzzerOpt scaleIncapableOpt">Slow extended pulse<select id="buzzerSlowExtendedPulseRate"') ||
-    !css.includes('input[type=text],input[type=password]{-webkit-appearance:none;appearance:none') ||
+    !css.includes('color-scheme:light dark') ||
+    !css.includes('html,input,select,textarea{color-scheme:dark}') ||
+    !css.includes('input[type=text],input[type=password]{-webkit-appearance:none;appearance:none}') ||
     !css.includes('min-height:2.5rem') ||
-    !css.includes('input[type=text],input[type=password]{-webkit-appearance:none;appearance:none;height:2.5rem') ||
-    !css.includes('background-color:var(--bg)') ||
+    !css.includes('background:var(--bg)') ||
+    !css.includes('input:-webkit-autofill') ||
+    !css.includes('-webkit-box-shadow:0 0 0 2.5rem var(--bg) inset') ||
     css.includes('input[type=text],input[type=password],select{-webkit-appearance:none') ||
     html.includes('id="staSsid" type="number"') ||
     html.includes('id="ntpServerCustom" type="number"') ||
+    !html.includes('id="staSsid" type="text" maxlength="32" autocomplete="off"') ||
+    !html.includes('id="ntpServerCustom" type="text" maxlength="63" placeholder="e.g. ntp.example.com" autocomplete="off"') ||
     !html.includes('> Scale lost<small class="fieldHint">Echo inverted when the scale disconnects') ||
     html.includes('Scale lost (BBW)') ||
     !html.includes('option value="fast" selected') ||
@@ -1618,6 +1623,9 @@ if (!/<script\s+type="module"\s+src="\/app\.js\?v=/.test(shellHtml) &&
 if (!/<link\s+rel="stylesheet"\s+href="\/app\.css\?v=/.test(shellHtml) &&
     !shellHtml.includes('href="/app.css?v=__FW_VERSION__"')) {
   throw new Error('Web UI must load same-origin /app.css with a firmware version query');
+}
+if (!shellHtml.includes('name="color-scheme" content="light dark"')) {
+  throw new Error('Web UI must declare color-scheme so Safari form controls follow dark mode');
 }
 if (/<link\s+[^>]*href=["']https?:\/\//i.test(shellHtml) ||
     /cdn\.|unpkg\.|jsdelivr\./i.test(shellHtml)) {
