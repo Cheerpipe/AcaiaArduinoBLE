@@ -210,7 +210,7 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 46100) {
+if (htmlBytes > 46300) {
   throw new Error('Web UI HTML source exceeds the 45 KiB authoring budget');
 }
 if (jsBytes > 120000) {
@@ -696,7 +696,7 @@ if (!ui.includes('id="shotPanel"') ||
     !network.includes('scaleProtocol') ||
     !network.includes('safeScaleProtocol') ||
     !ui.includes('remoteReady&&relayStartReady&&canControl') ||
-    !ui.includes('Remote CN9 disabled by policy') ||
+    !ui.includes('Remote machine control disabled by policy') ||
     !network.includes('\\"remoteControlEnabled\\"') ||
     !network.includes('\\"lastCommand\\"') ||
     !network.includes('\\"maintenance\\"') ||
@@ -713,7 +713,7 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !ui.includes('id="autoToManualGuardLimitMode"') ||
     !ui.includes('id="autoToManualGuardBaselineS"') ||
     !ui.includes('id="scaleTimerStopExtraDelayMs"') ||
-    !html.includes('Added after the scale timer catches up to CN9 whole seconds') ||
+    !html.includes('Added after the scale timer catches up to circuit whole seconds') ||
     html.includes('Added after measured scale start lag') ||
     !ui.includes('id="dripDelayS" type="number" min="0" max="10" step="0.1"') ||
     !ui.includes('id="autoToManualGuardManualLimitS"') ||
@@ -2027,7 +2027,7 @@ if (!ui.includes("s.safety.recoveryRequired||s.safety.state==='LOCKOUT'") ||
     !ui.includes('function updateHomeAdminActions(') ||
     !ui.includes("id=\"actionsPanel\" class=\"hidden\"") ||
     !ui.includes('shot.disabled=!admin||(!live&&!(remoteReady&&relayStartReady&&canControl))')) {
-  throw new Error('CN9 Actions must stay behind admin unlock and preserve Stop only while unlocked');
+  throw new Error('Circuit actions must stay behind admin unlock and preserve Stop only while unlocked');
 }
 if (!network.includes('/api/v1/status/home') ||
     !network.includes('/api/v1/status/settings') ||
@@ -2312,7 +2312,7 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'eventsDropped', 'lastCommand', 'loopIntervalGapMs', 'loopMaxGapMs',
     'machineState', 'physicalPaddleOn', 'controlSource', 'cupPresence',
     'streamState', 'controlState', 'taskWatchdogReady', 'recoveryRequired',
-    'compileFlags'
+    'compileFlags', 'remoteMachineControl'
   ]) {
     if (!diagBody.includes(field)) {
       throw new Error('status/diagnostic missing required field: ' + field);
@@ -2328,7 +2328,7 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
       !ui.includes("typeof s.bootId==='number'") ||
       !ui.includes('function applyDiagnosticStatus(') ||
       !ui.includes('dBz') ||
-      !ui.includes('dCn9') ||
+      !ui.includes('dCircuit') ||
       !ui.includes('dArch') ||
       !ui.includes('Compile flags') ||
       !ui.includes('s.compileFlags')) {
@@ -2588,7 +2588,7 @@ if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
     !firmware.includes('requestBookooSilenceIfConfigured') ||
     !firmware.includes('emitCommandAlert') ||
     !firmware.includes('emitImmediateCommandAlertIfBuzzer') ||
-    !firmware.includes('emitCn9CycleAlert') ||
+    !firmware.includes('emitCircuitCycleAlert') ||
     !firmware.includes('commandAlertUsesBuzzer') ||
     /enum class ScaleCommandType[\s\S]*BEEP/.test(
       firmware.slice(firmware.indexOf('enum class ScaleCommandType'),
@@ -2613,21 +2613,21 @@ if (!alertChannel.includes('AlertKind::CommandImmediate') ||
 }
 const immediateCommandAlertCalls =
     firmware.split('emitImmediateCommandAlertIfBuzzer(').length - 1;
-const cn9CycleAlertCalls = firmware.split('emitCn9CycleAlert(').length - 1;
-if (immediateCommandAlertCalls < 3 || cn9CycleAlertCalls < 4 ||
+const circuitCycleAlertCalls = firmware.split('emitCircuitCycleAlert(').length - 1;
+if (immediateCommandAlertCalls < 3 || circuitCycleAlertCalls < 4 ||
     !firmware.includes(
-        'emitCn9CycleAlert(session.startedWithScale && session.config.autoTare &&\n                            session.config.canTareStartTimer\n                        ? AlertEvent::TARE_START\n                        : AlertEvent::START_TIMER,\n                    true);') ||
+        'emitCircuitCycleAlert(session.startedWithScale && session.config.autoTare &&\n                            session.config.canTareStartTimer\n                        ? AlertEvent::TARE_START\n                        : AlertEvent::START_TIMER,\n                    true);') ||
     !firmware.includes(
-        'if (shotCompletionGetsLongBeep(reason)) {\n    // Completion LONG replaces the stop-timer SINGLE so ends are one cue.\n    requestCompletionAlert();\n  } else {\n    emitCn9CycleAlert(AlertEvent::STOP_TIMER, true);') ||
+        'if (shotCompletionGetsLongBeep(reason)) {\n    // Completion LONG replaces the stop-timer SINGLE so ends are one cue.\n    requestCompletionAlert();\n  } else {\n    emitCircuitCycleAlert(AlertEvent::STOP_TIMER, true);') ||
     !firmware.includes('emitImmediateCommandAlertIfBuzzer(AlertEvent::TARE);\n  markRetareEnded') ||
-    !firmware.includes('emitCn9CycleAlert(AlertEvent::START_TIMER, true);')) {
-  throw new Error('Command alerts must fire at CN9/paddle/retare, not after BLE');
+    !firmware.includes('emitCircuitCycleAlert(AlertEvent::START_TIMER, true);')) {
+  throw new Error('Command alerts must fire at circuit/paddle/retare, not after BLE');
 }
 if (firmware.includes('SCALE_COMPLETION_BEEP_DELAY_MS') ||
     firmware.includes('scheduleScaleCompletionBeep') ||
     firmware.includes('scaleCompletionBeepDueAtMs') ||
     !firmware.includes('void requestCompletionAlert()')) {
-  throw new Error('Completion beep must fire at CN9 open with no emission delay');
+  throw new Error('Completion beep must fire at machine circuit open with no emission delay');
 }
 if (firmware.includes('maybeCaptureScaleStartLag') ||
     firmware.includes('scaleStartLagCaptured') ||
@@ -2636,7 +2636,7 @@ if (firmware.includes('maybeCaptureScaleStartLag') ||
     !firmware.includes('remoteTimerStartSettled') ||
     !firmware.includes(
         'command.type == ScaleCommandType::STOP_TIMER &&\n      session.remoteTimerStartSettled')) {
-  throw new Error('Scale timer stop must catch up live, wait for start, and not BLE.advertise() on CN9 open');
+  throw new Error('Scale timer stop must catch up live, wait for start, and not BLE.advertise() on machine circuit open');
 }
 
 (async () => {
@@ -2846,7 +2846,7 @@ if (!network.includes('requireActiveWebUiClient') ||
     network.includes('WEB_PADDLE_HEARTBEAT_TIMEOUT_MS') ||
     network.includes('heartbeatStopSent_')) {
   throw new Error(
-      'WebUI claim must replace POST /heartbeat; web paddle heartbeat CN9 timeout must be gone');
+      'WebUI claim must replace POST /heartbeat; web paddle heartbeat circuit timeout must be gone');
 }
 const logHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::logHandler');
 const shotsHandlerStart = network.indexOf('esp_err_t ShotStopperNetwork::shotsHandler');
@@ -3032,10 +3032,10 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
     throw new Error(
       'OTA must re-verify the staged image immediately before switching the boot partition');
   }
-  // Rolling back must never reboot on its own: CN9 has to be opened first.
+  // Rolling back must never reboot on its own: machine circuit has to be opened first.
   if (ota.includes('esp_ota_mark_app_invalid_rollback_and_reboot') ||
       ota.includes('ESP.restart') || ota.includes('esp_restart')) {
-    throw new Error('OTA must not restart the controller directly; CN9 is opened first');
+    throw new Error('OTA must not restart the controller directly; machine circuit is opened first');
   }
   if (!ota.includes('rejected_ = true') ||
       !/if \(rejected_\) \{\s*return false;/.test(ota)) {

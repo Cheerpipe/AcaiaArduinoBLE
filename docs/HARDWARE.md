@@ -3,7 +3,12 @@
 Development board used for this firmware, default GPIO map, and wiring
 warnings.
 
-**TODO:** bill of materials, schematic, and step-by-step Micra CN9 wiring.
+**TODO:** bill of materials, schematic, and step-by-step brew-switch wiring.
+
+On the Linea Micra, the intercepted brew-switch connector is labelled **CN9**.
+This firmware treats that contact as the **machine circuit** — the isolated
+path that makes the machine run — not as a Micra-specific name. Other machines
+intercept a different brew/run circuit with the same relay contract.
 
 Until that write-up exists, treat the photo and pin table below as the known
 facts, and complete the [manual test plan](MANUAL_TEST_PLAN.md) on the bench
@@ -41,27 +46,27 @@ Optional external K2 safety (both pins or neither; no defaults, because they
 depend on a reviewed board):
 
 - `SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO`
-- `SHOT_STOPPER_CN9_FEEDBACK_GPIO`
-- `SHOT_STOPPER_CN9_FEEDBACK_CLOSED_LEVEL` (optional; default LOW)
+- `SHOT_STOPPER_CIRCUIT_FEEDBACK_GPIO`
+- `SHOT_STOPPER_CIRCUIT_FEEDBACK_CLOSED_LEVEL` (optional; default LOW)
 
 Compile example:
 
 ```sh
 ./scripts/build-idf --arch n16r8 \
-  --flags "-DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 \
--DSHOT_STOPPER_SAFETY_HEARTBEAT_GPIO=16 -DSHOT_STOPPER_CN9_FEEDBACK_GPIO=17"
+  --flags "-DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1 \
+-DSHOT_STOPPER_SAFETY_HEARTBEAT_GPIO=16 -DSHOT_STOPPER_CIRCUIT_FEEDBACK_GPIO=17"
 ```
 
 To use a different paddle, relay, LED, or buzzer pin, edit
 `ShotStopperHardware.h` (or the matching `-D` override) and rebuild. Wrong
-pins can leave CN9 closed or misread the paddle.
+pins can leave machine circuit closed or misread the paddle.
 
 ## Isolation (must)
 
-- CN9 connects only to the relay **COM/NO** contact. Never to GND, VCC, or an
+- The machine circuit connects only to the relay **COM/NO** contact. Never to GND, VCC, or an
   ESP32 GPIO.
 - Do not use NC as the brew path.
-- Feedback, if you add it, must also be isolated. Do not join CN9 ground to
+- Feedback, if you add it, must also be isolated. Do not join machine circuit ground to
   ESP32 ground.
 - The onboard relay is **not** a certified safety barrier. A welded contact
   or a shorted driver needs a second, normally-open contact (K2) driven by an
@@ -74,7 +79,7 @@ startup, reset, and power loss.
 
 GPIO 1 is HIGH while a BLE scale is connected and **Settings → Alerts → Blue
 LED while scale connected** is on. It is diagnostic only and is never part of
-the CN9 decision.
+the machine-circuit decision.
 
 Override at compile time with `-DSHOT_STOPPER_SCALE_CONNECTED_LED_GPIO=…`.
 The pin must be output-capable and distinct from paddle, relay, buzzer,

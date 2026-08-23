@@ -12,7 +12,7 @@ maximum recovery weight.
 Automatic brew-by-weight with a usable scale. It does not run when BBW is
 off, on rinses, or on manual no-scale shots.
 
-Elapsed time is measured from cycle start (CN9 close). The learned stop
+Elapsed time is measured from cycle start (machine circuit close). The learned stop
 offset applies to both the target and the max recovery weight.
 
 Fast extended and Slow extended are mutually exclusive. If Fast already
@@ -35,7 +35,7 @@ between **28 s** and **44 s**.
 ## How it works
 
 1. **Normal stop** — the scale reaches the target at or after the minimum brew
-   time → CN9 opens at the target (`normal_target`).
+   time → machine circuit opens at the target (`normal_target`).
 2. **Too fast** — the target arrives *before* the minimum brew time → the
    shot enters **extended** mode until either:
    - **Max recovery weight** (`extended_max_weight`), or

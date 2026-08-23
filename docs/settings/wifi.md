@@ -12,7 +12,7 @@ it immediately. Use a trusted network.
 ## When it applies
 
 Wi-Fi and the HTTP server start regardless of paddle position.
-**Configuration changes** still need a maintenance window: paddle OFF, CN9
+**Configuration changes** still need a maintenance window: paddle OFF, machine circuit
 open, no active cycle.
 
 You cannot change workflow settings during an active shot. Read-only status

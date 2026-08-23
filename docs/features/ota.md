@@ -23,7 +23,7 @@ serve the Web UI before it is confirmed. If it fails, the bootloader
 rolls back to the previous slot—no USB required. A second OTA while
 verification is still pending is refused (`PENDING_VERIFY`).
 
-CN9 stays open during the update. Wi-Fi credentials, presets, calibration,
+Machine circuit stays open during the update. Wi-Fi credentials, presets, calibration,
 and shot history are left unchanged on a successful flash.
 
 ## How to run

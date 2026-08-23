@@ -2,11 +2,12 @@
   Shot Stopper for La Marzocco Micra
 
   The Micra paddle is connected only to an ESP32-S3 GPIO and GND. The stopper is
-  the sole controller of the Micra CN9 circuit through a normally-open relay.
+  the sole controller of the machine circuit (the intercepted brew-switch
+  contact that makes the machine run) through a normally-open relay.
 
   Paddle ON  (microswitch closed) -> GPIO LOW
   Paddle OFF (microswitch open)   -> GPIO HIGH
-  Relay de-energized              -> CN9 open (safe state)
+  Relay de-energized              -> machine circuit open (safe state)
 
   Released under the MIT license.
   https://github.com/tatemazer/AcaiaArduinoBLE
@@ -113,7 +114,7 @@ constexpr BaseType_t CONTROL_TASK_CORE = 1;
 constexpr bool DEBUG = false;
 
 static_assert(SCALE_WORKER_STALE_MS > PADDLE_DEBOUNCE_MS &&
-                  SCALE_WORKER_STALE_MS < HARD_MAX_CN9_CLOSED_MS,
+                  SCALE_WORKER_STALE_MS < HARD_MAX_CIRCUIT_CLOSED_MS,
               "Scale worker stale timeout must be useful and safety-bounded");
 static_assert(FLASH_IO_CONTROL_LOCK_TIMEOUT_MS * 20U <
                   TASK_WATCHDOG_TIMEOUT_MS,
@@ -158,7 +159,7 @@ bool startPulseTrain(BuzzerPattern pattern, uint32_t durationMs);
 bool emitAlert(AlertEvent event, uint32_t cycleId = 0);
 bool commandAlertUsesBuzzer();
 void emitImmediateCommandAlertIfBuzzer(AlertEvent event);
-bool emitCn9CycleAlert(AlertEvent event, bool preempt);
+bool emitCircuitCycleAlert(AlertEvent event, bool preempt);
 void emitCommandAlert(AlertEvent event, bool commandAttempted,
                       bool writeSucceeded, bool commandFeedbackExpected);
 
@@ -172,7 +173,7 @@ enum class TimerStopResult : uint8_t {
 
 struct ShotTrajectory {
   uint32_t startMs = 0;
-  float expectedEndS = HARD_MAX_CN9_CLOSED_MS / 1000.0f;
+  float expectedEndS = HARD_MAX_CIRCUIT_CLOSED_MS / 1000.0f;
   float weight[MAX_SHOT_DATAPOINTS] = {};
   float timeS[MAX_SHOT_DATAPOINTS] = {};
   size_t datapoints = 0;
@@ -208,7 +209,7 @@ struct CycleSession {
   uint32_t connectionGenerationAtStart = 0;
   uint32_t ownedConnectionGeneration = 0;
   uint32_t startedAtMs = 0;
-  uint32_t cn9ClosedAtMs = 0;
+  uint32_t circuitClosedAtMs = 0;
   uint32_t rinseStartedAtMs = 0;
   uint32_t postTareBaselineDeadlineMs = 0;
   uint32_t stopTimerRetryDeadlineMs = 0;
@@ -517,16 +518,16 @@ SHOT_STOPPER_PSRAM_BSS PersistedSettings persistedSettings;
 ShotStopperNetwork networkManager;
 #endif
 
-// The esp_timer callback independently opens CN9 at the hard limit even if the
+// The esp_timer callback independently opens the machine circuit at the hard limit even if the
 // normal control loop is delayed or unavailable.
 esp_timer_handle_t relaySafetyTimer = nullptr;
 esp_timer_handle_t operationalLimitTimer = nullptr;
 IndependentSafetyTimer independentSafetyTimer;
 portMUX_TYPE relayMux = portMUX_INITIALIZER_UNLOCKED;
-bool cn9Closed = false;
+bool circuitClosed = false;
 bool relaySafetyTripped = false;
 bool operationalLimitTripped = false;
-uint32_t cn9ClosedAtMs = 0;
+uint32_t circuitClosedAtMs = 0;
 struct PendingScaleTimerStop {
   bool pending = false;
   uint32_t targetMs = 0;
@@ -536,7 +537,7 @@ struct PendingScaleTimerStop {
 };
 PendingScaleTimerStop pendingScaleTimerStop;
 bool pendingBrewRfRestore = false;
-uint32_t operationalLimitAtArmMs = HARD_MAX_CN9_CLOSED_MS;
+uint32_t operationalLimitAtArmMs = HARD_MAX_CIRCUIT_CLOSED_MS;
 RelaySafetyState relaySafetyState = RelaySafetyState::BOOT_SAFE;
 RelaySafetyFault relaySafetyFault = RelaySafetyFault::NONE;
 uint32_t relaySafetyGeneration = 0;
@@ -643,7 +644,7 @@ void serialTrace(LogLevel level, const char *message) {
   if (message == nullptr || !logLevelAtMost(level, serialLogLevel)) {
     return;
   }
-  if (session.active || cn9Closed) {
+  if (session.active || circuitClosed) {
     return;
   }
   Serial.println(message);
@@ -653,7 +654,7 @@ void serialTracef(LogLevel level, const char *fmt, ...) {
   if (fmt == nullptr || !logLevelAtMost(level, serialLogLevel)) {
     return;
   }
-  if (session.active || cn9Closed) {
+  if (session.active || circuitClosed) {
     return;
   }
   char line[192] = {};
@@ -714,7 +715,7 @@ void logEmit(LogLevel level, DebugCategory category, DebugCode code,
 
   // USB CDC TX can block if the host is not draining. During a pour keep the
   // control path off Serial; the RAM ring still captures the event.
-  if (toSerial && !session.active && !cn9Closed) {
+  if (toSerial && !session.active && !circuitClosed) {
     writeSerialLogLine(event);
   }
 }
@@ -859,7 +860,7 @@ void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
                  ? session.config.minRecoveryWeightG
                  : static_cast<float>(session.config.goalWeightG));
   const uint32_t startMs =
-      session.cn9ClosedAtMs != 0U ? session.cn9ClosedAtMs : session.startedAtMs;
+      session.circuitClosedAtMs != 0U ? session.circuitClosedAtMs : session.startedAtMs;
   if (session.firstDropMs != 0 &&
       static_cast<int32_t>(session.firstDropMs - startMs) >= 0) {
     last.firstDropElapsedMs = session.firstDropMs - startMs;
@@ -1648,7 +1649,7 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   pendingFinalize.dripDelayMs = session.config.dripDelayMs;
   pendingFinalize.endedWeightSequence = currentWeightSequence;
   pendingFinalize.cycleStartedAtMs =
-      session.cn9ClosedAtMs != 0U ? session.cn9ClosedAtMs : session.startedAtMs;
+      session.circuitClosedAtMs != 0U ? session.circuitClosedAtMs : session.startedAtMs;
   pendingFinalize.bootId = shotLog.bootId();
   pendingFinalize.durationDs =
       static_cast<uint16_t>(durationMs / 100U);
@@ -2400,7 +2401,7 @@ bool commandAlertUsesBuzzer() {
                          ctx) == AlertSink::Buzzer;
 }
 
-// Tare/start/stop replacement sounds: fire at the local CN9/paddle/retare
+// Tare/start/stop replacement sounds: fire at the local circuit/paddle/retare
 // moment when the buzzer is the routed output. Never wait for BLE.
 void emitImmediateCommandAlertIfBuzzer(AlertEvent event) {
   (void)dispatchAlert(AlertKind::CommandImmediate, event, 0, false, false,
@@ -2408,8 +2409,8 @@ void emitImmediateCommandAlertIfBuzzer(AlertEvent event) {
 }
 
 // Shot start/stop follow the relay, not the scale timer or Output channel.
-// Both preempt so the CN9 edge is not stuck behind a warning, echo, or pulse.
-bool emitCn9CycleAlert(AlertEvent event, bool preempt) {
+// Both preempt so the circuit edge is not stuck behind a warning, echo, or pulse.
+bool emitCircuitCycleAlert(AlertEvent event, bool preempt) {
   if (!soundAlertsEnabled()) {
     return false;
   }
@@ -2548,7 +2549,7 @@ void requestCompletionAlert() {
   if (!soundAlertsEnabled()) {
     return;
   }
-  if (emitCn9CycleAlert(AlertEvent::COMPLETION_EXTRA, true)) {
+  if (emitCircuitCycleAlert(AlertEvent::COMPLETION_EXTRA, true)) {
     scaleCompletionBeepScheduled = false;
     return;
   }
@@ -2623,7 +2624,7 @@ void servicePaddleReturnReminder() {
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   // Read the GPIO here rather than a debounced state: this reminder describes
   // the physical paddle circuit as it is wired at this instant.
-  const bool paddleOnCn9Off = readRawPaddleOn() && !relay.closed;
+  const bool paddleOnCircuitOff = readRawPaddleOn() && !relay.closed;
   const AlertOutputChannel channel = currentAlertOutputChannel();
   const bool localBuzzerUsable =
       BUZZER_SUPPORT_ENABLED && localBuzzer.ready;
@@ -2642,7 +2643,7 @@ void servicePaddleReturnReminder() {
   }
   const bool shouldRemind =
       soundAlertsEnabled() && runtimeConfig.paddleReturnReminderBeep &&
-      paddleOnCn9Off && outputUsable;
+      paddleOnCircuitOff && outputUsable;
   if (!shouldRemind) {
     paddleReturnReminderActive = false;
     paddleReturnReminderLastAtMs = 0;
@@ -2750,7 +2751,7 @@ ScaleMacCacheMode currentScaleMacCacheMode() {
 }
 
 // Pause companion advertising while discovering/connecting a scale, and while
-// CN9 is closed (existing brew RF preference). Scan can coexist with
+// machine circuit is closed (existing brew RF preference). Scan can coexist with
 // advertising; GAP connect as central usually cannot.
 bool companionAdvertisingShouldPause() {
   return !scale.isConnected() || getRelaySafetySnapshot().closed;
@@ -3663,7 +3664,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
 
   resetSessionForNewCycle(source);
   session.startedAtMs = millis();
-  session.cn9ClosedAtMs = 0;
+  session.circuitClosedAtMs = 0;
   session.firstDropMs = 0;
   session.retareFlowFirstDetectedAtMs = 0;
   session.scaleBaselineReady = false;
@@ -3707,7 +3708,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
       session.startedWithScale && !session.config.timerOnly;
   session.originalBbwHardMaxArmed = originalBbwStart;
   const uint32_t closeLimitMs = originalBbwStart
-                                    ? HARD_MAX_CN9_CLOSED_MS
+                                    ? HARD_MAX_CIRCUIT_CLOSED_MS
                                     : session.config.operationalWallMs;
   if (!machineRequestStart(closeLimitMs)) {
     session.active = false;
@@ -3715,9 +3716,9 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
     transitionTo(StopperState::REQUIRES_OFF);
     return;
   }
-  session.cn9ClosedAtMs = getRelaySafetySnapshot().closedAtMs;
+  session.circuitClosedAtMs = getRelaySafetySnapshot().closedAtMs;
 
-  emitCn9CycleAlert(session.startedWithScale && session.config.autoTare &&
+  emitCircuitCycleAlert(session.startedWithScale && session.config.autoTare &&
                             session.config.canTareStartTimer
                         ? AlertEvent::TARE_START
                         : AlertEvent::START_TIMER,
@@ -3747,7 +3748,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   stopPulseTrains();
   cancelScaleBrewBeep(session.id);
   cancelScaleCompletionBeep();
-  // GPIO first, then the CN9-open cue. BLE advertising resume is not on this
+  // GPIO first, then the machine circuit-open cue. BLE advertising resume is not on this
   // path (BLE worker + servicePendingBrewRfRestore after the buzzer starts).
   machineRequestStop();
   session.endReason = reason;
@@ -3755,7 +3756,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
     // Completion LONG replaces the stop-timer SINGLE so ends are one cue.
     requestCompletionAlert();
   } else {
-    emitCn9CycleAlert(AlertEvent::STOP_TIMER, true);
+    emitCircuitCycleAlert(AlertEvent::STOP_TIMER, true);
   }
   if (reason == EndReason::AUTO_TO_MANUAL_GUARD &&
       runtimeConfig.buzzerAutoToManualGuardEndBeep) {
@@ -3802,7 +3803,7 @@ bool beginRinseCycle(ControlSource source) {
                             : "Previous drip analysis cancelled by a rinse");
   resetSessionForNewCycle(source);
   session.startedAtMs = millis();
-  session.cn9ClosedAtMs = 0;
+  session.circuitClosedAtMs = 0;
   session.firstDropMs = 0;
   session.retareFlowFirstDetectedAtMs = 0;
   session.scaleBaselineReady = false;
@@ -3818,8 +3819,8 @@ bool beginRinseCycle(ControlSource source) {
     transitionTo(StopperState::REQUIRES_OFF);
     return false;
   }
-  session.cn9ClosedAtMs = getRelaySafetySnapshot().closedAtMs;
-  emitCn9CycleAlert(AlertEvent::START_TIMER, true);
+  session.circuitClosedAtMs = getRelaySafetySnapshot().closedAtMs;
+  emitCircuitCycleAlert(AlertEvent::START_TIMER, true);
   // Only an Armed no-scale rinse clears the latch; keep Armed when the scale
   // is usable (e.g. web rinse with a connected scale).
   if (noScaleShotGuardArmed) {
@@ -3925,13 +3926,13 @@ void stateMachineTask() {
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   if (relay.tripped ||
       (relay.closed &&
-       elapsedMs(relay.closedAtMs) >= HARD_MAX_CN9_CLOSED_MS)) {
+       elapsedMs(relay.closedAtMs) >= HARD_MAX_CIRCUIT_CLOSED_MS)) {
     addDebugEvent(DebugCategory::SECURITY, DebugCode::HARD_LIMIT);
     handleGlobalLimitTrip();
     return;
   }
   if (relay.operationalTripped ||
-      (relay.closed && relay.operationalLimitMs < HARD_MAX_CN9_CLOSED_MS &&
+      (relay.closed && relay.operationalLimitMs < HARD_MAX_CIRCUIT_CLOSED_MS &&
        elapsedMs(relay.closedAtMs) >= relay.operationalLimitMs)) {
     handleOperationalLimitTrip();
     return;
@@ -4017,7 +4018,7 @@ void stateMachineTask() {
 
     case StopperState::BREW:
       // Early paddle OFF demotes the brew to a rinse; otherwise ends the shot
-      // unless Original or Auto BBW semantics keep CN9 closed after the rinse
+      // unless Original or Auto BBW semantics keep machine circuit closed after the rinse
       // window.
       if (paddleTurnedOff) {
         demoteActiveCycleToRinseOrEnd();
@@ -4525,7 +4526,7 @@ void processWebCommand(const WebCommand &command) {
       return;
 
     case WebCommandType::PADDLE_ON:
-      if (!REMOTE_CN9_CONTROL_ENABLED || !webCommandAllowsUnsafeConfiguration(command)) {
+      if (!REMOTE_MACHINE_CONTROL_ENABLED || !webCommandAllowsUnsafeConfiguration(command)) {
         rejectWebCommand(command);
         return;
       }
@@ -4542,7 +4543,7 @@ void processWebCommand(const WebCommand &command) {
       return;
 
     case WebCommandType::RINSE:
-      if (!REMOTE_CN9_CONTROL_ENABLED || !webCommandAllowsUnsafeConfiguration(command)) {
+      if (!REMOTE_MACHINE_CONTROL_ENABLED || !webCommandAllowsUnsafeConfiguration(command)) {
         rejectWebCommand(command);
         return;
       }
@@ -5099,7 +5100,7 @@ void publishControlStatus() {
   // state used by the control state machine.
   next.physicalPaddleOn = readRawPaddleOn();
   next.virtualPaddleOn = virtualPaddleOn;
-  next.remoteControlEnabled = REMOTE_CN9_CONTROL_ENABLED;
+  next.remoteControlEnabled = REMOTE_MACHINE_CONTROL_ENABLED;
   next.source = session.active ? session.source : ControlSource::NONE;
   next.cycleId = session.active ? session.id : 0;
   next.bootId = shotLog.bootId();
@@ -5107,14 +5108,14 @@ void publishControlStatus() {
   next.maintenanceLeaseId = maintenanceLease.active ? maintenanceLease.id : 0;
   next.maintenanceStartedAtMs =
       maintenanceLease.active ? maintenanceLease.startedAtMs : 0;
-  next.cn9ElapsedMs = relay.closed ? elapsedMs(relay.closedAtMs) : 0;
+  next.circuitElapsedMs = relay.closed ? elapsedMs(relay.closedAtMs) : 0;
   next.safetyState = relay.state;
   next.safetyFault = relay.fault;
   next.safetyGeneration = relay.generation;
   next.safetyTimersReady = relay.timersReady;
   next.taskWatchdogReady = relay.watchdogReady;
   next.externalSafetyPresent = relay.externalSafetyPresent;
-  next.cn9FeedbackClosed = relay.feedbackClosed;
+  next.circuitFeedbackClosed = relay.feedbackClosed;
   next.resetReasonCode = relay.resetReasonCode;
   next.unsafeResetCount = relay.unsafeResetCount;
   next.resetRecoveryRequired = relay.resetRecoveryRequired;
@@ -5201,8 +5202,8 @@ void publishControlStatus() {
     next.cycleFirstDropMs = session.firstDropMs;
     next.cycleRetareFlowFirstDetectedAtMs =
         session.retareFlowFirstDetectedAtMs;
-    next.cycleStartedAtMs = session.cn9ClosedAtMs != 0U
-                                ? session.cn9ClosedAtMs
+    next.cycleStartedAtMs = session.circuitClosedAtMs != 0U
+                                ? session.circuitClosedAtMs
                                 : session.startedAtMs;
     next.cycleElapsedMs = cycleShotElapsedMs();
     next.cycleExtractionExtended =
@@ -5293,7 +5294,7 @@ void serialCliWipeCommandSecrets(WebCommand &command) {
 
 void serialCliRejectUnsafe() {
   serialCliReply(
-      "ERR not ready: paddle OFF, CN9 open, Ready, no active cycle");
+      "ERR not ready: paddle OFF, machine circuit open, Ready, no active cycle");
 }
 
 void serialCliQueueCommand(WebCommand &command, SerialCliVerb verb) {
@@ -5515,8 +5516,8 @@ void serialCliPrintBleCompanionStatus() {
 }
 
 void serialCliPrintLiveLogDump() {
-  if (session.active || cn9Closed) {
-    serialCliReply("ERR LOG dump deferred; CN9/cycle active");
+  if (session.active || circuitClosed) {
+    serialCliReply("ERR LOG dump deferred; circuit/cycle active");
     return;
   }
   size_t count = 0;
@@ -5765,7 +5766,7 @@ void holdFailedBootRecovery() {
   RecoveryGestureRecognizer gesture;
   gesture.begin(millis());
   for (;;) {
-    // Persistence did not reach a verified state. Keep CN9 open. A power cycle
+    // Persistence did not reach a verified state. Keep machine circuit open. A power cycle
     // retries the durable intent; the same paddle recovery gesture can also
     // re-enter NETWORK_ACCESS_RESET / FACTORY_RESET without cycling power.
     updatePaddleInput();
@@ -5827,7 +5828,7 @@ void resumePendingBootRecovery() {
   }
   if (recoveryIntentRecordPresent()) {
     // A malformed/torn intent cannot safely identify which destructive
-    // operation was requested. Keep CN9 open for explicit service.
+    // operation was requested. Keep machine circuit open for explicit service.
     holdFailedBootRecovery();
   }
 }
@@ -5895,7 +5896,7 @@ void setup() {
   if (EXTERNAL_SAFETY_HARDWARE_PRESENT) {
     pinMode(SAFETY_HEARTBEAT_GPIO, OUTPUT);
     digitalWrite(SAFETY_HEARTBEAT_GPIO, LOW);
-    pinMode(CN9_FEEDBACK_GPIO, INPUT_PULLUP);
+    pinMode(CIRCUIT_FEEDBACK_GPIO, INPUT_PULLUP);
   }
   initializeScaleConnectedLed();
 #ifndef SHOT_STOPPER_HOST_TEST
@@ -5912,7 +5913,7 @@ void setup() {
       configureTaskWatchdog() && subscribeCurrentTaskToWatchdog();
   initializeRelaySafetyStateAfterBoot();
 
-  if (EXTERNAL_SAFETY_HARDWARE_PRESENT && readCn9FeedbackClosed()) {
+  if (EXTERNAL_SAFETY_HARDWARE_PRESENT && readCircuitFeedbackClosed()) {
     tripRelaySafety(RelaySafetyFault::FEEDBACK_STUCK_CLOSED);
   }
 

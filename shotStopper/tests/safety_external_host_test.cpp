@@ -1,7 +1,7 @@
 #define SHOT_STOPPER_HOST_TEST
 #define ARDUINO_ESP32S3_DEV
 #define SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO 4
-#define SHOT_STOPPER_CN9_FEEDBACK_GPIO 5
+#define SHOT_STOPPER_CIRCUIT_FEEDBACK_GPIO 5
 
 #include <cstdlib>
 #include <iostream>
@@ -48,14 +48,14 @@ void resetSafety() {
   hostTaskWatchdogConfigured = false;
   hostTaskWatchdogSubscriptions = 0;
   hostTaskWatchdogFeeds = 0;
-  hostCn9ArmBeforeCommitHook = nullptr;
+  hostCircuitArmBeforeCommitHook = nullptr;
   resetSafetyResetGuardForHost();
 
-  cn9Closed = false;
+  circuitClosed = false;
   relaySafetyTripped = false;
   operationalLimitTripped = false;
-  cn9ClosedAtMs = 0;
-  operationalLimitAtArmMs = HARD_MAX_CN9_CLOSED_MS;
+  circuitClosedAtMs = 0;
+  operationalLimitAtArmMs = HARD_MAX_CIRCUIT_CLOSED_MS;
   relaySafetyState = RelaySafetyState::OPEN;
   relaySafetyFault = RelaySafetyFault::NONE;
   relaySafetyGeneration = 0;
@@ -72,7 +72,7 @@ void resetSafety() {
 
   pinMode(RELAY_GPIO, OUTPUT);
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
-  pinMode(CN9_FEEDBACK_GPIO, INPUT_PULLUP);
+  pinMode(CIRCUIT_FEEDBACK_GPIO, INPUT_PULLUP);
   pinMode(SAFETY_HEARTBEAT_GPIO, OUTPUT);
   digitalWrite(SAFETY_HEARTBEAT_GPIO, LOW);
   taskWatchdogReady =
@@ -84,13 +84,13 @@ void resetSafety() {
 
 void feedback_tracks_a_healthy_close_then_detects_contact_loss() {
   resetSafety();
-  CHECK(setCn9Closed(true, 5000));
-  hostPinLevel[CN9_FEEDBACK_GPIO] = CN9_FEEDBACK_CLOSED_LEVEL;
-  hostMillis += CN9_FEEDBACK_SETTLE_MS;
+  CHECK(setMachineCircuitClosed(true, 5000));
+  hostPinLevel[CIRCUIT_FEEDBACK_GPIO] = CIRCUIT_FEEDBACK_CLOSED_LEVEL;
+  hostMillis += CIRCUIT_FEEDBACK_SETTLE_MS;
   serviceRelaySafety();
   CHECK(getRelaySafetySnapshot().state == RelaySafetyState::CLOSED);
 
-  hostPinLevel[CN9_FEEDBACK_GPIO] = !CN9_FEEDBACK_CLOSED_LEVEL;
+  hostPinLevel[CIRCUIT_FEEDBACK_GPIO] = !CIRCUIT_FEEDBACK_CLOSED_LEVEL;
   serviceRelaySafety();
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   CHECK(!relay.closed);
@@ -101,21 +101,21 @@ void feedback_tracks_a_healthy_close_then_detects_contact_loss() {
 
 void stuck_closed_feedback_blocks_every_close_attempt() {
   resetSafety();
-  hostPinLevel[CN9_FEEDBACK_GPIO] = CN9_FEEDBACK_CLOSED_LEVEL;
-  CHECK(!setCn9Closed(true, 5000));
+  hostPinLevel[CIRCUIT_FEEDBACK_GPIO] = CIRCUIT_FEEDBACK_CLOSED_LEVEL;
+  CHECK(!setMachineCircuitClosed(true, 5000));
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   CHECK(relay.state == RelaySafetyState::LOCKOUT);
   CHECK(relay.fault == RelaySafetyFault::FEEDBACK_STUCK_CLOSED);
   CHECK(hostRelayClosedWrites == 0);
-  CHECK(!setCn9Closed(true, 5000));
+  CHECK(!setMachineCircuitClosed(true, 5000));
   CHECK(getRelaySafetySnapshot().fault ==
         RelaySafetyFault::FEEDBACK_STUCK_CLOSED);
 }
 
 void missing_close_feedback_opens_and_locks_out() {
   resetSafety();
-  CHECK(setCn9Closed(true, 5000));
-  hostMillis += CN9_FEEDBACK_SETTLE_MS;
+  CHECK(setMachineCircuitClosed(true, 5000));
+  hostMillis += CIRCUIT_FEEDBACK_SETTLE_MS;
   serviceRelaySafety();
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   CHECK(!relay.closed);
@@ -136,9 +136,9 @@ void heartbeat_is_emitted_only_after_healthy_loop_epochs() {
 
 void gptimer_open_does_not_false_stuck_closed_before_settle() {
   resetSafety();
-  CHECK(setCn9Closed(true, 5000));
-  hostPinLevel[CN9_FEEDBACK_GPIO] = CN9_FEEDBACK_CLOSED_LEVEL;
-  hostMillis += CN9_FEEDBACK_SETTLE_MS;
+  CHECK(setMachineCircuitClosed(true, 5000));
+  hostPinLevel[CIRCUIT_FEEDBACK_GPIO] = CIRCUIT_FEEDBACK_CLOSED_LEVEL;
+  hostMillis += CIRCUIT_FEEDBACK_SETTLE_MS;
   serviceRelaySafety();
   CHECK(getRelaySafetySnapshot().state == RelaySafetyState::CLOSED);
 
@@ -151,7 +151,7 @@ void gptimer_open_does_not_false_stuck_closed_before_settle() {
   CHECK(getRelaySafetySnapshot().fault !=
         RelaySafetyFault::FEEDBACK_STUCK_CLOSED);
 
-  hostMillis += CN9_FEEDBACK_SETTLE_MS;
+  hostMillis += CIRCUIT_FEEDBACK_SETTLE_MS;
   serviceRelaySafety();
   const RelaySafetySnapshot afterSettle = getRelaySafetySnapshot();
   CHECK(afterSettle.state == RelaySafetyState::LOCKOUT);
@@ -167,7 +167,7 @@ int main() {
   heartbeat_is_emitted_only_after_healthy_loop_epochs();
   gptimer_open_does_not_false_stuck_closed_before_settle();
   releaseResources();
-  std::cout << "External CN9 safety: 5 tests, " << failures
+  std::cout << "External machine circuit safety: 5 tests, " << failures
             << " failures\n";
   return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

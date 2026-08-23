@@ -46,11 +46,11 @@ restarts and the monitor session may drop.
 ## Safety gate
 
 Destructive commands need the same gate as the Web UI: physical paddle
-**OFF**, CN9 open, state **Ready**, no active cycle.
+**OFF**, machine circuit open, state **Ready**, no active cycle.
 
 If USB/serial is also unavailable, use the
 [paddle emergency recovery procedure](EMERGENCY_RECOVERY.md). It works before
-Wi-Fi and BLE startup and keeps CN9 open throughout the operation.
+Wi-Fi and BLE startup and keeps machine circuit open throughout the operation.
 
 Always allowed (including during a cycle):
 
@@ -150,7 +150,7 @@ persist.
 
 | Command | Parameters | Effect |
 | --- | --- | --- |
-| `LOG_DUMP` | none | Prints the RAM debug ring (oldest first), one event at a time. Deferred while a cycle is active or CN9 is closed. Says so if empty or retain is none |
+| `LOG_DUMP` | none | Prints the RAM debug ring (oldest first), one event at a time. Deferred while a cycle is active or machine circuit is closed. Says so if empty or retain is none |
 | `HEALTH` | none | Heap, PSRAM, BLE host alloc counters, loop gap (interval + max), task stacks, CPU load, temperature, alert latches |
 | `SCALE_STATUS` | none | BLE scale link, preferred MAC/name, weight freshness |
 | `NTP_STATUS` | none | Wall clock / NTP state. Notes if STA is down |

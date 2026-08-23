@@ -1473,7 +1473,7 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
   const ControlGateSnapshot control = controlGate();
   const bool brewRfActive = control.activeCycle || control.relayClosed;
-  // Do not override brew BT preference with WIFI while CN9/automation is live.
+  // Do not override brew BT preference with WIFI while circuit/automation is live.
   if (!brewRfActive) {
     preferStaWifiCoex(true);
   }
@@ -3056,7 +3056,7 @@ constexpr const char *WEB_UI_CLIENT_HEADER = "X-WebUI-Client";
 
 const char *configLockReason(const ControlGateSnapshot &status) {
   if (status.activeCycle) return "active_shot";
-  if (status.machineRunning) return "cn9_closed";
+  if (status.machineRunning) return "machine_running";
   if (status.physicalPaddleOn) return "paddle_on";
   if (status.maintenanceLeaseActive) return "maintenance";
   if (status.state != StopperState::READY) return "not_ready";
@@ -3958,7 +3958,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"relayClosed\":%s,"
         "\"physicalPaddleOn\":%s,\"virtualPaddleOn\":%s,"
         "\"remoteControlEnabled\":%s,\"controlSource\":\"%s\","
-        "\"cn9ElapsedMs\":%lu,"
+        "\"circuitElapsedMs\":%lu,"
         "\"safety\":{\"state\":\"%s\",\"fault\":\"%s\","
         "\"taskWatchdogReady\":%s,\"externalHardware\":%s,"
         "\"recoveryRequired\":%s},"
@@ -4001,7 +4001,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.virtualPaddleOn ? "true" : "false",
         control.remoteControlEnabled ? "true" : "false",
         controlSourceName(control.source),
-        static_cast<unsigned long>(control.cn9ElapsedMs),
+        static_cast<unsigned long>(control.circuitElapsedMs),
         relaySafetyStateName(control.safetyState),
         relaySafetyFaultName(control.safetyFault),
         control.taskWatchdogReady ? "true" : "false",
@@ -4172,7 +4172,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"reconnects\":%lu,\"lastDisconnectReasonName\":\"%s\","
         "\"eventsDropped\":%lu},"
         "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"},"
-        "\"compileFlags\":{\"buzzer\":\"%s\",\"remoteCn9\":%s,\"arch\":\"%s\"}",
+        "\"compileFlags\":{\"buzzer\":\"%s\",\"remoteMachineControl\":%s,\"arch\":\"%s\"}",
         stopperStateName(control.state),
         machineRunStateName(control.machineRunState),
         control.relayClosed ? "true" : "false",
@@ -4235,7 +4235,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(network.lastCommandRequestId),
         commandResultStateName(network.lastCommandState),
         compiledBuzzerModeId(),
-        REMOTE_CN9_CONTROL_ENABLED ? "true" : "false",
+        REMOTE_MACHINE_CONTROL_ENABLED ? "true" : "false",
         FW_BOARD_ARCH_STRING);
   }
 
@@ -5285,9 +5285,9 @@ esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
                      "The on field must be boolean.");
   }
   ControlGateSnapshot status = self.controlGate();
-  if (on && !REMOTE_CN9_CONTROL_ENABLED) {
+  if (on && !REMOTE_MACHINE_CONTROL_ENABLED) {
     return sendError(request, "403 Forbidden", "REMOTE_CONTROL_DISABLED",
-                     "Remote CN9 actuation is disabled in this firmware build.");
+                     "Remote machine control actuation is disabled in this firmware build.");
   }
   const bool allowed = on ? self.webUiConfigurationAllowed(request, status)
                           : (status.activeCycle &&
@@ -5313,9 +5313,9 @@ esp_err_t ShotStopperNetwork::rinseHandler(httpd_req_t *request) {
     return ESP_OK;
   }
   ControlGateSnapshot status = self.controlGate();
-  if (!REMOTE_CN9_CONTROL_ENABLED) {
+  if (!REMOTE_MACHINE_CONTROL_ENABLED) {
     return sendError(request, "403 Forbidden", "REMOTE_CONTROL_DISABLED",
-                     "Remote CN9 actuation is disabled in this firmware build.");
+                     "Remote machine control actuation is disabled in this firmware build.");
   }
   if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT, "CONTROL_STATE_CONFLICT",
@@ -6141,7 +6141,7 @@ esp_err_t ShotStopperNetwork::otaFlashHandler(httpd_req_t *request) {
   self.log(DebugCategory::NETWORK, DebugCode::OTA_FLASH_COMMITTED,
            static_cast<int32_t>(staged.packed));
 
-  // The restart runs through the ordinary maintenance lease, which opens CN9
+  // The restart runs through the ordinary maintenance lease, which opens the machine circuit
   // and waits for the machine to be idle before the reset.
   WebCommand command;
   command.type = WebCommandType::RESTART;

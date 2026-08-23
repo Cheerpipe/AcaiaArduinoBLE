@@ -62,7 +62,7 @@ inline void initializeSafetyResetRecord(
 }
 
 inline void recordRelayCommandedClosed(bool closed) {
-  // setup() initializes the record before CN9 can close. The fallback keeps
+  // setup() initializes the record before machine circuit can close. The fallback keeps
   // host/fault-injection calls deterministic without adding work to the ISR.
   if (!safetyResetRecordValid()) {
     initializeSafetyResetRecord(SAFETY_RELAY_OPEN_MARKER, 0);

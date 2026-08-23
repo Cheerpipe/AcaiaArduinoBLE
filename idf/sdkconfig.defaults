@@ -12,7 +12,7 @@ CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 
 # Product defaults (main/Kconfig.projbuild). Override with
 # SHOT_STOPPER_EXTRA_FLAGS=-DSHOT_STOPPER_… when needed.
-CONFIG_SHOT_STOPPER_ENABLE_REMOTE_CN9=y
+CONFIG_SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=y
 CONFIG_SHOT_STOPPER_ENABLE_BUZZER=2
 
 # Shot Stopper runs at 80 MHz (setup() calls setCpuFrequencyMhz(80)).

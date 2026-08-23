@@ -4,7 +4,7 @@ Safety layer for automatic brew-by-weight shots that **lose the scale**
 mid-extraction. **On by default.**
 
 A→M means auto-to-manual: weight stop is suspended, but the shot is still
-running. The guard closes CN9 on a shorter deadline so a silent fallback does
+running. The guard closes the machine circuit on a shorter deadline so a silent fallback does
 not become an over-extracted shot.
 
 ## When it applies
@@ -28,7 +28,7 @@ Active preset. The ON/OFF switch is also on **Home → Quick Settings**
 
 | Setting | Default | Range / notes | Effect on the shot |
 | --- | --- | --- | --- |
-| **Enable A→M time guard** | ON | ON / OFF | Master switch. OFF: if the scale never returns, the shot runs until paddle OFF or the CN9 / 60 s wall. |
+| **Enable A→M time guard** | ON | ON / OFF | Master switch. OFF: if the scale never returns, the shot runs until paddle OFF or the machine circuit / 60 s wall. |
 | **Limit mode** | Auto | Auto / Manual | **Auto** uses a trend of the last five good shot durations. **Manual** uses a fixed number of seconds. |
 | **Manual limit (s)** | 32 s | 10 s … Max BBW time | Used when Limit mode is Manual. |
 | **Trend (s)** | ~32 s | Read-only | Current Auto prediction. Always shown. |
@@ -55,7 +55,7 @@ not:
 
 An automatic Double loses Bluetooth at 12 s. Trend limit is 32 s. The
 firmware keeps reconnecting, but if the scale is still gone at 32 s from
-start, CN9 opens. If the scale had come back at 20 s with three good samples,
+start, machine circuit opens. If the scale had come back at 20 s with three good samples,
 weight stop would have resumed and the deadline would have been cleared.
 
 Related: [Brew by weight](brew-by-weight.md), [Alerts](../alerts.md)

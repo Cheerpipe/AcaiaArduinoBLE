@@ -409,7 +409,7 @@ inline bool serialCliParseLine(const char *line, SerialCliRequest &request) {
 
 inline void serialCliPrintHelp() {
   Serial.println(
-      "Commands are case-insensitive. Destructive need paddle OFF, CN9 open, "
+      "Commands are case-insensitive. Destructive need paddle OFF, machine circuit open, "
       "Ready, no cycle.");
   Serial.println("HELP  list commands  e.g. HELP");
   Serial.println("HELLO  probe CLI  e.g. HELLO");
@@ -464,7 +464,7 @@ inline void serialCliPrintHelp() {
   Serial.println("WEBUI_STATUS  dump HTTP/Web UI state  e.g. WEBUI_STATUS");
   Serial.println("NET_STATUS  WIFI + AP + WEBUI status  e.g. NET_STATUS");
   Serial.println(
-      "LOG_DUMP  print RAM debug ring (deferred in brew/CN9)  e.g. LOG_DUMP");
+      "LOG_DUMP  print RAM debug ring (deferred in brew/machine circuit)  e.g. LOG_DUMP");
   Serial.println("HEALTH  heap, loop gap, cpu load, task stacks  e.g. HEALTH");
   Serial.println("SCALE_STATUS  BLE scale link dump  e.g. SCALE_STATUS");
   Serial.println("NTP_STATUS  wall clock and NTP dump  e.g. NTP_STATUS");

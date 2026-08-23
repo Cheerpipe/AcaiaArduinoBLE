@@ -223,7 +223,7 @@ inline void ensureShotPresetBank(ShotPresetBank &bank,
                static_cast<unsigned>(preset.id));
     }
     if (preset.operationalWallMs < 5000 ||
-        preset.operationalWallMs > HARD_MAX_CN9_CLOSED_MS) {
+        preset.operationalWallMs > HARD_MAX_CIRCUIT_CLOSED_MS) {
       preset.operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
     }
     if (preset.minBrewTimeMs >= preset.operationalWallMs) {

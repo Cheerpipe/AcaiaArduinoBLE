@@ -116,7 +116,7 @@ class ShotStopperOta {
   OtaResult stage(uint32_t contentLength, bool allowDowngrade,
                   const OtaStreamIo &io);
   // Points the bootloader at the staged image. The caller performs the
-  // restart, so CN9 can be opened first.
+  // restart, so machine circuit can be opened first.
   OtaResult commit();
   void discard();
 
@@ -126,7 +126,7 @@ class ShotStopperOta {
   // Cancels the pending rollback: the running image becomes permanent.
   bool confirmRunningImage();
   // Selects the previous slot without rebooting, so the caller can restart
-  // through the normal CN9-safe path. Returns false when no other slot holds a
+  // through the normal machine circuit-safe path. Returns false when no other slot holds a
   // bootable application, in which case staying on this image is the only
   // option that keeps the machine usable. After a successful reject, both
   // confirmRunningImage() and a second reject are no-ops, so a later tick

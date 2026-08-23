@@ -2,7 +2,7 @@
 
 This page is a map of the **runtime finite-state machines** in Advanced Shot
 Stopper. It is written for someone who already knows the product
-(paddle → CN9 → scale) and wants to know **what each machine is for**,
+(paddle → machine circuit → scale) and wants to know **what each machine is for**,
 **what each state means**, and **which events move it**.
 
 Enums that are not machines (settings, log codes, buzzer patterns) are
@@ -26,7 +26,7 @@ Each section has:
    are derived (they recompute from another machine every loop).
 
 The control task in `shotStopper.cpp` is the orchestrator. One machine
-is special: **relay safety can open CN9 without waiting for brew
+is special: **relay safety can open the machine circuit without waiting for brew
 policy**. Everything else *requests* close/open; safety *owns* the
 contact.
 
@@ -36,10 +36,10 @@ contact.
 | --- | --- | --- |
 | Electrical | Relay safety | Can de-energize K1 from an ISR or trip path. Hard 60 s cap. |
 | Machine view | Machine run state, user intent | Derived. Status/UI only; they do not drive GPIO themselves. |
-| Brew orchestrator | Stopper | Decides rinse vs shot vs idle, and *requests* CN9 start/stop. |
+| Brew orchestrator | Stopper | Decides rinse vs shot vs idle, and *requests* circuit start/stop. |
 | In-shot sensing | Weight stream, weight control, cup presence, first flow, accidental touch | Consume scale samples. Only **weight control** can ask the stopper to cut. |
-| Scale link | BLE link + scale command/result | Connects the pan; does not close CN9. |
-| Off-brew | STA, Wi-Fi scan, NTP, OTA, Web command results, recovery gesture | Must not leave CN9 closed. OTA and recovery keep the relay open. |
+| Scale link | BLE link + scale command/result | Connects the pan; does not close the machine circuit. |
+| Off-brew | STA, Wi-Fi scan, NTP, OTA, Web command results, recovery gesture | Must not leave machine circuit closed. OTA and recovery keep the relay open. |
 
 ```mermaid
 flowchart TB
@@ -47,7 +47,7 @@ flowchart TB
   intent --> stopper[Stopper]
   web[Web / BLE companion] --> stopper
   stopper -->|request start/stop| safety[Relay safety]
-  safety -->|K1| cn9[CN9]
+  safety -->|K1| circuit[machine circuit]
   safety --> run[Machine run state]
   ble[BLE scale] --> link[Scale link]
   link --> stream[Weight stream]
@@ -66,9 +66,9 @@ flowchart TB
 is `CONFIRMED_OFF`. The scale link may be `CONNECTED` or
 `DISCONNECTED`; that only matters when a shot starts.
 
-**Start.** A debounced paddle ON (or a Web start, if remote CN9 is
+**Start.** A debounced paddle ON (or a Web start, if remote machine control is
 compiled in) is `REQUEST_START`. The stopper may **block** that start
-(no-scale BBW guard, cup-to-start guard) without closing CN9. A short
+(no-scale BBW guard, cup-to-start guard) without closing the machine circuit. A short
 ON→OFF in the rinse window is not a failed start: it becomes `RINSE`.
 
 If the start is accepted, the stopper calls `machineRequestStart`.
@@ -84,7 +84,7 @@ stream **suspends** weight control; the stopper stays in `BREW` and
 A→M may still cut later. Cup `REMOVED` can cut if that option is on.
 
 **Stop.** Brew policy (`SCALE_THRESHOLD`, paddle OFF, guards, Web Stop)
-or a safety trip asks to open CN9. `machineRequestStop` drives safety
+or a safety trip asks to open the machine circuit. `machineRequestStop` drives safety
 back to `OPEN` unless it already tripped. If the paddle is still ON,
 the stopper lands in `REQUIRES_OFF` until a stable OFF (`STABLE_IDLE`).
 Otherwise it returns to `READY`.
@@ -92,8 +92,8 @@ Otherwise it returns to `READY`.
 **Independence.** A 60 s (or operational-wall) timer ISR can trip
 safety while the control task is in BLE or flash I/O. The next loop
 sees `TRIPPED` / `LOCKOUT` and finalizes the cycle with
-`RELAY_SAFETY_FAILURE`. Network, OTA, and NTP never close CN9. A
-maintenance lease (Wi-Fi scan, some admin work) forces CN9 open and
+`RELAY_SAFETY_FAILURE`. Network, OTA, and NTP never close the machine circuit. A
+maintenance lease (Wi-Fi scan, some admin work) forces machine circuit open and
 parks the stopper in `REQUIRES_OFF` if the paddle is ON.
 
 ---
@@ -102,7 +102,7 @@ parks the stopper in `REQUIRES_OFF` if the paddle is ON.
 
 **Purpose.** The brew *workflow*: idle, rinse, automatic shot, or
 manual no-scale shot. It is the only machine that decides *when* to
-request CN9 close, and *why* a cycle ended (`EndReason`).
+request machine circuit close, and *why* a cycle ended (`EndReason`).
 
 Source: `ShotStopperBrewTypes.h`, orchestrated in `shotStopper.cpp`.
 
@@ -110,9 +110,9 @@ Source: `ShotStopperBrewTypes.h`, orchestrated in `shotStopper.cpp`.
 
 | State | Meaning |
 | --- | --- |
-| `REQUIRES_OFF` | Cycle over (or start refused after a trip) while the paddle is still ON. CN9 must stay open until a stable paddle OFF. Prevents an immediate re-close. |
-| `READY` | Idle. Waiting for a start gesture. CN9 is open. |
-| `BREW` | Shot in progress with weight and/or timer policy. CN9 is closed (unless safety already opened it). Includes timer-only BBW-off shots that started with a scale. |
+| `REQUIRES_OFF` | Cycle over (or start refused after a trip) while the paddle is still ON. Machine circuit must stay open until a stable paddle OFF. Prevents an immediate re-close. |
+| `READY` | Idle. Waiting for a start gesture. Machine circuit is open. |
+| `BREW` | Shot in progress with weight and/or timer policy. Machine circuit is closed (unless safety already opened it). Includes timer-only BBW-off shots that started with a scale. |
 | `RINSE` | Timed group-head rinse. Paddle edges are ignored until the rinse duration elapses. Not stored in shot history. |
 | `MANUAL_NO_SCALE` | Shot in progress without weight stop (no usable scale at start, or BBW off without treating it as timer-only brew). Ends on paddle OFF, rinse demotion, or a time/safety limit. |
 
@@ -122,7 +122,7 @@ Source: `ShotStopperBrewTypes.h`, orchestrated in `shotStopper.cpp`.
 | --- | --- | --- |
 | Paddle ON (`REQUEST_START`) | User intent | From `READY`: `beginCycle`. May be held/blocked by no-scale or cup-start guards. |
 | Paddle OFF inside rinse window | User intent | From `READY` with a held guard: start `RINSE`. From `BREW` / `MANUAL_NO_SCALE`: demote to `RINSE` if still inside the gesture window. |
-| Paddle OFF after rinse window | User intent | Natural mode: end shot (`EndReason::PADDLE` → `READY`). Original/Auto BBW: may keep CN9 closed (walk-away). |
+| Paddle OFF after rinse window | User intent | Natural mode: end shot (`EndReason::PADDLE` → `READY`). Original/Auto BBW: may keep machine circuit closed (walk-away). |
 | Paddle ON during Original BBW | User intent | Promotes the rest of that shot to Natural (paddle OFF will then end it). |
 | Weight cut due | Weight control | `finalizeCycle` with `SCALE_THRESHOLD` or a guard `EndReason`. |
 | Cup removed | Cup presence | Optional cut (`CUP_REMOVED`) if cup-stop is enabled. |
@@ -151,11 +151,11 @@ Source: `ShotStopperSafety.h`, `ShotStopperMachine.h`.
 
 | State | Meaning |
 | --- | --- |
-| `BOOT_SAFE` | Power-on default before supervisors are judged. CN9 is commanded open. |
+| `BOOT_SAFE` | Power-on default before supervisors are judged. Machine circuit is commanded open. |
 | `OPEN` | Relay de-energized. Close is allowed if watchdogs and timers are ready. |
 | `ARMING` | Close requested: generation bumped, hard/operational timers started, GPIO not yet committed (or about to be). A timeout here still trips. |
 | `CLOSED` | K1 energized. `commandedClosed` is latched in RTC so a reset mid-close is treated as unsafe. |
-| `TRIPPED` | Opened by a limit or fault with **no lockout**. Control must still treat CN9 as forbidden until the cycle is finalized. |
+| `TRIPPED` | Opened by a limit or fault with **no lockout**. Control must still treat machine circuit as forbidden until the cycle is finalized. |
 | `LOCKOUT` | Opened by a fault that must not silently retry (stuck feedback, watchdog missing, unsafe reset, boot loop). New closes are refused until the fault is cleared by a safe boot path. |
 
 ### Events / faults (`RelaySafetyFault`)
@@ -167,7 +167,7 @@ Source: `ShotStopperSafety.h`, `ShotStopperMachine.h`.
 | `WATCHDOG_UNAVAILABLE` | Task WDT not subscribed. | Lockout |
 | `INVALID_LIMIT` | Close requested with a bad operational limit. | Lockout |
 | `TIMER_ARM_FAILED` | Could not start the deadline timers. | Lockout |
-| `HARD_LIMIT` | 60 s cap (`HARD_MAX_CN9_CLOSED_MS`). ISR-safe. | Trip (not lockout) |
+| `HARD_LIMIT` | 60 s cap (`HARD_MAX_CIRCUIT_CLOSED_MS`). ISR-safe. | Trip (not lockout) |
 | `OPERATIONAL_LIMIT` | Configured Max BBW time (default 50 s), or Original-mode wall after paddle release. | Trip |
 | `FEEDBACK_STUCK_CLOSED` | Optional echo GPIO already closed before arm. | Lockout |
 | `FEEDBACK_FAILED_TO_CLOSE` | Echo never matched a commanded close. | Lockout |
@@ -193,7 +193,7 @@ GPIO.
 
 Source: `ShotStopperMachineTypes.h`, `machineRunState()` in
 `ShotStopperMachinePaddleState.h` (included from `ShotStopperMachine.h`).
-Config lock uses `machineIsRunning()`, which for paddle equals CN9 closed.
+Config lock uses `machineIsRunning()`, which for paddle equals machine circuit closed.
 
 ### States
 
@@ -213,7 +213,7 @@ safety.
 
 ## 4. User intent (`UserIntent`)
 
-**Purpose.** Debounced paddle as a *request*, not as CN9. The Micra
+**Purpose.** Debounced paddle as a *request*, not as machine circuit. The Micra
 paddle is only a GPIO; this machine is how brew policy hears the
 barista.
 
@@ -231,14 +231,14 @@ Source: `ShotStopperMachineTypes.h`, `machinePollIntention()`.
 
 Raw vs stable: `rawPaddleOn` is the pin; `paddleOn` is after
 `PADDLE_DEBOUNCE_MS`. The stopper uses both so a bounce cannot re-close
-CN9.
+Machine circuit.
 
 ---
 
 ## 5. Weight control (`WeightControlState`)
 
 **Purpose.** Whether **this cycle** may use the pan to stop. Losing
-the scale must not slam CN9 open; it **suspends** automation and lets
+the scale must not slam machine circuit open; it **suspends** automation and lets
 A→M / paddle / walls decide.
 
 Source: `ShotStopperScaleTypes.h`, `setWeightControlState()` in
@@ -380,7 +380,7 @@ Source: `ShotStopperScaleTypes.h`. Only runs while weight control is
 ## 10. Scale link (`ScaleLinkState`)
 
 **Purpose.** BLE session with the preferred / discovered scale.
-Connects the weight path; **never** drives CN9.
+Connects the weight path; **never** drives the machine circuit.
 
 Source: `shotStopper.cpp` (`ScaleLinkState`).
 
@@ -401,7 +401,7 @@ shot (that is what suspends weight control).
 | --- | --- |
 | `START_TIMER_AND_TARE` | Shot start: tare (if enabled) and start the scale timer. |
 | `TARE_ONLY` | Late-cup retare. |
-| `STOP_TIMER` | After CN9 opens, once the scale timer has reached the internal whole-second time (or the 2 s catch-up cap). Optional extra delay is a pad after that. Queued to the **front**. |
+| `STOP_TIMER` | After machine circuit opens, once the scale timer has reached the internal whole-second time (or the 2 s catch-up cap). Optional extra delay is a pad after that. Queued to the **front**. |
 
 ### Scale events (`ScaleEventType`) — inbound
 
@@ -432,7 +432,7 @@ Not a C++ enum; latches `noScaleShotGuardArmed` / `Idle`.
 | State (UI) | Meaning |
 | --- | --- |
 | Off | Setting disabled or BBW off. Guard does nothing. |
-| Armed | Next long paddle ON is blocked (CN9 stays open, triple beep). |
+| Armed | Next long paddle ON is blocked (machine circuit stays open, triple beep). |
 | Idle | Guard consumed (blocked start, rinse, or finished non-rinse shot). Re-arms on scale connect, boot, or **Last shot cooldown**. |
 
 ### Events
@@ -450,7 +450,7 @@ Not a C++ enum; latches `noScaleShotGuardArmed` / `Idle`.
 ## 12. Recovery gesture
 
 **Purpose.** Restore network or factory-reset when Wi-Fi, Web UI, BLE,
-and USB are all unusable. **CN9 stays open** for the whole window.
+and USB are all unusable. **machine circuit stays open** for the whole window.
 
 Source: `ShotStopperRecoveryGesture.h`. Entry: power-on reset **and**
 paddle already stably ON.
@@ -512,7 +512,7 @@ during a shot or scan.
 ## 14. Wi-Fi scan (`WifiScanState`)
 
 **Purpose.** Fill the Web UI network list. Scanning is RF-heavy, so it
-takes a **maintenance lease**: CN9 is forced open for the scan.
+takes a **maintenance lease**: machine circuit is forced open for the scan.
 
 | State | Meaning |
 | --- | --- |
@@ -547,7 +547,7 @@ the UI.
 ## 16. OTA (`OtaState`)
 
 **Purpose.** Dual-slot Wi-Fi update that cannot brick the only bootable
-image. CN9 stays open. Transfer writes the **inactive** slot; boot
+image. Machine circuit stays open. Transfer writes the **inactive** slot; boot
 selection changes only on an explicit flash/commit.
 
 Source: `ShotStopperOta.h`. Product notes: [OTA](features/ota.md).
@@ -608,7 +608,7 @@ ran, stored on the session, last-shot blob, and shot log.
 | `RINSE_COMPLETE` | Rinse duration elapsed. |
 | `WEB_STOP` | Authenticated Stop. |
 | `PHYSICAL_OVERRIDE` | Paddle moved during a Web-owned cycle. |
-| `WEB_HEARTBEAT_TIMEOUT` | Remote hold lost (when remote CN9 is enabled). |
+| `WEB_HEARTBEAT_TIMEOUT` | Remote hold lost (when remote machine control is enabled). |
 | `RELAY_SAFETY_FAILURE` | Arm failed or safety tripped. |
 | `FAST_EXTRACTION_MAX_WEIGHT` | Fast guard: recovery weight. |
 | `FAST_EXTRACTION_MIN_TIME` | Fast guard: min brew time reached after an early target. |
@@ -629,7 +629,7 @@ One pass of the control task, simplified:
 
 1. Feed watchdogs. Poll paddle → user intent.
 2. Service relay safety (honor ISR trips, echo GPIO if present).
-3. Recovery gesture only in the boot window; it never closes CN9.
+3. Recovery gesture only in the boot window; it never closes the machine circuit.
 4. Apply stopper `switch (stopperState)` using intent, weight control,
    cup, A→M, and rinse timers.
 5. Drain scale events; update link, stream, cup, first flow, touch,
@@ -638,7 +638,7 @@ One pass of the control task, simplified:
 7. Network, NTP, OTA, and HTTP run on the **network task**. They take a
    maintenance lease when they need exclusive RF or flash.
 
-That split is why a hung HTTP handler cannot keep CN9 closed: the
+That split is why a hung HTTP handler cannot keep machine circuit closed: the
 deadline timers and panic/stack-overflow hooks write the relay GPIO
 from IRAM.
 

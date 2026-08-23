@@ -10,18 +10,18 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 
 | Question | Answer |
 | --- | --- |
-| **I cannot brew longer than 60 s. Why?** | A firmware **hard cap of 60 s** applies to every path that closes CN9. The Web UI cannot raise it. Separate from **Max BBW time**. See [Brew by weight](features/brew-by-weight.md). |
+| **I cannot brew longer than 60 s. Why?** | A firmware **hard cap of 60 s** applies to every path that closes the machine circuit. The Web UI cannot raise it. Separate from **Max BBW time**. See [Brew by weight](features/brew-by-weight.md). |
 | **My shot stops around 50 s (or another value under 60 s).** | Check **Max BBW time** (default **50 s**). [A→M time guard](features/auto-to-manual.md) can also cut if the scale dropped. [Slow extraction guard](features/slow-extraction-guard.md) may decide at **44 s**; that is not a replacement for Max BBW time. |
-| **The shot ended off-target and the scale was not stopping the flow.** | Often [A→M time guard](features/auto-to-manual.md) (on by default). If the scale is lost mid-shot, weight stop pauses, reconnect continues, and CN9 can still open on a deadline from shot start. Status shows `Off` / `Idle` / `Armed` / `A→M · …s`. |
+| **The shot ended off-target and the scale was not stopping the flow.** | Often [A→M time guard](features/auto-to-manual.md) (on by default). If the scale is lost mid-shot, weight stop pauses, reconnect continues, and machine circuit can still open on a deadline from shot start. Status shows `Off` / `Idle` / `Armed` / `A→M · …s`. |
 | **The shot finished 2–4 g over target.** | Expected when [Fast extraction guard](features/fast-extraction-guard.md) is on and the target arrived **too soon**. The shot extends toward max recovery weight or minimum brew time. Turn the guard off if you do not want that. Pulses: [Alerts](alerts.md). |
 | **The shot finished under target (for example 34 g) when it was slow.** | Expected when [Slow extraction guard](features/slow-extraction-guard.md) is on and the target was not reached by max brew time. BBW still wins if you hit target on time. |
 | **The scale hit target but the shot did not stop.** | [Cup protection](features/cup-protection.md) / **BBW protection** (default **12 s**) blocks automatic weight stop at the start so a finger, late cup, or noise cannot cut. First drops can still beep. |
 | **Can I put the cup down after I start?** | **Yes**, if **Automatic retare** is on (default). Place the cup in the **retare window** (default **4 s**). Any stable load at or above **Minimum cup weight** (default **10 g** — cardboard ~12–20 g or ceramic 150 g) is a cup, not first drop, and can retare. A finger tap is also not first drop. Then **Post-tare grace** (default **2 s**) lets the scale settle before weight is used to stop. See [Tare and retare](features/tare-retare.md), [Tare](settings/tare.md), and [Cup](settings/cup.md). |
-| **Why does it not stop exactly on the target grams?** | A **learned stop offset** (default 1.5 g, max 5 g) compensates for drip after CN9 opens. History shows `cut_type` and `stop_detail`, not a “prediction” type. See [Brew by weight](features/brew-by-weight.md). |
-| **The scale disconnected mid-shot. What happens?** | Weight stop pauses; reconnect continues for the whole cycle. If three coherent samples return, BBW resumes. If [A→M](features/auto-to-manual.md) is on, CN9 may still open on the deadline. If A→M is off, the shot runs until paddle OFF or the 60 s wall. |
+| **Why does it not stop exactly on the target grams?** | A **learned stop offset** (default 1.5 g, max 5 g) compensates for drip after machine circuit opens. History shows `cut_type` and `stop_detail`, not a “prediction” type. See [Brew by weight](features/brew-by-weight.md). |
+| **The scale disconnected mid-shot. What happens?** | Weight stop pauses; reconnect continues for the whole cycle. If three coherent samples return, BBW resumes. If [A→M](features/auto-to-manual.md) is on, machine circuit may still open on the deadline. If A→M is off, the shot runs until paddle OFF or the 60 s wall. |
 | **I turned Brew by weight off. Why no weight stop?** | Tare and the timer remain. Weight stop, retare, BBW protection, and offset learning do not. Cut is paddle, time limit, or remote **Stop**. Fast, Slow, A→M, and No-scale BBW become read-only on Home. |
 | **Home Brew by weight is OFF but Settings is ON.** | Both can be right. **Home** is the live session (Manual) and is what the next shot uses. **Settings → Brew** is the saved recipe and does not flip off when you turn Home off. Turn Home ON to resume weight stop without changing the recipe. |
-| **BBW is on, scale is off, a long paddle does nothing (triple beep, CN9 open).** | [No-scale BBW](settings/no-scale-bbw.md) (*Avoid BBW shot without scale*, on by default). A long paddle does not close CN9. A short ON→OFF still rinses. The next start is a manual no-scale shot. |
+| **BBW is on, scale is off, a long paddle does nothing (triple beep, machine circuit open).** | [No-scale BBW](settings/no-scale-bbw.md) (*Avoid BBW shot without scale*, on by default). A long paddle does not close the machine circuit. A short ON→OFF still rinses. The next start is a manual no-scale shot. |
 
 ## Network and access
 
@@ -33,7 +33,7 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 | **Can I change the password?** | **Admin** (unlock with the current device password) **→ Device password** (new + confirm). USB: `SET_DEVICE_PASSWORD` / `RESET_DEVICE_PASSWORD`. See [USB serial CLI](SERIAL_CLI.md). |
 | **I lost Wi-Fi or the device password. How do I recover over USB?** | 115200 baud. `HELLO` replies `how are you` even if serial debug is off. `RESET_DEVICE_PASSWORD`, `CLEAR_WIFI`, or `FACTORY_RESET`. Destructive commands need paddle OFF. |
 | **No Web UI, Wi-Fi, BLE, or USB. How do I recover?** | [Emergency recovery with the paddle](EMERGENCY_RECOVERY.md). Power on with paddle ON: three cycles restore access; five do a factory reset. |
-| **Can I control the shot from my phone?** | Monitoring always. **Start shot**, **Start rinse**, and **Stop shot** need Admin unlock (device password) on that window. Start and rinse also need a build with `SHOT_STOPPER_ENABLE_REMOTE_CN9=1`. The physical paddle always wins. |
+| **Can I control the shot from my phone?** | Monitoring always. **Start shot**, **Start rinse**, and **Stop shot** need Admin unlock (device password) on that window. Start and rinse also need a build with `SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1`. The physical paddle always wins. |
 | **How do I close Admin unlock?** | **Lock** in the header or at the top of Admin. Unlock stays while the Admin page is open, or for 15 minutes after Start/Stop, rinse, Wi-Fi, or OTA. Leaving Home polling does not renew it. |
 | **The Web UI looks like garbage in `curl`.** | HTML is gzip. Browsers decode it. Use `curl --compressed http://<ip>/`. |
 | **Serial shows `FT-PSK present but FT disabled, falling back to WPA2-PSK`.** | Harmless WPA2 fallback: the router advertises 802.11r and the ESP32 does not use it. Current firmware silences that IDF `wifi` warning. Not a failed join. |
@@ -45,17 +45,17 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 | **Which boards can I use?** | ESP32-S3 with PSRAM only: **n16r8** (development board in [Hardware](HARDWARE.md)) or **n8r4**. Default pins: paddle GPIO **21**, relay GPIO **2** (active HIGH). Classic ESP32 and Nano ESP32 are not supported. |
 | **Which scales work?** | Designed first for **Bookoo** Themis Mini/Ultra. Also Acaia, Felicita Arc, AtomHeart Eclair via [AcaiaArduinoBLE](../libraries/AcaiaArduinoBLE/README.md#scale-compatibility). See [Scales](settings/scales.md). |
 | **How do I choose among several scales?** | **Always use this scale** (on by default) plus **Preferred scale**. See [Scales](settings/scales.md). |
-| **Does it work on machines other than the Micra?** | **No**, not officially. This firmware is for the Linea Micra (paddle on GPIO, CN9 through an isolated relay). |
+| **Does it work on machines other than the Micra?** | **No**, not officially. This firmware is for the Linea Micra (paddle on GPIO, machine circuit through an isolated relay). |
 | **Do I need a custom ShotStopper PCB?** | No. The development board in [Hardware](HARDWARE.md) is an ESP32-S3 1-channel relay module. BOM and Micra wiring are still TODO. |
-| **What does the blue LED mean?** | GPIO 1 HIGH while a BLE scale is connected. Toggle in [Alerts](alerts.md). Not part of CN9 decisions. |
+| **What does the blue LED mean?** | GPIO 1 HIGH while a BLE scale is connected. Toggle in [Alerts](alerts.md). Not part of machine-circuit decisions. |
 | **My wiring uses different GPIOs. How do I change them?** | Not from the Web UI. Edit `shotStopper/ShotStopperHardware.h` and rebuild. See [Hardware](HARDWARE.md). Defaults match the relay board: paddle 21, relay 2 **active HIGH**, paddle **active LOW**. |
-| **Why beeps after the shot already ended?** | [Paddle-off reminder](alerts.md): the paddle is still ON and CN9 is already open. Default interval 10 s, limit 15 min. |
+| **Why beeps after the shot already ended?** | [Paddle-off reminder](alerts.md): the paddle is still ON and machine circuit is already open. Default interval 10 s, limit 15 min. |
 
 ## Safety and diagnostics
 
 | Question | Answer |
 | --- | --- |
-| **What happens after a panic or watchdog reset?** | Boot forces CN9 **open**, then starts normally. No paddle recovery gesture is required. Active hardware/feedback/timer faults can still lock out new closes. |
+| **What happens after a panic or watchdog reset?** | Boot forces machine circuit **open**, then starts normally. No paddle recovery gesture is required. Active hardware/feedback/timer faults can still lock out new closes. |
 | **How do I see why a shot ended?** | [Shot history](features/shot-history.md): `cut_type` (`auto`, `manual`, `limit`) and `stop_detail` (`normal_target`, `paddle`, `web_stop`, `wall_limit`, `hard_limit`, `extended_max_weight`, `cup_removed`, …). `other` is only for unknown/legacy rows. |
 | **The board LED does not light with the scale connected.** | Check **Blue LED while scale connected** (on by default) and that BLE shows connected. |
 | **Is the ESP32 relay enough as a safety guarantee?** | **No.** Watchdogs and the 60 s cap reduce lockups, but a welded contact needs a second isolated barrier (K2). See [Hardware](HARDWARE.md). |

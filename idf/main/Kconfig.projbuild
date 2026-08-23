@@ -1,11 +1,15 @@
 menu "Advanced Shot Stopper"
 
-    config SHOT_STOPPER_ENABLE_REMOTE_CN9
-        bool "Enable remote CN9 control path"
+    config SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL
+        bool "Enable remote machine control"
         default y
         help
-            When enabled, compiles with SHOT_STOPPER_ENABLE_REMOTE_CN9=1.
-            Command-line -DSHOT_STOPPER_ENABLE_REMOTE_CN9=… still overrides.
+            When enabled, compiles the remote start/stop path for the
+            intercepted machine circuit
+            (SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1). The legacy
+            -DSHOT_STOPPER_ENABLE_REMOTE_CN9 alias still maps onto this flag.
+            Command-line -DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=… still
+            overrides.
 
     config SHOT_STOPPER_ENABLE_BUZZER
         int "Buzzer mode (0=off, 1=passive RTTTL, 2=active beep)"

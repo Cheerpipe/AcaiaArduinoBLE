@@ -40,28 +40,28 @@ constexpr uint8_t RELAY_OPEN_LEVEL = LOW;
 
 constexpr uint32_t PADDLE_DEBOUNCE_MS = 30;
 constexpr uint32_t SAFETY_HEARTBEAT_TOGGLE_MS = 50;
-constexpr uint32_t CN9_FEEDBACK_SETTLE_MS = 100;
+constexpr uint32_t CIRCUIT_FEEDBACK_SETTLE_MS = 100;
 
 #if defined(SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO) != \
-    defined(SHOT_STOPPER_CN9_FEEDBACK_GPIO)
-#error "Define both safety heartbeat and CN9 feedback GPIOs, or neither"
+    defined(SHOT_STOPPER_CIRCUIT_FEEDBACK_GPIO)
+#error "Define both safety heartbeat and circuit feedback GPIOs, or neither"
 #endif
 
 #if defined(SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO)
 constexpr bool EXTERNAL_SAFETY_HARDWARE_PRESENT = true;
 constexpr uint8_t SAFETY_HEARTBEAT_GPIO =
     SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO;
-constexpr uint8_t CN9_FEEDBACK_GPIO = SHOT_STOPPER_CN9_FEEDBACK_GPIO;
-#ifndef SHOT_STOPPER_CN9_FEEDBACK_CLOSED_LEVEL
-#define SHOT_STOPPER_CN9_FEEDBACK_CLOSED_LEVEL LOW
+constexpr uint8_t CIRCUIT_FEEDBACK_GPIO = SHOT_STOPPER_CIRCUIT_FEEDBACK_GPIO;
+#ifndef SHOT_STOPPER_CIRCUIT_FEEDBACK_CLOSED_LEVEL
+#define SHOT_STOPPER_CIRCUIT_FEEDBACK_CLOSED_LEVEL LOW
 #endif
-constexpr uint8_t CN9_FEEDBACK_CLOSED_LEVEL =
-    SHOT_STOPPER_CN9_FEEDBACK_CLOSED_LEVEL;
+constexpr uint8_t CIRCUIT_FEEDBACK_CLOSED_LEVEL =
+    SHOT_STOPPER_CIRCUIT_FEEDBACK_CLOSED_LEVEL;
 #else
 constexpr bool EXTERNAL_SAFETY_HARDWARE_PRESENT = false;
 constexpr uint8_t SAFETY_HEARTBEAT_GPIO = 0;
-constexpr uint8_t CN9_FEEDBACK_GPIO = 0;
-constexpr uint8_t CN9_FEEDBACK_CLOSED_LEVEL = LOW;
+constexpr uint8_t CIRCUIT_FEEDBACK_GPIO = 0;
+constexpr uint8_t CIRCUIT_FEEDBACK_CLOSED_LEVEL = LOW;
 #endif
 
 static_assert(PADDLE_GPIO != RELAY_GPIO,
@@ -89,25 +89,25 @@ static_assert(!BUZZER_SUPPORT_ENABLED ||
 #if defined(SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO)
 static_assert(SAFETY_HEARTBEAT_GPIO != RELAY_GPIO &&
                   SAFETY_HEARTBEAT_GPIO != PADDLE_GPIO &&
-                  CN9_FEEDBACK_GPIO != RELAY_GPIO &&
-                  CN9_FEEDBACK_GPIO != PADDLE_GPIO &&
-                  CN9_FEEDBACK_GPIO != SAFETY_HEARTBEAT_GPIO,
+                  CIRCUIT_FEEDBACK_GPIO != RELAY_GPIO &&
+                  CIRCUIT_FEEDBACK_GPIO != PADDLE_GPIO &&
+                  CIRCUIT_FEEDBACK_GPIO != SAFETY_HEARTBEAT_GPIO,
               "Safety GPIOs must be unique");
 static_assert(SAFETY_HEARTBEAT_GPIO != SCALE_CONNECTED_LED_GPIO &&
-                  CN9_FEEDBACK_GPIO != SCALE_CONNECTED_LED_GPIO,
+                  CIRCUIT_FEEDBACK_GPIO != SCALE_CONNECTED_LED_GPIO,
               "Safety GPIOs must not share the scale-connected LED pin");
 static_assert(BUZZER_GPIO != SAFETY_HEARTBEAT_GPIO &&
-                  BUZZER_GPIO != CN9_FEEDBACK_GPIO,
+                  BUZZER_GPIO != CIRCUIT_FEEDBACK_GPIO,
               "Buzzer GPIO must be distinct from safety GPIOs");
 #ifndef SHOT_STOPPER_HOST_TEST
 static_assert(GPIO_IS_VALID_OUTPUT_GPIO(SAFETY_HEARTBEAT_GPIO),
               "Heartbeat must use a valid output-capable GPIO");
-static_assert(GPIO_IS_VALID_GPIO(CN9_FEEDBACK_GPIO),
-              "CN9 feedback must use a valid input GPIO");
+static_assert(GPIO_IS_VALID_GPIO(CIRCUIT_FEEDBACK_GPIO),
+              "circuit feedback must use a valid input GPIO");
 #endif
-static_assert(CN9_FEEDBACK_CLOSED_LEVEL == LOW ||
-                  CN9_FEEDBACK_CLOSED_LEVEL == HIGH,
-              "CN9 feedback level must be LOW or HIGH");
+static_assert(CIRCUIT_FEEDBACK_CLOSED_LEVEL == LOW ||
+                  CIRCUIT_FEEDBACK_CLOSED_LEVEL == HIGH,
+              "circuit feedback level must be LOW or HIGH");
 #endif
 static_assert(PADDLE_DEBOUNCE_MS > 0,
               "Paddle debounce must be greater than zero");

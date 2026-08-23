@@ -3,7 +3,7 @@
 Optional brew-by-weight enhancement, **on by default**. It is the inverse of
 [Fast extraction guard](fast-extraction-guard.md): shots that have **not**
 reached the target by a maximum brew time — often a grind that is too fine —
-should not wait all the way to the CN9 wall.
+should not wait all the way to the machine circuit wall.
 
 ## When it applies
 
@@ -13,7 +13,7 @@ off, on rinses, or on manual no-scale shots.
 BBW still wins by weight: if the target arrives on time, the cut is a normal
 target stop. Fast extended and Slow extended cannot both own the same shot.
 
-Elapsed time is measured from cycle start (CN9 close). The learned stop
+Elapsed time is measured from cycle start (machine circuit close). The learned stop
 offset applies to the min recovery threshold (`min recovery − offset`).
 
 Max brew time is a **decision point**, not a replacement for Max BBW time or
@@ -33,11 +33,11 @@ Active preset, **Settings → Brew**. The ON/OFF switch is also on
 ## How it works
 
 1. **Normal stop** — the scale reaches the target at or before max brew time
-   → CN9 opens at the target (`normal_target`). Slow does not fire.
+   → machine circuit opens at the target (`normal_target`). Slow does not fire.
 2. **Too slow** — max brew time is reached *without* the target:
    - Already at or above **min recovery** → cut now (`slow_max_time`).
    - Still below that floor → **extended** until min recovery
-     (`slow_min_weight`) or until the CN9 / Max BBW time wall.
+     (`slow_min_weight`) or until the machine circuit / Max BBW time wall.
 
 ## Example
 

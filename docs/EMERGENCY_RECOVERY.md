@@ -8,7 +8,7 @@ This is the **user procedure**. Implementation notes live in
 [Factory reset](settings/factory-reset.md), [FAQ](FAQ.md),
 [USB serial CLI](SERIAL_CLI.md).
 
-> **Safety:** During recovery, the firmware keeps CN9 open and does not allow
+> **Safety:** During recovery, the firmware keeps machine circuit open and does not allow
 > a brew or rinse. Do not make coffee until the procedure finishes and the
 > controller restarts.
 
@@ -117,7 +117,7 @@ and the firmware decides only after 3 seconds without motion.
 
 Stop moving the paddle and allow the total 60-second window to expire. A beep
 lasting 1.5 seconds announces the exit. Then move the paddle to OFF; the
-firmware continues normal startup and CN9 stays open until it detects a stable
+firmware continues normal startup and machine circuit stays open until it detects a stable
 OFF.
 
 You can also cut power before the 3-second confirmation ends. If the erase had
@@ -144,8 +144,8 @@ operation safely.
 3. Look for `AdvancedShotStopperAP`; the initial STA attempt may delay its
    appearance by approximately 15 seconds.
 4. If you hear a long-short-long pattern and startup does not continue, there
-   was a storage failure. CN9 stays open. Cut and restore power to
+   was a storage failure. Machine circuit stays open. Cut and restore power to
    automatically retry the pending operation.
 5. If the issue persists, use the [USB CLI](SERIAL_CLI.md) or reflash the
-   firmware before connecting CN9 again.
+   firmware before connecting machine circuit again.
 

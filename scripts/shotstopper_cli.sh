@@ -18,7 +18,7 @@
 SS_CLI_KEYS="port arch speed host token flags build_dir output_dir"
 SS_CLI_SECRET_KEYS="token"
 # Extra compiler flags offered when the prompt for --flags is answered with Enter.
-SS_CLI_DEFAULT_FLAGS='-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=2'
+SS_CLI_DEFAULT_FLAGS='-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1 -DSHOT_STOPPER_ENABLE_BUZZER=2'
 # Per-run path overrides. Persisting them would let a stale build_dir silently
 # point an analysis at the wrong architecture, so they never touch the store.
 SS_CLI_TRANSIENT_KEYS="build_dir output_dir"
@@ -189,7 +189,7 @@ ss_cli_parse() {
 }
 
 # g++ treats a bare MACRO=value token as a linker input. Prefix -D so
-# SHOT_STOPPER_ENABLE_REMOTE_CN9=1 is a define, not a missing file.
+# SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1 is a define, not a missing file.
 ss_normalize_compiler_flags() {
   local raw="$1" out="" tok
   # Word-splitting is intentional: extra_flags is a space-separated list.

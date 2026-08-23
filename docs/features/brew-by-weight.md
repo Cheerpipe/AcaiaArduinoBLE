@@ -14,7 +14,7 @@ run on a rinse, a timer-only shot (BBW off), or a manual no-scale shot.
 
 After the start-of-shot protection window ends (see
 [Cup protection](cup-protection.md)), two fresh scale samples at or above
-`target − learned offset` open CN9. A short linear prediction can stop a
+`target − learned offset` open the machine circuit. A short linear prediction can stop a
 moment earlier. The learned offset is capped at 5.0 g and can be reset to a
 baseline from the Web UI.
 
@@ -38,7 +38,7 @@ noted. **Home → Quick Settings** can toggle brew by weight for the session
 Fixed behavior (not separate settings):
 
 - Direct stop: two fresh samples at the threshold after BBW protection ends.
-- Predictive stop: may open CN9 slightly before the threshold.
+- Predictive stop: may open the machine circuit slightly before the threshold.
 - Scale loss: weight control pauses; paddle OFF and time limits stay in force.
   See [A→M time guard](auto-to-manual.md).
 

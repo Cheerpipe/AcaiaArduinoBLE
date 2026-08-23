@@ -13,8 +13,8 @@ password returns to **`ineedacoffee`**. The device then restarts.
 ## Ways to run it
 
 All of these need the machine idle where a safety gate exists (paddle OFF,
-CN9 open, Ready) except the paddle gesture, which runs **before** Wi-Fi and
-keeps CN9 open.
+Machine circuit open, Ready) except the paddle gesture, which runs **before** Wi-Fi and
+keeps machine circuit open.
 
 | Path | How | Notes |
 | --- | --- | --- |

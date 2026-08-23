@@ -8,7 +8,7 @@ ESP32-S3 firmware for a **La Marzocco Linea Micra**. It adds brew-by-weight
 and related workflow controls without replacing the machine’s own brew switch.
 
 The controller reads the physical paddle on a GPIO and drives the machine’s
-CN9 brew circuit through an isolated relay. A Bluetooth scale (designed first
+brew circuit through an isolated relay. A Bluetooth scale (designed first
 for **Bookoo** Themis Mini / Ultra) supplies the weight. Other compatible
 scales work through the vendored AcaiaArduinoBLE library.
 
@@ -32,7 +32,7 @@ This project started from
 [tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/AcaiaArduinoBLE),
 the original ESP32 firmware that stops an extraction by weight over Bluetooth.
 Small Micra-specific changes grew into a dedicated rewrite: independent paddle
-read and CN9 control, a walk-away workflow, and extra guards so a late cup, a
+read and machine control, a walk-away workflow, and extra guards so a late cup, a
 finger on the pan, or a dropped scale does not ruin the shot.
 
 The original project proved that BLE brew-by-weight stop was possible.
@@ -44,9 +44,9 @@ away. The intelligence lives in firmware defaults, not in a new control panel.
 
 ## How it works
 
-The Micra paddle does **not** connect to CN9. It connects only between a
+The Micra paddle does **not** connect to the brew circuit. It connects only between a
 configured ESP32-S3 GPIO and GND. The relay COM/NO contact is the only
-connection to CN9. The firmware can therefore read the paddle and control the
+connection to that circuit. The firmware can therefore read the paddle and control the
 machine independently.
 
 That split is what makes the firmware “advanced”:
@@ -66,7 +66,7 @@ map matches that board. Details are in [Hardware](docs/HARDWARE.md).
 
 ### Brew by weight
 
-When a usable scale is connected, the firmware closes CN9 with the paddle and
+When a usable scale is connected, the firmware closes the machine circuit with the paddle and
 opens it at the target weight (minus a learned drip offset). You can turn
 weight stop off and keep only the timer and tare. See
 [Brew by weight](docs/features/brew-by-weight.md).
@@ -96,14 +96,14 @@ of stopping thin. On by default. See
 ### Slow extraction guard
 
 If the target has not arrived by a maximum brew time (often a fine grind),
-the shot can cut at a floor weight instead of waiting for the full CN9 limit.
+the shot can cut at a floor weight instead of waiting for the full machine circuit limit.
 On by default. See
 [Slow extraction guard](docs/features/slow-extraction-guard.md).
 
 ### A→M time guard
 
 If the scale is lost mid-shot, weight stop pauses and the firmware keeps
-trying to reconnect. This guard still closes CN9 on a shorter, predictable
+trying to reconnect. This guard still closes the machine circuit on a shorter, predictable
 deadline so the shot does not run to the hard 60 s cap unnoticed. On by
 default. See [A→M time guard](docs/features/auto-to-manual.md).
 
@@ -116,7 +116,7 @@ reminders, scale lost/connected, and extended-shot pulses. See
 ### Quick rinse
 
 A short paddle ON→OFF (within the gesture window) is a timed group-head
-rinse, not a shot. CN9 stays closed for the rinse duration, then opens.
+rinse, not a shot. Machine circuit stays closed for the rinse duration, then opens.
 Rinses are not stored in shot history. See
 [Quick rinse](docs/settings/quick-rinse.md).
 
@@ -147,7 +147,7 @@ the new image fails to serve the Web UI. See [OTA](docs/features/ota.md) and
 
 If Wi-Fi, Web UI, BLE, and USB are all unavailable, power on with the paddle
 ON to enter a 60 s recovery window. Three `OFF→ON` cycles restore network
-access; five do a factory reset. CN9 stays open. See
+access; five do a factory reset. Machine circuit stays open. See
 [Emergency recovery](docs/EMERGENCY_RECOVERY.md).
 
 ## Main settings
@@ -260,8 +260,8 @@ You are solely responsible for:
   tests and the full [manual test plan](docs/MANUAL_TEST_PLAN.md) before
   connecting to a live espresso machine.
 - **Configuring the firmware correctly and safely** — including GPIO assignment,
-  compile-time pin maps, polarity, CN9 limits, and workflow parameters — so
-  that paddle readback, CN9 control, and automatic stop behavior match your
+  compile-time pin maps, polarity, machine circuit limits, and workflow parameters — so
+  that paddle readback, machine control, and automatic stop behavior match your
   hardware. GPIO and other safety-critical pin assignments are **not**
   configurable from the Web UI; they must be set in source and verified at
   build time (see [Hardware](docs/HARDWARE.md) and the [FAQ](docs/FAQ.md)).
@@ -296,7 +296,7 @@ Advanced Shot Stopper would not exist without
 **[tatemazer](https://github.com/tatemazer)** and
 [tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/AcaiaArduinoBLE).
 That repository proved BLE brew-by-weight stop and shared the core scale
-protocol work. This application firmware, Web UI, Micra paddle/CN9 model, and
+protocol work. This application firmware, Web UI, Micra paddle/machine circuit model, and
 safety workflow are new work on top of that foundation.
 
 The vendored library also credits:

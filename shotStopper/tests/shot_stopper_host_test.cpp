@@ -1,6 +1,6 @@
 #define SHOT_STOPPER_HOST_TEST
 #define ARDUINO_ESP32S3_DEV
-#define SHOT_STOPPER_ENABLE_REMOTE_CN9 1
+#define SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL 1
 #ifndef SHOT_STOPPER_ENABLE_BUZZER
 #define SHOT_STOPPER_ENABLE_BUZZER 1
 #endif
@@ -79,7 +79,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   hostEspTimerStartSucceeds = true;
   hostGptimerCreateSucceeds = true;
   hostGptimerArmSucceeds = true;
-  hostCn9ArmBeforeCommitHook = nullptr;
+  hostCircuitArmBeforeCommitHook = nullptr;
   hostTaskWatchdogOperationsSucceed = true;
   hostTaskWatchdogConfigured = false;
   hostTaskWatchdogSubscriptions = 0;
@@ -108,7 +108,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   runtimeConfig.avoidBbwShotWithoutScale = false;
   runtimeConfig.avoidAccidentalTouchEnabled = false;
   // Host scenarios assert immediate scale timer stop when the display is
-  // already at/past CN9 whole seconds; catch-up is covered by ST02–ST06.
+  // already at/past circuit whole seconds; catch-up is covered by ST02–ST06.
   runtimeConfig.scaleTimerStopExtraDelayMs = 0;
   lastCycle = LastCycleSummary{};
   persistedLastShot = PersistedLastShot{};
@@ -231,11 +231,11 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   paddleTurnedOff = false;
   rawPaddleChangedAtMs = 0;
   virtualPaddleOn = false;
-  cn9Closed = false;
+  circuitClosed = false;
   relaySafetyTripped = false;
   operationalLimitTripped = false;
-  cn9ClosedAtMs = 0;
-  operationalLimitAtArmMs = HARD_MAX_CN9_CLOSED_MS;
+  circuitClosedAtMs = 0;
+  operationalLimitAtArmMs = HARD_MAX_CIRCUIT_CLOSED_MS;
   relaySafetyState = RelaySafetyState::OPEN;
   relaySafetyFault = RelaySafetyFault::NONE;
   relaySafetyGeneration = 0;
@@ -309,20 +309,20 @@ void verifySafetyInvariants() {
       stopperState == StopperState::MANUAL_NO_SCALE;
 
   if (relay.closed && (!stateMayCloseRelay || !session.active)) {
-    std::cerr << "Safety invariant failed: CN9 closed in "
+    std::cerr << "Safety invariant failed: machine circuit closed in "
               << stopperStateName(stopperState) << "\n";
     ++failures;
   }
   if ((stopperState == StopperState::READY ||
        stopperState == StopperState::REQUIRES_OFF) &&
       relay.closed) {
-    std::cerr << "Safety invariant failed: safe state has CN9 closed\n";
+    std::cerr << "Safety invariant failed: safe state has machine circuit closed\n";
     ++failures;
   }
   if (!paddleOn && !rawPaddleOn && stopperState != StopperState::RINSE &&
       session.source != ControlSource::WEB && relay.closed &&
       !originalBbwSemanticsActive() && !autoBbwSemanticsActive()) {
-    std::cerr << "Safety invariant failed: stable paddle OFF has CN9 closed\n";
+    std::cerr << "Safety invariant failed: stable paddle OFF has machine circuit closed\n";
     ++failures;
   }
 }
@@ -772,7 +772,7 @@ void t12_global_limit_opens_manual_and_brew_cycles() {
   startCycle();
   reachManualNoScaleState();
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
-  reachSessionElapsed(HARD_MAX_CN9_CLOSED_MS);
+  reachSessionElapsed(HARD_MAX_CIRCUIT_CLOSED_MS);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(session.endReason == EndReason::GLOBAL_LIMIT);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -781,7 +781,7 @@ void t12_global_limit_opens_manual_and_brew_cycles() {
   reachReadyFromBoot();
   startCycle();
   advanceToBrew();
-  reachSessionElapsed(HARD_MAX_CN9_CLOSED_MS);
+  reachSessionElapsed(HARD_MAX_CIRCUIT_CLOSED_MS);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
 }
@@ -803,7 +803,7 @@ void t13_reset_path_starts_with_relay_open() {
   scaleCommandQueue = nullptr;
   scaleEventQueue = nullptr;
   webCommandQueue = nullptr;
-  cn9Closed = false;
+  circuitClosed = false;
   relaySafetyTripped = false;
   stopperState = StopperState::REQUIRES_OFF;
   hostRelayOpenWrites = 0;
@@ -826,7 +826,7 @@ void t14_automatic_stop_stays_open_while_paddle_on() {
   runLoopAfter(1000);
   loop();
   CHECK(stopperState == StopperState::REQUIRES_OFF);
-  runLoopAfter(HARD_MAX_CN9_CLOSED_MS * 2);
+  runLoopAfter(HARD_MAX_CIRCUIT_CLOSED_MS * 2);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(!getRelaySafetySnapshot().closed);
 }
@@ -863,10 +863,10 @@ void t16_only_micra_states_are_compiled() {
 void t17_simultaneous_global_limit_and_paddle_off_is_idempotent() {
   resetHarness(false, true);
   reachReadyFromBoot();
-  runtimeConfig.operationalWallMs = HARD_MAX_CN9_CLOSED_MS;
+  runtimeConfig.operationalWallMs = HARD_MAX_CIRCUIT_CLOSED_MS;
   startCycle();
   advanceToBrew();
-  reachSessionElapsed(HARD_MAX_CN9_CLOSED_MS - PADDLE_DEBOUNCE_MS);
+  reachSessionElapsed(HARD_MAX_CIRCUIT_CLOSED_MS - PADDLE_DEBOUNCE_MS);
   setRawPaddle(false);
   hostRelayOpenWrites = 0;
   runLoopAfter(PADDLE_DEBOUNCE_MS);
@@ -924,7 +924,7 @@ void t21_global_limit_without_scale_rearms_after_release() {
   resetHarness(false, false);
   reachReadyFromBoot();
   startCycle();
-  reachSessionElapsed(HARD_MAX_CN9_CLOSED_MS);
+  reachSessionElapsed(HARD_MAX_CIRCUIT_CLOSED_MS);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(!getRelaySafetySnapshot().closed);
   setRawPaddle(false);
@@ -1265,13 +1265,13 @@ void r05_regression_uses_last_ten_valid_samples() {
   CHECK(shot.timeS[0] == static_cast<float>(9));
 }
 
-void r06_hard_timer_opens_cn9_without_control_loop() {
+void r06_hard_timer_opens_circuit_without_control_loop() {
   resetHarness(false, false);
   reachReadyFromBoot();
   startCycle();
   CHECK(getRelaySafetySnapshot().closed);
 
-  hostMillis = cn9ClosedAtMs + HARD_MAX_CN9_CLOSED_MS;
+  hostMillis = circuitClosedAtMs + HARD_MAX_CIRCUIT_CLOSED_MS;
   hostServiceEspTimer(relaySafetyTimer);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(getRelaySafetySnapshot().tripped);
@@ -1289,11 +1289,11 @@ void r07_timing_remains_correct_across_millis_wrap() {
   rawPaddleChangedAtMs = hostMillis;
   runLoopAfter(PADDLE_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
-  runtimeConfig.operationalWallMs = HARD_MAX_CN9_CLOSED_MS;
+  runtimeConfig.operationalWallMs = HARD_MAX_CIRCUIT_CLOSED_MS;
   startCycle();
   reachManualNoScaleState();
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
-  reachSessionElapsed(HARD_MAX_CN9_CLOSED_MS);
+  reachSessionElapsed(HARD_MAX_CIRCUIT_CLOSED_MS);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(session.endReason == EndReason::GLOBAL_LIMIT);
 }
@@ -1530,7 +1530,7 @@ void r14_invalid_runtime_configuration_is_transactionally_rejected() {
         CommandResultState::FAILED);
 
   update.config = runtimeConfig;
-  update.config.operationalWallMs = HARD_MAX_CN9_CLOSED_MS + 1;
+  update.config.operationalWallMs = HARD_MAX_CIRCUIT_CLOSED_MS + 1;
   CHECK(validateRuntimeConfig(update.config) ==
         ConfigValidationError::OPERATIONAL_WALL);
   CHECK(enqueueWebCommand(update));
@@ -1538,9 +1538,9 @@ void r14_invalid_runtime_configuration_is_transactionally_rejected() {
   CHECK(runtimeConfig.operationalWallMs == original.operationalWallMs);
 }
 
-void r15_gptimer_opens_cn9_without_arduino_or_esp_timer_tasks() {
+void r15_gptimer_opens_circuit_without_arduino_or_esp_timer_tasks() {
   resetHarness(false, false);
-  CHECK(setCn9Closed(true, 5000));
+  CHECK(setMachineCircuitClosed(true, 5000));
   hostMillis += 5000;
   independentSafetyTimer.serviceForHost();
 
@@ -1552,14 +1552,14 @@ void r15_gptimer_opens_cn9_without_arduino_or_esp_timer_tasks() {
   CHECK(hostPinLevel[RELAY_GPIO] == RELAY_OPEN_LEVEL);
 }
 
-void r16_timeout_during_arm_transaction_can_never_close_cn9() {
+void r16_timeout_during_arm_transaction_can_never_close_circuit() {
   resetHarness(false, false);
-  hostCn9ArmBeforeCommitHook = []() {
+  hostCircuitArmBeforeCommitHook = []() {
     ++hostMillis;
     independentSafetyTimer.serviceForHost();
   };
 
-  CHECK(!setCn9Closed(true, 1));
+  CHECK(!setMachineCircuitClosed(true, 1));
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   CHECK(!relay.closed);
   CHECK(relay.operationalTripped);
@@ -1572,7 +1572,7 @@ void r17_gptimer_arm_failure_prevents_relay_energization() {
   resetHarness(false, false);
   hostGptimerArmSucceeds = false;
 
-  CHECK(!setCn9Closed(true, 5000));
+  CHECK(!setMachineCircuitClosed(true, 5000));
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   CHECK(!relay.closed);
   CHECK(relay.state == RelaySafetyState::LOCKOUT);
@@ -1580,9 +1580,9 @@ void r17_gptimer_arm_failure_prevents_relay_energization() {
   CHECK(hostRelayClosedWrites == 0);
 }
 
-void r18_watchdog_fault_opens_cn9_and_requests_safe_restart() {
+void r18_watchdog_fault_opens_circuit_and_requests_safe_restart() {
   resetHarness(false, false);
-  CHECK(setCn9Closed(true, 5000));
+  CHECK(setMachineCircuitClosed(true, 5000));
 
   reportTaskWatchdogFault();
   serviceRelaySafety();
@@ -1596,7 +1596,7 @@ void r18_watchdog_fault_opens_cn9_and_requests_safe_restart() {
 
 void r18b_ota_watchdog_restore_failure_requests_safe_restart() {
   resetHarness(false, false);
-  CHECK(setCn9Closed(true, 5000));
+  CHECK(setMachineCircuitClosed(true, 5000));
   hostTaskWatchdogOperationsSucceed = true;
   {
     TaskWatchdogOtaWindow window;
@@ -1627,7 +1627,7 @@ void r19_reset_during_close_reopens_without_recovery_lockout() {
   CHECK(safetyResetRecord.relayMarker == SAFETY_RELAY_OPEN_MARKER);
 }
 
-void r19b_panic_boot_is_ready_for_webui_and_next_cn9_cycle() {
+void r19b_panic_boot_is_ready_for_webui_and_next_circuit_cycle() {
   resetHarness(false, false);
   reachReadyFromBoot();
   hostSafetyResetReasonCode = 4;
@@ -1643,9 +1643,9 @@ void r19b_panic_boot_is_ready_for_webui_and_next_cn9_cycle() {
   CHECK(stopperState == StopperState::READY);
   CHECK(controlAllowsConfigurationNow());
 
-  CHECK(setCn9Closed(true, runtimeConfig.operationalWallMs));
+  CHECK(setMachineCircuitClosed(true, runtimeConfig.operationalWallMs));
   CHECK(getRelaySafetySnapshot().closed);
-  CHECK(setCn9Closed(false));
+  CHECK(setMachineCircuitClosed(false));
 }
 
 void r20_three_unsafe_resets_are_latched_as_a_boot_loop() {
@@ -1994,7 +1994,7 @@ void w11_operational_timer_opens_without_control_loop() {
   runtimeConfig.autoToManualGuardBaselineMs = 15000;
   CHECK(validateRuntimeConfig(runtimeConfig) == ConfigValidationError::NONE);
   startCycle();
-  hostMillis = cn9ClosedAtMs + runtimeConfig.operationalWallMs;
+  hostMillis = circuitClosedAtMs + runtimeConfig.operationalWallMs;
   hostServiceEspTimer(operationalLimitTimer);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(getRelaySafetySnapshot().operationalTripped);
@@ -2006,7 +2006,7 @@ void w11_operational_timer_opens_without_control_loop() {
 
 void w12_hard_limit_cannot_be_configured_above_sixty_seconds() {
   RuntimeConfig config;
-  config.operationalWallMs = HARD_MAX_CN9_CLOSED_MS + 1;
+  config.operationalWallMs = HARD_MAX_CIRCUIT_CLOSED_MS + 1;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::OPERATIONAL_WALL);
 }
@@ -2608,7 +2608,7 @@ void w52_local_buzzer_triple_on_manual_bbw_without_scale() {
   const uint32_t before = localBuzzer.acceptedRequests;
   startCycle();
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
-  // No-scale TRIPLE (warning) then CN9 start cue, which queues behind it.
+  // No-scale TRIPLE (warning) then circuit start cue, which queues behind it.
   CHECK(localBuzzer.acceptedRequests == before + 2);
 }
 
@@ -2623,7 +2623,7 @@ void w53_local_buzzer_silent_when_bbw_off_without_scale() {
   const uint32_t before = localBuzzer.acceptedRequests;
   startCycle();
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
-  // No-scale TRIPLE is suppressed when BBW is off; CN9 start still beeps.
+  // No-scale TRIPLE is suppressed when BBW is off; circuit start still beeps.
   CHECK(localBuzzer.acceptedRequests == before + 1);
 }
 
@@ -2883,7 +2883,7 @@ void w56_atm_beep_queued_when_scale_lost_after_deadline() {
   setScaleConnected(false);
   loop();
   CHECK(session.endReason == EndReason::AUTO_TO_MANUAL_GUARD);
-  // Scale-lost Echo inverted is preempted by CN9 completion LONG; ATM TRIPLE
+  // Scale-lost Echo inverted is preempted by machine circuit completion LONG; ATM TRIPLE
   // queues behind it.
   CHECK(localBuzzer.acceptedRequests == before + 3);
   checkLocalCompletionTone();
@@ -3563,7 +3563,7 @@ void w75_bookoo_discovery_connect_applies_beep_policy() {
   CHECK(scale.commandLog[0] == "setBeepLevel:0");
 }
 
-void w76_buzzer_only_start_beeps_at_cn9_not_ble_result() {
+void w76_buzzer_only_start_beeps_at_circuit_not_ble_result() {
   resetHarness(false, true);
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
@@ -3577,7 +3577,7 @@ void w76_buzzer_only_start_beeps_at_cn9_not_ble_result() {
   CHECK(localBuzzer.acceptedRequests == before + 1);
 }
 
-void w77_scale_priority_disconnected_beeps_on_cn9_without_ble() {
+void w77_scale_priority_disconnected_beeps_on_circuit_without_ble() {
   resetHarness(false, false);
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
@@ -3600,7 +3600,7 @@ void w77_scale_priority_disconnected_beeps_on_cn9_without_ble() {
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
 }
 
-void w78_scale_priority_connected_start_beeps_at_cn9() {
+void w78_scale_priority_connected_start_beeps_at_circuit() {
   resetHarness(false, true);
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
@@ -3634,7 +3634,7 @@ void w79_buzzer_only_stop_beeps_before_timer_stop_result() {
   CHECK(localBuzzer.acceptedRequests == before + 1);
 }
 
-void w79b_stop_beeps_at_cn9_while_scale_timer_stop_still_pending() {
+void w79b_stop_beeps_at_circuit_while_scale_timer_stop_still_pending() {
   resetHarness(false, true);
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
@@ -3654,7 +3654,7 @@ void w79b_stop_beeps_at_cn9_while_scale_timer_stop_still_pending() {
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
 }
 
-void w79c_rinse_without_scale_beeps_at_cn9_open_and_close() {
+void w79c_rinse_without_scale_beeps_at_circuit_open_and_close() {
   resetHarness(false, false);
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
@@ -3673,7 +3673,7 @@ void w79c_rinse_without_scale_beeps_at_cn9_open_and_close() {
   checkLocalCompletionTone();
 }
 
-void w79d_scale_only_start_and_stop_still_use_local_cn9_beeps() {
+void w79d_scale_only_start_and_stop_still_use_local_circuit_beeps() {
   resetHarness(false, true);
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::SCALE_ONLY);
@@ -4610,7 +4610,7 @@ void r26_remote_timer_stop_retries_after_full_queue() {
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
 }
 
-void r27_platform_clock_failure_prevents_cn9_close() {
+void r27_platform_clock_failure_prevents_circuit_close() {
   resetHarness(false, false);
   reachReadyFromBoot();
   platformClockReady = false;
@@ -4835,12 +4835,12 @@ void w25b_log_levels_and_cycle_events_reach_ring() {
   }
   CHECK(sawLevel);
   char message[128] = {};
-  DebugEvent cn9 = {};
-  cn9.code = DebugCode::CN9_ARM_FAILED;
-  cn9.argument1 = static_cast<int32_t>(Cn9ArmFailReason::SAFETY_LOCKOUT);
-  CHECK(formatLifecycleDebugMessage(cn9, message, sizeof(message)));
+  DebugEvent circuit = {};
+  circuit.code = DebugCode::CIRCUIT_ARM_FAILED;
+  circuit.argument1 = static_cast<int32_t>(CircuitArmFailReason::SAFETY_LOCKOUT);
+  CHECK(formatLifecycleDebugMessage(circuit, message, sizeof(message)));
   CHECK(std::string(message).find("safety lockout") != std::string::npos);
-  CHECK(debugCodeDefaultLevel(DebugCode::CN9_ARM_FAILED) ==
+  CHECK(debugCodeDefaultLevel(DebugCode::CIRCUIT_ARM_FAILED) ==
         LogLevel::CRITICAL);
   CHECK(debugCodeDefaultLevel(DebugCode::SCALE_CONNECTING) == LogLevel::DEBUG);
   CHECK(!logLevelAtMost(LogLevel::CRITICAL, LogLevel::NONE));
@@ -4857,8 +4857,8 @@ void w25c_ring_retain_none_skips_ring_and_error_filters() {
   ringRetainLogLevel = LogLevel::NONE;
   serialLogLevel = LogLevel::NONE;
   addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_STARTED);
-  addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
-                static_cast<int32_t>(Cn9ArmFailReason::SAFETY_LOCKOUT));
+  addDebugEvent(DebugCategory::RELAY, DebugCode::CIRCUIT_ARM_FAILED,
+                static_cast<int32_t>(CircuitArmFailReason::SAFETY_LOCKOUT));
   DebugEvent noneEvents[DEBUG_EVENT_CAPACITY] = {};
   CHECK(copyDebugEvents(0, noneEvents, DEBUG_EVENT_CAPACITY) == 0);
 
@@ -4866,13 +4866,13 @@ void w25c_ring_retain_none_skips_ring_and_error_filters() {
   ringRetainLogLevel = LogLevel::ERROR;
   addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_STARTED);
   addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_CONNECTING);
-  addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
-                static_cast<int32_t>(Cn9ArmFailReason::SAFETY_LOCKOUT));
+  addDebugEvent(DebugCategory::RELAY, DebugCode::CIRCUIT_ARM_FAILED,
+                static_cast<int32_t>(CircuitArmFailReason::SAFETY_LOCKOUT));
   DebugEvent errorEvents[DEBUG_EVENT_CAPACITY] = {};
   const size_t count =
       copyDebugEvents(0, errorEvents, DEBUG_EVENT_CAPACITY);
   CHECK(count == 1);
-  CHECK(errorEvents[0].code == DebugCode::CN9_ARM_FAILED);
+  CHECK(errorEvents[0].code == DebugCode::CIRCUIT_ARM_FAILED);
   CHECK(errorEvents[0].level == LogLevel::CRITICAL);
 }
 
@@ -5405,7 +5405,7 @@ void r44_first_shot_after_reconnect_enters_brew() {
   CHECK(session.receivedFreshWeightInCycle);
 }
 
-void st01_cycle_elapsed_follows_cn9_immediately() {
+void st01_cycle_elapsed_follows_circuit_immediately() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
@@ -6038,7 +6038,7 @@ void s02c_shot_curve_samples_on_two_second_grid_and_latches_slow() {
   session.startedWithScale = true;
   session.hasWeightAnchor = true;
   session.startedAtMs = hostMillis;
-  session.cn9ClosedAtMs = hostMillis;
+  session.circuitClosedAtMs = hostMillis;
   resetShotTrajectory(hostMillis);
   CHECK(shotCurveSampler.count == 0);
   acceptWeightIntoTrajectory(0.2f, hostMillis, 1);
@@ -6081,7 +6081,7 @@ void s02d_shot_curve_latches_first_drop_fast_and_atm() {
   session.hasWeightAnchor = true;
   session.lastAcceptedWeightG = 0.5f;
   session.startedAtMs = hostMillis;
-  session.cn9ClosedAtMs = hostMillis;
+  session.circuitClosedAtMs = hostMillis;
   session.autoToManualGuardArmed = true;
   session.autoToManualGuardEnforced = false;
   session.weightControlState = WeightControlState::ACTIVE;
@@ -6307,7 +6307,7 @@ void s15c_last_shot_prefers_last_accepted_over_cup_off() {
   session.hasWeightAnchor = true;
   session.lastAcceptedWeightG = 42.1f;
   session.startedAtMs = hostMillis > 25000 ? hostMillis - 25000 : 1;
-  session.cn9ClosedAtMs = session.startedAtMs;
+  session.circuitClosedAtMs = session.startedAtMs;
   session.firstDropMs = session.startedAtMs + 4500;
   session.weightSequenceAtStart = 1;
   currentWeight = 0.0f;
@@ -6866,7 +6866,7 @@ void sc10_help_prints_one_line_per_command() {
   CHECK(serialTxContains("WEBUI_STATUS  dump HTTP"));
   CHECK(serialTxContains("NET_STATUS  WIFI + AP + WEBUI"));
   CHECK(serialTxContains(
-      "LOG_DUMP  print RAM debug ring (deferred in brew/CN9)"));
+      "LOG_DUMP  print RAM debug ring (deferred in brew/machine circuit)"));
   CHECK(serialTxContains("HEALTH  heap, loop gap, cpu load"));
   CHECK(serialTxContains("SCALE_STATUS  BLE scale link"));
   CHECK(serialTxContains("NTP_STATUS  wall clock"));
@@ -7060,7 +7060,7 @@ void sc16_debug_status_and_log_dump() {
   startCycle();
   Serial.tx.clear();
   feedSerial("LOG_DUMP\n");
-  CHECK(serialTxContains("ERR LOG dump deferred; CN9/cycle active"));
+  CHECK(serialTxContains("ERR LOG dump deferred; circuit/cycle active"));
   CHECK(!serialTxContains("events="));
 }
 
@@ -8364,7 +8364,7 @@ void rt18_late_combined_start_does_not_rearm_after_retare() {
   CHECK(!session.awaitingPostTareBaseline);
 }
 
-void pm01_original_bbw_release_after_rinse_keeps_cn9_closed() {
+void pm01_original_bbw_release_after_rinse_keeps_machine_running() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
@@ -8467,7 +8467,7 @@ void pm07_original_bbw_hard_limit_while_held() {
   runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
   startCycle();
   advanceToBrew();
-  reachSessionElapsed(HARD_MAX_CN9_CLOSED_MS);
+  reachSessionElapsed(HARD_MAX_CIRCUIT_CLOSED_MS);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(session.endReason == EndReason::GLOBAL_LIMIT);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -8505,7 +8505,7 @@ void configureOriginalBbwShortWall() {
 
 void advanceToOriginalBbwOperationalWall() {
   const uint32_t wallAtMs =
-      session.cn9ClosedAtMs + session.config.operationalWallMs;
+      session.circuitClosedAtMs + session.config.operationalWallMs;
   CHECK(hostMillis <= wallAtMs);
   runLoopAfter(wallAtMs - hostMillis);
 }
@@ -8517,7 +8517,7 @@ void pm10_original_bbw_hold_skips_operational_wall() {
   startCycle();
   advanceToBrew();
   CHECK(session.originalBbwHardMaxArmed);
-  CHECK(getRelaySafetySnapshot().operationalLimitMs == HARD_MAX_CN9_CLOSED_MS);
+  CHECK(getRelaySafetySnapshot().operationalLimitMs == HARD_MAX_CIRCUIT_CLOSED_MS);
   advanceToOriginalBbwOperationalWall();
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.active);
@@ -8543,7 +8543,7 @@ void pm11_original_bbw_release_honors_operational_wall() {
   CHECK(stopperState == StopperState::READY);
 }
 
-void pm12_auto_bbw_release_after_rinse_keeps_cn9_closed() {
+void pm12_auto_bbw_release_after_rinse_keeps_machine_running() {
   resetHarness(false, true);
   reachReadyFromBoot();
   runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::AUTO);
@@ -8705,7 +8705,7 @@ const TestCase testCases[] = {
     {"T26", t26_reconnected_suspended_cycle_sends_one_stop_on_release},
     {"T27", t27_configuration_is_rejected_while_cycle_is_active},
     {"T28", t28_paddle_motion_cannot_cancel_or_extend_rinse},
-    {"PM01", pm01_original_bbw_release_after_rinse_keeps_cn9_closed},
+    {"PM01", pm01_original_bbw_release_after_rinse_keeps_machine_running},
     {"PM02", pm02_original_bbw_release_inside_rinse_is_rinse},
     {"PM03", pm03_original_no_scale_paddle_off_ends_shot},
     {"PM04", pm04_original_timer_only_paddle_off_ends_shot},
@@ -8716,7 +8716,7 @@ const TestCase testCases[] = {
     {"PM09", pm09_apply_config_accepts_original_paddle_mode},
     {"PM10", pm10_original_bbw_hold_skips_operational_wall},
     {"PM11", pm11_original_bbw_release_honors_operational_wall},
-    {"PM12", pm12_auto_bbw_release_after_rinse_keeps_cn9_closed},
+    {"PM12", pm12_auto_bbw_release_after_rinse_keeps_machine_running},
     {"PM13", pm13_auto_bbw_hold_allows_auto_stop},
     {"PM14", pm14_auto_bbw_off_on_off_stays_brewing},
     {"PM15", pm15_auto_no_scale_paddle_off_ends_shot},
@@ -8729,7 +8729,7 @@ const TestCase testCases[] = {
     {"R03", r03_non_finite_weights_cannot_corrupt_state_or_offset},
     {"R04", r04_scale_commands_execute_once_and_report_results},
     {"R05", r05_regression_uses_last_ten_valid_samples},
-    {"R06", r06_hard_timer_opens_cn9_without_control_loop},
+    {"R06", r06_hard_timer_opens_circuit_without_control_loop},
     {"R07", r07_timing_remains_correct_across_millis_wrap},
     {"R08", r08_full_command_queue_forces_safe_manual_cycle},
     {"R09", r09_stop_is_not_retried_after_disconnect_before_execution},
@@ -8739,13 +8739,13 @@ const TestCase testCases[] = {
     {"R12b", r12b_discovery_clears_stale_connected_link_snapshot},
     {"R13", r13_full_queue_prevents_stop_without_delaying_relay_open},
     {"R14", r14_invalid_runtime_configuration_is_transactionally_rejected},
-    {"R15", r15_gptimer_opens_cn9_without_arduino_or_esp_timer_tasks},
-    {"R16", r16_timeout_during_arm_transaction_can_never_close_cn9},
+    {"R15", r15_gptimer_opens_circuit_without_arduino_or_esp_timer_tasks},
+    {"R16", r16_timeout_during_arm_transaction_can_never_close_circuit},
     {"R17", r17_gptimer_arm_failure_prevents_relay_energization},
-    {"R18", r18_watchdog_fault_opens_cn9_and_requests_safe_restart},
+    {"R18", r18_watchdog_fault_opens_circuit_and_requests_safe_restart},
     {"R18b", r18b_ota_watchdog_restore_failure_requests_safe_restart},
     {"R19", r19_reset_during_close_reopens_without_recovery_lockout},
-    {"R19b", r19b_panic_boot_is_ready_for_webui_and_next_cn9_cycle},
+    {"R19b", r19b_panic_boot_is_ready_for_webui_and_next_circuit_cycle},
     {"R20", r20_three_unsafe_resets_are_latched_as_a_boot_loop},
     {"R21", r21_automatic_control_requires_fresh_weight},
     {"R22", r22_confirmed_implausible_weight_does_not_stop},
@@ -8753,7 +8753,7 @@ const TestCase testCases[] = {
     {"R24", r24_web_control_is_available_without_session_owner},
     {"R25", r25_critical_scale_mailbox_never_blocks_and_keeps_latest},
     {"R26", r26_remote_timer_stop_retries_after_full_queue},
-    {"R27", r27_platform_clock_failure_prevents_cn9_close},
+    {"R27", r27_platform_clock_failure_prevents_circuit_close},
     {"R28", r28_terminal_control_result_is_retained_until_forwarded},
     {"R29", r29_direct_threshold_stops_before_regression_is_ready},
     {"R30", r30_first_abrupt_sample_uses_pre_shot_baseline},
@@ -8839,7 +8839,7 @@ const TestCase testCases[] = {
     {"R54", r54_post_tare_baseline_keeps_weight_control},
     {"R44", r44_first_shot_after_reconnect_enters_brew},
     {"R45", r45_slew_rejection_emits_specific_debug_code},
-    {"ST01", st01_cycle_elapsed_follows_cn9_immediately},
+    {"ST01", st01_cycle_elapsed_follows_circuit_immediately},
     {"ST02", st02_scale_timer_stop_waits_until_display_catches_internal},
     {"ST03", st03_scale_timer_stop_when_display_already_at_internal},
     {"ST04", st04_scale_timer_stop_extra_delay_applies_after_catchup},
@@ -8967,13 +8967,13 @@ const TestCase testCases[] = {
     {"W74", w74_apply_config_enabling_mute_sends_silence_only_in_buzzer_only},
     {"W74b", w74b_sound_alert_master_mutes_and_cancels_all_routes},
     {"W75", w75_bookoo_discovery_connect_applies_beep_policy},
-    {"W76", w76_buzzer_only_start_beeps_at_cn9_not_ble_result},
-    {"W77", w77_scale_priority_disconnected_beeps_on_cn9_without_ble},
-    {"W78", w78_scale_priority_connected_start_beeps_at_cn9},
+    {"W76", w76_buzzer_only_start_beeps_at_circuit_not_ble_result},
+    {"W77", w77_scale_priority_disconnected_beeps_on_circuit_without_ble},
+    {"W78", w78_scale_priority_connected_start_beeps_at_circuit},
     {"W79", w79_buzzer_only_stop_beeps_before_timer_stop_result},
-    {"W79b", w79b_stop_beeps_at_cn9_while_scale_timer_stop_still_pending},
-    {"W79c", w79c_rinse_without_scale_beeps_at_cn9_open_and_close},
-    {"W79d", w79d_scale_only_start_and_stop_still_use_local_cn9_beeps},
+    {"W79b", w79b_stop_beeps_at_circuit_while_scale_timer_stop_still_pending},
+    {"W79c", w79c_rinse_without_scale_beeps_at_circuit_open_and_close},
+    {"W79d", w79d_scale_only_start_and_stop_still_use_local_circuit_beeps},
     {"W80", w80_buzzer_only_retare_beeps_before_tare_result},
     {"W81", w81_scale_priority_failed_start_falls_back_after_disconnect},
     {"W94", w94_eclair_scale_priority_uses_local_alerts},

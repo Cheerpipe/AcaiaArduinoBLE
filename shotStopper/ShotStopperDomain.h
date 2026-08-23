@@ -11,13 +11,20 @@
 
 // Map ESP-IDF Kconfig (main/Kconfig.projbuild) onto the historical
 // SHOT_STOPPER_* macros. Command-line -DSHOT_STOPPER_*=… wins (ifndef).
+#ifndef SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL
+#ifdef SHOT_STOPPER_ENABLE_REMOTE_CN9
+#define SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL SHOT_STOPPER_ENABLE_REMOTE_CN9
+#endif
+#endif
 #if !defined(SHOT_STOPPER_HOST_TEST) && __has_include("sdkconfig.h")
 #include "sdkconfig.h"
-#ifndef SHOT_STOPPER_ENABLE_REMOTE_CN9
-#ifdef CONFIG_SHOT_STOPPER_ENABLE_REMOTE_CN9
-#define SHOT_STOPPER_ENABLE_REMOTE_CN9 1
+#ifndef SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL
+#ifdef CONFIG_SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL
+#define SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL 1
+#elif defined(CONFIG_SHOT_STOPPER_ENABLE_REMOTE_CN9)
+#define SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL 1
 #else
-#define SHOT_STOPPER_ENABLE_REMOTE_CN9 0
+#define SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL 0
 #endif
 #endif
 #ifndef SHOT_STOPPER_ENABLE_BUZZER
@@ -98,15 +105,15 @@ constexpr size_t WIFI_PASSWORD_CAPACITY = 64;
 constexpr size_t WEB_COMMAND_QUEUE_LENGTH = 4;
 constexpr size_t DEBUG_EVENT_CAPACITY = 96;
 
-#ifndef SHOT_STOPPER_ENABLE_REMOTE_CN9
-#define SHOT_STOPPER_ENABLE_REMOTE_CN9 0
+#ifndef SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL
+#define SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL 0
 #endif
 
-constexpr bool REMOTE_CN9_CONTROL_ENABLED =
-    SHOT_STOPPER_ENABLE_REMOTE_CN9 == 1;
-static_assert(SHOT_STOPPER_ENABLE_REMOTE_CN9 == 0 ||
-                  SHOT_STOPPER_ENABLE_REMOTE_CN9 == 1,
-              "SHOT_STOPPER_ENABLE_REMOTE_CN9 must be 0 or 1");
+constexpr bool REMOTE_MACHINE_CONTROL_ENABLED =
+    SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL == 1;
+static_assert(SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL == 0 ||
+                  SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL == 1,
+              "SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL must be 0 or 1");
 
 #ifndef SHOT_STOPPER_ENABLE_BUZZER
 #define SHOT_STOPPER_ENABLE_BUZZER 0
@@ -431,11 +438,11 @@ struct RuntimeConfig {
   // Internal polarity: true disables weight stop. UI/API brewByWeight is the inverse.
   bool timerOnly = false;
   bool canTareStartTimer = true;
-  // Optional pad after the scale timer catches up to CN9 whole seconds.
+  // Optional pad after the scale timer catches up to circuit whole seconds.
   uint32_t scaleTimerStopExtraDelayMs = DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS;
   // Optional beep when the first coffee drop is detected.
   bool firstDropBeep = true;
-  // Remind the user to release the physical paddle after CN9 has opened.
+  // Remind the user to release the physical paddle after machine circuit has opened.
   bool paddleReturnReminderBeep = true;
   // Persisted as of schema v4. Schema-v3 records are migrated with alerts on.
   bool soundAlertsMuted = false;
@@ -505,7 +512,7 @@ struct RuntimeConfig {
   float cupRemovedWeightG = DEFAULT_CUP_REMOVED_WEIGHT_G;
   bool avoidBbwShotWithoutScale = true;
   uint32_t lastShotCooldownMs = DEFAULT_LAST_SHOT_COOLDOWN_MS;
-  // USB debug spew (paddle/CN9/Wi-Fi traces). CLI replies stay independent.
+  // USB debug spew (paddle/machine circuit/Wi-Fi traces). CLI replies stay independent.
   bool serialDebugOutput = false;
   // Minimum level retained in the RAM debug ring (WebUI Log). NONE disables.
   uint8_t ringRetainLogLevel = static_cast<uint8_t>(LogLevel::NONE);
@@ -870,7 +877,7 @@ inline ConfigValidationError validateRuntimeConfig(
     return ConfigValidationError::BBW_PROTECTION_RETARE_RELATION;
   }
   if (config.operationalWallMs < 5000 ||
-      config.operationalWallMs > HARD_MAX_CN9_CLOSED_MS) {
+      config.operationalWallMs > HARD_MAX_CIRCUIT_CLOSED_MS) {
     return ConfigValidationError::OPERATIONAL_WALL;
   }
   if (config.paddleReturnReminderIntervalMs <
@@ -888,7 +895,7 @@ inline ConfigValidationError validateRuntimeConfig(
     return ConfigValidationError::PADDLE_REMINDER_MAX_DURATION;
   }
   // Retare and BBW protection run in parallel from paddle ON — each alone
-  // must fit under the CN9 wall (do not sum them).
+  // must fit under the machine circuit wall (do not sum them).
   if (!(config.rinseGestureMs < config.operationalWallMs) ||
       config.rinseDurationMs > config.operationalWallMs ||
       config.retareWindowMs > config.operationalWallMs ||
@@ -1561,21 +1568,21 @@ struct ControlStatusSnapshot {
   bool machineRunning = false;
   bool physicalPaddleOn = false;
   bool virtualPaddleOn = false;
-  bool remoteControlEnabled = REMOTE_CN9_CONTROL_ENABLED;
+  bool remoteControlEnabled = REMOTE_MACHINE_CONTROL_ENABLED;
   ControlSource source = ControlSource::NONE;
   uint32_t cycleId = 0;
   uint32_t bootId = 0;
   bool maintenanceLeaseActive = false;
   uint32_t maintenanceLeaseId = 0;
   uint32_t maintenanceStartedAtMs = 0;
-  uint32_t cn9ElapsedMs = 0;
+  uint32_t circuitElapsedMs = 0;
   RelaySafetyState safetyState = RelaySafetyState::BOOT_SAFE;
   RelaySafetyFault safetyFault = RelaySafetyFault::NONE;
   uint32_t safetyGeneration = 0;
   bool safetyTimersReady = false;
   bool taskWatchdogReady = false;
   bool externalSafetyPresent = false;
-  bool cn9FeedbackClosed = false;
+  bool circuitFeedbackClosed = false;
   uint32_t resetReasonCode = 0;
   uint32_t unsafeResetCount = 0;
   bool resetRecoveryRequired = false;
@@ -1748,7 +1755,7 @@ enum class DebugCategory : uint8_t {
   SYSTEM
 };
 
-enum class Cn9ArmFailReason : int32_t {
+enum class CircuitArmFailReason : int32_t {
   INVALID_LIMIT = 1,
   SAFETY_LOCKOUT = 2,
   SUPERVISOR_UNAVAILABLE = 3,
@@ -1850,7 +1857,7 @@ enum class DebugCode : uint8_t {
   BOOT_RUNTIME_CONFIG,
   BOOT_READY,
   SAFETY_LOCKOUT_ACTIVE,
-  CN9_ARM_FAILED,
+  CIRCUIT_ARM_FAILED,
   CYCLE_STARTED,
   CYCLE_ENDED,
   BREW_STARTED,
@@ -1876,7 +1883,7 @@ enum class DebugCode : uint8_t {
   OTA_ROLLBACK_FAILED
 };
 
-// Health telemetry thresholds (observability only; never act on CN9).
+// Health telemetry thresholds (observability only; never act on machine circuit).
 // Clear values are higher than alert values for hysteresis / rising-edge only.
 constexpr uint32_t HEALTH_HEAP_FREE_ALERT_BYTES = 49152;   // 48 KiB
 constexpr uint32_t HEALTH_HEAP_FREE_CLEAR_BYTES = 65536;   // 64 KiB
@@ -2079,7 +2086,7 @@ inline bool logLevelAtMost(LogLevel level, LogLevel threshold) {
 inline LogLevel debugCodeDefaultLevel(DebugCode code) {
   switch (code) {
     case DebugCode::INITIALIZATION_FAILED:
-    case DebugCode::CN9_ARM_FAILED:
+    case DebugCode::CIRCUIT_ARM_FAILED:
     case DebugCode::SAFETY_LOCKOUT_ACTIVE:
     case DebugCode::HARD_LIMIT:
       return LogLevel::CRITICAL;
@@ -2160,17 +2167,17 @@ inline const char *debugCategoryName(DebugCategory category) {
   return "unknown";
 }
 
-inline const char *cn9ArmFailReasonName(Cn9ArmFailReason reason) {
+inline const char *circuitArmFailReasonName(CircuitArmFailReason reason) {
   switch (reason) {
-    case Cn9ArmFailReason::INVALID_LIMIT: return "invalid safety limit";
-    case Cn9ArmFailReason::SAFETY_LOCKOUT: return "safety lockout is active";
-    case Cn9ArmFailReason::SUPERVISOR_UNAVAILABLE:
+    case CircuitArmFailReason::INVALID_LIMIT: return "invalid safety limit";
+    case CircuitArmFailReason::SAFETY_LOCKOUT: return "safety lockout is active";
+    case CircuitArmFailReason::SUPERVISOR_UNAVAILABLE:
       return "safety supervisor unavailable";
-    case Cn9ArmFailReason::FEEDBACK_STUCK_CLOSED:
+    case CircuitArmFailReason::FEEDBACK_STUCK_CLOSED:
       return "feedback is already closed";
-    case Cn9ArmFailReason::TIMER_ARM_FAILED:
+    case CircuitArmFailReason::TIMER_ARM_FAILED:
       return "failed to arm safety deadline";
-    case Cn9ArmFailReason::ARM_CANCELED:
+    case CircuitArmFailReason::ARM_CANCELED:
       return "arm transaction was canceled";
   }
   return "unknown";
@@ -2196,8 +2203,8 @@ inline const char *debugCodeName(DebugCode code) {
   switch (code) {
     case DebugCode::PADDLE_ON: return "paddle on";
     case DebugCode::PADDLE_OFF: return "paddle off";
-    case DebugCode::RELAY_CLOSED: return "CN9 closed";
-    case DebugCode::RELAY_OPENED: return "CN9 opened";
+    case DebugCode::RELAY_CLOSED: return "machine circuit closed";
+    case DebugCode::RELAY_OPENED: return "machine circuit opened";
     case DebugCode::HARD_LIMIT: return "hard limit reached";
     case DebugCode::OPERATIONAL_LIMIT:
       return "configured wall limit reached";
@@ -2239,7 +2246,7 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::AUTO_TO_MANUAL_GUARD_CLEARED:
       return "auto-to-manual guard enforcement cleared";
     case DebugCode::AUTO_TO_MANUAL_GUARD_FIRED:
-      return "auto-to-manual guard opened CN9";
+      return "auto-to-manual guard opened machine circuit";
     case DebugCode::CONFIG_PERSISTED: return "configuration persisted";
     case DebugCode::AP_STARTED: return "access point started";
     case DebugCode::AP_STOPPED: return "access point stopped";
@@ -2331,7 +2338,7 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::BOOT_RUNTIME_CONFIG: return "runtime config loaded";
     case DebugCode::BOOT_READY: return "boot ready";
     case DebugCode::SAFETY_LOCKOUT_ACTIVE: return "safety lockout active";
-    case DebugCode::CN9_ARM_FAILED: return "cannot close CN9";
+    case DebugCode::CIRCUIT_ARM_FAILED: return "cannot close the machine circuit";
     case DebugCode::CYCLE_STARTED: return "cycle started";
     case DebugCode::CYCLE_ENDED: return "cycle ended";
     case DebugCode::BREW_STARTED: return "brew started";
@@ -2470,7 +2477,7 @@ inline const char *endReasonDebugName(EndReason reason) {
     case EndReason::PADDLE: return "paddle";
     case EndReason::SCALE_THRESHOLD: return "scale threshold";
     case EndReason::WEIGHT_ANOMALY: return "weight anomaly";
-    case EndReason::GLOBAL_LIMIT: return "global CN9 limit";
+    case EndReason::GLOBAL_LIMIT: return "global machine circuit limit";
     case EndReason::CONFIGURED_WALL_LIMIT: return "configured wall limit";
     case EndReason::SHORT_SHOT: return "short shot";
     case EndReason::RINSE_COMPLETE: return "rinse complete";
@@ -2519,10 +2526,10 @@ inline bool formatLifecycleDebugMessage(const DebugEvent &event, char *message,
       snprintf(message, capacity, "runtime config goal=%s offset=%s",
                weightText, offsetText);
       return true;
-    case DebugCode::CN9_ARM_FAILED:
-      snprintf(message, capacity, "cannot close CN9: %s",
-               cn9ArmFailReasonName(
-                   static_cast<Cn9ArmFailReason>(event.argument1)));
+    case DebugCode::CIRCUIT_ARM_FAILED:
+      snprintf(message, capacity, "cannot close the machine circuit: %s",
+               circuitArmFailReasonName(
+                   static_cast<CircuitArmFailReason>(event.argument1)));
       return true;
     case DebugCode::CYCLE_STARTED:
       formatWeightCentigrams(event.argument1, weightText, sizeof(weightText));

@@ -21,7 +21,7 @@ firmware_file="$firmware_dir/shotStopper.cpp"
 ble_companion_file="$firmware_dir/ShotStopperBleCompanion.h"
 cxx=${CXX:-c++}
 
-# Domain split moved paddle/CN9/BBW out of shotStopper.cpp. Forbidden-symbol
+# Domain split moved paddle/machine circuit/BBW out of shotStopper.cpp. Forbidden-symbol
 # greps must cover those headers or a regression there would miss CI.
 scan_firmware_sources() {
   grep -n "$1" \
@@ -96,7 +96,7 @@ ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
   "$test_dir/remote_policy_host_test.cpp" \
   -o "$remote_policy_binary"
 "$remote_policy_binary"
-echo "Remote CN9 policy: disabled by default"
+echo "Remote machine control policy: disabled by default"
 
 "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
   "$test_dir/ota_image_host_test.cpp" \

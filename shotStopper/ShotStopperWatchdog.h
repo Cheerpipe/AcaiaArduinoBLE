@@ -27,7 +27,7 @@ namespace shotstopper {
 constexpr uint32_t TASK_WATCHDOG_TIMEOUT_MS = 5000;
 
 // Flash erase and the SHA-256 pass at the end of an OTA hold the cache long
-// enough that the normal 5 s budget is not a useful liveness signal. CN9 stays
+// enough that the normal 5 s budget is not a useful liveness signal. Machine circuit stays
 // bounded throughout by the independent hardware timer, which this never
 // touches, and OTA only runs with the relay already open.
 constexpr uint32_t TASK_WATCHDOG_OTA_TIMEOUT_MS = 30000;
@@ -56,7 +56,7 @@ inline bool configureTaskWatchdog() {
 }
 
 // Set when an OTA window widened the TWDT but could not restore 5 s. The
-// control loop trips CN9 and requests a safe restart so 30 s never sticks.
+// control loop trips machine circuit and requests a safe restart so 30 s never sticks.
 inline volatile bool taskWatchdogRestoreFailed = false;
 
 // Widens the task watchdog for the duration of a scope and always restores the

@@ -8,9 +8,9 @@
 // Included from ShotStopperMachine.h in the shotStopper.cpp translation unit.
 // State is file-scope BSS — no heap.
 
-bool readCn9FeedbackClosed() {
+bool readCircuitFeedbackClosed() {
   return EXTERNAL_SAFETY_HARDWARE_PRESENT &&
-         digitalRead(CN9_FEEDBACK_GPIO) == CN9_FEEDBACK_CLOSED_LEVEL;
+         digitalRead(CIRCUIT_FEEDBACK_GPIO) == CIRCUIT_FEEDBACK_CLOSED_LEVEL;
 }
 
 void stopRelayDeadlineTimers() {
@@ -29,7 +29,7 @@ void tripRelaySafetyLocked(RelaySafetyFault fault, bool hardLimit,
   // timer cleanup and recovery all happen after the relay is de-energized.
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
   recordRelayCommandedClosed(false);
-  cn9Closed = false;
+  circuitClosed = false;
   ++relaySafetyGeneration;
   relaySafetyState = lockout ? RelaySafetyState::LOCKOUT
                              : RelaySafetyState::TRIPPED;
@@ -58,8 +58,8 @@ void relaySafetyTimerCallback(void *) {
   // a timeout that races the close transaction cancels that transaction.
   if ((relaySafetyState == RelaySafetyState::ARMING ||
        relaySafetyState == RelaySafetyState::CLOSED) &&
-      static_cast<uint32_t>(callbackAtMs - cn9ClosedAtMs) >=
-          HARD_MAX_CN9_CLOSED_MS) {
+      static_cast<uint32_t>(callbackAtMs - circuitClosedAtMs) >=
+          HARD_MAX_CIRCUIT_CLOSED_MS) {
     tripRelaySafetyLocked(RelaySafetyFault::HARD_LIMIT, true, false, false);
   }
   portEXIT_CRITICAL(&relayMux);
@@ -70,8 +70,8 @@ void operationalLimitTimerCallback(void *) {
   portENTER_CRITICAL(&relayMux);
   if ((relaySafetyState == RelaySafetyState::ARMING ||
        relaySafetyState == RelaySafetyState::CLOSED) &&
-      operationalLimitAtArmMs < HARD_MAX_CN9_CLOSED_MS &&
-      static_cast<uint32_t>(callbackAtMs - cn9ClosedAtMs) >=
+      operationalLimitAtArmMs < HARD_MAX_CIRCUIT_CLOSED_MS &&
+      static_cast<uint32_t>(callbackAtMs - circuitClosedAtMs) >=
           operationalLimitAtArmMs) {
     tripRelaySafetyLocked(RelaySafetyFault::OPERATIONAL_LIMIT, false, true,
                           false);
@@ -114,7 +114,7 @@ void IRAM_ATTR openRelayElectricalFromIsr() {
 }
 
 // FreeRTOS calls this before aborting when stack canaries are enabled. Open
-// CN9 first (IRAM GPIO path), then clear the RTC close marker. Avoid heap or
+// machine circuit first (IRAM GPIO path), then clear the RTC close marker. Avoid heap or
 // Serial here.
 extern "C" void vApplicationStackOverflowHook(TaskHandle_t, char *) {
   openRelayElectricalFromIsr();
@@ -140,13 +140,13 @@ void IRAM_ATTR independentSafetyTimerCallback(void *) {
   if (relaySafetyState == RelaySafetyState::ARMING ||
       relaySafetyState == RelaySafetyState::CLOSED) {
     const bool operational =
-        operationalLimitAtArmMs < HARD_MAX_CN9_CLOSED_MS;
+        operationalLimitAtArmMs < HARD_MAX_CIRCUIT_CLOSED_MS;
     // Keep this ISR minimal and IRAM-safe. The control task performs timer
     // cleanup, RTC OPEN publication and logging after observing the latched
     // trip flags. If reset wins that race, the retained CLOSE marker causes a
     // conservative boot lockout.
     openRelayElectricalFromIsr();
-    cn9Closed = false;
+    circuitClosed = false;
     ++relaySafetyGeneration;
     relaySafetyState = RelaySafetyState::TRIPPED;
     relaySafetyFault = operational ? RelaySafetyFault::OPERATIONAL_LIMIT
@@ -165,7 +165,7 @@ bool initializeRelaySafetyTimer() {
   hardArgs.callback = &relaySafetyTimerCallback;
   hardArgs.arg = nullptr;
   hardArgs.dispatch_method = ESP_TIMER_TASK;
-  hardArgs.name = "cn9_hard_limit";
+  hardArgs.name = "circuit_hard_limit";
   if (esp_timer_create(&hardArgs, &relaySafetyTimer) != ESP_OK) {
     return false;
   }
@@ -174,7 +174,7 @@ bool initializeRelaySafetyTimer() {
   operationalArgs.callback = &operationalLimitTimerCallback;
   operationalArgs.arg = nullptr;
   operationalArgs.dispatch_method = ESP_TIMER_TASK;
-  operationalArgs.name = "cn9_oper_limit";
+  operationalArgs.name = "circuit_oper_limit";
   if (esp_timer_create(&operationalArgs, &operationalLimitTimer) != ESP_OK) {
     return false;
   }
@@ -187,7 +187,7 @@ RelaySafetySnapshot getRelaySafetySnapshot() {
   portENTER_CRITICAL(&relayMux);
   snapshot.state = relaySafetyState;
   snapshot.fault = relaySafetyFault;
-  snapshot.closed = cn9Closed;
+  snapshot.closed = circuitClosed;
   snapshot.commandedClosed = relaySafetyState == RelaySafetyState::ARMING ||
                              relaySafetyState == RelaySafetyState::CLOSED;
   snapshot.feedbackAvailable = EXTERNAL_SAFETY_HARDWARE_PRESENT;
@@ -197,29 +197,29 @@ RelaySafetySnapshot getRelaySafetySnapshot() {
   snapshot.tripped = relaySafetyTripped;
   snapshot.operationalTripped = operationalLimitTripped;
   snapshot.generation = relaySafetyGeneration;
-  snapshot.closedAtMs = cn9ClosedAtMs;
+  snapshot.closedAtMs = circuitClosedAtMs;
   snapshot.operationalLimitMs = operationalLimitAtArmMs;
   snapshot.resetReasonCode = safetyResetStatus.reasonCode;
   snapshot.unsafeResetCount = safetyResetStatus.unsafeResetCount;
   snapshot.resetRecoveryRequired = safetyResetStatus.recoveryRequired;
   snapshot.bootLoopDetected = safetyResetStatus.bootLoopDetected;
   portEXIT_CRITICAL(&relayMux);
-  snapshot.feedbackClosed = readCn9FeedbackClosed();
+  snapshot.feedbackClosed = readCircuitFeedbackClosed();
   return snapshot;
 }
 
 void applyBrewRfPreference(bool preferBluetooth) {
 #if defined(SHOT_STOPPER_HAS_COEX)
   // Prefer BLE airtime while an automatic brew needs a fresh weight stream.
-  // Restore balance as soon as CN9 opens so the Web UI stays responsive.
+  // Restore balance as soon as machine circuit opens so the Web UI stays responsive.
   (void)esp_coex_preference_set(preferBluetooth ? ESP_COEX_PREFER_BT
                                                 : ESP_COEX_PREFER_BALANCE);
 #else
   (void)preferBluetooth;
 #endif
 #if !defined(SHOT_STOPPER_HOST_TEST)
-  // Pause on the CN9-close path (stopAdvertise is fast). Resume is owned by
-  // the BLE worker via syncCompanionAdvertisingForScaleLink so opening CN9
+  // Pause on the machine circuit-close path (stopAdvertise is fast). Resume is owned by
+  // the BLE worker via syncCompanionAdvertisingForScaleLink so opening machine circuit
   // never blocks the control task in BLE.advertise() before the stop beep.
   if (preferBluetooth && bleCompanion != nullptr) {
     bleCompanion->setAdvertisingPaused(true);
@@ -229,8 +229,8 @@ void applyBrewRfPreference(bool preferBluetooth) {
 #endif
 }
 
-bool setCn9Closed(bool closed,
-                  uint32_t operationalLimitMs = HARD_MAX_CN9_CLOSED_MS) {
+bool setMachineCircuitClosed(bool closed,
+                  uint32_t operationalLimitMs = HARD_MAX_CIRCUIT_CLOSED_MS) {
   if (closed) {
     const RelaySafetySnapshot before = getRelaySafetySnapshot();
     if (before.closed) {
@@ -238,15 +238,15 @@ bool setCn9Closed(bool closed,
     }
 
     if (operationalLimitMs < 1 ||
-        operationalLimitMs > HARD_MAX_CN9_CLOSED_MS) {
+        operationalLimitMs > HARD_MAX_CIRCUIT_CLOSED_MS) {
       tripRelaySafety(RelaySafetyFault::INVALID_LIMIT);
-      addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
-                    static_cast<int32_t>(Cn9ArmFailReason::INVALID_LIMIT));
+      addDebugEvent(DebugCategory::RELAY, DebugCode::CIRCUIT_ARM_FAILED,
+                    static_cast<int32_t>(CircuitArmFailReason::INVALID_LIMIT));
       return false;
     }
     if (before.state == RelaySafetyState::LOCKOUT) {
-      addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
-                    static_cast<int32_t>(Cn9ArmFailReason::SAFETY_LOCKOUT));
+      addDebugEvent(DebugCategory::RELAY, DebugCode::CIRCUIT_ARM_FAILED,
+                    static_cast<int32_t>(CircuitArmFailReason::SAFETY_LOCKOUT));
       return false;
     }
     if (!platformClockReady || !relaySafetyTimersReady || !taskWatchdogReady ||
@@ -256,15 +256,15 @@ bool setCn9Closed(bool closed,
                           ? RelaySafetyFault::WATCHDOG_UNAVAILABLE
                           : RelaySafetyFault::INITIALIZATION_FAILED);
       addDebugEvent(
-          DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
-          static_cast<int32_t>(Cn9ArmFailReason::SUPERVISOR_UNAVAILABLE));
+          DebugCategory::RELAY, DebugCode::CIRCUIT_ARM_FAILED,
+          static_cast<int32_t>(CircuitArmFailReason::SUPERVISOR_UNAVAILABLE));
       return false;
     }
-    if (EXTERNAL_SAFETY_HARDWARE_PRESENT && readCn9FeedbackClosed()) {
+    if (EXTERNAL_SAFETY_HARDWARE_PRESENT && readCircuitFeedbackClosed()) {
       tripRelaySafety(RelaySafetyFault::FEEDBACK_STUCK_CLOSED);
       addDebugEvent(
-          DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
-          static_cast<int32_t>(Cn9ArmFailReason::FEEDBACK_STUCK_CLOSED));
+          DebugCategory::RELAY, DebugCode::CIRCUIT_ARM_FAILED,
+          static_cast<int32_t>(CircuitArmFailReason::FEEDBACK_STUCK_CLOSED));
       return false;
     }
 
@@ -273,26 +273,26 @@ bool setCn9Closed(bool closed,
     uint32_t generation;
     portENTER_CRITICAL(&relayMux);
     generation = ++relaySafetyGeneration;
-    cn9ClosedAtMs = closingAtMs;
+    circuitClosedAtMs = closingAtMs;
     operationalLimitAtArmMs = operationalLimitMs;
     relaySafetyTripped = false;
     operationalLimitTripped = false;
     relaySafetyFault = RelaySafetyFault::NONE;
     relaySafetyState = RelaySafetyState::ARMING;
-    cn9Closed = false;
+    circuitClosed = false;
     portEXIT_CRITICAL(&relayMux);
 
     bool armed = independentSafetyTimer.arm(
-        operationalLimitMs < HARD_MAX_CN9_CLOSED_MS
+        operationalLimitMs < HARD_MAX_CIRCUIT_CLOSED_MS
             ? operationalLimitMs
-            : HARD_MAX_CN9_CLOSED_MS);
+            : HARD_MAX_CIRCUIT_CLOSED_MS);
     if (esp_timer_start_once(
             relaySafetyTimer,
-            static_cast<uint64_t>(HARD_MAX_CN9_CLOSED_MS) * 1000ULL) !=
+            static_cast<uint64_t>(HARD_MAX_CIRCUIT_CLOSED_MS) * 1000ULL) !=
         ESP_OK) {
       armed = false;
     }
-    if (operationalLimitMs < HARD_MAX_CN9_CLOSED_MS &&
+    if (operationalLimitMs < HARD_MAX_CIRCUIT_CLOSED_MS &&
         esp_timer_start_once(
             operationalLimitTimer,
             static_cast<uint64_t>(operationalLimitMs) * 1000ULL) != ESP_OK) {
@@ -301,14 +301,14 @@ bool setCn9Closed(bool closed,
 
     if (!armed) {
       tripRelaySafety(RelaySafetyFault::TIMER_ARM_FAILED);
-      addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
-                    static_cast<int32_t>(Cn9ArmFailReason::TIMER_ARM_FAILED));
+      addDebugEvent(DebugCategory::RELAY, DebugCode::CIRCUIT_ARM_FAILED,
+                    static_cast<int32_t>(CircuitArmFailReason::TIMER_ARM_FAILED));
       return false;
     }
 
 #ifdef SHOT_STOPPER_HOST_TEST
-    if (hostCn9ArmBeforeCommitHook != nullptr) {
-      hostCn9ArmBeforeCommitHook();
+    if (hostCircuitArmBeforeCommitHook != nullptr) {
+      hostCircuitArmBeforeCommitHook();
     }
 #endif
 
@@ -325,7 +325,7 @@ bool setCn9Closed(bool closed,
       // two writes produces a safe false-positive lockout, never a missed one.
       recordRelayCommandedClosed(true);
       digitalWrite(RELAY_GPIO, RELAY_CLOSED_LEVEL);
-      cn9Closed = true;
+      circuitClosed = true;
       relaySafetyState = RelaySafetyState::CLOSED;
       feedbackExpectedClosed = true;
       feedbackTransitionPending = EXTERNAL_SAFETY_HARDWARE_PRESENT;
@@ -336,8 +336,8 @@ bool setCn9Closed(bool closed,
     portEXIT_CRITICAL(&relayMux);
     if (!committed) {
       stopRelayDeadlineTimers();
-      addDebugEvent(DebugCategory::RELAY, DebugCode::CN9_ARM_FAILED,
-                    static_cast<int32_t>(Cn9ArmFailReason::ARM_CANCELED));
+      addDebugEvent(DebugCategory::RELAY, DebugCode::CIRCUIT_ARM_FAILED,
+                    static_cast<int32_t>(CircuitArmFailReason::ARM_CANCELED));
       return false;
     }
     addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_CLOSED,
@@ -350,17 +350,17 @@ bool setCn9Closed(bool closed,
   }
 
   portENTER_CRITICAL(&relayMux);
-  const bool wasClosed = cn9Closed ||
+  const bool wasClosed = circuitClosed ||
                          relaySafetyState == RelaySafetyState::ARMING;
   // Open before stopping either timer. A preemption after this write is safe.
   const bool alreadyOpenedBySafety =
-      !cn9Closed && (relaySafetyState == RelaySafetyState::TRIPPED ||
+      !circuitClosed && (relaySafetyState == RelaySafetyState::TRIPPED ||
                      relaySafetyState == RelaySafetyState::LOCKOUT);
   if (!alreadyOpenedBySafety) {
     digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
   }
   recordRelayCommandedClosed(false);
-  cn9Closed = false;
+  circuitClosed = false;
   ++relaySafetyGeneration;
   if (relaySafetyState != RelaySafetyState::TRIPPED &&
       relaySafetyState != RelaySafetyState::LOCKOUT) {
@@ -372,7 +372,7 @@ bool setCn9Closed(bool closed,
   feedbackTransitionStampPending = false;
   portEXIT_CRITICAL(&relayMux);
   stopRelayDeadlineTimers();
-  // Coex restore runs after the CN9-open beep (servicePendingBrewRfRestore).
+  // Coex restore runs after the machine circuit-open beep (servicePendingBrewRfRestore).
   pendingBrewRfRestore = true;
   if (wasClosed) {
     addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_OPENED);
@@ -409,7 +409,7 @@ void serviceRelaySafety() {
   if ((relay.state == RelaySafetyState::ARMING || relay.closed) &&
       elapsedMs(relay.closedAtMs) >= relay.operationalLimitMs) {
     const bool operational =
-        relay.operationalLimitMs < HARD_MAX_CN9_CLOSED_MS;
+        relay.operationalLimitMs < HARD_MAX_CIRCUIT_CLOSED_MS;
     tripRelaySafety(operational ? RelaySafetyFault::OPERATIONAL_LIMIT
                                : RelaySafetyFault::HARD_LIMIT,
                     !operational, operational, false);
@@ -420,7 +420,7 @@ void serviceRelaySafety() {
     return;
   }
 
-  const bool feedbackClosed = readCn9FeedbackClosed();
+  const bool feedbackClosed = readCircuitFeedbackClosed();
   bool pending = false;
   bool expectedClosed = false;
   uint32_t settleStartedAtMs = 0;
@@ -435,12 +435,12 @@ void serviceRelaySafety() {
   portEXIT_CRITICAL(&relayMux);
 
   if (pending) {
-    if (elapsedMs(settleStartedAtMs) < CN9_FEEDBACK_SETTLE_MS) {
+    if (elapsedMs(settleStartedAtMs) < CIRCUIT_FEEDBACK_SETTLE_MS) {
       return;
     }
     portENTER_CRITICAL(&relayMux);
     const bool stillPending = feedbackTransitionPending &&
-        elapsedMs(feedbackTransitionStartedAtMs) >= CN9_FEEDBACK_SETTLE_MS;
+        elapsedMs(feedbackTransitionStartedAtMs) >= CIRCUIT_FEEDBACK_SETTLE_MS;
     expectedClosed = feedbackExpectedClosed;
     if (stillPending) {
       feedbackTransitionPending = false;

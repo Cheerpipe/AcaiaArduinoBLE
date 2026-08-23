@@ -5,7 +5,7 @@
 namespace shotstopper {
 
 // Electrical / machine timing. Brew walls must never exceed this hard cap.
-constexpr uint32_t HARD_MAX_CN9_CLOSED_MS = 60000;
+constexpr uint32_t HARD_MAX_CIRCUIT_CLOSED_MS = 60000;
 constexpr uint32_t DEFAULT_OPERATIONAL_WALL_MS = 50000;
 constexpr uint32_t DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS = 10000;
 constexpr uint32_t MIN_PADDLE_RETURN_REMINDER_INTERVAL_MS = 5000;

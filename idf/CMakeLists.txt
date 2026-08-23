@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.16)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Board-parity defines (Arduino FQBN: PSRAM + USB CDC on boot / Hardware CDC).
-# Product options (remote CN9, buzzer) live in main/Kconfig.projbuild and
+# Product options (remote machine control, buzzer) live in main/Kconfig.projbuild and
 # sdkconfig.defaults; SHOT_STOPPER_EXTRA_FLAGS may still pass -D overrides.
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 

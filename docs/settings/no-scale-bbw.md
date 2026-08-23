@@ -12,8 +12,8 @@ The Web UI label is **Avoid BBW shot without scale**, under
 Only while **Brew by weight** is on and the scale is missing or not usable.
 With BBW off, this guard does nothing.
 
-A paddle ON **longer than the quick rinse gesture** does not close CN9. A
-shorter ON→OFF is still a rinse: CN9 closes and the guard goes **Idle**. The
+A paddle ON **longer than the quick rinse gesture** does not close the machine circuit. A
+shorter ON→OFF is still a rinse: machine circuit closes and the guard goes **Idle**. The
 no-scale triple beep still plays on paddle ON (brew or rinse) whenever BBW is
 on and the scale is missing.
 
@@ -25,7 +25,7 @@ or after **Last shot cooldown**.
 
 | Setting | Default | Range | Effect on the shot |
 | --- | --- | --- | --- |
-| **Avoid BBW shot without scale** | ON | ON / OFF | Armed: a long paddle ON does not close CN9. A rinse gesture still rinses and consumes Armed. |
+| **Avoid BBW shot without scale** | ON | ON / OFF | Armed: a long paddle ON does not close the machine circuit. A rinse gesture still rinses and consumes Armed. |
 | **Last shot cooldown (min)** | 60 min | 5–240 min | After a blocked start, an Armed rinse, or a finished (non-rinse) shot, wait this long before the guard re-arms. Boot and scale reconnect re-arm immediately. |
 
 Status shows `Off` / `Armed` / `Idle`.
@@ -33,7 +33,7 @@ Status shows `Off` / `Armed` / `Idle`.
 ## Example
 
 BBW is on, the Bookoo is still in the drawer. A long paddle ON plays the
-triple beep and leaves CN9 open. A short ON→OFF still rinses. After that,
+triple beep and leaves machine circuit open. A short ON→OFF still rinses. After that,
 the next long paddle starts a manual shot without a scale. When the scale
 connects, the guard re-arms immediately.
 

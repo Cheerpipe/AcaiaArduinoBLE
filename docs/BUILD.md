@@ -120,14 +120,14 @@ and then remembered in `.shotstopper`.
 `build-idf/<arch>/shotstopper.bin`.
 
 Extra compile defines go in `--flags`. The prompt’s suggested development
-flags enable remote CN9 and an active buzzer. Enter accepts them. Examples:
+flags enable remote machine control and an active buzzer. Enter accepts them. Examples:
 
 ```sh
 ./scripts/build-idf --arch n16r8 \
-  --flags "-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=2"
+  --flags "-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1 -DSHOT_STOPPER_ENABLE_BUZZER=2"
 ```
 
-- `SHOT_STOPPER_ENABLE_REMOTE_CN9=1` — virtual paddle and remote rinse on the
+- `SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1` — virtual paddle and remote rinse on the
   Web UI (trusted network only). **Stop** is always available when signed in.
 - `SHOT_STOPPER_ENABLE_BUZZER=1` — passive piezo (PWM). `=2` — active buzzer
   (GPIO HIGH/LOW). `=0` or omit — no local buzzer.

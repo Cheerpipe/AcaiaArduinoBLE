@@ -44,7 +44,7 @@ prompting. The same applies with `SHOTSTOPPER_NONINTERACTIVE=1`.
 | `-h`, `--help` | — | Show the script help. |
 
 Suggested `--flags` at the prompt (Enter accepts them):
-`-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_CN9=1 -DSHOT_STOPPER_ENABLE_BUZZER=2`.
+`-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1 -DSHOT_STOPPER_ENABLE_BUZZER=2`.
 
 ## ESP-IDF (supported)
 
