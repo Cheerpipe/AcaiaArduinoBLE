@@ -7,7 +7,7 @@ your network.
 ## Requirements
 
 - Change the device password away from the factory default
-  (`Advanced1234`). That password is the **OTA token** for the command-line
+  (`ineedacoffee`). That password is the **OTA token** for the command-line
   scripts; they never store it.
 - Pass the token every CLI run (`--token` or `SHOTSTOPPER_OTA_TOKEN`).
 - From **Admin → Firmware update**, unlock administration first. The Web UI

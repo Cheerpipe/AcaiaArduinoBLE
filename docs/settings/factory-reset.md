@@ -8,7 +8,7 @@ credentials. Firmware on the flash is not erased.
 Wi-Fi (STA and last-known-good network), workflow settings, presets,
 calibration (including learned offset and A→M samples), preferred scale,
 BLE Companion preference, shot history, and last shot. The device
-password returns to **`Advanced1234`**. The device then restarts.
+password returns to **`ineedacoffee`**. The device then restarts.
 
 ## Ways to run it
 
@@ -27,7 +27,7 @@ A shorter paddle gesture (three cycles) restores the device password / forgets S
 
 ## After reset
 
-Connect to `AdvancedShotStopperAP` / `Advanced1234` at `http://192.168.4.1` and set
+Connect to `AdvancedShotStopperAP` / `ineedacoffee` at `http://192.168.4.1` and set
 the device up again. See [AP](ap.md) and the
 [README first connection](../../README.md#first-connection).
 

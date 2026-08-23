@@ -22,7 +22,7 @@ This is the **user procedure**. Implementation notes live in
 After either procedure, local access returns to:
 
 - Network: **`AdvancedShotStopperAP`**
-- Device password: **`Advanced1234`**
+- Device password: **`ineedacoffee`**
 - Address: **`http://192.168.4.1`**
 
 Passwords are case-sensitive.
@@ -56,7 +56,7 @@ This procedure does not erase recipes, machine settings, or history.
 
 6. Keep the paddle still on ON for 3 seconds.
 7. Three short beeps confirm that access credentials were restored.
-8. Wait for the restart and connect to `AdvancedShotStopperAP` with `Advanced1234`.
+8. Wait for the restart and connect to `AdvancedShotStopperAP` with `ineedacoffee`.
 
 Example of valid timing:
 

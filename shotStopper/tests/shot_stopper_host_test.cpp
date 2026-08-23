@@ -1869,7 +1869,7 @@ void w04_wifi_credentials_have_strict_bounds() {
   CHECK(validWifiPassword("12345678", false));
   CHECK(!validWifiPassword("1234", false));
   CHECK(validWifiPassword("", true));
-  CHECK(validDevicePassword("Advanced1234"));
+  CHECK(validDevicePassword("ineedacoffee"));
   CHECK(shouldReuseSavedWifiCredentials("CafeLAN", "", false, true, "CafeLAN",
                                         false));
   CHECK(shouldReuseSavedWifiCredentials("CafeLAN", "", true, true, "CafeLAN",
@@ -6630,7 +6630,7 @@ void sc05_serial_cli_parser_covers_supported_commands() {
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(!serialCliParseLine("SERIAL_DEBUG_ON extra", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
-  CHECK(serialCliParseLine("SET_DEVICE_PASSWORD Advanced1234", request));
+  CHECK(serialCliParseLine("SET_DEVICE_PASSWORD ineedacoffee", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(serialCliParseLine("SET_DEVICE_PASSWORD oldpass newpass", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);

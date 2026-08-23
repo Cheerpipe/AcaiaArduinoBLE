@@ -183,7 +183,7 @@ On a fresh flash or after factory reset:
 | | Value |
 | --- | --- |
 | **Fallback Wi-Fi (AP) name** | `AdvancedShotStopperAP` |
-| **Device password** | `Advanced1234` (SoftAP WPA2 and OTA token) |
+| **Device password** | `ineedacoffee` (SoftAP WPA2 and OTA token) |
 | **Web UI address (AP mode)** | `http://192.168.4.1` |
 
 The password is case-sensitive. Join the AP, open the address above, then

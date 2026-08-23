@@ -202,7 +202,7 @@ it is always `192.168.4.1`.
 
 OTA uses the device password as `X-OTA-Token` for the command-line client.
 The Web UI authorises the same update after you unlock **Admin**. A controller
-still on the factory password **`Advanced1234`** cannot be updated over the air.
+still on the factory password **`ineedacoffee`** cannot be updated over the air.
 Change it first from **Admin → Device password**.
 
 The running firmware is never overwritten; the upload goes to the inactive

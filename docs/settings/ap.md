@@ -22,14 +22,14 @@ OTA token.
 | Setting | Default | Notes |
 | --- | --- | --- |
 | **AP name** | `AdvancedShotStopperAP` | Not user-editable. |
-| **Device password** | `Advanced1234` | Case-sensitive. 8–63 characters when you change it; USB `SET_DEVICE_PASSWORD` will not accept the factory string as the new value. Also used as the SoftAP WPA2 password and the OTA token. |
+| **Device password** | `ineedacoffee` | Case-sensitive. 8–63 characters when you change it; USB `SET_DEVICE_PASSWORD` will not accept the factory string as the new value. Also used as the SoftAP WPA2 password and the OTA token. |
 | **AP address** | `http://192.168.4.1` | SoftAP IPv4. |
 
 ## First connection
 
 1. Power the ESP32-S3 and wait for boot (the GPIO 1 LED stays off until a
    scale connects).
-2. Join **`AdvancedShotStopperAP`** with the device password **`Advanced1234`**.
+2. Join **`AdvancedShotStopperAP`** with the device password **`ineedacoffee`**.
 3. Open **`http://192.168.4.1`**.
 4. Claim the Web UI to save home Wi-Fi or change settings.
 

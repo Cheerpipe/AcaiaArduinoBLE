@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ShotStopperDomain.h"
+#include "ShotStopperPersistedNetwork.h"
 #include "ShotStopperTime.h"
 
 namespace shotstopper {
@@ -364,7 +365,7 @@ inline bool serialCliParseLine(const char *line, SerialCliRequest &request) {
       request.error = "Device password must be 8-63 characters";
       return true;
     }
-    if (strcmp(args[0], "Advanced1234") == 0) {
+    if (isFactoryDefaultPassword(args[0])) {
       request.verb = SerialCliVerb::INVALID_ARGS;
       request.error =
           "password cannot be the factory default; use RESET_DEVICE_PASSWORD";
@@ -414,14 +415,14 @@ inline void serialCliPrintHelp() {
   Serial.println("HELLO  probe CLI  e.g. HELLO");
   Serial.println("REBOOT  restart firmware  e.g. REBOOT");
   Serial.println(
-      "FACTORY_RESET  wipe Wi-Fi, settings, shots; device password Advanced1234; "
+      "FACTORY_RESET  wipe Wi-Fi, settings, shots; device password ineedacoffee; "
       "restart  e.g. FACTORY_RESET");
   Serial.println(
-      "RESET_DEVICE_PASSWORD  restore device password Advanced1234 (STA Wi-Fi "
+      "RESET_DEVICE_PASSWORD  restore device password ineedacoffee (STA Wi-Fi "
       "unchanged)  e.g. RESET_DEVICE_PASSWORD");
   Serial.println(
       "SET_DEVICE_PASSWORD <password>  set device password (8-63 chars, not "
-      "Advanced1234; USB does not require the current password)  e.g. "
+      "ineedacoffee; USB does not require the current password)  e.g. "
       "SET_DEVICE_PASSWORD password1234");
   Serial.println(
       "SET_WIFI <ssid> [password]  save STA Wi-Fi (DHCP), commit, and restart; "
@@ -430,7 +431,7 @@ inline void serialCliPrintHelp() {
   Serial.println("CLEAR_SHOTS  clear shot history  e.g. CLEAR_SHOTS");
   Serial.println(
       "RESET_NETWORK_AP  forget STA Wi-Fi and restore device password "
-      "Advanced1234; restart  e.g. RESET_NETWORK_AP");
+      "ineedacoffee; restart  e.g. RESET_NETWORK_AP");
   Serial.println(
       "SERIAL_DEBUG_ON  enable USB debug traces (any time)  e.g. "
       "SERIAL_DEBUG_ON");
