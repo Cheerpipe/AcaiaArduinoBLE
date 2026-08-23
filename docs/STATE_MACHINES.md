@@ -1,6 +1,6 @@
 # Firmware state machines
 
-This page is a map of the **runtime finite-state machines** in Micra Shot
+This page is a map of the **runtime finite-state machines** in Advanced Shot
 Stopper. It is written for someone who already knows the product
 (paddle → CN9 → scale) and wants to know **what each machine is for**,
 **what each state means**, and **which events move it**.

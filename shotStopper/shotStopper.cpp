@@ -586,7 +586,7 @@ void formatDebugEventMessage(const DebugEvent &event, char *message,
     return;
   }
   if (event.code == DebugCode::BOOT_BANNER) {
-    snprintf(message, capacity, "Shot Stopper Micra %s (bootId=%ld)",
+    snprintf(message, capacity, "Advanced Shot Stopper %s (bootId=%ld)",
              FW_VERSION, static_cast<long>(event.argument1));
     return;
   }

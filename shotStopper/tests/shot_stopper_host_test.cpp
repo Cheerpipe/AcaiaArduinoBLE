@@ -1869,7 +1869,7 @@ void w04_wifi_credentials_have_strict_bounds() {
   CHECK(validWifiPassword("12345678", false));
   CHECK(!validWifiPassword("1234", false));
   CHECK(validWifiPassword("", true));
-  CHECK(validDevicePassword("Micra1234"));
+  CHECK(validDevicePassword("Advanced1234"));
   CHECK(shouldReuseSavedWifiCredentials("CafeLAN", "", false, true, "CafeLAN",
                                         false));
   CHECK(shouldReuseSavedWifiCredentials("CafeLAN", "", true, true, "CafeLAN",
@@ -6630,7 +6630,7 @@ void sc05_serial_cli_parser_covers_supported_commands() {
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(!serialCliParseLine("SERIAL_DEBUG_ON extra", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
-  CHECK(serialCliParseLine("SET_DEVICE_PASSWORD Micra1234", request));
+  CHECK(serialCliParseLine("SET_DEVICE_PASSWORD Advanced1234", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
   CHECK(serialCliParseLine("SET_DEVICE_PASSWORD oldpass newpass", request));
   CHECK(request.verb == SerialCliVerb::INVALID_ARGS);
@@ -6965,7 +6965,7 @@ void sc15_status_printers_use_dump_views() {
   CHECK(serialTxContains("wifiStatus=3 CONNECTED"));
   CHECK(serialTxContains("staReconnectHeld=true"));
   CHECK(serialTxContains("AP_STATUS"));
-  CHECK(serialTxContains("ssid=MicraShotStopperAP"));
+  CHECK(serialTxContains("ssid=AdvancedShotStopperAP"));
   CHECK(serialTxContains("WEBUI_STATUS"));
   CHECK(serialTxContains("httpActive=true"));
   CHECK(serialTxContains("httpStartHeld=true"));

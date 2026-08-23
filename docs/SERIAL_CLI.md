@@ -86,9 +86,9 @@ reboot. Automatic SoftAP from boot is still torn down when STA comes up.
 | Command | Parameters | Effect |
 | --- | --- | --- |
 | `REBOOT` | none | Restarts firmware (safety gate) |
-| `FACTORY_RESET` | none | Wipes Wi-Fi, settings, calibration, and shots; device password `Micra1234`; restarts (safety gate) |
-| `SET_DEVICE_PASSWORD` | `<password>` | Sets the device password (8–63 chars, not `Micra1234`). Used for SoftAP WPA2 and OTA. Does not require the current password. Safety gate |
-| `RESET_DEVICE_PASSWORD` | none | Restores device password `Micra1234`. STA unchanged. Safety gate |
+| `FACTORY_RESET` | none | Wipes Wi-Fi, settings, calibration, and shots; device password `Advanced1234`; restarts (safety gate) |
+| `SET_DEVICE_PASSWORD` | `<password>` | Sets the device password (8–63 chars, not `Advanced1234`). Used for SoftAP WPA2 and OTA. Does not require the current password. Safety gate |
+| `RESET_DEVICE_PASSWORD` | none | Restores device password `Advanced1234`. STA unchanged. Safety gate |
 
 ## STA credentials (persist + reboot)
 
@@ -98,7 +98,7 @@ reboot. Automatic SoftAP from boot is still torn down when STA comes up.
 | --- | --- | --- |
 | `SET_WIFI` | `<ssid> [password]` | Saves home Wi-Fi (DHCP), **commits** it (no 3-minute Web UI confirm window), and restarts. Omit password if open. Quote spaces. Safety gate |
 | `CLEAR_WIFI` | none | Forgets saved STA only; restarts (safety gate) |
-| `RESET_NETWORK_AP` | none | Forgets STA and restores device password `Micra1234`; restarts (safety gate) |
+| `RESET_NETWORK_AP` | none | Forgets STA and restores device password `Advanced1234`; restarts (safety gate) |
 
 ## STA link (no NVS change)
 
@@ -113,7 +113,7 @@ reboot. Automatic SoftAP from boot is still torn down when STA comes up.
 
 | Command | Parameters | Effect |
 | --- | --- | --- |
-| `AP_START` | none | Raises SoftAP (`MicraShotStopperAP` at `192.168.4.1`). Stays up if STA is connected. Does not start HTTP if `WEBUI_STOP` is held |
+| `AP_START` | none | Raises SoftAP (`AdvancedShotStopperAP` at `192.168.4.1`). Stays up if STA is connected. Does not start HTTP if `WEBUI_STOP` is held |
 | `AP_STOP` | none | Stops SoftAP and holds auto-raise. HTTP stays if STA is up |
 | `AP_STATUS` | none | Dumps SoftAP state (never the password) |
 

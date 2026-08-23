@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/micra-shot-stopper.svg" alt="Micra Shot Stopper" width="520">
+  <img src="docs/advanced-shot-stopper.svg" alt="Advanced Shot Stopper" width="520">
 </p>
 
-# Micra Shot Stopper
+# Advanced Shot Stopper
 
 ESP32-S3 firmware for a **La Marzocco Linea Micra**. It adds brew-by-weight
 and related workflow controls without replacing the machine’s own brew switch.
@@ -35,9 +35,9 @@ Small Micra-specific changes grew into a dedicated rewrite: independent paddle
 read and CN9 control, a walk-away workflow, and extra guards so a late cup, a
 finger on the pan, or a dropped scale does not ruin the shot.
 
-The original project proved that BLE brew-by-weight stop was possible. Micra
-Shot Stopper is now the main application in this repository. The derived scale
-library remains here as a local dependency.
+The original project proved that BLE brew-by-weight stop was possible.
+Advanced Shot Stopper is now the main application in this repository. The
+derived scale library remains here as a local dependency.
 
 The day-to-day goal stays simple: put the cup down, flip the paddle, walk
 away. The intelligence lives in firmware defaults, not in a new control panel.
@@ -173,7 +173,7 @@ The Admin page is locked until you enter the device password (**Unlock administr
 | --- | --- |
 | **[Wi-Fi](docs/settings/wifi.md)** | Join your home network (STA), DHCP or static IP, first-boot fallback. |
 | **Device password** | Single firmware password: SoftAP WPA2, OTA, and Admin unlock. Changed from **Admin → Device password** after unlocking. |
-| **[AP](docs/settings/ap.md)** | Fallback access point `MicraShotStopperAP`. Uses the device password. |
+| **[AP](docs/settings/ap.md)** | Fallback access point `AdvancedShotStopperAP`. Uses the device password. |
 | **[Factory reset](docs/settings/factory-reset.md)** | Erase settings, Wi-Fi, calibration, and shot history. |
 
 ## First connection
@@ -182,8 +182,8 @@ On a fresh flash or after factory reset:
 
 | | Value |
 | --- | --- |
-| **Fallback Wi-Fi (AP) name** | `MicraShotStopperAP` |
-| **Device password** | `Micra1234` (SoftAP WPA2 and OTA token) |
+| **Fallback Wi-Fi (AP) name** | `AdvancedShotStopperAP` |
+| **Device password** | `Advanced1234` (SoftAP WPA2 and OTA token) |
 | **Web UI address (AP mode)** | `http://192.168.4.1` |
 
 The password is case-sensitive. Join the AP, open the address above, then
@@ -292,7 +292,7 @@ verified wiring, isolation, and behavior on your own setup.
 
 The project retains the MIT license in [LICENSE](LICENSE).
 
-Micra Shot Stopper would not exist without
+Advanced Shot Stopper would not exist without
 **[tatemazer](https://github.com/tatemazer)** and
 [tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/AcaiaArduinoBLE).
 That repository proved BLE brew-by-weight stop and shared the core scale

@@ -122,7 +122,7 @@ const char *jsonParseFailureMessage(const char *fallback) {
   return fallback;
 }
 
-constexpr const char *AP_SSID = "MicraShotStopperAP";
+constexpr const char *AP_SSID = "AdvancedShotStopperAP";
 constexpr const char *AP_IP = "192.168.4.1";
 constexpr const char *JSON_CONTENT_TYPE = "application/json";
 constexpr const char *STATUS_OK = "200 OK";
@@ -4299,7 +4299,7 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
     const DebugEvent &event = work.logBatch[index];
     char message[128] = {};
     if (event.code == DebugCode::BOOT_BANNER) {
-      snprintf(message, sizeof(message), "Shot Stopper Micra %s (bootId=%ld)",
+      snprintf(message, sizeof(message), "Advanced Shot Stopper %s (bootId=%ld)",
                FW_VERSION, static_cast<long>(event.argument1));
     } else if (event.code == DebugCode::STATE_TRANSITION &&
         event.argument1 >=

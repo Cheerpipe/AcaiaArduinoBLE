@@ -27,7 +27,7 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 
 | Question | Answer |
 | --- | --- |
-| **What are the default credentials?** | AP **`MicraShotStopperAP`** / device password **`Micra1234`**. Web UI in AP: **`http://192.168.4.1`**. See [First connection](../README.md#first-connection) and [AP](settings/ap.md). |
+| **What are the default credentials?** | AP **`AdvancedShotStopperAP`** / device password **`Advanced1234`**. Web UI in AP: **`http://192.168.4.1`**. See [First connection](../README.md#first-connection) and [AP](settings/ap.md). |
 | **I cannot find the device Wi-Fi after first boot.** | With no home Wi-Fi saved, the AP stays up. With saved credentials, STA is tried first; SoftAP appears only if STA fails for ~15 s at boot. After a successful STA join, a later drop does **not** raise SoftAP — use USB `AP_START` or reboot. See [Wi-Fi](settings/wifi.md). |
 | **How do I open the UI after I saved home Wi-Fi?** | Stay on the wait overlay: it polls this address and reloads when the controller returns, which confirms the new network. After a static-IP change, open `http://<new-ip>` if this page does not come back. Serial logs at **115200** also print the address. If the new settings are unreachable, Wi-Fi reverts to the previous network in ~3 minutes and the overlay reconnects there. |
 | **Can I change the password?** | **Admin** (unlock with the current device password) **→ Device password** (new + confirm). USB: `SET_DEVICE_PASSWORD` / `RESET_DEVICE_PASSWORD`. See [USB serial CLI](SERIAL_CLI.md). |

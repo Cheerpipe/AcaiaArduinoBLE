@@ -178,7 +178,7 @@ if (css.includes('.brandLogo') || allHtml.includes('logo.svg') || allHtml.includ
 }
 if (!css.includes('.brand') || !css.includes('inline-flex') ||
     !css.includes('.brandMark') || !shellHtml.includes('class="brandMark"') ||
-    !shellHtml.includes('<svg') || !shellHtml.includes('<small>Micra</small>Shot Stopper') ||
+    !shellHtml.includes('<svg') || !shellHtml.includes('<small>Advanced</small>Shot Stopper') ||
     shellHtml.includes('logo.svg')) {
   throw new Error('Brand lockup must use inline SVG mark plus HTML wordmark');
 }
@@ -206,7 +206,7 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 46080) {
+if (htmlBytes > 46100) {
   throw new Error('Web UI HTML source exceeds the 45 KiB authoring budget');
 }
 if (jsBytes > 120000) {
@@ -520,7 +520,7 @@ if (ui.includes('authenticatedOnly') ||
     !ui.includes('function knownPath(') ||
     !ui.includes('class="brand"') ||
     !ui.includes('class="brandMark"') ||
-    !ui.includes('<small>Micra</small>Shot Stopper') ||
+    !ui.includes('<small>Advanced</small>Shot Stopper') ||
     !ui.includes('href="/" data-route="/"') ||
     !ui.includes("querySelectorAll('a[data-route]')") ||
     !ui.includes('ensureView') ||

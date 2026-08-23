@@ -1,7 +1,7 @@
 {
   "name": "acaiaarduinoble",
   "private": true,
-  "description": "Build tooling for Micra Shot Stopper embedded Web UI assets",
+  "description": "Build tooling for Advanced Shot Stopper embedded Web UI assets",
   "scripts": {
     "gen:web-ui": "node ./scripts/gen_web_ui.js"
   },

@@ -21,8 +21,8 @@ This is the **user procedure**. Implementation notes live in
 
 After either procedure, local access returns to:
 
-- Network: **`MicraShotStopperAP`**
-- Device password: **`Micra1234`**
+- Network: **`AdvancedShotStopperAP`**
+- Device password: **`Advanced1234`**
 - Address: **`http://192.168.4.1`**
 
 Passwords are case-sensitive.
@@ -56,7 +56,7 @@ This procedure does not erase recipes, machine settings, or history.
 
 6. Keep the paddle still on ON for 3 seconds.
 7. Three short beeps confirm that access credentials were restored.
-8. Wait for the restart and connect to `MicraShotStopperAP` with `Micra1234`.
+8. Wait for the restart and connect to `AdvancedShotStopperAP` with `Advanced1234`.
 
 Example of valid timing:
 
@@ -141,7 +141,7 @@ operation safely.
 
 1. Wait at least 20 seconds after confirmation.
 2. Verify that the paddle is OFF and power the controller back on.
-3. Look for `MicraShotStopperAP`; the initial STA attempt may delay its
+3. Look for `AdvancedShotStopperAP`; the initial STA attempt may delay its
    appearance by approximately 15 seconds.
 4. If you hear a long-short-long pattern and startup does not continue, there
    was a storage failure. CN9 stays open. Cut and restore power to

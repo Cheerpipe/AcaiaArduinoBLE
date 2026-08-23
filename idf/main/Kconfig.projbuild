@@ -1,4 +1,4 @@
-menu "Micra Shot Stopper"
+menu "Advanced Shot Stopper"
 
     config SHOT_STOPPER_ENABLE_REMOTE_CN9
         bool "Enable remote CN9 control path"

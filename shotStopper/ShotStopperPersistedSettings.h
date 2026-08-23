@@ -9,7 +9,7 @@ constexpr uint32_t PERSISTED_SETTINGS_MAGIC = 0x53544F50U;  // "STOP"
 constexpr const char *SETTINGS_NAMESPACE = "shotstopper";
 constexpr const char *SETTINGS_SLOT_A = "settingsA";
 constexpr const char *SETTINGS_SLOT_B = "settingsB";
-constexpr const char *DEFAULT_DEVICE_PASSWORD = "Micra1234";
+constexpr const char *DEFAULT_DEVICE_PASSWORD = "Advanced1234";
 
 struct PersistedSettings {
   uint32_t magic = PERSISTED_SETTINGS_MAGIC;
