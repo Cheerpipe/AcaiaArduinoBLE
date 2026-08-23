@@ -28,6 +28,10 @@ scan_firmware_sources() {
     "$firmware_file" \
     "$firmware_dir/ShotStopperHardware.h" \
     "$firmware_dir/ShotStopperMachine.h" \
+    "$firmware_dir/ShotStopperMachineRelay.h" \
+    "$firmware_dir/ShotStopperMachinePaddleInput.h" \
+    "$firmware_dir/ShotStopperMachinePaddleControl.h" \
+    "$firmware_dir/ShotStopperMachinePaddleState.h" \
     "$firmware_dir/ShotStopperMachineTypes.h" \
     "$firmware_dir/ShotStopperScaleSense.h" \
     "$firmware_dir/ShotStopperCupPresence.h" \

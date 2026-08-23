@@ -2216,12 +2216,14 @@ void w26_status_is_a_copied_snapshot() {
   copyControlStatus(status);
   CHECK(status.activeCycle);
   CHECK(status.relayClosed);
+  CHECK(status.machineRunning);
   CHECK(status.source == ControlSource::PHYSICAL);
   CHECK(status.config.revision == session.config.revision);
   ControlGateSnapshot gate;
   copyControlGate(gate);
   CHECK(gate.activeCycle);
   CHECK(gate.relayClosed);
+  CHECK(gate.machineRunning);
   CHECK(gate.source == ControlSource::PHYSICAL);
 }
 
@@ -4308,7 +4310,7 @@ void w39_history_mutation_blocked_while_brew_rf_active() {
   status.activeCycle = true;
   CHECK(!controlAllowsHistoryMutation(status));
   status.activeCycle = false;
-  status.relayClosed = true;
+  status.machineRunning = true;
   CHECK(!controlAllowsHistoryMutation(status));
 }
 

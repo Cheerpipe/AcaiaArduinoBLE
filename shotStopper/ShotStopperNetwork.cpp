@@ -3056,7 +3056,7 @@ constexpr const char *WEB_UI_CLIENT_HEADER = "X-WebUI-Client";
 
 const char *configLockReason(const ControlGateSnapshot &status) {
   if (status.activeCycle) return "active_shot";
-  if (status.relayClosed) return "cn9_closed";
+  if (status.machineRunning) return "cn9_closed";
   if (status.physicalPaddleOn) return "paddle_on";
   if (status.maintenanceLeaseActive) return "maintenance";
   if (status.state != StopperState::READY) return "not_ready";

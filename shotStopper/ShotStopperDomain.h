@@ -1558,6 +1558,7 @@ struct ControlStatusSnapshot {
   StopperState state = StopperState::REQUIRES_OFF;
   bool activeCycle = false;
   bool relayClosed = false;
+  bool machineRunning = false;
   bool physicalPaddleOn = false;
   bool virtualPaddleOn = false;
   bool remoteControlEnabled = REMOTE_CN9_CONTROL_ENABLED;
@@ -1679,13 +1680,14 @@ struct ControlStatusSnapshot {
 static_assert(sizeof(ControlStatusSnapshot) <= 4096,
               "ControlStatusSnapshot grew past the loop-stack staging budget");
 
-// Gate checks (Ready / CN9 / paddle / lease) do not need the ~4 KiB snapshot.
-// Network and httpd copy this onto the stack; the full snapshot stays in BSS
-// or NetworkWorkBuf (PSRAM).
+// Gate checks (Ready / machine working / paddle / lease) do not need the ~4 KiB
+// snapshot. Network and httpd copy this onto the stack; the full snapshot stays
+// in BSS or NetworkWorkBuf (PSRAM).
 struct ControlGateSnapshot {
   StopperState state = StopperState::REQUIRES_OFF;
   bool activeCycle = false;
   bool relayClosed = false;
+  bool machineRunning = false;
   bool physicalPaddleOn = false;
   bool maintenanceLeaseActive = false;
   uint32_t maintenanceLeaseId = 0;
@@ -1700,6 +1702,7 @@ inline ControlGateSnapshot controlGateOf(const ControlStatusSnapshot &status) {
   gate.state = status.state;
   gate.activeCycle = status.activeCycle;
   gate.relayClosed = status.relayClosed;
+  gate.machineRunning = status.machineRunning;
   gate.physicalPaddleOn = status.physicalPaddleOn;
   gate.maintenanceLeaseActive = status.maintenanceLeaseActive;
   gate.maintenanceLeaseId = status.maintenanceLeaseId;
@@ -1708,11 +1711,13 @@ inline ControlGateSnapshot controlGateOf(const ControlStatusSnapshot &status) {
 }
 
 inline bool controlAllowsConfiguration(const ControlGateSnapshot &status) {
-  // Relay safety is enforced independently when CN9 is armed. A safety
-  // lockout must keep the relay open, but it must not lock the WebUI or
+  // Relay safety is enforced independently when the brew circuit is armed. A
+  // safety lockout must keep the relay open, but it must not lock the WebUI or
   // prevent recovery-time configuration and diagnostics.
+  // Config lock is "machine working", not "K1 energized". For paddle those
+  // coincide (circuit closed == group brewing).
   return status.state == StopperState::READY && !status.activeCycle &&
-         !status.relayClosed && !status.physicalPaddleOn &&
+         !status.machineRunning && !status.physicalPaddleOn &&
          !status.maintenanceLeaseActive;
 }
 
@@ -1721,9 +1726,9 @@ inline bool controlAllowsConfiguration(const ControlStatusSnapshot &status) {
 }
 
 // Shot-log / last-shot NVS. WebUI override may mutate config during a pour;
-// it must not disable flash cache while CN9 can be closed.
+// it must not disable flash cache while the machine is working.
 inline bool controlAllowsHistoryMutation(const ControlGateSnapshot &status) {
-  return !status.activeCycle && !status.relayClosed;
+  return !status.activeCycle && !status.machineRunning;
 }
 
 inline bool controlAllowsHistoryMutation(const ControlStatusSnapshot &status) {

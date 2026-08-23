@@ -192,7 +192,8 @@ without exposing ARMING vs CLOSED vs TRIPPED. It does not command
 GPIO.
 
 Source: `ShotStopperMachineTypes.h`, `machineRunState()` in
-`ShotStopperMachine.h`.
+`ShotStopperMachinePaddleState.h` (included from `ShotStopperMachine.h`).
+Config lock uses `machineIsRunning()`, which for paddle equals CN9 closed.
 
 ### States
 

@@ -4094,9 +4094,8 @@ void maybeRequestNtpSyncOnActivity() {
 }
 
 bool controlAllowsConfigurationNow() {
-  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   return stopperState == StopperState::READY && !session.active &&
-         !relay.closed && !paddleOn && !rawPaddleOn &&
+         !machineIsRunning() && !paddleOn && !rawPaddleOn &&
          !maintenanceLease.active;
 }
 
@@ -5095,6 +5094,7 @@ void publishControlStatus() {
   next.state = stopperState;
   next.activeCycle = session.active;
   next.relayClosed = relay.closed;
+  next.machineRunning = relay.closed;
   // Status intentionally reports the actual GPIO level, not the debounced
   // state used by the control state machine.
   next.physicalPaddleOn = readRawPaddleOn();
