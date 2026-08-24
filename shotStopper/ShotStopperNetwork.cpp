@@ -396,6 +396,10 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "Cup-present threshold must be from 0.1 to 50 g.";
     case ConfigValidationError::CUP_REMOVED_WEIGHT:
       return "Cup-removed threshold must be from -50 to -0.1 g.";
+    case ConfigValidationError::STOP_PULSE:
+      return "Stop pulse must be from 50 to 1000 ms.";
+    case ConfigValidationError::MAX_SINGLE_PRESS:
+      return "Single press max must be from 100 to 5000 ms.";
   }
   return "Invalid configuration.";
 }
@@ -431,12 +435,22 @@ bool jsonPaddleMode(cJSON *object, const char *name, uint8_t &output) {
   return parsePaddleMode(item->valuestring, output);
 }
 
-bool jsonMomentaryStartEdge(cJSON *object, const char *name, bool &output) {
-  cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
-  if (!cJSON_IsString(item) || item->valuestring == nullptr) {
+bool jsonStopPulseMs(cJSON *object, RuntimeConfig &config) {
+  uint32_t ms = 0;
+  if (!jsonUint32(object, "stopPulseMs", ms) || ms < 50 || ms > 1000) {
     return false;
   }
-  return parseMomentaryStartEdge(item->valuestring, output);
+  setRuntimeStopPulseMs(config, ms);
+  return true;
+}
+
+bool jsonMaxSinglePressMs(cJSON *object, RuntimeConfig &config) {
+  uint32_t ms = 0;
+  if (!jsonUint32(object, "maxSinglePressMs", ms) || ms < 100 || ms > 5000) {
+    return false;
+  }
+  setRuntimeMaxSinglePressMs(config, ms);
+  return true;
 }
 
 bool jsonNtpPreset(cJSON *object, const char *name, uint8_t &output) {
@@ -3871,7 +3885,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"paddleReturnReminderBeep\":%s,"
         "\"paddleReturnReminderIntervalMs\":%lu,"
         "\"paddleReturnReminderMaxDurationMs\":%lu,\"paddleMode\":\"%s\","
-        "\"momentaryStartEdge\":\"%s\","
+        "\"stopPulseMs\":%lu,\"maxSinglePressMs\":%lu,"
         "\"buzzerScaleLostBeep\":%s,\"buzzerAutoToManualGuardEndBeep\":%s,"
         "\"buzzerManualNoScaleBeep\":%s,\"buzzerScaleConnectedBeep\":%s,"
         "\"scaleConnectedLed\":%s,"
@@ -3913,7 +3927,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(
             control.config.paddleReturnReminderMaxDurationMs),
         paddleModeId(control.config.paddleMode),
-        momentaryStartEdgeId(control.config.momentaryStartOnPress),
+        static_cast<unsigned long>(runtimeStopPulseMs(control.config)),
+        static_cast<unsigned long>(runtimeMaxSinglePressMs(control.config)),
         control.config.buzzerScaleLostBeep ? "true" : "false",
         control.config.buzzerAutoToManualGuardEndBeep ? "true" : "false",
         control.config.buzzerManualNoScaleBeep ? "true" : "false",
@@ -4092,8 +4107,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         safePreferredScaleMac, safePreferredScaleName,
         static_cast<unsigned long>(control.scaleMacCachePauseRemainingMs),
         g_work->historyJson, g_work->presetsJson,
-        static_cast<unsigned long>(COMPILED_STOP_PULSE_MS),
-        static_cast<unsigned long>(COMPILED_MAX_SINGLE_PRESS_MS));
+        static_cast<unsigned long>(runtimeStopPulseMs(control.config)),
+        static_cast<unsigned long>(runtimeMaxSinglePressMs(control.config)));
   } else if (ok && page == StatusPage::Admin) {
     // Locked admin: confirm-window hint only. Unlocked: Wi-Fi/AP + BLE + OTA.
     ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s",
@@ -4697,7 +4712,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "firstDropBeep", "scaleConnectedLed",
       "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
-      "paddleMode", "momentaryStartEdge", "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
+      "paddleMode", "stopPulseMs", "maxSinglePressMs", "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
       "buzzerManualNoScaleBeep", "buzzerScaleConnectedBeep",
       "buzzerExtendedPulseRate", "buzzerSlowExtendedPulseRate",
       "alertOutputChannel", "autoRetare", "retareWindowMs", "minimumCupWeightG",
@@ -4794,10 +4809,12 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (jsonFieldPresent(root, "paddleMode") &&
              !jsonPaddleMode(root, "paddleMode", candidate.paddleMode)) {
     parseError = "paddleMode must be auto, natural or original.";
-  } else if (jsonFieldPresent(root, "momentaryStartEdge") &&
-             !jsonMomentaryStartEdge(root, "momentaryStartEdge",
-                                     candidate.momentaryStartOnPress)) {
-    parseError = "momentaryStartEdge must be press or release.";
+  } else if (jsonFieldPresent(root, "stopPulseMs") &&
+             !jsonStopPulseMs(root, candidate)) {
+    parseError = "stopPulseMs must be an integer from 50 to 1000.";
+  } else if (jsonFieldPresent(root, "maxSinglePressMs") &&
+             !jsonMaxSinglePressMs(root, candidate)) {
+    parseError = "maxSinglePressMs must be an integer from 100 to 5000.";
   } else if (jsonFieldPresent(root, "buzzerScaleLostBeep") &&
              !jsonBoolean(root, "buzzerScaleLostBeep",
                           candidate.buzzerScaleLostBeep)) {

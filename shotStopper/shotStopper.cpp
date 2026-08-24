@@ -3988,7 +3988,7 @@ void enterBrewOrManualFromStart() {
 }
 
 void demoteActiveCycleToRinseOrEnd() {
-  if (withinRinseGestureWindow()) {
+  if (machineSupportsRinse() && withinRinseGestureWindow()) {
     enterRinse();
     return;
   }
@@ -4097,7 +4097,8 @@ void stateMachineTask() {
       if (intent.intent == UserIntent::REQUEST_START) {
         beginCycle(ControlSource::PHYSICAL);
       }
-      if (intent.intent == UserIntent::REQUEST_STOP &&
+      if (machineSupportsRinse() &&
+          intent.intent == UserIntent::REQUEST_STOP &&
           ((noScaleShotGuardHold &&
             elapsedMs(noScaleShotGuardHoldAtMs) <=
                 runtimeConfig.rinseGestureMs) ||
@@ -4674,13 +4675,9 @@ void processWebCommand(const WebCommand &command) {
       candidate.dripDelayMs = command.config.dripDelayMs;
       candidate.soundAlertsMuted = command.config.soundAlertsMuted;
       candidate.firstDropBeep = command.config.firstDropBeep;
-      candidate.paddleReturnReminderBeep = command.config.paddleReturnReminderBeep;
-      candidate.paddleReturnReminderIntervalMs =
-          command.config.paddleReturnReminderIntervalMs;
-      candidate.paddleReturnReminderMaxDurationMs =
-          command.config.paddleReturnReminderMaxDurationMs;
-      candidate.paddleMode = command.config.paddleMode;
-      candidate.momentaryStartOnPress = command.config.momentaryStartOnPress;
+      machineApplyWorkflowConfig(candidate, command.config);
+      candidate.rinseGestureMs = command.config.rinseGestureMs;
+      candidate.rinseDurationMs = command.config.rinseDurationMs;
       candidate.buzzerScaleLostBeep = command.config.buzzerScaleLostBeep;
       candidate.buzzerAutoToManualGuardEndBeep =
           command.config.buzzerAutoToManualGuardEndBeep;
@@ -4694,8 +4691,6 @@ void processWebCommand(const WebCommand &command) {
       candidate.alertOutputChannel = command.config.alertOutputChannel;
       candidate.bookooMuteOnBuzzerOnly = command.config.bookooMuteOnBuzzerOnly;
       candidate.bookooConnectBeepLevel = command.config.bookooConnectBeepLevel;
-      candidate.rinseGestureMs = command.config.rinseGestureMs;
-      candidate.rinseDurationMs = command.config.rinseDurationMs;
       candidate.autoRetare = command.config.autoRetare;
       candidate.retareWindowMs = command.config.retareWindowMs;
       candidate.minimumCupWeightG = command.config.minimumCupWeightG;

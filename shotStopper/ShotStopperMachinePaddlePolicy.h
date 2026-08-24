@@ -64,9 +64,12 @@ bool machineCyclePromotedToNaturalForTest() {
 
 uint32_t machineLastRawEdgeMs() { return rawPaddleChangedAtMs; }
 
-bool machineWithinRinseGestureWindow() {
-  return machineCycleActive &&
-         elapsedMs(machineCycleStartedAtMs) <= machineCycleRinseGestureMs;
+// Early paddle OFF still reports REQUEST_STOP so ShotStopper can apply its
+// rinse-after-X-time rule. After that window, Original/Auto may hide the stop.
+bool machineReportsStopOnRelease() {
+  return !machineHidesPhysicalStop() ||
+         (machineCycleActive &&
+          elapsedMs(machineCycleStartedAtMs) <= machineCycleRinseGestureMs);
 }
 
 MachineIntention machinePollIntention() {
@@ -84,8 +87,7 @@ MachineIntention machinePollIntention() {
   out.holdActive = paddleOn || rawPaddleOn;
   out.stablyOff = paddleIsStablyOff();
 
-  const bool swallowStop = paddleTurnedOff && machineHidesPhysicalStop() &&
-                           !machineWithinRinseGestureWindow();
+  const bool swallowStop = paddleTurnedOff && !machineReportsStopOnRelease();
   if (paddleTurnedOn && !machineCycleActive) {
     out.intent = UserIntent::REQUEST_START;
   } else if (paddleTurnedOn && machineCycleActive) {
@@ -153,4 +155,12 @@ void machineServiceReminders() {
       paddleReturnReminderLastAtMs = now;
     }
   }
+}
+
+inline void machineApplyWorkflowConfig(RuntimeConfig &dst,
+                                       const RuntimeConfig &src) {
+  dst.paddleMode = src.paddleMode;
+  dst.paddleReturnReminderBeep = src.paddleReturnReminderBeep;
+  dst.paddleReturnReminderIntervalMs = src.paddleReturnReminderIntervalMs;
+  dst.paddleReturnReminderMaxDurationMs = src.paddleReturnReminderMaxDurationMs;
 }

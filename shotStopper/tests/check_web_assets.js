@@ -861,7 +861,10 @@ if (!html.includes('<summary>Paddle</summary>') ||
     !network.includes('"paddleMode"') ||
     !network.includes('paddleMode must be auto, natural or original.') ||
     !network.includes('jsonPaddleMode') ||
-    !firmware.includes('candidate.paddleMode = command.config.paddleMode') ||
+    !firmware.includes('machineApplyWorkflowConfig') ||
+    !firmwareCore.includes('machineApplyWorkflowConfig(candidate, command.config)') ||
+    !firmware.includes('dst.paddleMode = src.paddleMode') ||
+    firmwareCore.includes('candidate.paddleMode') ||
     !firmware.includes('machineHidesPhysicalStop()') ||
     !firmware.includes('machineAllowsAutomationStop()') ||
     !firmware.includes('machineBeginCycle') ||
@@ -911,6 +914,9 @@ if (momentaryInputHeader.includes('session.active') ||
 if (firmwareCore.includes('readRawPaddleOn()') ||
     firmwareCore.includes('pinMode(RELAY_GPIO') ||
     firmwareCore.includes('#if SHOT_STOPPER_MACHINE_TYPE') ||
+    firmwareCore.includes('MACHINE_USES_MOMENTARY') ||
+    firmwareCore.includes('stopPulseTenMs') ||
+    firmwareCore.includes('maxSinglePressHundredMs') ||
     !firmware.includes('pinMode(RELAY_GPIO, OUTPUT)') ||
     !firmware.includes('machineBootSwitchHeldStably()') ||
     !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineSwitchSample.h'), 'utf8')
@@ -919,41 +925,40 @@ if (firmwareCore.includes('readRawPaddleOn()') ||
   throw new Error(
       'Machine GPIO, switch sample BSS, and boot debounce must live in machine headers — not shotStopper.cpp');
 }
-if (!html.includes('<summary>Momentary</summary>') ||
-    !html.includes('id="momentaryStartEdge"') ||
+if (!html.includes('<summary>Switch</summary>') ||
+    !html.includes('id="stopPulseMs"') ||
+    !html.includes('id="maxSinglePressMs"') ||
     !html.includes('class="cfgGroup momentaryOnly"') ||
-    !html.includes('<option value="release" selected>On release</option>') ||
-    !html.includes('<option value="press">On press</option>') ||
+    html.includes('id="momentaryStartEdge"') ||
+    html.includes('<summary>Momentary</summary>') ||
     html.indexOf('<summary>Paddle</summary>') >
-        html.indexOf('<summary>Momentary</summary>') ||
-    html.indexOf('<summary>Momentary</summary>') >
+        html.indexOf('<summary>Switch</summary>') ||
+    html.indexOf('<summary>Switch</summary>') >
         html.indexOf('<summary>No-scale BBW</summary>') ||
-    html.indexOf('id="momentaryStartEdge"') >
+    html.indexOf('id="stopPulseMs"') >
         html.indexOf('<summary>No-scale BBW</summary>') ||
-    !html.includes('Releasing that same start press does not stop') ||
-    !ui.includes("momentaryStartEdge:($('momentaryStartEdge')") ||
-    !ui.includes("if($('momentaryStartEdge'))$('momentaryStartEdge').value=") ||
+    !html.includes('Pulse the firmware sends to stop at target weight') ||
+    !ui.includes('stopPulseMs:number(') ||
+    !ui.includes("if($('stopPulseMs'))$('stopPulseMs').value=") ||
     !css.includes('.momentaryOnly') ||
-    !network.includes('"momentaryStartEdge"') ||
-    !network.includes('momentaryStartEdge must be press or release.') ||
-    !network.includes('jsonMomentaryStartEdge') ||
-    !firmware.includes(
-        'candidate.momentaryStartOnPress = command.config.momentaryStartOnPress') ||
-    !firmware.includes('runtimeConfig.momentaryStartOnPress') ||
-    !domain.includes('bool momentaryStartOnPress = false') ||
-    !domain.includes('parseMomentaryStartEdge') ||
-    !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineTypes.h'), 'utf8')
-         .includes('parseMomentaryStartEdge') ||
+    !network.includes('"stopPulseMs"') ||
+    !network.includes('stopPulseMs must be an integer from 50 to 1000.') ||
+    !network.includes('jsonStopPulseMs') ||
+    !firmware.includes('machineApplyWorkflowConfig') ||
+    !firmware.includes('dst.stopPulseTenMs = src.stopPulseTenMs') ||
+    !domain.includes('uint8_t stopPulseTenMs') ||
+    !domain.includes('setRuntimeStopPulseMs') ||
     fs.readFileSync(path.join(sketchDir, 'ShotStopperBrewTypes.h'), 'utf8')
-        .includes('parseMomentaryStartEdge') ||
+        .includes('stopPulseTenMs') ||
     fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8')
-        .includes('momentaryStart')) {
+        .includes('stopPulseTenMs')) {
   throw new Error(
-      'Momentary start-edge setting must be wired in Settings, API, APPLY_CONFIG, and machine types — not brew');
+      'Momentary Switch timings must be wired in Settings, API, APPLY_CONFIG, and runtime config — not brew');
 }
 if (!html.includes('class="cfgGroup paddleOnly"><summary>Paddle</summary>') ||
     !html.includes('class="cfgGroup paddleOnly"><summary>Quick rinse</summary>') ||
-    !html.includes('class="cfgGroup momentaryOnly"><summary>Momentary</summary>') ||
+    !html.includes('class="cfgGroup momentaryOnly"><summary>Switch</summary>') ||
+    !html.includes('class="paddleOnly"><input id="paddleReturnReminderBeep"') ||
     html.includes('cfgGroup paddleOnly momentaryOnly') ||
     html.includes('cfgGroup momentaryOnly paddleOnly') ||
     !css.includes('html.momentaryMachine .paddleOnly') ||

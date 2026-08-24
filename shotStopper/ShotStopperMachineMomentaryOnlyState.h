@@ -13,7 +13,7 @@ constexpr float MOMENTARY_BASELINE_BAND_G = 0.5f;
 constexpr float MOMENTARY_CONFIRM_DELTA_G = 1.0f;
 constexpr uint32_t MOMENTARY_FLOW_HOLD_MS = 500;
 constexpr uint32_t MOMENTARY_FLOW_GAP_SKIP_MS = 500;
-constexpr uint32_t MOMENTARY_QUIET_MS = 400;
+constexpr uint32_t MOMENTARY_QUIET_MS = 1000;
 constexpr uint32_t MOMENTARY_STOP_ACK_MS = 1500;
 constexpr uint32_t MOMENTARY_STOP_RETRY_AFTER_MS = 600;
 constexpr uint32_t MOMENTARY_PREINFUSION_MS = 8000;
@@ -156,10 +156,21 @@ void serviceMomentaryRunSensors() {
     momentaryQuietBaselineG = weight;
   }
 
+  const bool quietPan =
+      momentaryQuietSinceMs != 0 && elapsedMs(momentaryQuietSinceMs) >= MOMENTARY_QUIET_MS;
+  if (quietPan && !momentaryStartAwaitingAck &&
+      (momentaryStopAwaitingAck || momentaryOrphanRun ||
+       (!momentaryLogicalRunActive &&
+        momentaryInferredState != MachineRunState::CONFIRMED_ON &&
+        momentaryInferredState != MachineRunState::ASSUMED_ON))) {
+    momentaryStopAwaitingAck = false;
+    momentaryOrphanRun = false;
+    momentaryEspressoConfirmed = false;
+    momentaryInferredState = MachineRunState::CONFIRMED_OFF;
+  }
+
   if (momentaryStopAwaitingAck) {
-    const bool quiet =
-        momentaryQuietSinceMs != 0 && elapsedMs(momentaryQuietSinceMs) >= MOMENTARY_QUIET_MS;
-    if (quiet) {
+    if (quietPan) {
       momentaryStopAwaitingAck = false;
       momentaryOrphanRun = false;
       momentaryInferredState = MachineRunState::CONFIRMED_OFF;
@@ -238,20 +249,8 @@ void serviceMomentaryRunSensors() {
 }
 
 bool machineAllowsFirmwareStopPulse() {
-  if (momentaryUserStopThisCycle) {
-    if (momentaryInferredState == MachineRunState::CONFIRMED_OFF) {
-      return false;
-    }
-    if (momentaryInferredState == MachineRunState::UNKNOWN) {
-      return momentaryOrphanRun;
-    }
-    if (momentaryInferredState == MachineRunState::CONFIRMED_ON ||
-        momentaryOrphanRun) {
-      return true;
-    }
-    return elapsedMs(momentaryLogicalRunStartedAtMs) < MOMENTARY_PREINFUSION_MS;
-  }
-  return momentaryInferredState == MachineRunState::CONFIRMED_ON;
+  return momentaryInferredState == MachineRunState::CONFIRMED_ON &&
+         !momentaryPhysicalOn;
 }
 
 inline bool machineRunningElapsed(uint32_t &elapsedOut) {
@@ -287,4 +286,10 @@ inline MachineRunState machineRunState() {
                                  : MachineRunState::CONFIRMED_OFF;
   }
   return momentaryInferredState;
+}
+
+inline void machineFillInferenceStatus(ControlStatusSnapshot &status) {
+  status.machineStartAckPending = momentaryStartAwaitingAck;
+  status.machineStopAckPending = momentaryStopAwaitingAck;
+  status.machineOrphanRun = momentaryOrphanRun;
 }

@@ -7,9 +7,9 @@ rinse ends.
 Quick rinse works in every [paddle mode](paddle.md). Paddle firmware shows
 this group with **Paddle**. Momentary-switch firmware (with or without reed)
 hides both and shows [Momentary](momentary.md) instead; it also hides the
-Home rinse button. A short press starts or stops a brew, and a long press
-drives the machine circuit directly. When that short press reports “running”
-is chosen there; that edge is also when the rinse gesture window starts.
+Home rinse button. On momentary, a short press starts or stops a brew, and a
+long press is mirrored to the machine (native rinse) without opening a
+stopper rinse cycle.
 
 ## When it applies
 

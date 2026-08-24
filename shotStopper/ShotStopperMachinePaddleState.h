@@ -39,3 +39,9 @@ inline MachineRunState machineRunState() {
   }
   return MachineRunState::CONFIRMED_OFF;
 }
+
+inline void machineFillInferenceStatus(ControlStatusSnapshot &status) {
+  status.machineStartAckPending = false;
+  status.machineStopAckPending = false;
+  status.machineOrphanRun = false;
+}

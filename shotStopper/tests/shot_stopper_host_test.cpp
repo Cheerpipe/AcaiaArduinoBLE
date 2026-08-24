@@ -1719,7 +1719,8 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(!config.serialDebugOutput);
   CHECK(config.ringRetainLogLevel == static_cast<uint8_t>(LogLevel::NONE));
   CHECK(config.paddleMode == static_cast<uint8_t>(PaddleMode::NATURAL));
-  CHECK(!config.momentaryStartOnPress);
+  CHECK(runtimeStopPulseMs(config) == COMPILED_STOP_PULSE_MS);
+  CHECK(runtimeMaxSinglePressMs(config) == COMPILED_MAX_SINGLE_PRESS_MS);
 }
 
 void w02_each_runtime_field_is_validated() {
@@ -1844,12 +1845,19 @@ void w03_runtime_timing_relations_are_transactional() {
   CHECK(parsePaddleMode("auto", parsedPaddle));
   CHECK(parsedPaddle == static_cast<uint8_t>(PaddleMode::AUTO));
   CHECK(!parsePaddleMode("legacy", parsedPaddle));
-  bool parsedStartOnPress = true;
-  CHECK(parseMomentaryStartEdge("release", parsedStartOnPress));
-  CHECK(!parsedStartOnPress);
-  CHECK(parseMomentaryStartEdge("press", parsedStartOnPress));
-  CHECK(parsedStartOnPress);
-  CHECK(!parseMomentaryStartEdge("hold", parsedStartOnPress));
+  config = RuntimeConfig{};
+  config.stopPulseTenMs = 4;
+  CHECK(validateRuntimeConfig(config) == ConfigValidationError::STOP_PULSE);
+  config = RuntimeConfig{};
+  config.maxSinglePressHundredMs = 51;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::MAX_SINGLE_PRESS);
+  config = RuntimeConfig{};
+  config.stopPulseTenMs = 0;
+  config.maxSinglePressHundredMs = 0;
+  CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
+  CHECK(runtimeStopPulseMs(config) == COMPILED_STOP_PULSE_MS);
+  CHECK(runtimeMaxSinglePressMs(config) == COMPILED_MAX_SINGLE_PRESS_MS);
   config = RuntimeConfig{};
   config.cupPresentWeightG = 0.0f;
   CHECK(validateRuntimeConfig(config) ==

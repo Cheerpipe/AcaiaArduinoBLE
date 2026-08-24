@@ -50,6 +50,9 @@ void serviceMomentaryRunSensors() { sampleReed(); }
 
 bool machineAllowsFirmwareStopPulse() {
   sampleReed();
+  if (momentaryPhysicalOn) {
+    return false;
+  }
   if (momentaryFirmwareStopIssued && !momentaryUserStopThisCycle) {
     return false;
   }
@@ -99,4 +102,10 @@ inline MachineRunState machineRunState() {
     return MachineRunState::ASSUMED_ON;
   }
   return MachineRunState::CONFIRMED_OFF;
+}
+
+inline void machineFillInferenceStatus(ControlStatusSnapshot &status) {
+  status.machineStartAckPending = false;
+  status.machineStopAckPending = false;
+  status.machineOrphanRun = false;
 }

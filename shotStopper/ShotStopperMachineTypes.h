@@ -97,25 +97,6 @@ inline bool parsePaddleMode(const char *text, uint8_t &mode) {
   return false;
 }
 
-inline const char *momentaryStartEdgeId(bool startOnPress) {
-  return startOnPress ? "press" : "release";
-}
-
-inline bool parseMomentaryStartEdge(const char *text, bool &startOnPress) {
-  if (text == nullptr) {
-    return false;
-  }
-  if (strcmp(text, "press") == 0) {
-    startOnPress = true;
-    return true;
-  }
-  if (strcmp(text, "release") == 0) {
-    startOnPress = false;
-    return true;
-  }
-  return false;
-}
-
 inline const char *machineRunStateName(MachineRunState state) {
   switch (state) {
     case MachineRunState::CONFIRMED_OFF: return "CONFIRMED_OFF";

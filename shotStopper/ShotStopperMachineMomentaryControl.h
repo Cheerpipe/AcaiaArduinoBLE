@@ -1,41 +1,21 @@
 #pragma once
 
-// Momentary actuator: K1 is closed only for a replayed press or a firmware stop
-// pulse. Long-press after the single-press threshold mirrors the remainder.
-// Logical run walls reuse tripRelaySafety so brew sees the existing flags.
+// Momentary actuator: K1 mirrors the physical switch 1:1. The only synthetic
+// close is a firmware stop pulse (weight cut / walls), aborted if the user
+// presses. Logical run walls reuse tripRelaySafety so brew sees existing flags.
 
-void abortStartPulseIfActive() {
-  if (pulseOutputActive && pulseOutputIsStart) {
-    (void)setMachineCircuitClosed(false);
-    pulseOutputActive = false;
-  }
-}
-
-bool emitPulse(uint32_t durationMs, bool isStart) {
-  if (momentaryLongPressActive) {
-    return true;
-  }
+void abortFirmwarePulseIfActive() {
   if (pulseOutputActive) {
-    if (!isStart && !pulseOutputIsStart) {
-      return true;
-    }
-    (void)setMachineCircuitClosed(false);
     pulseOutputActive = false;
+    if (!momentaryPhysicalOn && getRelaySafetySnapshot().closed) {
+      (void)setMachineCircuitClosed(false);
+    }
   }
-  if (durationMs < 50U) {
-    durationMs = 50U;
-  }
-  if (!setMachineCircuitClosed(true, HARD_MAX_CIRCUIT_CLOSED_MS)) {
-    return false;
-  }
-  pulseOutputActive = true;
-  pulseOutputIsStart = isStart;
-  pulseOutputEndsAtMs = millis() + durationMs;
-  return true;
 }
 
-void finishPulseOutputIfDue() {
-  if (momentaryLongPressActive) {
+void applyMomentaryRelayDrive() {
+  if (momentaryPhysicalOn) {
+    abortFirmwarePulseIfActive();
     if (!getRelaySafetySnapshot().closed) {
       (void)setMachineCircuitClosed(true, HARD_MAX_CIRCUIT_CLOSED_MS);
     }
@@ -45,6 +25,8 @@ void finishPulseOutputIfDue() {
     if (static_cast<int32_t>(millis() - pulseOutputEndsAtMs) >= 0) {
       (void)setMachineCircuitClosed(false);
       pulseOutputActive = false;
+    } else if (!getRelaySafetySnapshot().closed) {
+      (void)setMachineCircuitClosed(true, HARD_MAX_CIRCUIT_CLOSED_MS);
     }
     return;
   }
@@ -53,16 +35,36 @@ void finishPulseOutputIfDue() {
   }
 }
 
+bool emitFirmwareStopPulse() {
+  if (momentaryPhysicalOn) {
+    return true;
+  }
+  if (pulseOutputActive) {
+    return true;
+  }
+  uint32_t durationMs = runtimeStopPulseMs(runtimeConfig);
+  if (durationMs < 50U) {
+    durationMs = 50U;
+  }
+  if (!setMachineCircuitClosed(true, HARD_MAX_CIRCUIT_CLOSED_MS)) {
+    return false;
+  }
+  pulseOutputActive = true;
+  pulseOutputIsStart = false;
+  pulseOutputEndsAtMs = millis() + durationMs;
+  return true;
+}
+
 void maybeEmitFirmwareStopPulse() {
+  if (momentaryPhysicalOn) {
+    abortFirmwarePulseIfActive();
+    return;
+  }
   if (!machineAllowsFirmwareStopPulse()) {
-    abortStartPulseIfActive();
+    abortFirmwarePulseIfActive();
     return;
   }
-  if (pulseOutputActive && pulseOutputIsStart) {
-    abortStartPulseIfActive();
-    return;
-  }
-  (void)emitPulse(COMPILED_STOP_PULSE_MS, false);
+  (void)emitFirmwareStopPulse();
 }
 
 void serviceLogicalRunWalls() {
@@ -117,36 +119,47 @@ inline bool machineRequestStart(uint32_t operationalLimitMs) {
   momentaryLogicalRunActive = true;
   momentaryLogicalRunStartedAtMs = millis();
   momentaryLogicalOperationalLimitMs = operationalLimitMs;
-  const uint32_t durationMs =
-      momentaryCapturedPressMs > 0U ? momentaryCapturedPressMs : COMPILED_STOP_PULSE_MS;
-  momentaryCapturedPressMs = 0U;
-  return emitPulse(durationMs, true);
+  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
+  return relay.state != RelaySafetyState::LOCKOUT &&
+         relay.state != RelaySafetyState::TRIPPED;
 }
 
 inline bool machineRequestStop() {
-  const bool allow = machineAllowsFirmwareStopPulse();
   momentaryLogicalRunActive = false;
-  if (!allow) {
-    abortStartPulseIfActive();
+  const bool skipPulse =
+      momentaryPhysicalOn || momentarySkipFirmwareStopPulse;
+  momentarySkipFirmwareStopPulse = false;
+  if (skipPulse) {
+    abortFirmwarePulseIfActive();
+    noteMomentaryLogicalStop();
+    applyMomentaryRelayDrive();
+    return true;
+  }
+  if (pulseOutputActive) {
+    noteMomentaryLogicalStop();
+    return true;
+  }
+  if (!machineAllowsFirmwareStopPulse()) {
+    noteMomentaryLogicalStop();
+    applyMomentaryRelayDrive();
     return true;
   }
   noteMomentaryLogicalStop();
-  if (pulseOutputActive && pulseOutputIsStart) {
-    abortStartPulseIfActive();
-    return true;
-  }
-  return emitPulse(COMPILED_STOP_PULSE_MS, false);
+  return emitFirmwareStopPulse();
+}
+
+inline void machineApplyWorkflowConfig(RuntimeConfig &dst,
+                                       const RuntimeConfig &src) {
+  dst.stopPulseTenMs = src.stopPulseTenMs;
+  dst.maxSinglePressHundredMs = src.maxSinglePressHundredMs;
 }
 
 inline void serviceMachine() {
   serviceMomentaryRunSensors();
-  finishPulseOutputIfDue();
+  applyMomentaryRelayDrive();
   serviceLogicalRunWalls();
   if (momentaryStopRetryPending) {
     momentaryStopRetryPending = false;
     maybeEmitFirmwareStopPulse();
-  }
-  if (momentaryUserStopThisCycle && !machineSense.brewCycleActive) {
-    (void)machineRequestStop();
   }
 }

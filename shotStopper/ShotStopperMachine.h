@@ -4,11 +4,13 @@
 #include "ShotStopperMachineTypes.h"
 #include "ShotStopperSafety.h"
 
-// Machine façade. Stopper talks only to UserIntent, machineRequestStart/Stop,
-// machineIsRunning, cycle policy (Begin/End/AllowsAutomationStop), and the
-// MachineSense snapshot. Brew/scale/cup never call this header's actuators.
-// Included from shotStopper.cpp after logging helpers. Switch sample BSS lives
-// in ShotStopperMachineSwitchSample.h, not in the stopper.
+// Machine façade. Stopper talks to a generic machine: UserIntent,
+// machineRequestStart/Stop, machineIsRunning, cycle policy, config apply,
+// and MachineSense. It does not branch on paddle vs switch vs reed and does
+// not read those implementations' internals. Rinse duration and the
+// "stop within X ms is a rinse" rule live in the stopper; the machine only
+// reports start/stop/hold (paddle may still surface an early OFF as STOP so
+// that rule can run). Brew/scale/cup never call this header's actuators.
 
 #include "ShotStopperMachineRelay.h"
 #include "ShotStopperMachineSwitchSample.h"
@@ -72,7 +74,9 @@ inline uint32_t machineCloseLimitMs(uint32_t operationalWallMs) {
 inline bool machineCycleHardMaxArmedForTest() { return false; }
 inline bool machineCyclePromotedToNaturalForTest() { return false; }
 inline uint32_t machineLastRawEdgeMs() { return momentaryRawChangedAtMs; }
-inline void machineNoteFirmwareStop() { momentaryUserStopThisCycle = true; }
+inline void machineNoteFirmwareStop() {
+  momentarySkipFirmwareStopPulse = false;
+}
 inline void machineServiceReminders() {}
 inline void machineSampleInput() { updatePaddleInput(); }
 
@@ -80,7 +84,7 @@ inline MachineIntention machinePollIntention() {
   MachineIntention out;
   out.turnedOn = paddleTurnedOn;
   out.turnedOff = paddleTurnedOff;
-  out.holdActive = paddleOn || rawPaddleOn;
+  out.holdActive = momentaryPhysicalOn || rawPaddleOn;
   out.stablyOff = paddleIsStablyOff();
   if (paddleTurnedOn) {
     out.intent = UserIntent::REQUEST_START;
@@ -125,19 +129,8 @@ inline bool machineBootSwitchHeldStably() {
 }
 
 inline void machineFillStatus(ControlStatusSnapshot &status) {
-  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   status.reedOn = reedIsOn();
   status.physicalPaddleOn = readRawPaddleOn();
-  status.circuitElapsedMs = MACHINE_USES_MOMENTARY_SWITCH
-                                ? machineElapsedMs()
-                                : (relay.closed ? elapsedMs(relay.closedAtMs) : 0);
-#if SHOT_STOPPER_MACHINE_TYPE == 1
-  status.machineStartAckPending = momentaryStartAwaitingAck;
-  status.machineStopAckPending = momentaryStopAwaitingAck;
-  status.machineOrphanRun = momentaryOrphanRun;
-#else
-  status.machineStartAckPending = false;
-  status.machineStopAckPending = false;
-  status.machineOrphanRun = false;
-#endif
+  status.circuitElapsedMs = machineElapsedMs();
+  machineFillInferenceStatus(status);
 }

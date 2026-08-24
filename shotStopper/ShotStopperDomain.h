@@ -561,17 +561,65 @@ struct RuntimeConfig {
   bool serialDebugOutput = false;
   // Minimum level retained in the RAM debug ring (WebUI Log). NONE disables.
   uint8_t ringRetainLogLevel = static_cast<uint8_t>(LogLevel::NONE);
-  // Momentary only: report running on press (true) vs on release (false).
-  // Occupies former padding before dripDelayMs so NVS schema 11 size is unchanged.
-  bool momentaryStartOnPress = false;
+  // Momentary Switch timings packed to keep NVS schema 11 size. 0 = compiled
+  // default (legacy blobs that stored momentaryStartOnPress here).
+  uint8_t stopPulseTenMs =
+      static_cast<uint8_t>((SHOT_STOPPER_STOP_PULSE_MS + 5) / 10);
+  uint8_t maxSinglePressHundredMs =
+      static_cast<uint8_t>((SHOT_STOPPER_MAX_SINGLE_PRESS_MS + 50) / 100);
   // Wait after shot end before capturing the post-drip weight.
   uint32_t dripDelayMs = DEFAULT_DRIP_DELAY_MS;
 };
 
 static_assert(sizeof(RuntimeConfig) == 244,
               "RuntimeConfig NVS size changed; add a schema migration");
+static_assert(offsetof(RuntimeConfig, stopPulseTenMs) == 238,
+              "RuntimeConfig stopPulseTenMs offset changed");
 static_assert(offsetof(RuntimeConfig, dripDelayMs) == 240,
               "RuntimeConfig dripDelayMs offset changed");
+
+inline uint32_t runtimeStopPulseMs(const RuntimeConfig &config) {
+  if (config.stopPulseTenMs == 0) {
+    return COMPILED_STOP_PULSE_MS;
+  }
+  const uint32_t ms = static_cast<uint32_t>(config.stopPulseTenMs) * 10U;
+  if (ms < 50U || ms > 1000U) {
+    return COMPILED_STOP_PULSE_MS;
+  }
+  return ms;
+}
+
+inline uint32_t runtimeMaxSinglePressMs(const RuntimeConfig &config) {
+  if (config.maxSinglePressHundredMs == 0) {
+    return COMPILED_MAX_SINGLE_PRESS_MS;
+  }
+  const uint32_t ms =
+      static_cast<uint32_t>(config.maxSinglePressHundredMs) * 100U;
+  if (ms < 100U || ms > 5000U) {
+    return COMPILED_MAX_SINGLE_PRESS_MS;
+  }
+  return ms;
+}
+
+inline void setRuntimeStopPulseMs(RuntimeConfig &config, uint32_t ms) {
+  if (ms < 50U) {
+    ms = 50U;
+  }
+  if (ms > 1000U) {
+    ms = 1000U;
+  }
+  config.stopPulseTenMs = static_cast<uint8_t>((ms + 5U) / 10U);
+}
+
+inline void setRuntimeMaxSinglePressMs(RuntimeConfig &config, uint32_t ms) {
+  if (ms < 100U) {
+    ms = 100U;
+  }
+  if (ms > 5000U) {
+    ms = 5000U;
+  }
+  config.maxSinglePressHundredMs = static_cast<uint8_t>((ms + 50U) / 100U);
+}
 
 struct CycleConfigSnapshot {
   uint32_t revision = 1;
@@ -721,7 +769,9 @@ enum class ConfigValidationError : uint8_t {
   RING_RETAIN_LOG_LEVEL,
   PADDLE_MODE,
   CUP_PRESENT_WEIGHT,
-  CUP_REMOVED_WEIGHT
+  CUP_REMOVED_WEIGHT,
+  STOP_PULSE,
+  MAX_SINGLE_PRESS
 };
 
 constexpr size_t MAX_SHOT_PRESETS = 8;
@@ -1014,6 +1064,15 @@ inline ConfigValidationError validateRuntimeConfig(
       config.dripDelayMs > MAX_DRIP_DELAY_MS) {
     return ConfigValidationError::DRIP_DELAY;
   }
+  if (config.stopPulseTenMs != 0 &&
+      (config.stopPulseTenMs < 5 || config.stopPulseTenMs > 100)) {
+    return ConfigValidationError::STOP_PULSE;
+  }
+  if (config.maxSinglePressHundredMs != 0 &&
+      (config.maxSinglePressHundredMs < 1 ||
+       config.maxSinglePressHundredMs > 50)) {
+    return ConfigValidationError::MAX_SINGLE_PRESS;
+  }
   if (config.ringRetainLogLevel >
       static_cast<uint8_t>(LogLevel::NONE)) {
     return ConfigValidationError::RING_RETAIN_LOG_LEVEL;
@@ -1144,6 +1203,10 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "lastShotCooldownMs";
     case ConfigValidationError::DRIP_DELAY:
       return "dripDelayMs";
+    case ConfigValidationError::STOP_PULSE:
+      return "stopPulseMs";
+    case ConfigValidationError::MAX_SINGLE_PRESS:
+      return "maxSinglePressMs";
     case ConfigValidationError::RING_RETAIN_LOG_LEVEL:
       return "ringRetainLogLevel";
     case ConfigValidationError::PADDLE_MODE:
