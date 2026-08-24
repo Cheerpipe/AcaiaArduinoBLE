@@ -176,3 +176,19 @@ CupPresenceEvent feedCupPresence(float weight, uint32_t receivedAtMs,
   resetCupPlaceStabilityStreak();
   return CupPresenceEvent::PLACED;
 }
+
+inline void copyCupPresenceDebug(CupPresenceState &state, bool &holdTransitions,
+                                 bool &inNegativeHole, bool &removedArmed,
+                                 uint8_t &removedConfirmations,
+                                 uint8_t &placeStabilitySamples,
+                                 float &holeWeightG,
+                                 float &placeCandidateWeightG) {
+  state = cupPresence.state;
+  holdTransitions = cupPresence.holdTransitions;
+  inNegativeHole = cupPresence.inNegativeHole;
+  removedArmed = cupPresence.removedArmed;
+  removedConfirmations = cupPresence.removedConfirmations;
+  placeStabilitySamples = cupPresence.placeStabilitySamples;
+  holeWeightG = cupPresence.holeWeightG;
+  placeCandidateWeightG = cupPresence.placeCandidateWeightG;
+}

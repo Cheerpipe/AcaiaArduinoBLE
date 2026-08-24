@@ -204,11 +204,28 @@ enum class AccidentalTouchPhase : uint8_t {
   TREND = 1
 };
 
+inline const char *accidentalTouchPhaseName(AccidentalTouchPhase phase) {
+  switch (phase) {
+    case AccidentalTouchPhase::STARTUP: return "STARTUP";
+    case AccidentalTouchPhase::TREND: return "TREND";
+  }
+  return "STARTUP";
+}
+
 enum class AccidentalTouchClass : uint8_t {
   OK = 0,
   TOUCH = 1,
   SUSTAINED = 2
 };
+
+inline const char *accidentalTouchClassName(AccidentalTouchClass classified) {
+  switch (classified) {
+    case AccidentalTouchClass::OK: return "OK";
+    case AccidentalTouchClass::TOUCH: return "TOUCH";
+    case AccidentalTouchClass::SUSTAINED: return "SUSTAINED";
+  }
+  return "OK";
+}
 
 enum class FirstFlowPhase : uint8_t {
   SEEKING = 0,

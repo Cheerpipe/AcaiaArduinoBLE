@@ -57,6 +57,7 @@
 #endif
 
 #include "ShotStopperDomain.h"
+#include "ShotStopperDebugExport.h"
 #include "ShotStopperBleCompanion.h"
 #if !defined(SHOT_STOPPER_HOST_TEST)
 #include "ShotStopperBleCompanionPersistence.h"
@@ -770,6 +771,9 @@ void copyControlStatus(ControlStatusSnapshot &output) {
   output = publishedControlStatus;
   portEXIT_CRITICAL(&webStatusMux);
 }
+
+ScaleLinkSnapshot getScaleLinkSnapshot();
+RelaySafetySnapshot getRelaySafetySnapshot();
 
 void copyControlGate(ControlGateSnapshot &output) {
   portENTER_CRITICAL(&webStatusMux);
@@ -1529,6 +1533,79 @@ void serviceRemoteTimerStopRetry() {
 #include "ShotStopperCupPresence.h"
 #include "ShotStopperBrew.h"
 #include "ShotStopperScaleSense.h"
+
+void copyDebugExportExtras(DebugExportExtras &out) {
+  out = DebugExportExtras{};
+  if (session.active) {
+    out.sessionActive = true;
+    out.sessionAutomaticEnabled = session.automaticEnabled;
+    out.sessionBbwProtectionEnabled = session.bbwProtectionEnabled;
+    out.sessionBbwProtectionEnded = session.bbwProtectionEnded;
+    out.sessionStartedWithScale = session.startedWithScale;
+    out.sessionScaleWasLost = session.scaleWasLost;
+    out.sessionCupRemovedPending = session.cupRemovedPending;
+    out.sessionExtractionExtended = session.extractionExtended;
+    out.sessionSlowExtractionExtended = session.slowExtractionExtended;
+    out.sessionTargetReachedEarly = session.targetReachedEarly;
+    out.sessionAutoToManualGuardArmed = session.autoToManualGuardArmed;
+    out.sessionAutoToManualGuardEnforced = session.autoToManualGuardEnforced;
+    out.sessionAccidentalTouchHolding = session.accidentalTouchHolding;
+    out.sessionAccidentalTouchPhase =
+        static_cast<uint8_t>(session.accidentalTouchPhase);
+    out.sessionAccidentalTouchClass =
+        static_cast<uint8_t>(session.accidentalTouchClass);
+    out.sessionAccidentalTouchPendingCount = session.accidentalTouchPendingCount;
+    out.sessionActivePresetId = session.activePresetId;
+    out.sessionWeightControlState =
+        static_cast<uint8_t>(session.weightControlState);
+    out.sessionId = session.id;
+    out.sessionStartedAtMs = session.startedAtMs;
+    out.sessionFirstDropMs = session.firstDropMs;
+    out.sessionAutoToManualGuardDeadlineAtMs =
+        session.autoToManualGuardDeadlineAtMs;
+    out.sessionTargetReachedAtMs = session.targetReachedAtMs;
+  }
+  {
+    CupPresenceState cupState = CupPresenceState::ABSENT;
+    copyCupPresenceDebug(
+        cupState, out.cupHoldTransitions, out.cupInNegativeHole,
+        out.cupRemovedArmed, out.cupRemovedConfirmations,
+        out.cupPlaceStabilitySamples, out.cupHoleWeightG,
+        out.cupPlaceCandidateWeightG);
+    out.cupState = static_cast<uint8_t>(cupState);
+  }
+  {
+    const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+    out.scaleLinkState = static_cast<uint8_t>(link.state);
+    out.scaleDisconnectSequence = link.disconnectSequence;
+    out.scaleConnectionGeneration = link.connectionGeneration;
+    out.scalePacketSequence = link.packetSequence;
+    out.scaleWorkerProgressAtMs = link.workerProgressAtMs;
+    out.scaleTimerValid = link.timerValid;
+    out.scaleTimerMs = link.timerMs;
+    out.scaleTimerAgeMs = link.timerAgeMs;
+    copyCString(out.scaleProtocolName, sizeof(out.scaleProtocolName),
+                link.protocolName);
+  }
+  out.relay = getRelaySafetySnapshot();
+  {
+    ControlStatusSnapshot status;
+    copyControlStatus(status);
+    out.rawActivatorOn = status.rawActivatorOn;
+    out.physicalActivatorOn = status.physicalActivatorOn;
+    out.machineRunState = static_cast<uint8_t>(status.machineRunState);
+    out.machineStartAckPending = status.machineStartAckPending;
+    out.machineStopAckPending = status.machineStopAckPending;
+    out.machineOrphanRun = status.machineOrphanRun;
+    out.noScaleShotGuardHold = status.noScaleShotGuardHold;
+    out.noScaleShotGuardScaleWasAvailable =
+        status.noScaleShotGuardScaleWasAvailable;
+    out.cupStartGuardHold = status.cupStartGuardHold;
+  }
+  out.healthHeapAlertLatched = healthHeapAlertLatched;
+  out.healthStackAlertLatched = healthStackAlertLatched;
+  out.healthLoopGapAlertLatched = healthLoopGapAlertLatched;
+}
 
 GuardInputs loopGuardInputs;
 
@@ -5425,6 +5502,14 @@ void publishControlStatus() {
     next.cycleAutoToManualGuardArmed = session.autoToManualGuardArmed;
     next.cycleAutoToManualGuardEnforced = session.autoToManualGuardEnforced;
     next.cycleAccidentalTouchHolding = session.accidentalTouchHolding;
+    next.cycleAccidentalTouchPhase =
+        static_cast<uint8_t>(session.accidentalTouchPhase);
+    next.cycleAccidentalTouchClass =
+        static_cast<uint8_t>(session.accidentalTouchClass);
+    next.cycleAccidentalTouchPendingCount = session.accidentalTouchPendingCount;
+    next.cycleCupRemovedPending = session.cupRemovedPending;
+    next.cycleBbwProtectionEnabled = session.bbwProtectionEnabled;
+    next.cycleBbwProtectionEnded = session.bbwProtectionEnded;
     if (session.autoToManualGuardEnforced) {
       const uint32_t nowMs = millis();
       next.cycleAutoToManualGuardRemainingMs =
@@ -5441,6 +5526,9 @@ void publishControlStatus() {
   }
   next.noScaleShotGuardEnabled = runtimeConfig.avoidBbwShotWithoutScale;
   next.noScaleShotGuardArmed = noScaleShotGuardArmed;
+  next.noScaleShotGuardHold = noScaleShotGuardHold;
+  next.noScaleShotGuardScaleWasAvailable = noScaleShotGuardScaleWasAvailable;
+  next.cupStartGuardHold = cupStartGuardHold;
   next.machineRunState = machineRunState();
   next.cupPresenceState = cupPresenceState();
   next.cupPresent = next.cupPresenceState == CupPresenceState::PRESENT;
@@ -6316,6 +6404,7 @@ void setup() {
     callbacks.copyScaleHistory = copyScaleHistory;
     callbacks.copyPresetBank = copyPresetBank;
     callbacks.copyRuntimeConfig = copyRuntimeConfig;
+    callbacks.copyDebugExportExtras = copyDebugExportExtras;
     if (!networkManager.begin(persistedSettings, callbacks)) {
       logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
               BOOT_SUBSYSTEM_NETWORK, 0);

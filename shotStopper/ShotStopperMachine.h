@@ -205,7 +205,9 @@ inline bool machineBootActivatorHeldStably() {
 }
 
 inline void machineFillStatus(ControlStatusSnapshot &status) {
-  status.physicalActivatorOn = readRawActivatorOn();
+  const bool rawOn = readRawActivatorOn();
+  status.rawActivatorOn = rawOn;
+  status.physicalActivatorOn = rawOn;
   status.circuitElapsedMs = machineElapsedMs();
   machineFillInferenceStatus(status);
 }

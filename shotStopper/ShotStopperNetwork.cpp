@@ -1,4 +1,5 @@
 #include "ShotStopperNetwork.h"
+#include "ShotStopperDebugExport.h"
 #include "ShotStopperMachineMomentaryConfig.h"
 #include "ShotStopperMachinePaddleConfig.h"
 #include "ShotStopperJsonArena.h"
@@ -52,6 +53,7 @@ struct NetworkWorkBuf {
   ShotLogRecord shotRecords[SHOT_LOG_CAPACITY]{};
   ShotCurveRecord shotCurves[SHOT_CURVE_CAPACITY]{};
   ControlStatusSnapshot control{};
+  DebugExportExtras debugExport{};
   // Must match ShotStopperNetwork::REQUEST_BODY_CAPACITY (asserted in begin()).
   char requestBody[2048]{};
   WifiScanSnapshot wifiScan{};
@@ -3044,6 +3046,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/status/settings", HTTP_GET, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/status/admin", HTTP_GET, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/status/diagnostic", HTTP_GET, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/debug/export", HTTP_GET, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/log", HTTP_GET, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/shots", HTTP_GET, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/shots/clear", HTTP_POST, ownedApiHandler) &&
@@ -3449,6 +3452,9 @@ esp_err_t ShotStopperNetwork::ownedApiHandler(httpd_req_t *request) {
       apiUriMatches(request->uri, "/api/v1/status/admin") ||
       apiUriMatches(request->uri, "/api/v1/status/diagnostic")) {
     return statusHandler(request);
+  }
+  if (apiUriMatches(request->uri, "/api/v1/debug/export")) {
+    return debugExportHandler(request);
   }
   if (apiUriMatches(request->uri, "/api/v1/log")) return logHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/shots")) return shotsHandler(request);
@@ -4363,6 +4369,71 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         compiledMachineTypeId(),
         static_cast<unsigned long>(COMPILED_STOP_PULSE_MS),
         static_cast<unsigned long>(COMPILED_MAX_SINGLE_PRESS_MS));
+    if (ok) {
+      const bool bbwEnabled = !control.config.timerOnly;
+      const bool scaleUsable =
+          control.scaleAvailable &&
+          control.weightStreamState == WeightStreamState::FRESH;
+      const bool lastShotCupRemoved =
+          control.lastShot.valid &&
+          control.lastShot.endReason == EndReason::CUP_REMOVED;
+      ok = statusJsonAppend(
+          &used,
+          ",\"guards\":{"
+          "\"bbwEnabled\":%s,\"scaleUsable\":%s,\"lastShotCupRemoved\":%s,"
+          "\"noScale\":{\"enabled\":%s,\"armed\":%s,\"hold\":%s,"
+          "\"scaleWasAvailable\":%s},"
+          "\"atm\":{\"enabled\":%s,\"armed\":%s,\"enforced\":%s,"
+          "\"remainingMs\":%lu},"
+          "\"slowExtraction\":{\"enabled\":%s,\"extended\":%s,"
+          "\"targetReachedEarly\":%s,\"activeStopWeightG\":%.1f},"
+          "\"fastExtraction\":{\"enabled\":%s,\"extended\":%s,"
+          "\"targetReachedEarly\":%s,\"activeStopWeightG\":%.1f,"
+          "\"minBrewTimeRemainingMs\":%lu},"
+          "\"accidentalTouch\":{\"enabled\":%s,\"holding\":%s,"
+          "\"phase\":\"%s\",\"class\":\"%s\",\"pendingCount\":%u},"
+          "\"cupProtection\":{\"enabled\":%s,\"stopIfRemoved\":%s,"
+          "\"requireCupToStart\":%s,\"present\":%s,\"startHold\":%s,"
+          "\"removedPending\":%s,\"bbwProtectionActive\":%s,"
+          "\"bbwProtectionEnded\":%s}}",
+          bbwEnabled ? "true" : "false", scaleUsable ? "true" : "false",
+          lastShotCupRemoved ? "true" : "false",
+          control.noScaleShotGuardEnabled ? "true" : "false",
+          control.noScaleShotGuardArmed ? "true" : "false",
+          control.noScaleShotGuardHold ? "true" : "false",
+          control.noScaleShotGuardScaleWasAvailable ? "true" : "false",
+          control.config.autoToManualGuardEnabled ? "true" : "false",
+          control.cycleAutoToManualGuardArmed ? "true" : "false",
+          control.cycleAutoToManualGuardEnforced ? "true" : "false",
+          static_cast<unsigned long>(
+              control.cycleAutoToManualGuardRemainingMs),
+          control.config.slowExtractionGuardEnabled ? "true" : "false",
+          control.cycleSlowExtractionExtended ? "true" : "false",
+          control.cycleTargetReachedEarly ? "true" : "false",
+          static_cast<double>(control.cycleActiveStopWeightG),
+          control.config.fastExtractionGuardEnabled ? "true" : "false",
+          control.cycleExtractionExtended ? "true" : "false",
+          control.cycleTargetReachedEarly ? "true" : "false",
+          static_cast<double>(control.cycleActiveStopWeightG),
+          static_cast<unsigned long>(control.cycleMinBrewTimeRemainingMs),
+          control.config.avoidAccidentalTouchEnabled ? "true" : "false",
+          control.cycleAccidentalTouchHolding ? "true" : "false",
+          accidentalTouchPhaseName(static_cast<AccidentalTouchPhase>(
+              control.cycleAccidentalTouchPhase)),
+          accidentalTouchClassName(static_cast<AccidentalTouchClass>(
+              control.cycleAccidentalTouchClass)),
+          static_cast<unsigned>(control.cycleAccidentalTouchPendingCount),
+          control.config.cupProtectionEnabled ? "true" : "false",
+          control.config.stopIfCupRemoved ? "true" : "false",
+          control.config.requireCupToStart ? "true" : "false",
+          control.cupPresent ? "true" : "false",
+          control.cupStartGuardHold ? "true" : "false",
+          control.cycleCupRemovedPending ? "true" : "false",
+          control.cycleBbwProtectionEnabled && !control.cycleBbwProtectionEnded
+              ? "true"
+              : "false",
+          control.cycleBbwProtectionEnded ? "true" : "false");
+    }
   }
 
   if (ok) {
@@ -4380,6 +4451,653 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       sendJson(request, STATUS_OK, g_work->statusJson);
   self.unlockWorkBuf();
   return sent;
+}
+
+namespace {
+
+bool debugExportChunk(httpd_req_t *request, const char *text) {
+  if (text == nullptr || text[0] == '\0') {
+    return true;
+  }
+  return httpd_resp_send_chunk(request, text, HTTPD_RESP_USE_STRLEN) == ESP_OK;
+}
+
+bool debugExportChunkf(httpd_req_t *request, char *buf, size_t cap,
+                       const char *fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  const int n = vsnprintf(buf, cap, fmt, args);
+  va_end(args);
+  if (n < 0 || static_cast<size_t>(n) >= cap) {
+    return false;
+  }
+  return debugExportChunk(request, buf);
+}
+
+}  // namespace
+
+esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  // DEBUG EXPORT MAINTENANCE: extend sections below when adding diagnostically
+  // relevant settings / state. Bump DEBUG_EXPORT_SCHEMA_VERSION on material
+  // schema changes. Never include secrets.
+  if (!self.lockWorkBuf()) {
+    return self.workBufBusy(request);
+  }
+  NetworkWorkBuf &work = *self.workBuf_;
+  self.callbacks_.copyControlStatus(work.control);
+  if (self.callbacks_.copyDebugExportExtras != nullptr) {
+    self.callbacks_.copyDebugExportExtras(work.debugExport);
+  } else {
+    work.debugExport = DebugExportExtras{};
+  }
+  const ControlStatusSnapshot &c = work.control;
+  const DebugExportExtras &x = work.debugExport;
+  const NetworkStatusSnapshot network = self.snapshot();
+  const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(millis());
+  const bool configMutable = controlAllowsConfiguration(c);
+  char *buf = work.statusJson;
+  constexpr size_t cap = NetworkWorkBuf::kStatusJson;
+
+  httpd_resp_set_type(request, JSON_CONTENT_TYPE);
+  httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+  httpd_resp_set_hdr(request, "Connection", "close");
+  httpd_resp_set_hdr(request, "Content-Disposition",
+                     "attachment; filename=\"shotstopper-debug.json\"");
+
+  bool ok = debugExportChunkf(
+      request, buf, cap,
+      "{\"exportSchemaVersion\":%lu,\"exportedAtUtcSec\":%lu,"
+      "\"firmwareVersion\":\"%s\",\"bootId\":%lu,\"machineType\":\"%s\","
+      "\"boardArch\":\"%s\",\"sections\":{",
+      static_cast<unsigned long>(DEBUG_EXPORT_SCHEMA_VERSION),
+      static_cast<unsigned long>(timeStatus.utcSec), FW_VERSION,
+      static_cast<unsigned long>(c.bootId), compiledMachineTypeId(),
+      FW_BOARD_ARCH_STRING);
+
+  ok = ok &&
+       debugExportChunkf(
+           request, buf, cap,
+           "\"envelope\":{\"configMutable\":%s,\"liveShot\":%s,"
+           "\"configRevision\":%lu,\"ringRetainLogLevel\":\"%s\","
+           "\"serialDebugOutput\":%s},",
+           configMutable ? "true" : "false",
+           (c.activeCycle || c.machineRunning || c.relayClosed) ? "true"
+                                                                : "false",
+           static_cast<unsigned long>(c.config.revision),
+           logLevelName(
+               static_cast<LogLevel>(c.config.ringRetainLogLevel)),
+           c.config.serialDebugOutput ? "true" : "false");
+
+  ok = ok &&
+       debugExportChunkf(
+           request, buf, cap,
+           "\"runtimeConfig\":{\"revision\":%lu,\"goalWeightG\":%u,"
+           "\"weightOffsetG\":%.2f,\"weightOffsetBaselineG\":%.2f,"
+           "\"autoTare\":%s,\"postTareBaselineGraceMs\":%lu,"
+           "\"timerOnly\":%s,\"brewByWeight\":%s,\"canTareStartTimer\":%s,"
+           "\"scaleTimerStopExtraDelayMs\":%lu,\"dripDelayMs\":%lu,"
+           "\"soundAlertsMuted\":%s,\"firstDropBeep\":%s,"
+           "\"paddleReturnReminderBeep\":%s,"
+           "\"paddleReturnReminderIntervalMs\":%lu,"
+           "\"paddleReturnReminderMaxDurationMs\":%lu,"
+           "\"bbwProtectionMs\":%lu,\"operationalWallMs\":%lu,"
+           "\"fastExtractionGuardEnabled\":%s,\"maxRecoveryWeightG\":%.1f,"
+           "\"minBrewTimeMs\":%lu,\"slowExtractionGuardEnabled\":%s,"
+           "\"minRecoveryWeightG\":%.1f,\"maxBrewTimeMs\":%lu,"
+           "\"autoToManualGuardEnabled\":%s,"
+           "\"autoToManualGuardLimitMode\":\"%s\","
+           "\"autoToManualGuardManualLimitMs\":%lu,"
+           "\"autoToManualGuardBaselineMs\":%lu,"
+           "\"cupProtectionEnabled\":%s,\"stopIfCupRemoved\":%s,"
+           "\"requireCupToStart\":%s,\"avoidAccidentalTouchEnabled\":%s,"
+           "\"cupPresentWeightG\":%.1f,\"cupRemovedWeightG\":%.1f,"
+           "\"avoidBbwShotWithoutScale\":%s,\"autoRetare\":%s,"
+           "\"retareWindowMs\":%lu,\"minimumCupWeightG\":%.1f,"
+           "\"lastShotCooldownMs\":%lu,\"timezoneOffsetMinutes\":%d,"
+           "\"serialDebugOutput\":%s},",
+           static_cast<unsigned long>(c.config.revision),
+           static_cast<unsigned>(c.config.goalWeightG),
+           static_cast<double>(c.config.weightOffsetG),
+           static_cast<double>(c.config.weightOffsetBaselineG),
+           c.config.autoTare ? "true" : "false",
+           static_cast<unsigned long>(c.config.postTareBaselineGraceMs),
+           c.config.timerOnly ? "true" : "false",
+           c.config.timerOnly ? "false" : "true",
+           c.config.canTareStartTimer ? "true" : "false",
+           static_cast<unsigned long>(c.config.scaleTimerStopExtraDelayMs),
+           static_cast<unsigned long>(c.config.dripDelayMs),
+           c.config.soundAlertsMuted ? "true" : "false",
+           c.config.firstDropBeep ? "true" : "false",
+           c.config.paddleReturnReminderBeep ? "true" : "false",
+           static_cast<unsigned long>(c.config.paddleReturnReminderIntervalMs),
+           static_cast<unsigned long>(
+               c.config.paddleReturnReminderMaxDurationMs),
+           static_cast<unsigned long>(c.config.bbwProtectionMs),
+           static_cast<unsigned long>(c.config.operationalWallMs),
+           c.config.fastExtractionGuardEnabled ? "true" : "false",
+           static_cast<double>(c.config.maxRecoveryWeightG),
+           static_cast<unsigned long>(c.config.minBrewTimeMs),
+           c.config.slowExtractionGuardEnabled ? "true" : "false",
+           static_cast<double>(c.config.minRecoveryWeightG),
+           static_cast<unsigned long>(c.config.maxBrewTimeMs),
+           c.config.autoToManualGuardEnabled ? "true" : "false",
+           autoToManualGuardLimitModeId(c.config.autoToManualGuardLimitMode),
+           static_cast<unsigned long>(c.config.autoToManualGuardManualLimitMs),
+           static_cast<unsigned long>(c.config.autoToManualGuardBaselineMs),
+           c.config.cupProtectionEnabled ? "true" : "false",
+           c.config.stopIfCupRemoved ? "true" : "false",
+           c.config.requireCupToStart ? "true" : "false",
+           c.config.avoidAccidentalTouchEnabled ? "true" : "false",
+           static_cast<double>(c.config.cupPresentWeightG),
+           static_cast<double>(c.config.cupRemovedWeightG),
+           c.config.avoidBbwShotWithoutScale ? "true" : "false",
+           c.config.autoRetare ? "true" : "false",
+           static_cast<unsigned long>(c.config.retareWindowMs),
+           static_cast<double>(c.config.minimumCupWeightG),
+           static_cast<unsigned long>(c.config.lastShotCooldownMs),
+           static_cast<int>(c.config.timezoneOffsetMinutes),
+           c.config.serialDebugOutput ? "true" : "false");
+
+  ok = ok && debugExportChunk(request, "\"presets\":{\"activeId\":");
+  ok = ok &&
+       debugExportChunkf(request, buf, cap, "%u,\"items\":[",
+                         static_cast<unsigned>(c.presets.activeId));
+  for (uint8_t i = 0; ok && i < c.presets.count && i < MAX_SHOT_PRESETS; ++i) {
+    const ShotPreset &p = c.presets.presets[i];
+    char safeName[SHOT_PRESET_NAME_CAPACITY] = {};
+    sanitizeJsonEmbed(p.name, safeName, sizeof(safeName));
+    ok = debugExportChunkf(
+        request, buf, cap,
+        "%s{\"id\":%u,\"name\":\"%s\",\"isFactory\":%s,\"brewByWeight\":%s,"
+        "\"goalWeightG\":%u,\"minBrewTimeMs\":%lu,\"maxBrewTimeMs\":%lu,"
+        "\"maxRecoveryWeightG\":%.1f,\"minRecoveryWeightG\":%.1f,"
+        "\"fastExtractionGuardEnabled\":%s,\"slowExtractionGuardEnabled\":%s,"
+        "\"autoToManualGuardEnabled\":%s,\"autoToManualGuardSamplesDs\":[%u,%u,"
+        "%u,%u,%u]}",
+        i == 0 ? "" : ",", static_cast<unsigned>(p.id), safeName,
+        p.isFactory ? "true" : "false", p.brewByWeight ? "true" : "false",
+        static_cast<unsigned>(p.goalWeightG),
+        static_cast<unsigned long>(p.minBrewTimeMs),
+        static_cast<unsigned long>(p.maxBrewTimeMs),
+        static_cast<double>(p.maxRecoveryWeightG),
+        static_cast<double>(p.minRecoveryWeightG),
+        p.fastExtractionGuardEnabled ? "true" : "false",
+        p.slowExtractionGuardEnabled ? "true" : "false",
+        p.autoToManualGuardEnabled ? "true" : "false",
+        static_cast<unsigned>(p.autoToManualGuardSamplesDs[0]),
+        static_cast<unsigned>(p.autoToManualGuardSamplesDs[1]),
+        static_cast<unsigned>(p.autoToManualGuardSamplesDs[2]),
+        static_cast<unsigned>(p.autoToManualGuardSamplesDs[3]),
+        static_cast<unsigned>(p.autoToManualGuardSamplesDs[4]));
+  }
+  ok = ok && debugExportChunk(request, "]},");
+
+  ok = ok &&
+       debugExportChunkf(
+           request, buf, cap,
+           "\"controlSnapshot\":{\"state\":\"%s\",\"activeCycle\":%s,"
+           "\"relayClosed\":%s,\"machineRunning\":%s,\"reedOn\":%s,"
+           "\"physicalActivatorOn\":%s,\"controlSource\":\"%s\","
+           "\"weightStreamState\":\"%s\",\"weightControlState\":\"%s\","
+           "\"scaleAvailable\":%s,\"currentWeightValid\":%s,"
+           "\"currentWeightG\":%.2f,\"observedWeightValid\":%s,"
+           "\"observedWeightG\":%.2f,\"cycleId\":%lu,\"uptimeMs\":%lu,"
+           "\"loopIntervalGapMs\":%lu,\"loopMaxGapMs\":%lu,"
+           "\"freeHeapBytes\":%lu,\"minimumFreeHeapBytes\":%lu,"
+           "\"noScaleShotGuardEnabled\":%s,\"noScaleShotGuardArmed\":%s,"
+           "\"noScaleShotGuardHold\":%s,\"cupStartGuardHold\":%s,"
+           "\"cycleExtractionExtended\":%s,\"cycleSlowExtractionExtended\":%s,"
+           "\"cycleTargetReachedEarly\":%s,\"cycleAutoToManualGuardArmed\":%s,"
+           "\"cycleAutoToManualGuardEnforced\":%s,"
+           "\"cycleAccidentalTouchHolding\":%s,"
+           "\"cycleAccidentalTouchPhase\":\"%s\","
+           "\"cycleAccidentalTouchClass\":\"%s\","
+           "\"cycleCupRemovedPending\":%s,\"cycleBbwProtectionEnabled\":%s,"
+           "\"cycleBbwProtectionEnded\":%s},",
+           stopperStateName(c.state), c.activeCycle ? "true" : "false",
+           c.relayClosed ? "true" : "false",
+           c.machineRunning ? "true" : "false", c.reedOn ? "true" : "false",
+           c.physicalActivatorOn ? "true" : "false",
+           controlSourceName(c.source),
+           weightStreamStateName(c.weightStreamState),
+           weightControlStateName(c.weightControlState),
+           c.scaleAvailable ? "true" : "false",
+           c.currentWeightValid ? "true" : "false",
+           static_cast<double>(c.currentWeightG),
+           c.observedWeightValid ? "true" : "false",
+           static_cast<double>(c.observedWeightG),
+           static_cast<unsigned long>(c.cycleId),
+           static_cast<unsigned long>(c.uptimeMs),
+           static_cast<unsigned long>(c.loopIntervalGapMs),
+           static_cast<unsigned long>(c.loopMaxGapMs),
+           static_cast<unsigned long>(c.freeHeapBytes),
+           static_cast<unsigned long>(c.minimumFreeHeapBytes),
+           c.noScaleShotGuardEnabled ? "true" : "false",
+           c.noScaleShotGuardArmed ? "true" : "false",
+           c.noScaleShotGuardHold ? "true" : "false",
+           c.cupStartGuardHold ? "true" : "false",
+           c.cycleExtractionExtended ? "true" : "false",
+           c.cycleSlowExtractionExtended ? "true" : "false",
+           c.cycleTargetReachedEarly ? "true" : "false",
+           c.cycleAutoToManualGuardArmed ? "true" : "false",
+           c.cycleAutoToManualGuardEnforced ? "true" : "false",
+           c.cycleAccidentalTouchHolding ? "true" : "false",
+           accidentalTouchPhaseName(static_cast<AccidentalTouchPhase>(
+               c.cycleAccidentalTouchPhase)),
+           accidentalTouchClassName(static_cast<AccidentalTouchClass>(
+               c.cycleAccidentalTouchClass)),
+           c.cycleCupRemovedPending ? "true" : "false",
+           c.cycleBbwProtectionEnabled ? "true" : "false",
+           c.cycleBbwProtectionEnded ? "true" : "false");
+
+  if (x.sessionActive) {
+    ok = ok &&
+         debugExportChunkf(
+             request, buf, cap,
+             "\"session\":{\"active\":true,\"automaticEnabled\":%s,"
+             "\"bbwProtectionEnabled\":%s,\"bbwProtectionEnded\":%s,"
+             "\"startedWithScale\":%s,\"scaleWasLost\":%s,"
+             "\"cupRemovedPending\":%s,\"extractionExtended\":%s,"
+             "\"slowExtractionExtended\":%s,\"targetReachedEarly\":%s,"
+             "\"autoToManualGuardArmed\":%s,\"autoToManualGuardEnforced\":%s,"
+             "\"accidentalTouchHolding\":%s,\"accidentalTouchPhase\":\"%s\","
+             "\"accidentalTouchClass\":\"%s\",\"accidentalTouchPendingCount\":%u,"
+             "\"activePresetId\":%u,\"weightControlState\":\"%s\","
+             "\"id\":%lu,\"startedAtMs\":%lu,\"firstDropMs\":%lu,"
+             "\"autoToManualGuardDeadlineAtMs\":%lu,\"targetReachedAtMs\":%lu},",
+             x.sessionAutomaticEnabled ? "true" : "false",
+             x.sessionBbwProtectionEnabled ? "true" : "false",
+             x.sessionBbwProtectionEnded ? "true" : "false",
+             x.sessionStartedWithScale ? "true" : "false",
+             x.sessionScaleWasLost ? "true" : "false",
+             x.sessionCupRemovedPending ? "true" : "false",
+             x.sessionExtractionExtended ? "true" : "false",
+             x.sessionSlowExtractionExtended ? "true" : "false",
+             x.sessionTargetReachedEarly ? "true" : "false",
+             x.sessionAutoToManualGuardArmed ? "true" : "false",
+             x.sessionAutoToManualGuardEnforced ? "true" : "false",
+             x.sessionAccidentalTouchHolding ? "true" : "false",
+             accidentalTouchPhaseName(static_cast<AccidentalTouchPhase>(
+                 x.sessionAccidentalTouchPhase)),
+             accidentalTouchClassName(static_cast<AccidentalTouchClass>(
+                 x.sessionAccidentalTouchClass)),
+             static_cast<unsigned>(x.sessionAccidentalTouchPendingCount),
+             static_cast<unsigned>(x.sessionActivePresetId),
+             weightControlStateName(static_cast<WeightControlState>(
+                 x.sessionWeightControlState)),
+             static_cast<unsigned long>(x.sessionId),
+             static_cast<unsigned long>(x.sessionStartedAtMs),
+             static_cast<unsigned long>(x.sessionFirstDropMs),
+             static_cast<unsigned long>(x.sessionAutoToManualGuardDeadlineAtMs),
+             static_cast<unsigned long>(x.sessionTargetReachedAtMs));
+  } else {
+    ok = ok && debugExportChunk(request, "\"session\":null,");
+  }
+
+  ok = ok &&
+       debugExportChunkf(
+           request, buf, cap,
+           "\"relay\":{\"state\":\"%s\",\"fault\":\"%s\",\"closed\":%s,"
+           "\"commandedClosed\":%s,\"feedbackClosed\":%s,"
+           "\"feedbackAvailable\":%s,\"externalSafetyPresent\":%s,"
+           "\"watchdogReady\":%s,\"timersReady\":%s,\"tripped\":%s,"
+           "\"operationalTripped\":%s,\"generation\":%lu,\"closedAtMs\":%lu,"
+           "\"operationalLimitMs\":%lu,\"resetReasonCode\":%lu,"
+           "\"unsafeResetCount\":%lu,\"resetRecoveryRequired\":%s,"
+           "\"bootLoopDetected\":%s},",
+           relaySafetyStateName(x.relay.state),
+           relaySafetyFaultName(x.relay.fault),
+           x.relay.closed ? "true" : "false",
+           x.relay.commandedClosed ? "true" : "false",
+           x.relay.feedbackClosed ? "true" : "false",
+           x.relay.feedbackAvailable ? "true" : "false",
+           x.relay.externalSafetyPresent ? "true" : "false",
+           x.relay.watchdogReady ? "true" : "false",
+           x.relay.timersReady ? "true" : "false",
+           x.relay.tripped ? "true" : "false",
+           x.relay.operationalTripped ? "true" : "false",
+           static_cast<unsigned long>(x.relay.generation),
+           static_cast<unsigned long>(x.relay.closedAtMs),
+           static_cast<unsigned long>(x.relay.operationalLimitMs),
+           static_cast<unsigned long>(x.relay.resetReasonCode),
+           static_cast<unsigned long>(x.relay.unsafeResetCount),
+           x.relay.resetRecoveryRequired ? "true" : "false",
+           x.relay.bootLoopDetected ? "true" : "false");
+
+  ok = ok &&
+       debugExportChunkf(
+           request, buf, cap,
+           "\"machine\":{\"rawActivatorOn\":%s,\"physicalActivatorOn\":%s,"
+           "\"machineRunState\":\"%s\",\"machineStartAckPending\":%s,"
+           "\"machineStopAckPending\":%s,\"machineOrphanRun\":%s},",
+           x.rawActivatorOn ? "true" : "false",
+           x.physicalActivatorOn ? "true" : "false",
+           machineRunStateName(static_cast<MachineRunState>(x.machineRunState)),
+           x.machineStartAckPending ? "true" : "false",
+           x.machineStopAckPending ? "true" : "false",
+           x.machineOrphanRun ? "true" : "false");
+
+  {
+    const bool bbwEnabled = !c.config.timerOnly;
+    const bool scaleUsable =
+        c.scaleAvailable && c.weightStreamState == WeightStreamState::FRESH;
+    const bool lastShotCupRemoved =
+        c.lastShot.valid && c.lastShot.endReason == EndReason::CUP_REMOVED;
+    ok = ok &&
+         debugExportChunkf(
+             request, buf, cap,
+             "\"guards\":{\"bbwEnabled\":%s,\"scaleUsable\":%s,"
+             "\"lastShotCupRemoved\":%s,"
+             "\"noScale\":{\"enabled\":%s,\"armed\":%s,\"hold\":%s,"
+             "\"scaleWasAvailable\":%s},"
+             "\"atm\":{\"enabled\":%s,\"armed\":%s,\"enforced\":%s,"
+             "\"remainingMs\":%lu},"
+             "\"slowExtraction\":{\"enabled\":%s,\"extended\":%s,"
+             "\"targetReachedEarly\":%s,\"activeStopWeightG\":%.1f},"
+             "\"fastExtraction\":{\"enabled\":%s,\"extended\":%s,"
+             "\"targetReachedEarly\":%s,\"activeStopWeightG\":%.1f,"
+             "\"minBrewTimeRemainingMs\":%lu},"
+             "\"accidentalTouch\":{\"enabled\":%s,\"holding\":%s,"
+             "\"phase\":\"%s\",\"class\":\"%s\",\"pendingCount\":%u},"
+             "\"cupProtection\":{\"enabled\":%s,\"stopIfRemoved\":%s,"
+             "\"requireCupToStart\":%s,\"present\":%s,\"startHold\":%s,"
+             "\"removedPending\":%s,\"bbwProtectionActive\":%s,"
+             "\"bbwProtectionEnded\":%s}},",
+             bbwEnabled ? "true" : "false", scaleUsable ? "true" : "false",
+             lastShotCupRemoved ? "true" : "false",
+             c.noScaleShotGuardEnabled ? "true" : "false",
+             c.noScaleShotGuardArmed ? "true" : "false",
+             c.noScaleShotGuardHold ? "true" : "false",
+             c.noScaleShotGuardScaleWasAvailable ? "true" : "false",
+             c.config.autoToManualGuardEnabled ? "true" : "false",
+             c.cycleAutoToManualGuardArmed ? "true" : "false",
+             c.cycleAutoToManualGuardEnforced ? "true" : "false",
+             static_cast<unsigned long>(c.cycleAutoToManualGuardRemainingMs),
+             c.config.slowExtractionGuardEnabled ? "true" : "false",
+             c.cycleSlowExtractionExtended ? "true" : "false",
+             c.cycleTargetReachedEarly ? "true" : "false",
+             static_cast<double>(c.cycleActiveStopWeightG),
+             c.config.fastExtractionGuardEnabled ? "true" : "false",
+             c.cycleExtractionExtended ? "true" : "false",
+             c.cycleTargetReachedEarly ? "true" : "false",
+             static_cast<double>(c.cycleActiveStopWeightG),
+             static_cast<unsigned long>(c.cycleMinBrewTimeRemainingMs),
+             c.config.avoidAccidentalTouchEnabled ? "true" : "false",
+             c.cycleAccidentalTouchHolding ? "true" : "false",
+             accidentalTouchPhaseName(static_cast<AccidentalTouchPhase>(
+                 c.cycleAccidentalTouchPhase)),
+             accidentalTouchClassName(static_cast<AccidentalTouchClass>(
+                 c.cycleAccidentalTouchClass)),
+             static_cast<unsigned>(c.cycleAccidentalTouchPendingCount),
+             c.config.cupProtectionEnabled ? "true" : "false",
+             c.config.stopIfCupRemoved ? "true" : "false",
+             c.config.requireCupToStart ? "true" : "false",
+             c.cupPresent ? "true" : "false",
+             c.cupStartGuardHold ? "true" : "false",
+             c.cycleCupRemovedPending ? "true" : "false",
+             c.cycleBbwProtectionEnabled && !c.cycleBbwProtectionEnded ? "true"
+                                                                       : "false",
+             c.cycleBbwProtectionEnded ? "true" : "false");
+  }
+
+  ok = ok &&
+       debugExportChunkf(
+           request, buf, cap,
+           "\"cupPresence\":{\"state\":\"%s\",\"holdTransitions\":%s,"
+           "\"inNegativeHole\":%s,\"removedArmed\":%s,"
+           "\"removedConfirmations\":%u,\"placeStabilitySamples\":%u,"
+           "\"holeWeightG\":%.2f,\"placeCandidateWeightG\":%.2f},",
+           cupPresenceStateName(static_cast<CupPresenceState>(x.cupState)),
+           x.cupHoldTransitions ? "true" : "false",
+           x.cupInNegativeHole ? "true" : "false",
+           x.cupRemovedArmed ? "true" : "false",
+           static_cast<unsigned>(x.cupRemovedConfirmations),
+           static_cast<unsigned>(x.cupPlaceStabilitySamples),
+           static_cast<double>(x.cupHoleWeightG),
+           static_cast<double>(x.cupPlaceCandidateWeightG));
+
+  ok = ok &&
+       debugExportChunkf(
+           request, buf, cap,
+           "\"scaleLink\":{\"state\":\"%s\",\"disconnectSequence\":%lu,"
+           "\"connectionGeneration\":%lu,\"packetSequence\":%lu,"
+           "\"packetGaps\":%lu,\"rejectedPackets\":%lu,\"reconnects\":%lu,"
+           "\"workerProgressAtMs\":%lu,\"timerValid\":%s,\"timerMs\":%lu,"
+           "\"timerAgeMs\":%lu,\"protocol\":\"%s\","
+           "\"lastDisconnectReasonName\":\"%s\"},",
+           debugExportScaleLinkStateName(x.scaleLinkState),
+           static_cast<unsigned long>(x.scaleDisconnectSequence),
+           static_cast<unsigned long>(x.scaleConnectionGeneration),
+           static_cast<unsigned long>(x.scalePacketSequence),
+           static_cast<unsigned long>(c.scalePacketGaps),
+           static_cast<unsigned long>(c.scaleRejectedPackets),
+           static_cast<unsigned long>(c.scaleReconnects),
+           static_cast<unsigned long>(x.scaleWorkerProgressAtMs),
+           x.scaleTimerValid ? "true" : "false",
+           static_cast<unsigned long>(x.scaleTimerMs),
+           static_cast<unsigned long>(x.scaleTimerAgeMs), x.scaleProtocolName,
+           scaleDisconnectReasonName(c.scaleLastDisconnectReason));
+
+  char safeStaSsid[WIFI_SSID_CAPACITY] = {};
+  sanitizeJsonEmbed(network.staSsid, safeStaSsid, sizeof(safeStaSsid));
+  ok = ok &&
+       debugExportChunkf(
+           request, buf, cap,
+           "\"network\":{\"networkActive\":%s,\"apActive\":%s,"
+           "\"wifiConfigured\":%s,\"staState\":\"%s\",\"staIp\":\"%s\","
+           "\"ssid\":\"%s\",\"apIp\":\"%s\",\"apClients\":%u,"
+           "\"httpActive\":%s,\"staMac\":\"%s\",\"staBssid\":\"%s\","
+           "\"apMac\":\"%s\",\"staReconnectHeld\":%s,\"apStartHeld\":%s,"
+           "\"httpStartHeld\":%s,\"taskAgeMs\":%lu,\"taskStackMinWords\":%lu,"
+           "\"startupFailures\":%lu,\"channel\":%u,\"rssi\":%d,"
+           "\"signalQualityPct\":%u,\"configState\":\"%s\","
+           "\"ipMode\":\"%s\",\"confirmRemainingMs\":%lu},",
+           network.networkActive ? "true" : "false",
+           network.apActive ? "true" : "false",
+           network.wifiConfigured ? "true" : "false",
+           staStateName(network.staState), network.staIp, safeStaSsid,
+           network.apIp, static_cast<unsigned>(network.apClients),
+           network.httpActive ? "true" : "false", network.staMac,
+           network.staBssid, network.apMac,
+           network.staReconnectHeld ? "true" : "false",
+           network.apStartHeld ? "true" : "false",
+           network.httpStartHeld ? "true" : "false",
+           static_cast<unsigned long>(network.taskAgeMs),
+           static_cast<unsigned long>(network.taskStackMinWords),
+           static_cast<unsigned long>(network.startupFailures),
+           static_cast<unsigned>(network.channel),
+           static_cast<int>(network.staRssi),
+           static_cast<unsigned>(network.staSignalQualityPct),
+           staConfigStateName(network.staConfigState),
+           staIpModeName(network.staIpMode),
+           static_cast<unsigned long>(network.confirmRemainingMs));
+
+  char safeActiveServer[NTP_SERVER_HOST_CAPACITY] = {};
+  sanitizeJsonEmbed(timeStatus.activeServer, safeActiveServer,
+                    sizeof(safeActiveServer));
+  ok = ok &&
+       debugExportChunkf(
+           request, buf, cap,
+           "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
+           "\"nextRetryInMs\":%lu,\"activeServer\":\"%s\"},",
+           timeSyncStateName(timeStatus.state),
+           static_cast<unsigned long>(timeStatus.utcSec),
+           static_cast<unsigned long>(timeStatus.lastSyncAgeMs),
+           static_cast<unsigned long>(timeStatus.nextRetryInMs),
+           safeActiveServer);
+
+  ok = ok &&
+       debugExportChunkf(
+           request, buf, cap,
+           "\"health\":{\"uptimeMs\":%lu,\"loopIntervalGapMs\":%lu,"
+           "\"loopMaxGapMs\":%lu,\"loopStackMinWords\":%lu,"
+           "\"scaleStackMinWords\":%lu,\"freeHeapBytes\":%lu,"
+           "\"minimumFreeHeapBytes\":%lu,\"largestFreeHeapBlockBytes\":%lu,"
+           "\"psramSizeBytes\":%lu,\"psramFreeBytes\":%lu,"
+           "\"psramLargestFreeBlockBytes\":%lu,\"bleHostAllocPsram\":%lu,"
+           "\"bleHostAllocFallback\":%lu,\"heapAlertLatched\":%s,"
+           "\"stackAlertLatched\":%s,\"loopGapAlertLatched\":%s,"
+           "\"cpuLoad5s\":%.2f,\"cpuLoad1m\":%.2f,\"cpuLoad5m\":%.2f,"
+           "\"cpuMhz\":%lu,\"tempC\":%.1f,\"tempPeakC\":%.1f},",
+           static_cast<unsigned long>(c.uptimeMs),
+           static_cast<unsigned long>(c.loopIntervalGapMs),
+           static_cast<unsigned long>(c.loopMaxGapMs),
+           static_cast<unsigned long>(c.loopStackMinWords),
+           static_cast<unsigned long>(c.scaleStackMinWords),
+           static_cast<unsigned long>(c.freeHeapBytes),
+           static_cast<unsigned long>(c.minimumFreeHeapBytes),
+           static_cast<unsigned long>(c.largestFreeHeapBlockBytes),
+           static_cast<unsigned long>(c.psramSizeBytes),
+           static_cast<unsigned long>(c.psramFreeBytes),
+           static_cast<unsigned long>(c.psramLargestFreeBlockBytes),
+           static_cast<unsigned long>(c.bleHostAllocPsramCount),
+           static_cast<unsigned long>(c.bleHostAllocFallbackCount),
+           x.healthHeapAlertLatched ? "true" : "false",
+           x.healthStackAlertLatched ? "true" : "false",
+           x.healthLoopGapAlertLatched ? "true" : "false",
+           static_cast<double>(c.hwmon.cpuLoad5s),
+           static_cast<double>(c.hwmon.cpuLoad1m),
+           static_cast<double>(c.hwmon.cpuLoad5m),
+           static_cast<unsigned long>(c.hwmon.cpuMhz),
+           static_cast<double>(c.hwmon.tempC),
+           static_cast<double>(c.hwmon.tempPeakC));
+
+  ok = ok &&
+       debugExportChunkf(
+           request, buf, cap,
+           "\"safety\":{\"state\":\"%s\",\"fault\":\"%s\","
+           "\"taskWatchdogReady\":%s,\"externalHardware\":%s,"
+           "\"recoveryRequired\":%s,\"resetReasonCode\":%lu,"
+           "\"unsafeResetCount\":%lu,\"bootLoopDetected\":%s,"
+           "\"safetyGeneration\":%lu,\"safetyTimersReady\":%s},",
+           relaySafetyStateName(c.safetyState),
+           relaySafetyFaultName(c.safetyFault),
+           c.taskWatchdogReady ? "true" : "false",
+           c.externalSafetyPresent ? "true" : "false",
+           c.resetRecoveryRequired ? "true" : "false",
+           static_cast<unsigned long>(c.resetReasonCode),
+           static_cast<unsigned long>(c.unsafeResetCount),
+           c.bootLoopDetected ? "true" : "false",
+           static_cast<unsigned long>(c.safetyGeneration),
+           c.safetyTimersReady ? "true" : "false");
+
+  ok = ok &&
+       debugExportChunkf(
+           request, buf, cap,
+           "\"bleCompanion\":{\"enabled\":%s,\"active\":%s,"
+           "\"restartRequired\":%s,\"stackReady\":%s,\"advertising\":%s,"
+           "\"connected\":%s,\"protocolVersion\":%u,\"acceptedWrites\":%lu,"
+           "\"rejectedWrites\":%lu},",
+           c.bleCompanionEnabled ? "true" : "false",
+           c.bleCompanionActive ? "true" : "false",
+           c.bleCompanionRestartRequired ? "true" : "false",
+           c.bleCompanionStackReady ? "true" : "false",
+           c.bleCompanionAdvertising ? "true" : "false",
+           c.bleCompanionConnected ? "true" : "false",
+           static_cast<unsigned>(c.bleCompanionProtocolVersion),
+           static_cast<unsigned long>(c.bleCompanionAcceptedWrites),
+           static_cast<unsigned long>(c.bleCompanionRejectedWrites));
+
+  self.buildOtaJson(work.otaJson, NetworkWorkBuf::kOtaJson, c);
+  ok = ok && debugExportChunk(request, "\"ota\":");
+  ok = ok && debugExportChunk(request, work.otaJson);
+  ok = ok && debugExportChunk(request, ",");
+
+  ok = ok &&
+       debugExportChunkf(
+           request, buf, cap,
+           "\"lastShot\":{\"valid\":%s,\"goalWeightG\":%u,\"durationMs\":%lu,"
+           "\"endReason\":\"%s\",\"shotType\":\"%s\","
+           "\"extractionExtended\":%s,\"slowExtractionExtended\":%s},"
+           "\"compileFlags\":{\"buzzer\":\"%s\",\"remoteMachineControl\":%s,"
+           "\"arch\":\"%s\",\"machineType\":\"%s\",\"stopPulseMs\":%lu,"
+           "\"maxSinglePressMs\":%lu},",
+           c.lastShot.valid ? "true" : "false",
+           static_cast<unsigned>(c.lastShot.goalWeightG),
+           static_cast<unsigned long>(c.lastShot.durationMs),
+           self.endReasonName(c.lastShot.endReason),
+           lastShotTypeName(static_cast<LastShotType>(c.lastShot.shotType)),
+           c.lastShot.extractionExtended ? "true" : "false",
+           c.lastShot.slowExtractionExtended ? "true" : "false",
+           compiledBuzzerModeId(),
+           REMOTE_MACHINE_CONTROL_ENABLED ? "true" : "false",
+           FW_BOARD_ARCH_STRING, compiledMachineTypeId(),
+           static_cast<unsigned long>(COMPILED_STOP_PULSE_MS),
+           static_cast<unsigned long>(COMPILED_MAX_SINGLE_PRESS_MS));
+
+  ok = ok &&
+       debugExportChunkf(
+           request, buf, cap,
+           "\"events\":{\"dropped\":%lu,\"items\":[",
+           static_cast<unsigned long>(c.debugEventsDropped));
+  if (ok && self.callbacks_.copyDebugEvents != nullptr) {
+    uint32_t after = 0;
+    bool first = true;
+    for (;;) {
+      const size_t count = self.callbacks_.copyDebugEvents(
+          after, work.logBatch, kNetworkLogBatchSize);
+      if (count == 0) {
+        break;
+      }
+      for (size_t index = 0; ok && index < count; ++index) {
+        const DebugEvent &event = work.logBatch[index];
+        ok = debugExportChunkf(
+            request, buf, cap,
+            "%s{\"sequence\":%lu,\"atMs\":%lu,\"wallSec\":%lu,"
+            "\"level\":\"%s\",\"category\":\"%s\",\"code\":\"%s\","
+            "\"argument1\":%ld,\"argument2\":%ld}",
+            first ? "" : ",", static_cast<unsigned long>(event.sequence),
+            static_cast<unsigned long>(event.atMs),
+            static_cast<unsigned long>(event.wallSec),
+            logLevelName(event.level), debugCategoryName(event.category),
+            debugCodeName(event.code), static_cast<long>(event.argument1),
+            static_cast<long>(event.argument2));
+        first = false;
+        after = event.sequence;
+      }
+      if (count < kNetworkLogBatchSize) {
+        break;
+      }
+    }
+  }
+  ok = ok && debugExportChunk(request, "]},");
+
+  size_t shotTotal = 0;
+  if (self.callbacks_.copyShotRecords != nullptr) {
+    shotTotal =
+        self.callbacks_.copyShotRecords(work.shotRecords, SHOT_LOG_CAPACITY);
+  }
+  const size_t recent =
+      shotTotal < DEBUG_EXPORT_SHOT_SUMMARY_LIMIT
+          ? shotTotal
+          : DEBUG_EXPORT_SHOT_SUMMARY_LIMIT;
+  ok = ok &&
+       debugExportChunkf(request, buf, cap,
+                         "\"shotLogSummary\":{\"total\":%lu,\"recent\":[",
+                         static_cast<unsigned long>(shotTotal));
+  for (size_t index = 0; ok && index < recent; ++index) {
+    const ShotLogRecord &record = work.shotRecords[index];
+    ok = debugExportChunkf(
+        request, buf, cap,
+        "%s{\"id\":%lu,\"bootId\":%lu,\"durationDs\":%u,\"goalWeightG\":%u,"
+        "\"stopDetail\":\"%s\"}",
+        index == 0 ? "" : ",", static_cast<unsigned long>(record.id),
+        static_cast<unsigned long>(record.bootId),
+        static_cast<unsigned>(record.durationDs),
+        static_cast<unsigned>(record.goalWeightG),
+        shotLogStopDetailName(
+            static_cast<ShotLogStopDetail>(record.stopDetail)));
+  }
+  ok = ok && debugExportChunk(request, "]}}}");
+
+  if (!ok) {
+    self.unlockWorkBuf();
+    return ESP_FAIL;
+  }
+  const esp_err_t finished = httpd_resp_send_chunk(request, nullptr, 0);
+  self.unlockWorkBuf();
+  return finished;
 }
 
 esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {

@@ -86,6 +86,7 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
 #diagnosticsPanel fieldset{margin:.5rem 0 0;padding:.55rem .65rem;background:transparent}
 #diagnosticsPanel fieldset:first-of-type{margin-top:.25rem}
 #diagnosticsPanel fieldset>legend{grid-column:1/-1}
+#diagnosticsPanel [id$="Raw"]{font-size:.82em;color:var(--mu);font-weight:400}
 .stateReady{color:var(--ok);font-weight:700}
 .stateActive{color:var(--ac);font-weight:700}
 .stateFault{color:var(--dn);font-weight:700}

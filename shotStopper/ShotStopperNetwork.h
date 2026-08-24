@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ShotStopperDomain.h"
+#include "ShotStopperDebugExport.h"
 #include "ShotStopperBleCompanion.h"
 #include "ShotStopperPersistence.h"
 #include "ShotStopperShotCurveTypes.h"
@@ -147,6 +148,7 @@ struct NetworkBridgeCallbacks {
   void (*copyScaleHistory)(ScaleHistoryEntry *out) = nullptr;
   void (*copyPresetBank)(ShotPresetBank *out) = nullptr;
   void (*copyRuntimeConfig)(RuntimeConfig *out) = nullptr;
+  void (*copyDebugExportExtras)(DebugExportExtras &out) = nullptr;
 };
 
 class ShotStopperNetwork {
@@ -351,6 +353,7 @@ class ShotStopperNetwork {
   static esp_err_t adminLockHandler(httpd_req_t *request);
   static esp_err_t ownedApiHandler(httpd_req_t *request);
   static esp_err_t statusHandler(httpd_req_t *request);
+  static esp_err_t debugExportHandler(httpd_req_t *request);
   static esp_err_t logHandler(httpd_req_t *request);
   static esp_err_t shotsHandler(httpd_req_t *request);
   static esp_err_t shotsClearHandler(httpd_req_t *request);

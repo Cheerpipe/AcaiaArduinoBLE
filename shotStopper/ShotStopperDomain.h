@@ -498,6 +498,7 @@ enum class LogLevel : uint8_t {
 
 // NVS/UI compose of Machine + Scale + Brew settings. Schema version is
 // unchanged; do not split this blob without a migration.
+// New fields: consider debug export (ShotStopperDebugExport.h).
 struct RuntimeConfig {
   uint32_t revision = 1;
   uint8_t goalWeightG = DEFAULT_GOAL_WEIGHT_G;
@@ -1785,6 +1786,7 @@ struct ControlStatusSnapshot {
   bool machineRunning = false;
   bool reedOn = false;
   bool physicalActivatorOn = false;
+  bool rawActivatorOn = false;
   bool virtualHoldOn = false;
   bool remoteControlEnabled = REMOTE_MACHINE_CONTROL_ENABLED;
   ControlSource source = ControlSource::NONE;
@@ -1876,6 +1878,13 @@ struct ControlStatusSnapshot {
   bool cycleAutoToManualGuardEnforced = false;
   uint32_t cycleAutoToManualGuardRemainingMs = 0;
   bool cycleAccidentalTouchHolding = false;
+  // New fields: consider debug export (ShotStopperDebugExport.h).
+  uint8_t cycleAccidentalTouchPhase = 0;
+  uint8_t cycleAccidentalTouchClass = 0;
+  uint8_t cycleAccidentalTouchPendingCount = 0;
+  bool cycleCupRemovedPending = false;
+  bool cycleBbwProtectionEnabled = false;
+  bool cycleBbwProtectionEnded = false;
   uint32_t autoToManualGuardTrendMs = DEFAULT_AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT_MS;
   char scaleProtocol[20] = "none";
   char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
@@ -1884,6 +1893,9 @@ struct ControlStatusSnapshot {
   uint32_t scaleMacCachePauseRemainingMs = 0;
   bool noScaleShotGuardEnabled = true;
   bool noScaleShotGuardArmed = true;
+  bool noScaleShotGuardHold = false;
+  bool noScaleShotGuardScaleWasAvailable = false;
+  bool cupStartGuardHold = false;
   MachineRunState machineRunState = MachineRunState::CONFIRMED_OFF;
   bool machineStartAckPending = false;
   bool machineStopAckPending = false;

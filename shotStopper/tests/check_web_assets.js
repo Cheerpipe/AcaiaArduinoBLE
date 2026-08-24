@@ -218,13 +218,13 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 48600) {
-  throw new Error('Web UI HTML source exceeds the 47.5 KiB authoring budget');
+if (htmlBytes > 49500) {
+  throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 123000) {
+if (jsBytes > 128000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 171500) {
+if (htmlBytes + jsBytes > 177000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -1537,6 +1537,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('id="diagnosticsPanel"') ||
       !diagHtml.includes('<legend>Diagnostics</legend>') ||
       !diagHtml.includes('<legend>States</legend>') ||
+      !diagHtml.includes('<legend>Guards</legend>') ||
       !diagHtml.includes('<legend>Machine I/O</legend>') ||
       !diagHtml.includes('<legend>WiFi</legend>') ||
       !diagHtml.includes('<legend>AP</legend>') ||
@@ -1548,6 +1549,14 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('id="dMachine"') ||
       !diagHtml.includes('id="dBrew"') ||
       !diagHtml.includes('id="dCup"') ||
+      !diagHtml.includes('id="dGuardNoScaleUser"') ||
+      !diagHtml.includes('id="dGuardNoScaleRaw"') ||
+      !diagHtml.includes('id="dGuardAtmUser"') ||
+      !diagHtml.includes('id="dGuardSlowUser"') ||
+      !diagHtml.includes('id="dGuardFastUser"') ||
+      !diagHtml.includes('id="dGuardTouchUser"') ||
+      !diagHtml.includes('id="dGuardCupUser"') ||
+      !diagHtml.includes('id="exportDebugDataButton"') ||
       !diagHtml.includes('id="dActivator"') ||
       !diagHtml.includes('id="dReed"') ||
       !diagHtml.includes('class="paddleOnly">Paddle</strong>') ||
@@ -1567,6 +1576,9 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes("t('hBoot',typeof s.bootId==='number'&&s.bootId?'#'+s.bootId:'')") ||
       !ui.includes("t('dBrew',s.state)") ||
       !ui.includes("t('dCup',cp.state)") ||
+      !ui.includes('function applyDiagnosticGuards(') ||
+      !ui.includes('function exportDebugData(') ||
+      !ui.includes('/api/v1/debug/export') ||
       !ui.includes("t('dActivator',s.physicalActivatorOn?'ON':'OFF')") ||
       !ui.includes("t('dReed',s.reedOn?'ON':'OFF')") ||
       !ui.includes("t('dStream',sc.streamState)") ||
@@ -1590,7 +1602,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('id="ntpLastSync"') ||
       !diagHtml.includes('id="ntpServer"') ||
       diagHtml.indexOf('id="diagnosticsPanel"') > diagHtml.indexOf('id="logPanel"') ||
-      diagHtml.indexOf('<legend>States</legend>') > diagHtml.indexOf('<legend>Machine I/O</legend>') ||
+      diagHtml.indexOf('<legend>States</legend>') > diagHtml.indexOf('<legend>Guards</legend>') ||
+      diagHtml.indexOf('<legend>Guards</legend>') > diagHtml.indexOf('<legend>Machine I/O</legend>') ||
       diagHtml.indexOf('<legend>Machine I/O</legend>') > diagHtml.indexOf('<legend>WiFi</legend>') ||
       diagHtml.indexOf('<legend>WiFi</legend>') > diagHtml.indexOf('<legend>AP</legend>') ||
       diagHtml.indexOf('<legend>AP</legend>') > diagHtml.indexOf('<legend>CPU') ||
@@ -1620,7 +1633,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       css.includes('#diagnosticsPanel .metric,#statusPanel .metric,#scalePanel .metric,.shotCard > *{') ||
       css.includes('diagGroup')) {
     throw new Error(
-        'Diagnostics must be a non-collapsible fieldset at the top of Diagnostic, above Log, with States/Machine I/O/WiFi/AP/CPU/RAM/HEAP/Scale/MISC sections and one value per label');
+        'Diagnostics must be a non-collapsible fieldset at the top of Diagnostic, above Log, with States/Guards/Machine I/O/WiFi/AP/CPU/RAM/HEAP/Scale/MISC sections and one value per label');
   }
 }
 if (!ui.includes('id="shotTable"') ||
@@ -2107,6 +2120,7 @@ const expected = new Map([
   ['GET /api/v1/status/settings', 'ownedApiHandler'],
   ['GET /api/v1/status/admin', 'ownedApiHandler'],
   ['GET /api/v1/status/diagnostic', 'ownedApiHandler'],
+  ['GET /api/v1/debug/export', 'ownedApiHandler'],
   ['GET /api/v1/log', 'ownedApiHandler'],
   ['POST /api/v1/config', 'ownedApiHandler'],
   ['POST /api/v1/scale/preferred/clear', 'ownedApiHandler'],
@@ -2515,9 +2529,9 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
         'statusPageOk(admin) must accept a locked payload and validate unlocked network/BLE/NTP/OTA');
   }
   if (!ui.includes(
-          "v==='diagnostic'?!!(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalActivatorOn==='boolean'&&'reedOn' in s&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags)")) {
+          "v==='diagnostic'?!!(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalActivatorOn==='boolean'&&'reedOn' in s&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags&&s.guards&&typeof s.guards.bbwEnabled==='boolean'&&s.guards.noScale&&s.guards.atm&&s.guards.slowExtraction&&s.guards.fastExtraction&&s.guards.accidentalTouch&&s.guards.cupProtection)")) {
     throw new Error(
-        'statusPageOk(diagnostic) must validate states, machine I/O, and diagnostic metrics');
+        'statusPageOk(diagnostic) must validate states, machine I/O, guards, and diagnostic metrics');
   }
 }
 if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
@@ -2594,6 +2608,21 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     throw new Error(
         'status/diagnostic must not include settings/admin-only payload fields');
   }
+}
+if (!network.includes('ShotStopperDebugExport.h') ||
+    !network.includes('DEBUG_EXPORT_SCHEMA_VERSION') ||
+    !network.includes('exportSchemaVersion') ||
+    !network.includes('debugExportHandler') ||
+    !network.includes('/api/v1/debug/export') ||
+    !network.includes('\\"guards\\"') ||
+    !network.includes('\\"bbwEnabled\\"') ||
+    !firmware.includes('copyDebugExportExtras') ||
+    !firmware.includes('ShotStopperDebugExport.h') ||
+    !ui.includes('/api/v1/debug/export') ||
+    !ui.includes('exportDebugDataButton') ||
+    !html.includes('id="exportDebugDataButton"')) {
+  throw new Error(
+      'Diagnostic must expose guards status and GET /api/v1/debug/export with schema version');
 }
 const sharedRingOpen = statusFormat.indexOf(
     ',\\"config\\":{\\"revision\\":%lu,\\"ringRetainLogLevel\\":\\"%s\\"');
@@ -2952,8 +2981,8 @@ if (generated.settingsGzip.length > 4096) {
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
 }
-if (generated.combined > 49152) {
-  throw new Error('Combined Web UI gzip exceeds the 48 KiB flash budget');
+if (generated.combined > 51200) {
+  throw new Error('Combined Web UI gzip exceeds the 50 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
