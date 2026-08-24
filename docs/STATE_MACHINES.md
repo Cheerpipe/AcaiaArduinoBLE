@@ -213,7 +213,7 @@ Config lock uses `machineIsRunning()`, which for paddle equals machine circuit c
 | `CONFIRMED_OFF` | Relay not closed. Safety is OPEN, or tripped/lockout with contact open. |
 | `ASSUMED_ON` | Safety is `ARMING`: close is in flight, echo may not yet match. Reed: configured start edge (press or release), reed still off, within confirm timeout. |
 | `CONFIRMED_ON` | Safety `CLOSED` or `relay.closed`. Reed: reed is on (outside an assumed-off window). |
-| `ASSUMED_OFF` | Reed: configured stop edge (press or release), reed still on, within confirm timeout. Switch-only: quiet START nack (no espresso-like flow before the shot-reaction timeout), or a logical STOP still settling (pan not yet quiet). |
+| `ASSUMED_OFF` | Reed: configured stop edge (press or release), reed still on, within confirm timeout. Switch-only: quiet START nack (no espresso-like flow before the shot-reaction timeout), or a logical STOP still settling (pan not yet quiet). Momentary-only: cup `REMOVED` while in this state confirms off immediately (no quiet wait). |
 | `UNKNOWN` | Safety TRIPPED/LOCKOUT but the contact still reads closed (should not last). |
 
 ### Command vs pin vs paddle

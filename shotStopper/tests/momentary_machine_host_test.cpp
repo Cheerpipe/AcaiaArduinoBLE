@@ -70,6 +70,9 @@ void resetMomentaryHarness() {
   shot = ShotTrajectory{};
   session = CycleSession{};
   resetCupPresence();
+  pendingCupRemovedSettle = false;
+  scaleWeightEventPending = false;
+  scaleWeightEvent = ScaleEvent{};
   runtimeConfig = RuntimeConfig{};
   runtimeConfig.requireCupToStart = false;
   runtimeConfig.avoidBbwShotWithoutScale = false;
@@ -95,6 +98,8 @@ void resetMomentaryHarness() {
   currentWeight = 0.0f;
   currentWeightReceivedAtMs = 0;
   currentWeightSequence = 0;
+  currentWeightConnectionGeneration = 0;
+  pendingScaleConnectIdleSync = false;
   scale.connected = true;
   setScaleLinkState(ScaleLinkState::CONNECTED);
 
@@ -138,6 +143,10 @@ void resetMomentaryHarness() {
   momentaryRisingSinceMs = 0;
   momentaryQuietSinceMs = 0;
   momentaryLastWeightSequence = 0;
+  momentaryLastWeightG = 0.0f;
+  momentaryLastWeightAtMs = 0;
+  momentaryShotBaselineG = 0.0f;
+  momentaryQuietBaselineG = 0.0f;
   momentaryLogicalRunActive = false;
   momentaryLogicalRunStartedAtMs = 0;
   clearMomentaryElapsedLatch();
@@ -685,6 +694,39 @@ void dripFreshWeight(float weight, uint32_t dtMs) {
   runLoopAfter(dtMs);
 }
 
+// Enqueue a BLE weight packet and let loop() run processScaleWorkerEvents →
+// observeMachineSenseFromSession → serviceMachine (cup REMOVED wiring).
+void dripQueuedWeight(float weight, uint32_t dtMs) {
+  ScaleEvent event;
+  event.type = ScaleEventType::WEIGHT;
+  event.receivedAtMs = hostMillis;
+  event.weightG = weight;
+  CHECK(publishScaleEvent(event, false));
+  runLoopAfter(dtMs);
+}
+
+void seedPresentCup(float weight = 80.0f) {
+  const uint8_t sampleCount = runtimeConfig.retareStabilitySamples;
+  const uint32_t minDurationMs = runtimeConfig.retareStabilityMinDurationMs;
+  const uint32_t stepMs =
+      sampleCount > 1U && minDurationMs > 0U
+          ? minDurationMs / static_cast<uint32_t>(sampleCount - 1U)
+          : 100U;
+  const uint32_t intervalMs = stepMs > 0U ? stepMs : 100U;
+  for (uint8_t index = 0; index < sampleCount; ++index) {
+    dripQueuedWeight(weight + (index == 1 ? 0.1f : 0.0f), intervalMs);
+  }
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+}
+
+void liftPresentCup() {
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+  for (uint8_t sample = 0; sample < DIRECT_STOP_CONFIRMATION_SAMPLES; ++sample) {
+    dripQueuedWeight(runtimeConfig.cupRemovedWeightG - 1.0f, 50);
+  }
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+}
+
 void confirmEspressoFlow() {
   currentWeight = 0.2f;
   currentWeightReceivedAtMs = hostMillis;
@@ -881,18 +923,35 @@ void t_cup_removed_settles_assumed_off_after_stop() {
 void t_cup_removed_settles_start_nack_assumed_off() {
   resetMomentaryHarness();
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  seedPresentCup();
   shortPress(150);
-  currentWeight = 0.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 1;
   runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
-  for (int step = 0; step < 61; ++step) {
-    dripFreshWeight(0.0f, 200);
+  for (int step = 0; step < 70; ++step) {
+    dripFreshWeight(80.0f, 200);
   }
   CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
   CHECK(!momentaryStopSettling);
-  pushCupRemovedSettleEdge();
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+  liftPresentCup();
   CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+}
+
+void t_cup_removed_event_settles_assumed_off_after_stop() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  seedPresentCup();
+  shortPress(150);
+  confirmEspressoFlow();
+  CHECK(machineRequestStop());
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  CHECK(momentaryStopSettling);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+  runLoopAfter(runtimeConfig.postTareBaselineGraceMs + 50);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  liftPresentCup();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  CHECK(!momentaryStopSettling);
+  CHECK(!machineIsRunning());
 }
 
 void t_cup_removed_ignored_while_assumed_on() {
@@ -1504,6 +1563,7 @@ const TestCase kTests[] = {
     {"P25I3", t_cup_removed_settles_start_nack_assumed_off},
     {"P25I4", t_cup_removed_ignored_while_assumed_on},
     {"P25I5", t_cup_removed_ignored_while_confirmed_on},
+    {"P25I6", t_cup_removed_event_settles_assumed_off_after_stop},
     {"P25J", t_firmware_cut_settles_off_after_drip},
     {"P25K", t_firmware_cut_settles_off_without_pending_finalize},
     {"P25L", t_firmware_cut_stale_weight_stays_assumed_off},
