@@ -4999,7 +4999,7 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            static_cast<unsigned long>(c.bleCompanionAcceptedWrites),
            static_cast<unsigned long>(c.bleCompanionRejectedWrites));
 
-  self.buildOtaJson(work.otaJson, NetworkWorkBuf::kOtaJson, c);
+  self.buildOtaJson(work.otaJson, NetworkWorkBuf::kOtaJson, controlGateOf(c));
   ok = ok && debugExportChunk(request, "\"ota\":");
   ok = ok && debugExportChunk(request, work.otaJson);
   ok = ok && debugExportChunk(request, ",");
