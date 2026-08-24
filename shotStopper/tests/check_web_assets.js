@@ -1604,6 +1604,7 @@ if (!ui.includes('id="shotTable"') ||
     !runtimeJs.includes('function shotDisplayActualG(') ||
     !runtimeJs.includes('shotDisplayActualG(r.actualG,r.wCg)') ||
     !runtimeJs.includes('shotDisplayActualG(ls.currentWeightG,cv.wCg)') ||
+    !runtimeJs.includes('return y!=null&&y>=1') ||
     !runtimeJs.includes('shotDisplayFlowGS(r)') ||
     !runtimeJs.includes('const live=!!(s.cycle&&s.cycle.active)') ||
     runtimeJs.includes('const live=!!((s.cycle&&s.cycle.active)||s.liveShot)') ||

@@ -1992,11 +1992,13 @@ void cancelPendingFinalize(const char *reason) {
       shotLogBbwEligible(snapshot.startedWithScale, snapshot.timerOnly,
                          snapshot.automaticBrew) &&
       shotLogWeightEligible(weightG, valid);
-  if (!persistEligible) {
-    return;
+  if (persistEligible) {
+    commitPendingShotLog(snapshot, weightG, valid, source);
   }
-  commitPendingShotLog(snapshot, weightG, valid, source);
-  persistLastShotFromFinalize(snapshot, weightG, valid);
+  // Home last shot is independent of history eligibility (incl. weight < 1 g).
+  if (snapshot.endReason != EndReason::RINSE_COMPLETE) {
+    persistLastShotFromFinalize(snapshot, weightG, valid);
+  }
 }
 
 void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
@@ -2083,6 +2085,10 @@ void pendingShotFinalizeTask() {
 
   if (persistEligible) {
     commitPendingShotLog(snapshot, logWeightG, logWeightValid, weightSource);
+  }
+  // Home last shot always reflects the finished cycle, even when history
+  // skips (weight < 1 g, non-AUTO, etc.). Rinses do not overwrite it.
+  if (snapshot.endReason != EndReason::RINSE_COMPLETE) {
     persistLastShotFromFinalize(snapshot, logWeightG, logWeightValid);
   }
 
@@ -3901,6 +3907,11 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   scheduleScaleTimerStopAfterCycle(durationMs);
 
   schedulePendingShotFinalize(reason, durationMs);
+  // Home status must show the last shot immediately (during drip delay),
+  // including empty / sub-1 g results. Rinses do not overwrite last shot.
+  if (reason != EndReason::RINSE_COMPLETE) {
+    persistLastShotFromEndedCycle(reason, durationMs);
+  }
 
   lastCycle.valid = true;
   lastCycle.cycleId = session.id;

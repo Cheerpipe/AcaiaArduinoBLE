@@ -24,6 +24,11 @@ The log holds up to **120** shots. The following are never stored:
 - Shots whose final weight is missing or below 1 g (e.g. scale off the
   machine or disconnected)
 
+Those empty or sub-1 g shots are still shown on Home as the **last shot**
+(status always reflects the current and last finished cycle). They are not
+written to history, not used in averages, and not used for learned stop
+offset or A→M samples.
+
 Curve samples and the history record are written **once** when the cycle
 closes (after the configured drip delay), not during an active brew. The
 live `shotCurve` on the status API is in-memory only for the home UI.

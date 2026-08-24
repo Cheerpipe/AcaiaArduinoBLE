@@ -6097,8 +6097,10 @@ void s02f_shot_log_skips_sub_one_gram_weight() {
   resetHarness(false, true);
   reachReadyFromBoot();
   shotLog.clear();
+  persistedLastShot = PersistedLastShot{};
   pendingFinalize = PendingShotFinalize{};
   pendingFinalize.pending = true;
+  pendingFinalize.cycleId = 5;
   pendingFinalize.logEligible = true;
   pendingFinalize.startedWithScale = true;
   pendingFinalize.timerOnly = false;
@@ -6116,7 +6118,39 @@ void s02f_shot_log_skips_sub_one_gram_weight() {
   CHECK(!pendingFinalize.pending);
   CHECK(shotLog.count() == 0);
   CHECK(shotCurves.count() == 0);
-  CHECK(!persistedLastShot.valid);
+  // Home last shot is independent of the 1 g history floor.
+  CHECK(persistedLastShot.valid);
+  CHECK(persistedLastShot.cycleId == 5);
+  CHECK(persistedLastShot.weightValid);
+  CHECK(fabsf(persistedLastShot.currentWeightG - 0.5f) < 0.001f);
+}
+
+void s02g_full_cycle_sub_one_gram_updates_last_shot_not_history() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  shotLog.clear();
+  ShotCurveLog::resetHostStorage();
+  shotCurves.load();
+  persistedLastShot = PersistedLastShot{};
+  const uint32_t rawOnAt = startCycle();
+  advanceToBrew();
+  currentWeight = 0.5f;
+  currentWeightSequence = session.weightSequenceAtStart + 1;
+  currentWeightReceivedAtMs = hostMillis;
+  session.hasWeightAnchor = true;
+  session.lastAcceptedWeightG = 0.5f;
+  acceptWeightIntoTrajectory(0.5f, hostMillis, currentWeightSequence);
+  releaseAtPhysicalDuration(rawOnAt, 12000);
+  // Last shot updates immediately at cycle end (before drip delay).
+  CHECK(persistedLastShot.valid);
+  CHECK(persistedLastShot.weightValid);
+  CHECK(fabsf(persistedLastShot.currentWeightG - 0.5f) < 0.001f);
+  CHECK(shotLog.count() == 0);
+  runLoopAfter(runtimeConfig.dripDelayMs);
+  CHECK(shotLog.count() == 0);
+  CHECK(shotCurves.count() == 0);
+  CHECK(persistedLastShot.valid);
+  CHECK(fabsf(persistedLastShot.currentWeightG - 0.5f) < 0.001f);
 }
 
 void s02c_shot_curve_samples_on_two_second_grid_and_latches_slow() {
@@ -6346,14 +6380,36 @@ void s03_shot_log_clear_empties_records() {
   CHECK(shotLog.count() == 0);
 }
 
-void s14_last_shot_skips_manual_cycle() {
+void s14_last_shot_persists_manual_cycle() {
   resetHarness(false, false);
   reachReadyFromBoot();
   CHECK(!persistedLastShot.valid);
   const uint32_t rawOnAt = startCycle();
   releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs + 100);
+  // Manual / short cycles update home last shot; they still skip history.
+  CHECK(persistedLastShot.valid);
   runLoopAfter(runtimeConfig.dripDelayMs);
-  CHECK(!persistedLastShot.valid);
+  CHECK(persistedLastShot.valid);
+  CHECK(shotLog.count() == 0);
+}
+
+void s14b_rinse_does_not_overwrite_last_shot() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  persistedLastShot = PersistedLastShot{};
+  persistedLastShot.valid = true;
+  persistedLastShot.cycleId = 42;
+  persistedLastShot.weightValid = true;
+  persistedLastShot.currentWeightG = 36.0f;
+  persistLastShotSnapshot(persistedLastShot);
+  const uint32_t rawOnAt = startCycle();
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE ||
+        stopperState == StopperState::READY);
+  runLoopAfter(runtimeConfig.rinseDurationMs + runtimeConfig.dripDelayMs);
+  CHECK(persistedLastShot.valid);
+  CHECK(persistedLastShot.cycleId == 42);
+  CHECK(fabsf(persistedLastShot.currentWeightG - 36.0f) < 0.001f);
 }
 
 void s15b_cup_off_after_end_keeps_last_known_actual() {
@@ -9193,13 +9249,15 @@ const TestCase testCases[] = {
     {"S02", s02_shot_log_appends_after_drip_delay},
     {"S02E", s02e_shot_log_appends_auto_bbw_after_drip_delay},
     {"S02F", s02f_shot_log_skips_sub_one_gram_weight},
+    {"S02G", s02g_full_cycle_sub_one_gram_updates_last_shot_not_history},
     {"S02C", s02c_shot_curve_samples_on_two_second_grid_and_latches_slow},
     {"S02D", s02d_shot_curve_latches_first_drop_fast_and_atm},
     {"S02B", s02b_drip_delay_is_snapshotted_and_honors_boundaries},
     {"S17", s17_new_cycle_commits_pending_log_as_last_known},
     {"W90", w90_save_unknown_preset_id_does_not_overwrite_active},
     {"S03", s03_shot_log_clear_empties_records},
-    {"S14", s14_last_shot_skips_manual_cycle},
+    {"S14", s14_last_shot_persists_manual_cycle},
+    {"S14b", s14b_rinse_does_not_overwrite_last_shot},
     {"S15", s15_last_shot_persists_after_drip_when_eligible},
     {"S15b", s15b_cup_off_after_end_keeps_last_known_actual},
     {"S15c", s15c_last_shot_prefers_last_accepted_over_cup_off},
