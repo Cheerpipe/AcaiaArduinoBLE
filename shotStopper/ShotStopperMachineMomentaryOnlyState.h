@@ -7,7 +7,9 @@
 //       scale is UNKNOWN (no auto-cut), quiet pan reinforces OFF, and
 //       espresso-like rising flow (g/s) is the only path to CONFIRMED_ON.
 //       CONFIRMED_ON expires without recent flow so auto-cut cannot pulse a
-//       stopped group. Consumes MachineSense pushed by the stopper.
+//       stopped group. A logical stop goes to ASSUMED_OFF (stop-settling) until
+//       the pan is quiet, including after the stop-ack timeout. Consumes
+//       MachineSense pushed by the stopper.
 //
 // BOUNDARY: This file alone determines momentary-only run state. Do not put
 // reed GPIO here (that is MomentaryReedState). Do not put paddle latch logic
@@ -17,6 +19,7 @@ constexpr float MOMENTARY_FLOW_ON_G_S = 0.60f;
 constexpr float MOMENTARY_FLOW_OFF_G_S = 0.20f;
 constexpr float MOMENTARY_TARE_RESET_G = 1.0f;
 constexpr float MOMENTARY_FINGER_JUMP_G = 15.0f;
+constexpr float MOMENTARY_FLOW_CONFIRM_MAX_G_S = MOMENTARY_FINGER_JUMP_G;
 constexpr float MOMENTARY_BASELINE_BAND_G = 0.5f;
 constexpr float MOMENTARY_CONFIRM_DELTA_G = 1.0f;
 constexpr uint32_t MOMENTARY_FLOW_HOLD_MS = 500;
@@ -48,6 +51,7 @@ bool momentaryOrphanRun = false;
 uint32_t momentaryStaleSinceMs = 0;
 bool momentaryFirmwareCutPending = false;
 bool momentarySettledWeightCutArmed = false;
+bool momentaryStopSettling = false;
 
 bool reedIsOn() { return false; }
 
@@ -67,6 +71,7 @@ void noteMomentaryLogicalStart() {
   momentaryStaleSinceMs = 0;
   momentaryFirmwareCutPending = false;
   momentarySettledWeightCutArmed = false;
+  momentaryStopSettling = false;
   if (machineSense.weightFresh) {
     momentarySawScale = true;
     const float weight = momentaryLiveWeightG();
@@ -91,17 +96,21 @@ void noteMomentaryLogicalStop() {
   momentaryStopRetryPending = false;
   momentaryStartAwaitingAck = false;
   momentaryStartBaselineSinceMs = 0;
+  momentaryStopSettling = true;
   if (!machineSense.weightFresh) {
     momentaryStopAwaitingAck = false;
+    if (momentarySettledWeightCutArmed) {
+      momentaryInferredState = MachineRunState::ASSUMED_OFF;
+      return;
+    }
+    momentaryStopSettling = false;
     momentaryInferredState = momentarySawScale ? MachineRunState::UNKNOWN
                                        : MachineRunState::CONFIRMED_OFF;
     return;
   }
   momentaryStopAwaitingAck = true;
   momentaryStopAwaitingSinceMs = millis();
-  if (momentaryInferredState == MachineRunState::CONFIRMED_ON) {
-    momentaryInferredState = MachineRunState::ASSUMED_ON;
-  }
+  momentaryInferredState = MachineRunState::ASSUMED_OFF;
 }
 
 void noteMomentaryLogicalStartCanceled() {
@@ -113,6 +122,7 @@ void noteMomentaryLogicalStartCanceled() {
   momentaryStartAwaitingAck = false;
   momentaryStartBaselineSinceMs = 0;
   momentaryOrphanRun = false;
+  momentaryStopSettling = false;
   momentaryInferredState = MachineRunState::CONFIRMED_OFF;
 }
 
@@ -126,6 +136,7 @@ void noteMomentaryDisqualifiedPress(bool restoreRunning) {
   momentaryStartAwaitingAck = false;
   momentaryStartBaselineSinceMs = 0;
   momentaryOrphanRun = false;
+  momentaryStopSettling = false;
   momentaryInferredState = momentaryGesturePreState;
   if (momentaryInferredState == MachineRunState::CONFIRMED_OFF) {
     momentaryInferredState = MachineRunState::ASSUMED_ON;
@@ -144,6 +155,7 @@ void settleMomentaryInferredOff() {
   momentaryLogicalRunActive = false;
   momentaryFirmwareCutPending = false;
   momentarySettledWeightCutArmed = false;
+  momentaryStopSettling = false;
   momentaryInferredState = MachineRunState::CONFIRMED_OFF;
 }
 
@@ -157,6 +169,7 @@ void machineOverrideInferredOn() {
   momentaryOrphanRun = false;
   momentaryFirmwareCutPending = false;
   momentarySettledWeightCutArmed = false;
+  momentaryStopSettling = false;
   momentaryEspressoConfirmed = true;
   momentaryInferredState = MachineRunState::CONFIRMED_ON;
   momentaryLogicalRunActive = true;
@@ -191,18 +204,22 @@ void serviceMomentaryRunSensors() {
   }
   if (momentaryLogicalRunActive &&
       momentaryInferredState == MachineRunState::CONFIRMED_OFF &&
-      !momentaryStopAwaitingAck && momentaryStartAwaitingAck) {
+      !momentaryStopAwaitingAck && !momentaryStopSettling &&
+      momentaryStartAwaitingAck) {
     momentaryInferredState = MachineRunState::ASSUMED_ON;
   }
   if (!machineSense.weightFresh) {
     if (momentaryStaleSinceMs == 0) {
       momentaryStaleSinceMs = millis();
     }
+    const bool settling =
+        momentaryStopSettling || momentarySettledWeightCutArmed;
     if (momentaryInferredState == MachineRunState::CONFIRMED_ON) {
       momentaryEspressoConfirmed = false;
-      momentaryInferredState = MachineRunState::ASSUMED_ON;
+      momentaryInferredState = settling ? MachineRunState::ASSUMED_OFF
+                                        : MachineRunState::ASSUMED_ON;
     }
-    if ((momentaryLogicalRunActive || momentarySawScale) &&
+    if (!settling && (momentaryLogicalRunActive || momentarySawScale) &&
         elapsedMs(momentaryStaleSinceMs) >= MOMENTARY_STALE_UNKNOWN_MS) {
       momentaryInferredState = MachineRunState::UNKNOWN;
     }
@@ -213,7 +230,7 @@ void serviceMomentaryRunSensors() {
     if (momentaryStopAwaitingAck &&
         elapsedMs(momentaryStopAwaitingSinceMs) >= MOMENTARY_STOP_ACK_MS) {
       momentaryStopAwaitingAck = false;
-      if (momentarySawScale) {
+      if (!settling && momentarySawScale) {
         momentaryInferredState = MachineRunState::UNKNOWN;
       }
     }
@@ -259,7 +276,7 @@ void serviceMomentaryRunSensors() {
 
   const bool quietPan =
       momentaryQuietSinceMs != 0 && elapsedMs(momentaryQuietSinceMs) >= MOMENTARY_QUIET_MS;
-  if (momentarySettledWeightCutArmed && quietPan) {
+  if ((momentarySettledWeightCutArmed || momentaryStopSettling) && quietPan) {
     settleMomentaryInferredOff();
   }
   if (quietPan && !momentaryStartAwaitingAck &&
@@ -276,9 +293,7 @@ void serviceMomentaryRunSensors() {
 
   if (momentaryStopAwaitingAck) {
     if (quietPan) {
-      momentaryStopAwaitingAck = false;
-      momentaryOrphanRun = false;
-      momentaryInferredState = MachineRunState::CONFIRMED_OFF;
+      settleMomentaryInferredOff();
     } else if (flowGps >= MOMENTARY_FLOW_ON_G_S &&
                elapsedMs(momentaryStopAwaitingSinceMs) >= MOMENTARY_STOP_RETRY_AFTER_MS) {
       if (momentaryFirmwareCutPending) {
@@ -286,6 +301,7 @@ void serviceMomentaryRunSensors() {
         momentaryStopAwaitingSinceMs = now;
       } else if (!momentarySettledWeightCutArmed) {
         momentaryStopAwaitingAck = false;
+        momentaryStopSettling = false;
         momentaryEspressoConfirmed = true;
         momentaryInferredState = MachineRunState::CONFIRMED_ON;
         momentaryLogicalRunActive = true;
@@ -294,8 +310,7 @@ void serviceMomentaryRunSensors() {
         }
         momentaryLogicalOperationalLimitMs = runtimeConfig.operationalWallMs;
       }
-    } else if (!momentarySettledWeightCutArmed &&
-               elapsedMs(momentaryStopAwaitingSinceMs) >= MOMENTARY_STOP_ACK_MS) {
+    } else if (elapsedMs(momentaryStopAwaitingSinceMs) >= MOMENTARY_STOP_ACK_MS) {
       momentaryStopAwaitingAck = false;
     }
   }
@@ -348,7 +363,8 @@ void serviceMomentaryRunSensors() {
       !finger && !accidental && !skipFlow && !momentaryStopAwaitingAck &&
       !momentarySettledWeightCutArmed &&
       momentaryInferredState != MachineRunState::CONFIRMED_OFF && inShotBand &&
-      flowGps >= MOMENTARY_FLOW_ON_G_S && flowGps <= 8.0f;
+      flowGps >= MOMENTARY_FLOW_ON_G_S &&
+      flowGps <= MOMENTARY_FLOW_CONFIRM_MAX_G_S;
   if (canConfirmOn) {
     if (momentaryRisingSinceMs == 0) {
       momentaryRisingSinceMs = now;
@@ -360,6 +376,7 @@ void serviceMomentaryRunSensors() {
       momentaryEspressoConfirmed = true;
       momentaryStartAwaitingAck = false;
       momentaryStartBaselineSinceMs = 0;
+      momentaryStopSettling = false;
       momentaryInferredState = MachineRunState::CONFIRMED_ON;
       if (recoverFromAssumedOff) {
         momentaryLogicalRunActive = true;

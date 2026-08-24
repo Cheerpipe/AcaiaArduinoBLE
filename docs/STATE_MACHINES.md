@@ -212,25 +212,34 @@ Config lock uses `machineIsRunning()`, which for paddle equals machine circuit c
 | `CONFIRMED_OFF` | Relay not closed. Safety is OPEN, or tripped/lockout with contact open. |
 | `ASSUMED_ON` | Safety is `ARMING`: close is in flight, echo may not yet match. Reed: configured start edge (press or release), reed still off, within confirm timeout. |
 | `CONFIRMED_ON` | Safety `CLOSED` or `relay.closed`. Reed: reed is on (outside an assumed-off window). |
-| `ASSUMED_OFF` | Reed: configured stop edge (press or release), reed still on, within confirm timeout. Switch-only: quiet START nack (no espresso-like flow before the shot-reaction timeout). |
+| `ASSUMED_OFF` | Reed: configured stop edge (press or release), reed still on, within confirm timeout. Switch-only: quiet START nack (no espresso-like flow before the shot-reaction timeout), or a logical STOP still settling (pan not yet quiet). |
 | `UNKNOWN` | Safety TRIPPED/LOCKOUT but the contact still reads closed (should not last). |
 
 On **momentary-only** builds (`SHOT_STOPPER_MACHINE_TYPE=1`) these labels are
 inferred from brew-accepted weight, not from K1. Boot is `CONFIRMED_OFF`. A
-START pulse goes to `ASSUMED_ON`. Espresso-like flow (about 0.60 g/s, ≥1 g
+START pulse goes to `ASSUMED_ON`. Espresso-like flow (about 0.60 g/s, below
+the finger-jump rate, ≥1 g
 above the shot baseline, after 800 ms of logical run) is the only path to
 `CONFIRMED_ON`, including recovery from `ASSUMED_OFF`. That ON expires if
 flow stays below 0.20 g/s for 500 ms, so auto-cut cannot pulse a stopped
 group. A START that stays on the shot baseline for the shot-reaction
 timeout (default 12 s, setting 3–30 s) is nacked to `ASSUMED_OFF` — not
 Confirmed off — so a late first drop can still confirm ON without a second
-pulse. A STOP ack needs a quiet pan; timeout without quiet does **not**
-force OFF. If espresso-like flow continues after an assumed STOP, polarity
-is wrong: go to `CONFIRMED_ON` without an extra pulse. Firmware-cut stop
-retries still pulse. Scale connect can settle to Confirmed off when
+pulse. A logical STOP (user or firmware) goes to `ASSUMED_OFF` while the
+pan settles. A STOP ack needs a quiet pan; timeout without quiet does
+**not** force Idle, but later quiet still settles to Confirmed off. A START
+nack that stays `ASSUMED_OFF` without stop-settling does **not** idle on
+quiet — late espresso-like flow still confirms ON with no extra pulse. If
+espresso-like flow continues after an assumed user STOP, polarity is
+wrong: go to `CONFIRMED_ON` without an extra pulse. Firmware-cut stop
+retries still pulse while the stop-ack window is open. Scale connect can
+settle to Confirmed off when
 **Assume idle when the scale connects** is on and no brew cycle is active
-(no relay pulse). A successful BBW cut (`SCALE_THRESHOLD`) plus drip delay
-and a quiet, plausible settled weight also settles to Confirmed off. Home
+(no relay pulse). A successful BBW or extraction-guard cut
+(`SCALE_THRESHOLD`, `FAST_EXTRACTION_*`, `SLOW_EXTRACTION_*`) plus a quiet
+pan (live, or at drip delay with a plausible settled weight) settles to
+Confirmed off. A short shot that never schedules drip-delay finalize still
+settles on a quiet pan. Home
 **Override idle** / **Override brewing** are the manual escape hatch when
 the group is electrically ON with no coffee; they do not pulse. An
 operational wall without `CONFIRMED_ON` and with a scale still leaves an

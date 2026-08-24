@@ -2089,7 +2089,7 @@ void pendingShotFinalizeTask() {
     postDripWeightValid = snapshot.startedWithScale;
   }
 
-  if (snapshot.endReason == EndReason::SCALE_THRESHOLD) {
+  if (brewWeightCutSettlesMachineOff(snapshot.endReason)) {
     if (postDripWeightValid) {
       machineNoteSettledWeightCutOff();
     } else {
@@ -3924,7 +3924,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   cancelScaleCompletionBeep();
   // GPIO first, then the machine circuit-open cue. BLE advertising resume is not on this
   // path (BLE worker + servicePendingBrewRfRestore after the buzzer starts).
-  if (reason == EndReason::SCALE_THRESHOLD) {
+  if (brewWeightCutSettlesMachineOff(reason)) {
     machineArmSettledWeightCutOff();
   } else {
     machineCancelSettledWeightCutOff();

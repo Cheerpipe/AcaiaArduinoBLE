@@ -141,6 +141,19 @@ enum class EndReason : uint8_t {
   CUP_REMOVED = 18
 };
 
+inline bool brewWeightCutSettlesMachineOff(EndReason reason) {
+  switch (reason) {
+    case EndReason::SCALE_THRESHOLD:
+    case EndReason::FAST_EXTRACTION_MAX_WEIGHT:
+    case EndReason::FAST_EXTRACTION_MIN_TIME:
+    case EndReason::SLOW_EXTRACTION_MAX_TIME:
+    case EndReason::SLOW_EXTRACTION_MIN_WEIGHT:
+      return true;
+    default:
+      return false;
+  }
+}
+
 enum class AutoToManualGuardLimitMode : uint8_t {
   MANUAL = 0,
   AUTO = 1

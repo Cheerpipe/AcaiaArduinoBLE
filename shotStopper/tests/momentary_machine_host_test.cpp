@@ -141,6 +141,7 @@ void resetMomentaryHarness() {
   clearMomentaryElapsedLatch();
   momentaryFirmwareCutPending = false;
   momentarySettledWeightCutArmed = false;
+  momentaryStopSettling = false;
 #endif
   momentarySkipFirmwareStopPulse = false;
   pulseOutputActive = false;
@@ -643,6 +644,13 @@ void confirmEspressoFlow() {
   }
 }
 
+void holdStableWeight(uint32_t totalMs) {
+  const float held = currentWeight;
+  for (uint32_t waited = 0; waited < totalMs; waited += 100) {
+    dripFreshWeight(held, 100);
+  }
+}
+
 void t_start_ack_stays_assumed_without_flow() {
   resetMomentaryHarness();
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
@@ -694,19 +702,20 @@ void t_stop_ack_quiet_confirms_off() {
   CHECK(!machineIsRunning());
 }
 
-void t_stop_ack_timeout_without_quiet_stays_on() {
+void t_stop_ack_timeout_without_quiet_stays_assumed_off() {
   resetMomentaryHarness();
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   confirmEspressoFlow();
   CHECK(machineRequestStop());
   CHECK(machineIsRunning());
-  for (int step = 0; step < 16; ++step) {
-    dripFreshWeight(currentWeight + 0.45f, 100);
-    CHECK(machineIsRunning());
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  for (int step = 0; step < 4; ++step) {
+    dripFreshWeight(currentWeight + 0.6f, 600);
   }
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  CHECK(!machineIsRunning());
   CHECK(machineRunState() != MachineRunState::CONFIRMED_OFF);
-  CHECK(machineIsRunning());
 }
 
 void t_start_preinfusion_quiet_stays_assumed() {
@@ -778,6 +787,103 @@ void t_flow_after_assumed_off_confirms_on_without_pulse() {
   CHECK(hostRelayClosedWrites == closedBefore);
 }
 
+void t_start_nack_quiet_does_not_idle() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
+  for (int step = 0; step < 61; ++step) {
+    dripFreshWeight(0.0f, 200);
+  }
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  CHECK(!momentaryStopSettling);
+  holdStableWeight(2000);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  CHECK(machineRunState() != MachineRunState::CONFIRMED_OFF);
+}
+
+void t_firmware_cut_settles_off_after_drip() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  confirmEspressoFlow();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  machineArmSettledWeightCutOff();
+  const size_t closedBefore = hostRelayClosedWrites;
+  CHECK(machineRequestStop());
+  CHECK(hostRelayClosedWrites == closedBefore + 1);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  CHECK(momentaryStopSettling);
+  for (int step = 0; step < 4; ++step) {
+    dripFreshWeight(currentWeight + 0.6f, 600);
+  }
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  CHECK(!machineIsRunning());
+  CHECK(momentarySettledWeightCutArmed);
+  holdStableWeight(1200);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  CHECK(!momentarySettledWeightCutArmed);
+  CHECK(!momentaryStopSettling);
+  CHECK(hostRelayClosedWrites == closedBefore + 1);
+}
+
+void t_firmware_cut_settles_off_without_pending_finalize() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  confirmEspressoFlow();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  session.extractionExtended = true;
+  session.startedWithScale = true;
+  shot.automaticBrew = true;
+  const size_t closedBefore = hostRelayClosedWrites;
+  finalizeCycle(EndReason::FAST_EXTRACTION_MAX_WEIGHT, StopperState::READY);
+  CHECK(brewWeightCutSettlesMachineOff(EndReason::FAST_EXTRACTION_MAX_WEIGHT));
+  CHECK(brewWeightCutSettlesMachineOff(EndReason::SLOW_EXTRACTION_MIN_WEIGHT));
+  CHECK(!brewWeightCutSettlesMachineOff(EndReason::WEB_STOP));
+  CHECK(!pendingFinalize.pending);
+  CHECK(momentarySettledWeightCutArmed);
+  CHECK(hostRelayClosedWrites == closedBefore + 1);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  for (int step = 0; step < 4; ++step) {
+    dripFreshWeight(currentWeight + 0.6f, 600);
+  }
+  CHECK(!machineIsRunning());
+  holdStableWeight(1200);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  CHECK(hostRelayClosedWrites == closedBefore + 1);
+}
+
+void t_firmware_cut_stale_weight_stays_assumed_off() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  confirmEspressoFlow();
+  machineArmSettledWeightCutOff();
+  CHECK(machineRequestStop());
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  runLoopAfter(3000);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  CHECK(machineRunState() != MachineRunState::UNKNOWN);
+}
+
+void t_gusher_flow_confirms_on() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  currentWeight = 0.2f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  runLoopAfter(50);
+  for (int step = 0; step < 8; ++step) {
+    dripFreshWeight(currentWeight + 1.0f, 100);
+  }
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+}
+
 void t_override_sets_inferred_idle_and_brewing_without_pulse() {
   resetMomentaryHarness();
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
@@ -808,13 +914,6 @@ void t_scale_connect_settles_idle_when_idle() {
   setScaleLinkState(ScaleLinkState::CONNECTED);
   runLoopAfter(10);
   CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
-}
-
-void holdStableWeight(uint32_t totalMs) {
-  const float held = currentWeight;
-  for (uint32_t waited = 0; waited < totalMs; waited += 100) {
-    dripFreshWeight(held, 100);
-  }
 }
 
 void t_settled_weight_cut_confirms_off() {
@@ -1252,11 +1351,16 @@ const TestCase kTests[] = {
     {"P18", t_start_ack_stays_assumed_without_flow},
     {"P21", t_confirmed_on_expires_without_flow},
     {"P22", t_stop_ack_quiet_confirms_off},
-    {"P23", t_stop_ack_timeout_without_quiet_stays_on},
+    {"P23", t_stop_ack_timeout_without_quiet_stays_assumed_off},
     {"P24", t_start_preinfusion_quiet_stays_assumed},
     {"P25", t_start_nack_long_baseline_confirms_off},
     {"P25B", t_start_nack_timeout_follows_setting},
     {"P25C", t_flow_after_assumed_off_confirms_on_without_pulse},
+    {"P25I", t_start_nack_quiet_does_not_idle},
+    {"P25J", t_firmware_cut_settles_off_after_drip},
+    {"P25K", t_firmware_cut_settles_off_without_pending_finalize},
+    {"P25L", t_firmware_cut_stale_weight_stays_assumed_off},
+    {"P25M", t_gusher_flow_confirms_on},
     {"P25D", t_override_sets_inferred_idle_and_brewing_without_pulse},
     {"P25E", t_scale_connect_settles_idle_when_idle},
     {"P25F", t_settled_weight_cut_confirms_off},
