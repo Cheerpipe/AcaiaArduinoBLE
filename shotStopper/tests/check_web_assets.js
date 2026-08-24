@@ -1002,6 +1002,8 @@ if (!html.includes('<summary>Switch</summary>') ||
     !html.includes('Override brewing') ||
     !css.includes('html.reedMachine .switchOnly') ||
     !css.includes('html:not(.momentaryMachine) .switchOnly') ||
+    !css.includes('#machineStateValue .switchOnly') ||
+    !css.includes('#machineStateValue .switchOnly,#machineStateValue a{font-size:.78rem;font-weight:400}') ||
     !css.includes('.momentaryOnly') ||
     !css.includes('html:not(.reedMachine) .reedOnly') ||
     !network.includes('"stopPulseMs"') ||
