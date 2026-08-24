@@ -3178,6 +3178,7 @@ esp_err_t ShotStopperNetwork::claimHandler(httpd_req_t *request) {
   portENTER_CRITICAL(&self.dataMux_);
   memcpy(self.activeWebUiClientId_, clientId, sizeof(clientId));
   self.webUiOverrideActive_ = false;
+  self.webUiOverrideUntilMs_ = 0;
   portEXIT_CRITICAL(&self.dataMux_);
   self.clearAdminUnlock();
   memset(clientId, 0, sizeof(clientId));
@@ -3187,6 +3188,7 @@ esp_err_t ShotStopperNetwork::claimHandler(httpd_req_t *request) {
 esp_err_t ShotStopperNetwork::unlockHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   if (!self.requireActiveWebUiClient(request)) return ESP_OK;
+  if (!self.requireAdminUnlock(request)) return ESP_OK;
   const esp_err_t bodyStatus = self.lockJsonBody(
       request, "An explicit confirmation is required.");
   if (bodyStatus != ESP_OK) {
@@ -3207,8 +3209,10 @@ esp_err_t ShotStopperNetwork::unlockHandler(httpd_req_t *request) {
     return sendError(request, STATUS_UNPROCESSABLE, "UNLOCK_NOT_CONFIRMED",
                      "The unsafe WebUI override was not explicitly confirmed.");
   }
+  const uint32_t now = millis();
   portENTER_CRITICAL(&self.dataMux_);
   self.webUiOverrideActive_ = true;
+  self.webUiOverrideUntilMs_ = now + WEB_UI_OVERRIDE_MS;
   portEXIT_CRITICAL(&self.dataMux_);
   return sendJson(request, STATUS_OK, "{\"unlocked\":true}");
 }
@@ -3216,19 +3220,42 @@ esp_err_t ShotStopperNetwork::unlockHandler(httpd_req_t *request) {
 bool ShotStopperNetwork::webUiOverrideAllowed(httpd_req_t *request) {
   char clientId[WEB_UI_CLIENT_ID_CAPACITY] = {};
   if (!readWebUiClientId(request, clientId, sizeof(clientId))) return false;
+  const uint32_t now = millis();
   bool allowed = false;
   portENTER_CRITICAL(&dataMux_);
-  allowed = webUiOverrideActive_ && activeWebUiClientId_[0] != '\0' &&
-            strcmp(activeWebUiClientId_, clientId) == 0;
+  if (webUiOverrideActive_ && activeWebUiClientId_[0] != '\0' &&
+      strcmp(activeWebUiClientId_, clientId) == 0) {
+    if (static_cast<int32_t>(now - webUiOverrideUntilMs_) >= 0) {
+      webUiOverrideActive_ = false;
+      webUiOverrideUntilMs_ = 0;
+    } else {
+      allowed = true;
+    }
+  }
   portEXIT_CRITICAL(&dataMux_);
   memset(clientId, 0, sizeof(clientId));
   return allowed;
 }
 
+uint32_t ShotStopperNetwork::webUiOverrideRemainingMs(httpd_req_t *request) {
+  char clientId[WEB_UI_CLIENT_ID_CAPACITY] = {};
+  if (!readWebUiClientId(request, clientId, sizeof(clientId))) return 0;
+  const uint32_t now = millis();
+  uint32_t remaining = 0;
+  portENTER_CRITICAL(&dataMux_);
+  if (webUiOverrideActive_ && activeWebUiClientId_[0] != '\0' &&
+      strcmp(activeWebUiClientId_, clientId) == 0 &&
+      static_cast<int32_t>(now - webUiOverrideUntilMs_) < 0) {
+    remaining = webUiOverrideUntilMs_ - now;
+  }
+  portEXIT_CRITICAL(&dataMux_);
+  memset(clientId, 0, sizeof(clientId));
+  return remaining;
+}
+
 bool ShotStopperNetwork::webUiConfigurationAllowed(
     httpd_req_t *request, const ControlGateSnapshot &status) {
   if (controlAllowsConfiguration(status)) {
-    clearWebUiOverrideIfSafe(status);
     return true;
   }
   return webUiOverrideAllowed(request);
@@ -3240,14 +3267,6 @@ bool ShotStopperNetwork::historyMutationAllowed(
     return false;
   }
   return webUiConfigurationAllowed(request, status);
-}
-
-void ShotStopperNetwork::clearWebUiOverrideIfSafe(
-    const ControlGateSnapshot &status) {
-  if (!controlAllowsConfiguration(status)) return;
-  portENTER_CRITICAL(&dataMux_);
-  webUiOverrideActive_ = false;
-  portEXIT_CRITICAL(&dataMux_);
 }
 
 void ShotStopperNetwork::clearAdminUnlock() {
@@ -3744,9 +3763,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
 
   ControlStatusSnapshot &control = self.workBuf_->control;
   self.callbacks_.copyControlStatus(control);
-  self.clearWebUiOverrideIfSafe(controlGateOf(control));
   const bool configMutable = controlAllowsConfiguration(control);
   const bool webUiOverrideActive = self.webUiOverrideAllowed(request);
+  const uint32_t webUiOverrideRemainingMs =
+      webUiOverrideActive ? self.webUiOverrideRemainingMs(request) : 0;
   bool adminUnlocked = false;
   if (page == StatusPage::Admin || page == StatusPage::Home) {
     adminUnlocked = self.adminUnlockAllowed(request);
@@ -3847,12 +3867,15 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   // is appended below so home/settings polls stay lean.
   bool ok = statusJsonAppend(
       &used,
-      "{\"firmwareVersion\":\"%s\",\"bootId\":%lu,\"configMutable\":%s,\"webUiOverrideActive\":%s,\"configLockReason\":\"%s\",\"liveShot\":%s",
+      "{\"firmwareVersion\":\"%s\",\"bootId\":%lu,\"configMutable\":%s,"
+      "\"webUiOverrideActive\":%s,\"webUiOverrideRemainingMs\":%lu,"
+      "\"configLockReason\":\"%s\",\"liveShot\":%s",
       safeFirmwareVersion,
       static_cast<unsigned long>(control.bootId),
       configMutable ? "true" : "false",
-      webUiOverrideActive ? "true" : "false", configLockReason(control),
-      liveShot ? "true" : "false");
+      webUiOverrideActive ? "true" : "false",
+      static_cast<unsigned long>(webUiOverrideRemainingMs),
+      configLockReason(control), liveShot ? "true" : "false");
   if (ok) {
     ok = statusJsonAppend(&used, ",\"machineType\":\"%s\"",
                           compiledMachineTypeId());

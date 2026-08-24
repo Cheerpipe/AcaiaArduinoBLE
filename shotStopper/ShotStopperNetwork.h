@@ -198,6 +198,7 @@ class ShotStopperNetwork {
   static constexpr uint32_t ADMIN_UNLOCK_IDLE_MS = 15 * 60 * 1000;
   static constexpr uint32_t ADMIN_UNLOCK_COOLDOWN_MS = 30000;
   static constexpr uint8_t ADMIN_UNLOCK_FAILURES_BEFORE_COOLDOWN = 5;
+  static constexpr uint32_t WEB_UI_OVERRIDE_MS = 60 * 1000;
   // Machine config JSON is ~1 KiB and grows with NTP custom / bool false
   // literals; keep headroom above the wire payload.
   static constexpr size_t REQUEST_BODY_CAPACITY = 2048;
@@ -216,6 +217,7 @@ class ShotStopperNetwork {
   portMUX_TYPE dataMux_ = portMUX_INITIALIZER_UNLOCKED;
   char activeWebUiClientId_[WEB_UI_CLIENT_ID_CAPACITY] = {};
   bool webUiOverrideActive_ = false;
+  uint32_t webUiOverrideUntilMs_ = 0;
   char adminUnlockClientId_[WEB_UI_CLIENT_ID_CAPACITY] = {};
   bool adminUnlocked_ = false;
   uint32_t adminUnlockUntilMs_ = 0;
@@ -409,11 +411,11 @@ class ShotStopperNetwork {
   bool adminUnlockAllowed(httpd_req_t *request);
   bool requireAdminUnlock(httpd_req_t *request);
   bool webUiOverrideAllowed(httpd_req_t *request);
+  uint32_t webUiOverrideRemainingMs(httpd_req_t *request);
   bool webUiConfigurationAllowed(httpd_req_t *request,
                                  const ControlGateSnapshot &status);
   bool historyMutationAllowed(httpd_req_t *request,
                               const ControlGateSnapshot &status);
-  void clearWebUiOverrideIfSafe(const ControlGateSnapshot &status);
   static const char *stateLabel(StopperState state);
   static const char *controlSourceName(ControlSource source);
   static const char *endReasonName(EndReason reason);

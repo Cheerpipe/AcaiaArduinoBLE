@@ -221,10 +221,10 @@ const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 48600) {
   throw new Error('Web UI HTML source exceeds the 47.5 KiB authoring budget');
 }
-if (jsBytes > 121650) {
+if (jsBytes > 123000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 170250) {
+if (htmlBytes + jsBytes > 171500) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -2213,9 +2213,22 @@ if (!ui.includes('clearTimeout(webUiInactivityTimer)') ||
 }
 if (!ui.includes('setMutable(!!s.configMutable||!!s.webUiOverrideActive)') ||
     !ui.includes('webUiOverrideActive') ||
+    !ui.includes('webUiOverrideRemainingMs') ||
+    !ui.includes("uiOverridePanel") ||
+    !ui.includes("uiOverrideButton") ||
+    !ui.includes('UI Override') ||
+    !ui.includes("closest('#adminLockPanel,#uiOverridePanel,#bleCompanionPanel')") ||
+    !ui.includes('function ensureUiOverridePanel(') ||
+    !ui.includes('/api/v1/ui/unlock') ||
+    !ui.includes('UNSAFE_WEBUI_OVERRIDE') ||
     !network.includes('/api/v1/ui/unlock') ||
-    !network.includes('UNSAFE_WEBUI_OVERRIDE')) {
-  throw new Error('Web UI must honor configMutable/webUiOverrideActive; firmware keeps the unlock API');
+    !network.includes('UNSAFE_WEBUI_OVERRIDE') ||
+    !network.includes('WEB_UI_OVERRIDE_MS') ||
+    !network.includes('webUiOverrideUntilMs_') ||
+    !network.includes('webUiOverrideRemainingMs') ||
+    !network.includes('requireAdminUnlock(request)') ||
+    network.includes('clearWebUiOverrideIfSafe')) {
+  throw new Error('Web UI must honor configMutable/webUiOverrideActive with a timed admin-gated UI Override');
 }
 if (ui.includes('configLockBanner') || css.includes('configLockBanner') ||
     ui.includes('ensureConfigLockBanner') || ui.includes('renderConfigLockBanner') ||
@@ -2419,9 +2432,9 @@ if (alertChannelStatusFields.length !== 2 ||
 }
 // Shared status envelope: firmware/bootId/mutable/liveShot/ringRetain only.
 // NTP → admin; serialDebug/diagnostics → diagnostic; buzzerSupported → settings.
-if (!statusFormat.includes(
-        '{\\"firmwareVersion\\":\\"%s\\",\\"bootId\\":%lu,\\"configMutable\\":%s,' +
-            '\\"webUiOverrideActive\\":%s,\\"configLockReason\\":\\"%s\\",\\"liveShot\\":%s"') ||
+if (!statusFormat.includes('{\\"firmwareVersion\\":\\"%s\\",\\"bootId\\":%lu,\\"configMutable\\":%s,') ||
+    !statusFormat.includes('\\"webUiOverrideActive\\":%s,\\"webUiOverrideRemainingMs\\":%lu,') ||
+    !statusFormat.includes('\\"configLockReason\\":\\"%s\\",\\"liveShot\\":%s"') ||
     !ui.includes("typeof s.bootId==='number'") ||
     !ui.includes('updateFirmwareFooter()')) {
   throw new Error(
@@ -2918,7 +2931,7 @@ if (generated.gzip.length > 4096) {
 if (generated.jsGzip.length > 6144) {
   throw new Error('Compressed Web UI shell JS exceeds the 6 KiB gzip budget');
 }
-if (generated.runtimeGzip.length > 25600) {
+if (generated.runtimeGzip.length > 26112) {
   throw new Error('Compressed Web UI runtime JS exceeds the 25 KiB gzip budget');
 }
 if (generated.secondaryGzip.length > 4096) {
@@ -3379,7 +3392,7 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
       !js.includes('stopViewPolls();lockAdminUi();setMutable(false)') ||
       !js.includes('/api/v1/admin/unlock') ||
       !js.includes('/api/v1/admin/lock') ||
-      !js.includes("closest('#adminLockPanel')") ||
+      !js.includes("closest('#adminLockPanel") ||
       !css.includes('.navLock.hidden,.textLock.hidden{display:none}') ||
       !css.includes('.textLock') ||
       !network.includes('/api/v1/admin/unlock') ||
@@ -3416,6 +3429,11 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
           !network.slice(start, start + 500).includes('requireAdminUnlock(request)')) {
         throw new Error(label + ' must require admin unlock');
       }
+    }
+    const unlockFnStart = network.indexOf('ShotStopperNetwork::unlockHandler');
+    if (unlockFnStart < 0 ||
+        !network.slice(unlockFnStart, unlockFnStart + 600).includes('requireAdminUnlock(request)')) {
+      throw new Error('ui/unlock must require admin unlock');
     }
     const networkFn = network.slice(
         network.indexOf('ShotStopperNetwork::networkHandler'),

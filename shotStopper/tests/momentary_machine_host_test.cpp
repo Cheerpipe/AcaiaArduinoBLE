@@ -780,10 +780,55 @@ void t_scale_connect_settles_idle_when_idle() {
   CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
 }
 
+void holdStableWeight(uint32_t totalMs) {
+  const float held = currentWeight;
+  for (uint32_t waited = 0; waited < totalMs; waited += 100) {
+    dripFreshWeight(held, 100);
+  }
+}
+
 void t_settled_weight_cut_confirms_off() {
   resetMomentaryHarness();
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
+  confirmEspressoFlow();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  holdStableWeight(1200);
+  machineArmSettledWeightCutOff();
+  machineNoteSettledWeightCutOff();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+}
+
+void t_settled_weight_cut_stays_armed_while_pouring() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  confirmEspressoFlow();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  machineArmSettledWeightCutOff();
+  machineNoteSettledWeightCutOff();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  CHECK(momentarySettledWeightCutArmed);
+  for (int step = 0; step < 8; ++step) {
+    dripFreshWeight(currentWeight + 0.45f, 100);
+  }
+  CHECK(machineRunState() != MachineRunState::CONFIRMED_OFF);
+  CHECK(momentarySettledWeightCutArmed);
+  holdStableWeight(1200);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  CHECK(!momentarySettledWeightCutArmed);
+}
+
+void t_settled_weight_cut_flow_is_not_polarity() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  machineArmSettledWeightCutOff();
+  const size_t closedBefore = hostRelayClosedWrites;
+  CHECK(machineRequestStop());
+  CHECK(hostRelayClosedWrites == closedBefore);
+  CHECK(momentarySettledWeightCutArmed);
   currentWeight = 0.2f;
   currentWeightReceivedAtMs = hostMillis;
   currentWeightSequence = 1;
@@ -791,10 +836,9 @@ void t_settled_weight_cut_confirms_off() {
   for (int step = 0; step < 12; ++step) {
     dripFreshWeight(currentWeight + 0.45f, 100);
   }
-  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
-  machineArmSettledWeightCutOff();
-  machineNoteSettledWeightCutOff();
-  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  CHECK(machineRunState() != MachineRunState::CONFIRMED_ON);
+  CHECK(momentarySettledWeightCutArmed);
+  CHECK(hostRelayClosedWrites == closedBefore);
 }
 
 void t_user_stop_after_preinfusion_does_not_pulse() {
@@ -1158,6 +1202,8 @@ const TestCase kTests[] = {
     {"P25D", t_override_sets_inferred_idle_and_brewing_without_pulse},
     {"P25E", t_scale_connect_settles_idle_when_idle},
     {"P25F", t_settled_weight_cut_confirms_off},
+    {"P25G", t_settled_weight_cut_stays_armed_while_pouring},
+    {"P25H", t_settled_weight_cut_flow_is_not_polarity},
     {"P26", t_user_stop_after_preinfusion_does_not_pulse},
     {"P27", t_accidental_touch_does_not_confirm_on},
     {"P28", t_gap_skip_does_not_confirm_from_step},
