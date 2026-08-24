@@ -77,7 +77,7 @@ enum class ShotLogStopDetail : uint8_t {
   SLOW_MAX_TIME = 5,
   SLOW_MIN_WEIGHT = 6,
   CUP_REMOVED = 7,
-  PADDLE = 8,
+  ACTIVATOR = 8,
   WEB_STOP = 9,
   PHYSICAL_OVERRIDE = 10,
   WEB_HEARTBEAT = 11,
@@ -129,7 +129,7 @@ inline const char *shotLogStopDetailName(ShotLogStopDetail detail) {
     case ShotLogStopDetail::SLOW_MAX_TIME: return "slow_max_time";
     case ShotLogStopDetail::SLOW_MIN_WEIGHT: return "slow_min_weight";
     case ShotLogStopDetail::CUP_REMOVED: return "cup_removed";
-    case ShotLogStopDetail::PADDLE: return "paddle";
+    case ShotLogStopDetail::ACTIVATOR: return "activator";
     case ShotLogStopDetail::WEB_STOP: return "web_stop";
     case ShotLogStopDetail::PHYSICAL_OVERRIDE: return "physical_override";
     case ShotLogStopDetail::WEB_HEARTBEAT: return "web_heartbeat";
@@ -172,8 +172,8 @@ inline ShotLogStopDetail shotLogStopDetailFromEndReason(
       return ShotLogStopDetail::NORMAL_TARGET;
     case EndReason::WEIGHT_ANOMALY:
       return ShotLogStopDetail::WEIGHT_ANOMALY;
-    case EndReason::PADDLE:
-      return ShotLogStopDetail::PADDLE;
+    case EndReason::ACTIVATOR:
+      return ShotLogStopDetail::ACTIVATOR;
     case EndReason::WEB_STOP:
       return ShotLogStopDetail::WEB_STOP;
     case EndReason::PHYSICAL_OVERRIDE:
@@ -222,7 +222,7 @@ inline ShotLogCut shotLogCutFromEndReason(EndReason reason) {
     case EndReason::SLOW_EXTRACTION_MIN_WEIGHT:
     case EndReason::CUP_REMOVED:
       return ShotLogCut::AUTO;
-    case EndReason::PADDLE:
+    case EndReason::ACTIVATOR:
     case EndReason::WEB_STOP:
     case EndReason::WEB_HEARTBEAT_TIMEOUT:
     case EndReason::PHYSICAL_OVERRIDE:

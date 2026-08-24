@@ -12,6 +12,10 @@
 // quirk, encode it as generic intent/flags on the façade — never leak
 // PaddleMode into brew.
 
+bool paddleReturnReminderActive = false;
+uint32_t paddleReturnReminderLastAtMs = 0;
+uint32_t paddleReturnReminderStartedAtMs = 0;
+
 bool machineCycleActive = false;
 uint8_t machineCyclePaddleMode = static_cast<uint8_t>(PaddleMode::NATURAL);
 bool machineCycleAutomaticBbw = false;
@@ -56,7 +60,7 @@ bool machineAllowsAutomationStop() {
   return !(machineHidesPhysicalStop() &&
            machineCyclePaddleMode ==
                static_cast<uint8_t>(PaddleMode::ORIGINAL) &&
-           (paddleOn || rawPaddleOn));
+           (activatorOn || rawActivatorOn));
 }
 
 uint32_t machineCloseLimitMs(uint32_t operationalWallMs) {
@@ -70,7 +74,7 @@ bool machineCyclePromotedToNaturalForTest() {
   return machineCyclePromotedToNatural;
 }
 
-uint32_t machineLastRawEdgeMs() { return rawPaddleChangedAtMs; }
+uint32_t machineLastActivatorEdgeMs() { return rawActivatorChangedAtMs; }
 
 // Early paddle OFF still reports REQUEST_STOP so ShotStopper can apply its
 // rinse-after-X-time rule. After that window, Original/Auto may hide the stop.
@@ -81,26 +85,26 @@ bool machineReportsStopOnRelease() {
 }
 
 MachineIntention machinePollIntention() {
-  if (machineCycleActive && paddleTurnedOff) {
+  if (machineCycleActive && activatorTurnedOff) {
     machineCycleSawRelease = true;
   }
-  if (machineHidesPhysicalStop() && paddleTurnedOn && machineCycleSawRelease &&
+  if (machineHidesPhysicalStop() && activatorTurnedOn && machineCycleSawRelease &&
       machineCyclePaddleMode == static_cast<uint8_t>(PaddleMode::ORIGINAL)) {
     machineCyclePromotedToNatural = true;
   }
 
   MachineIntention out;
-  out.turnedOn = paddleTurnedOn;
-  out.turnedOff = paddleTurnedOff;
-  out.holdActive = paddleOn || rawPaddleOn;
-  out.stablyOff = paddleIsStablyOff();
+  out.turnedOn = activatorTurnedOn;
+  out.turnedOff = activatorTurnedOff;
+  out.holdActive = activatorOn || rawActivatorOn;
+  out.stablyOff = activatorIsStablyOff();
 
-  const bool swallowStop = paddleTurnedOff && !machineReportsStopOnRelease();
-  if (paddleTurnedOn && !machineCycleActive) {
+  const bool swallowStop = activatorTurnedOff && !machineReportsStopOnRelease();
+  if (activatorTurnedOn && !machineCycleActive) {
     out.intent = UserIntent::REQUEST_START;
-  } else if (paddleTurnedOn && machineCycleActive) {
+  } else if (activatorTurnedOn && machineCycleActive) {
     out.intent = UserIntent::HOLD_ACTIVE;
-  } else if (paddleTurnedOff && !swallowStop) {
+  } else if (activatorTurnedOff && !swallowStop) {
     out.intent = UserIntent::REQUEST_STOP;
   } else if (out.holdActive) {
     out.intent = UserIntent::HOLD_ACTIVE;
@@ -114,7 +118,7 @@ void machineServiceReminders() {
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   // Read the GPIO here rather than a debounced state: this reminder describes
   // the physical paddle circuit as it is wired at this instant.
-  const bool paddleOnCircuitOff = readRawPaddleOn() && !relay.closed;
+  const bool paddleOnCircuitOff = readRawActivatorOn() && !relay.closed;
   const AlertOutputChannel channel = currentAlertOutputChannel();
   const bool localBuzzerUsable =
       BUZZER_SUPPORT_ENABLED && localBuzzer.ready;

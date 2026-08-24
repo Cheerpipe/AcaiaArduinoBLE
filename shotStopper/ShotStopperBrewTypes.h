@@ -15,7 +15,8 @@ namespace shotstopper {
 // =============================================================================
 // WHAT: StopperState, EndReason, GuardInputs, and brew timing/weight constants.
 //       The stopper FSM decides rinse vs shot vs idle and *requests* circuit
-//       start/stop; it does not drive GPIO or know paddle vs momentary.
+//       start/stop; it does not drive GPIO or know paddle vs switch. The
+//       activator translates GPIO into UserIntent before brew sees it.
 //
 // BOUNDARY: GuardInputs is a neutral snapshot the orchestrator fills once per
 // loop. Brew/guards must not poll machine specializations, scale link, or cup
@@ -120,7 +121,7 @@ inline const char *stopperStateName(StopperState state) {
 
 enum class EndReason : uint8_t {
   NONE = 0,
-  PADDLE = 1,
+  ACTIVATOR = 1,
   // 2 was SCALE_PREDICTION (removed); keep ordinals stable for old logs.
   SCALE_THRESHOLD = 3,
   WEIGHT_ANOMALY = 4,

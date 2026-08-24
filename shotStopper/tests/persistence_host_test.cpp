@@ -843,8 +843,8 @@ void p49_ble_companion_corruption_falls_back_and_reset_enables() {
 }
 
 RecoveryGestureResult recoveryEdge(RecoveryGestureRecognizer &recognizer,
-                                   uint32_t atMs, bool paddleOn) {
-  return recognizer.update(atMs, paddleOn, paddleOn, !paddleOn);
+                                   uint32_t atMs, bool activatorOn) {
+  return recognizer.update(atMs, activatorOn, activatorOn, !activatorOn);
 }
 
 void p50_recovery_three_cycles_confirm_network_reset() {

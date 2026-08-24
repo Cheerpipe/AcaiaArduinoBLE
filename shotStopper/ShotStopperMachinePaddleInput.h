@@ -6,44 +6,44 @@
 // WHAT: Raw sample, debounce, and stable-off for the latch paddle.
 //       Included from ShotStopperMachine.h in the shotStopper.cpp TU.
 //
-// BOUNDARY: Paddle GPIO only. Writes shared switch sample fields
-// (ShotStopperMachineSwitchSample.h). Stopper/brew/cup/scale must not read
+// BOUNDARY: Paddle GPIO only. Writes shared activator sample fields
+// (ShotStopperMachineActivatorSample.h). Stopper/brew/cup/scale must not read
 // these — they consume UserIntent from the machine façade. No momentary code.
 
-bool readRawPaddleOn() {
-  return digitalRead(PADDLE_GPIO) == PADDLE_ACTIVE_LEVEL;
+bool readRawActivatorOn() {
+  return digitalRead(ACTIVATOR_GPIO) == ACTIVATOR_ACTIVE_LEVEL;
 }
 
-void initializePaddleInput() {
-  pinMode(PADDLE_GPIO, INPUT_PULLUP);
-  rawPaddleOn = readRawPaddleOn();
-  paddleOn = rawPaddleOn;
-  rawPaddleChangedAtMs = millis();
+void initializeActivatorInput() {
+  pinMode(ACTIVATOR_GPIO, INPUT_PULLUP);
+  rawActivatorOn = readRawActivatorOn();
+  activatorOn = rawActivatorOn;
+  rawActivatorChangedAtMs = millis();
 }
 
-void updatePaddleInput() {
-  paddleTurnedOn = false;
-  paddleTurnedOff = false;
+void updateActivatorInput() {
+  activatorTurnedOn = false;
+  activatorTurnedOff = false;
 
-  const bool sampledOn = readRawPaddleOn();
-  if (sampledOn != rawPaddleOn) {
-    rawPaddleOn = sampledOn;
-    rawPaddleChangedAtMs = millis();
+  const bool sampledOn = readRawActivatorOn();
+  if (sampledOn != rawActivatorOn) {
+    rawActivatorOn = sampledOn;
+    rawActivatorChangedAtMs = millis();
   }
 
-  if (paddleOn != rawPaddleOn &&
-      elapsedMs(rawPaddleChangedAtMs) >= PADDLE_DEBOUNCE_MS) {
-    const bool previous = paddleOn;
-    paddleOn = rawPaddleOn;
-    paddleTurnedOn = !previous && paddleOn;
-    paddleTurnedOff = previous && !paddleOn;
+  if (activatorOn != rawActivatorOn &&
+      elapsedMs(rawActivatorChangedAtMs) >= ACTIVATOR_DEBOUNCE_MS) {
+    const bool previous = activatorOn;
+    activatorOn = rawActivatorOn;
+    activatorTurnedOn = !previous && activatorOn;
+    activatorTurnedOff = previous && !activatorOn;
 
-    addDebugEvent(DebugCategory::PADDLE,
-                  paddleOn ? DebugCode::PADDLE_ON : DebugCode::PADDLE_OFF);
+    addDebugEvent(DebugCategory::ACTIVATOR,
+                  activatorOn ? DebugCode::ACTIVATOR_ON : DebugCode::ACTIVATOR_OFF);
   }
 }
 
-bool paddleIsStablyOff() {
-  return !paddleOn && !rawPaddleOn &&
-         elapsedMs(rawPaddleChangedAtMs) >= PADDLE_DEBOUNCE_MS;
+bool activatorIsStablyOff() {
+  return !activatorOn && !rawActivatorOn &&
+         elapsedMs(rawActivatorChangedAtMs) >= ACTIVATOR_DEBOUNCE_MS;
 }

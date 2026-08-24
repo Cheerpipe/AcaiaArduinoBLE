@@ -2,7 +2,7 @@
 
 This page is a map of the **runtime finite-state machines** in Advanced Shot
 Stopper. It is written for someone who already knows the product
-(paddle → machine circuit → scale) and wants to know **what each machine is for**,
+(activator → machine circuit → scale) and wants to know **what each machine is for**,
 **what each state means**, and **which events move it**.
 
 Enums that are not machines (settings, log codes, buzzer patterns) are
@@ -29,8 +29,12 @@ The control task in `shotStopper.cpp` is the orchestrator. Brew, scale sense,
 and cup presence do not call each other: the stopper polls machine **once** per
 loop (`machinePollIntention` → `machineLastIntention`), builds `GuardInputs` for
 brew guards, pushes a `MachineSense` snapshot into machine, and applies scale
-events (first-drop, post-tare cup hold). Machine (paddle/momentary) never reads
-`session` or live scale globals. One machine
+events (first-drop, post-tare cup hold). The **activator** reads user intention
+on `ACTIVATOR_GPIO` (paddle, switch, or another compatible mechanism),
+interprets that signal, and publishes `UserIntent` / `MachineIntention`. Shot
+stopper / brew / cup / scale consume that contract; they do not read the GPIO
+or know paddle vs switch. Machine specializations never read `session` or live
+scale globals. One machine
 is special: **relay safety can open the machine circuit without waiting for brew
 policy**. Everything else *requests* close/open; safety *owns* the
 contact.
@@ -48,7 +52,8 @@ contact.
 
 ```mermaid
 flowchart TB
-  paddle[Paddle GPIO] --> intent[User intent]
+  gpio[ACTIVATOR_GPIO] --> activator[Activator]
+  activator -->|UserIntent| intent[User intent]
   intent --> stopper[Stopper]
   web[Web / BLE companion] --> stopper
   stopper -->|request start/stop| safety[Relay safety]
@@ -71,7 +76,7 @@ flowchart TB
 is `CONFIRMED_OFF`. The scale link may be `CONNECTED` or
 `DISCONNECTED`; that only matters when a shot starts.
 
-**Start.** A debounced paddle ON (or a Web start, if remote machine control is
+**Start.** A debounced activator ON (or a Web start, if remote machine control is
 compiled in) is `REQUEST_START`. The stopper may **block** that start
 (no-scale BBW guard, cup-to-start guard) without closing the machine circuit. A short
 ON→OFF in the rinse window is not a failed start: it becomes `RINSE`.
@@ -115,29 +120,29 @@ Source: `ShotStopperBrewTypes.h`, orchestrated in `shotStopper.cpp`.
 
 | State | Meaning |
 | --- | --- |
-| `REQUIRES_OFF` | Cycle over (or start refused after a trip) while the paddle is still ON. Machine circuit must stay open until a stable paddle OFF. Prevents an immediate re-close. |
+| `REQUIRES_OFF` | Cycle over (or start refused after a trip) while the activator is still ON. Machine circuit must stay open until a stable activator OFF. Prevents an immediate re-close. |
 | `READY` | Idle. Waiting for a start gesture. Machine circuit is open. |
 | `BREW` | Shot in progress with weight and/or timer policy. Machine circuit is closed (unless safety already opened it). Includes timer-only BBW-off shots that started with a scale. |
-| `RINSE` | Timed group-head rinse. Paddle edges are ignored until the rinse duration elapses. Not stored in shot history. |
-| `MANUAL_NO_SCALE` | Shot in progress without weight stop (no usable scale at start, or BBW off without treating it as timer-only brew). Ends on paddle OFF, rinse demotion, or a time/safety limit. |
+| `RINSE` | Timed group-head rinse. Activator edges are ignored until the rinse duration elapses. Not stored in shot history. |
+| `MANUAL_NO_SCALE` | Shot in progress without weight stop (no usable scale at start, or BBW off without treating it as timer-only brew). Ends on activator OFF, rinse demotion, or a time/safety limit. |
 
 ### Events (inputs)
 
 | Event | From | Effect |
 | --- | --- | --- |
-| Paddle ON (`REQUEST_START`) | User intent | From `READY`: `beginCycle`. May be held/blocked by no-scale or cup-start guards. |
-| Paddle OFF inside rinse window | User intent | From `READY` with a held guard: start `RINSE`. From `BREW` / `MANUAL_NO_SCALE`: demote to `RINSE` if still inside the gesture window. |
-| Paddle OFF after rinse window | User intent | Natural mode: end shot (`EndReason::PADDLE` → `READY`). Original/Auto BBW: may keep machine circuit closed (walk-away). |
+| Activator ON (`REQUEST_START`) | User intent | From `READY`: `beginCycle`. May be held/blocked by no-scale or cup-start guards. |
+| Activator OFF inside rinse window | User intent | From `READY` with a held guard: start `RINSE`. From `BREW` / `MANUAL_NO_SCALE`: demote to `RINSE` if still inside the gesture window. |
+| Activator OFF after rinse window | User intent | Natural mode: end shot (`EndReason::ACTIVATOR` → `READY`). Original/Auto BBW: may keep machine circuit closed (walk-away). |
 | Paddle ON during Original BBW | User intent | Promotes the rest of that shot to Natural (paddle OFF will then end it). |
 | Weight cut due | Weight control | `finalizeCycle` with `SCALE_THRESHOLD` or a guard `EndReason`. |
 | Cup removed | Cup presence | Optional cut (`CUP_REMOVED`) if cup-stop is enabled. |
 | A→M deadline | Weight control suspended | Cut (`AUTO_TO_MANUAL_GUARD`) if the guard is enforced. |
 | Rinse duration elapsed | Timer | `RINSE_COMPLETE` → `READY` or `REQUIRES_OFF`. |
-| Web Stop / Web start / rinse | Web command | Same as paddle, but `ControlSource::WEB`. Physical paddle always wins (`PHYSICAL_OVERRIDE`). |
-| Safety trip / arm failure | Relay safety | `RELAY_SAFETY_FAILURE` or wall/hard-limit reasons; next state `REQUIRES_OFF` if the paddle is ON. |
-| Physical paddle while Web cycle | User intent | Immediate finalize, `PHYSICAL_OVERRIDE`. |
+| Web Stop / Web start / rinse | Web command | Same as the activator, but `ControlSource::WEB`. Physical activator always wins (`PHYSICAL_OVERRIDE`). |
+| Safety trip / arm failure | Relay safety | `RELAY_SAFETY_FAILURE` or wall/hard-limit reasons; next state `REQUIRES_OFF` if the activator is ON. |
+| Physical activator while Web cycle | User intent | Immediate finalize, `PHYSICAL_OVERRIDE`. |
 
-Typical path: `READY → BREW → READY` (or `REQUIRES_OFF` if the paddle
+Typical path: `READY → BREW → READY` (or `REQUIRES_OFF` if the activator
 was left ON). Rinse: `READY → RINSE → READY`.
 
 ---
@@ -250,8 +255,10 @@ safety.
 
 ## 4. User intent (`UserIntent`)
 
-**Purpose.** Generic brew request after the machine translates the physical
-switch. The stopper never reads GPIO, paddle mode, or machine type.
+**Purpose.** Generic brew request after the **activator** reads `ACTIVATOR_GPIO`
+(paddle, switch, or another compatible mechanism), interprets that signal, and
+translates it to something the shot stopper understands. The stopper never
+reads GPIO, paddle mode, or machine type.
 
 Source: `ShotStopperMachineTypes.h`, `machinePollIntention()`. Latch TYPE=0
 maps GPIO + snapshotted `PaddleMode` onto these intents (Original/Auto may
@@ -666,7 +673,7 @@ FSM.
 
 One pass of the control task, simplified:
 
-1. Feed watchdogs. Machine samples the switch and publishes `UserIntent`.
+1. Feed watchdogs. The activator samples `ACTIVATOR_GPIO` and publishes `UserIntent`.
 2. Service relay safety (honor ISR trips, echo GPIO if present).
 3. Recovery gesture only in the boot window; it never closes the machine circuit.
 4. Apply stopper `switch (stopperState)` using intent, weight control,
@@ -687,7 +694,7 @@ from IRAM.
 
 | Name | Why it is omitted |
 | --- | --- |
-| `PaddleMode` (Natural / Original / Auto) | Latch TYPE=0 translator setting. Lives in `ShotStopperMachineTypes.h`; the stopper never branches on it. |
+| `PaddleMode` (Natural / Original / Auto) | Latch TYPE=0 translator setting. Lives in `ShotStopperMachinePaddleConfig.h`; the stopper never branches on it. |
 | `BrewCommand` | Declared, unused at runtime. |
 | `AlertEvent` | Outputs (beeps), not a mode. |
 | `TaskProfilerState` | Diagnostics only. |

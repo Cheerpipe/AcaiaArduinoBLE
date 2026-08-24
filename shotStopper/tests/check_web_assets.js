@@ -15,11 +15,12 @@ const firmware = [
   fs.readFileSync(path.join(sketchDir, 'ShotStopperHardware.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachine.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineRelay.h'), 'utf8'),
-  fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineSwitchSample.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineActivatorSample.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleInput.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleControl.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleState.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddlePolicy.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleConfig.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryInput.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryConfig.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryControl.h'), 'utf8'),
@@ -227,7 +228,7 @@ if (htmlBytes + jsBytes > 170000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
-    !ui.includes('id="dPaddle"') || !ui.includes('firstDropBeep') ||
+    !ui.includes('id="dActivator"') || !ui.includes('firstDropBeep') ||
     !ui.includes('paddleReturnReminderBeep') ||
     !ui.includes('buzzerScaleLostBeep') ||
     !ui.includes('buzzerAutoToManualGuardEndBeep') ||
@@ -580,7 +581,7 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !scaleSection[1].includes('id="preferredScale"') ||
     !scaleSection[1].includes('id="scaleWeight"') ||
     !scaleSection[1].includes('id="scaleTimer"') ||
-    !ui.includes("s.physicalPaddleOn?'ON':'OFF'") ||
+    !ui.includes("s.physicalActivatorOn?'ON':'OFF'") ||
     !ui.includes("s.relayClosed?'ON':'OFF'") ||
     !ui.includes('function formatScaleWeight(') ||
     !ui.includes('function formatScaleStatus(') ||
@@ -870,18 +871,27 @@ if (!html.includes('<summary>Paddle</summary>') ||
     !firmware.includes('machineHidesPhysicalStop()') ||
     !firmware.includes('machineAllowsAutomationStop()') ||
     !firmware.includes('machineBeginCycle') ||
-    !domain.includes('enum class PaddleMode') ||
-    !domain.includes('NATURAL = 0') ||
-    !domain.includes('ORIGINAL = 1') ||
-    !domain.includes('AUTO = 2') ||
-    !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineTypes.h'), 'utf8')
+    domain.includes('enum class PaddleMode') ||
+    !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleConfig.h'), 'utf8')
          .includes('enum class PaddleMode') ||
+    !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleConfig.h'), 'utf8')
+         .includes('NATURAL = 0') ||
+    !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleConfig.h'), 'utf8')
+         .includes('ORIGINAL = 1') ||
+    !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleConfig.h'), 'utf8')
+         .includes('AUTO = 2') ||
+    fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineTypes.h'), 'utf8')
+         .includes('enum class PaddleMode') ||
+    fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineTypes.h'), 'utf8')
+         .includes('parsePaddleMode') ||
+    fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineTypes.h'), 'utf8')
+         .includes('enum class MachineType') ||
     !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddlePolicy.h'), 'utf8')
          .includes('machinePollIntention()') ||
     fs.readFileSync(path.join(sketchDir, 'ShotStopperBrewTypes.h'), 'utf8')
         .includes('enum class PaddleMode') ||
     fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8')
-        .includes('PaddleMode') ||
+        .includes('PaddleMode::') ||
     fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8')
         .includes('paddleMode')) {
   throw new Error('Machine Paddle mode must expose Auto/Natural/Original in UI, API, and APPLY_CONFIG');
@@ -920,19 +930,19 @@ if (momentaryInputHeader.includes('session.active') ||
     relayHeader.includes('session.automaticEnabled')) {
   throw new Error('Machine momentary/relay must not read session or live scale globals');
 }
-if (firmwareCore.includes('readRawPaddleOn()') ||
+if (firmwareCore.includes('readRawActivatorOn()') ||
     firmwareCore.includes('pinMode(RELAY_GPIO') ||
     firmwareCore.includes('#if SHOT_STOPPER_MACHINE_TYPE') ||
     firmwareCore.includes('MACHINE_USES_MOMENTARY') ||
     firmwareCore.includes('stopPulseTenMs') ||
     firmwareCore.includes('maxSinglePressHundredMs') ||
     !firmware.includes('pinMode(RELAY_GPIO, OUTPUT)') ||
-    !firmware.includes('machineBootSwitchHeldStably()') ||
-    !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineSwitchSample.h'), 'utf8')
-         .includes('bool rawPaddleOn') ||
-    firmwareCore.includes('bool rawPaddleOn')) {
+    !firmware.includes('machineBootActivatorHeldStably()') ||
+    !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineActivatorSample.h'), 'utf8')
+         .includes('bool rawActivatorOn') ||
+    firmwareCore.includes('bool rawActivatorOn')) {
   throw new Error(
-      'Machine GPIO, switch sample BSS, and boot debounce must live in machine headers — not shotStopper.cpp');
+      'Machine GPIO, activator sample BSS, and boot debounce must live in machine headers — not shotStopper.cpp');
 }
 if (!html.includes('<summary>Switch</summary>') ||
     !html.includes('id="stopPulseMs"') ||
@@ -989,6 +999,10 @@ if (!html.includes('<summary>Switch</summary>') ||
     paddlePolicyHeader.includes('reedConfirmTimeoutHundredMs') ||
     machineTypesHeader.includes('parseMomentaryStartEdge') ||
     machineTypesHeader.includes('momentaryStartEdgeId') ||
+    machineTypesHeader.includes('PaddleMode') ||
+    machineTypesHeader.includes('parsePaddleMode') ||
+    !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleConfig.h'), 'utf8')
+         .includes('parsePaddleMode') ||
     !momentaryConfigHeader.includes('parseMomentaryStartEdge') ||
     !momentaryConfigHeader.includes('momentaryStartEdgeId') ||
     !domain.includes('uint8_t stopPulseTenMs') ||
@@ -1490,7 +1504,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('id="dMachine"') ||
       !diagHtml.includes('id="dBrew"') ||
       !diagHtml.includes('id="dCup"') ||
-      !diagHtml.includes('id="dPaddle"') ||
+      !diagHtml.includes('id="dActivator"') ||
       !diagHtml.includes('id="dReed"') ||
       !diagHtml.includes('class="paddleOnly">Paddle</strong>') ||
       !diagHtml.includes('class="momentaryOnly">Switch</strong>') ||
@@ -1509,7 +1523,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes("t('hBoot',typeof s.bootId==='number'&&s.bootId?'#'+s.bootId:'')") ||
       !ui.includes("t('dBrew',s.state)") ||
       !ui.includes("t('dCup',cp.state)") ||
-      !ui.includes("t('dPaddle',s.physicalPaddleOn?'ON':'OFF')") ||
+      !ui.includes("t('dActivator',s.physicalActivatorOn?'ON':'OFF')") ||
       !ui.includes("t('dReed',s.reedOn?'ON':'OFF')") ||
       !ui.includes("t('dStream',sc.streamState)") ||
       !ui.includes("t('dControl',sc.controlState)") ||
@@ -2442,7 +2456,7 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
         'statusPageOk(admin) must accept a locked payload and validate unlocked network/BLE/NTP/OTA');
   }
   if (!ui.includes(
-          "v==='diagnostic'?!!(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalPaddleOn==='boolean'&&'reedOn' in s&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags)")) {
+          "v==='diagnostic'?!!(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalActivatorOn==='boolean'&&'reedOn' in s&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags)")) {
     throw new Error(
         'statusPageOk(diagnostic) must validate states, machine I/O, and diagnostic metrics');
   }
@@ -2469,7 +2483,7 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'bleHostAllocPsram', 'bleHostAllocFallback',
     'resetReasonCode', 'packetGaps', 'rejectedPackets', 'reconnects',
     'eventsDropped', 'lastCommand', 'loopIntervalGapMs', 'loopMaxGapMs',
-    'machineState', 'physicalPaddleOn', 'reedOn', 'controlSource', 'cupPresence',
+    'machineState', 'physicalActivatorOn', 'reedOn', 'controlSource', 'cupPresence',
     'streamState', 'controlState', 'taskWatchdogReady', 'recoveryRequired',
     'compileFlags', 'remoteMachineControl'
   ]) {

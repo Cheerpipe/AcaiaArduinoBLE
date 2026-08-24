@@ -18,8 +18,8 @@ enum class RecoveryGestureResult : uint8_t {
 };
 
 inline bool recoveryGestureEntryAllowed(bool powerOnReset,
-                                        bool paddleStablyOn) {
-  return powerOnReset && paddleStablyOn;
+                                        bool activatorStablyOn) {
+  return powerOnReset && activatorStablyOn;
 }
 
 // Boot-local recognizer. Inputs are already debounced by the firmware. A
@@ -49,7 +49,7 @@ struct RecoveryGestureRecognizer {
     attemptStartedAtMs = 0;
   }
 
-  RecoveryGestureResult update(uint32_t nowMs, bool paddleOn,
+  RecoveryGestureResult update(uint32_t nowMs, bool activatorOn,
                                bool turnedOn, bool turnedOff) {
     if (!active) {
       return RecoveryGestureResult::NONE;
@@ -100,7 +100,7 @@ struct RecoveryGestureRecognizer {
       return RecoveryGestureResult::NONE;
     }
 
-    const bool candidate = paddleOn &&
+    const bool candidate = activatorOn &&
                            (completedCycles == RECOVERY_NETWORK_CYCLES ||
                             completedCycles == RECOVERY_FACTORY_CYCLES);
     if (candidate &&

@@ -1,5 +1,6 @@
 #include "ShotStopperNetwork.h"
 #include "ShotStopperMachineMomentaryConfig.h"
+#include "ShotStopperMachinePaddleConfig.h"
 #include "ShotStopperJsonArena.h"
 #include "ShotStopperOta.h"
 #include "ShotStopperPsram.h"
@@ -2002,7 +2003,7 @@ void ShotStopperNetwork::serviceWifiScan(uint32_t now) {
       scanMaintenanceLeaseId_ != 0 && control.maintenanceLeaseActive &&
       control.maintenanceLeaseId == scanMaintenanceLeaseId_ &&
       !control.activeCycle && !control.relayClosed &&
-      !control.physicalPaddleOn;
+      !control.physicalActivatorOn;
   const bool safe = controlAllowsConfiguration(control) ||
                     matchingMaintenanceLease;
 
@@ -2246,7 +2247,7 @@ void ShotStopperNetwork::processAcceptedMaintenanceCommand(uint32_t now) {
         static_cast<uint32_t>(now - acceptedCommandReceivedAtMs_) >=
         MAINTENANCE_PUBLICATION_TIMEOUT_MS;
     if (control.maintenanceLeaseActive || control.activeCycle ||
-        control.physicalPaddleOn || publicationTimedOut) {
+        control.physicalActivatorOn || publicationTimedOut) {
       (void)enqueueMaintenanceCompletion(
           acceptedCommand_, false, CommandResultState::CANCELED);
       acceptedCommandPending_ = false;
@@ -2255,7 +2256,7 @@ void ShotStopperNetwork::processAcceptedMaintenanceCommand(uint32_t now) {
     return;
   }
   if (control.activeCycle || control.relayClosed ||
-      control.physicalPaddleOn) {
+      control.physicalActivatorOn) {
     (void)enqueueMaintenanceCompletion(
         acceptedCommand_, false, CommandResultState::CANCELED);
     acceptedCommandPending_ = false;
@@ -3100,7 +3101,7 @@ constexpr const char *WEB_UI_CLIENT_HEADER = "X-WebUI-Client";
 const char *configLockReason(const ControlGateSnapshot &status) {
   if (status.activeCycle) return "active_shot";
   if (status.machineRunning) return "machine_running";
-  if (status.physicalPaddleOn) return "paddle_on";
+  if (status.physicalActivatorOn) return "activator_on";
   if (status.maintenanceLeaseActive) return "maintenance";
   if (status.state != StopperState::READY) return "not_ready";
   return "none";
@@ -3650,7 +3651,7 @@ const char *activeCycleShotTypeLabel(const ControlStatusSnapshot &control) {
 const char *ShotStopperNetwork::endReasonName(EndReason reason) {
   switch (reason) {
     case EndReason::NONE: return "NONE";
-    case EndReason::PADDLE: return "PADDLE";
+    case EndReason::ACTIVATOR: return "ACTIVATOR";
     case EndReason::SCALE_THRESHOLD: return "SCALE_THRESHOLD";
     case EndReason::WEIGHT_ANOMALY: return "WEIGHT_ANOMALY";
     case EndReason::GLOBAL_LIMIT: return "GLOBAL_LIMIT";
@@ -4010,7 +4011,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         &used,
         ",\"state\":\"%s\",\"stateLabel\":\"%s\",\"machineState\":\"%s\","
         "\"relayClosed\":%s,\"machineRunning\":%s,"
-        "\"physicalPaddleOn\":%s,\"virtualPaddleOn\":%s,"
+        "\"physicalActivatorOn\":%s,\"virtualHoldOn\":%s,"
         "\"remoteControlEnabled\":%s,\"controlSource\":\"%s\","
         "\"circuitElapsedMs\":%lu,"
         "\"safety\":{\"state\":\"%s\",\"fault\":\"%s\","
@@ -4052,8 +4053,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         machineRunStateName(control.machineRunState),
         control.relayClosed ? "true" : "false",
         control.machineRunning ? "true" : "false",
-        control.physicalPaddleOn ? "true" : "false",
-        control.virtualPaddleOn ? "true" : "false",
+        control.physicalActivatorOn ? "true" : "false",
+        control.virtualHoldOn ? "true" : "false",
         control.remoteControlEnabled ? "true" : "false",
         controlSourceName(control.source),
         static_cast<unsigned long>(control.circuitElapsedMs),
@@ -4203,7 +4204,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"relayClosed\":%s,\"machineRunning\":%s,"
         "\"machineStartAck\":%s,\"machineStopAck\":%s,\"machineOrphan\":%s,"
         "\"reedOn\":%s,"
-        "\"physicalPaddleOn\":%s,"
+        "\"physicalActivatorOn\":%s,"
         "\"controlSource\":\"%s\","
         "\"cupPresence\":{\"state\":\"%s\",\"present\":%s},"
         "\"network\":{\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
@@ -4247,7 +4248,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.machineStopAckPending ? "true" : "false",
         control.machineOrphanRun ? "true" : "false",
         control.reedOn ? "true" : "false",
-        control.physicalPaddleOn ? "true" : "false",
+        control.physicalActivatorOn ? "true" : "false",
         controlSourceName(control.source),
         cupPresenceStateName(control.cupPresenceState),
         control.cupPresent ? "true" : "false",
@@ -4390,7 +4391,7 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
     } else if ((event.code == DebugCode::WEB_COMMAND_ACCEPTED ||
                 event.code == DebugCode::WEB_COMMAND_REJECTED) &&
                event.argument1 >=
-                   static_cast<int32_t>(WebCommandType::PADDLE_ON) &&
+                   static_cast<int32_t>(WebCommandType::REMOTE_ON) &&
                event.argument1 <=
                    static_cast<int32_t>(
                        WebCommandType::MAINTENANCE_COMPLETE)) {
@@ -4578,7 +4579,7 @@ esp_err_t ShotStopperNetwork::shotsClearHandler(httpd_req_t *request) {
   if (!self.historyMutationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
-                     "Stop the cycle, switch the physical paddle OFF, and wait for Ready before clearing shot history.");
+                     "Stop the cycle, switch the physical activator OFF, and wait for Ready before clearing shot history.");
   }
 
   const esp_err_t bodyStatus = self.lockJsonBody(
@@ -4618,7 +4619,7 @@ esp_err_t ShotStopperNetwork::lastShotClearHandler(httpd_req_t *request) {
   if (!self.historyMutationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
-                     "Stop the cycle, switch the physical paddle OFF, and wait for Ready before clearing the last shot.");
+                     "Stop the cycle, switch the physical activator OFF, and wait for Ready before clearing the last shot.");
   }
 
   const esp_err_t bodyStatus = self.lockJsonBody(
@@ -4658,7 +4659,7 @@ esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
   if (!self.historyMutationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
-                     "Stop the cycle, switch the physical paddle OFF, and wait for Ready before deleting shot records.");
+                     "Stop the cycle, switch the physical activator OFF, and wait for Ready before deleting shot records.");
   }
 
   const esp_err_t bodyStatus = self.lockJsonBody(
@@ -4697,7 +4698,7 @@ esp_err_t ShotStopperNetwork::timeSyncHandler(httpd_req_t *request) {
   if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
-                     "Stop the cycle, switch the physical paddle OFF, and wait for Ready before syncing the clock.");
+                     "Stop the cycle, switch the physical activator OFF, and wait for Ready before syncing the clock.");
   }
   self.ntpManualSyncPending_ = true;
   return self.sendAccepted(request, self.allocateRequestId());
@@ -5384,7 +5385,7 @@ esp_err_t ShotStopperNetwork::paddleHandler(httpd_req_t *request) {
                      "The current state does not allow that action.");
   }
   WebCommand command;
-  command.type = on ? WebCommandType::PADDLE_ON : WebCommandType::PADDLE_OFF;
+  command.type = on ? WebCommandType::REMOTE_ON : WebCommandType::REMOTE_OFF;
   command.requestId = self.allocateRequestId();
   command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   if (!self.callbacks_.enqueueWebCommand(command)) {
@@ -5470,7 +5471,7 @@ esp_err_t ShotStopperNetwork::factoryResetHandler(httpd_req_t *request) {
   if (!self.webUiConfigurationAllowed(request, status)) {
     return sendError(request, STATUS_CONFLICT,
                      "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
-                     "Stop the cycle, switch the physical paddle OFF, and wait for Ready before restoring factory settings.");
+                     "Stop the cycle, switch the physical activator OFF, and wait for Ready before restoring factory settings.");
   }
 
   const esp_err_t bodyStatus = self.lockJsonBody(

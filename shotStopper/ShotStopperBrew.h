@@ -15,8 +15,9 @@
 //   machineIsRunning / machineRunningElapsed, start/stop requests). Never
 //   include or call paddle/momentary/reed internals.
 // - Must not know paddle vs switch vs reed details. If a guard or brew path
-//   branches on PaddleMode, reed GPIO, momentary pulse state, or MachineType,
-//   that is a layer violation — move it into the machine specialization.
+//   branches on paddle-mode settings, reed GPIO, momentary pulse state, or
+//   compiled machine identity, that is a layer violation — move it into the
+//   machine specialization.
 // - Does not own cup presence or scale link; consumes GuardInputs / session
 //   snapshots the stopper already built.
 

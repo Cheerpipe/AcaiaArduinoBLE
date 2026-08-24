@@ -135,7 +135,7 @@ void serviceReedAssumeWindow() {
     if (elapsedMs(reedAssumeAtMs) >= runtimeReedConfirmTimeoutMs(runtimeConfig)) {
       clearReedAssume();
       momentaryLogicalRunActive = false;
-      paddleTurnedOff = true;
+      activatorTurnedOff = true;
     }
     return;
   }
@@ -233,6 +233,7 @@ inline MachineRunState machineRunState() {
 }
 
 inline void machineFillInferenceStatus(ControlStatusSnapshot &status) {
+  status.reedOn = reedOn;
   status.machineStartAckPending =
       reedAssume == ReedAssume::ON || reedAssume == ReedAssume::GRACE_ON;
   status.machineStopAckPending =

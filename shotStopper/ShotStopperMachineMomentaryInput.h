@@ -9,7 +9,7 @@
 //       (machine-native rinse) and is not a start/stop: in press mode the
 //       tentative edge is undone; in release mode it is never applied.
 //
-// BOUNDARY: Momentary-only. Writes shared switch sample + momentary runtime.
+// BOUNDARY: Momentary-only. Writes shared activator sample + momentary runtime.
 // Stopper/brew/cup/scale must not read these fields or know press vs release —
 // they consume UserIntent from the façade. No paddle latch / PaddleMode here.
 
@@ -33,8 +33,8 @@ bool pulseOutputActive = false;
 bool pulseOutputIsStart = false;
 uint32_t pulseOutputEndsAtMs = 0;
 
-bool readRawPaddleOn() {
-  return digitalRead(PADDLE_GPIO) == PADDLE_ACTIVE_LEVEL;
+bool readRawActivatorOn() {
+  return digitalRead(ACTIVATOR_GPIO) == ACTIVATOR_ACTIVE_LEVEL;
 }
 
 void applyMomentaryRelayDrive();
@@ -52,16 +52,16 @@ void resetReedRuntime();
 // momentaryStartOnPress (press, or a short-press release). Not the 1:1 relay.
 void applyMomentaryStartStopEdge() {
   if (machineIsRunning()) {
-    paddleOn = false;
-    paddleTurnedOff = true;
+    activatorOn = false;
+    activatorTurnedOff = true;
     momentaryUserStopThisCycle = true;
     momentarySkipFirmwareStopPulse = true;
     momentaryLogicalRunActive = false;
     noteMomentaryLogicalStop();
     return;
   }
-  paddleOn = false;
-  paddleTurnedOn = true;
+  activatorOn = false;
+  activatorTurnedOn = true;
   momentaryStartEdgeThisCycle = true;
   noteMomentaryLogicalStart();
   momentaryLogicalRunActive = true;
@@ -77,10 +77,10 @@ void snapshotMomentaryGesture() {
 }
 
 void revertDisqualifiedSinglePress() {
-  paddleOn = false;
+  activatorOn = false;
   momentaryStartEdgeThisCycle = false;
   if (!momentaryGestureRestoreRunning) {
-    paddleTurnedOff = true;
+    activatorTurnedOff = true;
     momentaryUserStopThisCycle = true;
     momentarySkipFirmwareStopPulse = true;
     momentaryLogicalRunActive = false;
@@ -93,17 +93,17 @@ void revertDisqualifiedSinglePress() {
   noteMomentaryDisqualifiedPress(true);
 }
 
-void initializePaddleInput() {
-  pinMode(PADDLE_GPIO, INPUT_PULLUP);
+void initializeActivatorInput() {
+  pinMode(ACTIVATOR_GPIO, INPUT_PULLUP);
 #if SHOT_STOPPER_MACHINE_TYPE == 2
   pinMode(REED_GPIO, INPUT_PULLUP);
   resetReedRuntime();
 #endif
-  momentaryRawOn = readRawPaddleOn();
+  momentaryRawOn = readRawActivatorOn();
   momentaryPhysicalOn = momentaryRawOn;
   momentaryRawChangedAtMs = millis();
-  rawPaddleOn = momentaryRawOn;
-  paddleOn = false;
+  rawActivatorOn = momentaryRawOn;
+  activatorOn = false;
   momentaryPressHeld = false;
   momentaryUserStopThisCycle = false;
   momentarySkipFirmwareStopPulse = false;
@@ -113,44 +113,44 @@ void initializePaddleInput() {
   pulseOutputActive = false;
 }
 
-void machineReleasePhysicalSwitchToBrew() {
+void machineOnActivatorReady() {
   if (!momentaryPhysicalOn) {
-    paddleOn = false;
-    rawPaddleOn = false;
+    activatorOn = false;
+    rawActivatorOn = false;
   }
 }
 
-void machineReconcileBrewOutcome(bool brewActive) {
+void machineOnBrewOutcome(bool brewActive) {
   if (momentaryStartEdgeThisCycle && !brewActive) {
-    paddleOn = false;
+    activatorOn = false;
     momentaryLogicalRunActive = false;
     momentaryGesturePending = false;
     noteMomentaryLogicalStartCanceled();
   }
 }
 
-bool paddleIsStablyOff() {
-  return !paddleOn && !rawPaddleOn && !momentaryPhysicalOn &&
-         elapsedMs(momentaryRawChangedAtMs) >= PADDLE_DEBOUNCE_MS;
+bool activatorIsStablyOff() {
+  return !activatorOn && !rawActivatorOn && !momentaryPhysicalOn &&
+         elapsedMs(momentaryRawChangedAtMs) >= ACTIVATOR_DEBOUNCE_MS;
 }
 
-void updatePaddleInput() {
-  paddleTurnedOn = false;
-  paddleTurnedOff = false;
+void updateActivatorInput() {
+  activatorTurnedOn = false;
+  activatorTurnedOff = false;
   momentaryUserStopThisCycle = false;
   momentaryStartEdgeThisCycle = false;
 
-  const bool sampledOn = readRawPaddleOn();
+  const bool sampledOn = readRawActivatorOn();
   if (sampledOn != momentaryRawOn) {
     momentaryRawOn = sampledOn;
     momentaryRawChangedAtMs = millis();
   }
-  rawPaddleOn = momentaryRawOn;
+  rawActivatorOn = momentaryRawOn;
 
   bool physicalTurnedOn = false;
   bool physicalTurnedOff = false;
   if (momentaryPhysicalOn != momentaryRawOn &&
-      elapsedMs(momentaryRawChangedAtMs) >= PADDLE_DEBOUNCE_MS) {
+      elapsedMs(momentaryRawChangedAtMs) >= ACTIVATOR_DEBOUNCE_MS) {
     const bool previous = momentaryPhysicalOn;
     momentaryPhysicalOn = momentaryRawOn;
     physicalTurnedOn = !previous && momentaryPhysicalOn;
@@ -164,7 +164,7 @@ void updatePaddleInput() {
   if (physicalTurnedOn) {
     momentaryPressHeld = true;
     momentaryPressStartedAtMs = millis();
-    addDebugEvent(DebugCategory::PADDLE, DebugCode::PADDLE_ON);
+    addDebugEvent(DebugCategory::ACTIVATOR, DebugCode::ACTIVATOR_ON);
     if (startOnPress) {
       snapshotMomentaryGesture();
       applyMomentaryStartStopEdge();
@@ -183,7 +183,7 @@ void updatePaddleInput() {
     const uint32_t heldMs = elapsedMs(momentaryPressStartedAtMs);
     momentaryPressHeld = false;
     momentaryGesturePending = false;
-    addDebugEvent(DebugCategory::PADDLE, DebugCode::PADDLE_OFF);
+    addDebugEvent(DebugCategory::ACTIVATOR, DebugCode::ACTIVATOR_OFF);
     if (startOnPress) {
       return;
     }

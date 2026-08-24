@@ -29,11 +29,12 @@ scan_firmware_sources() {
     "$firmware_dir/ShotStopperHardware.h" \
     "$firmware_dir/ShotStopperMachine.h" \
     "$firmware_dir/ShotStopperMachineRelay.h" \
-    "$firmware_dir/ShotStopperMachineSwitchSample.h" \
+    "$firmware_dir/ShotStopperMachineActivatorSample.h" \
     "$firmware_dir/ShotStopperMachinePaddleInput.h" \
     "$firmware_dir/ShotStopperMachinePaddleControl.h" \
     "$firmware_dir/ShotStopperMachinePaddleState.h" \
     "$firmware_dir/ShotStopperMachinePaddlePolicy.h" \
+    "$firmware_dir/ShotStopperMachinePaddleConfig.h" \
     "$firmware_dir/ShotStopperMachineMomentaryInput.h" \
     "$firmware_dir/ShotStopperMachineMomentaryConfig.h" \
     "$firmware_dir/ShotStopperMachineMomentaryControl.h" \
@@ -167,7 +168,7 @@ done
 
 echo "Legacy Micra-incompatible paths: absent"
 
-for machine_gpio_leak in 'readRawPaddleOn(' 'pinMode(RELAY_GPIO' \
+for machine_gpio_leak in 'readRawActivatorOn(' 'pinMode(RELAY_GPIO' \
     '#if SHOT_STOPPER_MACHINE_TYPE'; do
   if grep -n "$machine_gpio_leak" "$firmware_file"; then
     echo "Machine GPIO/type leak remains in shotStopper.cpp: $machine_gpio_leak" >&2

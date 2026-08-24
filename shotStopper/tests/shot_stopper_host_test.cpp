@@ -216,21 +216,23 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scaleDebugAction = BookooDebugAction::START;
   scaleDebugBeepLevel = 0;
   scalePaddleReturnReminderBeepPending = false;
+#if SHOT_STOPPER_MACHINE_TYPE == 0
   paddleReturnReminderActive = false;
   paddleReturnReminderLastAtMs = 0;
   paddleReturnReminderStartedAtMs = 0;
+#endif
   scaleCompletionBeepPending = false;
   scaleCompletionBeepScheduled = false;
   hostAutoScaleWorkerProgress = true;
   setScaleLinkState(scaleConnected ? ScaleLinkState::CONNECTED
                                    : ScaleLinkState::DISCONNECTED);
 
-  rawPaddleOn = false;
-  paddleOn = false;
-  paddleTurnedOn = false;
-  paddleTurnedOff = false;
-  rawPaddleChangedAtMs = 0;
-  virtualPaddleOn = false;
+  rawActivatorOn = false;
+  activatorOn = false;
+  activatorTurnedOn = false;
+  activatorTurnedOff = false;
+  rawActivatorChangedAtMs = 0;
+  virtualHoldOn = false;
   machineEndCycle();
   circuitClosed = false;
   relaySafetyTripped = false;
@@ -280,11 +282,11 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   relaySafetyTimersReady = true;
 
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
-  hostPinLevel[PADDLE_GPIO] = initialPaddleOn ? PADDLE_ACTIVE_LEVEL
-                                              : !PADDLE_ACTIVE_LEVEL;
-  initializePaddleInput();
+  hostPinLevel[ACTIVATOR_GPIO] = initialPaddleOn ? ACTIVATOR_ACTIVE_LEVEL
+                                              : !ACTIVATOR_ACTIVE_LEVEL;
+  initializeActivatorInput();
 #if SHOT_STOPPER_MACHINE_TYPE != 0
-  machineReleasePhysicalSwitchToBrew();
+  machineOnActivatorReady();
 #endif
   localBuzzer.begin(BUZZER_GPIO);
   hostRelayOpenWrites = 0;
@@ -352,8 +354,8 @@ void runLoopAfter(uint32_t deltaMs) {
 }
 
 void setRawPaddle(bool on) {
-  hostPinLevel[PADDLE_GPIO] = on ? PADDLE_ACTIVE_LEVEL
-                                : !PADDLE_ACTIVE_LEVEL;
+  hostPinLevel[ACTIVATOR_GPIO] = on ? ACTIVATOR_ACTIVE_LEVEL
+                                : !ACTIVATOR_ACTIVE_LEVEL;
   if (hostAutoScaleWorkerProgress && scale.connected) {
     markScaleWorkerProgress();
   }
@@ -416,7 +418,7 @@ void seedCupPresence(float weight) {
 }
 
 void reachReadyFromBoot() {
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
 }
@@ -430,7 +432,7 @@ uint32_t startCycle() {
   const uint32_t rawOnAtMs = hostMillis;
   setRawPaddle(true);
   CHECK_VALUE(stopperState == StopperState::READY, rawOnAtMs);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK_VALUE(stopperState == StopperState::BREW ||
                   stopperState == StopperState::MANUAL_NO_SCALE,
               rawOnAtMs);
@@ -451,7 +453,7 @@ void releaseAtPhysicalDuration(uint32_t rawOnAtMs, uint32_t durationMs) {
   CHECK(hostMillis <= rawOffAtMs);
   runLoopAfter(rawOffAtMs - hostMillis);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
 }
 
 void reachSessionElapsed(uint32_t elapsed) {
@@ -612,13 +614,13 @@ void t01_boot_with_paddle_off() {
   reachReadyFromBoot();
 }
 
-void t02_boot_with_paddle_on() {
+void t02_boot_with_activator_on() {
   resetHarness(true, true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS * 4);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS * 4);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(!getRelaySafetySnapshot().closed);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   startCycle();
 }
@@ -684,7 +686,7 @@ void t05_release_between_rinse_and_brew_is_short_shot() {
   CHECK(executeNextScaleCommand());
   releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs + 1);
   CHECK(stopperState == StopperState::READY);
-  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(session.endReason == EndReason::ACTIVATOR);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
 }
@@ -696,9 +698,9 @@ void t06_paddle_off_during_brew() {
   advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
-  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(session.endReason == EndReason::ACTIVATOR);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
 }
@@ -726,7 +728,7 @@ void t08_on_during_rinse_is_ignored() {
   CHECK(stopperState == StopperState::RINSE);
   const uint32_t rinseStarted = session.rinseStartedAtMs;
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::RINSE);
   CHECK(session.rinseStartedAtMs == rinseStarted);
 }
@@ -737,7 +739,7 @@ void t09_rinse_ending_on_requires_off() {
   const uint32_t rawOnAt = startCycle();
   releaseAtPhysicalDuration(rawOnAt, 500);
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   runLoopAfter(runtimeConfig.rinseDurationMs - elapsedMs(session.rinseStartedAtMs));
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -747,9 +749,9 @@ void t10_paddle_bounce_does_not_start_cycle() {
   resetHarness(false, false);
   reachReadyFromBoot();
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS - 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS - 1);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(hostRelayClosedWrites == 0);
@@ -766,7 +768,7 @@ void t11_ble_loss_suspends_brew_without_late_stop() {
   CHECK(session.weightControlState == WeightControlState::SUSPENDED);
   CHECK(getRelaySafetySnapshot().closed);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   CHECK(session.timerStopResult == TimerStopResult::NOT_ATTEMPTED);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
@@ -822,7 +824,7 @@ void t13_reset_path_starts_with_relay_open() {
   CHECK(!getRelaySafetySnapshot().resetRecoveryRequired);
 }
 
-void t14_automatic_stop_stays_open_while_paddle_on() {
+void t14_automatic_stop_stays_open_while_activator_on() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
@@ -862,7 +864,7 @@ void t15_repeated_rinse_and_brew_reset_session_state() {
 
 void t16_only_micra_states_are_compiled() {
   CHECK(StopperState::REQUIRES_OFF != StopperState::READY);
-  CHECK(PADDLE_ACTIVE_LEVEL == LOW);
+  CHECK(ACTIVATOR_ACTIVE_LEVEL == LOW);
   CHECK(RELAY_OPEN_LEVEL != RELAY_CLOSED_LEVEL);
 }
 
@@ -872,10 +874,10 @@ void t17_simultaneous_global_limit_and_paddle_off_is_idempotent() {
   runtimeConfig.operationalWallMs = HARD_MAX_CIRCUIT_CLOSED_MS;
   startCycle();
   advanceToBrew();
-  reachSessionElapsed(HARD_MAX_CIRCUIT_CLOSED_MS - PADDLE_DEBOUNCE_MS);
+  reachSessionElapsed(HARD_MAX_CIRCUIT_CLOSED_MS - ACTIVATOR_DEBOUNCE_MS);
   setRawPaddle(false);
   hostRelayOpenWrites = 0;
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(session.endReason == EndReason::GLOBAL_LIMIT);
   CHECK(hostRelayOpenWrites == 1);
@@ -897,7 +899,7 @@ void t18_rinse_and_short_shot_each_request_one_stop() {
   rawOnAt = startCycle();
   CHECK(executeNextScaleCommand());
   releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs + 100);
-  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(session.endReason == EndReason::ACTIVATOR);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
 }
 
@@ -909,7 +911,7 @@ void t19_manual_cycle_without_scale_has_no_timer_commands() {
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
   runLoopAfter(runtimeConfig.rinseGestureMs + 1);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 0);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
@@ -934,7 +936,7 @@ void t21_global_limit_without_scale_rearms_after_release() {
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(!getRelaySafetySnapshot().closed);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
 }
 
@@ -971,7 +973,7 @@ void t24_paddle_off_during_brew_is_immediate() {
   startCycle();
   advanceToBrew();
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
 }
@@ -1009,7 +1011,7 @@ void t26_reconnected_suspended_cycle_sends_one_stop_on_release() {
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.weightControlState == WeightControlState::SUSPENDED);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
 }
@@ -1028,7 +1030,7 @@ void t27_configuration_is_rejected_while_cycle_is_active() {
   CHECK(runtimeConfig.goalWeightG == DEFAULT_GOAL_WEIGHT_G);
   CHECK(session.config.goalWeightG == DEFAULT_GOAL_WEIGHT_G);
 
-  releaseAtPhysicalDuration(rawPaddleChangedAtMs,
+  releaseAtPhysicalDuration(rawActivatorChangedAtMs,
                             runtimeConfig.rinseGestureMs + 100);
   CHECK(stopperState == StopperState::READY);
   CHECK(enqueueWebCommand(update));
@@ -1046,11 +1048,11 @@ void t28_paddle_motion_cannot_cancel_or_extend_rinse() {
   const uint32_t rinseDeadline = session.rinseStartedAtMs + runtimeConfig.rinseDurationMs;
 
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::RINSE);
   CHECK(session.rinseStartedAtMs + runtimeConfig.rinseDurationMs == rinseDeadline);
 
@@ -1155,7 +1157,7 @@ void r04_scale_commands_execute_once_and_report_results() {
   CHECK(scale.tareCalls == 0);
   advanceToBrew();
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
   CHECK(executeNextScaleCommand());
   CHECK(scale.stopTimerCalls == 1);
@@ -1180,7 +1182,7 @@ void r04_scale_commands_execute_once_and_report_results() {
   advanceToBrew();
   scale.stopTimerSucceeds = false;
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(executeNextScaleCommand());
   CHECK(scale.stopTimerCalls == 1);
   CHECK(session.timerStopResult == TimerStopResult::WRITE_FAILED);
@@ -1292,8 +1294,8 @@ void r06_hard_timer_opens_circuit_without_control_loop() {
 void r07_timing_remains_correct_across_millis_wrap() {
   resetHarness(false, false);
   hostMillis = UINT32_MAX - 100;
-  rawPaddleChangedAtMs = hostMillis;
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  rawActivatorChangedAtMs = hostMillis;
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   runtimeConfig.operationalWallMs = HARD_MAX_CIRCUIT_CLOSED_MS;
   startCycle();
@@ -1330,7 +1332,7 @@ void r09_stop_is_not_retried_after_disconnect_before_execution() {
   CHECK(executeNextScaleCommand());
   advanceToBrew();
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
 
   // Link-state publication can lag the library's own connection flag.
@@ -1351,7 +1353,7 @@ void r10_relay_cannot_close_when_hard_timer_cannot_arm() {
   delete relaySafetyTimer;
   relaySafetyTimer = nullptr;
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(session.endReason == EndReason::RELAY_SAFETY_FAILURE);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -1361,7 +1363,7 @@ void r10_relay_cannot_close_when_hard_timer_cannot_arm() {
   reachReadyFromBoot();
   hostEspTimerStartSucceeds = false;
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(session.endReason == EndReason::RELAY_SAFETY_FAILURE);
   CHECK(!session.active);
@@ -1508,7 +1510,7 @@ void r13_full_queue_prevents_stop_without_delaying_relay_open() {
     CHECK(enqueueScaleCommand(filler));
   }
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(session.stopTimerRequested);
@@ -2055,15 +2057,15 @@ void w45_bbw_protection_retare_relation_is_validated() {
 void w13_virtual_paddle_uses_normal_state_machine() {
   resetHarness(false, false);
   reachReadyFromBoot();
-  WebCommand on = webControlCommand(WebCommandType::PADDLE_ON);
+  WebCommand on = webControlCommand(WebCommandType::REMOTE_ON);
   processWebCommand(on);
   CHECK(session.active);
   CHECK(session.source == ControlSource::WEB);
-  CHECK(virtualPaddleOn);
+  CHECK(virtualHoldOn);
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
   CHECK(getRelaySafetySnapshot().closed);
   runLoopAfter(runtimeConfig.rinseGestureMs + 1);
-  WebCommand off = webControlCommand(WebCommandType::PADDLE_OFF);
+  WebCommand off = webControlCommand(WebCommandType::REMOTE_OFF);
   processWebCommand(off);
   CHECK(stopperState == StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -2072,10 +2074,10 @@ void w13_virtual_paddle_uses_normal_state_machine() {
 void w14_physical_motion_overrides_web_control() {
   resetHarness(false, false);
   reachReadyFromBoot();
-  WebCommand on = webControlCommand(WebCommandType::PADDLE_ON);
+  WebCommand on = webControlCommand(WebCommandType::REMOTE_ON);
   processWebCommand(on);
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(session.endReason == EndReason::PHYSICAL_OVERRIDE);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -2096,7 +2098,7 @@ void w15_web_rinse_starts_scale_timer() {
 
   processWebCommand(rinse);
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(session.endReason == EndReason::PHYSICAL_OVERRIDE);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -2110,7 +2112,7 @@ void w16_web_stop_during_rinse_preserves_rearm() {
   const uint32_t rawOnAt = startCycle();
   releaseAtPhysicalDuration(rawOnAt, 400);
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   WebCommand stop;
   stop.type = WebCommandType::STOP;
   processWebCommand(stop);
@@ -2122,7 +2124,7 @@ void w16_web_stop_during_rinse_preserves_rearm() {
 void w17_web_session_stop_is_a_safe_stop() {
   resetHarness(false, false);
   reachReadyFromBoot();
-  WebCommand on = webControlCommand(WebCommandType::PADDLE_ON);
+  WebCommand on = webControlCommand(WebCommandType::REMOTE_ON);
   processWebCommand(on);
   WebCommand timeout;
   timeout.type = WebCommandType::STOP_HEARTBEAT;
@@ -2147,7 +2149,7 @@ void w18_web_stop_can_end_a_physical_brew_only_by_opening() {
 
 void w19_web_start_is_rejected_outside_ready() {
   resetHarness(true, false);
-  WebCommand on = webControlCommand(WebCommandType::PADDLE_ON);
+  WebCommand on = webControlCommand(WebCommandType::REMOTE_ON);
   processWebCommand(on);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(!session.active);
@@ -2351,7 +2353,7 @@ void w30_last_cycle_weight_must_belong_to_that_cycle() {
   event.weightG = 7.5f;
   publishScaleEvent(event, true);
   processScaleWorkerEvents();
-  releaseAtPhysicalDuration(rawPaddleChangedAtMs,
+  releaseAtPhysicalDuration(rawActivatorChangedAtMs,
                             runtimeConfig.rinseGestureMs + 100);
   CHECK(lastCycle.weightValid);
   CHECK(fabsf(lastCycle.lastWeightG - 7.5f) < 0.001f);
@@ -2435,12 +2437,12 @@ void w34_calibration_reset_restores_baseline_and_cancels_analysis() {
 void w35_status_reports_the_live_physical_paddle_gpio() {
   resetHarness(false, false);
   reachReadyFromBoot();
-  hostPinLevel[PADDLE_GPIO] = PADDLE_ACTIVE_LEVEL;
-  CHECK(!rawPaddleOn);
+  hostPinLevel[ACTIVATOR_GPIO] = ACTIVATOR_ACTIVE_LEVEL;
+  CHECK(!rawActivatorOn);
   publishControlStatus();
   ControlStatusSnapshot status;
   copyControlStatus(status);
-  CHECK(status.physicalPaddleOn);
+  CHECK(status.physicalActivatorOn);
 }
 
 void w36_paddle_return_reminder_beeps_at_configured_interval_only_while_open() {
@@ -2675,7 +2677,7 @@ void attemptBlockedNoScaleStart() {
   CHECK(noScaleShotGuardArmed);
   const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   CHECK(!session.active);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -2692,7 +2694,7 @@ void attemptBlockedNoScaleStart() {
   CHECK(debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED));
   CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
 }
 
@@ -2787,7 +2789,7 @@ void ns08_blocked_beep_respects_alert_checkbox() {
   reachReadyFromBoot();
   const uint32_t before = localBuzzer.acceptedRequests;
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(localBuzzer.acceptedRequests == before);
   runLoopAfter(runtimeConfig.rinseGestureMs + 1);
   CHECK(stopperState == StopperState::READY);
@@ -2803,7 +2805,7 @@ void ns09_armed_rinse_gesture_runs_and_consumes_guard() {
   const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
   const uint32_t rawOnAt = hostMillis;
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   CHECK(noScaleShotGuardArmed);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -3625,7 +3627,7 @@ void w77_scale_priority_disconnected_beeps_on_circuit_without_ble() {
     runLoopAfter(40);
   }
   const uint32_t afterStart = localBuzzer.acceptedRequests;
-  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(localBuzzer.acceptedRequests == afterStart + 1);
   checkLocalCompletionTone();
@@ -3657,7 +3659,7 @@ void w79_buzzer_only_stop_beeps_before_timer_stop_result() {
     runLoopAfter(40);
   }
   const uint32_t before = localBuzzer.acceptedRequests;
-  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(localBuzzer.acceptedRequests == before + 1);
   checkLocalCompletionTone();
@@ -3677,7 +3679,7 @@ void w79b_stop_beeps_at_circuit_while_scale_timer_stop_still_pending() {
   drainLocalBuzzer();
   const uint32_t before = localBuzzer.acceptedRequests;
   publishScaleTimer(5000);
-  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(localBuzzer.acceptedRequests == before + 1);
   checkLocalCompletionTone();
@@ -3717,7 +3719,7 @@ void w79d_scale_only_start_and_stop_still_use_local_circuit_beeps() {
   CHECK(executeNextScaleCommand());
   drainLocalBuzzer();
   const uint32_t afterStart = localBuzzer.acceptedRequests;
-  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
   CHECK(localBuzzer.acceptedRequests == afterStart + 1);
   checkLocalCompletionTone();
 }
@@ -4379,7 +4381,7 @@ void r21_automatic_control_requires_fresh_weight() {
   reachReadyFromBoot();
 
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(session.active);
   CHECK(!session.startedWithScale);
   CHECK(!session.automaticEnabled);
@@ -4393,7 +4395,7 @@ void r21_automatic_control_requires_fresh_weight() {
   currentWeightReceivedAtMs = hostMillis;
   markScaleWorkerProgress();
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(session.startedWithScale);
   CHECK(session.automaticEnabled);
   CHECK(stopperState == StopperState::BREW);
@@ -4569,12 +4571,12 @@ void w89_restart_flush_includes_live_and_aborts_on_fail() {
 void r24_web_control_is_available_without_session_owner() {
   resetHarness(false, false);
   reachReadyFromBoot();
-  processWebCommand(webControlCommand(WebCommandType::PADDLE_ON));
+  processWebCommand(webControlCommand(WebCommandType::REMOTE_ON));
   CHECK(session.active);
   CHECK(session.source == ControlSource::WEB);
   CHECK(getRelaySafetySnapshot().closed);
 
-  WebCommand paddleOff = webControlCommand(WebCommandType::PADDLE_OFF);
+  WebCommand paddleOff = webControlCommand(WebCommandType::REMOTE_OFF);
   processWebCommand(paddleOff);
   CHECK(!session.active);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -4647,7 +4649,7 @@ void r27_platform_clock_failure_prevents_circuit_close() {
   reachReadyFromBoot();
   platformClockReady = false;
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(getRelaySafetySnapshot().state == RelaySafetyState::LOCKOUT);
   CHECK(getRelaySafetySnapshot().fault ==
@@ -4658,7 +4660,7 @@ void r27_platform_clock_failure_prevents_circuit_close() {
 void r28_terminal_control_result_is_retained_until_forwarded() {
   resetHarness(false, false);
   reachReadyFromBoot();
-  processWebCommand(webControlCommand(WebCommandType::PADDLE_ON));
+  processWebCommand(webControlCommand(WebCommandType::REMOTE_ON));
   CHECK(session.active);
   hostForwardAcceptedNetworkCommandSucceeds = false;
 
@@ -4933,7 +4935,7 @@ void attemptBlockedCupStart() {
   CHECK(stopperState == StopperState::READY);
   const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   CHECK(!session.active);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -4947,7 +4949,7 @@ void attemptBlockedCupStart() {
   CHECK(debugEventExists(DebugCode::CUP_START_GUARD_BLOCKED));
   CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
 }
 
@@ -5001,7 +5003,7 @@ void cp05_rinse_without_cup_still_starts() {
   const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
   const uint32_t rawOnAt = hostMillis;
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   CHECK(cupStartGuardHold);
   CHECK(localBuzzer.acceptedRequests == beforeBeeps);
@@ -5069,12 +5071,12 @@ void cp09_blocked_cup_start_is_silent_when_alerts_off() {
   currentWeightSequence = 1;
   const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   runLoopAfter(runtimeConfig.rinseGestureMs + 1);
   CHECK(debugEventExists(DebugCode::CUP_START_GUARD_BLOCKED));
   CHECK(localBuzzer.acceptedRequests == beforeBeeps);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
 }
 
 void cp10_web_paddle_blocks_cup_start_with_double_beep() {
@@ -5085,7 +5087,7 @@ void cp10_web_paddle_blocks_cup_start_with_double_beep() {
   currentWeightReceivedAtMs = hostMillis;
   currentWeightSequence = 1;
   const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
-  processWebCommand(webControlCommand(WebCommandType::PADDLE_ON));
+  processWebCommand(webControlCommand(WebCommandType::REMOTE_ON));
   CHECK(stopperState == StopperState::READY);
   CHECK(!session.active);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -5459,7 +5461,7 @@ void st02_scale_timer_stop_waits_until_display_catches_internal() {
   runLoopAfter(4000);
   publishScaleTimer(3000);
 
-  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
   CHECK(pendingScaleTimerStop.pending);
   CHECK(!session.stopTimerRequested);
   CHECK(pendingScaleTimerStop.targetMs == 4000U);
@@ -5482,7 +5484,7 @@ void st03_scale_timer_stop_when_display_already_at_internal() {
   CHECK(executeNextScaleCommand());
   runLoopAfter(4000);
   publishScaleTimer(4200);
-  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
   CHECK(!pendingScaleTimerStop.pending);
   CHECK(session.stopTimerRequested);
 }
@@ -5495,7 +5497,7 @@ void st04_scale_timer_stop_extra_delay_applies_after_catchup() {
   CHECK(executeNextScaleCommand());
   runLoopAfter(4000);
   publishScaleTimer(4200);
-  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
   CHECK(pendingScaleTimerStop.pending);
   CHECK(!session.stopTimerRequested);
 
@@ -5516,7 +5518,7 @@ void st05_scale_timer_stop_catchup_times_out() {
   CHECK(executeNextScaleCommand());
   runLoopAfter(4000);
   publishScaleTimer(3000);
-  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
   CHECK(pendingScaleTimerStop.pending);
   CHECK(!session.stopTimerRequested);
 
@@ -5536,7 +5538,7 @@ void st06_scale_timer_stop_without_valid_timer_is_immediate() {
   startCycle();
   CHECK(executeNextScaleCommand());
   runLoopAfter(4000);
-  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
   CHECK(!pendingScaleTimerStop.pending);
   CHECK(session.stopTimerRequested);
 }
@@ -5550,7 +5552,7 @@ void st07_scale_timer_stop_waits_for_start_before_queueing_stop() {
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 0);
   CHECK(!session.remoteTimerStartSettled);
 
-  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
   CHECK(pendingScaleTimerStop.pending);
   CHECK(!session.stopTimerRequested);
   CHECK(commandCount(ScaleCommandType::START_TIMER_AND_TARE) == 1);
@@ -5577,7 +5579,7 @@ void st08_scale_timer_stop_extra_delay_applies_without_valid_timer() {
   runtimeConfig.scaleTimerStopExtraDelayMs = 100;
   startCycle();
   CHECK(executeNextScaleCommand());
-  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
   CHECK(pendingScaleTimerStop.pending);
   CHECK(!session.stopTimerRequested);
 
@@ -5997,8 +5999,8 @@ void w38_scale_connected_led_tracks_link_and_setting() {
 void s01_shot_log_filters_short_and_rinse() {
   CHECK(!shotLogEligible(EndReason::SHORT_SHOT, 15000));
   CHECK(!shotLogEligible(EndReason::RINSE_COMPLETE, 15000));
-  CHECK(!shotLogEligible(EndReason::PADDLE, 9000));
-  CHECK(shotLogEligible(EndReason::PADDLE, 10000));
+  CHECK(!shotLogEligible(EndReason::ACTIVATOR, 9000));
+  CHECK(shotLogEligible(EndReason::ACTIVATOR, 10000));
   CHECK(!shotLogBbwEligible(false, false, true));
   CHECK(!shotLogBbwEligible(true, true, true));
   CHECK(!shotLogBbwEligible(true, false, false));
@@ -6009,8 +6011,8 @@ void s01_shot_log_filters_short_and_rinse() {
 }
 
 void s01b_shot_log_stop_detail_names_end_reasons() {
-  CHECK(shotLogStopDetailFromEndReason(EndReason::PADDLE, true, false) ==
-        ShotLogStopDetail::PADDLE);
+  CHECK(shotLogStopDetailFromEndReason(EndReason::ACTIVATOR, true, false) ==
+        ShotLogStopDetail::ACTIVATOR);
   CHECK(shotLogStopDetailFromEndReason(EndReason::WEB_STOP, false, false) ==
         ShotLogStopDetail::WEB_STOP);
   CHECK(shotLogStopDetailFromEndReason(EndReason::PHYSICAL_OVERRIDE, false,
@@ -6033,7 +6035,7 @@ void s01b_shot_log_stop_detail_names_end_reasons() {
         ShotLogStopDetail::NORMAL_TARGET);
   CHECK(shotLogStopDetailFromEndReason(EndReason::CUP_REMOVED, true, false) ==
         ShotLogStopDetail::CUP_REMOVED);
-  CHECK(strcmp(shotLogStopDetailName(ShotLogStopDetail::PADDLE), "paddle") == 0);
+  CHECK(strcmp(shotLogStopDetailName(ShotLogStopDetail::ACTIVATOR), "activator") == 0);
   CHECK(strcmp(shotLogStopDetailName(ShotLogStopDetail::HARD_LIMIT),
                "hard_limit") == 0);
   CHECK(strcmp(shotLogStopDetailName(ShotLogStopDetail::WALL_LIMIT),
@@ -6049,7 +6051,7 @@ void s02_shot_log_appends_after_drip_delay() {
   pendingFinalize.logEligible = true;
   pendingFinalize.startedWithScale = false;
   pendingFinalize.finalState = StopperState::MANUAL_NO_SCALE;
-  pendingFinalize.endReason = EndReason::PADDLE;
+  pendingFinalize.endReason = EndReason::ACTIVATOR;
   pendingFinalize.bootId = shotLog.bootId();
   pendingFinalize.durationDs = 120;
   pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
@@ -6251,7 +6253,7 @@ void s02b_drip_delay_is_snapshotted_and_honors_boundaries() {
   session.startedWithScale = true;
   session.config.timerOnly = false;
   shot.automaticBrew = true;
-  schedulePendingShotFinalize(EndReason::PADDLE, 12000);
+  schedulePendingShotFinalize(EndReason::ACTIVATOR, 12000);
   CHECK(pendingFinalize.dripDelayMs == 1700);
 
   pendingFinalize = PendingShotFinalize{};
@@ -8265,7 +8267,7 @@ void at11_pre_cycle_anchor_does_not_treat_first_pour_as_touch() {
   advanceToBrew();
   session.hasWeightAnchor = true;
   session.lastAcceptedWeightG = 0.0f;
-  session.lastAcceptedWeightAtMs = session.startedAtMs - PADDLE_DEBOUNCE_MS;
+  session.lastAcceptedWeightAtMs = session.startedAtMs - ACTIVATOR_DEBOUNCE_MS;
   hostMillis += 300;
   publishWeight(2.0f);
   CHECK(!session.accidentalTouchHolding);
@@ -8521,7 +8523,7 @@ void pm01_original_bbw_release_after_rinse_keeps_machine_running() {
   CHECK(stopperState == StopperState::BREW);
   CHECK(machineHidesPhysicalStop());
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.active);
   CHECK(getRelaySafetySnapshot().closed);
@@ -8546,9 +8548,9 @@ void pm03_original_no_scale_paddle_off_ends_shot() {
   reachManualNoScaleState();
   runLoopAfter(runtimeConfig.rinseGestureMs + 1);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
-  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(session.endReason == EndReason::ACTIVATOR);
   CHECK(!getRelaySafetySnapshot().closed);
 }
 
@@ -8561,9 +8563,9 @@ void pm04_original_timer_only_paddle_off_ends_shot() {
   advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
-  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(session.endReason == EndReason::ACTIVATOR);
   CHECK(!getRelaySafetySnapshot().closed);
 }
 
@@ -8574,19 +8576,19 @@ void pm05_original_bbw_promote_then_off_ends_like_natural() {
   startCycle();
   advanceToBrew();
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::BREW);
   CHECK(getRelaySafetySnapshot().closed);
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(machineCyclePromotedToNaturalForTest());
   CHECK(!machineHidesPhysicalStop());
   CHECK(stopperState == StopperState::BREW);
   CHECK(getRelaySafetySnapshot().closed);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
-  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(session.endReason == EndReason::ACTIVATOR);
   CHECK(!getRelaySafetySnapshot().closed);
 }
 
@@ -8603,7 +8605,7 @@ void pm06_original_bbw_hold_blocks_auto_stop_until_release() {
   CHECK(stopperState == StopperState::BREW);
   CHECK(getRelaySafetySnapshot().closed);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
   CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -8628,9 +8630,9 @@ void pm08_natural_paddle_off_after_rinse_still_ends_shot() {
   startCycle();
   advanceToBrew();
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
-  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(session.endReason == EndReason::ACTIVATOR);
   CHECK(!getRelaySafetySnapshot().closed);
 }
 
@@ -8680,7 +8682,7 @@ void pm11_original_bbw_release_honors_operational_wall() {
   startCycle();
   advanceToBrew();
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::BREW);
   CHECK(getRelaySafetySnapshot().closed);
   CHECK(machineHidesPhysicalStop());
@@ -8701,7 +8703,7 @@ void pm12_auto_bbw_release_after_rinse_keeps_machine_running() {
   CHECK(machineHidesPhysicalStop());
   CHECK(!machineCycleHardMaxArmedForTest());
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.active);
   CHECK(getRelaySafetySnapshot().closed);
@@ -8730,18 +8732,18 @@ void pm14_auto_bbw_off_on_off_stays_brewing() {
   startCycle();
   advanceToBrew();
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::BREW);
   CHECK(getRelaySafetySnapshot().closed);
   CHECK(machineHidesPhysicalStop());
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(!machineCyclePromotedToNaturalForTest());
   CHECK(machineHidesPhysicalStop());
   CHECK(stopperState == StopperState::BREW);
   CHECK(getRelaySafetySnapshot().closed);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.active);
   CHECK(getRelaySafetySnapshot().closed);
@@ -8756,9 +8758,9 @@ void pm15_auto_no_scale_paddle_off_ends_shot() {
   reachManualNoScaleState();
   runLoopAfter(runtimeConfig.rinseGestureMs + 1);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
-  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(session.endReason == EndReason::ACTIVATOR);
   CHECK(!getRelaySafetySnapshot().closed);
 }
 
@@ -8772,9 +8774,9 @@ void pm16_auto_timer_only_paddle_off_ends_shot() {
   CHECK(stopperState == StopperState::BREW);
   CHECK(!machineHidesPhysicalStop());
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
-  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(session.endReason == EndReason::ACTIVATOR);
   CHECK(!getRelaySafetySnapshot().closed);
 }
 
@@ -8795,7 +8797,7 @@ void pm18_auto_bbw_auto_stop_with_paddle_off_goes_ready() {
   startCycle();
   advanceToBrew();
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::BREW);
   endBbwProtectionForTests();
   shot.expectedEndS = 1.0f;
@@ -8825,11 +8827,11 @@ void pm20_original_on_off_on_promotes_once_without_extra_polls() {
   advanceToBrew();
   CHECK(!machineCyclePromotedToNaturalForTest());
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::BREW);
   CHECK(!machineCyclePromotedToNaturalForTest());
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(machineCyclePromotedToNaturalForTest());
   CHECK(machineLastIntention().holdActive);
   (void)machineLastIntention();
@@ -8838,9 +8840,9 @@ void pm20_original_on_off_on_promotes_once_without_extra_polls() {
   CHECK(stopperState == StopperState::BREW);
   CHECK(getRelaySafetySnapshot().closed);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);
-  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(session.endReason == EndReason::ACTIVATOR);
   CHECK(!getRelaySafetySnapshot().closed);
 }
 
@@ -8853,7 +8855,7 @@ struct TestCase {
 
 const TestCase testCases[] = {
     {"T01", t01_boot_with_paddle_off},
-    {"T02", t02_boot_with_paddle_on},
+    {"T02", t02_boot_with_activator_on},
     {"T03", t03_sustained_on_enters_brew_once},
     {"T04", t04_exact_rinse_boundary_and_duration},
     {"T05", t05_release_between_rinse_and_brew_is_short_shot},
@@ -8865,7 +8867,7 @@ const TestCase testCases[] = {
     {"T11", t11_ble_loss_suspends_brew_without_late_stop},
     {"T12", t12_global_limit_opens_manual_and_brew_cycles},
     {"T13", t13_reset_path_starts_with_relay_open},
-    {"T14", t14_automatic_stop_stays_open_while_paddle_on},
+    {"T14", t14_automatic_stop_stays_open_while_activator_on},
     {"T15", t15_repeated_rinse_and_brew_reset_session_state},
     {"T16", t16_only_micra_states_are_compiled},
     {"T17", t17_simultaneous_global_limit_and_paddle_off_is_idempotent},

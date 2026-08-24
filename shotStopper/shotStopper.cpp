@@ -1,23 +1,25 @@
 /*
   Shot Stopper for La Marzocco Micra
 
-  The Micra paddle is connected only to an ESP32-S3 GPIO and GND. The stopper is
-  the sole controller of the machine circuit (the intercepted brew-switch
-  contact that makes the machine run) through a normally-open relay.
+  An activator on ACTIVATOR_GPIO (paddle, switch, or another compatible
+  mechanism) reports user intention. The stopper is the sole controller of the
+  machine circuit (the intercepted brew-switch contact that makes the machine
+  run) through a normally-open relay.
 
-  Paddle ON  (microswitch closed) -> GPIO LOW
-  Paddle OFF (microswitch open)   -> GPIO HIGH
-  Relay de-energized              -> machine circuit open (safe state)
+  Activator ON  (control closed) -> GPIO LOW
+  Activator OFF (control open)   -> GPIO HIGH
+  Relay de-energized             -> machine circuit open (safe state)
 
   LAYER: Shot stopper (orchestrator)
   ----------------------------------
   This translation unit wires brew, cup, scale, and the generic machine façade.
   It must keep responsibilities decoupled:
 
-  - Stopper talks to Machine only through the abstract façade (UserIntent,
-    MachineIntention, machineRequestStart/Stop, machineRunState, MachineSense).
-    It must NOT include paddle/momentary specialization headers, branch on
-    MachineType, or know reed/pulse/PaddleMode internals.
+  - The activator reads GPIO and translates it to UserIntent / MachineIntention.
+    The stopper talks to Machine only through that abstract façade
+    (machinePollIntention, machineRequestStart/Stop, machineRunState,
+    MachineSense). It must NOT include paddle/momentary specialization headers,
+    branch on MachineType, or know reed/pulse/PaddleMode internals.
   - Paddle logic stays in ShotStopperMachinePaddle*; momentary in
     ShotStopperMachineMomentary*. Run state is owned only by each type's
     *State* file. Brew / cup / scale / guards likewise never talk to switch
@@ -131,7 +133,7 @@ constexpr BaseType_t CONTROL_TASK_CORE = 1;
 
 constexpr bool DEBUG = false;
 
-static_assert(SCALE_WORKER_STALE_MS > PADDLE_DEBOUNCE_MS &&
+static_assert(SCALE_WORKER_STALE_MS > ACTIVATOR_DEBOUNCE_MS &&
                   SCALE_WORKER_STALE_MS < HARD_MAX_CIRCUIT_CLOSED_MS,
               "Scale worker stale timeout must be useful and safety-bounded");
 static_assert(FLASH_IO_CONTROL_LOCK_TIMEOUT_MS * 20U <
@@ -458,13 +460,10 @@ bool scaleDebugPending = false;
 BookooDebugAction scaleDebugAction = BookooDebugAction::START;
 uint8_t scaleDebugBeepLevel = 0;
 bool scalePaddleReturnReminderBeepPending = false;
-bool paddleReturnReminderActive = false;
-uint32_t paddleReturnReminderLastAtMs = 0;
-uint32_t paddleReturnReminderStartedAtMs = 0;
 bool scaleCompletionBeepPending = false;
 bool scaleCompletionBeepScheduled = false;
 
-bool virtualPaddleOn = false;
+bool virtualHoldOn = false;
 // Keep status snapshots in internal DRAM: loop copies ~4 KiB every 50 ms.
 ControlStatusSnapshot publishedControlStatus;
 ControlStatusSnapshot stagingControlStatus;
@@ -632,7 +631,7 @@ void formatDebugEventMessage(const DebugEvent &event, char *message,
   }
   if ((event.code == DebugCode::WEB_COMMAND_ACCEPTED ||
        event.code == DebugCode::WEB_COMMAND_REJECTED) &&
-      event.argument1 >= static_cast<int32_t>(WebCommandType::PADDLE_ON) &&
+      event.argument1 >= static_cast<int32_t>(WebCommandType::REMOTE_ON) &&
       event.argument1 <=
           static_cast<int32_t>(WebCommandType::MAINTENANCE_COMPLETE)) {
     snprintf(message, capacity, "%s: %s", debugCodeName(event.code),
@@ -2692,7 +2691,7 @@ void cancelScalePaddleReturnReminderBeep() {
 
 bool shotCompletionGetsLongBeep(EndReason reason) {
   switch (reason) {
-    case EndReason::PADDLE:
+    case EndReason::ACTIVATOR:
     case EndReason::SCALE_THRESHOLD:
     case EndReason::WEIGHT_ANOMALY:
     case EndReason::GLOBAL_LIMIT:
@@ -3919,7 +3918,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   session.active = false;
   session.awaitingPostTareBaseline = false;
   holdCupPresenceTransitions(false);
-  virtualPaddleOn = false;
+  virtualHoldOn = false;
   machineSetPreferBleAirtime(false);
   machineEndCycle();
   addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_ENDED,
@@ -3942,7 +3941,7 @@ bool beginRinseCycle(ControlSource source) {
   session.weightSequenceAtStart = currentWeightSequence;
   session.startedWithScale = scaleAvailable();
   session.automaticEnabled = false;
-  virtualPaddleOn = false;
+  virtualHoldOn = false;
   resetShotTrajectory(session.startedAtMs);
   machineSetPreferBleAirtime(false);
   machineBeginCycle(false);
@@ -3980,7 +3979,7 @@ bool beginRinseCycle(ControlSource source) {
 void enterRinse() {
   // The duration is measured from the beginning of the stable OFF level, not
   // from 30 ms later when debounce accepts the transition.
-  session.rinseStartedAtMs = machineLastRawEdgeMs();
+  session.rinseStartedAtMs = machineLastActivatorEdgeMs();
   session.automaticEnabled = false;
   session.autoToManualGuardArmed = false;
   session.autoToManualGuardEnforced = false;
@@ -4019,7 +4018,7 @@ void demoteActiveCycleToRinseOrEnd() {
   if (session.automaticEnabled) {
     shot.automaticBrew = true;
   }
-  finalizeCycle(EndReason::PADDLE, StopperState::READY);
+  finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
 }
 
 void handleGlobalLimitTrip() {
@@ -4624,17 +4623,17 @@ void processWebCommand(const WebCommand &command) {
   switch (command.type) {
     case WebCommandType::STOP:
     case WebCommandType::STOP_HEARTBEAT:
-    case WebCommandType::PADDLE_OFF:
+    case WebCommandType::REMOTE_OFF:
       if (!machineIsRunning() ||
-          (command.type == WebCommandType::PADDLE_OFF &&
+          (command.type == WebCommandType::REMOTE_OFF &&
            (!session.active || session.source != ControlSource::WEB))) {
         rejectWebCommand(command);
         return;
       }
       machineNoteFirmwareStop();
       addDebugEvent(DebugCategory::WEB,
-                    command.type == WebCommandType::PADDLE_OFF
-                        ? DebugCode::WEB_PADDLE_OFF
+                    command.type == WebCommandType::REMOTE_OFF
+                        ? DebugCode::WEB_REMOTE_OFF
                         : DebugCode::WEB_STOP,
                     static_cast<int32_t>(command.type),
                     static_cast<int32_t>(session.id));
@@ -4651,19 +4650,19 @@ void processWebCommand(const WebCommand &command) {
       reportControlCommandResult(command, CommandResultState::APPLIED);
       return;
 
-    case WebCommandType::PADDLE_ON:
+    case WebCommandType::REMOTE_ON:
       if (!REMOTE_MACHINE_CONTROL_ENABLED || !webCommandAllowsUnsafeConfiguration(command)) {
         rejectWebCommand(command);
         return;
       }
-      virtualPaddleOn = true;
+      virtualHoldOn = true;
       beginCycle(ControlSource::WEB);
       if (!session.active) {
-        virtualPaddleOn = false;
+        virtualHoldOn = false;
         reportControlCommandResult(command, CommandResultState::FAILED);
         return;
       }
-      addDebugEvent(DebugCategory::WEB, DebugCode::WEB_PADDLE_ON,
+      addDebugEvent(DebugCategory::WEB, DebugCode::WEB_REMOTE_ON,
                     static_cast<int32_t>(command.type));
       reportControlCommandResult(command, CommandResultState::APPLIED);
       return;
@@ -5219,7 +5218,7 @@ void publishControlStatus() {
   next.relayClosed = relay.closed;
   next.machineRunning = machineIsRunning();
   machineFillStatus(next);
-  next.virtualPaddleOn = virtualPaddleOn;
+  next.virtualHoldOn = virtualHoldOn;
   next.remoteControlEnabled = REMOTE_MACHINE_CONTROL_ENABLED;
   next.source = session.active ? session.source : ControlSource::NONE;
   next.cycleId = session.active ? session.id : 0;
@@ -5955,7 +5954,7 @@ void resumePendingBootRecovery() {
 
 void maybeRunBootRecoveryGesture() {
   const bool powerOnReset = currentSafetyResetIsPowerOn();
-  const bool switchStablyOn = powerOnReset && machineBootSwitchHeldStably();
+  const bool switchStablyOn = powerOnReset && machineBootActivatorHeldStably();
   if (!recoveryGestureEntryAllowed(powerOnReset, switchStablyOn)) {
     return;
   }
@@ -6019,7 +6018,7 @@ void setup() {
   // BLE, Wi-Fi or HTTP startup. A new gesture is accepted only on cold power.
   resumePendingBootRecovery();
   maybeRunBootRecoveryGesture();
-  machineReleasePhysicalSwitchToBrew();
+  machineOnActivatorReady();
 #endif
 
   Serial.begin(SERIAL_BAUD);
@@ -6379,7 +6378,7 @@ void loop() {
   serviceNoScaleShotGuard(loopGuardInputs);
   serviceCupStartGuard(loopGuardInputs);
   stateMachineTask();
-  machineReconcileBrewOutcome(session.active);
+  machineOnBrewOutcome(session.active);
   serviceExtendedPulseAlert();
   localBuzzer.service(millis());
   servicePendingBrewRfRestore();

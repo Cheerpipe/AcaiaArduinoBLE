@@ -7,15 +7,18 @@
 // =============================================================================
 // LAYER: Machine (façade)
 // =============================================================================
-// WHAT: Generic machine API. Compile-time selects paddle vs momentary
-//       specializations behind one surface: UserIntent, MachineIntention,
-//       machineRequestStart/Stop, machineIsRunning, cycle policy, MachineSense.
+// WHAT: Generic machine API. The activator reads user intention on
+//       ACTIVATOR_GPIO (paddle latch, momentary switch, or another compatible
+//       mechanism) and translates that signal into UserIntent /
+//       MachineIntention. Compile-time selects the specialization behind one
+//       surface: start/stop, run state, cycle policy, MachineSense.
 //
 // BOUNDARY (hard rules — do not cross):
-// - Shot stopper / brew / cup / scale / guards talk ONLY to this abstract
-//   machine. They must NOT include paddle or momentary headers, branch on
-//   MachineType, read paddleMode / reed / momentary GPIO, or know how a
-//   specialization drives K1.
+// - The activator owns GPIO sampling, debounce, edge interpretation, and
+//   translation to UserIntent. Shot stopper / brew / cup / scale / guards
+//   talk ONLY to this abstract machine. They must NOT include paddle or
+//   momentary headers, branch on MachineType, read paddleMode / reed /
+//   momentary GPIO, or know how a specialization drives K1.
 // - Paddle code lives only under ShotStopperMachinePaddle*. Momentary under
 //   ShotStopperMachineMomentary*. Never mix paddle logic into momentary files
 //   or the reverse. Run state for each type is owned solely by that type's
@@ -25,7 +28,7 @@
 //   STOP so that rule can run). Brew/scale/cup never call actuators here.
 
 #include "ShotStopperMachineRelay.h"
-#include "ShotStopperMachineSwitchSample.h"
+#include "ShotStopperMachineActivatorSample.h"
 
 struct MachineIntention {
   UserIntent intent = UserIntent::NONE;
@@ -59,12 +62,11 @@ inline void machineSetPreferBleAirtime(bool prefer) {
 #include "ShotStopperMachinePaddleState.h"
 #include "ShotStopperMachinePaddlePolicy.h"
 
-inline void machineReleasePhysicalSwitchToBrew() {}
-inline void machineReconcileBrewOutcome(bool) {}
+inline void machineOnActivatorReady() {}
+inline void machineOnBrewOutcome(bool) {}
 inline bool machineSupportsRinse() { return true; }
-inline bool reedIsOn() { return false; }
 inline void machineNoteFirmwareStop() {}
-inline void machineSampleInput() { updatePaddleInput(); }
+inline void machineSampleInput() { updateActivatorInput(); }
 inline void serviceMachine() { machineServiceReminders(); }
 #else
 #include "ShotStopperMachineMomentaryInput.h"
@@ -85,22 +87,22 @@ inline uint32_t machineCloseLimitMs(uint32_t operationalWallMs) {
 }
 inline bool machineCycleHardMaxArmedForTest() { return false; }
 inline bool machineCyclePromotedToNaturalForTest() { return false; }
-inline uint32_t machineLastRawEdgeMs() { return momentaryRawChangedAtMs; }
+inline uint32_t machineLastActivatorEdgeMs() { return momentaryRawChangedAtMs; }
 inline void machineNoteFirmwareStop() {
   momentarySkipFirmwareStopPulse = false;
 }
 inline void machineServiceReminders() {}
-inline void machineSampleInput() { updatePaddleInput(); }
+inline void machineSampleInput() { updateActivatorInput(); }
 
 inline MachineIntention machinePollIntention() {
   MachineIntention out;
-  out.turnedOn = paddleTurnedOn;
-  out.turnedOff = paddleTurnedOff;
-  out.holdActive = momentaryPhysicalOn || rawPaddleOn;
-  out.stablyOff = paddleIsStablyOff();
-  if (paddleTurnedOn) {
+  out.turnedOn = activatorTurnedOn;
+  out.turnedOff = activatorTurnedOff;
+  out.holdActive = momentaryPhysicalOn || rawActivatorOn;
+  out.stablyOff = activatorIsStablyOff();
+  if (activatorTurnedOn) {
     out.intent = UserIntent::REQUEST_START;
-  } else if (paddleTurnedOff) {
+  } else if (activatorTurnedOff) {
     out.intent = UserIntent::REQUEST_STOP;
   } else if (out.holdActive) {
     out.intent = UserIntent::HOLD_ACTIVE;
@@ -119,30 +121,29 @@ inline void machineInitialize() {
     digitalWrite(SAFETY_HEARTBEAT_GPIO, LOW);
     pinMode(CIRCUIT_FEEDBACK_GPIO, INPUT_PULLUP);
   }
-  initializePaddleInput();
+  initializeActivatorInput();
 }
 
-inline bool machineBootSwitchHeldStably() {
-  if (!readRawPaddleOn()) {
+inline bool machineBootActivatorHeldStably() {
+  if (!readRawActivatorOn()) {
     return false;
   }
 #ifndef SHOT_STOPPER_HOST_TEST
   const uint32_t startedAtMs = millis();
   while (static_cast<uint32_t>(millis() - startedAtMs) <
-         PADDLE_DEBOUNCE_MS) {
-    if (!readRawPaddleOn()) {
+         ACTIVATOR_DEBOUNCE_MS) {
+    if (!readRawActivatorOn()) {
       return false;
     }
     serviceBootRecoverySafety();
     vTaskDelay(pdMS_TO_TICKS(1));
   }
 #endif
-  return readRawPaddleOn();
+  return readRawActivatorOn();
 }
 
 inline void machineFillStatus(ControlStatusSnapshot &status) {
-  status.reedOn = reedIsOn();
-  status.physicalPaddleOn = readRawPaddleOn();
+  status.physicalActivatorOn = readRawActivatorOn();
   status.circuitElapsedMs = machineElapsedMs();
   machineFillInferenceStatus(status);
 }

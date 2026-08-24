@@ -42,7 +42,7 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 
 | Question | Answer |
 | --- | --- |
-| **Which boards can I use?** | ESP32-S3 with PSRAM only: **n16r8** (development board in [Hardware](HARDWARE.md)) or **n8r4**. Default pins: paddle GPIO **21**, relay GPIO **2** (active HIGH). Classic ESP32 and Nano ESP32 are not supported. |
+| **Which boards can I use?** | ESP32-S3 with PSRAM only: **n16r8** (development board in [Hardware](HARDWARE.md)) or **n8r4**. Default pins: activator GPIO **21**, relay GPIO **2** (active HIGH). Classic ESP32 and Nano ESP32 are not supported. |
 | **Which scales work?** | Designed first for **Bookoo** Themis Mini/Ultra. Also Acaia, Felicita Arc, AtomHeart Eclair via [AcaiaArduinoBLE](../libraries/AcaiaArduinoBLE/README.md#scale-compatibility). See [Scales](settings/scales.md). |
 | **How do I choose among several scales?** | **Always use this scale** (on by default) plus **Preferred scale**. See [Scales](settings/scales.md). |
 | **Does it work on machines other than the Micra?** | **No**, not officially. This firmware is for the Linea Micra (paddle on GPIO, machine circuit through an isolated relay). On the Micra the intercepted brew-switch connector is labelled CN9; user-facing copy always says **machine circuit**. |

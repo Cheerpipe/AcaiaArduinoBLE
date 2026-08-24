@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <string.h>
 
 namespace shotstopper {
 
@@ -9,31 +8,18 @@ namespace shotstopper {
 // LAYER: Machine types (shared contracts)
 // =============================================================================
 // WHAT: Enums and snapshots shared by the machine façade and specializations
-//       (MachineType, UserIntent, MachineRunState, MachineSense, PaddleMode).
+//       (UserIntent, MachineRunState, MachineSense).
 //
 // BOUNDARY: These types are the ONLY machine vocabulary brew/stopper/guards
-// may use. PaddleMode values are snapshotted inside the paddle specialization
-// at cycle start; brew/stopper must never branch on PaddleMode or MachineType.
+// may use. They must never branch on paddle vs switch, paddle-mode settings,
+// or compiled machine identity. UserIntent is the product of the activator:
+// the specialization reads ACTIVATOR_GPIO and translates that signal here.
 // MachineSense is a one-way push from the stopper — specializations must not
 // reach into session or live scale globals.
-//
+
 // Electrical / machine timing. Brew walls must never exceed this hard cap.
 constexpr uint32_t HARD_MAX_CIRCUIT_CLOSED_MS = 60000;
 constexpr uint32_t DEFAULT_OPERATIONAL_WALL_MS = 50000;
-constexpr uint32_t DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS = 10000;
-constexpr uint32_t MIN_PADDLE_RETURN_REMINDER_INTERVAL_MS = 5000;
-constexpr uint32_t MAX_PADDLE_RETURN_REMINDER_INTERVAL_MS = 60000;
-constexpr uint32_t DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS =
-    15UL * 60UL * 1000UL;
-constexpr uint32_t MIN_PADDLE_RETURN_REMINDER_MAX_DURATION_MS = 60000UL;
-constexpr uint32_t MAX_PADDLE_RETURN_REMINDER_MAX_DURATION_MS =
-    60UL * 60UL * 1000UL;
-
-enum class MachineType : uint8_t {
-  PADDLE = 0,
-  MOMENTARY = 1,
-  MOMENTARY_REED = 2
-};
 
 enum class MachineRunState : uint8_t {
   CONFIRMED_OFF = 0,
@@ -54,6 +40,8 @@ struct MachineSense {
 
 inline bool machinePreferBleAirtime = false;
 
+// Translated activator intention. Not a GPIO level: paddle, switch, or another
+// compatible mechanism interprets the pin and publishes one of these values.
 enum class UserIntent : uint8_t {
   NONE = 0,
   REQUEST_START = 1,
@@ -61,54 +49,6 @@ enum class UserIntent : uint8_t {
   HOLD_ACTIVE = 3,
   STABLE_IDLE = 4
 };
-
-// Latch-switch brew feel. Snapshot by the machine at cycle start; brew/stopper
-// never branch on this enum. Natural = OFF ends the shot. Original = legacy
-// start gesture (BBW+scale: OFF after rinse keeps the circuit closed until
-// weight stop; ON again promotes to Natural). Auto = BBW finish regardless of
-// ON/OFF (no promote, no hold-off of automation).
-enum class PaddleMode : uint8_t {
-  NATURAL = 0,
-  ORIGINAL = 1,
-  AUTO = 2
-};
-
-inline bool validPaddleMode(uint8_t mode) {
-  return mode == static_cast<uint8_t>(PaddleMode::NATURAL) ||
-         mode == static_cast<uint8_t>(PaddleMode::ORIGINAL) ||
-         mode == static_cast<uint8_t>(PaddleMode::AUTO);
-}
-
-inline const char *paddleModeId(uint8_t mode) {
-  switch (static_cast<PaddleMode>(mode)) {
-    case PaddleMode::ORIGINAL:
-      return "original";
-    case PaddleMode::AUTO:
-      return "auto";
-    case PaddleMode::NATURAL:
-    default:
-      return "natural";
-  }
-}
-
-inline bool parsePaddleMode(const char *text, uint8_t &mode) {
-  if (text == nullptr) {
-    return false;
-  }
-  if (strcmp(text, "natural") == 0) {
-    mode = static_cast<uint8_t>(PaddleMode::NATURAL);
-    return true;
-  }
-  if (strcmp(text, "original") == 0) {
-    mode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
-    return true;
-  }
-  if (strcmp(text, "auto") == 0) {
-    mode = static_cast<uint8_t>(PaddleMode::AUTO);
-    return true;
-  }
-  return false;
-}
 
 inline const char *machineRunStateName(MachineRunState state) {
   switch (state) {

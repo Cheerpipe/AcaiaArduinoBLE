@@ -40,6 +40,7 @@
 #endif
 
 #include "ShotStopperMachineTypes.h"
+#include "ShotStopperMachinePaddleConfig.h"
 #include "ShotStopperScaleTypes.h"
 #include "ShotStopperBrewTypes.h"
 
@@ -169,6 +170,12 @@ static_assert(SHOT_STOPPER_MAX_SINGLE_PRESS_MS >= 100 &&
 static_assert(SHOT_STOPPER_REED_CONFIRM_TIMEOUT_MS >= 200 &&
                   SHOT_STOPPER_REED_CONFIRM_TIMEOUT_MS <= 5000,
               "SHOT_STOPPER_REED_CONFIRM_TIMEOUT_MS must be 200–5000");
+
+enum class MachineType : uint8_t {
+  PADDLE = 0,
+  MOMENTARY = 1,
+  MOMENTARY_REED = 2
+};
 
 constexpr uint8_t COMPILED_MACHINE_TYPE =
     static_cast<uint8_t>(SHOT_STOPPER_MACHINE_TYPE);
@@ -1483,8 +1490,8 @@ inline const char *staConfigStateName(uint8_t state) {
 }
 
 enum class WebCommandType : uint8_t {
-  PADDLE_ON,
-  PADDLE_OFF,
+  REMOTE_ON,
+  REMOTE_OFF,
   RINSE,
   STOP,
   STOP_HEARTBEAT,
@@ -1521,8 +1528,8 @@ enum class WebCommandType : uint8_t {
 
 inline const char *webCommandTypeName(WebCommandType type) {
   switch (type) {
-    case WebCommandType::PADDLE_ON: return "paddle web on";
-    case WebCommandType::PADDLE_OFF: return "paddle web off";
+    case WebCommandType::REMOTE_ON: return "remote web on";
+    case WebCommandType::REMOTE_OFF: return "remote web off";
     case WebCommandType::RINSE: return "rinse web";
     case WebCommandType::STOP: return "web stop";
     case WebCommandType::STOP_HEARTBEAT:
@@ -1735,8 +1742,8 @@ struct ControlStatusSnapshot {
   bool relayClosed = false;
   bool machineRunning = false;
   bool reedOn = false;
-  bool physicalPaddleOn = false;
-  bool virtualPaddleOn = false;
+  bool physicalActivatorOn = false;
+  bool virtualHoldOn = false;
   bool remoteControlEnabled = REMOTE_MACHINE_CONTROL_ENABLED;
   ControlSource source = ControlSource::NONE;
   uint32_t cycleId = 0;
@@ -1867,7 +1874,7 @@ struct ControlGateSnapshot {
   bool activeCycle = false;
   bool relayClosed = false;
   bool machineRunning = false;
-  bool physicalPaddleOn = false;
+  bool physicalActivatorOn = false;
   bool maintenanceLeaseActive = false;
   uint32_t maintenanceLeaseId = 0;
   ControlSource source = ControlSource::NONE;
@@ -1882,7 +1889,7 @@ inline ControlGateSnapshot controlGateOf(const ControlStatusSnapshot &status) {
   gate.activeCycle = status.activeCycle;
   gate.relayClosed = status.relayClosed;
   gate.machineRunning = status.machineRunning;
-  gate.physicalPaddleOn = status.physicalPaddleOn;
+  gate.physicalActivatorOn = status.physicalActivatorOn;
   gate.maintenanceLeaseActive = status.maintenanceLeaseActive;
   gate.maintenanceLeaseId = status.maintenanceLeaseId;
   gate.source = status.source;
@@ -1896,7 +1903,7 @@ inline bool controlAllowsConfiguration(const ControlGateSnapshot &status) {
   // Config lock is "machine working", not "K1 energized". For paddle those
   // coincide (circuit closed == group brewing).
   return status.state == StopperState::READY && !status.activeCycle &&
-         !status.machineRunning && !status.physicalPaddleOn &&
+         !status.machineRunning && !status.physicalActivatorOn &&
          !status.maintenanceLeaseActive;
 }
 
@@ -1915,7 +1922,7 @@ inline bool controlAllowsHistoryMutation(const ControlStatusSnapshot &status) {
 }
 
 enum class DebugCategory : uint8_t {
-  PADDLE,
+  ACTIVATOR,
   RELAY,
   STATE,
   SCALE,
@@ -1937,8 +1944,8 @@ enum class CircuitArmFailReason : int32_t {
 };
 
 enum class DebugCode : uint8_t {
-  PADDLE_ON,
-  PADDLE_OFF,
+  ACTIVATOR_ON,
+  ACTIVATOR_OFF,
   RELAY_CLOSED,
   RELAY_OPENED,
   HARD_LIMIT,
@@ -1978,8 +1985,8 @@ enum class DebugCode : uint8_t {
   WIFI_SCAN_COMPLETE,
   WIFI_SCAN_ERROR,
   WIFI_SCAN_CANCELED,
-  WEB_PADDLE_ON,
-  WEB_PADDLE_OFF,
+  WEB_REMOTE_ON,
+  WEB_REMOTE_OFF,
   WEB_RINSE,
   WEB_COMMAND_ACCEPTED,
   WEB_COMMAND_REJECTED,
@@ -2325,7 +2332,7 @@ inline LogLevel debugCodeDefaultLevel(DebugCode code) {
 
 inline const char *debugCategoryName(DebugCategory category) {
   switch (category) {
-    case DebugCategory::PADDLE: return "paddle";
+    case DebugCategory::ACTIVATOR: return "activator";
     case DebugCategory::RELAY: return "relay";
     case DebugCategory::STATE: return "state";
     case DebugCategory::SCALE: return "scale";
@@ -2373,8 +2380,8 @@ inline const char *bootSubsystemName(int32_t subsystem) {
 
 inline const char *debugCodeName(DebugCode code) {
   switch (code) {
-    case DebugCode::PADDLE_ON: return "paddle on";
-    case DebugCode::PADDLE_OFF: return "paddle off";
+    case DebugCode::ACTIVATOR_ON: return "activator on";
+    case DebugCode::ACTIVATOR_OFF: return "activator off";
     case DebugCode::RELAY_CLOSED: return "machine circuit closed";
     case DebugCode::RELAY_OPENED: return "machine circuit opened";
     case DebugCode::HARD_LIMIT: return "hard limit reached";
@@ -2430,8 +2437,8 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::WIFI_SCAN_ERROR: return "WiFi scan failed";
     case DebugCode::WIFI_SCAN_CANCELED:
       return "WiFi scan canceled for active control";
-    case DebugCode::WEB_PADDLE_ON: return "paddle web on";
-    case DebugCode::WEB_PADDLE_OFF: return "paddle web off";
+    case DebugCode::WEB_REMOTE_ON: return "remote web on";
+    case DebugCode::WEB_REMOTE_OFF: return "remote web off";
     case DebugCode::WEB_RINSE: return "rinse web started";
     case DebugCode::WEB_COMMAND_ACCEPTED: return "web command accepted";
     case DebugCode::WEB_COMMAND_REJECTED: return "web command rejected";
@@ -2646,7 +2653,7 @@ inline bool formatPersistDebugMessage(const DebugEvent &event, char *message,
 inline const char *endReasonDebugName(EndReason reason) {
   switch (reason) {
     case EndReason::NONE: return "none";
-    case EndReason::PADDLE: return "paddle";
+    case EndReason::ACTIVATOR: return "activator";
     case EndReason::SCALE_THRESHOLD: return "scale threshold";
     case EndReason::WEIGHT_ANOMALY: return "weight anomaly";
     case EndReason::GLOBAL_LIMIT: return "global machine circuit limit";

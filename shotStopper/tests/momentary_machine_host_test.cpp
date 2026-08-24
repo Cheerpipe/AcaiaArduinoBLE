@@ -88,10 +88,10 @@ void resetMomentaryHarness() {
   relaySafetyFault = RelaySafetyFault::NONE;
   relaySafetyGeneration = 0;
   criticalTaskWatchdogFault = false;
-  paddleOn = false;
-  rawPaddleOn = false;
-  paddleTurnedOn = false;
-  paddleTurnedOff = false;
+  activatorOn = false;
+  rawActivatorOn = false;
+  activatorTurnedOn = false;
+  activatorTurnedOff = false;
   currentWeight = 0.0f;
   currentWeightReceivedAtMs = 0;
   currentWeightSequence = 0;
@@ -115,12 +115,12 @@ void resetMomentaryHarness() {
   taskWatchdogReady = configureTaskWatchdog() &&
                       subscribeCurrentTaskToWatchdog();
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
-  hostPinLevel[PADDLE_GPIO] = !PADDLE_ACTIVE_LEVEL;
+  hostPinLevel[ACTIVATOR_GPIO] = !ACTIVATOR_ACTIVE_LEVEL;
 #if SHOT_STOPPER_MACHINE_TYPE == 2
   hostPinLevel[REED_GPIO] = !REED_ACTIVE_LEVEL;
 #endif
-  initializePaddleInput();
-  machineReleasePhysicalSwitchToBrew();
+  initializeActivatorInput();
+  machineOnActivatorReady();
 #if SHOT_STOPPER_MACHINE_TYPE == 1
   momentaryInferredState = MachineRunState::CONFIRMED_OFF;
   momentarySawScale = false;
@@ -166,27 +166,27 @@ void runLoopAfter(uint32_t deltaMs) {
 }
 
 void setRawPaddle(bool on) {
-  hostPinLevel[PADDLE_GPIO] = on ? PADDLE_ACTIVE_LEVEL
-                                : !PADDLE_ACTIVE_LEVEL;
+  hostPinLevel[ACTIVATOR_GPIO] = on ? ACTIVATOR_ACTIVE_LEVEL
+                                : !ACTIVATOR_ACTIVE_LEVEL;
   loop();
 }
 
 void shortPress(uint32_t heldMs) {
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   runLoopAfter(heldMs);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
 }
 
 void pressDown() {
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
 }
 
 void releaseUp() {
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
 }
 
 #if SHOT_STOPPER_MACHINE_TYPE == 2
@@ -199,7 +199,7 @@ void setRawReed(bool on) {
 
 void t_short_press_mirrors_then_opens() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   CHECK(stopperState == StopperState::READY);
   pressDown();
   CHECK(getRelaySafetySnapshot().closed);
@@ -214,7 +214,7 @@ void t_short_press_mirrors_then_opens() {
 
 void t_default_starts_on_press() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   pressDown();
   CHECK(session.active);
   CHECK(stopperState != StopperState::READY || session.active);
@@ -226,7 +226,7 @@ void t_default_starts_on_press() {
 void t_release_mode_starts_on_release_not_press() {
   resetMomentaryHarness();
   runtimeConfig.momentaryStartOnPress = false;
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   pressDown();
   CHECK(!session.active);
   CHECK(stopperState == StopperState::READY);
@@ -237,7 +237,7 @@ void t_release_mode_starts_on_release_not_press() {
 
 void t_second_short_press_stops_without_rinse() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(180);
   CHECK(session.active);
   CHECK(stopperState != StopperState::RINSE);
@@ -255,7 +255,7 @@ void t_guard_reject_still_mirrors() {
   currentWeight = 0.0f;
   currentWeightReceivedAtMs = hostMillis;
   currentWeightSequence = 1;
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   const size_t closedBefore = hostRelayClosedWrites;
   pressDown();
   CHECK(hostRelayClosedWrites > closedBefore);
@@ -267,7 +267,7 @@ void t_guard_reject_still_mirrors() {
 
 void t_user_stop_without_session_does_not_leave_orphan_run() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   CHECK(!session.active);
   CHECK(!machineIsRunning());
   momentaryUserStopThisCycle = true;
@@ -282,9 +282,9 @@ void t_long_press_mirrors_from_first_instant() {
 #if SHOT_STOPPER_MACHINE_TYPE == 2
   runtimeConfig.reedConfirmTimeoutHundredMs = 50;
 #endif
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   CHECK(getRelaySafetySnapshot().closed);
   CHECK(session.active);
   CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
@@ -294,7 +294,7 @@ void t_long_press_mirrors_from_first_instant() {
   CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
   CHECK(!machineIsRunning());
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(!session.active);
 }
@@ -302,16 +302,16 @@ void t_long_press_mirrors_from_first_instant() {
 void t_release_mode_long_press_ignored_as_start() {
   resetMomentaryHarness();
   runtimeConfig.momentaryStartOnPress = false;
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   setRawPaddle(true);
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   CHECK(getRelaySafetySnapshot().closed);
   CHECK(!session.active);
   runLoopAfter(COMPILED_MAX_SINGLE_PRESS_MS + 20);
   CHECK(!session.active);
   CHECK(getRelaySafetySnapshot().closed);
   setRawPaddle(false);
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(!session.active);
 }
@@ -319,7 +319,7 @@ void t_release_mode_long_press_ignored_as_start() {
 #if SHOT_STOPPER_MACHINE_TYPE == 1
 void t_only_auto_cut_needs_confirmed_on() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   CHECK(session.active);
   runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
@@ -328,7 +328,7 @@ void t_only_auto_cut_needs_confirmed_on() {
   CHECK(hostRelayClosedWrites == closedQuiet);
 
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   currentWeight = 0.2f;
   currentWeightReceivedAtMs = hostMillis;
@@ -352,7 +352,7 @@ void t_quiet_pan_does_not_force_cut_when_unknown() {
   noScaleShotGuardArmed = false;
   scale.connected = false;
   setScaleLinkState(ScaleLinkState::DISCONNECTED);
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   CHECK(session.active);
   const size_t closedAtStart = hostRelayClosedWrites;
@@ -365,7 +365,7 @@ void t_quiet_pan_does_not_force_cut_when_unknown() {
 #if SHOT_STOPPER_MACHINE_TYPE == 2
 void t_reed_off_blocks_firmware_cut() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   CHECK(session.active);
   CHECK(!reedIsOn());
@@ -377,7 +377,7 @@ void t_reed_off_blocks_firmware_cut() {
 
 void t_reed_on_allows_firmware_cut() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
   setRawReed(true);
@@ -392,7 +392,7 @@ void t_reed_on_allows_firmware_cut() {
 #if SHOT_STOPPER_MACHINE_TYPE == 1
 void t_tare_rebases_flow_signature() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   currentWeight = 0.2f;
   currentWeightReceivedAtMs = hostMillis;
@@ -417,7 +417,7 @@ void t_tare_rebases_flow_signature() {
 
 void t_user_stop_does_not_extra_pulse_when_assumed_on() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   currentWeight = 0.0f;
   currentWeightReceivedAtMs = hostMillis;
@@ -436,7 +436,7 @@ void t_wall_with_quiet_pan_does_not_auto_pulse() {
   currentWeight = 0.0f;
   currentWeightReceivedAtMs = hostMillis;
   currentWeightSequence = 1;
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   CHECK(session.active);
   const size_t closedAtStart = hostRelayClosedWrites;
@@ -450,7 +450,7 @@ void t_wall_with_quiet_pan_does_not_auto_pulse() {
 
 void t_settings_lock_follows_logical_run() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   CHECK(controlAllowsConfigurationNow());
   shortPress(150);
   CHECK(machineIsRunning());
@@ -459,7 +459,7 @@ void t_settings_lock_follows_logical_run() {
 
 void t_polarity_resyncs_to_running_machine() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   runLoopAfter(50);
   CHECK(machineIsRunning());
@@ -469,7 +469,7 @@ void t_polarity_resyncs_to_running_machine() {
 
 void t_user_press_wins_over_firmware_pulse() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   momentaryInferredState = MachineRunState::CONFIRMED_ON;
   CHECK(machineRequestStop());
@@ -502,7 +502,7 @@ void t_reed_boot_on_is_unknown() {
 
 void t_reed_off_wins_over_rising_weight() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   currentWeight = 0.2f;
   currentWeightReceivedAtMs = hostMillis;
@@ -522,7 +522,7 @@ void t_reed_off_wins_over_rising_weight() {
 
 void t_assumed_on_offers_web_stop() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   CHECK(momentaryLogicalRunActive);
   CHECK(!reedIsOn());
@@ -533,21 +533,21 @@ void t_assumed_on_offers_web_stop() {
 
 void t_recovery_hold_mirrors_gpio() {
   resetMomentaryHarness();
-  hostPinLevel[PADDLE_GPIO] = PADDLE_ACTIVE_LEVEL;
-  initializePaddleInput();
+  hostPinLevel[ACTIVATOR_GPIO] = ACTIVATOR_ACTIVE_LEVEL;
+  initializeActivatorInput();
   applyMomentaryRelayDrive();
   CHECK(momentaryPhysicalOn);
   CHECK(getRelaySafetySnapshot().closed);
   CHECK(!session.active);
-  hostPinLevel[PADDLE_GPIO] = !PADDLE_ACTIVE_LEVEL;
-  updatePaddleInput();
-  hostMillis += PADDLE_DEBOUNCE_MS + 1;
-  updatePaddleInput();
+  hostPinLevel[ACTIVATOR_GPIO] = !ACTIVATOR_ACTIVE_LEVEL;
+  updateActivatorInput();
+  hostMillis += ACTIVATOR_DEBOUNCE_MS + 1;
+  updateActivatorInput();
   CHECK(!momentaryPhysicalOn);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(!session.active);
-  machineReleasePhysicalSwitchToBrew();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  machineOnActivatorReady();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   CHECK(stopperState == StopperState::READY);
   shortPress(150);
   CHECK(session.active);
@@ -573,7 +573,7 @@ void confirmEspressoFlow() {
 
 void t_start_ack_stays_assumed_without_flow() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   currentWeight = 0.0f;
   currentWeightReceivedAtMs = hostMillis;
@@ -589,7 +589,7 @@ void t_start_ack_stays_assumed_without_flow() {
 
 void t_confirmed_on_expires_without_flow() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   confirmEspressoFlow();
   CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
@@ -605,7 +605,7 @@ void t_confirmed_on_expires_without_flow() {
 
 void t_stop_ack_quiet_confirms_off() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   confirmEspressoFlow();
   CHECK(machineRequestStop());
@@ -624,7 +624,7 @@ void t_stop_ack_quiet_confirms_off() {
 
 void t_stop_ack_timeout_without_quiet_stays_on() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   confirmEspressoFlow();
   CHECK(machineRequestStop());
@@ -639,7 +639,7 @@ void t_stop_ack_timeout_without_quiet_stays_on() {
 
 void t_start_preinfusion_quiet_stays_assumed() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   currentWeight = 0.0f;
   currentWeightReceivedAtMs = hostMillis;
@@ -654,7 +654,7 @@ void t_start_preinfusion_quiet_stays_assumed() {
 
 void t_start_nack_long_baseline_confirms_off() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   currentWeight = 0.0f;
   currentWeightReceivedAtMs = hostMillis;
@@ -669,7 +669,7 @@ void t_start_nack_long_baseline_confirms_off() {
 
 void t_user_stop_after_preinfusion_does_not_pulse() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   currentWeight = 0.0f;
   currentWeightReceivedAtMs = hostMillis;
@@ -687,7 +687,7 @@ void t_user_stop_after_preinfusion_does_not_pulse() {
 
 void t_accidental_touch_does_not_confirm_on() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   session.accidentalTouchHolding = true;
   currentWeight = 0.2f;
@@ -702,7 +702,7 @@ void t_accidental_touch_does_not_confirm_on() {
 
 void t_gap_skip_does_not_confirm_from_step() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   currentWeight = 0.2f;
   currentWeightReceivedAtMs = hostMillis;
@@ -714,7 +714,7 @@ void t_gap_skip_does_not_confirm_from_step() {
 
 void t_accepted_weight_drives_confirm_on() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   session.hasWeightAnchor = true;
   session.lastAcceptedWeightG = 0.2f;
@@ -733,7 +733,7 @@ void t_accepted_weight_drives_confirm_on() {
 
 void t_logical_elapsed_after_start_pulse_opens() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -749,7 +749,7 @@ void t_orphan_wall_does_not_auto_pulse_user_still_mirrors() {
   currentWeight = 0.0f;
   currentWeightReceivedAtMs = hostMillis;
   currentWeightSequence = 1;
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
   const size_t closedAtStart = hostRelayClosedWrites;
@@ -768,7 +768,7 @@ void t_orphan_wall_does_not_auto_pulse_user_still_mirrors() {
 
 void t_brief_stale_demotes_confirmed_not_unknown() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   confirmEspressoFlow();
   CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
@@ -781,7 +781,7 @@ void t_brief_stale_demotes_confirmed_not_unknown() {
 
 void t_small_delta_does_not_confirm_on() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   currentWeight = 0.2f;
   currentWeightReceivedAtMs = hostMillis;
@@ -796,7 +796,7 @@ void t_small_delta_does_not_confirm_on() {
 void t_confirmed_wall_pulses_once_and_ends_session() {
   resetMomentaryHarness();
   runtimeConfig.operationalWallMs = 2000;
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
   confirmEspressoFlow();
@@ -821,21 +821,21 @@ void t_confirmed_wall_pulses_once_and_ends_session() {
 #if SHOT_STOPPER_MACHINE_TYPE == 2
 void t_reed_polarity_stop_when_running() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
   setRawReed(true);
-  paddleOn = false;
+  activatorOn = false;
   CHECK(machineIsRunning());
   shortPress(180);
   CHECK(!momentaryStartEdgeThisCycle);
-  CHECK(momentaryUserStopThisCycle || !paddleOn);
+  CHECK(momentaryUserStopThisCycle || !activatorOn);
 }
 
 void t_reed_stays_assumed_on_until_timeout_then_confirms_off() {
   resetMomentaryHarness();
   runtimeConfig.reedConfirmTimeoutHundredMs = 2;
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   pressDown();
   CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
   CHECK(session.active);
@@ -853,7 +853,7 @@ void t_reed_stays_assumed_on_until_timeout_then_confirms_off() {
 void t_reed_on_during_window_confirms_immediately() {
   resetMomentaryHarness();
   runtimeConfig.reedConfirmTimeoutHundredMs = 20;
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   pressDown();
   CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
   setRawReed(true);
@@ -863,7 +863,7 @@ void t_reed_on_during_window_confirms_immediately() {
 
 void t_reed_stop_assumed_off_until_reed_matches() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   pressDown();
   setRawReed(true);
   CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
@@ -878,7 +878,7 @@ void t_reed_stop_assumed_off_until_reed_matches() {
 void t_reed_stop_timeout_confirms_actual_on() {
   resetMomentaryHarness();
   runtimeConfig.reedConfirmTimeoutHundredMs = 2;
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   pressDown();
   setRawReed(true);
   releaseUp();
@@ -891,7 +891,7 @@ void t_reed_stop_timeout_confirms_actual_on() {
 
 void t_reed_outside_assumed_follows_reed() {
   resetMomentaryHarness();
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
   setRawReed(true);
   CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
@@ -903,7 +903,7 @@ void t_reed_release_mode_assume_clock_starts_on_release() {
   resetMomentaryHarness();
   runtimeConfig.momentaryStartOnPress = false;
   runtimeConfig.reedConfirmTimeoutHundredMs = 5;
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   pressDown();
   CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
   CHECK(!session.active);
@@ -924,7 +924,7 @@ void t_reed_release_mode_stop_assume_starts_on_release() {
   resetMomentaryHarness();
   runtimeConfig.momentaryStartOnPress = false;
   runtimeConfig.reedConfirmTimeoutHundredMs = 20;
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   setRawReed(true);
   CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
@@ -941,7 +941,7 @@ void t_reed_disqualified_press_grace_then_reed_canonical() {
   resetMomentaryHarness();
   runtimeConfig.maxSinglePressHundredMs = 2;
   runtimeConfig.reedConfirmTimeoutHundredMs = 3;
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   pressDown();
   CHECK(session.active);
   CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
@@ -961,7 +961,7 @@ void t_reed_disqualified_press_grace_then_reed_canonical() {
 void t_reed_wall_pulses_once_and_ends_session() {
   resetMomentaryHarness();
   runtimeConfig.operationalWallMs = 2000;
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
   setRawReed(true);
@@ -980,7 +980,7 @@ void t_reed_wall_pulses_once_and_ends_session() {
 void t_logical_wall_trips_existing_flags() {
   resetMomentaryHarness();
   runtimeConfig.operationalWallMs = 2000;
-  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   CHECK(session.active);
   CHECK(momentaryLogicalRunActive);
