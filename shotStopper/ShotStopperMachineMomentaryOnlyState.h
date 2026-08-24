@@ -17,8 +17,9 @@
 //       ASSUMED_OFF settles to CONFIRMED_OFF immediately (MachineSense edge).
 //       A Start that never confirms espresso and stays within 1 g of the shot
 //       baseline until HARD_MAX_CIRCUIT_CLOSED_MS settles to CONFIRMED_OFF
-//       (no pulse) so the stopper can abandon the cycle. Consumes MachineSense
-//       pushed by the stopper.
+//       (no pulse) so the stopper can abandon the cycle. Espresso-like confirm
+//       vetoes that idle for the rest of the logical run, even after Confirmed
+//       on expires. Consumes MachineSense pushed by the stopper.
 //
 // BOUNDARY: This file alone determines momentary-only run state. Do not put
 // reed GPIO here (that is MomentaryReedState). Do not put paddle latch logic
@@ -45,6 +46,7 @@ constexpr uint32_t MOMENTARY_STALE_UNKNOWN_MS = 1500;
 MachineRunState momentaryInferredState = MachineRunState::CONFIRMED_OFF;
 bool momentarySawScale = false;
 bool momentaryEspressoConfirmed = false;
+bool momentaryHadEspressoConfirm = false;
 bool momentarySawEspresso = false;
 float momentaryShotBaselineG = 0.0f;
 float momentaryQuietBaselineG = 0.0f;
@@ -70,9 +72,16 @@ bool reedIsOn() { return false; }
 
 inline float momentaryLiveWeightG() { return machineSense.weightG; }
 
+void noteMomentaryEspressoConfirmed() {
+  momentaryEspressoConfirmed = true;
+  momentaryHadEspressoConfirm = true;
+  momentarySawEspresso = true;
+}
+
 void noteMomentaryLogicalStart() {
   momentaryInferredState = MachineRunState::ASSUMED_ON;
   momentaryEspressoConfirmed = false;
+  momentaryHadEspressoConfirm = false;
   momentarySawEspresso = false;
   momentaryRisingSinceMs = 0;
   momentaryLowFlowSinceMs = 0;
@@ -131,6 +140,7 @@ void noteMomentaryLogicalStop() {
 
 void noteMomentaryLogicalStartCanceled() {
   momentaryEspressoConfirmed = false;
+  momentaryHadEspressoConfirm = false;
   momentaryRisingSinceMs = 0;
   momentaryLowFlowSinceMs = 0;
   momentaryStopAwaitingAck = false;
@@ -162,6 +172,7 @@ void noteMomentaryDisqualifiedPress(bool restoreRunning) {
 
 void settleMomentaryInferredOff() {
   momentaryEspressoConfirmed = false;
+  momentaryHadEspressoConfirm = false;
   momentarySawEspresso = false;
   momentaryRisingSinceMs = 0;
   momentaryLowFlowSinceMs = 0;
@@ -190,8 +201,7 @@ void machineOverrideInferredOn() {
   momentarySettledWeightCutArmed = false;
   momentaryStopSettling = false;
   momentaryNoFlowIdlePending = false;
-  momentaryEspressoConfirmed = true;
-  momentarySawEspresso = true;
+  noteMomentaryEspressoConfirmed();
   momentaryInferredState = MachineRunState::CONFIRMED_ON;
   momentaryLogicalRunActive = true;
   momentaryLogicalRunStartedAtMs = millis();
@@ -219,7 +229,7 @@ void machineNoteSettledWeightCutOff() {
 
 void maybeSettleMomentaryNoFlowIdle(float weight) {
   if (momentaryStopSettling || momentarySettledWeightCutArmed ||
-      momentaryEspressoConfirmed) {
+      momentaryHadEspressoConfirm) {
     return;
   }
   if (momentaryInferredState != MachineRunState::ASSUMED_ON &&
@@ -369,8 +379,7 @@ void serviceMomentaryRunSensors() {
       } else if (!momentarySettledWeightCutArmed) {
         momentaryStopAwaitingAck = false;
         momentaryStopSettling = false;
-        momentaryEspressoConfirmed = true;
-        momentarySawEspresso = true;
+        noteMomentaryEspressoConfirmed();
         momentaryInferredState = MachineRunState::CONFIRMED_ON;
         momentaryLogicalRunActive = true;
         if (momentaryLogicalRunStartedAtMs == 0) {
@@ -446,8 +455,7 @@ void serviceMomentaryRunSensors() {
         elapsedMs(momentaryLogicalRunStartedAtMs) >= MOMENTARY_CONFIRM_MIN_RUN_MS) {
       const bool recoverFromAssumedOff =
           momentaryInferredState == MachineRunState::ASSUMED_OFF;
-      momentaryEspressoConfirmed = true;
-      momentarySawEspresso = true;
+      noteMomentaryEspressoConfirmed();
       momentaryStartAwaitingAck = false;
       momentaryStartBaselineSinceMs = 0;
       momentaryStopSettling = false;
