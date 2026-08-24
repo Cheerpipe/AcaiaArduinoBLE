@@ -961,7 +961,9 @@ if (!html.includes('<summary>Switch</summary>') ||
     !html.includes('Button press') ||
     !html.includes('Button release') ||
     !html.includes('when the reed confirm window starts') ||
-    !html.includes('The clock starts on that press or release') ||
+    !html.includes(
+        'how long Assumed may disagree with the reed') ||
+    !html.includes('Starts on press/release, not relay mirror') ||
     !html.includes('undone if the hold exceeds this limit') ||
     html.includes('<summary>Momentary</summary>') ||
     html.indexOf('<summary>Paddle</summary>') >
@@ -987,7 +989,10 @@ if (!html.includes('<summary>Switch</summary>') ||
     !ui.includes('updateHomeAdminActions') ||
     !ui.includes("d.classList.contains('momentaryMachine')&&!d.classList.contains('reedMachine')") ||
     !html.includes('Assume idle when the scale connects') ||
+    !html.includes('On connect with no brew, mark idle. No pulse.') ||
     !html.includes('Shot reaction timeout') ||
+    !html.includes(
+        'quiet pan to Assumed off in this many s. No pulse; late flow confirms ON.') ||
     !html.includes('Override idle') ||
     !html.includes('Override brewing') ||
     !css.includes('html.reedMachine .switchOnly') ||
