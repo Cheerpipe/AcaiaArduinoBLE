@@ -3,8 +3,22 @@
 #include "ShotStopperAlert.h"
 #include "ShotStopperBrewTypes.h"
 
-// Brew-by-weight policy and extraction guards.
-// Included from shotStopper.cpp after Machine and session BSS. No heap.
+// =============================================================================
+// LAYER: Brew (policy + extraction guards)
+// =============================================================================
+// WHAT: Brew-by-weight cuts, extraction guards (fast/slow, A→M, min/max time),
+//       thresholds, and in-shot brew decisions. Included from shotStopper.cpp
+//       after Machine and session BSS. No heap.
+//
+// BOUNDARY (hard rules — do not cross):
+// - Talks to the machine ONLY through the generic façade (UserIntent,
+//   machineIsRunning / machineRunningElapsed, start/stop requests). Never
+//   include or call paddle/momentary/reed internals.
+// - Must not know paddle vs switch vs reed details. If a guard or brew path
+//   branches on PaddleMode, reed GPIO, momentary pulse state, or MachineType,
+//   that is a layer violation — move it into the machine specialization.
+// - Does not own cup presence or scale link; consumes GuardInputs / session
+//   snapshots the stopper already built.
 
 bool fastExtractionGuardSession();
 bool slowExtractionGuardSession();

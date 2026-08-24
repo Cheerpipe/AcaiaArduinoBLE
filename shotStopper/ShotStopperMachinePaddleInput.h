@@ -1,7 +1,14 @@
 #pragma once
 
-// Paddle / latch-switch GPIO: raw sample, debounce, and stable-off.
-// Included from ShotStopperMachine.h in the shotStopper.cpp translation unit.
+// =============================================================================
+// SPECIALIZATION: Paddle / latch-switch — GPIO input
+// =============================================================================
+// WHAT: Raw sample, debounce, and stable-off for the latch paddle.
+//       Included from ShotStopperMachine.h in the shotStopper.cpp TU.
+//
+// BOUNDARY: Paddle GPIO only. Writes shared switch sample fields
+// (ShotStopperMachineSwitchSample.h). Stopper/brew/cup/scale must not read
+// these — they consume UserIntent from the machine façade. No momentary code.
 
 bool readRawPaddleOn() {
   return digitalRead(PADDLE_GPIO) == PADDLE_ACTIVE_LEVEL;

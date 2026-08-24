@@ -1,19 +1,26 @@
 #pragma once
 
-// Momentary + reed run view. Outside an assumed window, the reed is
-// canonical: OFF → CONFIRMED_OFF, ON → CONFIRMED_ON. Boot with the reed
-// already ON is UNKNOWN until that OFF. Firmware auto-cut pulses only
-// while the reed is canonically ON.
+// =============================================================================
+// SPECIALIZATION: Momentary + reed — run view (state)
+// =============================================================================
+// WHAT: Outside an assumed window, the reed is canonical: OFF → CONFIRMED_OFF,
+//       ON → CONFIRMED_ON. Boot with the reed already ON is UNKNOWN until that
+//       OFF. Firmware auto-cut pulses only while the reed is canonically ON.
 //
-// ASSUMED_ON/OFF is the short window after the shot start/stop edge — the
-// same press or release chosen by momentaryStartOnPress — where machine may
-// disagree with reed (solenoid lag). The confirm-timeout clock starts at
-// that logical edge, not at the 1:1 relay close. If reed matches the
-// expected level, confirm immediately. If the timeout elapses, confirm the
-// actual reed.
+//       ASSUMED_ON/OFF is the short window after the shot start/stop edge — the
+//       same press or release chosen by momentaryStartOnPress — where machine
+//       may disagree with reed (solenoid lag). The confirm-timeout clock starts
+//       at that logical edge, not at the 1:1 relay close. If reed matches the
+//       expected level, confirm immediately. If the timeout elapses, confirm
+//       the actual reed.
 //
-// GRACE_ON/OFF is the same timeout after a press that exceeded Single-press
-// limit: machine holds the pre-press run/idle view, then reed is canonical.
+//       GRACE_ON/OFF is the same timeout after a press that exceeded
+//       Single-press limit: machine holds the pre-press run/idle view, then
+//       reed is canonical.
+//
+// BOUNDARY: This file alone determines momentary+reed run state. Reed GPIO and
+// assume windows stay here. Brew/stopper/guards must not sample reed or know
+// ReedAssume — only machineRunState() / façade flags. No paddle latch policy.
 
 enum class ReedAssume : uint8_t {
   NONE = 0,

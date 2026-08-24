@@ -5,6 +5,18 @@
 
 namespace shotstopper {
 
+// =============================================================================
+// LAYER: Machine types (shared contracts)
+// =============================================================================
+// WHAT: Enums and snapshots shared by the machine façade and specializations
+//       (MachineType, UserIntent, MachineRunState, MachineSense, PaddleMode).
+//
+// BOUNDARY: These types are the ONLY machine vocabulary brew/stopper/guards
+// may use. PaddleMode values are snapshotted inside the paddle specialization
+// at cycle start; brew/stopper must never branch on PaddleMode or MachineType.
+// MachineSense is a one-way push from the stopper — specializations must not
+// reach into session or live scale globals.
+//
 // Electrical / machine timing. Brew walls must never exceed this hard cap.
 constexpr uint32_t HARD_MAX_CIRCUIT_CLOSED_MS = 60000;
 constexpr uint32_t DEFAULT_OPERATIONAL_WALL_MS = 50000;

@@ -10,6 +10,17 @@
 
 namespace shotstopper {
 
+// =============================================================================
+// LAYER: Brew types (stopper workflow + guard contracts)
+// =============================================================================
+// WHAT: StopperState, EndReason, GuardInputs, and brew timing/weight constants.
+//       The stopper FSM decides rinse vs shot vs idle and *requests* circuit
+//       start/stop; it does not drive GPIO or know paddle vs momentary.
+//
+// BOUNDARY: GuardInputs is a neutral snapshot the orchestrator fills once per
+// loop. Brew/guards must not poll machine specializations, scale link, or cup
+// presence themselves, and must not import paddle/momentary headers.
+
 constexpr uint32_t DEFAULT_LAST_SHOT_COOLDOWN_MS = 60UL * 60UL * 1000UL;
 constexpr uint32_t MIN_LAST_SHOT_COOLDOWN_MS = 5UL * 60UL * 1000UL;
 constexpr uint32_t MAX_LAST_SHOT_COOLDOWN_MS = 240UL * 60UL * 1000UL;
@@ -86,7 +97,8 @@ enum class ControlSource : uint8_t {
 };
 
 // Snapshot the stopper builds once per loop. Brew/guards never poll machine,
-// scale link, or cup presence themselves.
+// scale link, or cup presence themselves — and never see paddle/momentary
+// internals (no PaddleMode, reed, pulse state, or MachineType branches).
 struct GuardInputs {
   bool holdActive = false;
   bool scaleAvailable = false;

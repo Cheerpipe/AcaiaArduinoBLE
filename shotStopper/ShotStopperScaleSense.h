@@ -3,10 +3,16 @@
 #include "ShotStopperScaleTypes.h"
 #include "ShotStopperShotLogTypes.h"
 
-// Scale sense: trajectory and first-drop detector.
-// Cup presence lives in ShotStopperCupPresence.h. Predicts against a
-// brew-injected target. No GPIO. No heap; trajectory is BSS.
-// Does not call brew or cup — the stopper applies those effects.
+// =============================================================================
+// LAYER: Scale (sense / trajectory / first-drop)
+// =============================================================================
+// WHAT: Shot weight trajectory and first-drop detector. Predicts against a
+//       brew-injected target. Cup presence is ShotStopperCupPresence.h.
+//       No GPIO. No heap; trajectory is BSS.
+//
+// BOUNDARY: Weight stream only. Does not call brew or cup — the stopper
+// applies those effects. Must not include or know paddle/momentary/reed or
+// machine actuators. Never branch on MachineType or PaddleMode.
 
 void resetShotTrajectory(uint32_t startedAtMs) {
   shot.startMs = startedAtMs;

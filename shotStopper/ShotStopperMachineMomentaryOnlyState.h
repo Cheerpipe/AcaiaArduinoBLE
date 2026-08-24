@@ -1,9 +1,17 @@
 #pragma once
 
-// Momentary-only run view. Never canonical: boot is OFF, a missing scale is
-// UNKNOWN (no auto-cut), quiet pan reinforces OFF, and espresso-like rising
-// flow (g/s) is the only path to CONFIRMED_ON. CONFIRMED_ON expires without
-// recent flow so auto-cut cannot pulse a stopped group.
+// =============================================================================
+// SPECIALIZATION: Momentary-only — run view (state)
+// =============================================================================
+// WHAT: MachineRunState without reed. Never canonical: boot is OFF, a missing
+//       scale is UNKNOWN (no auto-cut), quiet pan reinforces OFF, and
+//       espresso-like rising flow (g/s) is the only path to CONFIRMED_ON.
+//       CONFIRMED_ON expires without recent flow so auto-cut cannot pulse a
+//       stopped group. Consumes MachineSense pushed by the stopper.
+//
+// BOUNDARY: This file alone determines momentary-only run state. Do not put
+// reed GPIO here (that is MomentaryReedState). Do not put paddle latch logic
+// here. Brew/guards must not re-derive this — they use machineRunState().
 
 constexpr float MOMENTARY_FLOW_ON_G_S = 0.60f;
 constexpr float MOMENTARY_FLOW_OFF_G_S = 0.20f;

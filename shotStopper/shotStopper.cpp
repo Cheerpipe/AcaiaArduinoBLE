@@ -9,6 +9,24 @@
   Paddle OFF (microswitch open)   -> GPIO HIGH
   Relay de-energized              -> machine circuit open (safe state)
 
+  LAYER: Shot stopper (orchestrator)
+  ----------------------------------
+  This translation unit wires brew, cup, scale, and the generic machine façade.
+  It must keep responsibilities decoupled:
+
+  - Stopper talks to Machine only through the abstract façade (UserIntent,
+    MachineIntention, machineRequestStart/Stop, machineRunState, MachineSense).
+    It must NOT include paddle/momentary specialization headers, branch on
+    MachineType, or know reed/pulse/PaddleMode internals.
+  - Paddle logic stays in ShotStopperMachinePaddle*; momentary in
+    ShotStopperMachineMomentary*. Run state is owned only by each type's
+    *State* file. Brew / cup / scale / guards likewise never talk to switch
+    or paddle details — if a guard uses paddle- or momentary-specific code,
+    that is a layer bug.
+  - Brew, cup, and scale do not call each other; this file polls machine once
+    per loop, builds GuardInputs, pushes MachineSense, and applies scale/cup
+    effects.
+
   Released under the MIT license.
   https://github.com/tatemazer/AcaiaArduinoBLE
 */
@@ -1378,6 +1396,10 @@ void cancelScalePaddleReturnReminderBeep();
 void serviceBootRecoverySafety();
 #endif
 
+// ---------------------------------------------------------------------------
+// Machine façade (generic). Paddle vs momentary is compile-time behind
+// ShotStopperMachine.h — this file must not reach into those specializations.
+// ---------------------------------------------------------------------------
 #include "ShotStopperMachine.h"
 
 StopperState nextStateForUserHold(const MachineIntention &intent) {
@@ -1480,7 +1502,9 @@ void serviceRemoteTimerStopRetry() {
   (void)tryQueueRemoteTimerStop();
 }
 // ---------------------------------------------------------------------------
-// Brew policy + scale sense (domain headers). Orchestrator glue follows.
+// Brew policy + scale sense + cup (domain headers). Orchestrator glue follows.
+// These layers stay decoupled: no paddle/momentary internals, no direct calls
+// between brew ↔ cup ↔ scale — this file applies their effects.
 // ---------------------------------------------------------------------------
 
 #include "ShotStopperCupPresence.h"

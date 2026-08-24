@@ -2,8 +2,15 @@
 
 #include "ShotStopperScaleTypes.h"
 
-// Cup presence FSM (Scale). PRESENT / ABSENT from weight hysteresis.
-// Tare does not change state. No heap; state is BSS.
+// =============================================================================
+// LAYER: Cup (presence FSM)
+// =============================================================================
+// WHAT: PRESENT / ABSENT from weight hysteresis on the scale stream. Tare does
+//       not change state. No heap; state is BSS.
+//
+// BOUNDARY: Scale-weight sensing only. Must not talk to machine, paddle,
+// momentary, reed, or brew actuators. Emits CupPresenceEvent; the stopper
+// decides whether REMOVED cuts the shot. No MachineType / paddle details.
 
 namespace {
 

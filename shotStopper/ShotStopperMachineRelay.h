@@ -7,6 +7,11 @@
 // K1 electrical driver and independent deadline/feedback safety.
 // Included from ShotStopperMachine.h in the shotStopper.cpp translation unit.
 // State is file-scope BSS — no heap.
+//
+// BOUNDARY: Shared electrical layer under the machine façade. Paddle and
+// momentary specializations request close/open through this driver; brew and
+// guards do not call it directly (except via machineRequestStart/Stop). Safety
+// may open the circuit without waiting for brew policy.
 
 bool readCircuitFeedbackClosed() {
   return EXTERNAL_SAFETY_HARDWARE_PRESENT &&

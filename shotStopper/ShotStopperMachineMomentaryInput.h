@@ -1,10 +1,17 @@
 #pragma once
 
-// Momentary-switch GPIO: debounce, live 1:1 relay mirror. Start/stop for
-// brew follows momentaryStartOnPress: on press (default) or on release of a
-// hold no longer than Single-press limit. A longer hold is still mirrored
-// (machine-native rinse) and is not a start/stop: in press mode the tentative
-// edge is undone; in release mode it is never applied.
+// =============================================================================
+// SPECIALIZATION: Momentary switch — GPIO input
+// =============================================================================
+// WHAT: Debounce and live 1:1 relay mirror. Start/stop for brew follows
+//       momentaryStartOnPress: on press (default) or on release of a hold no
+//       longer than Single-press limit. A longer hold is still mirrored
+//       (machine-native rinse) and is not a start/stop: in press mode the
+//       tentative edge is undone; in release mode it is never applied.
+//
+// BOUNDARY: Momentary-only. Writes shared switch sample + momentary runtime.
+// Stopper/brew/cup/scale must not read these fields or know press vs release —
+// they consume UserIntent from the façade. No paddle latch / PaddleMode here.
 
 bool momentaryPhysicalOn = false;
 bool momentaryRawOn = false;

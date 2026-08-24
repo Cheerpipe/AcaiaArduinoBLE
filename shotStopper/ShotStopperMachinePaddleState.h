@@ -1,7 +1,14 @@
 #pragma once
 
-// Paddle / latch-switch run view: group brewing == circuit closed.
-// Included from ShotStopperMachine.h after the relay driver.
+// =============================================================================
+// SPECIALIZATION: Paddle / latch-switch — run view (state)
+// =============================================================================
+// WHAT: MachineRunState for paddle builds. Group brewing == circuit closed
+//       (relay snapshot). Included from ShotStopperMachine.h after the relay.
+//
+// BOUNDARY: Paddle-only. This file owns paddle run-state derivation. Do not
+// put momentary/reed inference here. Stopper/brew/cup/scale never include this
+// directly — only via the machine façade.
 
 // One snapshot: closed + elapsed. Callers that need both must use this so an
 // ISR open between two getRelaySafetySnapshot() calls cannot stamp 0 ms.

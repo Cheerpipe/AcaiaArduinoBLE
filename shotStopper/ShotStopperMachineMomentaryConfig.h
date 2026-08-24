@@ -4,8 +4,14 @@
 
 namespace shotstopper {
 
-// JSON/API encoding for RuntimeConfig.momentaryStartOnPress. Paddle does not
-// use this; keep it out of ShotStopperMachineTypes.h.
+// =============================================================================
+// SPECIALIZATION: Momentary — config helpers (API encoding)
+// =============================================================================
+// WHAT: JSON/API encoding for RuntimeConfig.momentaryStartOnPress.
+//
+// BOUNDARY: Momentary-only helpers. Paddle does not use this; keep it out of
+// ShotStopperMachineTypes.h so brew/stopper never grow momentary-specific
+// parsing paths.
 
 inline const char *momentaryStartEdgeId(bool startOnPress) {
   return startOnPress ? "press" : "release";

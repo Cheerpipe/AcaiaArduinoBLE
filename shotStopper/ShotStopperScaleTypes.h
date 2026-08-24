@@ -7,6 +7,16 @@
 
 namespace shotstopper {
 
+// =============================================================================
+// LAYER: Scale types (link, weight stream, cup contracts)
+// =============================================================================
+// WHAT: Scale pairing/MAC modes, weight stream/control states, cup presence
+//       enums, and shared scale constants used by sense + BLE link.
+//
+// BOUNDARY: Scale/cup vocabulary only. Machine paddle/momentary details do not
+// belong here. Upper layers (brew, guards, stopper) consume these types; they
+// must not push machine-specialization knowledge into this header.
+
 inline void copyCString(char *destination, size_t capacity, const char *source) {
   if (destination == nullptr || capacity == 0) {
     return;

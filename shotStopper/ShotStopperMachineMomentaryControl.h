@@ -2,9 +2,16 @@
 
 #include "ShotStopperMachineMomentaryConfig.h"
 
-// Momentary actuator: K1 mirrors the physical switch 1:1. The only synthetic
-// close is a firmware stop pulse (weight cut / walls), aborted if the user
-// presses. Logical run walls reuse tripRelaySafety so brew sees existing flags.
+// =============================================================================
+// SPECIALIZATION: Momentary switch — actuator (control)
+// =============================================================================
+// WHAT: K1 mirrors the physical switch 1:1. The only synthetic close is a
+//       firmware stop pulse (weight cut / walls), aborted if the user presses.
+//       Logical run walls reuse tripRelaySafety so brew sees existing flags.
+//
+// BOUNDARY: Momentary-only. No paddle latch/PaddleMode policy. Stopper/brew
+// call machineRequestStart/Stop on the façade and must not know about pulses
+// or 1:1 mirroring. Run state lives in MomentaryOnlyState / MomentaryReedState.
 
 void abortFirmwarePulseIfActive() {
   if (pulseOutputActive) {

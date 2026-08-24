@@ -1,8 +1,16 @@
 #pragma once
 
-// Latch-switch translator: GPIO edges + snapshotted PaddleMode → UserIntent.
-// Included from ShotStopperMachine.h when SHOT_STOPPER_MACHINE_TYPE == 0.
-// Stopper/brew never read paddleMode or GPIO; they consume last intention.
+// =============================================================================
+// SPECIALIZATION: Paddle / latch-switch — policy (intent translator)
+// =============================================================================
+// WHAT: GPIO edges + snapshotted PaddleMode → UserIntent / cycle policy.
+//       Included from ShotStopperMachine.h when SHOT_STOPPER_MACHINE_TYPE == 0.
+//
+// BOUNDARY: Paddle-only. Owns Natural/Original/Auto feel. Stopper/brew never
+// read paddleMode or GPIO; they consume last MachineIntention. Do not put
+// momentary press/release or reed logic here. If brew/guards need a paddle
+// quirk, encode it as generic intent/flags on the façade — never leak
+// PaddleMode into brew.
 
 bool machineCycleActive = false;
 uint8_t machineCyclePaddleMode = static_cast<uint8_t>(PaddleMode::NATURAL);

@@ -4,13 +4,25 @@
 #include "ShotStopperMachineTypes.h"
 #include "ShotStopperSafety.h"
 
-// Machine façade. Stopper talks to a generic machine: UserIntent,
-// machineRequestStart/Stop, machineIsRunning, cycle policy, config apply,
-// and MachineSense. It does not branch on paddle vs switch vs reed and does
-// not read those implementations' internals. Rinse duration and the
-// "stop within X ms is a rinse" rule live in the stopper; the machine only
-// reports start/stop/hold (paddle may still surface an early OFF as STOP so
-// that rule can run). Brew/scale/cup never call this header's actuators.
+// =============================================================================
+// LAYER: Machine (façade)
+// =============================================================================
+// WHAT: Generic machine API. Compile-time selects paddle vs momentary
+//       specializations behind one surface: UserIntent, MachineIntention,
+//       machineRequestStart/Stop, machineIsRunning, cycle policy, MachineSense.
+//
+// BOUNDARY (hard rules — do not cross):
+// - Shot stopper / brew / cup / scale / guards talk ONLY to this abstract
+//   machine. They must NOT include paddle or momentary headers, branch on
+//   MachineType, read paddleMode / reed / momentary GPIO, or know how a
+//   specialization drives K1.
+// - Paddle code lives only under ShotStopperMachinePaddle*. Momentary under
+//   ShotStopperMachineMomentary*. Never mix paddle logic into momentary files
+//   or the reverse. Run state for each type is owned solely by that type's
+//   *State* header (PaddleState vs MomentaryOnlyState / MomentaryReedState).
+// - Brew rinse duration and "stop within X ms is a rinse" live in the stopper;
+//   the machine only reports start/stop/hold (paddle may surface early OFF as
+//   STOP so that rule can run). Brew/scale/cup never call actuators here.
 
 #include "ShotStopperMachineRelay.h"
 #include "ShotStopperMachineSwitchSample.h"
