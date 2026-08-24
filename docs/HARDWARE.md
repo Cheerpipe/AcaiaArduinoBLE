@@ -8,7 +8,8 @@ warnings.
 On the Linea Micra, the intercepted brew-switch connector is labelled **CN9**.
 This firmware treats that contact as the **machine circuit** — the isolated
 path that makes the machine run — not as a Micra-specific name. Other machines
-intercept a different brew/run circuit with the same relay contract.
+intercept a different brew/run circuit with the same relay contract. User-facing
+copy (Web UI, Settings, status JSON) always says **machine circuit**, never CN9.
 
 Until that write-up exists, treat the photo and pin table below as the known
 facts, and complete the [manual test plan](MANUAL_TEST_PLAN.md) on the bench
@@ -38,6 +39,7 @@ They are **not** editable from the Web UI.
 | Function | GPIO | Level |
 | --- | ---: | --- |
 | Physical paddle (to GND) | **21** | Active **LOW** (internal pull-up; ON = GPIO LOW) |
+| Reed (momentary+reed builds) | **4** | Active **LOW** (internal pull-up; ON = GPIO LOW). Compile `SHOT_STOPPER_MACHINE_TYPE=2`. Override with `-DSHOT_STOPPER_REED_GPIO`. Must stay distinct from paddle, relay, LED, buzzer, and safety GPIOs. |
 | Onboard relay coil | **2** | Active **HIGH** (HIGH energizes the coil and closes NO) |
 | Scale-connected LED | **1** | Active HIGH while a BLE scale is connected (switchable in Alerts) |
 | Optional buzzer | **14** | Compile with `SHOT_STOPPER_ENABLE_BUZZER=1` (passive piezo, RTTTL on the same pin) or `=2` (active on/off beep) |

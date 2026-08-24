@@ -271,13 +271,19 @@ bool setMachineCircuitClosed(bool closed,
     stopRelayDeadlineTimers();
     const uint32_t closingAtMs = millis();
     uint32_t generation;
+    // A momentary stop pulse may re-close K1 after tripRelaySafety opened it.
+    // Keep the trip flags so stateMachineTask still finalizes the brew cycle.
+    const bool preserveTripFlags =
+        before.tripped || before.operationalTripped;
     portENTER_CRITICAL(&relayMux);
     generation = ++relaySafetyGeneration;
     circuitClosedAtMs = closingAtMs;
     operationalLimitAtArmMs = operationalLimitMs;
-    relaySafetyTripped = false;
-    operationalLimitTripped = false;
-    relaySafetyFault = RelaySafetyFault::NONE;
+    if (!preserveTripFlags) {
+      relaySafetyTripped = false;
+      operationalLimitTripped = false;
+      relaySafetyFault = RelaySafetyFault::NONE;
+    }
     relaySafetyState = RelaySafetyState::ARMING;
     circuitClosed = false;
     portEXIT_CRITICAL(&relayMux);

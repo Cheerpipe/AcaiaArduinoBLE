@@ -1,9 +1,14 @@
 # Paddle
 
-How the physical brew switch starts, holds, and ends a shot. Choose the mode
-in **Settings → Machine and scale → Paddle** (`paddleMode`). It is
+How the physical **latch** brew switch starts, holds, and ends a shot. Choose
+the mode in **Settings → Machine and scale → Paddle** (`paddleMode`). It is
 **machine-level**, not per-preset. Selector order is **Auto**, **Natural**,
 **Original**. Default is **Natural**.
+
+This page applies to firmware compiled as `SHOT_STOPPER_MACHINE_TYPE=0`
+(paddle / latch). That firmware shows **Paddle** and **Quick rinse**.
+Momentary builds (with or without reed) hide both and show
+[Momentary](momentary.md) instead. The groups are mutually exclusive.
 
 This is the main day-to-day choice. All modes still share quick rinse, machine circuit
 safety limits, and physical-paddle priority. They differ in whether releasing
@@ -84,6 +89,6 @@ Default **Natural**: brew like a stock Micra. Flip ON, walk away, the
 controller stops by weight; flip OFF any time after the rinse window to cut
 now.
 
-Related: [Quick rinse](quick-rinse.md),
+Related: [Quick rinse](quick-rinse.md), [Momentary](momentary.md),
 [Brew by weight](../features/brew-by-weight.md), [Alerts](../alerts.md)
 (paddle-off reminder).

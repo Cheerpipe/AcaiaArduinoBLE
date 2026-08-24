@@ -18,6 +18,10 @@ const firmware = [
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleInput.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleControl.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleState.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryInput.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryControl.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryReedState.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryOnlyState.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperScaleSense.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperCupPresence.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8'),
@@ -210,8 +214,8 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 46300) {
-  throw new Error('Web UI HTML source exceeds the 45 KiB authoring budget');
+if (htmlBytes > 46800) {
+  throw new Error('Web UI HTML source exceeds the 45.7 KiB authoring budget');
 }
 if (jsBytes > 120000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
@@ -580,7 +584,8 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !ui.includes('function formatScaleTimer(') ||
     !ui.includes('function formatMachineState(') ||
     !ui.includes("CONFIRMED_OFF:'Idle'") ||
-    !ui.includes("CONFIRMED_ON:'Working'") ||
+    !ui.includes("ASSUMED_ON:'Assumed on'") ||
+    !ui.includes("CONFIRMED_ON:'Confirmed on'") ||
     !ui.includes('function formatCupState(') ||
     !ui.includes('lastDisconnectReasonName') ||
     !ui.includes("'Stale'") ||
@@ -861,6 +866,50 @@ if (!html.includes('<summary>Paddle</summary>') ||
     !domain.includes('ORIGINAL = 1') ||
     !domain.includes('AUTO = 2')) {
   throw new Error('Machine Paddle mode must expose Auto/Natural/Original in UI, API, and APPLY_CONFIG');
+}
+if (!html.includes('<summary>Momentary</summary>') ||
+    !html.includes('id="momentaryStartEdge"') ||
+    !html.includes('class="cfgGroup momentaryOnly"') ||
+    !html.includes('<option value="release" selected>On release</option>') ||
+    !html.includes('<option value="press">On press</option>') ||
+    html.indexOf('<summary>Paddle</summary>') >
+        html.indexOf('<summary>Momentary</summary>') ||
+    html.indexOf('<summary>Momentary</summary>') >
+        html.indexOf('<summary>No-scale BBW</summary>') ||
+    html.indexOf('id="momentaryStartEdge"') >
+        html.indexOf('<summary>No-scale BBW</summary>') ||
+    !html.includes('Releasing that same start press does not stop') ||
+    !ui.includes("momentaryStartEdge:($('momentaryStartEdge')") ||
+    !ui.includes("if($('momentaryStartEdge'))$('momentaryStartEdge').value=") ||
+    !css.includes('.momentaryOnly') ||
+    !network.includes('"momentaryStartEdge"') ||
+    !network.includes('momentaryStartEdge must be press or release.') ||
+    !network.includes('jsonMomentaryStartEdge') ||
+    !firmware.includes(
+        'candidate.momentaryStartOnPress = command.config.momentaryStartOnPress') ||
+    !firmware.includes('runtimeConfig.momentaryStartOnPress') ||
+    !domain.includes('bool momentaryStartOnPress = false') ||
+    !domain.includes('parseMomentaryStartEdge') ||
+    !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineTypes.h'), 'utf8')
+         .includes('parseMomentaryStartEdge') ||
+    fs.readFileSync(path.join(sketchDir, 'ShotStopperBrewTypes.h'), 'utf8')
+        .includes('parseMomentaryStartEdge') ||
+    fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8')
+        .includes('momentaryStart')) {
+  throw new Error(
+      'Momentary start-edge setting must be wired in Settings, API, APPLY_CONFIG, and machine types — not brew');
+}
+if (!html.includes('class="cfgGroup paddleOnly"><summary>Paddle</summary>') ||
+    !html.includes('class="cfgGroup paddleOnly"><summary>Quick rinse</summary>') ||
+    !html.includes('class="cfgGroup momentaryOnly"><summary>Momentary</summary>') ||
+    html.includes('cfgGroup paddleOnly momentaryOnly') ||
+    html.includes('cfgGroup momentaryOnly paddleOnly') ||
+    !css.includes('html.momentaryMachine .paddleOnly') ||
+    !css.includes('html:not(.momentaryMachine) .momentaryOnly') ||
+    !ui.includes("classList.toggle('momentaryMachine',t!=='paddle')") ||
+    !ui.includes("classList.toggle('reedMachine',t==='momentary_reed')")) {
+  throw new Error(
+      'Paddle+Quick rinse and Momentary Settings groups must be mutually exclusive by compiled machine type');
 }
 if (!ui.includes('id="learnedOffsetG"') ||
     !ui.includes('id="weightOffsetBaselineG"') ||
@@ -2331,7 +2380,12 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
       !ui.includes('dCircuit') ||
       !ui.includes('dArch') ||
       !ui.includes('Compile flags') ||
-      !ui.includes('s.compileFlags')) {
+      !ui.includes('s.compileFlags') ||
+      !html.includes('paddleOnly') ||
+      !html.includes('id="dMt"') ||
+      !css.includes('html.momentaryMachine .paddleOnly') ||
+      !css.includes('.momentaryOnly') ||
+      !ui.includes('function applyMachineTypeUi(')) {
     throw new Error(
         'status/diagnostic must keep transversal bootId/firmware/liveShot/ringRetain for the Diagnostic page');
   }
@@ -2715,8 +2769,8 @@ if (generated.settingsGzip.length > 4096) {
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
 }
-if (generated.combined > 47104) {
-  throw new Error('Combined Web UI gzip exceeds the 46 KiB flash budget');
+if (generated.combined > 47616) {
+  throw new Error('Combined Web UI gzip exceeds the 46.5 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {

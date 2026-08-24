@@ -4,16 +4,32 @@
 #include "ShotStopperMachineTypes.h"
 #include "ShotStopperSafety.h"
 
-// Machine façade (paddle / latch-switch). Brew talks to this header the same
-// way it does today: paddleOn edges, machineRequestStart/Stop, machineIsRunning.
-// Internals are split so later machine types can replace input/control/state
-// without changing that contract. Included from shotStopper.cpp after logging
-// helpers and BSS globals. State is file-scope BSS — no heap.
+// Machine façade. Brew talks to paddleOn edges, machineRequestStart/Stop,
+// and machineIsRunning. Included from shotStopper.cpp after logging helpers
+// and BSS globals. State is file-scope BSS — no heap.
 
 #include "ShotStopperMachineRelay.h"
+#if SHOT_STOPPER_MACHINE_TYPE == 0
 #include "ShotStopperMachinePaddleInput.h"
 #include "ShotStopperMachinePaddleControl.h"
 #include "ShotStopperMachinePaddleState.h"
+
+inline void serviceMachine() {}
+inline void machineReleasePhysicalSwitchToBrew() {}
+inline void machineReconcileBrewOutcome() {}
+inline bool machineSupportsRinse() { return true; }
+inline bool reedIsOn() { return false; }
+#else
+#include "ShotStopperMachineMomentaryInput.h"
+#if SHOT_STOPPER_MACHINE_TYPE == 2
+#include "ShotStopperMachineMomentaryReedState.h"
+#else
+#include "ShotStopperMachineMomentaryOnlyState.h"
+#endif
+#include "ShotStopperMachineMomentaryControl.h"
+
+inline bool machineSupportsRinse() { return false; }
+#endif
 
 struct MachineIntention {
   UserIntent intent = UserIntent::NONE;

@@ -68,6 +68,8 @@ static_assert(offsetof(PersistedSettings, storageRevision) + sizeof(uint32_t) ==
 
 static_assert(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET,
               "PersistedSettings exceeds NVS dual-slot budget");
+static_assert(sizeof(PersistedSettings) == 1904,
+              "PersistedSettings size changed; add a schema migration");
 
 inline uint32_t persistedSettingsChecksum(const PersistedSettings &settings) {
   return crc32(reinterpret_cast<const uint8_t *>(&settings),

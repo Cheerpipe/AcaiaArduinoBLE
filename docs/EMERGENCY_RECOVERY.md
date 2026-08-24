@@ -31,7 +31,9 @@ Passwords are case-sensitive.
 
 One cycle means moving the paddle completely from **OFF to ON**. The
 controller must initially power on with the paddle in **ON**; that initial
-position does not count as a cycle.
+position does not count as a cycle. Momentary-switch builds use the same
+recovery procedure: **hold the button at power-on**, then cycle it the
+same way. The firmware still reads raw GPIO edges during recovery.
 
 - Perform all gesture movements in less than 5 seconds.
 - After the last ON, do not move the paddle for 3 seconds.

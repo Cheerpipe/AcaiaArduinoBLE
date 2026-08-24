@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <string.h>
 
 namespace shotstopper {
 
@@ -17,7 +18,9 @@ constexpr uint32_t MAX_PADDLE_RETURN_REMINDER_MAX_DURATION_MS =
     60UL * 60UL * 1000UL;
 
 enum class MachineType : uint8_t {
-  PADDLE = 0
+  PADDLE = 0,
+  MOMENTARY = 1,
+  MOMENTARY_REED = 2
 };
 
 enum class MachineRunState : uint8_t {
@@ -34,6 +37,25 @@ enum class UserIntent : uint8_t {
   HOLD_ACTIVE = 3,
   STABLE_IDLE = 4
 };
+
+inline const char *momentaryStartEdgeId(bool startOnPress) {
+  return startOnPress ? "press" : "release";
+}
+
+inline bool parseMomentaryStartEdge(const char *text, bool &startOnPress) {
+  if (text == nullptr) {
+    return false;
+  }
+  if (strcmp(text, "press") == 0) {
+    startOnPress = true;
+    return true;
+  }
+  if (strcmp(text, "release") == 0) {
+    startOnPress = false;
+    return true;
+  }
+  return false;
+}
 
 inline const char *machineRunStateName(MachineRunState state) {
   switch (state) {

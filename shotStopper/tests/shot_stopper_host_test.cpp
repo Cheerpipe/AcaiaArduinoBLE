@@ -282,6 +282,9 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   hostPinLevel[PADDLE_GPIO] = initialPaddleOn ? PADDLE_ACTIVE_LEVEL
                                               : !PADDLE_ACTIVE_LEVEL;
   initializePaddleInput();
+#if SHOT_STOPPER_MACHINE_TYPE != 0
+  machineReleasePhysicalSwitchToBrew();
+#endif
   localBuzzer.begin(BUZZER_GPIO);
   hostRelayOpenWrites = 0;
   hostRelayClosedWrites = 0;
@@ -319,7 +322,8 @@ void verifySafetyInvariants() {
     std::cerr << "Safety invariant failed: safe state has machine circuit closed\n";
     ++failures;
   }
-  if (!paddleOn && !rawPaddleOn && stopperState != StopperState::RINSE &&
+  if (!MACHINE_USES_MOMENTARY_SWITCH && !paddleOn && !rawPaddleOn &&
+      stopperState != StopperState::RINSE &&
       session.source != ControlSource::WEB && relay.closed &&
       !originalBbwSemanticsActive() && !autoBbwSemanticsActive()) {
     std::cerr << "Safety invariant failed: stable paddle OFF has machine circuit closed\n";
@@ -1713,6 +1717,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(!config.serialDebugOutput);
   CHECK(config.ringRetainLogLevel == static_cast<uint8_t>(LogLevel::NONE));
   CHECK(config.paddleMode == static_cast<uint8_t>(PaddleMode::NATURAL));
+  CHECK(!config.momentaryStartOnPress);
 }
 
 void w02_each_runtime_field_is_validated() {
@@ -1837,6 +1842,12 @@ void w03_runtime_timing_relations_are_transactional() {
   CHECK(parsePaddleMode("auto", parsedPaddle));
   CHECK(parsedPaddle == static_cast<uint8_t>(PaddleMode::AUTO));
   CHECK(!parsePaddleMode("legacy", parsedPaddle));
+  bool parsedStartOnPress = true;
+  CHECK(parseMomentaryStartEdge("release", parsedStartOnPress));
+  CHECK(!parsedStartOnPress);
+  CHECK(parseMomentaryStartEdge("press", parsedStartOnPress));
+  CHECK(parsedStartOnPress);
+  CHECK(!parseMomentaryStartEdge("hold", parsedStartOnPress));
   config = RuntimeConfig{};
   config.cupPresentWeightG = 0.0f;
   CHECK(validateRuntimeConfig(config) ==

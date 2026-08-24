@@ -4,7 +4,12 @@ A short paddle ON then OFF is a **rinse**, not a shot. Machine circuit stays clo
 configured duration, then opens. Further paddle changes are ignored until the
 rinse ends.
 
-Quick rinse works in every [paddle mode](paddle.md).
+Quick rinse works in every [paddle mode](paddle.md). Paddle firmware shows
+this group with **Paddle**. Momentary-switch firmware (with or without reed)
+hides both and shows [Momentary](momentary.md) instead; it also hides the
+Home rinse button. A short press starts or stops a brew, and a long press
+drives the machine circuit directly. When that short press reports “running”
+is chosen there; that edge is also when the rinse gesture window starts.
 
 ## When it applies
 
@@ -32,5 +37,5 @@ Rinses are not stored in shot history (they are too short).
 Default 1 s gesture / 4 s duration: flip the paddle ON and back OFF within a
 second. The group head rinses for four seconds, then machine circuit opens.
 
-Related: [Paddle](paddle.md), [No-scale BBW](no-scale-bbw.md),
+Related: [Paddle](paddle.md), [Momentary](momentary.md), [No-scale BBW](no-scale-bbw.md),
 [Shot history](../features/shot-history.md).

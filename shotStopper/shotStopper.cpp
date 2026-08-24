@@ -2621,6 +2621,9 @@ void serviceScaleCompletionBeep() {
 }
 
 void servicePaddleReturnReminder() {
+  if (MACHINE_USES_MOMENTARY_SWITCH) {
+    return;
+  }
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   // Read the GPIO here rather than a debounced state: this reminder describes
   // the physical paddle circuit as it is wired at this instant.
@@ -4377,7 +4380,7 @@ bool dispatchSettingsPersist() {
 #endif
 
 void serviceShotStorePersistence() {
-  if (session.active || getRelaySafetySnapshot().closed) {
+  if (session.active || machineIsRunning()) {
     return;
   }
   // Do not wait on the durable flash mutex from the 1 ms control loop: a
@@ -4504,18 +4507,26 @@ void processWebCommand(const WebCommand &command) {
     case WebCommandType::STOP:
     case WebCommandType::STOP_HEARTBEAT:
     case WebCommandType::PADDLE_OFF:
-      if (!session.active || !getRelaySafetySnapshot().closed ||
+      if (!machineIsRunning() ||
           (command.type == WebCommandType::PADDLE_OFF &&
-           session.source != ControlSource::WEB)) {
+           (!session.active || session.source != ControlSource::WEB))) {
         rejectWebCommand(command);
         return;
       }
+#if SHOT_STOPPER_MACHINE_TYPE != 0
+      momentaryUserStopThisCycle = true;
+#endif
       addDebugEvent(DebugCategory::WEB,
                     command.type == WebCommandType::PADDLE_OFF
                         ? DebugCode::WEB_PADDLE_OFF
                         : DebugCode::WEB_STOP,
                     static_cast<int32_t>(command.type),
                     static_cast<int32_t>(session.id));
+      if (!session.active) {
+        (void)machineRequestStop();
+        reportControlCommandResult(command, CommandResultState::APPLIED);
+        return;
+      }
       finalizeCycle(
           command.type == WebCommandType::STOP_HEARTBEAT
               ? EndReason::WEB_HEARTBEAT_TIMEOUT
@@ -4543,7 +4554,8 @@ void processWebCommand(const WebCommand &command) {
       return;
 
     case WebCommandType::RINSE:
-      if (!REMOTE_MACHINE_CONTROL_ENABLED || !webCommandAllowsUnsafeConfiguration(command)) {
+      if (!machineSupportsRinse() || !REMOTE_MACHINE_CONTROL_ENABLED ||
+          !webCommandAllowsUnsafeConfiguration(command)) {
         rejectWebCommand(command);
         return;
       }
@@ -4578,6 +4590,7 @@ void processWebCommand(const WebCommand &command) {
       candidate.paddleReturnReminderMaxDurationMs =
           command.config.paddleReturnReminderMaxDurationMs;
       candidate.paddleMode = command.config.paddleMode;
+      candidate.momentaryStartOnPress = command.config.momentaryStartOnPress;
       candidate.buzzerScaleLostBeep = command.config.buzzerScaleLostBeep;
       candidate.buzzerAutoToManualGuardEndBeep =
           command.config.buzzerAutoToManualGuardEndBeep;
@@ -5095,7 +5108,8 @@ void publishControlStatus() {
   next.state = stopperState;
   next.activeCycle = session.active;
   next.relayClosed = relay.closed;
-  next.machineRunning = relay.closed;
+  next.machineRunning = machineIsRunning();
+  next.reedOn = reedIsOn();
   // Status intentionally reports the actual GPIO level, not the debounced
   // state used by the control state machine.
   next.physicalPaddleOn = readRawPaddleOn();
@@ -5108,7 +5122,9 @@ void publishControlStatus() {
   next.maintenanceLeaseId = maintenanceLease.active ? maintenanceLease.id : 0;
   next.maintenanceStartedAtMs =
       maintenanceLease.active ? maintenanceLease.startedAtMs : 0;
-  next.circuitElapsedMs = relay.closed ? elapsedMs(relay.closedAtMs) : 0;
+  next.circuitElapsedMs = MACHINE_USES_MOMENTARY_SWITCH
+      ? machineElapsedMs()
+      : (relay.closed ? elapsedMs(relay.closedAtMs) : 0);
   next.safetyState = relay.state;
   next.safetyFault = relay.fault;
   next.safetyGeneration = relay.generation;
@@ -5246,6 +5262,11 @@ void publishControlStatus() {
   next.noScaleShotGuardEnabled = runtimeConfig.avoidBbwShotWithoutScale;
   next.noScaleShotGuardArmed = noScaleShotGuardArmed;
   next.machineRunState = machineRunState();
+#if SHOT_STOPPER_MACHINE_TYPE == 1
+  next.machineStartAckPending = momentaryStartAwaitingAck;
+  next.machineStopAckPending = momentaryStopAwaitingAck;
+  next.machineOrphanRun = momentaryOrphanRun;
+#endif
   next.cupPresenceState = cupPresenceState();
   next.cupPresent = next.cupPresenceState == CupPresenceState::PRESENT;
   next.configPersistPending = runtimePersistPending;
@@ -5922,6 +5943,7 @@ void setup() {
   // BLE, Wi-Fi or HTTP startup. A new gesture is accepted only on cold power.
   resumePendingBootRecovery();
   maybeRunBootRecoveryGesture();
+  machineReleasePhysicalSwitchToBrew();
 #endif
 
   Serial.begin(SERIAL_BAUD);
@@ -6274,6 +6296,7 @@ void loop() {
     healthIntervalMaxGapMs = 0;
   }
   updatePaddleInput();
+  serviceMachine();
   // Consume only the latest attributed weight before making automatic
   // decisions. Paddle and relay safety were already sampled first, so their
   // priority is preserved without adding a full event backlog to this loop.
@@ -6281,6 +6304,7 @@ void loop() {
   serviceNoScaleShotGuard();
   serviceCupStartGuard();
   stateMachineTask();
+  machineReconcileBrewOutcome();
   servicePaddleReturnReminder();
   serviceExtendedPulseAlert();
   localBuzzer.service(millis());
@@ -6310,6 +6334,7 @@ void loop() {
         publishedControlStatus.state != stopperState ||
         publishedControlStatus.activeCycle != session.active ||
         publishedControlStatus.relayClosed != relaySnap.closed ||
+        publishedControlStatus.machineRunning != machineIsRunning() ||
         publishedControlStatus.safetyGeneration != relaySnap.generation ||
         publishedControlStatus.safetyFault != relaySnap.fault;
     const uint32_t nowMs = millis();

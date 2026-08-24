@@ -157,9 +157,10 @@ need to change them after first setup.
 
 | Group | What it covers |
 | --- | --- |
-| **[Paddle](docs/settings/paddle.md)** | Auto, Natural (default), or Original feel for the brew switch. |
+| **[Paddle](docs/settings/paddle.md)** | Paddle firmware only. Auto, Natural (default), or Original feel for the brew switch. Hidden on momentary. |
+| **[Momentary](docs/settings/momentary.md)** | Momentary firmware only (with or without reed). Report running on press or on release. Hidden on paddle. |
 | **[No-scale BBW](docs/settings/no-scale-bbw.md)** | Block a full automatic shot when brew-by-weight is on and the scale is missing. |
-| **[Quick rinse](docs/settings/quick-rinse.md)** | Short paddle ON→OFF becomes a timed rinse instead of a shot. |
+| **[Quick rinse](docs/settings/quick-rinse.md)** | Paddle firmware only. Short paddle ON→OFF becomes a timed rinse instead of a shot. Hidden on momentary. |
 | **[Cup](docs/settings/cup.md)** | What counts as a cup placed or lifted. |
 | **[Tare](docs/settings/tare.md)** | Automatic tare, late-cup retare, and settle time after tare. |
 | **[Scales](docs/settings/scales.md)** | Preferred scale, drip delay, Bookoo volume and combined tare. |
@@ -214,6 +215,7 @@ claim the Web UI to save your home Wi-Fi. Step-by-step notes are in
 **Settings**
 
 - [Paddle](docs/settings/paddle.md)
+- [Momentary](docs/settings/momentary.md)
 - [No-scale BBW](docs/settings/no-scale-bbw.md)
 - [Quick rinse](docs/settings/quick-rinse.md)
 - [Cup](docs/settings/cup.md)

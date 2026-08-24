@@ -32,6 +32,11 @@
 #define SHOT_STOPPER_ENABLE_BUZZER CONFIG_SHOT_STOPPER_ENABLE_BUZZER
 #endif
 #endif
+#ifndef SHOT_STOPPER_MACHINE_TYPE
+#ifdef CONFIG_SHOT_STOPPER_MACHINE_TYPE
+#define SHOT_STOPPER_MACHINE_TYPE CONFIG_SHOT_STOPPER_MACHINE_TYPE
+#endif
+#endif
 #endif
 
 #include "ShotStopperMachineTypes.h"
@@ -134,6 +139,46 @@ inline const char *compiledBuzzerModeId() {
     return "passive";
   }
   return "off";
+}
+
+#ifndef SHOT_STOPPER_MACHINE_TYPE
+#define SHOT_STOPPER_MACHINE_TYPE 0
+#endif
+#ifndef SHOT_STOPPER_STOP_PULSE_MS
+#define SHOT_STOPPER_STOP_PULSE_MS 300
+#endif
+#ifndef SHOT_STOPPER_MAX_SINGLE_PRESS_MS
+#define SHOT_STOPPER_MAX_SINGLE_PRESS_MS 1000
+#endif
+
+static_assert(SHOT_STOPPER_MACHINE_TYPE >= 0 && SHOT_STOPPER_MACHINE_TYPE <= 2,
+              "SHOT_STOPPER_MACHINE_TYPE must be 0 (paddle/latch), 1 (momentary), "
+              "or 2 (momentary+reed)");
+static_assert(SHOT_STOPPER_STOP_PULSE_MS >= 50 &&
+                  SHOT_STOPPER_STOP_PULSE_MS <= 1000,
+              "SHOT_STOPPER_STOP_PULSE_MS must be 50–1000");
+static_assert(SHOT_STOPPER_MAX_SINGLE_PRESS_MS >= 100 &&
+                  SHOT_STOPPER_MAX_SINGLE_PRESS_MS <= 5000,
+              "SHOT_STOPPER_MAX_SINGLE_PRESS_MS must be 100–5000");
+
+constexpr uint8_t COMPILED_MACHINE_TYPE =
+    static_cast<uint8_t>(SHOT_STOPPER_MACHINE_TYPE);
+constexpr bool MACHINE_USES_MOMENTARY_SWITCH = SHOT_STOPPER_MACHINE_TYPE != 0;
+constexpr bool MACHINE_HAS_REED = SHOT_STOPPER_MACHINE_TYPE == 2;
+constexpr uint32_t COMPILED_STOP_PULSE_MS =
+    static_cast<uint32_t>(SHOT_STOPPER_STOP_PULSE_MS);
+constexpr uint32_t COMPILED_MAX_SINGLE_PRESS_MS =
+    static_cast<uint32_t>(SHOT_STOPPER_MAX_SINGLE_PRESS_MS);
+
+inline const char *compiledMachineTypeId() {
+  switch (SHOT_STOPPER_MACHINE_TYPE) {
+    case 1:
+      return "momentary";
+    case 2:
+      return "momentary_reed";
+    default:
+      return "paddle";
+  }
 }
 
 enum class BuzzerPattern : uint8_t {
@@ -516,9 +561,17 @@ struct RuntimeConfig {
   bool serialDebugOutput = false;
   // Minimum level retained in the RAM debug ring (WebUI Log). NONE disables.
   uint8_t ringRetainLogLevel = static_cast<uint8_t>(LogLevel::NONE);
+  // Momentary only: report running on press (true) vs on release (false).
+  // Occupies former padding before dripDelayMs so NVS schema 11 size is unchanged.
+  bool momentaryStartOnPress = false;
   // Wait after shot end before capturing the post-drip weight.
   uint32_t dripDelayMs = DEFAULT_DRIP_DELAY_MS;
 };
+
+static_assert(sizeof(RuntimeConfig) == 244,
+              "RuntimeConfig NVS size changed; add a schema migration");
+static_assert(offsetof(RuntimeConfig, dripDelayMs) == 240,
+              "RuntimeConfig dripDelayMs offset changed");
 
 struct CycleConfigSnapshot {
   uint32_t revision = 1;
@@ -1566,6 +1619,7 @@ struct ControlStatusSnapshot {
   bool activeCycle = false;
   bool relayClosed = false;
   bool machineRunning = false;
+  bool reedOn = false;
   bool physicalPaddleOn = false;
   bool virtualPaddleOn = false;
   bool remoteControlEnabled = REMOTE_MACHINE_CONTROL_ENABLED;
@@ -1667,6 +1721,9 @@ struct ControlStatusSnapshot {
   bool noScaleShotGuardEnabled = true;
   bool noScaleShotGuardArmed = true;
   MachineRunState machineRunState = MachineRunState::CONFIRMED_OFF;
+  bool machineStartAckPending = false;
+  bool machineStopAckPending = false;
+  bool machineOrphanRun = false;
   CupPresenceState cupPresenceState = CupPresenceState::ABSENT;
   bool cupPresent = false;
   bool configPersistPending = false;

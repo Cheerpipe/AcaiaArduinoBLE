@@ -59,6 +59,7 @@ void testConfigPatchWorstCaseFitsArena() {
       "\"paddleReturnReminderIntervalMs\":15000,"
       "\"paddleReturnReminderMaxDurationMs\":60000,"
       "\"paddleMode\":1,"
+      "\"momentaryStartEdge\":\"press\","
       "\"buzzerScaleLostBeep\":true,"
       "\"buzzerAutoToManualGuardEndBeep\":false,"
       "\"buzzerManualNoScaleBeep\":true,"

@@ -32,6 +32,10 @@ scan_firmware_sources() {
     "$firmware_dir/ShotStopperMachinePaddleInput.h" \
     "$firmware_dir/ShotStopperMachinePaddleControl.h" \
     "$firmware_dir/ShotStopperMachinePaddleState.h" \
+    "$firmware_dir/ShotStopperMachineMomentaryInput.h" \
+    "$firmware_dir/ShotStopperMachineMomentaryControl.h" \
+    "$firmware_dir/ShotStopperMachineMomentaryReedState.h" \
+    "$firmware_dir/ShotStopperMachineMomentaryOnlyState.h" \
     "$firmware_dir/ShotStopperMachineTypes.h" \
     "$firmware_dir/ShotStopperScaleSense.h" \
     "$firmware_dir/ShotStopperCupPresence.h" \
@@ -52,6 +56,20 @@ scan_firmware_sources() {
   -o "$test_binary"
 
 "$test_binary"
+
+momentary_binary=${TMPDIR:-/tmp}/shot_stopper_momentary_host_test
+for machine_type in 1 2; do
+  "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+    -DSHOT_STOPPER_MACHINE_TYPE="$machine_type" \
+    "$test_dir/momentary_machine_host_test.cpp" \
+    -o "$momentary_binary"
+  "$momentary_binary"
+  "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+    -DSHOT_STOPPER_MACHINE_TYPE="$machine_type" \
+    "$test_dir/shot_stopper_host_test.cpp" \
+    -o /tmp/shot_stopper_host_test_type"$machine_type"
+  echo "Momentary machine type $machine_type: host compile OK"
+done
 
 "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
   -fno-omit-frame-pointer -fsanitize=address,undefined \
@@ -137,7 +155,7 @@ else
   echo "libcjson not found: json arena host test skipped" >&2
 fi
 
-for removed_symbol in MOMENTARY REEDSWITCH REED_IN BUTTON_STATE_ARRAY_LENGTH; do
+for removed_symbol in REEDSWITCH REED_IN BUTTON_STATE_ARRAY_LENGTH; do
   if scan_firmware_sources "$removed_symbol"; then
     echo "Removed legacy symbol remains in firmware: $removed_symbol" >&2
     exit 1

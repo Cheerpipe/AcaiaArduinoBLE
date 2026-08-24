@@ -11,6 +11,16 @@ menu "Advanced Shot Stopper"
             Command-line -DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=… still
             overrides.
 
+    config SHOT_STOPPER_MACHINE_TYPE
+        int "Machine type (0=paddle/latch, 1=momentary switch, 2=momentary+reed)"
+        range 0 2
+        default 0
+        help
+            Compile-time machine switch. 0 is paddle or latch (persistent
+            GPIO). 1 is a momentary switch. 2 is a momentary switch plus a
+            reed that reports whether the group is actually running.
+            Command-line -DSHOT_STOPPER_MACHINE_TYPE=… still overrides.
+
     config SHOT_STOPPER_ENABLE_BUZZER
         int "Buzzer mode (0=off, 1=passive RTTTL, 2=active beep)"
         range 0 2

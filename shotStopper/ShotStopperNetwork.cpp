@@ -431,6 +431,14 @@ bool jsonPaddleMode(cJSON *object, const char *name, uint8_t &output) {
   return parsePaddleMode(item->valuestring, output);
 }
 
+bool jsonMomentaryStartEdge(cJSON *object, const char *name, bool &output) {
+  cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+  if (!cJSON_IsString(item) || item->valuestring == nullptr) {
+    return false;
+  }
+  return parseMomentaryStartEdge(item->valuestring, output);
+}
+
 bool jsonNtpPreset(cJSON *object, const char *name, uint8_t &output) {
   cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
   if (!cJSON_IsString(item) || item->valuestring == nullptr) {
@@ -3787,6 +3795,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       configMutable ? "true" : "false",
       webUiOverrideActive ? "true" : "false", configLockReason(control),
       liveShot ? "true" : "false");
+  if (ok) {
+    ok = statusJsonAppend(&used, ",\"machineType\":\"%s\"",
+                          compiledMachineTypeId());
+  }
   if (ok && page == StatusPage::Settings) {
     ok = statusJsonAppend(&used, ",\"buzzerSupported\":%s",
                           BUZZER_SUPPORT_ENABLED ? "true" : "false");
@@ -3859,6 +3871,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"paddleReturnReminderBeep\":%s,"
         "\"paddleReturnReminderIntervalMs\":%lu,"
         "\"paddleReturnReminderMaxDurationMs\":%lu,\"paddleMode\":\"%s\","
+        "\"momentaryStartEdge\":\"%s\","
         "\"buzzerScaleLostBeep\":%s,\"buzzerAutoToManualGuardEndBeep\":%s,"
         "\"buzzerManualNoScaleBeep\":%s,\"buzzerScaleConnectedBeep\":%s,"
         "\"scaleConnectedLed\":%s,"
@@ -3900,6 +3913,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(
             control.config.paddleReturnReminderMaxDurationMs),
         paddleModeId(control.config.paddleMode),
+        momentaryStartEdgeId(control.config.momentaryStartOnPress),
         control.config.buzzerScaleLostBeep ? "true" : "false",
         control.config.buzzerAutoToManualGuardEndBeep ? "true" : "false",
         control.config.buzzerManualNoScaleBeep ? "true" : "false",
@@ -3955,7 +3969,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
     ok = statusJsonAppend(
         &used,
         ",\"state\":\"%s\",\"stateLabel\":\"%s\",\"machineState\":\"%s\","
-        "\"relayClosed\":%s,"
+        "\"relayClosed\":%s,\"machineRunning\":%s,"
         "\"physicalPaddleOn\":%s,\"virtualPaddleOn\":%s,"
         "\"remoteControlEnabled\":%s,\"controlSource\":\"%s\","
         "\"circuitElapsedMs\":%lu,"
@@ -3997,6 +4011,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         stopperStateName(control.state), stateLabel(control.state),
         machineRunStateName(control.machineRunState),
         control.relayClosed ? "true" : "false",
+        control.machineRunning ? "true" : "false",
         control.physicalPaddleOn ? "true" : "false",
         control.virtualPaddleOn ? "true" : "false",
         control.remoteControlEnabled ? "true" : "false",
@@ -4073,10 +4088,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         &used,
         ",\"scale\":{\"preferredMac\":\"%s\",\"preferredName\":\"%s\","
         "\"macCachePauseRemainingMs\":%lu,\"history\":%s},"
-        "\"presets\":%s",
+        "\"presets\":%s,\"stopPulseMs\":%lu,\"maxSinglePressMs\":%lu",
         safePreferredScaleMac, safePreferredScaleName,
         static_cast<unsigned long>(control.scaleMacCachePauseRemainingMs),
-        g_work->historyJson, g_work->presetsJson);
+        g_work->historyJson, g_work->presetsJson,
+        static_cast<unsigned long>(COMPILED_STOP_PULSE_MS),
+        static_cast<unsigned long>(COMPILED_MAX_SINGLE_PRESS_MS));
   } else if (ok && page == StatusPage::Admin) {
     // Locked admin: confirm-window hint only. Unlocked: Wi-Fi/AP + BLE + OTA.
     ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s",
@@ -4139,7 +4156,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
     ok = statusJsonAppend(
         &used,
         ",\"state\":\"%s\",\"machineState\":\"%s\","
-        "\"relayClosed\":%s,\"physicalPaddleOn\":%s,"
+        "\"relayClosed\":%s,\"machineRunning\":%s,"
+        "\"machineStartAck\":%s,\"machineStopAck\":%s,\"machineOrphan\":%s,"
+        "\"reedOn\":%s,"
+        "\"physicalPaddleOn\":%s,"
         "\"controlSource\":\"%s\","
         "\"cupPresence\":{\"state\":\"%s\",\"present\":%s},"
         "\"network\":{\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
@@ -4172,10 +4192,17 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"reconnects\":%lu,\"lastDisconnectReasonName\":\"%s\","
         "\"eventsDropped\":%lu},"
         "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"},"
-        "\"compileFlags\":{\"buzzer\":\"%s\",\"remoteMachineControl\":%s,\"arch\":\"%s\"}",
+        "\"compileFlags\":{\"buzzer\":\"%s\",\"remoteMachineControl\":%s,"
+        "\"arch\":\"%s\",\"machineType\":\"%s\",\"stopPulseMs\":%lu,"
+        "\"maxSinglePressMs\":%lu}",
         stopperStateName(control.state),
         machineRunStateName(control.machineRunState),
         control.relayClosed ? "true" : "false",
+        control.machineRunning ? "true" : "false",
+        control.machineStartAckPending ? "true" : "false",
+        control.machineStopAckPending ? "true" : "false",
+        control.machineOrphanRun ? "true" : "false",
+        control.reedOn ? "true" : "false",
         control.physicalPaddleOn ? "true" : "false",
         controlSourceName(control.source),
         cupPresenceStateName(control.cupPresenceState),
@@ -4236,7 +4263,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         commandResultStateName(network.lastCommandState),
         compiledBuzzerModeId(),
         REMOTE_MACHINE_CONTROL_ENABLED ? "true" : "false",
-        FW_BOARD_ARCH_STRING);
+        FW_BOARD_ARCH_STRING,
+        compiledMachineTypeId(),
+        static_cast<unsigned long>(COMPILED_STOP_PULSE_MS),
+        static_cast<unsigned long>(COMPILED_MAX_SINGLE_PRESS_MS));
   }
 
   if (ok) {
@@ -4667,7 +4697,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "firstDropBeep", "scaleConnectedLed",
       "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
-      "paddleMode", "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
+      "paddleMode", "momentaryStartEdge", "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
       "buzzerManualNoScaleBeep", "buzzerScaleConnectedBeep",
       "buzzerExtendedPulseRate", "buzzerSlowExtendedPulseRate",
       "alertOutputChannel", "autoRetare", "retareWindowMs", "minimumCupWeightG",
@@ -4764,6 +4794,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (jsonFieldPresent(root, "paddleMode") &&
              !jsonPaddleMode(root, "paddleMode", candidate.paddleMode)) {
     parseError = "paddleMode must be auto, natural or original.";
+  } else if (jsonFieldPresent(root, "momentaryStartEdge") &&
+             !jsonMomentaryStartEdge(root, "momentaryStartEdge",
+                                     candidate.momentaryStartOnPress)) {
+    parseError = "momentaryStartEdge must be press or release.";
   } else if (jsonFieldPresent(root, "buzzerScaleLostBeep") &&
              !jsonBoolean(root, "buzzerScaleLostBeep",
                           candidate.buzzerScaleLostBeep)) {
@@ -5338,7 +5372,7 @@ esp_err_t ShotStopperNetwork::stopHandler(httpd_req_t *request) {
     return ESP_OK;
   }
   ControlGateSnapshot status = self.controlGate();
-  if (!status.activeCycle || !status.relayClosed) {
+  if (!status.activeCycle || !status.machineRunning) {
     return sendError(request, STATUS_CONFLICT, "CONTROL_STATE_CONFLICT",
                      "There is no active shot to stop.");
   }

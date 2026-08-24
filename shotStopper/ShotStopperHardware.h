@@ -38,6 +38,19 @@ constexpr uint8_t PADDLE_ACTIVE_LEVEL = LOW;
 constexpr uint8_t RELAY_CLOSED_LEVEL = HIGH;
 constexpr uint8_t RELAY_OPEN_LEVEL = LOW;
 
+#if SHOT_STOPPER_MACHINE_TYPE == 2
+#ifndef SHOT_STOPPER_REED_GPIO
+#define SHOT_STOPPER_REED_GPIO 4
+#endif
+constexpr uint8_t REED_GPIO = SHOT_STOPPER_REED_GPIO;
+constexpr uint8_t REED_ACTIVE_LEVEL = LOW;
+constexpr uint32_t REED_DEBOUNCE_MS = 30;
+#else
+constexpr uint8_t REED_GPIO = 0;
+constexpr uint8_t REED_ACTIVE_LEVEL = LOW;
+constexpr uint32_t REED_DEBOUNCE_MS = 30;
+#endif
+
 constexpr uint32_t PADDLE_DEBOUNCE_MS = 30;
 constexpr uint32_t SAFETY_HEARTBEAT_TOGGLE_MS = 50;
 constexpr uint32_t CIRCUIT_FEEDBACK_SETTLE_MS = 100;
@@ -113,5 +126,24 @@ static_assert(PADDLE_DEBOUNCE_MS > 0,
               "Paddle debounce must be greater than zero");
 static_assert(PADDLE_DEBOUNCE_MS < 100,
               "Paddle debounce must fit every valid rinse gesture");
+#if SHOT_STOPPER_MACHINE_TYPE == 2
+static_assert(REED_GPIO != PADDLE_GPIO && REED_GPIO != RELAY_GPIO &&
+                  REED_GPIO != SCALE_CONNECTED_LED_GPIO &&
+                  REED_GPIO != BUZZER_GPIO,
+              "Reed GPIO must be distinct from paddle, relay, LED, and buzzer");
+#if defined(SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO)
+static_assert(REED_GPIO != SAFETY_HEARTBEAT_GPIO &&
+                  REED_GPIO != CIRCUIT_FEEDBACK_GPIO,
+              "Reed GPIO must be distinct from safety GPIOs");
+#endif
+#ifndef SHOT_STOPPER_HOST_TEST
+static_assert(GPIO_IS_VALID_GPIO(REED_GPIO),
+              "Reed must use a valid input GPIO");
+#endif
+static_assert(REED_ACTIVE_LEVEL == LOW,
+              "Reed wiring requires INPUT_PULLUP and active LOW");
+static_assert(REED_DEBOUNCE_MS > 0 && REED_DEBOUNCE_MS < 100,
+              "Reed debounce must match the paddle window");
+#endif
 
 }  // namespace shotstopper

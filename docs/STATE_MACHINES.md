@@ -204,6 +204,21 @@ Config lock uses `machineIsRunning()`, which for paddle equals machine circuit c
 | `CONFIRMED_ON` | Safety `CLOSED` or `relay.closed`. |
 | `UNKNOWN` | Safety TRIPPED/LOCKOUT but the contact still reads closed (should not last). |
 
+On **momentary-only** builds (`SHOT_STOPPER_MACHINE_TYPE=1`) these labels are
+inferred from brew-accepted weight, not from K1. Boot is `CONFIRMED_OFF`. A
+START pulse goes to `ASSUMED_ON`. Espresso-like flow (about 0.60 g/s, ≥1 g
+above the shot baseline, after 800 ms of logical run) is the only path to
+`CONFIRMED_ON`. That ON expires if flow stays below 0.20 g/s for 500 ms, so
+auto-cut cannot pulse a stopped group. A START that stays on the shot
+baseline for 12 s is nacked to `CONFIRMED_OFF`. A STOP ack needs a quiet pan;
+timeout without quiet does **not** force OFF. An operational wall without
+`CONFIRMED_ON` leaves an orphan run: settings stay locked and a later user
+Stop may pulse; firmware auto-cut does not.
+
+`machineIsRunning()` is logical run, stop-ack, orphan, `CONFIRMED_ON`, or
+`ASSUMED_ON`. Home shows Assumed on vs Confirmed on. Diagnostic JSON also
+reports `machineStartAck`, `machineStopAck`, and `machineOrphan`.
+
 ### Events
 
 None of its own. Recomputed every time status is sampled from relay
@@ -224,7 +239,7 @@ Source: `ShotStopperMachineTypes.h`, `machinePollIntention()`.
 | State | Meaning |
 | --- | --- |
 | `NONE` | No classified edge this sample (transient). |
-| `REQUEST_START` | Rising edge after debounce (`paddleTurnedOn`). |
+| `REQUEST_START` | Rising edge after debounce (`paddleTurnedOn`). On momentary builds this edge is synthetic: **On release** (default) or **On press**, from [Momentary](settings/momentary.md). |
 | `REQUEST_STOP` | Falling edge (`paddleTurnedOff`). |
 | `HOLD_ACTIVE` | Paddle is ON, no new edge. |
 | `STABLE_IDLE` | Paddle OFF long enough to leave `REQUIRES_OFF`. |
