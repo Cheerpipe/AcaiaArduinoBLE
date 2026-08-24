@@ -186,6 +186,7 @@ Source: `ShotStopperSafety.h`, `ShotStopperMachine.h`.
 | `RESET_DURING_CLOSE` | Reboot while RTC said commanded-closed. | Lockout |
 | `UNSAFE_RESET` | Reset reason treated as unsafe. | Lockout |
 | `BOOT_LOOP` | Repeated unsafe resets. | Lockout |
+| `GPIO_DESYNC` | Commanded CLOSED but the relay GPIO still reads OPEN after a rewrite. Best-effort (`digitalRead` of an output is not a contact sense). Periodic rewrite while commanded closed is the main defense. | Trip (not lockout) |
 
 **Events that are not faults:** `machineRequestStart` (OPEN→ARMING→CLOSED),
 `machineRequestStop` (CLOSED/ARMING→OPEN, unless already TRIPPED/LOCKOUT).
@@ -214,6 +215,16 @@ Config lock uses `machineIsRunning()`, which for paddle equals machine circuit c
 | `CONFIRMED_ON` | Safety `CLOSED` or `relay.closed`. Reed: reed is on (outside an assumed-off window). |
 | `ASSUMED_OFF` | Reed: configured stop edge (press or release), reed still on, within confirm timeout. Switch-only: quiet START nack (no espresso-like flow before the shot-reaction timeout), or a logical STOP still settling (pan not yet quiet). |
 | `UNKNOWN` | Safety TRIPPED/LOCKOUT but the contact still reads closed (should not last). |
+
+### Command vs pin vs paddle
+
+Two different “desync” stories. Do not mix them:
+
+| Build | Source of truth for machine run | Internal software/pin desync | Paddle ON / K1 OFF after an automatic cut |
+| --- | --- | --- | --- |
+| Paddle (`SHOT_STOPPER_MACHINE_TYPE=0`) | Relay GPIO / commanded closed | **None expected.** Software CLOSED with pin OPEN is a bug; firmware rewrites the closed level every loop and logs `RELAY_GPIO_DESYNC`. If the rewrite does not stick, `GPIO_DESYNC` trips. | **Expected:** stopper `REQUIRES_OFF` + paddle-return reminder until a stable OFF. K1 must stay open; the ON-only mirror must not re-close. |
+| Reed (`SHOT_STOPPER_MACHINE_TYPE=2`) | Reed, except Assumed after the configured edge | Only **reed confirm timeout** (about 1 s) | N/A (cut is a pulse) |
+| Momentary-only (`SHOT_STOPPER_MACHINE_TYPE=1`) | Inferred | Yes, outside reed | N/A |
 
 On **momentary-only** builds (`SHOT_STOPPER_MACHINE_TYPE=1`) these labels are
 inferred from brew-accepted weight, not from K1. Boot is `CONFIRMED_OFF`. A

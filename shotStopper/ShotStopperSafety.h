@@ -27,7 +27,8 @@ enum class RelaySafetyFault : uint8_t {
   TASK_WATCHDOG_FAILURE,
   RESET_DURING_CLOSE,
   UNSAFE_RESET,
-  BOOT_LOOP
+  BOOT_LOOP,
+  GPIO_DESYNC
 };
 
 inline const char *relaySafetyStateName(RelaySafetyState state) {
@@ -65,6 +66,7 @@ inline const char *relaySafetyFaultName(RelaySafetyFault fault) {
       return "RESET_DURING_CLOSE";
     case RelaySafetyFault::UNSAFE_RESET: return "UNSAFE_RESET";
     case RelaySafetyFault::BOOT_LOOP: return "BOOT_LOOP";
+    case RelaySafetyFault::GPIO_DESYNC: return "GPIO_DESYNC";
   }
   return "UNKNOWN";
 }

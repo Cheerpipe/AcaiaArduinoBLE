@@ -8929,6 +8929,106 @@ void pm20_original_on_off_on_promotes_once_without_extra_polls() {
   CHECK(!getRelaySafetySnapshot().closed);
 }
 
+void pm21_hold_with_scale_keeps_k1_closed_for_five_seconds() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  startCycle();
+  advanceToBrew();
+  CHECK(session.active);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(hostPinLevel[RELAY_GPIO] == RELAY_CLOSED_LEVEL);
+  runLoopAfter(5000);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.active);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(hostPinLevel[RELAY_GPIO] == RELAY_CLOSED_LEVEL);
+}
+
+void pm22_already_closed_rewrites_pin_if_gpio_dropped() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  CHECK(setMachineCircuitClosed(true, 5000));
+  CHECK(hostPinLevel[RELAY_GPIO] == RELAY_CLOSED_LEVEL);
+  hostPinLevel[RELAY_GPIO] = RELAY_OPEN_LEVEL;
+  CHECK(setMachineCircuitClosed(true, 5000));
+  CHECK(hostPinLevel[RELAY_GPIO] == RELAY_CLOSED_LEVEL);
+  CHECK(debugEventExists(DebugCode::RELAY_GPIO_DESYNC));
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(getRelaySafetySnapshot().fault == RelaySafetyFault::NONE);
+
+  hostPinLevel[RELAY_GPIO] = RELAY_OPEN_LEVEL;
+  serviceRelaySafety();
+  CHECK(hostPinLevel[RELAY_GPIO] == RELAY_CLOSED_LEVEL);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(getRelaySafetySnapshot().fault == RelaySafetyFault::NONE);
+}
+
+void pm23_weight_cut_does_not_reclose_while_paddle_held() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  startCycle();
+  advanceToBrew();
+  endBbwProtectionForTests();
+  shot.expectedEndS = 1.0f;
+  runLoopAfter(1000);
+  loop();
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(hostPinLevel[RELAY_GPIO] == RELAY_OPEN_LEVEL);
+#if SHOT_STOPPER_MACHINE_TYPE == 0
+  CHECK(paddleReturnReminderActive);
+#endif
+  const size_t closedWrites = hostRelayClosedWrites;
+  runLoopAfter(200);
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(hostRelayClosedWrites == closedWrites);
+  setRawPaddle(false);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+}
+
+void pm24_no_scale_hard_limit_does_not_reclose_while_held() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  startCycle();
+  reachManualNoScaleState();
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  reachSessionElapsed(HARD_MAX_CIRCUIT_CLOSED_MS);
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(!getRelaySafetySnapshot().closed);
+  const size_t closedWrites = hostRelayClosedWrites;
+  runLoopAfter(200);
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(hostRelayClosedWrites == closedWrites);
+  setRawPaddle(false);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+}
+
+void pm25_web_start_paddle_off_keeps_k1_closed_with_scale() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  WebCommand on = webControlCommand(WebCommandType::REMOTE_ON);
+  processWebCommand(on);
+  CHECK(session.active);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(hostPinLevel[RELAY_GPIO] == RELAY_CLOSED_LEVEL);
+  runLoopAfter(500);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(hostPinLevel[RELAY_GPIO] == RELAY_CLOSED_LEVEL);
+}
+
+void pm26_blocked_no_scale_hold_does_not_close_k1() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  reachReadyFromBoot();
+  attemptBlockedNoScaleStart();
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(hostPinLevel[RELAY_GPIO] == RELAY_OPEN_LEVEL);
+}
+
 using TestFunction = void (*)();
 
 struct TestCase {
@@ -8985,6 +9085,12 @@ const TestCase testCases[] = {
     {"PM18", pm18_auto_bbw_auto_stop_with_paddle_off_goes_ready},
     {"PM19", pm19_apply_config_accepts_auto_paddle_mode},
     {"PM20", pm20_original_on_off_on_promotes_once_without_extra_polls},
+    {"PM21", pm21_hold_with_scale_keeps_k1_closed_for_five_seconds},
+    {"PM22", pm22_already_closed_rewrites_pin_if_gpio_dropped},
+    {"PM23", pm23_weight_cut_does_not_reclose_while_paddle_held},
+    {"PM24", pm24_no_scale_hard_limit_does_not_reclose_while_held},
+    {"PM25", pm25_web_start_paddle_off_keeps_k1_closed_with_scale},
+    {"PM26", pm26_blocked_no_scale_hold_does_not_close_k1},
     {"R01", r01_transient_disconnect_suspends_weight_control},
     {"R02", r02_stalled_scale_worker_suspends_until_validated},
     {"R03", r03_non_finite_weights_cannot_corrupt_state_or_offset},

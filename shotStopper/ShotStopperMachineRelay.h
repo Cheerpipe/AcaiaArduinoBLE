@@ -234,12 +234,33 @@ void applyBrewRfPreference(bool preferBluetooth) {
 #endif
 }
 
+bool relayOutputIsClosed() {
+  return digitalRead(RELAY_GPIO) == RELAY_CLOSED_LEVEL;
+}
+
+void writeRelayClosedOutput() {
+  digitalWrite(RELAY_GPIO, RELAY_CLOSED_LEVEL);
+}
+
+bool reassertCommandedRelayClosedPin() {
+  if (relayOutputIsClosed()) {
+    return true;
+  }
+  addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_GPIO_DESYNC);
+  writeRelayClosedOutput();
+  if (relayOutputIsClosed()) {
+    return true;
+  }
+  tripRelaySafety(RelaySafetyFault::GPIO_DESYNC, true, false, false);
+  return false;
+}
+
 bool setMachineCircuitClosed(bool closed,
                   uint32_t operationalLimitMs = HARD_MAX_CIRCUIT_CLOSED_MS) {
   if (closed) {
     const RelaySafetySnapshot before = getRelaySafetySnapshot();
     if (before.closed) {
-      return true;
+      return reassertCommandedRelayClosedPin();
     }
 
     if (operationalLimitMs < 1 ||
@@ -353,10 +374,7 @@ bool setMachineCircuitClosed(bool closed,
     }
     addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_CLOSED,
                   static_cast<int32_t>(operationalLimitMs));
-    if (machinePreferBleAirtime) {
-      pendingBrewRfRestore = false;
-      applyBrewRfPreference(true);
-    }
+    pendingBrewRfRestore = false;
     return true;
   }
 
@@ -417,6 +435,13 @@ void serviceRelaySafety() {
   }
 
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
+  if (relay.closed &&
+      relay.state != RelaySafetyState::TRIPPED &&
+      relay.state != RelaySafetyState::LOCKOUT) {
+    if (!reassertCommandedRelayClosedPin()) {
+      return;
+    }
+  }
   if ((relay.state == RelaySafetyState::ARMING || relay.closed) &&
       elapsedMs(relay.closedAtMs) >= relay.operationalLimitMs) {
     const bool operational =

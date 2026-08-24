@@ -57,7 +57,16 @@ inline void machineObserveSense(const MachineSense &sense) {
 }
 
 inline void machineSetPreferBleAirtime(bool prefer) {
+  const bool was = machinePreferBleAirtime;
   machinePreferBleAirtime = prefer;
+  // Apply BT preference before K1 pull-in so coex/GATT work does not race
+  // the coil. Clearing the flag restores immediately if close never happened;
+  // a successful close still restores via pendingBrewRfRestore after open.
+  if (prefer && !was) {
+    applyBrewRfPreference(true);
+  } else if (!prefer && was && !getRelaySafetySnapshot().closed) {
+    applyBrewRfPreference(false);
+  }
 }
 
 // Dumb drive bit + hold-continuity latch. Specializations must not know why
@@ -93,9 +102,19 @@ inline void machineNoteActivatorReleased() {
 inline void machineOnActivatorReady() {}
 inline void machineOnBrewOutcome(bool) {}
 inline bool machineSupportsRinse() { return true; }
-inline void machineNoteFirmwareStop() {}
-inline void machineSampleInput() { updateActivatorInput(); }
-inline void serviceMachine() { machineServiceReminders(); }
+inline void machineNoteFirmwareStop() {
+  if (activatorOn || rawActivatorOn) {
+    machineActivatorDriveSuppressedThisHold = true;
+  }
+}
+inline void machineSampleInput() {
+  updateActivatorInput();
+  applyPaddleRelayDrive();
+}
+inline void serviceMachine() {
+  machineServiceReminders();
+  applyPaddleRelayDrive();
+}
 inline void machineOverrideInferredOff() {}
 inline void machineOverrideInferredOn() {}
 inline void machineArmSettledWeightCutOff() {}

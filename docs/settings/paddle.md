@@ -23,6 +23,32 @@ window). The special “keep machine circuit closed after OFF” rules apply onl
 **automatic brew-by-weight with a usable scale**. Without a scale, or with
 brew by weight off, paddle OFF ends the shot like Natural in every mode.
 
+## How K1 follows the paddle
+
+K1 **mirrors ON, not OFF**. While the paddle is ON and start is allowed,
+firmware keeps rewriting the closed level so a BLE/coex glitch cannot leave
+software CLOSED and the contact open. Paddle OFF does **not** open K1 by
+itself — the stopper requests stop, and the paddle specialization opens.
+
+That drive model is the same with or without a scale. The scale only changes
+whether brew-by-weight may walk away after OFF.
+
+Exceptions:
+
+1. **Automatic cut** (weight, walls, A→M, cup removed while ON) — the stopper
+   requests stop and K1 opens. If the paddle is still ON: stopper
+   `REQUIRES_OFF`, paddle-return reminder, K1 stays open until a stable OFF.
+   Firmware does not re-close on that leftover hold.
+2. **Start inhibit** (no-scale BBW armed, require-cup) — ON is not forwarded.
+   A blocked hold does not close K1; release and go ON again.
+3. **Rinse** — K1 stays closed for the rinse duration with the paddle OFF.
+4. **Original / Auto walk-away** (BBW + usable scale only) — K1 stays closed
+   after paddle OFF until automatic cut. Natural, no scale, or BBW off: OFF
+   opens K1.
+
+A Web/remote start with the paddle OFF leaves K1 closed; the ON-only mirror
+does not open it.
+
 ## Parameters
 
 | Setting | Default | Values | Effect on the shot |

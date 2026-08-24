@@ -2101,7 +2101,8 @@ enum class DebugCode : uint8_t {
   OTA_FLASH_COMMITTED,
   OTA_IMAGE_CONFIRMED,
   OTA_ROLLBACK_ARMED,
-  OTA_ROLLBACK_FAILED
+  OTA_ROLLBACK_FAILED,
+  RELAY_GPIO_DESYNC
 };
 
 // Health telemetry thresholds (observability only; never act on machine circuit).
@@ -2349,6 +2350,7 @@ inline LogLevel debugCodeDefaultLevel(DebugCode code) {
     case DebugCode::HEALTH_STACK_LOW:
     case DebugCode::HEALTH_LOOP_GAP:
     case DebugCode::OTA_UPLOAD_REJECTED:
+    case DebugCode::RELAY_GPIO_DESYNC:
       return LogLevel::WARNING;
     case DebugCode::OTA_ROLLBACK_ARMED:
     case DebugCode::OTA_ROLLBACK_FAILED:
@@ -2587,6 +2589,8 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::OTA_IMAGE_CONFIRMED: return "OTA image confirmed";
     case DebugCode::OTA_ROLLBACK_ARMED: return "OTA rollback armed";
     case DebugCode::OTA_ROLLBACK_FAILED: return "OTA rollback failed";
+    case DebugCode::RELAY_GPIO_DESYNC:
+      return "relay GPIO desync";
   }
   return "unknown";
 }
