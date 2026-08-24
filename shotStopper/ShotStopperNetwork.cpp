@@ -3723,6 +3723,8 @@ const char *ShotStopperNetwork::endReasonName(EndReason reason) {
       return "AUTO_TO_MANUAL_GUARD";
     case EndReason::CUP_REMOVED:
       return "CUP_REMOVED";
+    case EndReason::UNCONFIRMED_START:
+      return "UNCONFIRMED_START";
   }
   return "UNKNOWN";
 }

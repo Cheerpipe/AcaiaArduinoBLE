@@ -6025,6 +6025,9 @@ void w38_scale_connected_led_tracks_link_and_setting() {
 void s01_shot_log_filters_short_and_rinse() {
   CHECK(!shotLogEligible(EndReason::SHORT_SHOT, 15000));
   CHECK(!shotLogEligible(EndReason::RINSE_COMPLETE, 15000));
+  CHECK(!shotLogEligible(EndReason::UNCONFIRMED_START, 60000));
+  CHECK(brewEndIsAbandonedStart(EndReason::UNCONFIRMED_START));
+  CHECK(!brewEndIsAbandonedStart(EndReason::RINSE_COMPLETE));
   CHECK(!shotLogEligible(EndReason::ACTIVATOR, 9000));
   CHECK(shotLogEligible(EndReason::ACTIVATOR, 10000));
   CHECK(!shotLogBbwEligible(false, false, true));

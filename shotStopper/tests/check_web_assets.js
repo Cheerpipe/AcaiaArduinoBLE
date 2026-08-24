@@ -827,6 +827,7 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !network.includes('actualWeightSource') ||
     !network.includes('reset-guard-samples') ||
     !network.includes('AUTO_TO_MANUAL_GUARD') ||
+    !network.includes('UNCONFIRMED_START') ||
     !network.includes('cupProtectionEnabled') ||
     !network.includes('stopIfCupRemoved') ||
     !network.includes('requireCupToStart') ||

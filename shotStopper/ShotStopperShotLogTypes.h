@@ -189,6 +189,7 @@ inline ShotLogStopDetail shotLogStopDetailFromEndReason(
     case EndReason::NONE:
     case EndReason::SHORT_SHOT:
     case EndReason::RINSE_COMPLETE:
+    case EndReason::UNCONFIRMED_START:
       return ShotLogStopDetail::OTHER;
   }
   return ShotLogStopDetail::OTHER;
@@ -234,7 +235,8 @@ inline ShotLogCut shotLogCutFromEndReason(EndReason reason) {
 
 inline bool shotLogEligible(EndReason reason, uint32_t durationMs) {
   if (reason == EndReason::SHORT_SHOT ||
-      reason == EndReason::RINSE_COMPLETE) {
+      reason == EndReason::RINSE_COMPLETE ||
+      brewEndIsAbandonedStart(reason)) {
     return false;
   }
   return durationMs >= MIN_SHOT_LOG_DURATION_MS;

@@ -138,7 +138,8 @@ enum class EndReason : uint8_t {
   SLOW_EXTRACTION_MAX_TIME = 15,
   SLOW_EXTRACTION_MIN_WEIGHT = 16,
   AUTO_TO_MANUAL_GUARD = 17,
-  CUP_REMOVED = 18
+  CUP_REMOVED = 18,
+  UNCONFIRMED_START = 19
 };
 
 inline bool brewWeightCutSettlesMachineOff(EndReason reason) {
@@ -152,6 +153,10 @@ inline bool brewWeightCutSettlesMachineOff(EndReason reason) {
     default:
       return false;
   }
+}
+
+inline bool brewEndIsAbandonedStart(EndReason reason) {
+  return reason == EndReason::UNCONFIRMED_START;
 }
 
 enum class AutoToManualGuardLimitMode : uint8_t {

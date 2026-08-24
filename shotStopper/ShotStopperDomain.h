@@ -2732,6 +2732,7 @@ inline const char *endReasonDebugName(EndReason reason) {
       return "slow extraction min weight";
     case EndReason::AUTO_TO_MANUAL_GUARD: return "auto-to-manual time guard";
     case EndReason::CUP_REMOVED: return "cup removed";
+    case EndReason::UNCONFIRMED_START: return "unconfirmed start";
   }
   return "unknown";
 }

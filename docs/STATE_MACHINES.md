@@ -236,7 +236,11 @@ flow stays below 0.20 g/s for 500 ms, so auto-cut cannot pulse a stopped
 group. A START that stays on the shot baseline for the shot-reaction
 timeout (default 12 s, setting 3–30 s) is nacked to `ASSUMED_OFF` — not
 Confirmed off — so a late first drop can still confirm ON without a second
-pulse. A logical STOP (user or firmware) goes to `ASSUMED_OFF` while the
+pulse. A START nack (or Assumed on that never left a 1 g band around the
+shot baseline) that lasts until the compiled hard cap
+(`HARD_MAX_CIRCUIT_CLOSED_MS`, 60 s) still settles to Confirmed off with
+no relay pulse and no beep; the stopper abandons the cycle so the next
+press is a new Start (tare + timer). A logical STOP (user or firmware) goes to `ASSUMED_OFF` while the
 pan settles. A STOP ack needs a quiet pan; timeout without quiet does
 **not** force Idle, but later quiet still settles to Confirmed off. A START
 nack that stays `ASSUMED_OFF` without stop-settling does **not** idle on
@@ -703,6 +707,7 @@ ran, stored on the session, last-shot blob, and shot log.
 | `SLOW_EXTRACTION_MIN_WEIGHT` | Slow guard: floor weight after extend. |
 | `AUTO_TO_MANUAL_GUARD` | Scale lost; A→M deadline from shot start. |
 | `CUP_REMOVED` | Cup presence `REMOVED` with stop-if-removed on. |
+| `UNCONFIRMED_START` | Switch-only: live scale, no espresso-like flow, net mass still within 1 g of the shot baseline at the 60 s hard cap. Silent; no last-shot / history row. |
 
 History `cut_type` / `stop_detail` are a **stable log encoding** of
 the same facts ([Shot history](features/shot-history.md)), not another

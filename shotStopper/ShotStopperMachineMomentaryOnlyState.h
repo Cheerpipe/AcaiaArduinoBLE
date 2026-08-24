@@ -15,7 +15,10 @@
 //       A logical stop goes to ASSUMED_OFF (stop-settling) until the pan is
 //       quiet, including after the stop-ack timeout. Cup REMOVED while
 //       ASSUMED_OFF settles to CONFIRMED_OFF immediately (MachineSense edge).
-//       Consumes MachineSense pushed by the stopper.
+//       A Start that never confirms espresso and stays within 1 g of the shot
+//       baseline until HARD_MAX_CIRCUIT_CLOSED_MS settles to CONFIRMED_OFF
+//       (no pulse) so the stopper can abandon the cycle. Consumes MachineSense
+//       pushed by the stopper.
 //
 // BOUNDARY: This file alone determines momentary-only run state. Do not put
 // reed GPIO here (that is MomentaryReedState). Do not put paddle latch logic
@@ -27,6 +30,7 @@ constexpr float MOMENTARY_TARE_RESET_G = 1.0f;
 constexpr float MOMENTARY_FINGER_JUMP_G = 15.0f;
 constexpr float MOMENTARY_FLOW_CONFIRM_MAX_G_S = MOMENTARY_FINGER_JUMP_G;
 constexpr float MOMENTARY_BASELINE_BAND_G = 0.5f;
+constexpr float MOMENTARY_NO_FLOW_IDLE_BAND_G = 1.0f;
 constexpr float MOMENTARY_CONFIRM_DELTA_G = 1.0f;
 constexpr uint32_t MOMENTARY_FLOW_HOLD_MS = 500;
 constexpr uint32_t MOMENTARY_FLOW_GAP_SKIP_MS = 500;
@@ -60,6 +64,7 @@ uint32_t momentaryStaleSinceMs = 0;
 bool momentaryFirmwareCutPending = false;
 bool momentarySettledWeightCutArmed = false;
 bool momentaryStopSettling = false;
+bool momentaryNoFlowIdlePending = false;
 
 bool reedIsOn() { return false; }
 
@@ -81,6 +86,7 @@ void noteMomentaryLogicalStart() {
   momentaryFirmwareCutPending = false;
   momentarySettledWeightCutArmed = false;
   momentaryStopSettling = false;
+  momentaryNoFlowIdlePending = false;
   if (machineSense.weightFresh) {
     momentarySawScale = true;
     const float weight = momentaryLiveWeightG();
@@ -133,6 +139,7 @@ void noteMomentaryLogicalStartCanceled() {
   momentaryStartBaselineSinceMs = 0;
   momentaryOrphanRun = false;
   momentaryStopSettling = false;
+  momentaryNoFlowIdlePending = false;
   momentaryInferredState = MachineRunState::CONFIRMED_OFF;
 }
 
@@ -167,6 +174,7 @@ void settleMomentaryInferredOff() {
   momentaryFirmwareCutPending = false;
   momentarySettledWeightCutArmed = false;
   momentaryStopSettling = false;
+  momentaryNoFlowIdlePending = false;
   momentaryInferredState = MachineRunState::CONFIRMED_OFF;
 }
 
@@ -181,6 +189,7 @@ void machineOverrideInferredOn() {
   momentaryFirmwareCutPending = false;
   momentarySettledWeightCutArmed = false;
   momentaryStopSettling = false;
+  momentaryNoFlowIdlePending = false;
   momentaryEspressoConfirmed = true;
   momentarySawEspresso = true;
   momentaryInferredState = MachineRunState::CONFIRMED_ON;
@@ -206,6 +215,34 @@ void machineNoteSettledWeightCutOff() {
     return;
   }
   settleMomentaryInferredOff();
+}
+
+void maybeSettleMomentaryNoFlowIdle(float weight) {
+  if (momentaryStopSettling || momentarySettledWeightCutArmed ||
+      momentaryEspressoConfirmed) {
+    return;
+  }
+  if (momentaryInferredState != MachineRunState::ASSUMED_ON &&
+      momentaryInferredState != MachineRunState::ASSUMED_OFF) {
+    return;
+  }
+  if (momentaryLogicalRunStartedAtMs == 0 ||
+      elapsedMs(momentaryLogicalRunStartedAtMs) < HARD_MAX_CIRCUIT_CLOSED_MS) {
+    return;
+  }
+  if (fabsf(weight - momentaryShotBaselineG) > MOMENTARY_NO_FLOW_IDLE_BAND_G) {
+    return;
+  }
+  settleMomentaryInferredOff();
+  momentaryNoFlowIdlePending = true;
+}
+
+bool machineTakeNoFlowIdle() {
+  if (!momentaryNoFlowIdlePending) {
+    return false;
+  }
+  momentaryNoFlowIdlePending = false;
+  return true;
 }
 
 void serviceMomentaryRunSensors() {
@@ -427,6 +464,8 @@ void serviceMomentaryRunSensors() {
              (skipFlow || flowGps < MOMENTARY_FLOW_OFF_G_S)) {
     momentaryRisingSinceMs = 0;
   }
+
+  maybeSettleMomentaryNoFlowIdle(weight);
 
   if (!resample) {
     momentaryLastWeightG = weight;

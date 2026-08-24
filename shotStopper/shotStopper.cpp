@@ -1900,6 +1900,9 @@ bool recordWeightSample(float weight, uint32_t receivedAtMs) {
 
 
 void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
+  if (brewEndIsAbandonedStart(reason)) {
+    return;
+  }
   const bool logEligible = shotLogEligible(reason, durationMs);
   const bool bbwEligible =
       shotLogBbwEligible(session.startedWithScale, session.config.timerOnly,
@@ -2112,7 +2115,8 @@ void cancelPendingFinalize(const char *reason) {
     commitPendingShotLog(snapshot, weightG, valid, source);
   }
   // Home last shot is independent of history eligibility (incl. weight < 1 g).
-  if (snapshot.endReason != EndReason::RINSE_COMPLETE) {
+  if (snapshot.endReason != EndReason::RINSE_COMPLETE &&
+      !brewEndIsAbandonedStart(snapshot.endReason)) {
     persistLastShotFromFinalize(snapshot, weightG, valid);
   }
 }
@@ -2127,6 +2131,7 @@ void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
       snapshot.extractionExtended || snapshot.slowExtractionExtended ||
       snapshot.endReason == EndReason::AUTO_TO_MANUAL_GUARD ||
       snapshot.endReason == EndReason::RINSE_COMPLETE ||
+      brewEndIsAbandonedStart(snapshot.endReason) ||
       snapshot.endReason == EndReason::SHORT_SHOT ||
       snapshot.durationDs < (MIN_SHOT_LOG_DURATION_MS / 100U) ||
       !autoToManualGuardSampleErrorOk(finalWeightG, snapshot.goalWeightG)) {
@@ -2211,8 +2216,10 @@ void pendingShotFinalizeTask() {
     commitPendingShotLog(snapshot, logWeightG, logWeightValid, weightSource);
   }
   // Home last shot always reflects the finished cycle, even when history
-  // skips (weight < 1 g, non-AUTO, etc.). Rinses do not overwrite it.
-  if (snapshot.endReason != EndReason::RINSE_COMPLETE) {
+  // skips (weight < 1 g, non-AUTO, etc.). Rinses and abandoned starts do not
+  // overwrite it.
+  if (snapshot.endReason != EndReason::RINSE_COMPLETE &&
+      !brewEndIsAbandonedStart(snapshot.endReason)) {
     persistLastShotFromFinalize(snapshot, logWeightG, logWeightValid);
   }
 
@@ -4033,11 +4040,13 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   }
   machineRequestStop();
   session.endReason = reason;
-  if (shotCompletionGetsLongBeep(reason)) {
-    // Completion LONG replaces the stop-timer SINGLE so ends are one cue.
-    requestCompletionAlert();
-  } else {
-    emitCircuitCycleAlert(AlertEvent::STOP_TIMER, true);
+  if (!brewEndIsAbandonedStart(reason)) {
+    if (shotCompletionGetsLongBeep(reason)) {
+      // Completion LONG replaces the stop-timer SINGLE so ends are one cue.
+      requestCompletionAlert();
+    } else {
+      emitCircuitCycleAlert(AlertEvent::STOP_TIMER, true);
+    }
   }
   if (reason == EndReason::AUTO_TO_MANUAL_GUARD &&
       runtimeConfig.buzzerAutoToManualGuardEndBeep) {
@@ -4047,8 +4056,9 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
 
   schedulePendingShotFinalize(reason, durationMs);
   // Home status must show the last shot immediately (during drip delay),
-  // including empty / sub-1 g results. Rinses do not overwrite last shot.
-  if (reason != EndReason::RINSE_COMPLETE) {
+  // including empty / sub-1 g results. Rinses and abandoned starts do not
+  // overwrite last shot.
+  if (reason != EndReason::RINSE_COMPLETE && !brewEndIsAbandonedStart(reason)) {
     persistLastShotFromEndedCycle(reason, durationMs);
   }
 
@@ -4068,7 +4078,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
       lastCycle.weightValid ? elapsedMs(currentWeightReceivedAtMs) : 0;
   lastCycle.weightControlState = session.weightControlState;
   lastCycle.calibrationEligible = session.calibrationEligible;
-  if (reason != EndReason::RINSE_COMPLETE &&
+  if (reason != EndReason::RINSE_COMPLETE && !brewEndIsAbandonedStart(reason) &&
       stopperState != StopperState::RINSE) {
     noScaleShotGuardActivityAtMs = millis();
   }
@@ -4317,6 +4327,11 @@ void stateMachineTask() {
 
       if (session.cupRemovedPending) {
         finalizeCycle(EndReason::CUP_REMOVED, nextStateForUserHold(intent));
+        return;
+      }
+      if (machineTakeNoFlowIdle()) {
+        finalizeCycle(EndReason::UNCONFIRMED_START,
+                      nextStateForUserHold(intent));
         return;
       }
 

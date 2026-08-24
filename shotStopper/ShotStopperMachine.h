@@ -173,6 +173,10 @@ inline MachineIntention machinePollIntention() {
 }
 #endif
 
+#if SHOT_STOPPER_MACHINE_TYPE != 1
+inline bool machineTakeNoFlowIdle() { return false; }
+#endif
+
 inline void machineInitialize() {
   pinMode(RELAY_GPIO, OUTPUT);
   digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
