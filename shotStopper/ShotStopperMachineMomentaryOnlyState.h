@@ -41,13 +41,7 @@ uint32_t momentaryStaleSinceMs = 0;
 
 bool reedIsOn() { return false; }
 
-inline float momentaryLiveWeightG() {
-  if (session.active && session.hasWeightAnchor &&
-      isfinite(session.lastAcceptedWeightG)) {
-    return session.lastAcceptedWeightG;
-  }
-  return currentWeight;
-}
+inline float momentaryLiveWeightG() { return machineSense.weightG; }
 
 void noteMomentaryLogicalStart() {
   momentaryInferredState = MachineRunState::ASSUMED_ON;
@@ -61,7 +55,7 @@ void noteMomentaryLogicalStart() {
   momentaryStartBaselineSinceMs = 0;
   momentaryOrphanRun = false;
   momentaryStaleSinceMs = 0;
-  if (currentWeightIsFresh()) {
+  if (machineSense.weightFresh) {
     momentarySawScale = true;
     const float weight = momentaryLiveWeightG();
     momentaryShotBaselineG = weight;
@@ -80,7 +74,7 @@ void noteMomentaryLogicalStop() {
   momentaryStopRetryPending = false;
   momentaryStartAwaitingAck = false;
   momentaryStartBaselineSinceMs = 0;
-  if (!currentWeightIsFresh()) {
+  if (!machineSense.weightFresh) {
     momentaryStopAwaitingAck = false;
     momentaryInferredState = momentarySawScale ? MachineRunState::UNKNOWN
                                        : MachineRunState::CONFIRMED_OFF;
@@ -99,7 +93,7 @@ void serviceMomentaryRunSensors() {
       !momentaryStopAwaitingAck && momentaryStartAwaitingAck) {
     momentaryInferredState = MachineRunState::ASSUMED_ON;
   }
-  if (!currentWeightIsFresh()) {
+  if (!machineSense.weightFresh) {
     if (momentaryStaleSinceMs == 0) {
       momentaryStaleSinceMs = millis();
     }
@@ -132,7 +126,7 @@ void serviceMomentaryRunSensors() {
       momentaryLastWeightAtMs == 0 ? 0U : elapsedMs(momentaryLastWeightAtMs);
   const float jump = fabsf(weight - momentaryLastWeightG);
   const bool finger = jump > MOMENTARY_FINGER_JUMP_G;
-  const bool accidental = session.accidentalTouchHolding;
+  const bool accidental = machineSense.accidentalHold;
   const bool skipFlow = finger || accidental || dtMs < 40U ||
                         dtMs >= MOMENTARY_FLOW_GAP_SKIP_MS;
   float flowGps = 0.0f;

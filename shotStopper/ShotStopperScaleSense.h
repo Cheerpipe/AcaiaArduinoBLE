@@ -6,6 +6,7 @@
 // Scale sense: trajectory and first-drop detector.
 // Cup presence lives in ShotStopperCupPresence.h. Predicts against a
 // brew-injected target. No GPIO. No heap; trajectory is BSS.
+// Does not call brew or cup — the stopper applies those effects.
 
 void resetShotTrajectory(uint32_t startedAtMs) {
   shot.startMs = startedAtMs;
@@ -15,9 +16,9 @@ void resetShotTrajectory(uint32_t startedAtMs) {
   shotCurveSampler.reset(startedAtMs);
 }
 
-void calculateExpectedEndTime() {
+void calculateExpectedEndTime(float cutTargetG) {
   shot.expectedEndS = predictedWeightStopTimeS(
-      shot.timeS, shot.weight, shot.datapoints, activeWeightCutTargetG(),
+      shot.timeS, shot.weight, shot.datapoints, cutTargetG,
       session.config.operationalWallMs / 1000.0f);
 }
 
@@ -35,55 +36,55 @@ void armPostTareBaselineWindow() {
   session.recoveryLastAtMs = 0;
   session.recoveryLastPacketSequence = 0;
   resetWeightTrend();
-  notifyCupPresenceTare();
-  holdCupPresenceTransitions(true);
   if (session.weightControlState == WeightControlState::VALIDATING) {
     setWeightControlState(WeightControlState::ACTIVE);
   }
 }
 
-void expirePostTareBaselineIfNeeded() {
+bool expirePostTareBaselineIfNeeded() {
   if (!session.awaitingPostTareBaseline) {
-    return;
+    return false;
   }
   if (static_cast<int32_t>(millis() - session.postTareBaselineDeadlineMs) <
       0) {
-    return;
+    return false;
   }
   session.awaitingPostTareBaseline = false;
-  holdCupPresenceTransitions(false);
   addDebugEvent(DebugCategory::SCALE,
                 DebugCode::SCALE_POST_TARE_BASELINE_TIMEOUT,
                 static_cast<int32_t>(session.id),
                 static_cast<int32_t>(session.config.postTareBaselineGraceMs));
+  return true;
 }
 
-void maybeLatchFirstFlowFromAcceptedWeight(float weight,
-                                           uint32_t receivedAtMs) {
+uint32_t maybeLatchFirstFlowFromAcceptedWeight(float weight,
+                                               uint32_t receivedAtMs) {
   if (!session.active || !session.startedWithScale || session.firstDropMs != 0 ||
       !session.scaleBaselineReady) {
-    return;
+    return 0;
   }
   if (session.accidentalTouchHolding ||
       session.firstFlow.phase == FirstFlowPhase::TOUCH) {
     session.firstFlowAcceptedConfirmations = 0;
-    return;
+    return 0;
   }
   const float delta = weight - session.scaleBaselineG;
   if (delta < FIRST_DROP_THRESHOLD_G ||
       firstFlowIsCupMass(delta, runtimeConfig.minimumCupWeightG)) {
     session.firstFlowAcceptedConfirmations = 0;
-    return;
+    return 0;
   }
   ++session.firstFlowAcceptedConfirmations;
   if (session.firstFlowAcceptedConfirmations >=
       FIRST_DROP_CONFIRMATION_SAMPLES) {
-    onFirstDropsDetected(receivedAtMs);
+    return receivedAtMs;
   }
+  return 0;
 }
 
 bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
-                                uint32_t packetSequence) {
+                                uint32_t packetSequence,
+                                float cutTargetG = 0.0f) {
   size_t index;
   if (shot.datapoints < MAX_SHOT_DATAPOINTS) {
     index = shot.datapoints++;
@@ -103,26 +104,25 @@ bool acceptWeightIntoTrajectory(float weight, uint32_t receivedAtMs,
   session.lastAcceptedWeightAtMs = receivedAtMs;
   session.lastAcceptedWeightG = weight;
   session.lastAcceptedPacketSequence = packetSequence;
-  calculateExpectedEndTime();
+  calculateExpectedEndTime(cutTargetG);
 
   serialTracef(LogLevel::DEBUG, "%.2fg, t=%.2fs, expected end=%.2fs",
                weight, shot.timeS[index], shot.expectedEndS);
-  maybeLatchFirstFlowFromAcceptedWeight(weight, receivedAtMs);
   return true;
 }
 
-void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
-                              uint32_t packetSequence) {
+uint32_t considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
+                                  uint32_t packetSequence) {
   if (!session.active || !session.startedWithScale || session.firstDropMs != 0) {
-    return;
+    return 0;
   }
   if (!session.scaleBaselineReady) {
     if (fabsf(weight) > FIRST_DROP_BASELINE_SETTLE_G) {
-      return;
+      return 0;
     }
     session.scaleBaselineG = weight;
     session.scaleBaselineReady = true;
-    return;
+    return 0;
   }
   if (session.firstFlow.phase == FirstFlowPhase::SEEKING &&
       session.firstFlow.confirmations == 0 &&
@@ -135,9 +135,8 @@ void considerScaleFlowMarkers(float weight, uint32_t receivedAtMs,
       stepFirstFlow(session.firstFlow, weight, receivedAtMs, packetSequence,
                     session.scaleBaselineG, runtimeConfig.minimumCupWeightG);
   if (classified == FirstFlowClass::FIRE) {
-    const uint32_t detectedAtMs = session.firstFlow.candidateMs != 0
-                                      ? session.firstFlow.candidateMs
-                                      : receivedAtMs;
-    onFirstDropsDetected(detectedAtMs);
+    return session.firstFlow.candidateMs != 0 ? session.firstFlow.candidateMs
+                                              : receivedAtMs;
   }
+  return 0;
 }

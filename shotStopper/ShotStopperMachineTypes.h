@@ -30,6 +30,17 @@ enum class MachineRunState : uint8_t {
   UNKNOWN = 3
 };
 
+// Weight/brew snapshot the stopper pushes into machine each loop. Momentary
+// inference must not read session or the live scale globals.
+struct MachineSense {
+  float weightG = 0.0f;
+  bool weightFresh = false;
+  bool accidentalHold = false;
+  bool brewCycleActive = false;
+};
+
+inline bool machinePreferBleAirtime = false;
+
 enum class UserIntent : uint8_t {
   NONE = 0,
   REQUEST_START = 1,

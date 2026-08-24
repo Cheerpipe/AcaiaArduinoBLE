@@ -146,7 +146,7 @@ inline void serviceMachine() {
     momentaryStopRetryPending = false;
     maybeEmitFirmwareStopPulse();
   }
-  if (momentaryUserStopThisCycle && !session.active) {
+  if (momentaryUserStopThisCycle && !machineSense.brewCycleActive) {
     (void)machineRequestStop();
   }
 }

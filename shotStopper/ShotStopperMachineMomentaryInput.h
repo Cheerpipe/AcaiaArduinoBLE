@@ -60,8 +60,8 @@ void machineReleasePhysicalSwitchToBrew() {
   }
 }
 
-void machineReconcileBrewOutcome() {
-  if (momentaryStartEdgeThisCycle && !session.active) {
+void machineReconcileBrewOutcome(bool brewActive) {
+  if (momentaryStartEdgeThisCycle && !brewActive) {
     paddleOn = false;
     momentaryDeferredStopPending = false;
   }

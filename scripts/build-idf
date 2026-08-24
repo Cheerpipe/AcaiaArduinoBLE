@@ -64,6 +64,7 @@ node ./scripts/gen_web_ui.js
 
 export SHOT_STOPPER_EXTRA_FLAGS
 SHOT_STOPPER_EXTRA_FLAGS="$(ss_get flags)"
+echo "Extra compile flags: ${SHOT_STOPPER_EXTRA_FLAGS:-(none)}"
 
 mkdir -p "$IDF_BUILD_DIR"
 # Spike sdkconfig / CMake cache predates Arduino autostart and the firmware
@@ -81,6 +82,7 @@ if [[ -f "$IDF_BUILD_DIR/shotstopper_idf_spike.elf" ]] ||
 fi
 
 echo "Building IDF firmware $SHOTSTOPPER_ARCH → $IDF_BUILD_DIR"
+ss_idf_sync_extra_flags
 
 if [[ ! -f "$IDF_SDKCONFIG" ]] ||
    ! grep -q '^CONFIG_IDF_TARGET="esp32s3"$' "$IDF_SDKCONFIG"; then

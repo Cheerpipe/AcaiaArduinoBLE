@@ -85,6 +85,16 @@ enum class ControlSource : uint8_t {
   WEB
 };
 
+// Snapshot the stopper builds once per loop. Brew/guards never poll machine,
+// scale link, or cup presence themselves.
+struct GuardInputs {
+  bool holdActive = false;
+  bool scaleAvailable = false;
+  bool scaleUsable = false;
+  CupPresenceState cup = CupPresenceState::ABSENT;
+  float currentWeightG = 0.0f;
+};
+
 inline const char *stopperStateName(StopperState state) {
   switch (state) {
     case StopperState::REQUIRES_OFF: return "REQUIRES_OFF";

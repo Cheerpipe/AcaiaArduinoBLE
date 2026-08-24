@@ -881,6 +881,33 @@ if (!html.includes('<summary>Paddle</summary>') ||
         .includes('paddleMode')) {
   throw new Error('Machine Paddle mode must expose Auto/Natural/Original in UI, API, and APPLY_CONFIG');
 }
+const brewHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8');
+const scaleSenseHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperScaleSense.h'), 'utf8');
+const momentaryInputHeader = fs.readFileSync(
+    path.join(sketchDir, 'ShotStopperMachineMomentaryInput.h'), 'utf8');
+const momentaryControlHeader = fs.readFileSync(
+    path.join(sketchDir, 'ShotStopperMachineMomentaryControl.h'), 'utf8');
+const momentaryOnlyHeader = fs.readFileSync(
+    path.join(sketchDir, 'ShotStopperMachineMomentaryOnlyState.h'), 'utf8');
+const relayHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineRelay.h'), 'utf8');
+if (brewHeader.includes('machinePollIntention') ||
+    brewHeader.includes('getScaleLinkSnapshot') ||
+    brewHeader.includes('cupPresenceState(') ||
+    brewHeader.includes('scaleAvailable(')) {
+  throw new Error('Brew/guards must consume GuardInputs from the stopper — not poll machine/scale/cup');
+}
+if (scaleSenseHeader.includes('onFirstDropsDetected') ||
+    scaleSenseHeader.includes('notifyCupPresenceTare') ||
+    scaleSenseHeader.includes('holdCupPresenceTransitions')) {
+  throw new Error('Scale sense must return events; the stopper applies brew/cup effects');
+}
+if (momentaryInputHeader.includes('session.active') ||
+    momentaryControlHeader.includes('session.active') ||
+    momentaryOnlyHeader.includes('session.active') ||
+    momentaryOnlyHeader.includes('currentWeight') ||
+    relayHeader.includes('session.automaticEnabled')) {
+  throw new Error('Machine momentary/relay must not read session or live scale globals');
+}
 if (firmwareCore.includes('readRawPaddleOn()') ||
     firmwareCore.includes('pinMode(RELAY_GPIO') ||
     firmwareCore.includes('#if SHOT_STOPPER_MACHINE_TYPE') ||

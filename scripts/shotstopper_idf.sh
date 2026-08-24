@@ -147,6 +147,74 @@ ss_idf_require_image() {
   fi
 }
 
+# idf.py skips CMake when CMakeCache.txt exists, so a new
+# SHOT_STOPPER_EXTRA_FLAGS env value would otherwise never reach the compiler.
+# Stamp the flags and drop the cache when they change.
+ss_idf_sync_extra_flags() {
+  ss_idf_resolve_paths
+  local stamp="$IDF_BUILD_DIR/shot_stopper_extra_flags"
+  local new="${SHOT_STOPPER_EXTRA_FLAGS-}"
+  local old=""
+  mkdir -p "$IDF_BUILD_DIR"
+  if [[ -f "$stamp" ]]; then
+    old="$(cat "$stamp")"
+  fi
+  if [[ "$new" != "$old" ]]; then
+    echo "Extra compile flags changed; reconfiguring IDF CMake cache"
+    echo "  was: ${old:-(none)}"
+    echo "  now: ${new:-(none)}"
+    rm -f "$IDF_BUILD_DIR/CMakeCache.txt"
+  fi
+  printf '%s\n' "$new" > "$stamp"
+}
+
+# Confirm each extra -D flag actually appears on ShotStopperNetwork.cpp.
+ss_idf_verify_extra_flags() {
+  ss_idf_resolve_paths
+  local flags="${SHOT_STOPPER_EXTRA_FLAGS-}"
+  local cc="$IDF_BUILD_DIR/compile_commands.json"
+  [[ -n "$flags" ]] || return 0
+  case " $flags " in
+    *" -D"*) ;;
+    *) return 0 ;;
+  esac
+  if [[ ! -f "$cc" ]]; then
+    echo "$cc does not exist; cannot verify extra compile flags." >&2
+    exit 1
+  fi
+  command -v python3 >/dev/null 2>&1 || {
+    echo "python3 not found on PATH (needed to verify extra compile flags)." >&2
+    exit 127
+  }
+  python3 - "$cc" "$flags" <<'PY'
+import json, sys
+cc_path, flags = sys.argv[1], sys.argv[2]
+needles = [tok for tok in flags.split() if tok.startswith("-D")]
+if not needles:
+    sys.exit(0)
+entries = json.load(open(cc_path))
+cmd = None
+for entry in entries:
+    path = entry.get("file") or ""
+    if path.endswith("ShotStopperNetwork.cpp"):
+        cmd = entry.get("command") or " ".join(entry.get("arguments") or [])
+        break
+if not cmd:
+    sys.stderr.write(
+        "compile_commands.json has no ShotStopperNetwork.cpp entry.\n")
+    sys.exit(1)
+missing = [flag for flag in needles if flag not in cmd]
+if missing:
+    sys.stderr.write(
+        "Extra -D flags did not reach the compiler "
+        "(IDF CMake cache was probably configured with older flags):\n")
+    for flag in missing:
+        sys.stderr.write("  %s\n" % flag)
+    sys.exit(1)
+PY
+  echo "compile_commands: extra -D flags present on ShotStopperNetwork.cpp"
+}
+
 # ALLOW_BSS / autostart / g_probe, then the same OTA identity check as
 # ./scripts/build-idf (image_tag.js).
 ss_idf_verify_firmware() {
@@ -220,4 +288,6 @@ ss_idf_verify_firmware() {
   fi
   echo "Image OTA identity:"
   node "$SS_CLI_ROOT/scripts/image_tag.js" "$IDF_IMAGE" --expect-arch "$SHOTSTOPPER_ARCH"
+
+  ss_idf_verify_extra_flags
 }

@@ -261,7 +261,19 @@ void t_guard_reject_does_not_pulse() {
   shortPress(180);
   CHECK(!session.active);
   CHECK(!paddleOn);
+  CHECK(!machineIsRunning());
   CHECK(hostRelayClosedWrites == closedBefore);
+}
+
+void t_user_stop_without_session_does_not_leave_orphan_run() {
+  resetMomentaryHarness();
+  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  CHECK(!session.active);
+  CHECK(!machineIsRunning());
+  momentaryUserStopThisCycle = true;
+  serviceMachine();
+  CHECK(!machineIsRunning());
+  CHECK(!momentaryLogicalRunActive);
 }
 
 void t_long_press_mirrors_without_brew() {
@@ -839,6 +851,7 @@ const TestCase kTests[] = {
     {"P37", t_press_edge_starts_on_press_and_release_does_not_stop},
     {"P38", t_press_edge_later_click_stops},
     {"P02", t_guard_reject_does_not_pulse},
+    {"P39", t_user_stop_without_session_does_not_leave_orphan_run},
     {"P03", t_long_press_mirrors_without_brew},
 #if SHOT_STOPPER_MACHINE_TYPE == 1
     {"P04", t_only_auto_cut_needs_confirmed_on},

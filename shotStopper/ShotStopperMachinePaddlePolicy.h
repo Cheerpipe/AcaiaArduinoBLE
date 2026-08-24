@@ -2,7 +2,7 @@
 
 // Latch-switch translator: GPIO edges + snapshotted PaddleMode → UserIntent.
 // Included from ShotStopperMachine.h when SHOT_STOPPER_MACHINE_TYPE == 0.
-// Stopper/brew never read paddleMode or GPIO; they poll intention.
+// Stopper/brew never read paddleMode or GPIO; they consume last intention.
 
 bool machineCycleActive = false;
 uint8_t machineCyclePaddleMode = static_cast<uint8_t>(PaddleMode::NATURAL);
@@ -97,7 +97,7 @@ MachineIntention machinePollIntention() {
   } else if (out.stablyOff) {
     out.intent = UserIntent::STABLE_IDLE;
   }
-  return out;
+  return machineCaptureIntention(out);
 }
 
 void machineServiceReminders() {

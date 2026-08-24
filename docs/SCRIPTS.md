@@ -46,6 +46,12 @@ prompting. The same applies with `SHOTSTOPPER_NONINTERACTIVE=1`.
 Suggested `--flags` at the prompt (Enter accepts them):
 `-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1 -DSHOT_STOPPER_ENABLE_BUZZER=2`.
 
+`idf.py` does not reconfigure when only the environment changes. Changing
+`--flags` (for example `-DSHOT_STOPPER_MACHINE_TYPE=1`) drops the IDF CMake
+cache so the new `-D` flags actually reach the compiler. Diagnostic **Type**
+is that compile-time machine type (`paddle`, `momentary`, or `momentary_reed`),
+not a runtime setting.
+
 ## ESP-IDF (supported)
 
 Writes to `build-idf/<architecture>` (`shotstopper.bin`).

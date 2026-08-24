@@ -324,7 +324,7 @@ void verifySafetyInvariants() {
     ++failures;
   }
   if (!MACHINE_USES_MOMENTARY_SWITCH &&
-      machinePollIntention().stablyOff &&
+      machineLastIntention().stablyOff &&
       stopperState != StopperState::RINSE &&
       session.source != ControlSource::WEB && relay.closed &&
       !machineHidesPhysicalStop()) {
@@ -7872,6 +7872,44 @@ void ff12_cupmin_parameter_gates_touch_and_residual() {
         FirstFlowClass::TOUCH);
 }
 
+void ff13_rinse_first_drop_goes_through_stopper() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  const uint32_t rawOnAt = startCycle();
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(session.active);
+  CHECK(session.startedWithScale);
+  CHECK(session.firstDropMs == 0);
+  publishWeight(0.4f, hostMillis + 50, 1, 20);
+  publishWeight(0.9f, hostMillis + 150, 1, 21);
+  CHECK(session.firstDropMs != 0);
+}
+
+void ff14_no_scale_first_drop_does_not_skip_stopper() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  startCycle();
+  reachManualNoScaleState();
+  CHECK(!session.startedWithScale);
+  CHECK(session.firstDropMs == 0);
+  (void)recordWeightSampleWithProvenance(0.4f, hostMillis + 50, 20, 1);
+  (void)recordWeightSampleWithProvenance(0.9f, hostMillis + 150, 21, 1);
+  CHECK(session.firstDropMs == 0);
+}
+
+void ff15_orchestrate_post_tare_holds_cup_transitions() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  seedCupPresence(80.0f);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+  startCycle();
+  CHECK(session.awaitingPostTareBaseline);
+  publishWeight(0.0f, hostMillis, 1, 20);
+  publishWeight(-80.0f, hostMillis + 50, 1, 40);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+}
+
 void at01_classifier_startup_and_trend_math() {
   float times[WEIGHT_TREND_POINT_COUNT];
   float weights[WEIGHT_TREND_POINT_COUNT];
@@ -8682,6 +8720,33 @@ void pm19_apply_config_accepts_auto_paddle_mode() {
   CHECK(runtimeConfig.paddleMode == static_cast<uint8_t>(PaddleMode::AUTO));
 }
 
+void pm20_original_on_off_on_promotes_once_without_extra_polls() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
+  startCycle();
+  advanceToBrew();
+  CHECK(!machineCyclePromotedToNaturalForTest());
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(!machineCyclePromotedToNaturalForTest());
+  setRawPaddle(true);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(machineCyclePromotedToNaturalForTest());
+  CHECK(machineLastIntention().holdActive);
+  (void)machineLastIntention();
+  (void)machineLastIntention();
+  CHECK(machineCyclePromotedToNaturalForTest());
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(getRelaySafetySnapshot().closed);
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(session.endReason == EndReason::PADDLE);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
 using TestFunction = void (*)();
 
 struct TestCase {
@@ -8737,6 +8802,7 @@ const TestCase testCases[] = {
     {"PM17", pm17_auto_bbw_release_inside_rinse_is_rinse},
     {"PM18", pm18_auto_bbw_auto_stop_with_paddle_off_goes_ready},
     {"PM19", pm19_apply_config_accepts_auto_paddle_mode},
+    {"PM20", pm20_original_on_off_on_promotes_once_without_extra_polls},
     {"R01", r01_transient_disconnect_suspends_weight_control},
     {"R02", r02_stalled_scale_worker_suspends_until_validated},
     {"R03", r03_non_finite_weights_cannot_corrupt_state_or_offset},
@@ -8812,6 +8878,9 @@ const TestCase testCases[] = {
     {"FF10", ff10_control_ramp_records_first_flow},
     {"FF11", ff11_cup_and_finger_are_not_first_drop},
     {"FF12", ff12_cupmin_parameter_gates_touch_and_residual},
+    {"FF13", ff13_rinse_first_drop_goes_through_stopper},
+    {"FF14", ff14_no_scale_first_drop_does_not_skip_stopper},
+    {"FF15", ff15_orchestrate_post_tare_holds_cup_transitions},
     {"R65", r65_slow_extended_shot_does_not_learn_weight_offset},
     {"R32", r32_old_connection_generation_cannot_update_weight},
     {"R33", r33_weight_mailbox_keeps_latest_and_reports_gap},

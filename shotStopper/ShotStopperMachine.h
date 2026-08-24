@@ -5,7 +5,8 @@
 #include "ShotStopperSafety.h"
 
 // Machine façade. Stopper talks only to UserIntent, machineRequestStart/Stop,
-// machineIsRunning, and cycle policy (Begin/End/AllowsAutomationStop).
+// machineIsRunning, cycle policy (Begin/End/AllowsAutomationStop), and the
+// MachineSense snapshot. Brew/scale/cup never call this header's actuators.
 // Included from shotStopper.cpp after logging helpers. Switch sample BSS lives
 // in ShotStopperMachineSwitchSample.h, not in the stopper.
 
@@ -20,6 +21,24 @@ struct MachineIntention {
   bool stablyOff = false;
 };
 
+MachineIntention lastPolledIntention;
+MachineSense machineSense;
+
+inline MachineIntention machineCaptureIntention(const MachineIntention &intention) {
+  lastPolledIntention = intention;
+  return intention;
+}
+
+inline MachineIntention machineLastIntention() { return lastPolledIntention; }
+
+inline void machineObserveSense(const MachineSense &sense) {
+  machineSense = sense;
+}
+
+inline void machineSetPreferBleAirtime(bool prefer) {
+  machinePreferBleAirtime = prefer;
+}
+
 #if SHOT_STOPPER_MACHINE_TYPE == 0
 #include "ShotStopperMachinePaddleInput.h"
 #include "ShotStopperMachinePaddleControl.h"
@@ -27,7 +46,7 @@ struct MachineIntention {
 #include "ShotStopperMachinePaddlePolicy.h"
 
 inline void machineReleasePhysicalSwitchToBrew() {}
-inline void machineReconcileBrewOutcome() {}
+inline void machineReconcileBrewOutcome(bool) {}
 inline bool machineSupportsRinse() { return true; }
 inline bool reedIsOn() { return false; }
 inline void machineNoteFirmwareStop() {}
@@ -72,7 +91,7 @@ inline MachineIntention machinePollIntention() {
   } else if (out.stablyOff) {
     out.intent = UserIntent::STABLE_IDLE;
   }
-  return out;
+  return machineCaptureIntention(out);
 }
 #endif
 

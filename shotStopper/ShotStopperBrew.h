@@ -73,7 +73,7 @@ bool minRecoveryWeightReached(float weight) {
 void requestScaleBrewBeep(uint32_t cycleId);
 void enterBrewOrManualFromStart();
 void demoteActiveCycleToRinseOrEnd();
-void calculateExpectedEndTime();
+void calculateExpectedEndTime(float cutTargetG);
 
 void resetFirstFlowDetector() {
   resetFirstFlowState(session.firstFlow);
@@ -304,7 +304,7 @@ void enterFastExtractionExtended(float weightG, uint32_t atMs) {
           runtimeConfig.buzzerExtendedPulseRate) != BuzzerPattern::NONE) {
     emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
   }
-  calculateExpectedEndTime();
+  calculateExpectedEndTime(activeWeightCutTargetG());
 }
 
 void enterSlowExtractionExtended(float weightG, uint32_t atMs) {
@@ -320,7 +320,7 @@ void enterSlowExtractionExtended(float weightG, uint32_t atMs) {
           runtimeConfig.buzzerSlowExtendedPulseRate) != BuzzerPattern::NONE) {
     emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
   }
-  calculateExpectedEndTime();
+  calculateExpectedEndTime(activeWeightCutTargetG());
 }
 
 void considerDirectStopSample(float weight, uint32_t receivedAtMs,
@@ -426,27 +426,18 @@ void consumeNoScaleShotGuard() {
   addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED);
 }
 
-bool noScaleShotGuardWouldBlock() {
+bool noScaleShotGuardWouldBlock(const GuardInputs &inputs) {
   const RuntimeConfig effective = effectiveRuntimeConfig();
-  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
-  const bool scaleUsable =
-      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
   return runtimeConfig.avoidBbwShotWithoutScale && !effective.timerOnly &&
-         !scaleUsable && noScaleShotGuardArmed;
+         !inputs.scaleUsable && noScaleShotGuardArmed;
 }
 
-void maybeEmitManualNoScaleBeep() {
+void maybeEmitManualNoScaleBeep(const GuardInputs &inputs) {
   if (!runtimeConfig.buzzerManualNoScaleBeep) {
     return;
   }
   const RuntimeConfig effective = effectiveRuntimeConfig();
-  if (effective.timerOnly) {
-    return;
-  }
-  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
-  const bool scaleUsable =
-      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
-  if (scaleUsable) {
+  if (effective.timerOnly || inputs.scaleUsable) {
     return;
   }
   emitAlert(AlertEvent::MANUAL_NO_SCALE);
@@ -458,16 +449,15 @@ void blockNoScaleShotGuard() {
   addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED);
 }
 
-void serviceNoScaleShotGuard() {
-  const bool available = scaleAvailable();
-  if (available && !noScaleShotGuardScaleWasAvailable) {
+void serviceNoScaleShotGuard(const GuardInputs &inputs) {
+  if (inputs.scaleAvailable && !noScaleShotGuardScaleWasAvailable) {
     armNoScaleShotGuard();
   }
-  noScaleShotGuardScaleWasAvailable = available;
+  noScaleShotGuardScaleWasAvailable = inputs.scaleAvailable;
   if (noScaleShotGuardHold) {
-    if (!noScaleShotGuardWouldBlock()) {
+    if (!noScaleShotGuardWouldBlock(inputs)) {
       noScaleShotGuardHold = false;
-    } else if (machinePollIntention().holdActive &&
+    } else if (inputs.holdActive &&
                elapsedMs(noScaleShotGuardHoldAtMs) >
                    runtimeConfig.rinseGestureMs) {
       blockNoScaleShotGuard();
@@ -481,17 +471,14 @@ void serviceNoScaleShotGuard() {
   }
 }
 
-bool cupStartGuardWouldBlock() {
+bool cupStartGuardWouldBlock(const GuardInputs &inputs) {
   const RuntimeConfig effective = effectiveRuntimeConfig();
-  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
-  const bool scaleUsable =
-      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
   return effective.cupProtectionEnabled && effective.requireCupToStart &&
-         !effective.timerOnly && scaleUsable &&
-         cupPresenceState() != CupPresenceState::PRESENT;
+         !effective.timerOnly && inputs.scaleUsable &&
+         inputs.cup != CupPresenceState::PRESENT;
 }
 
-void serviceCupStartGuard() {
+void serviceCupStartGuard(const GuardInputs &inputs) {
   if (!cupStartGuardHold) {
     return;
   }
@@ -501,18 +488,15 @@ void serviceCupStartGuard() {
     cupStartGuardHold = false;
     return;
   }
-  const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
-  const bool scaleUsable =
-      scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
-  if (scaleUsable && cupPresenceState() == CupPresenceState::PRESENT) {
+  if (inputs.scaleUsable && inputs.cup == CupPresenceState::PRESENT) {
     cupStartGuardHold = false;
     return;
   }
-  if (machinePollIntention().holdActive &&
+  if (inputs.holdActive &&
       elapsedMs(cupStartGuardHoldAtMs) > runtimeConfig.rinseGestureMs) {
     cupStartGuardHold = false;
     addDebugEvent(DebugCategory::STATE, DebugCode::CUP_START_GUARD_BLOCKED,
-                  weightToCentigrams(currentWeight));
+                  weightToCentigrams(inputs.currentWeightG));
     emitAlert(AlertEvent::CUP_START_BLOCKED);
   }
 }

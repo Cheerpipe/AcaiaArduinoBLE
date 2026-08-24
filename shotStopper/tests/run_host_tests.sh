@@ -176,6 +176,35 @@ done
 
 echo "shotStopper.cpp machine GPIO/type leaks: absent"
 
+if grep -n -E 'machinePollIntention|getScaleLinkSnapshot|cupPresenceState\(|scaleAvailable\(' \
+    "$firmware_dir/ShotStopperBrew.h"; then
+  echo "Brew/guards must not poll machine, scale link, or cup presence" >&2
+  exit 1
+fi
+if grep -n -E 'onFirstDropsDetected|notifyCupPresenceTare|holdCupPresenceTransitions' \
+    "$firmware_dir/ShotStopperScaleSense.h"; then
+  echo "Scale sense must not call brew or cup effect functions" >&2
+  exit 1
+fi
+if grep -n 'session.active' \
+    "$firmware_dir/ShotStopperMachineMomentaryInput.h" \
+    "$firmware_dir/ShotStopperMachineMomentaryControl.h" \
+    "$firmware_dir/ShotStopperMachineMomentaryOnlyState.h"; then
+  echo "Momentary machine must not read session.active" >&2
+  exit 1
+fi
+if grep -n 'currentWeight' \
+    "$firmware_dir/ShotStopperMachineMomentaryOnlyState.h"; then
+  echo "Momentary-only state must not read currentWeight" >&2
+  exit 1
+fi
+if grep -n 'session.automaticEnabled' "$firmware_dir/ShotStopperMachineRelay.h"; then
+  echo "Relay must not read session.automaticEnabled" >&2
+  exit 1
+fi
+
+echo "Stopper orchestration leaks: absent"
+
 for removed_led_path in LED_RED_PIN LED_BLUE_PIN LED_GREEN_PIN 'analogWrite(' \
     SHOT_STOPPER_ENABLE_ALED rgbLedWrite status_indicator WS2812; do
   if scan_firmware_sources "$removed_led_path"; then

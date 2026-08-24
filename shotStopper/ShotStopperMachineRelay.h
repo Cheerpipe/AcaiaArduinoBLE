@@ -348,7 +348,7 @@ bool setMachineCircuitClosed(bool closed,
     }
     addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_CLOSED,
                   static_cast<int32_t>(operationalLimitMs));
-    if (session.automaticEnabled) {
+    if (machinePreferBleAirtime) {
       pendingBrewRfRestore = false;
       applyBrewRfPreference(true);
     }

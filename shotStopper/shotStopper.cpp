@@ -1428,6 +1428,60 @@ void serviceRemoteTimerStopRetry() {
 #include "ShotStopperBrew.h"
 #include "ShotStopperScaleSense.h"
 
+GuardInputs loopGuardInputs;
+
+void observeMachineSenseFromSession() {
+  MachineSense sense;
+  if (session.active && session.hasWeightAnchor &&
+      isfinite(session.lastAcceptedWeightG)) {
+    sense.weightG = session.lastAcceptedWeightG;
+  } else {
+    sense.weightG = currentWeight;
+  }
+  sense.weightFresh = currentWeightIsFresh();
+  sense.accidentalHold = session.accidentalTouchHolding;
+  sense.brewCycleActive = session.active;
+  machineObserveSense(sense);
+}
+
+void fillLoopGuardsFromIntention(const MachineIntention &intention) {
+  loopGuardInputs.holdActive = intention.holdActive;
+  loopGuardInputs.scaleAvailable = scaleAvailable();
+  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+  loopGuardInputs.scaleUsable =
+      scaleLinkAvailable(link) && currentWeightIsFresh();
+  loopGuardInputs.cup = cupPresenceState();
+  loopGuardInputs.currentWeightG = currentWeight;
+}
+
+void captureLoopGuards() {
+  fillLoopGuardsFromIntention(machinePollIntention());
+}
+
+void refreshLoopGuardsFromLastIntention() {
+  fillLoopGuardsFromIntention(machineLastIntention());
+}
+
+void orchestratePostTareBaselineArm() {
+  armPostTareBaselineWindow();
+  notifyCupPresenceTare();
+  holdCupPresenceTransitions(true);
+}
+
+bool acceptWeightAndNotifyFirstFlow(float weight, uint32_t receivedAtMs,
+                                    uint32_t packetSequence) {
+  if (!acceptWeightIntoTrajectory(weight, receivedAtMs, packetSequence,
+                                  activeWeightCutTargetG())) {
+    return false;
+  }
+  const uint32_t latchAtMs =
+      maybeLatchFirstFlowFromAcceptedWeight(weight, receivedAtMs);
+  if (latchAtMs != 0) {
+    onFirstDropsDetected(latchAtMs);
+  }
+  return true;
+}
+
 bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
                                       uint32_t packetSequence,
                                       uint32_t connectionGeneration) {
@@ -1467,7 +1521,11 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
   }
 
   if (session.active && session.startedWithScale) {
-    considerScaleFlowMarkers(weight, receivedAtMs, packetSequence);
+    const uint32_t firstDropAtMs =
+        considerScaleFlowMarkers(weight, receivedAtMs, packetSequence);
+    if (firstDropAtMs != 0) {
+      onFirstDropsDetected(firstDropAtMs);
+    }
   }
 
   if (!shouldTrackWeight()) {
@@ -1512,7 +1570,8 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
       session.awaitingPostTareBaseline = false;
       holdCupPresenceTransitions(false);
       weightStreamState = WeightStreamState::FRESH;
-      return acceptWeightIntoTrajectory(weight, receivedAtMs, packetSequence);
+      return acceptWeightAndNotifyFirstFlow(weight, receivedAtMs,
+                                            packetSequence);
     }
     rejectScaleSample(DebugCode::SCALE_SAMPLE_REJECTED_SLEW, weight,
                       POST_TARE_BASELINE_MAX_ABS_G);
@@ -1617,7 +1676,7 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
   considerDirectStopSample(weight, receivedAtMs, packetSequence,
                            connectionGeneration);
   weightStreamState = WeightStreamState::FRESH;
-  return acceptWeightIntoTrajectory(weight, receivedAtMs, packetSequence);
+  return acceptWeightAndNotifyFirstFlow(weight, receivedAtMs, packetSequence);
 }
 
 bool recordWeightSample(float weight, uint32_t receivedAtMs) {
@@ -3496,7 +3555,7 @@ void processScaleWorkerEvents() {
                  (cupPresenceState() == CupPresenceState::PRESENT &&
                   !session.awaitingPostTareBaseline));
             if (!skipCombinedRearm) {
-              armPostTareBaselineWindow();
+              orchestratePostTareBaselineArm();
               markTareZeroReady();
             }
           }
@@ -3517,7 +3576,7 @@ void processScaleWorkerEvents() {
         if (event.cycleId == session.id && event.writeSucceeded &&
             session.startedWithScale && session.active &&
             stopperState == StopperState::BREW) {
-          armPostTareBaselineWindow();
+          orchestratePostTareBaselineArm();
           markTareZeroReady();
           resetDirectStopConfirmation();
         }
@@ -3582,8 +3641,9 @@ bool beginRinseCycle(ControlSource source);
 void enterRinse();
 
 void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
-  maybeEmitManualNoScaleBeep();
-  if (noScaleShotGuardWouldBlock()) {
+  refreshLoopGuardsFromLastIntention();
+  maybeEmitManualNoScaleBeep(loopGuardInputs);
+  if (noScaleShotGuardWouldBlock(loopGuardInputs)) {
     if (source == ControlSource::PHYSICAL) {
       noScaleShotGuardHold = true;
       noScaleShotGuardHoldAtMs = millis();
@@ -3594,7 +3654,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   }
   noScaleShotGuardHold = false;
 
-  if (cupStartGuardWouldBlock()) {
+  if (cupStartGuardWouldBlock(loopGuardInputs)) {
     if (source == ControlSource::PHYSICAL) {
       cupStartGuardHold = true;
       cupStartGuardHoldAtMs = millis();
@@ -3637,7 +3697,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   session.calibrationEligible = session.automaticEnabled;
   if (session.startedWithScale) {
     if (session.config.autoTare) {
-      armPostTareBaselineWindow();
+      orchestratePostTareBaselineArm();
       markTareZeroReady();
     } else {
       session.hasWeightAnchor = true;
@@ -3651,11 +3711,15 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   resetShotTrajectory(session.startedAtMs);
   initializeBbwProtection();
 
-  machineBeginCycle(session.startedWithScale && !session.config.timerOnly);
+  const bool automaticBbw =
+      session.startedWithScale && !session.config.timerOnly;
+  machineSetPreferBleAirtime(automaticBbw);
+  machineBeginCycle(automaticBbw);
   if (!machineRequestStart(
           machineCloseLimitMs(session.config.operationalWallMs))) {
     session.active = false;
     session.endReason = EndReason::RELAY_SAFETY_FAILURE;
+    machineSetPreferBleAirtime(false);
     machineEndCycle();
     transitionTo(StopperState::REQUIRES_OFF);
     return;
@@ -3735,6 +3799,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   session.awaitingPostTareBaseline = false;
   holdCupPresenceTransitions(false);
   virtualPaddleOn = false;
+  machineSetPreferBleAirtime(false);
   machineEndCycle();
   addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_ENDED,
                 static_cast<int32_t>(reason));
@@ -3758,6 +3823,7 @@ bool beginRinseCycle(ControlSource source) {
   session.automaticEnabled = false;
   virtualPaddleOn = false;
   resetShotTrajectory(session.startedAtMs);
+  machineSetPreferBleAirtime(false);
   machineBeginCycle(false);
   if (!machineRequestStart(session.config.operationalWallMs)) {
     session.active = false;
@@ -3890,7 +3956,7 @@ void stateMachineTask() {
     return;
   }
 
-  const MachineIntention intent = machinePollIntention();
+  const MachineIntention intent = machineLastIntention();
 
   if (maintenanceLease.active) {
     if (relay.closed) {
@@ -3966,7 +4032,9 @@ void stateMachineTask() {
         }
       }
 
-      expirePostTareBaselineIfNeeded();
+      if (expirePostTareBaselineIfNeeded()) {
+        holdCupPresenceTransitions(false);
+      }
       serviceBbwProtectionPhases();
 
       if (session.cupRemovedPending) {
@@ -4027,7 +4095,7 @@ void maybeRequestNtpSyncOnActivity() {
 
 bool controlAllowsConfigurationNow() {
   return stopperState == StopperState::READY && !session.active &&
-         !machineIsRunning() && !machinePollIntention().holdActive &&
+         !machineIsRunning() && !machineLastIntention().holdActive &&
          !maintenanceLease.active;
 }
 
@@ -4117,7 +4185,7 @@ bool webCommandAllowsUnsafeConfiguration(const WebCommand &command) {
 
 void serviceMaintenanceLease() {
   if (!maintenanceLease.active || maintenanceLease.forwarded ||
-      !machinePollIntention().stablyOff ||
+      !machineLastIntention().stablyOff ||
       elapsedMs(maintenanceLease.startedAtMs) <
           MAINTENANCE_LEASE_SETTLE_MS) {
     return;
@@ -4417,7 +4485,7 @@ void completeMaintenanceLease(const WebCommand &result) {
                                  : DebugCode::COMMAND_FAILED,
                 static_cast<int32_t>(maintenanceLease.id));
   maintenanceLease = MaintenanceLease{};
-  if (machinePollIntention().holdActive) {
+  if (machineLastIntention().holdActive) {
     transitionTo(StopperState::REQUIRES_OFF);
   }
 }
@@ -4457,7 +4525,7 @@ void processWebCommand(const WebCommand &command) {
           command.type == WebCommandType::STOP_HEARTBEAT
               ? EndReason::WEB_HEARTBEAT_TIMEOUT
               : EndReason::WEB_STOP,
-          nextStateForUserHold(machinePollIntention()));
+          nextStateForUserHold(machineLastIntention()));
       reportControlCommandResult(command, CommandResultState::APPLIED);
       return;
 
@@ -6188,15 +6256,14 @@ void loop() {
     healthIntervalMaxGapMs = 0;
   }
   machineSampleInput();
-  serviceMachine();
-  // Consume only the latest attributed weight before making automatic
-  // decisions. Switch and relay safety were already sampled first, so their
-  // priority is preserved without adding a full event backlog to this loop.
   processScaleWorkerEvents();
-  serviceNoScaleShotGuard();
-  serviceCupStartGuard();
+  observeMachineSenseFromSession();
+  serviceMachine();
+  captureLoopGuards();
+  serviceNoScaleShotGuard(loopGuardInputs);
+  serviceCupStartGuard(loopGuardInputs);
   stateMachineTask();
-  machineReconcileBrewOutcome();
+  machineReconcileBrewOutcome(session.active);
   serviceExtendedPulseAlert();
   localBuzzer.service(millis());
   servicePendingBrewRfRestore();

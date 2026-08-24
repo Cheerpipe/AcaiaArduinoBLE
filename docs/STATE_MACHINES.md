@@ -25,7 +25,12 @@ Each section has:
    timers, Web UI commands). Not every enum is an event; some machines
    are derived (they recompute from another machine every loop).
 
-The control task in `shotStopper.cpp` is the orchestrator. One machine
+The control task in `shotStopper.cpp` is the orchestrator. Brew, scale sense,
+and cup presence do not call each other: the stopper polls machine **once** per
+loop (`machinePollIntention` → `machineLastIntention`), builds `GuardInputs` for
+brew guards, pushes a `MachineSense` snapshot into machine, and applies scale
+events (first-drop, post-tare cup hold). Machine (paddle/momentary) never reads
+`session` or live scale globals. One machine
 is special: **relay safety can open the machine circuit without waiting for brew
 policy**. Everything else *requests* close/open; safety *owns* the
 contact.
