@@ -233,8 +233,11 @@ retries still pulse. Scale connect can settle to Confirmed off when
 and a quiet, plausible settled weight also settles to Confirmed off. Home
 **Override idle** / **Override brewing** are the manual escape hatch when
 the group is electrically ON with no coffee; they do not pulse. An
-operational wall without `CONFIRMED_ON` leaves an orphan run: settings stay
-locked and a later user Stop may pulse; firmware auto-cut does not.
+operational wall without `CONFIRMED_ON` and with a scale still leaves an
+orphan run: settings stay locked and a later user Stop may pulse; firmware
+auto-cut does not. Without a scale (never saw fresh weight, switch released)
+the same wall emits one stop pulse and settles to Confirmed off — next press
+is Start.
 
 On **momentary+reed** builds (`SHOT_STOPPER_MACHINE_TYPE=2`) the reed is
 canonical except for a short assumed window after the configured start/stop

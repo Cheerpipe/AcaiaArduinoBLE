@@ -87,6 +87,29 @@ void maybeEmitFirmwareStopPulse() {
   (void)emitFirmwareStopPulse();
 }
 
+#if SHOT_STOPPER_MACHINE_TYPE == 1
+void endMomentaryLogicalRunForWall() {
+  const bool cut = machineAllowsFirmwareStopPulse();
+  const bool noScaleCut =
+      !cut && !momentarySawScale && !machineSense.weightFresh &&
+      !momentaryPhysicalOn;
+  momentaryLogicalRunActive = false;
+  if (cut) {
+    maybeEmitFirmwareStopPulse();
+    noteMomentaryLogicalStop();
+    return;
+  }
+  if (noScaleCut) {
+    (void)emitFirmwareStopPulse();
+    settleMomentaryInferredOff();
+    return;
+  }
+  if (momentaryInferredState != MachineRunState::CONFIRMED_OFF) {
+    momentaryOrphanRun = true;
+  }
+}
+#endif
+
 void serviceLogicalRunWalls() {
   if (!momentaryLogicalRunActive) {
     return;
@@ -95,14 +118,7 @@ void serviceLogicalRunWalls() {
   if (elapsed >= HARD_MAX_CIRCUIT_CLOSED_MS) {
     tripRelaySafety(RelaySafetyFault::HARD_LIMIT, true, false, false);
 #if SHOT_STOPPER_MACHINE_TYPE == 1
-    const bool cut = machineAllowsFirmwareStopPulse();
-    momentaryLogicalRunActive = false;
-    if (cut) {
-      maybeEmitFirmwareStopPulse();
-      noteMomentaryLogicalStop();
-    } else if (momentaryInferredState != MachineRunState::CONFIRMED_OFF) {
-      momentaryOrphanRun = true;
-    }
+    endMomentaryLogicalRunForWall();
 #else
     momentaryLogicalRunActive = false;
     if (machineAllowsFirmwareStopPulse()) {
@@ -116,14 +132,7 @@ void serviceLogicalRunWalls() {
       elapsed >= momentaryLogicalOperationalLimitMs) {
     tripRelaySafety(RelaySafetyFault::OPERATIONAL_LIMIT, false, true, false);
 #if SHOT_STOPPER_MACHINE_TYPE == 1
-    const bool cut = machineAllowsFirmwareStopPulse();
-    momentaryLogicalRunActive = false;
-    if (cut) {
-      maybeEmitFirmwareStopPulse();
-      noteMomentaryLogicalStop();
-    } else if (momentaryInferredState != MachineRunState::CONFIRMED_OFF) {
-      momentaryOrphanRun = true;
-    }
+    endMomentaryLogicalRunForWall();
 #else
     momentaryLogicalRunActive = false;
     if (machineAllowsFirmwareStopPulse()) {

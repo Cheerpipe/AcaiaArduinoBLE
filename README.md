@@ -110,7 +110,7 @@ not a Web UI setting. Rebuild (and usually reflash) to change it. Details:
 | Type | `SHOT_STOPPER_MACHINE_TYPE` | What it is |
 | --- | ---: | --- |
 | **Paddle / latch** | `0` (default) | The brew switch stays ON or OFF. Firmware reads the paddle on GPIO and drives the machine circuit through the relay independently. This is the Micra case and the architecture in [How it works](#how-it-works). |
-| **Momentary** | `1` | The button does not latch. The relay mirrors the press 1:1; firmware sends an auto-stop pulse to cut by weight. Without an extra sensor, “is the group running?” is **inferred** from scale flow — less reliable, and without a scale there is no safe automatic cut. |
+| **Momentary** | `1` | The button does not latch. The relay mirrors the press 1:1; firmware sends an auto-stop pulse to cut by weight. Without an extra sensor, “is the group running?” is **inferred** from scale flow — less reliable. Without a scale there is no weight cut; the operational time wall still sends one stop pulse. |
 | **Momentary + reed** | `2` | Same as momentary, plus a reed or hall sensor (default GPIO **4**) that reports whether the group/solenoid is actually ON. That reading is canonical. |
 
 **Strong recommendation:** on momentary machines, use a reed (or hall) on the

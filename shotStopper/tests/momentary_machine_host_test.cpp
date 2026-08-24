@@ -990,6 +990,33 @@ void t_confirmed_wall_pulses_once_and_ends_session() {
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(hostRelayClosedWrites == closedAtConfirm + 1);
 }
+
+void t_noscale_wall_pulses_and_next_press_starts() {
+  resetMomentaryHarness();
+  runtimeConfig.operationalWallMs = 2000;
+  runtimeConfig.avoidBbwShotWithoutScale = false;
+  scale.connected = false;
+  setScaleLinkState(ScaleLinkState::DISCONNECTED);
+  currentWeightSequence = 0;
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  CHECK(session.active);
+  runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
+  const size_t closedBeforeWall = hostRelayClosedWrites;
+  runLoopAfter(2200);
+  CHECK(!session.active);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  CHECK(!momentaryOrphanRun);
+  CHECK(!machineIsRunning());
+  CHECK(hostRelayClosedWrites == closedBeforeWall + 1);
+  runLoopAfter(COMPILED_STOP_PULSE_MS + 80);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(controlAllowsConfigurationNow());
+  shortPress(150);
+  CHECK(session.active);
+  CHECK(machineIsRunning());
+}
 #endif
 
 #if SHOT_STOPPER_MACHINE_TYPE == 2
@@ -1213,6 +1240,7 @@ const TestCase kTests[] = {
     {"P32", t_brief_stale_demotes_confirmed_not_unknown},
     {"P33", t_small_delta_does_not_confirm_on},
     {"P34", t_confirmed_wall_pulses_once_and_ends_session},
+    {"P51", t_noscale_wall_pulses_and_next_press_starts},
 #endif
 #if SHOT_STOPPER_MACHINE_TYPE == 2
     {"P06", t_reed_off_blocks_firmware_cut},

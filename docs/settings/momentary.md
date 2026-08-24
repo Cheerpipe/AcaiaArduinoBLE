@@ -28,8 +28,10 @@ that a blocked start also leaves K1 open.
 | **Button press** | yes | On the debounced press. If the hold then exceeds **Single-press limit**, that edge is undone (not a start/stop). Release does not toggle again. |
 | **Button release** | no | On release, and only if the hold is no longer than **Single-press limit**. A longer hold is mirror-only (for example a machine rinse). |
 
-Without a scale, the stopper does not know if the group is running. It stays
-fully manual: mirror only, no automatic cut.
+Without a scale, the stopper does not know if the group is running. Weight
+cuts and extraction guards stay off: mirror only. The **operational time
+wall** is the exception: at the configured max shot time it still sends one
+auto-stop pulse and treats the group as idle, so the next press is Start.
 
 Related: [Paddle](paddle.md), [Quick rinse](quick-rinse.md),
 [Hardware](../HARDWARE.md).
