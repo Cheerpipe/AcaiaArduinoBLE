@@ -174,6 +174,12 @@ void machineNoteSettledWeightCutOff() {
   if (!momentarySettledWeightCutArmed) {
     return;
   }
+  const bool quietPan =
+      machineSense.weightFresh && momentaryQuietSinceMs != 0 &&
+      elapsedMs(momentaryQuietSinceMs) >= MOMENTARY_QUIET_MS;
+  if (!quietPan) {
+    return;
+  }
   settleMomentaryInferredOff();
 }
 
@@ -253,6 +259,9 @@ void serviceMomentaryRunSensors() {
 
   const bool quietPan =
       momentaryQuietSinceMs != 0 && elapsedMs(momentaryQuietSinceMs) >= MOMENTARY_QUIET_MS;
+  if (momentarySettledWeightCutArmed && quietPan) {
+    settleMomentaryInferredOff();
+  }
   if (quietPan && !momentaryStartAwaitingAck &&
       (momentaryStopAwaitingAck || momentaryOrphanRun ||
        (!momentaryLogicalRunActive &&
@@ -275,7 +284,7 @@ void serviceMomentaryRunSensors() {
       if (momentaryFirmwareCutPending) {
         momentaryStopRetryPending = true;
         momentaryStopAwaitingSinceMs = now;
-      } else {
+      } else if (!momentarySettledWeightCutArmed) {
         momentaryStopAwaitingAck = false;
         momentaryEspressoConfirmed = true;
         momentaryInferredState = MachineRunState::CONFIRMED_ON;
@@ -285,7 +294,8 @@ void serviceMomentaryRunSensors() {
         }
         momentaryLogicalOperationalLimitMs = runtimeConfig.operationalWallMs;
       }
-    } else if (elapsedMs(momentaryStopAwaitingSinceMs) >= MOMENTARY_STOP_ACK_MS) {
+    } else if (!momentarySettledWeightCutArmed &&
+               elapsedMs(momentaryStopAwaitingSinceMs) >= MOMENTARY_STOP_ACK_MS) {
       momentaryStopAwaitingAck = false;
     }
   }
@@ -336,6 +346,7 @@ void serviceMomentaryRunSensors() {
        momentaryInferredState == MachineRunState::ASSUMED_ON ||
        momentaryInferredState == MachineRunState::ASSUMED_OFF) &&
       !finger && !accidental && !skipFlow && !momentaryStopAwaitingAck &&
+      !momentarySettledWeightCutArmed &&
       momentaryInferredState != MachineRunState::CONFIRMED_OFF && inShotBand &&
       flowGps >= MOMENTARY_FLOW_ON_G_S && flowGps <= 8.0f;
   if (canConfirmOn) {
