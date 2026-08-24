@@ -5316,6 +5316,16 @@ void cup_fsm_spike_does_not_place() {
   CHECK(cupPresenceState() == CupPresenceState::ABSENT);
 }
 
+void cup_fsm_untared_lift_to_zero_is_removed() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  seedCupPresence(80.0f);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+  publishWeight(0.0f, hostMillis, 1, 20);
+  publishWeight(0.0f, hostMillis + 50, 1, 21);
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+}
+
 void cup_fsm_tare_does_not_change_state() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -5323,6 +5333,9 @@ void cup_fsm_tare_does_not_change_state() {
   notifyCupPresenceTare();
   holdCupPresenceTransitions(false);
   publishStableCupWeight(0.0f, 30);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+  publishWeight(0.0f, hostMillis, 1, 35);
+  publishWeight(-0.2f, hostMillis + 50, 1, 36);
   CHECK(cupPresenceState() == CupPresenceState::PRESENT);
   publishWeight(-80.0f, hostMillis, 1, 40);
   publishWeight(-81.0f, hostMillis + 1, 1, 41);
@@ -8426,8 +8439,11 @@ void ff08_coffee_during_post_tare_grace_fires() {
   resetHarness(false, true);
   reachReadyFromBoot();
   startCycle();
+  CHECK(session.awaitingPostTareBaseline || session.scaleBaselineReady);
   CHECK(executeNextScaleCommand());
-  CHECK(session.awaitingPostTareBaseline);
+  // Empty-pan 0 g already accepted the baseline. A late combined start must
+  // not re-arm post-tare hold, or a following cup/coffee sample is swallowed.
+  CHECK(!session.awaitingPostTareBaseline);
   CHECK(session.scaleBaselineReady);
   publishWeight(0.4f, hostMillis + 50, 1, 20);
   publishWeight(0.8f, hostMillis + 150, 1, 21);
@@ -8595,6 +8611,85 @@ void rt18_late_combined_start_does_not_rearm_after_retare() {
   CHECK(publishScaleEvent(startResult, true));
   processScaleWorkerEvents();
   CHECK(!session.awaitingPostTareBaseline);
+}
+
+void rt19_late_cup_then_zero_lift_allows_next_shot_retare() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.autoRetare = true;
+  runtimeConfig.bbwProtectionMs = minimumBbwProtectionMs(runtimeConfig);
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+  waitForRetareEnded();
+  CHECK(!session.retarePerformed);
+  publishStableCupWeight(150.0f, 10);
+  CHECK(!session.retarePerformed);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+  reachBrewState();
+  setRawPaddle(false);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+  CHECK(!session.active);
+  publishWeight(0.0f, hostMillis, 1, 80);
+  publishWeight(0.0f, hostMillis + 50, 1, 81);
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+  CHECK(retareWindowOpen());
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  publishStableCupWeight(150.0f, 90);
+  CHECK(session.retarePerformed);
+  CHECK(commandCount(ScaleCommandType::TARE_ONLY) == 1);
+}
+
+void rt20_late_combined_start_does_not_rearm_when_cup_absent() {
+  prepareOpenRetareWindow(10.0f);
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+  CHECK(!session.awaitingPostTareBaseline);
+  ScaleEvent startResult;
+  startResult.type = ScaleEventType::TIMER_START_RESULT;
+  startResult.cycleId = session.id;
+  startResult.commandAttempted = true;
+  startResult.writeSucceeded = true;
+  startResult.usedCombinedTareStart = true;
+  CHECK(publishScaleEvent(startResult, true));
+  processScaleWorkerEvents();
+  CHECK(!session.awaitingPostTareBaseline);
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+  publishStableCupWeight(15.0f, 10);
+  expectRetareWithoutFirstDrop();
+}
+
+void rt21_empty_pan_at_cycle_start_resyncs_stuck_present() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.autoRetare = true;
+  runtimeConfig.bbwProtectionMs = minimumBbwProtectionMs(runtimeConfig);
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+  waitForRetareEnded();
+  publishStableCupWeight(150.0f, 10);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+  CHECK(!session.retarePerformed);
+  reachBrewState();
+  setRawPaddle(false);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+  CHECK(!session.active);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  ++currentWeightSequence;
+  startCycle();
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+  CHECK(executeNextScaleCommand());
+  establishPostTareBaseline();
+  CHECK(retareWindowOpen());
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  publishStableCupWeight(150.0f, 90);
+  CHECK(session.retarePerformed);
+  CHECK(commandCount(ScaleCommandType::TARE_ONLY) == 1);
 }
 
 void pm01_original_bbw_release_after_rinse_keeps_machine_running() {
@@ -9204,6 +9299,7 @@ const TestCase testCases[] = {
     {"CF06", cup_fsm_put_back_without_tare_is_present},
     {"CF07", cup_fsm_disconnect_does_not_emit_removed},
     {"CF08", cup_fsm_rinse_does_not_freeze_presence},
+    {"CF09", cup_fsm_untared_lift_to_zero_is_removed},
     {"R42", r42_weight_below_automation_min_stays_manual},
     {"R43", r43_post_tare_baseline_accepts_zero_after_pre_tare_weight},
     {"R54", r54_post_tare_baseline_keeps_weight_control},
@@ -9234,6 +9330,9 @@ const TestCase testCases[] = {
     {"RT16", rt16_configured_min_cup_weight_retares},
     {"RT17", rt17_light_cup_landing_and_overshoot_retares},
     {"RT18", rt18_late_combined_start_does_not_rearm_after_retare},
+    {"RT19", rt19_late_cup_then_zero_lift_allows_next_shot_retare},
+    {"RT20", rt20_late_combined_start_does_not_rearm_when_cup_absent},
+    {"RT21", rt21_empty_pan_at_cycle_start_resyncs_stuck_present},
     {"RS01", rs01_fast_samples_wait_for_min_duration},
     {"RS02", rs02_slow_samples_meet_min_duration_at_third_sample},
     {"RS03", rs03_broken_streak_before_min_duration_does_not_retare},

@@ -19,6 +19,10 @@ struct CupPresenceRuntime {
   bool holdTransitions = false;
   bool inNegativeHole = false;
   bool removedArmed = false;
+  // True after a tare while the cup is already PRESENT. 0 g then means "cup
+  // tared on the pan", so removal requires the negative hole. Untared PRESENT
+  // treats a stable empty pan (~0 g) as REMOVED.
+  bool taredWhilePresent = false;
   uint8_t removedConfirmations = 0;
   uint8_t placeStabilitySamples = 0;
   uint32_t lastRemovedAtMs = 0;
@@ -46,6 +50,24 @@ void resetCupPresence() {
   cupPresence = CupPresenceRuntime{};
 }
 
+void resyncCupPresenceIfPanEmpty(float weight) {
+  if (cupPresence.state != CupPresenceState::PRESENT) {
+    return;
+  }
+  if (!isfinite(weight) || weight >= runtimeConfig.minimumCupWeightG) {
+    return;
+  }
+  cupPresence.state = CupPresenceState::ABSENT;
+  cupPresence.taredWhilePresent = false;
+  cupPresence.inNegativeHole = false;
+  cupPresence.removedArmed = false;
+  cupPresence.removedConfirmations = 0;
+  cupPresence.lastRemovedAtMs = 0;
+  cupPresence.lastRemovedPacketSequence = 0;
+  cupPresence.holeWeightG = 0.0f;
+  resetCupPlaceStabilityStreak();
+}
+
 void holdCupPresenceTransitions(bool hold) {
   cupPresence.holdTransitions = hold;
   resetCupPlaceStabilityStreak();
@@ -55,6 +77,9 @@ void holdCupPresenceTransitions(bool hold) {
 }
 
 void notifyCupPresenceTare() {
+  if (cupPresence.state == CupPresenceState::PRESENT) {
+    cupPresence.taredWhilePresent = true;
+  }
   cupPresence.inNegativeHole = false;
   cupPresence.holeWeightG = 0.0f;
   resetCupPlaceStabilityStreak();
@@ -68,8 +93,11 @@ CupPresenceEvent feedCupPresence(float weight, uint32_t receivedAtMs,
 
   const float minCupG = runtimeConfig.minimumCupWeightG;
   const float removedG = runtimeConfig.cupRemovedWeightG;
+  const bool removalCandidate =
+      weight <= removedG ||
+      (!cupPresence.taredWhilePresent && weight < minCupG);
 
-  if (weight > removedG) {
+  if (!removalCandidate) {
     cupPresence.removedArmed = true;
     cupPresence.removedConfirmations = 0;
     cupPresence.lastRemovedAtMs = 0;
@@ -81,7 +109,7 @@ CupPresenceEvent feedCupPresence(float weight, uint32_t receivedAtMs,
   }
 
   if (cupPresence.state == CupPresenceState::PRESENT) {
-    if (weight > removedG) {
+    if (!removalCandidate) {
       resetCupPlaceStabilityStreak();
       return CupPresenceEvent::NONE;
     }
@@ -106,6 +134,7 @@ CupPresenceEvent feedCupPresence(float weight, uint32_t receivedAtMs,
     }
 
     cupPresence.state = CupPresenceState::ABSENT;
+    cupPresence.taredWhilePresent = false;
     cupPresence.inNegativeHole = true;
     cupPresence.holeWeightG = weight;
     cupPresence.removedConfirmations = 0;
@@ -170,6 +199,8 @@ CupPresenceEvent feedCupPresence(float weight, uint32_t receivedAtMs,
   }
 
   cupPresence.state = CupPresenceState::PRESENT;
+  // Put-back onto a tared hole reads ~0 g with the cup on the pan.
+  cupPresence.taredWhilePresent = placedByPutBack && !placedByWeight;
   cupPresence.inNegativeHole = false;
   cupPresence.holeWeightG = 0.0f;
   cupPresence.removedArmed = true;

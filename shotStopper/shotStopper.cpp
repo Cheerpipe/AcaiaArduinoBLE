@@ -3801,8 +3801,7 @@ void processScaleWorkerEvents() {
             const bool skipCombinedRearm =
                 event.usedCombinedTareStart &&
                 (session.retarePerformed ||
-                 (cupPresenceState() == CupPresenceState::PRESENT &&
-                  !session.awaitingPostTareBaseline));
+                 !session.awaitingPostTareBaseline);
             if (!skipCombinedRearm) {
               orchestratePostTareBaselineArm();
               markTareZeroReady();
@@ -3945,6 +3944,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
       session.weightControlState == WeightControlState::ACTIVE;
   session.calibrationEligible = session.automaticEnabled;
   if (session.startedWithScale) {
+    resyncCupPresenceIfPanEmpty(currentWeight);
     if (session.config.autoTare) {
       orchestratePostTareBaselineArm();
       markTareZeroReady();
