@@ -61,6 +61,8 @@ void testConfigPatchWorstCaseFitsArena() {
       "\"paddleMode\":1,"
       "\"stopPulseMs\":300,"
       "\"maxSinglePressMs\":1000,"
+      "\"momentaryStartEdge\":\"press\","
+      "\"reedConfirmTimeoutMs\":1000,"
       "\"buzzerScaleLostBeep\":true,"
       "\"buzzerAutoToManualGuardEndBeep\":false,"
       "\"buzzerManualNoScaleBeep\":true,"

@@ -35,6 +35,7 @@ scan_firmware_sources() {
     "$firmware_dir/ShotStopperMachinePaddleState.h" \
     "$firmware_dir/ShotStopperMachinePaddlePolicy.h" \
     "$firmware_dir/ShotStopperMachineMomentaryInput.h" \
+    "$firmware_dir/ShotStopperMachineMomentaryConfig.h" \
     "$firmware_dir/ShotStopperMachineMomentaryControl.h" \
     "$firmware_dir/ShotStopperMachineMomentaryReedState.h" \
     "$firmware_dir/ShotStopperMachineMomentaryOnlyState.h" \
@@ -188,6 +189,7 @@ if grep -n -E 'onFirstDropsDetected|notifyCupPresenceTare|holdCupPresenceTransit
 fi
 if grep -n 'session.active' \
     "$firmware_dir/ShotStopperMachineMomentaryInput.h" \
+    "$firmware_dir/ShotStopperMachineMomentaryConfig.h" \
     "$firmware_dir/ShotStopperMachineMomentaryControl.h" \
     "$firmware_dir/ShotStopperMachineMomentaryOnlyState.h"; then
   echo "Momentary machine must not read session.active" >&2

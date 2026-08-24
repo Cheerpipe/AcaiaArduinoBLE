@@ -71,20 +71,31 @@ inline PersistedSettings &persistedSettingsScratch(uint8_t index) {
 
 inline bool readSettingsSlot(Preferences &preferences, const char *key,
                              PersistedSettings &settings) {
-  if (!preferences.isKey(key) ||
-      preferences.getBytesLength(key) != sizeof(PersistedSettings)) {
+  if (!preferences.isKey(key)) {
     return false;
   }
-  // Read directly into the out-param to avoid borrowing scratch slots that
-  // load/save may already hold (candidate lives in scratch[1] during save).
-  if (preferences.getBytes(key, &settings, sizeof(settings)) !=
-      sizeof(settings)) {
+  const size_t storedLength = preferences.getBytesLength(key);
+  if (storedLength == sizeof(PersistedSettings)) {
+    if (preferences.getBytes(key, &settings, sizeof(settings)) !=
+        sizeof(settings)) {
+      return false;
+    }
+    if (!validPersistedSettings(settings)) {
+      return false;
+    }
+    return true;
+  }
+  if (storedLength != PERSISTED_SETTINGS_V11_SIZE) {
     return false;
   }
-  if (!validPersistedSettings(settings)) {
+  uint8_t v11Raw[PERSISTED_SETTINGS_V11_SIZE];
+  if (preferences.getBytes(key, v11Raw, sizeof(v11Raw)) != sizeof(v11Raw)) {
     return false;
   }
-  return true;
+  if (!migratePersistedSettingsFromV11(v11Raw, sizeof(v11Raw), settings)) {
+    return false;
+  }
+  return validPersistedSettings(settings);
 }
 
 inline bool lockSettingsNvs() { return lockFlashIo(); }

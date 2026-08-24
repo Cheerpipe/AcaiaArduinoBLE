@@ -21,6 +21,7 @@ const firmware = [
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleState.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddlePolicy.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryInput.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryConfig.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryControl.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryReedState.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryOnlyState.h'), 'utf8'),
@@ -216,13 +217,13 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 46800) {
-  throw new Error('Web UI HTML source exceeds the 45.7 KiB authoring budget');
+if (htmlBytes > 48500) {
+  throw new Error('Web UI HTML source exceeds the 47.4 KiB authoring budget');
 }
-if (jsBytes > 120000) {
+if (jsBytes > 121500) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 167000) {
+if (htmlBytes + jsBytes > 170000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -588,6 +589,7 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !ui.includes("CONFIRMED_OFF:'Idle'") ||
     !ui.includes("ASSUMED_ON:'Assumed on'") ||
     !ui.includes("CONFIRMED_ON:'Confirmed on'") ||
+    !ui.includes("ASSUMED_OFF:'Assumed off'") ||
     !ui.includes('function formatCupState(') ||
     !ui.includes('lastDisconnectReasonName') ||
     !ui.includes("'Stale'") ||
@@ -886,8 +888,14 @@ if (!html.includes('<summary>Paddle</summary>') ||
 }
 const brewHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8');
 const scaleSenseHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperScaleSense.h'), 'utf8');
+const paddlePolicyHeader = fs.readFileSync(
+    path.join(sketchDir, 'ShotStopperMachinePaddlePolicy.h'), 'utf8');
+const machineTypesHeader = fs.readFileSync(
+    path.join(sketchDir, 'ShotStopperMachineTypes.h'), 'utf8');
 const momentaryInputHeader = fs.readFileSync(
     path.join(sketchDir, 'ShotStopperMachineMomentaryInput.h'), 'utf8');
+const momentaryConfigHeader = fs.readFileSync(
+    path.join(sketchDir, 'ShotStopperMachineMomentaryConfig.h'), 'utf8');
 const momentaryControlHeader = fs.readFileSync(
     path.join(sketchDir, 'ShotStopperMachineMomentaryControl.h'), 'utf8');
 const momentaryOnlyHeader = fs.readFileSync(
@@ -905,6 +913,7 @@ if (scaleSenseHeader.includes('onFirstDropsDetected') ||
   throw new Error('Scale sense must return events; the stopper applies brew/cup effects');
 }
 if (momentaryInputHeader.includes('session.active') ||
+    momentaryConfigHeader.includes('session.active') ||
     momentaryControlHeader.includes('session.active') ||
     momentaryOnlyHeader.includes('session.active') ||
     momentaryOnlyHeader.includes('currentWeight') ||
@@ -928,8 +937,19 @@ if (firmwareCore.includes('readRawPaddleOn()') ||
 if (!html.includes('<summary>Switch</summary>') ||
     !html.includes('id="stopPulseMs"') ||
     !html.includes('id="maxSinglePressMs"') ||
+    !html.includes('id="momentaryStartEdge"') ||
+    !html.includes('id="reedConfirmTimeoutS"') ||
+    !html.includes('class="reedOnly"') ||
     !html.includes('class="cfgGroup momentaryOnly"') ||
-    html.includes('id="momentaryStartEdge"') ||
+    !html.includes('Auto-stop pulse') ||
+    !html.includes('Single-press limit') ||
+    !html.includes('Start/stop on') ||
+    !html.includes('Reed confirm timeout') ||
+    !html.includes('Button press') ||
+    !html.includes('Button release') ||
+    !html.includes('when the reed confirm window starts') ||
+    !html.includes('The clock starts on that press or release') ||
+    !html.includes('undone if the hold exceeds this limit') ||
     html.includes('<summary>Momentary</summary>') ||
     html.indexOf('<summary>Paddle</summary>') >
         html.indexOf('<summary>Switch</summary>') ||
@@ -937,17 +957,44 @@ if (!html.includes('<summary>Switch</summary>') ||
         html.indexOf('<summary>No-scale BBW</summary>') ||
     html.indexOf('id="stopPulseMs"') >
         html.indexOf('<summary>No-scale BBW</summary>') ||
-    !html.includes('Pulse the firmware sends to stop at target weight') ||
+    !html.includes(
+        'mimic a single button press when it needs to stop the brew automatically') ||
     !ui.includes('stopPulseMs:number(') ||
     !ui.includes("if($('stopPulseMs'))$('stopPulseMs').value=") ||
+    !ui.includes("'Auto-stop pulse'") ||
+    !ui.includes("'Single-press limit'") ||
+    !ui.includes("'Reed confirm timeout'") ||
+    !ui.includes('momentaryStartEdge:') ||
+    !ui.includes('reedConfirmTimeoutMs:') ||
     !css.includes('.momentaryOnly') ||
+    !css.includes('html:not(.reedMachine) .reedOnly') ||
     !network.includes('"stopPulseMs"') ||
+    !network.includes('"momentaryStartEdge"') ||
+    !network.includes('"reedConfirmTimeoutMs"') ||
     !network.includes('stopPulseMs must be an integer from 50 to 1000.') ||
+    !network.includes('maxSinglePressMs must be an integer from 100 to 5000.') ||
+    !network.includes('momentaryStartEdge must be press or release.') ||
+    !network.includes(
+        'reedConfirmTimeoutMs must be an integer from 200 to 5000.') ||
     !network.includes('jsonStopPulseMs') ||
+    !network.includes('jsonMomentaryStartEdge') ||
+    !network.includes('jsonReedConfirmTimeoutMs') ||
     !firmware.includes('machineApplyWorkflowConfig') ||
     !firmware.includes('dst.stopPulseTenMs = src.stopPulseTenMs') ||
+    !momentaryControlHeader.includes(
+        'dst.momentaryStartOnPress = src.momentaryStartOnPress') ||
+    !momentaryControlHeader.includes(
+        'dst.reedConfirmTimeoutHundredMs = src.reedConfirmTimeoutHundredMs') ||
+    paddlePolicyHeader.includes('momentaryStartOnPress') ||
+    paddlePolicyHeader.includes('reedConfirmTimeoutHundredMs') ||
+    machineTypesHeader.includes('parseMomentaryStartEdge') ||
+    machineTypesHeader.includes('momentaryStartEdgeId') ||
+    !momentaryConfigHeader.includes('parseMomentaryStartEdge') ||
+    !momentaryConfigHeader.includes('momentaryStartEdgeId') ||
     !domain.includes('uint8_t stopPulseTenMs') ||
+    !domain.includes('bool momentaryStartOnPress') ||
     !domain.includes('setRuntimeStopPulseMs') ||
+    !domain.includes('setRuntimeReedConfirmTimeoutMs') ||
     fs.readFileSync(path.join(sketchDir, 'ShotStopperBrewTypes.h'), 'utf8')
         .includes('stopPulseTenMs') ||
     fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8')
@@ -963,6 +1010,7 @@ if (!html.includes('class="cfgGroup paddleOnly"><summary>Paddle</summary>') ||
     html.includes('cfgGroup momentaryOnly paddleOnly') ||
     !css.includes('html.momentaryMachine .paddleOnly') ||
     !css.includes('html:not(.momentaryMachine) .momentaryOnly') ||
+    !css.includes('html:not(.reedMachine) .reedOnly') ||
     !ui.includes("classList.toggle('momentaryMachine',t!=='paddle')") ||
     !ui.includes("classList.toggle('reedMachine',t==='momentary_reed')")) {
   throw new Error(
@@ -2831,8 +2879,8 @@ if (generated.settingsGzip.length > 4096) {
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
 }
-if (generated.combined > 47616) {
-  throw new Error('Combined Web UI gzip exceeds the 46.5 KiB flash budget');
+if (generated.combined > 49152) {
+  throw new Error('Combined Web UI gzip exceeds the 48 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {

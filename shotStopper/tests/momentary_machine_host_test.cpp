@@ -143,6 +143,7 @@ void resetMomentaryHarness() {
   reedRawOn = false;
   reedOn = false;
   reedSawStableOff = false;
+  reedAssume = ReedAssume::NONE;
   reedChangedAtMs = millis();
   momentaryFirmwareStopIssued = false;
 #endif
@@ -202,7 +203,7 @@ void t_short_press_mirrors_then_opens() {
   CHECK(stopperState == StopperState::READY);
   pressDown();
   CHECK(getRelaySafetySnapshot().closed);
-  CHECK(!session.active);
+  CHECK(session.active);
   releaseUp();
   CHECK(session.active);
   CHECK(!getRelaySafetySnapshot().closed);
@@ -211,8 +212,20 @@ void t_short_press_mirrors_then_opens() {
 #endif
 }
 
-void t_default_starts_on_release_not_press() {
+void t_default_starts_on_press() {
   resetMomentaryHarness();
+  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  pressDown();
+  CHECK(session.active);
+  CHECK(stopperState != StopperState::READY || session.active);
+  CHECK(getRelaySafetySnapshot().closed);
+  releaseUp();
+  CHECK(session.active);
+}
+
+void t_release_mode_starts_on_release_not_press() {
+  resetMomentaryHarness();
+  runtimeConfig.momentaryStartOnPress = false;
   runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
   pressDown();
   CHECK(!session.active);
@@ -266,6 +279,29 @@ void t_user_stop_without_session_does_not_leave_orphan_run() {
 
 void t_long_press_mirrors_from_first_instant() {
   resetMomentaryHarness();
+#if SHOT_STOPPER_MACHINE_TYPE == 2
+  runtimeConfig.reedConfirmTimeoutHundredMs = 50;
+#endif
+  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  setRawPaddle(true);
+  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(session.active);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  runLoopAfter(COMPILED_MAX_SINGLE_PRESS_MS + 20);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(!session.active);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  CHECK(!machineIsRunning());
+  setRawPaddle(false);
+  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(!session.active);
+}
+
+void t_release_mode_long_press_ignored_as_start() {
+  resetMomentaryHarness();
+  runtimeConfig.momentaryStartOnPress = false;
   runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
   setRawPaddle(true);
   runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
@@ -796,6 +832,132 @@ void t_reed_polarity_stop_when_running() {
   CHECK(momentaryUserStopThisCycle || !paddleOn);
 }
 
+void t_reed_stays_assumed_on_until_timeout_then_confirms_off() {
+  resetMomentaryHarness();
+  runtimeConfig.reedConfirmTimeoutHundredMs = 2;
+  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  pressDown();
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  CHECK(session.active);
+  CHECK(!reedIsOn());
+  runLoopAfter(100);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  const size_t closedBefore = hostRelayClosedWrites;
+  runLoopAfter(150);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  CHECK(!session.active);
+  CHECK(!machineIsRunning());
+  CHECK(hostRelayClosedWrites == closedBefore);
+}
+
+void t_reed_on_during_window_confirms_immediately() {
+  resetMomentaryHarness();
+  runtimeConfig.reedConfirmTimeoutHundredMs = 20;
+  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  pressDown();
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  setRawReed(true);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  CHECK(reedIsOn());
+}
+
+void t_reed_stop_assumed_off_until_reed_matches() {
+  resetMomentaryHarness();
+  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  pressDown();
+  setRawReed(true);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  releaseUp();
+  pressDown();
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  CHECK(reedIsOn());
+  setRawReed(false);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+}
+
+void t_reed_stop_timeout_confirms_actual_on() {
+  resetMomentaryHarness();
+  runtimeConfig.reedConfirmTimeoutHundredMs = 2;
+  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  pressDown();
+  setRawReed(true);
+  releaseUp();
+  pressDown();
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  runLoopAfter(250);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  CHECK(reedIsOn());
+}
+
+void t_reed_outside_assumed_follows_reed() {
+  resetMomentaryHarness();
+  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  setRawReed(true);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  setRawReed(false);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+}
+
+void t_reed_release_mode_assume_clock_starts_on_release() {
+  resetMomentaryHarness();
+  runtimeConfig.momentaryStartOnPress = false;
+  runtimeConfig.reedConfirmTimeoutHundredMs = 5;
+  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  pressDown();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  CHECK(!session.active);
+  runLoopAfter(400);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  CHECK(!session.active);
+  releaseUp();
+  CHECK(session.active);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  runLoopAfter(150);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  runLoopAfter(400);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  CHECK(!session.active);
+}
+
+void t_reed_release_mode_stop_assume_starts_on_release() {
+  resetMomentaryHarness();
+  runtimeConfig.momentaryStartOnPress = false;
+  runtimeConfig.reedConfirmTimeoutHundredMs = 20;
+  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  shortPress(150);
+  setRawReed(true);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  CHECK(session.active);
+  pressDown();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  CHECK(reedIsOn());
+  releaseUp();
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  CHECK(reedIsOn());
+}
+
+void t_reed_disqualified_press_grace_then_reed_canonical() {
+  resetMomentaryHarness();
+  runtimeConfig.maxSinglePressHundredMs = 2;
+  runtimeConfig.reedConfirmTimeoutHundredMs = 3;
+  runLoopAfter(PADDLE_DEBOUNCE_MS + 1);
+  pressDown();
+  CHECK(session.active);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  runLoopAfter(250);
+  CHECK(!session.active);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  CHECK(!machineIsRunning());
+  setRawReed(true);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  CHECK(!machineIsRunning());
+  runLoopAfter(400);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  CHECK(machineIsRunning());
+  CHECK(!session.active);
+}
+
 void t_reed_wall_pulses_once_and_ends_session() {
   resetMomentaryHarness();
   runtimeConfig.operationalWallMs = 2000;
@@ -838,11 +1000,13 @@ struct TestCase {
 
 const TestCase kTests[] = {
     {"P01", t_short_press_mirrors_then_opens},
-    {"P36", t_default_starts_on_release_not_press},
+    {"P36", t_default_starts_on_press},
+    {"P40", t_release_mode_starts_on_release_not_press},
     {"P38", t_second_short_press_stops_without_rinse},
     {"P02", t_guard_reject_still_mirrors},
     {"P39", t_user_stop_without_session_does_not_leave_orphan_run},
     {"P03", t_long_press_mirrors_from_first_instant},
+    {"P41", t_release_mode_long_press_ignored_as_start},
 #if SHOT_STOPPER_MACHINE_TYPE == 1
     {"P04", t_only_auto_cut_needs_confirmed_on},
     {"P05", t_quiet_pan_does_not_force_cut_when_unknown},
@@ -876,6 +1040,14 @@ const TestCase kTests[] = {
     {"P17", t_assumed_on_offers_web_stop},
     {"P19", t_reed_polarity_stop_when_running},
     {"P35", t_reed_wall_pulses_once_and_ends_session},
+    {"P42", t_reed_stays_assumed_on_until_timeout_then_confirms_off},
+    {"P43", t_reed_on_during_window_confirms_immediately},
+    {"P44", t_reed_stop_assumed_off_until_reed_matches},
+    {"P45", t_reed_stop_timeout_confirms_actual_on},
+    {"P46", t_reed_outside_assumed_follows_reed},
+    {"P47", t_reed_release_mode_assume_clock_starts_on_release},
+    {"P48", t_reed_release_mode_stop_assume_starts_on_release},
+    {"P49", t_reed_disqualified_press_grace_then_reed_canonical},
 #endif
     {"P20", t_recovery_hold_mirrors_gpio},
     {"P08", t_logical_wall_trips_existing_flags},

@@ -205,8 +205,9 @@ Config lock uses `machineIsRunning()`, which for paddle equals machine circuit c
 | State | Meaning |
 | --- | --- |
 | `CONFIRMED_OFF` | Relay not closed. Safety is OPEN, or tripped/lockout with contact open. |
-| `ASSUMED_ON` | Safety is `ARMING`: close is in flight, echo may not yet match. |
-| `CONFIRMED_ON` | Safety `CLOSED` or `relay.closed`. |
+| `ASSUMED_ON` | Safety is `ARMING`: close is in flight, echo may not yet match. Reed: configured start edge (press or release), reed still off, within confirm timeout. |
+| `CONFIRMED_ON` | Safety `CLOSED` or `relay.closed`. Reed: reed is on (outside an assumed-off window). |
+| `ASSUMED_OFF` | Reed only: configured stop edge (press or release), reed still on, within confirm timeout. |
 | `UNKNOWN` | Safety TRIPPED/LOCKOUT but the contact still reads closed (should not last). |
 
 On **momentary-only** builds (`SHOT_STOPPER_MACHINE_TYPE=1`) these labels are
@@ -220,9 +221,25 @@ timeout without quiet does **not** force OFF. An operational wall without
 `CONFIRMED_ON` leaves an orphan run: settings stay locked and a later user
 Stop may pulse; firmware auto-cut does not.
 
+On **momentary+reed** builds (`SHOT_STOPPER_MACHINE_TYPE=2`) the reed is
+canonical except for a short assumed window after the configured start/stop
+edge (press or release per Start/stop on — not the 1:1 relay close; button
+→ solenoid → reed lag). Reed is polled every control loop (`digitalRead`
+plus 30 ms debounce); a sticky level is not missed. Outside assumed, reed
+off is `CONFIRMED_OFF` and reed on is `CONFIRMED_ON`. If the reed reaches
+the expected level during the window, confirm immediately. If the
+reed-confirm timeout elapses (default 1 s, setting 0.2–5 s, reed-only),
+confirm the **actual** reed: assumed-on + reed still off → `CONFIRMED_OFF`
+(clear logical run, one-cycle `REQUEST_STOP`, no extra stop pulse);
+assumed-off + reed still on → `CONFIRMED_ON`. Boot with the reed already
+on stays `UNKNOWN` until a stable off. Firmware auto-cut still requires
+canonical reed on.
+
 `machineIsRunning()` is logical run, stop-ack, orphan, `CONFIRMED_ON`, or
-`ASSUMED_ON`. Home shows Assumed on vs Confirmed on. Diagnostic JSON also
-reports `machineStartAck`, `machineStopAck`, and `machineOrphan`.
+`ASSUMED_ON`. On reed builds it is also true while the reed is on, so
+`ASSUMED_OFF` stays running until the reed drops. Home shows Assumed on,
+Assumed off, and Confirmed on. Diagnostic JSON also reports
+`machineStartAck`, `machineStopAck`, and `machineOrphan`.
 
 ### Events
 
@@ -238,8 +255,9 @@ switch. The stopper never reads GPIO, paddle mode, or machine type.
 
 Source: `ShotStopperMachineTypes.h`, `machinePollIntention()`. Latch TYPE=0
 maps GPIO + snapshotted `PaddleMode` onto these intents (Original/Auto may
-omit `REQUEST_STOP` after the rinse window). Momentary maps short/long press
-to the same intents.
+omit `REQUEST_STOP` after the rinse window). Momentary maps a hold no
+longer than Single-press limit to start/stop (on press or on release). A
+longer hold is mirror-only; in press mode the tentative edge is undone.
 
 ### States (snapshot, not latched)
 

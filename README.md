@@ -158,7 +158,7 @@ need to change them after first setup.
 | Group | What it covers |
 | --- | --- |
 | **[Paddle](docs/settings/paddle.md)** | Paddle firmware only. Auto, Natural (default), or Original feel for the brew switch. Hidden on momentary. |
-| **[Momentary](docs/settings/momentary.md)** | Momentary firmware only (with or without reed). Switch timings: stop pulse and single-press max. Hidden on paddle. |
+| **[Momentary](docs/settings/momentary.md)** | Momentary firmware only (with or without reed). Switch timings: auto-stop pulse, single-press limit, start/stop on press or release, and reed confirm timeout (reed builds). Hidden on paddle. |
 | **[No-scale BBW](docs/settings/no-scale-bbw.md)** | Block a full automatic shot when brew-by-weight is on and the scale is missing. |
 | **[Quick rinse](docs/settings/quick-rinse.md)** | Paddle firmware only. Short paddle ON→OFF becomes a timed rinse instead of a shot. Hidden on momentary. |
 | **[Cup](docs/settings/cup.md)** | What counts as a cup placed or lifted. |

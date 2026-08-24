@@ -27,7 +27,8 @@ enum class MachineRunState : uint8_t {
   CONFIRMED_OFF = 0,
   ASSUMED_ON = 1,
   CONFIRMED_ON = 2,
-  UNKNOWN = 3
+  UNKNOWN = 3,
+  ASSUMED_OFF = 4
 };
 
 // Weight/brew snapshot the stopper pushes into machine each loop. Momentary
@@ -103,6 +104,7 @@ inline const char *machineRunStateName(MachineRunState state) {
     case MachineRunState::ASSUMED_ON: return "ASSUMED_ON";
     case MachineRunState::CONFIRMED_ON: return "CONFIRMED_ON";
     case MachineRunState::UNKNOWN: return "UNKNOWN";
+    case MachineRunState::ASSUMED_OFF: return "ASSUMED_OFF";
   }
   return "UNKNOWN";
 }

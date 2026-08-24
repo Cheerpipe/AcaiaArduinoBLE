@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ShotStopperMachineMomentaryConfig.h"
+
 // Momentary actuator: K1 mirrors the physical switch 1:1. The only synthetic
 // close is a firmware stop pulse (weight cut / walls), aborted if the user
 // presses. Logical run walls reuse tripRelaySafety so brew sees existing flags.
@@ -152,6 +154,8 @@ inline void machineApplyWorkflowConfig(RuntimeConfig &dst,
                                        const RuntimeConfig &src) {
   dst.stopPulseTenMs = src.stopPulseTenMs;
   dst.maxSinglePressHundredMs = src.maxSinglePressHundredMs;
+  dst.momentaryStartOnPress = src.momentaryStartOnPress;
+  dst.reedConfirmTimeoutHundredMs = src.reedConfirmTimeoutHundredMs;
 }
 
 inline void serviceMachine() {

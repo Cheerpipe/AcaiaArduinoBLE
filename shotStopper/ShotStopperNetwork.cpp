@@ -1,4 +1,5 @@
 #include "ShotStopperNetwork.h"
+#include "ShotStopperMachineMomentaryConfig.h"
 #include "ShotStopperJsonArena.h"
 #include "ShotStopperOta.h"
 #include "ShotStopperPsram.h"
@@ -397,9 +398,11 @@ const char *configValidationMessage(ConfigValidationError error) {
     case ConfigValidationError::CUP_REMOVED_WEIGHT:
       return "Cup-removed threshold must be from -50 to -0.1 g.";
     case ConfigValidationError::STOP_PULSE:
-      return "Stop pulse must be from 50 to 1000 ms.";
+      return "Auto-stop pulse must be from 50 to 1000 ms.";
     case ConfigValidationError::MAX_SINGLE_PRESS:
-      return "Single press max must be from 100 to 5000 ms.";
+      return "Single-press limit must be from 100 to 5000 ms.";
+    case ConfigValidationError::REED_CONFIRM_TIMEOUT:
+      return "Reed confirm timeout must be from 0.2 to 5 s.";
   }
   return "Invalid configuration.";
 }
@@ -451,6 +454,24 @@ bool jsonMaxSinglePressMs(cJSON *object, RuntimeConfig &config) {
   }
   setRuntimeMaxSinglePressMs(config, ms);
   return true;
+}
+
+bool jsonReedConfirmTimeoutMs(cJSON *object, RuntimeConfig &config) {
+  uint32_t ms = 0;
+  if (!jsonUint32(object, "reedConfirmTimeoutMs", ms) || ms < 200 ||
+      ms > 5000) {
+    return false;
+  }
+  setRuntimeReedConfirmTimeoutMs(config, ms);
+  return true;
+}
+
+bool jsonMomentaryStartEdge(cJSON *object, RuntimeConfig &config) {
+  cJSON *item = cJSON_GetObjectItemCaseSensitive(object, "momentaryStartEdge");
+  if (!cJSON_IsString(item) || item->valuestring == nullptr) {
+    return false;
+  }
+  return parseMomentaryStartEdge(item->valuestring, config.momentaryStartOnPress);
 }
 
 bool jsonNtpPreset(cJSON *object, const char *name, uint8_t &output) {
@@ -3886,6 +3907,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"paddleReturnReminderIntervalMs\":%lu,"
         "\"paddleReturnReminderMaxDurationMs\":%lu,\"paddleMode\":\"%s\","
         "\"stopPulseMs\":%lu,\"maxSinglePressMs\":%lu,"
+        "\"momentaryStartEdge\":\"%s\",\"reedConfirmTimeoutMs\":%lu,"
         "\"buzzerScaleLostBeep\":%s,\"buzzerAutoToManualGuardEndBeep\":%s,"
         "\"buzzerManualNoScaleBeep\":%s,\"buzzerScaleConnectedBeep\":%s,"
         "\"scaleConnectedLed\":%s,"
@@ -3929,6 +3951,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         paddleModeId(control.config.paddleMode),
         static_cast<unsigned long>(runtimeStopPulseMs(control.config)),
         static_cast<unsigned long>(runtimeMaxSinglePressMs(control.config)),
+        momentaryStartEdgeId(control.config.momentaryStartOnPress),
+        static_cast<unsigned long>(
+            runtimeReedConfirmTimeoutMs(control.config)),
         control.config.buzzerScaleLostBeep ? "true" : "false",
         control.config.buzzerAutoToManualGuardEndBeep ? "true" : "false",
         control.config.buzzerManualNoScaleBeep ? "true" : "false",
@@ -4103,12 +4128,16 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         &used,
         ",\"scale\":{\"preferredMac\":\"%s\",\"preferredName\":\"%s\","
         "\"macCachePauseRemainingMs\":%lu,\"history\":%s},"
-        "\"presets\":%s,\"stopPulseMs\":%lu,\"maxSinglePressMs\":%lu",
+        "\"presets\":%s,\"stopPulseMs\":%lu,\"maxSinglePressMs\":%lu,"
+        "\"momentaryStartEdge\":\"%s\",\"reedConfirmTimeoutMs\":%lu",
         safePreferredScaleMac, safePreferredScaleName,
         static_cast<unsigned long>(control.scaleMacCachePauseRemainingMs),
         g_work->historyJson, g_work->presetsJson,
         static_cast<unsigned long>(runtimeStopPulseMs(control.config)),
-        static_cast<unsigned long>(runtimeMaxSinglePressMs(control.config)));
+        static_cast<unsigned long>(runtimeMaxSinglePressMs(control.config)),
+        momentaryStartEdgeId(control.config.momentaryStartOnPress),
+        static_cast<unsigned long>(
+            runtimeReedConfirmTimeoutMs(control.config)));
   } else if (ok && page == StatusPage::Admin) {
     // Locked admin: confirm-window hint only. Unlocked: Wi-Fi/AP + BLE + OTA.
     ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s",
@@ -4712,7 +4741,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "firstDropBeep", "scaleConnectedLed",
       "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
-      "paddleMode", "stopPulseMs", "maxSinglePressMs", "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
+      "paddleMode", "stopPulseMs", "maxSinglePressMs", "momentaryStartEdge",
+      "reedConfirmTimeoutMs", "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
       "buzzerManualNoScaleBeep", "buzzerScaleConnectedBeep",
       "buzzerExtendedPulseRate", "buzzerSlowExtendedPulseRate",
       "alertOutputChannel", "autoRetare", "retareWindowMs", "minimumCupWeightG",
@@ -4815,6 +4845,12 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (jsonFieldPresent(root, "maxSinglePressMs") &&
              !jsonMaxSinglePressMs(root, candidate)) {
     parseError = "maxSinglePressMs must be an integer from 100 to 5000.";
+  } else if (jsonFieldPresent(root, "momentaryStartEdge") &&
+             !jsonMomentaryStartEdge(root, candidate)) {
+    parseError = "momentaryStartEdge must be press or release.";
+  } else if (jsonFieldPresent(root, "reedConfirmTimeoutMs") &&
+             !jsonReedConfirmTimeoutMs(root, candidate)) {
+    parseError = "reedConfirmTimeoutMs must be an integer from 200 to 5000.";
   } else if (jsonFieldPresent(root, "buzzerScaleLostBeep") &&
              !jsonBoolean(root, "buzzerScaleLostBeep",
                           candidate.buzzerScaleLostBeep)) {

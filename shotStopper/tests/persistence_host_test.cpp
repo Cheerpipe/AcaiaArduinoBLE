@@ -78,6 +78,10 @@ void p01_defaults_are_valid() {
   CHECK(runtimeStopPulseMs(settings.runtime) == COMPILED_STOP_PULSE_MS);
   CHECK(runtimeMaxSinglePressMs(settings.runtime) ==
         COMPILED_MAX_SINGLE_PRESS_MS);
+  CHECK(settings.runtime.momentaryStartOnPress);
+  CHECK(settings.runtime.reedConfirmTimeoutHundredMs == 0);
+  CHECK(runtimeReedConfirmTimeoutMs(settings.runtime) ==
+        COMPILED_REED_CONFIRM_TIMEOUT_MS);
   CHECK(settings.runtime.alertOutputChannel ==
         static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL));
   CHECK(!settings.runtime.soundAlertsMuted);
@@ -530,6 +534,8 @@ void p24_preset_bank_size_and_crud_budgets() {
   CHECK(sizeof(ShotPreset) <= 136);
   CHECK(sizeof(ShotPresetBank) <= 1100);
   CHECK(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET);
+  CHECK(sizeof(PersistedSettings) == 1908);
+  CHECK(sizeof(RuntimeConfig) == 248);
   CHECK(sizeof(SettingsPersistRequest) <= PERSISTED_SETTINGS_NVS_BUDGET + 16);
   CHECK(sizeof(ControlStatusSnapshot) <= 4096);
   CHECK(sizeof(ControlGateSnapshot) <= 32);
@@ -1307,6 +1313,50 @@ void p63_flash_io_lock_fails_closed_without_mutex() {
   unlockFlashIo();
 }
 
+void p64_v11_blob_migrates_to_schema_12() {
+  resetHostPersistence();
+  PersistedSettings donor;
+  CHECK(initializeDefaultSettings(donor));
+  setRuntimeStopPulseMs(donor.runtime, 250);
+  donor.runtime.momentaryStartOnPress = false;
+  donor.runtime.reedConfirmTimeoutHundredMs = 20;
+  std::memset(donor.preferredScaleName, 0, sizeof(donor.preferredScaleName));
+  std::memcpy(donor.preferredScaleName, "Pearl-S", sizeof("Pearl-S"));
+  CHECK(validPreferredScaleName(donor.preferredScaleName));
+
+  uint8_t v11[PERSISTED_SETTINGS_V11_SIZE];
+  std::memset(v11, 0, sizeof(v11));
+  PersistedSettingsHeader header{};
+  std::memcpy(&header, &donor, sizeof(header));
+  header.schemaVersion = CONFIG_SCHEMA_VERSION_V11;
+  header.structureSize = PERSISTED_SETTINGS_V11_SIZE;
+  std::memcpy(v11, &header, sizeof(header));
+  std::memcpy(v11 + sizeof(header), &donor.runtime, RUNTIME_CONFIG_V11_SIZE);
+  const size_t v12Tail =
+      sizeof(PersistedSettingsHeader) + sizeof(RuntimeConfig);
+  const size_t v11Tail =
+      sizeof(PersistedSettingsHeader) + RUNTIME_CONFIG_V11_SIZE;
+  const size_t tailBytes = PERSISTED_SETTINGS_V11_SIZE - v11Tail;
+  std::memcpy(v11 + v11Tail,
+              reinterpret_cast<const uint8_t *>(&donor) + v12Tail, tailBytes);
+  const size_t checksumOff = PERSISTED_SETTINGS_V11_SIZE - sizeof(uint32_t);
+  const uint32_t checksum = crc32(v11, checksumOff);
+  std::memcpy(v11 + checksumOff, &checksum, sizeof(checksum));
+
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, v11,
+                           sizeof(v11));
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.structureSize == sizeof(PersistedSettings));
+  CHECK(loaded.runtime.momentaryStartOnPress);
+  CHECK(loaded.runtime.reedConfirmTimeoutHundredMs == 0);
+  CHECK(runtimeReedConfirmTimeoutMs(loaded.runtime) ==
+        COMPILED_REED_CONFIRM_TIMEOUT_MS);
+  CHECK(runtimeStopPulseMs(loaded.runtime) == 250);
+  CHECK(std::strcmp(loaded.preferredScaleName, "Pearl-S") == 0);
+}
+
 struct TestCase {
   const char *id;
   void (*function)();
@@ -1355,6 +1405,7 @@ const TestCase tests[] = {
     {"P61", p61_shot_curve_dual_slot_round_trip_and_delete},
     {"P62", p62_shot_curve_v1_schema_is_rejected},
     {"P63", p63_flash_io_lock_fails_closed_without_mutex},
+    {"P64", p64_v11_blob_migrates_to_schema_12},
 };
 
 }  // namespace

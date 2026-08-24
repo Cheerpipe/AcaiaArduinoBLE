@@ -46,7 +46,10 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 11;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 12;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V11 = 11;
+constexpr size_t RUNTIME_CONFIG_V11_SIZE = 244;
+constexpr size_t PERSISTED_SETTINGS_V11_SIZE = 1904;
 
 constexpr size_t NTP_SERVER_HOST_CAPACITY = 64;
 constexpr uint32_t NTP_RESYNC_INTERVAL_MS = 3600UL * 1000UL;
@@ -150,6 +153,9 @@ inline const char *compiledBuzzerModeId() {
 #ifndef SHOT_STOPPER_MAX_SINGLE_PRESS_MS
 #define SHOT_STOPPER_MAX_SINGLE_PRESS_MS 1000
 #endif
+#ifndef SHOT_STOPPER_REED_CONFIRM_TIMEOUT_MS
+#define SHOT_STOPPER_REED_CONFIRM_TIMEOUT_MS 1000
+#endif
 
 static_assert(SHOT_STOPPER_MACHINE_TYPE >= 0 && SHOT_STOPPER_MACHINE_TYPE <= 2,
               "SHOT_STOPPER_MACHINE_TYPE must be 0 (paddle/latch), 1 (momentary), "
@@ -160,6 +166,9 @@ static_assert(SHOT_STOPPER_STOP_PULSE_MS >= 50 &&
 static_assert(SHOT_STOPPER_MAX_SINGLE_PRESS_MS >= 100 &&
                   SHOT_STOPPER_MAX_SINGLE_PRESS_MS <= 5000,
               "SHOT_STOPPER_MAX_SINGLE_PRESS_MS must be 100–5000");
+static_assert(SHOT_STOPPER_REED_CONFIRM_TIMEOUT_MS >= 200 &&
+                  SHOT_STOPPER_REED_CONFIRM_TIMEOUT_MS <= 5000,
+              "SHOT_STOPPER_REED_CONFIRM_TIMEOUT_MS must be 200–5000");
 
 constexpr uint8_t COMPILED_MACHINE_TYPE =
     static_cast<uint8_t>(SHOT_STOPPER_MACHINE_TYPE);
@@ -169,6 +178,11 @@ constexpr uint32_t COMPILED_STOP_PULSE_MS =
     static_cast<uint32_t>(SHOT_STOPPER_STOP_PULSE_MS);
 constexpr uint32_t COMPILED_MAX_SINGLE_PRESS_MS =
     static_cast<uint32_t>(SHOT_STOPPER_MAX_SINGLE_PRESS_MS);
+constexpr uint32_t COMPILED_REED_CONFIRM_TIMEOUT_MS =
+    static_cast<uint32_t>(SHOT_STOPPER_REED_CONFIRM_TIMEOUT_MS);
+constexpr uint32_t MIN_REED_CONFIRM_TIMEOUT_MS = 200;
+constexpr uint32_t MAX_REED_CONFIRM_TIMEOUT_MS = 5000;
+constexpr uint32_t DEFAULT_REED_CONFIRM_TIMEOUT_MS = 1000;
 
 inline const char *compiledMachineTypeId() {
   switch (SHOT_STOPPER_MACHINE_TYPE) {
@@ -561,22 +575,29 @@ struct RuntimeConfig {
   bool serialDebugOutput = false;
   // Minimum level retained in the RAM debug ring (WebUI Log). NONE disables.
   uint8_t ringRetainLogLevel = static_cast<uint8_t>(LogLevel::NONE);
-  // Momentary Switch timings packed to keep NVS schema 11 size. 0 = compiled
-  // default (legacy blobs that stored momentaryStartOnPress here).
+  // Momentary Switch timings packed to keep NVS size. 0 = compiled default
+  // (legacy blobs that stored momentaryStartOnPress in stopPulseTenMs).
   uint8_t stopPulseTenMs =
       static_cast<uint8_t>((SHOT_STOPPER_STOP_PULSE_MS + 5) / 10);
   uint8_t maxSinglePressHundredMs =
       static_cast<uint8_t>((SHOT_STOPPER_MAX_SINGLE_PRESS_MS + 50) / 100);
   // Wait after shot end before capturing the post-drip weight.
   uint32_t dripDelayMs = DEFAULT_DRIP_DELAY_MS;
+  // Schema 12: start/stop on press (default) vs release. Reed confirm window.
+  bool momentaryStartOnPress = true;
+  uint8_t reedConfirmTimeoutHundredMs = 0;
 };
 
-static_assert(sizeof(RuntimeConfig) == 244,
+static_assert(sizeof(RuntimeConfig) == 248,
               "RuntimeConfig NVS size changed; add a schema migration");
 static_assert(offsetof(RuntimeConfig, stopPulseTenMs) == 238,
               "RuntimeConfig stopPulseTenMs offset changed");
 static_assert(offsetof(RuntimeConfig, dripDelayMs) == 240,
               "RuntimeConfig dripDelayMs offset changed");
+static_assert(offsetof(RuntimeConfig, momentaryStartOnPress) == 244,
+              "RuntimeConfig momentaryStartOnPress offset changed");
+static_assert(offsetof(RuntimeConfig, reedConfirmTimeoutHundredMs) == 245,
+              "RuntimeConfig reedConfirmTimeoutHundredMs offset changed");
 
 inline uint32_t runtimeStopPulseMs(const RuntimeConfig &config) {
   if (config.stopPulseTenMs == 0) {
@@ -619,6 +640,29 @@ inline void setRuntimeMaxSinglePressMs(RuntimeConfig &config, uint32_t ms) {
     ms = 5000U;
   }
   config.maxSinglePressHundredMs = static_cast<uint8_t>((ms + 50U) / 100U);
+}
+
+inline uint32_t runtimeReedConfirmTimeoutMs(const RuntimeConfig &config) {
+  if (config.reedConfirmTimeoutHundredMs == 0) {
+    return COMPILED_REED_CONFIRM_TIMEOUT_MS;
+  }
+  const uint32_t ms =
+      static_cast<uint32_t>(config.reedConfirmTimeoutHundredMs) * 100U;
+  if (ms < MIN_REED_CONFIRM_TIMEOUT_MS || ms > MAX_REED_CONFIRM_TIMEOUT_MS) {
+    return COMPILED_REED_CONFIRM_TIMEOUT_MS;
+  }
+  return ms;
+}
+
+inline void setRuntimeReedConfirmTimeoutMs(RuntimeConfig &config, uint32_t ms) {
+  if (ms < MIN_REED_CONFIRM_TIMEOUT_MS) {
+    ms = MIN_REED_CONFIRM_TIMEOUT_MS;
+  }
+  if (ms > MAX_REED_CONFIRM_TIMEOUT_MS) {
+    ms = MAX_REED_CONFIRM_TIMEOUT_MS;
+  }
+  config.reedConfirmTimeoutHundredMs =
+      static_cast<uint8_t>((ms + 50U) / 100U);
 }
 
 struct CycleConfigSnapshot {
@@ -771,7 +815,8 @@ enum class ConfigValidationError : uint8_t {
   CUP_PRESENT_WEIGHT,
   CUP_REMOVED_WEIGHT,
   STOP_PULSE,
-  MAX_SINGLE_PRESS
+  MAX_SINGLE_PRESS,
+  REED_CONFIRM_TIMEOUT
 };
 
 constexpr size_t MAX_SHOT_PRESETS = 8;
@@ -1073,6 +1118,11 @@ inline ConfigValidationError validateRuntimeConfig(
        config.maxSinglePressHundredMs > 50)) {
     return ConfigValidationError::MAX_SINGLE_PRESS;
   }
+  if (config.reedConfirmTimeoutHundredMs != 0 &&
+      (config.reedConfirmTimeoutHundredMs < 2 ||
+       config.reedConfirmTimeoutHundredMs > 50)) {
+    return ConfigValidationError::REED_CONFIRM_TIMEOUT;
+  }
   if (config.ringRetainLogLevel >
       static_cast<uint8_t>(LogLevel::NONE)) {
     return ConfigValidationError::RING_RETAIN_LOG_LEVEL;
@@ -1207,6 +1257,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "stopPulseMs";
     case ConfigValidationError::MAX_SINGLE_PRESS:
       return "maxSinglePressMs";
+    case ConfigValidationError::REED_CONFIRM_TIMEOUT:
+      return "reedConfirmTimeoutMs";
     case ConfigValidationError::RING_RETAIN_LOG_LEVEL:
       return "ringRetainLogLevel";
     case ConfigValidationError::PADDLE_MODE:

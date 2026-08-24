@@ -68,6 +68,11 @@ void noteMomentaryLogicalStart() {
 }
 
 void noteMomentaryLogicalStop() {
+  if (!momentaryLogicalRunActive &&
+      momentaryInferredState == MachineRunState::CONFIRMED_OFF &&
+      !momentaryStartAwaitingAck) {
+    return;
+  }
   momentaryEspressoConfirmed = false;
   momentaryRisingSinceMs = 0;
   momentaryLowFlowSinceMs = 0;
@@ -83,6 +88,34 @@ void noteMomentaryLogicalStop() {
   momentaryStopAwaitingAck = true;
   momentaryStopAwaitingSinceMs = millis();
   if (momentaryInferredState == MachineRunState::CONFIRMED_ON) {
+    momentaryInferredState = MachineRunState::ASSUMED_ON;
+  }
+}
+
+void noteMomentaryLogicalStartCanceled() {
+  momentaryEspressoConfirmed = false;
+  momentaryRisingSinceMs = 0;
+  momentaryLowFlowSinceMs = 0;
+  momentaryStopAwaitingAck = false;
+  momentaryStopRetryPending = false;
+  momentaryStartAwaitingAck = false;
+  momentaryStartBaselineSinceMs = 0;
+  momentaryOrphanRun = false;
+  momentaryInferredState = MachineRunState::CONFIRMED_OFF;
+}
+
+void noteMomentaryDisqualifiedPress(bool restoreRunning) {
+  if (!restoreRunning) {
+    noteMomentaryLogicalStartCanceled();
+    return;
+  }
+  momentaryStopAwaitingAck = false;
+  momentaryStopRetryPending = false;
+  momentaryStartAwaitingAck = false;
+  momentaryStartBaselineSinceMs = 0;
+  momentaryOrphanRun = false;
+  momentaryInferredState = momentaryGesturePreState;
+  if (momentaryInferredState == MachineRunState::CONFIRMED_OFF) {
     momentaryInferredState = MachineRunState::ASSUMED_ON;
   }
 }

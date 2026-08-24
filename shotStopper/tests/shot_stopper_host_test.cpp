@@ -1859,6 +1859,17 @@ void w03_runtime_timing_relations_are_transactional() {
   CHECK(runtimeStopPulseMs(config) == COMPILED_STOP_PULSE_MS);
   CHECK(runtimeMaxSinglePressMs(config) == COMPILED_MAX_SINGLE_PRESS_MS);
   config = RuntimeConfig{};
+  config.reedConfirmTimeoutHundredMs = 1;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::REED_CONFIRM_TIMEOUT);
+  config.reedConfirmTimeoutHundredMs = 51;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::REED_CONFIRM_TIMEOUT);
+  config.reedConfirmTimeoutHundredMs = 0;
+  CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
+  CHECK(runtimeReedConfirmTimeoutMs(config) ==
+        COMPILED_REED_CONFIRM_TIMEOUT_MS);
+  config = RuntimeConfig{};
   config.cupPresentWeightG = 0.0f;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::CUP_PRESENT_WEIGHT);
