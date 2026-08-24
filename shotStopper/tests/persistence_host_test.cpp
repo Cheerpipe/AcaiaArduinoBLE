@@ -1355,6 +1355,27 @@ void p64_v11_blob_migrates_to_schema_12() {
         COMPILED_REED_CONFIRM_TIMEOUT_MS);
   CHECK(runtimeStopPulseMs(loaded.runtime) == 250);
   CHECK(std::strcmp(loaded.preferredScaleName, "Pearl-S") == 0);
+  CHECK(loaded.runtime.assumeIdleWhenScaleConnects);
+  CHECK(loaded.runtime.shotReactTimeoutS == 0);
+}
+
+void p65_v12_blob_migrates_to_schema_13() {
+  resetHostPersistence();
+  PersistedSettings donor;
+  CHECK(initializeDefaultSettings(donor));
+  donor.runtime.assumeIdleWhenScaleConnects = false;
+  donor.runtime.shotReactTimeoutS = 0;
+  donor.schemaVersion = CONFIG_SCHEMA_VERSION_V12;
+  donor.checksum = 0;
+  donor.checksum = persistedSettingsChecksum(donor);
+
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &donor,
+                           sizeof(donor));
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.runtime.assumeIdleWhenScaleConnects);
+  CHECK(loaded.runtime.shotReactTimeoutS == 0);
 }
 
 struct TestCase {
@@ -1406,6 +1427,7 @@ const TestCase tests[] = {
     {"P62", p62_shot_curve_v1_schema_is_rejected},
     {"P63", p63_flash_io_lock_fails_closed_without_mutex},
     {"P64", p64_v11_blob_migrates_to_schema_12},
+    {"P65", p65_v12_blob_migrates_to_schema_13},
 };
 
 }  // namespace

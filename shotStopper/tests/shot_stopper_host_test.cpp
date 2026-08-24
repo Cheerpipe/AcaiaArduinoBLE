@@ -1872,6 +1872,19 @@ void w03_runtime_timing_relations_are_transactional() {
   CHECK(runtimeReedConfirmTimeoutMs(config) ==
         COMPILED_REED_CONFIRM_TIMEOUT_MS);
   config = RuntimeConfig{};
+  config.shotReactTimeoutS = 2;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::SHOT_REACT_TIMEOUT);
+  config.shotReactTimeoutS = 31;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::SHOT_REACT_TIMEOUT);
+  config.shotReactTimeoutS = 0;
+  CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
+  CHECK(runtimeShotReactTimeoutMs(config) == COMPILED_SHOT_REACT_TIMEOUT_MS);
+  config.shotReactTimeoutS = 12;
+  CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
+  CHECK(runtimeShotReactTimeoutS(config) == 12);
+  config = RuntimeConfig{};
   config.cupPresentWeightG = 0.0f;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::CUP_PRESENT_WEIGHT);

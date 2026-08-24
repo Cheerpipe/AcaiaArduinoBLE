@@ -138,6 +138,8 @@ void resetMomentaryHarness() {
   momentaryQuietSinceMs = 0;
   momentaryLogicalRunActive = false;
   momentaryLogicalRunStartedAtMs = 0;
+  momentaryFirmwareCutPending = false;
+  momentarySettledWeightCutArmed = false;
 #endif
   momentarySkipFirmwareStopPulse = false;
   pulseOutputActive = false;
@@ -703,8 +705,96 @@ void t_start_nack_long_baseline_confirms_off() {
   for (int step = 0; step < 61; ++step) {
     dripFreshWeight(0.0f, 200);
   }
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  CHECK(!machineIsRunning());
+}
+
+void t_start_nack_timeout_follows_setting() {
+  resetMomentaryHarness();
+  runtimeConfig.shotReactTimeoutS = 3;
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
+  for (int step = 0; step < 16; ++step) {
+    dripFreshWeight(0.0f, 200);
+  }
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+}
+
+void t_flow_after_assumed_off_confirms_on_without_pulse() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
+  for (int step = 0; step < 61; ++step) {
+    dripFreshWeight(0.0f, 200);
+  }
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  const size_t closedBefore = hostRelayClosedWrites;
+  currentWeight = 0.2f;
+  currentWeightReceivedAtMs = hostMillis;
+  ++currentWeightSequence;
+  runLoopAfter(50);
+  for (int step = 0; step < 12; ++step) {
+    dripFreshWeight(currentWeight + 0.45f, 100);
+  }
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  CHECK(hostRelayClosedWrites == closedBefore);
+}
+
+void t_override_sets_inferred_idle_and_brewing_without_pulse() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  const size_t closedBefore = hostRelayClosedWrites;
+  machineOverrideInferredOn();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  CHECK(machineIsRunning());
+  machineOverrideInferredOff();
   CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
   CHECK(!machineIsRunning());
+  CHECK(hostRelayClosedWrites == closedBefore);
+}
+
+void t_scale_connect_settles_idle_when_idle() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  CHECK(session.active);
+  setScaleLinkState(ScaleLinkState::DISCONNECTED);
+  runLoopAfter(10);
+  setScaleLinkState(ScaleLinkState::CONNECTED);
+  runLoopAfter(10);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  session.active = false;
+  setScaleLinkState(ScaleLinkState::DISCONNECTED);
+  runLoopAfter(10);
+  setScaleLinkState(ScaleLinkState::CONNECTED);
+  runLoopAfter(10);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+}
+
+void t_settled_weight_cut_confirms_off() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  currentWeight = 0.2f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  runLoopAfter(50);
+  for (int step = 0; step < 12; ++step) {
+    dripFreshWeight(currentWeight + 0.45f, 100);
+  }
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  machineArmSettledWeightCutOff();
+  machineNoteSettledWeightCutOff();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
 }
 
 void t_user_stop_after_preinfusion_does_not_pulse() {
@@ -1063,6 +1153,11 @@ const TestCase kTests[] = {
     {"P23", t_stop_ack_timeout_without_quiet_stays_on},
     {"P24", t_start_preinfusion_quiet_stays_assumed},
     {"P25", t_start_nack_long_baseline_confirms_off},
+    {"P25B", t_start_nack_timeout_follows_setting},
+    {"P25C", t_flow_after_assumed_off_confirms_on_without_pulse},
+    {"P25D", t_override_sets_inferred_idle_and_brewing_without_pulse},
+    {"P25E", t_scale_connect_settles_idle_when_idle},
+    {"P25F", t_settled_weight_cut_confirms_off},
     {"P26", t_user_stop_after_preinfusion_does_not_pulse},
     {"P27", t_accidental_touch_does_not_confirm_on},
     {"P28", t_gap_skip_does_not_confirm_from_step},

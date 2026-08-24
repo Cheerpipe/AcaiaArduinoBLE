@@ -59,4 +59,19 @@ inline bool migratePersistedSettingsFromV11(const uint8_t *raw, size_t length,
   return true;
 }
 
+inline bool migratePersistedSettingsFromV12(PersistedSettings &settings) {
+  if (settings.magic != PERSISTED_SETTINGS_MAGIC ||
+      settings.schemaVersion != CONFIG_SCHEMA_VERSION_V12 ||
+      settings.structureSize != sizeof(PersistedSettings) ||
+      settings.checksum != persistedSettingsChecksum(settings)) {
+    return false;
+  }
+  settings.runtime.assumeIdleWhenScaleConnects = true;
+  settings.runtime.shotReactTimeoutS = 0;
+  settings.schemaVersion = CONFIG_SCHEMA_VERSION;
+  settings.checksum = 0;
+  settings.checksum = persistedSettingsChecksum(settings);
+  return true;
+}
+
 }  // namespace shotstopper

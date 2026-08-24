@@ -80,10 +80,13 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
         sizeof(settings)) {
       return false;
     }
-    if (!validPersistedSettings(settings)) {
+    if (validPersistedSettings(settings)) {
+      return true;
+    }
+    if (!migratePersistedSettingsFromV12(settings)) {
       return false;
     }
-    return true;
+    return validPersistedSettings(settings);
   }
   if (storedLength != PERSISTED_SETTINGS_V11_SIZE) {
     return false;

@@ -47,7 +47,8 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 12;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 13;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V12 = 12;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V11 = 11;
 constexpr size_t RUNTIME_CONFIG_V11_SIZE = 244;
 constexpr size_t PERSISTED_SETTINGS_V11_SIZE = 1904;
@@ -190,6 +191,10 @@ constexpr uint32_t COMPILED_REED_CONFIRM_TIMEOUT_MS =
 constexpr uint32_t MIN_REED_CONFIRM_TIMEOUT_MS = 200;
 constexpr uint32_t MAX_REED_CONFIRM_TIMEOUT_MS = 5000;
 constexpr uint32_t DEFAULT_REED_CONFIRM_TIMEOUT_MS = 1000;
+constexpr uint32_t COMPILED_SHOT_REACT_TIMEOUT_MS = 12000;
+constexpr uint8_t MIN_SHOT_REACT_TIMEOUT_S = 3;
+constexpr uint8_t MAX_SHOT_REACT_TIMEOUT_S = 30;
+constexpr uint8_t DEFAULT_SHOT_REACT_TIMEOUT_S = 12;
 
 inline const char *compiledMachineTypeId() {
   switch (SHOT_STOPPER_MACHINE_TYPE) {
@@ -593,6 +598,10 @@ struct RuntimeConfig {
   // Schema 12: start/stop on press (default) vs release. Reed confirm window.
   bool momentaryStartOnPress = true;
   uint8_t reedConfirmTimeoutHundredMs = 0;
+  // Schema 13: switch-only inferred-state sync. Fits former RuntimeConfig
+  // padding (offsets 246–247). 0 timeout = compiled 12 s default.
+  bool assumeIdleWhenScaleConnects = true;
+  uint8_t shotReactTimeoutS = 0;
 };
 
 static_assert(sizeof(RuntimeConfig) == 248,
@@ -605,6 +614,10 @@ static_assert(offsetof(RuntimeConfig, momentaryStartOnPress) == 244,
               "RuntimeConfig momentaryStartOnPress offset changed");
 static_assert(offsetof(RuntimeConfig, reedConfirmTimeoutHundredMs) == 245,
               "RuntimeConfig reedConfirmTimeoutHundredMs offset changed");
+static_assert(offsetof(RuntimeConfig, assumeIdleWhenScaleConnects) == 246,
+              "RuntimeConfig assumeIdleWhenScaleConnects offset changed");
+static_assert(offsetof(RuntimeConfig, shotReactTimeoutS) == 247,
+              "RuntimeConfig shotReactTimeoutS offset changed");
 
 inline uint32_t runtimeStopPulseMs(const RuntimeConfig &config) {
   if (config.stopPulseTenMs == 0) {
@@ -670,6 +683,21 @@ inline void setRuntimeReedConfirmTimeoutMs(RuntimeConfig &config, uint32_t ms) {
   }
   config.reedConfirmTimeoutHundredMs =
       static_cast<uint8_t>((ms + 50U) / 100U);
+}
+
+inline uint32_t runtimeShotReactTimeoutMs(const RuntimeConfig &config) {
+  if (config.shotReactTimeoutS == 0) {
+    return COMPILED_SHOT_REACT_TIMEOUT_MS;
+  }
+  if (config.shotReactTimeoutS < MIN_SHOT_REACT_TIMEOUT_S ||
+      config.shotReactTimeoutS > MAX_SHOT_REACT_TIMEOUT_S) {
+    return COMPILED_SHOT_REACT_TIMEOUT_MS;
+  }
+  return static_cast<uint32_t>(config.shotReactTimeoutS) * 1000U;
+}
+
+inline uint8_t runtimeShotReactTimeoutS(const RuntimeConfig &config) {
+  return static_cast<uint8_t>(runtimeShotReactTimeoutMs(config) / 1000U);
 }
 
 struct CycleConfigSnapshot {
@@ -823,7 +851,8 @@ enum class ConfigValidationError : uint8_t {
   CUP_REMOVED_WEIGHT,
   STOP_PULSE,
   MAX_SINGLE_PRESS,
-  REED_CONFIRM_TIMEOUT
+  REED_CONFIRM_TIMEOUT,
+  SHOT_REACT_TIMEOUT
 };
 
 constexpr size_t MAX_SHOT_PRESETS = 8;
@@ -1130,6 +1159,11 @@ inline ConfigValidationError validateRuntimeConfig(
        config.reedConfirmTimeoutHundredMs > 50)) {
     return ConfigValidationError::REED_CONFIRM_TIMEOUT;
   }
+  if (config.shotReactTimeoutS != 0 &&
+      (config.shotReactTimeoutS < MIN_SHOT_REACT_TIMEOUT_S ||
+       config.shotReactTimeoutS > MAX_SHOT_REACT_TIMEOUT_S)) {
+    return ConfigValidationError::SHOT_REACT_TIMEOUT;
+  }
   if (config.ringRetainLogLevel >
       static_cast<uint8_t>(LogLevel::NONE)) {
     return ConfigValidationError::RING_RETAIN_LOG_LEVEL;
@@ -1266,6 +1300,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "maxSinglePressMs";
     case ConfigValidationError::REED_CONFIRM_TIMEOUT:
       return "reedConfirmTimeoutMs";
+    case ConfigValidationError::SHOT_REACT_TIMEOUT:
+      return "shotReactTimeoutS";
     case ConfigValidationError::RING_RETAIN_LOG_LEVEL:
       return "ringRetainLogLevel";
     case ConfigValidationError::PADDLE_MODE:
@@ -1523,6 +1559,8 @@ enum class WebCommandType : uint8_t {
   WEBUI_RESTART,
   BLE_COMPAT_ENABLE,
   BLE_COMPAT_DISABLE,
+  STATE_OVERRIDE_OFF,
+  STATE_OVERRIDE_ON,
   MAINTENANCE_COMPLETE
 };
 
@@ -1567,6 +1605,10 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::WEBUI_RESTART: return "restart Web UI";
     case WebCommandType::BLE_COMPAT_ENABLE: return "enable BLE Companion";
     case WebCommandType::BLE_COMPAT_DISABLE: return "disable BLE Companion";
+    case WebCommandType::STATE_OVERRIDE_OFF:
+      return "override inferred idle";
+    case WebCommandType::STATE_OVERRIDE_ON:
+      return "override inferred brewing";
     case WebCommandType::MAINTENANCE_COMPLETE:
       return "maintenance result";
   }

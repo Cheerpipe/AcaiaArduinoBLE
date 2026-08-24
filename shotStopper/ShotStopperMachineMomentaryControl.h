@@ -69,6 +69,9 @@ bool emitFirmwareStopPulse() {
   pulseOutputActive = true;
   pulseOutputIsStart = false;
   pulseOutputEndsAtMs = millis() + durationMs;
+#if SHOT_STOPPER_MACHINE_TYPE == 1
+  momentaryFirmwareCutPending = true;
+#endif
   return true;
 }
 
@@ -171,6 +174,8 @@ inline void machineApplyWorkflowConfig(RuntimeConfig &dst,
   dst.maxSinglePressHundredMs = src.maxSinglePressHundredMs;
   dst.momentaryStartOnPress = src.momentaryStartOnPress;
   dst.reedConfirmTimeoutHundredMs = src.reedConfirmTimeoutHundredMs;
+  dst.assumeIdleWhenScaleConnects = src.assumeIdleWhenScaleConnects;
+  dst.shotReactTimeoutS = src.shotReactTimeoutS;
 }
 
 inline void serviceMachine() {

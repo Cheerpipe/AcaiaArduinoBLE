@@ -404,6 +404,8 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "Single-press limit must be from 100 to 5000 ms.";
     case ConfigValidationError::REED_CONFIRM_TIMEOUT:
       return "Reed confirm timeout must be from 0.2 to 5 s.";
+    case ConfigValidationError::SHOT_REACT_TIMEOUT:
+      return "Shot reaction timeout must be 0 (compiled default) or from 3 to 30 s.";
   }
   return "Invalid configuration.";
 }
@@ -464,6 +466,24 @@ bool jsonReedConfirmTimeoutMs(cJSON *object, RuntimeConfig &config) {
     return false;
   }
   setRuntimeReedConfirmTimeoutMs(config, ms);
+  return true;
+}
+
+bool jsonAssumeIdleWhenScaleConnects(cJSON *object, RuntimeConfig &config) {
+  return jsonBoolean(object, "assumeIdleWhenScaleConnects",
+                     config.assumeIdleWhenScaleConnects);
+}
+
+bool jsonShotReactTimeoutS(cJSON *object, RuntimeConfig &config) {
+  uint8_t seconds = 0;
+  if (!jsonUint8(object, "shotReactTimeoutS", seconds)) {
+    return false;
+  }
+  if (seconds != 0 && (seconds < MIN_SHOT_REACT_TIMEOUT_S ||
+                       seconds > MAX_SHOT_REACT_TIMEOUT_S)) {
+    return false;
+  }
+  config.shotReactTimeoutS = seconds;
   return true;
 }
 
@@ -2973,7 +2993,7 @@ bool ShotStopperNetwork::startHttpServer() {
   // makes the last registerHandler fail, which tears down the whole Web UI, so
   // check_web_assets.js fails the build before the margin is gone.
   // Shell + app.js/css/runtime + secondary + settings + 4 HTML partials + APIs.
-  config.max_uri_handlers = 57;
+  config.max_uri_handlers = 58;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
   // the IDF default (1024) is enough most of the time but intermittent
   // long browser headers have returned 431 Request Header Fields Too Large.
@@ -3039,6 +3059,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/control/paddle", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/control/rinse", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/control/stop", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/control/state-override", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/control/restart", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/factory-reset", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/network", HTTP_POST, ownedApiHandler) &&
@@ -3425,6 +3446,7 @@ esp_err_t ShotStopperNetwork::ownedApiHandler(httpd_req_t *request) {
   if (apiUriMatches(request->uri, "/api/v1/control/paddle")) return paddleHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/control/rinse")) return rinseHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/control/stop")) return stopHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/control/state-override")) return stateOverrideHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/control/restart")) return restartHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/factory-reset")) return factoryResetHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/network/scan")) {
@@ -3909,6 +3931,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"paddleReturnReminderMaxDurationMs\":%lu,\"paddleMode\":\"%s\","
         "\"stopPulseMs\":%lu,\"maxSinglePressMs\":%lu,"
         "\"momentaryStartEdge\":\"%s\",\"reedConfirmTimeoutMs\":%lu,"
+        "\"assumeIdleWhenScaleConnects\":%s,\"shotReactTimeoutS\":%u,"
         "\"buzzerScaleLostBeep\":%s,\"buzzerAutoToManualGuardEndBeep\":%s,"
         "\"buzzerManualNoScaleBeep\":%s,\"buzzerScaleConnectedBeep\":%s,"
         "\"scaleConnectedLed\":%s,"
@@ -3955,6 +3978,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         momentaryStartEdgeId(control.config.momentaryStartOnPress),
         static_cast<unsigned long>(
             runtimeReedConfirmTimeoutMs(control.config)),
+        control.config.assumeIdleWhenScaleConnects ? "true" : "false",
+        static_cast<unsigned>(runtimeShotReactTimeoutS(control.config)),
         control.config.buzzerScaleLostBeep ? "true" : "false",
         control.config.buzzerAutoToManualGuardEndBeep ? "true" : "false",
         control.config.buzzerManualNoScaleBeep ? "true" : "false",
@@ -4130,7 +4155,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         ",\"scale\":{\"preferredMac\":\"%s\",\"preferredName\":\"%s\","
         "\"macCachePauseRemainingMs\":%lu,\"history\":%s},"
         "\"presets\":%s,\"stopPulseMs\":%lu,\"maxSinglePressMs\":%lu,"
-        "\"momentaryStartEdge\":\"%s\",\"reedConfirmTimeoutMs\":%lu",
+        "\"momentaryStartEdge\":\"%s\",\"reedConfirmTimeoutMs\":%lu,"
+        "\"assumeIdleWhenScaleConnects\":%s,\"shotReactTimeoutS\":%u",
         safePreferredScaleMac, safePreferredScaleName,
         static_cast<unsigned long>(control.scaleMacCachePauseRemainingMs),
         g_work->historyJson, g_work->presetsJson,
@@ -4138,7 +4164,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(runtimeMaxSinglePressMs(control.config)),
         momentaryStartEdgeId(control.config.momentaryStartOnPress),
         static_cast<unsigned long>(
-            runtimeReedConfirmTimeoutMs(control.config)));
+            runtimeReedConfirmTimeoutMs(control.config)),
+        control.config.assumeIdleWhenScaleConnects ? "true" : "false",
+        static_cast<unsigned>(runtimeShotReactTimeoutS(control.config)));
   } else if (ok && page == StatusPage::Admin) {
     // Locked admin: confirm-window hint only. Unlocked: Wi-Fi/AP + BLE + OTA.
     ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s",
@@ -4743,7 +4771,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "paddleReturnReminderBeep",
       "paddleReturnReminderIntervalMs", "paddleReturnReminderMaxDurationMs",
       "paddleMode", "stopPulseMs", "maxSinglePressMs", "momentaryStartEdge",
-      "reedConfirmTimeoutMs", "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
+      "reedConfirmTimeoutMs", "assumeIdleWhenScaleConnects", "shotReactTimeoutS",
+      "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
       "buzzerManualNoScaleBeep", "buzzerScaleConnectedBeep",
       "buzzerExtendedPulseRate", "buzzerSlowExtendedPulseRate",
       "alertOutputChannel", "autoRetare", "retareWindowMs", "minimumCupWeightG",
@@ -4852,6 +4881,13 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (jsonFieldPresent(root, "reedConfirmTimeoutMs") &&
              !jsonReedConfirmTimeoutMs(root, candidate)) {
     parseError = "reedConfirmTimeoutMs must be an integer from 200 to 5000.";
+  } else if (jsonFieldPresent(root, "assumeIdleWhenScaleConnects") &&
+             !jsonAssumeIdleWhenScaleConnects(root, candidate)) {
+    parseError = "assumeIdleWhenScaleConnects must be a boolean.";
+  } else if (jsonFieldPresent(root, "shotReactTimeoutS") &&
+             !jsonShotReactTimeoutS(root, candidate)) {
+    parseError =
+        "shotReactTimeoutS must be 0 (compiled default) or an integer from 3 to 30.";
   } else if (jsonFieldPresent(root, "buzzerScaleLostBeep") &&
              !jsonBoolean(root, "buzzerScaleLostBeep",
                           candidate.buzzerScaleLostBeep)) {
@@ -5432,6 +5468,42 @@ esp_err_t ShotStopperNetwork::stopHandler(httpd_req_t *request) {
   }
   WebCommand command;
   command.type = WebCommandType::STOP;
+  command.requestId = self.allocateRequestId();
+  if (!self.callbacks_.enqueueWebCommand(command)) {
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
+                     "Control queue is full.");
+  }
+  return self.sendAccepted(request, command.requestId);
+}
+
+esp_err_t ShotStopperNetwork::stateOverrideHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (SHOT_STOPPER_MACHINE_TYPE != 1) {
+    return sendError(request, STATUS_CONFLICT, "MACHINE_TYPE_UNSUPPORTED",
+                     "Inferred-state override is only available on switch-only builds.");
+  }
+  const esp_err_t bodyStatus =
+      self.lockJsonBody(request, "A JSON body is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
+  }
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
+  char state[8] = {};
+  static const char *const fields[] = {"state"};
+  const bool parsed = root != nullptr &&
+                      jsonHasOnlyUniqueFields(root, fields, 1) &&
+                      jsonString(root, "state", state, sizeof(state), false);
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  self.unlockJsonBody();
+  if (!parsed || (strcmp(state, "off") != 0 && strcmp(state, "on") != 0)) {
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
+                     "The state field must be \"off\" or \"on\".");
+  }
+  WebCommand command;
+  command.type = strcmp(state, "off") == 0 ? WebCommandType::STATE_OVERRIDE_OFF
+                                           : WebCommandType::STATE_OVERRIDE_ON;
   command.requestId = self.allocateRequestId();
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",

@@ -91,7 +91,7 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
 .stateFault{color:var(--dn);font-weight:700}
 .error{color:var(--dn)}.ok{color:var(--ok)}.warn{color:var(--wn)}
 .hidden{display:none}.fieldOff{opacity:.45}
-html.momentaryMachine .paddleOnly,html:not(.reedMachine) .reedOnly,html:not(.momentaryMachine) .momentaryOnly{display:none}
+html.momentaryMachine .paddleOnly,html:not(.reedMachine) .reedOnly,html:not(.momentaryMachine) .momentaryOnly,html.reedMachine .switchOnly,html:not(.momentaryMachine) .switchOnly{display:none}
 #message{position:sticky;top:var(--hdr);z-index:12;display:flex;align-items:center;gap:.45rem;background:var(--bg);padding:.55rem .45rem .55rem .65rem;margin:0 0 .5rem;font-weight:600;box-sizing:border-box;min-height:2.6rem;border-radius:.4rem;border-left:4px solid transparent}
 #message[hidden]{display:flex!important;visibility:hidden;pointer-events:none}
 #messageText{flex:1;min-width:0}

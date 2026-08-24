@@ -212,19 +212,29 @@ Config lock uses `machineIsRunning()`, which for paddle equals machine circuit c
 | `CONFIRMED_OFF` | Relay not closed. Safety is OPEN, or tripped/lockout with contact open. |
 | `ASSUMED_ON` | Safety is `ARMING`: close is in flight, echo may not yet match. Reed: configured start edge (press or release), reed still off, within confirm timeout. |
 | `CONFIRMED_ON` | Safety `CLOSED` or `relay.closed`. Reed: reed is on (outside an assumed-off window). |
-| `ASSUMED_OFF` | Reed only: configured stop edge (press or release), reed still on, within confirm timeout. |
+| `ASSUMED_OFF` | Reed: configured stop edge (press or release), reed still on, within confirm timeout. Switch-only: quiet START nack (no espresso-like flow before the shot-reaction timeout). |
 | `UNKNOWN` | Safety TRIPPED/LOCKOUT but the contact still reads closed (should not last). |
 
 On **momentary-only** builds (`SHOT_STOPPER_MACHINE_TYPE=1`) these labels are
 inferred from brew-accepted weight, not from K1. Boot is `CONFIRMED_OFF`. A
 START pulse goes to `ASSUMED_ON`. Espresso-like flow (about 0.60 g/s, ≥1 g
 above the shot baseline, after 800 ms of logical run) is the only path to
-`CONFIRMED_ON`. That ON expires if flow stays below 0.20 g/s for 500 ms, so
-auto-cut cannot pulse a stopped group. A START that stays on the shot
-baseline for 12 s is nacked to `CONFIRMED_OFF`. A STOP ack needs a quiet pan;
-timeout without quiet does **not** force OFF. An operational wall without
-`CONFIRMED_ON` leaves an orphan run: settings stay locked and a later user
-Stop may pulse; firmware auto-cut does not.
+`CONFIRMED_ON`, including recovery from `ASSUMED_OFF`. That ON expires if
+flow stays below 0.20 g/s for 500 ms, so auto-cut cannot pulse a stopped
+group. A START that stays on the shot baseline for the shot-reaction
+timeout (default 12 s, setting 3–30 s) is nacked to `ASSUMED_OFF` — not
+Confirmed off — so a late first drop can still confirm ON without a second
+pulse. A STOP ack needs a quiet pan; timeout without quiet does **not**
+force OFF. If espresso-like flow continues after an assumed STOP, polarity
+is wrong: go to `CONFIRMED_ON` without an extra pulse. Firmware-cut stop
+retries still pulse. Scale connect can settle to Confirmed off when
+**Assume idle when the scale connects** is on and no brew cycle is active
+(no relay pulse). A successful BBW cut (`SCALE_THRESHOLD`) plus drip delay
+and a quiet, plausible settled weight also settles to Confirmed off. Home
+**Override idle** / **Override brewing** are the manual escape hatch when
+the group is electrically ON with no coffee; they do not pulse. An
+operational wall without `CONFIRMED_ON` leaves an orphan run: settings stay
+locked and a later user Stop may pulse; firmware auto-cut does not.
 
 On **momentary+reed** builds (`SHOT_STOPPER_MACHINE_TYPE=2`) the reed is
 canonical except for a short assumed window after the configured start/stop

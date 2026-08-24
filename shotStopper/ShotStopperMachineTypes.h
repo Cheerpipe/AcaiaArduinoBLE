@@ -36,6 +36,9 @@ struct MachineSense {
   bool weightFresh = false;
   bool accidentalHold = false;
   bool brewCycleActive = false;
+  // One control-loop tick: scale just became CONNECTED. Set by the stopper
+  // after consuming a BLE-worker pending flag — never mutated on the BLE task.
+  bool scaleConnectedEdge = false;
 };
 
 inline bool machinePreferBleAirtime = false;

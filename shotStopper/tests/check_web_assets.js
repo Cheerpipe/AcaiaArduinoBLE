@@ -218,13 +218,13 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 48500) {
-  throw new Error('Web UI HTML source exceeds the 47.4 KiB authoring budget');
+if (htmlBytes > 48600) {
+  throw new Error('Web UI HTML source exceeds the 47.5 KiB authoring budget');
 }
-if (jsBytes > 121500) {
+if (jsBytes > 121650) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 170000) {
+if (htmlBytes + jsBytes > 170250) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -949,7 +949,10 @@ if (!html.includes('<summary>Switch</summary>') ||
     !html.includes('id="maxSinglePressMs"') ||
     !html.includes('id="momentaryStartEdge"') ||
     !html.includes('id="reedConfirmTimeoutS"') ||
+    !html.includes('id="assumeIdleWhenScaleConnects"') ||
+    !html.includes('id="shotReactTimeoutS"') ||
     !html.includes('class="reedOnly"') ||
+    !html.includes('class="switchOnly"') ||
     !html.includes('class="cfgGroup momentaryOnly"') ||
     !html.includes('Auto-stop pulse') ||
     !html.includes('Single-press limit') ||
@@ -976,6 +979,19 @@ if (!html.includes('<summary>Switch</summary>') ||
     !ui.includes("'Reed confirm timeout'") ||
     !ui.includes('momentaryStartEdge:') ||
     !ui.includes('reedConfirmTimeoutMs:') ||
+    !ui.includes('assumeIdleWhenScaleConnects:') ||
+    !ui.includes('shotReactTimeoutS:') ||
+    !ui.includes('id="overrideIdleButton"') ||
+    !ui.includes('id="overrideBrewingButton"') ||
+    !ui.includes('/api/v1/control/state-override') ||
+    !ui.includes('updateHomeAdminActions') ||
+    !ui.includes("d.classList.contains('momentaryMachine')&&!d.classList.contains('reedMachine')") ||
+    !html.includes('Assume idle when the scale connects') ||
+    !html.includes('Shot reaction timeout') ||
+    !html.includes('Override idle') ||
+    !html.includes('Override brewing') ||
+    !css.includes('html.reedMachine .switchOnly') ||
+    !css.includes('html:not(.momentaryMachine) .switchOnly') ||
     !css.includes('.momentaryOnly') ||
     !css.includes('html:not(.reedMachine) .reedOnly') ||
     !network.includes('"stopPulseMs"') ||
@@ -986,17 +1002,31 @@ if (!html.includes('<summary>Switch</summary>') ||
     !network.includes('momentaryStartEdge must be press or release.') ||
     !network.includes(
         'reedConfirmTimeoutMs must be an integer from 200 to 5000.') ||
+    !network.includes(
+        'Shot reaction timeout must be 0 (compiled default) or from 3 to 30 s.') ||
+    !network.includes(
+        'shotReactTimeoutS must be 0 (compiled default) or an integer from 3 to 30.') ||
     !network.includes('jsonStopPulseMs') ||
     !network.includes('jsonMomentaryStartEdge') ||
     !network.includes('jsonReedConfirmTimeoutMs') ||
+    !network.includes('jsonAssumeIdleWhenScaleConnects') ||
+    !network.includes('jsonShotReactTimeoutS') ||
+    !network.includes('stateOverrideHandler') ||
+    !network.includes('/api/v1/control/state-override') ||
     !firmware.includes('machineApplyWorkflowConfig') ||
     !firmware.includes('dst.stopPulseTenMs = src.stopPulseTenMs') ||
     !momentaryControlHeader.includes(
         'dst.momentaryStartOnPress = src.momentaryStartOnPress') ||
     !momentaryControlHeader.includes(
         'dst.reedConfirmTimeoutHundredMs = src.reedConfirmTimeoutHundredMs') ||
+    !momentaryControlHeader.includes(
+        'dst.assumeIdleWhenScaleConnects = src.assumeIdleWhenScaleConnects') ||
+    !momentaryControlHeader.includes(
+        'dst.shotReactTimeoutS = src.shotReactTimeoutS') ||
     paddlePolicyHeader.includes('momentaryStartOnPress') ||
     paddlePolicyHeader.includes('reedConfirmTimeoutHundredMs') ||
+    paddlePolicyHeader.includes('assumeIdleWhenScaleConnects') ||
+    paddlePolicyHeader.includes('shotReactTimeoutS') ||
     machineTypesHeader.includes('parseMomentaryStartEdge') ||
     machineTypesHeader.includes('momentaryStartEdgeId') ||
     machineTypesHeader.includes('PaddleMode') ||
@@ -2073,6 +2103,7 @@ const expected = new Map([
   ['POST /api/v1/control/paddle', 'ownedApiHandler'],
   ['POST /api/v1/control/rinse', 'ownedApiHandler'],
   ['POST /api/v1/control/stop', 'ownedApiHandler'],
+  ['POST /api/v1/control/state-override', 'ownedApiHandler'],
   ['POST /api/v1/control/restart', 'ownedApiHandler'],
   ['POST /api/v1/factory-reset', 'ownedApiHandler'],
   ['GET /api/v1/shots', 'ownedApiHandler'],

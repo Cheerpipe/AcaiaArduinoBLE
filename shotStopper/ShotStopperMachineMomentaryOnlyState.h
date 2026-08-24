@@ -46,6 +46,8 @@ bool momentaryStartAwaitingAck = false;
 uint32_t momentaryStartBaselineSinceMs = 0;
 bool momentaryOrphanRun = false;
 uint32_t momentaryStaleSinceMs = 0;
+bool momentaryFirmwareCutPending = false;
+bool momentarySettledWeightCutArmed = false;
 
 bool reedIsOn() { return false; }
 
@@ -63,6 +65,8 @@ void noteMomentaryLogicalStart() {
   momentaryStartBaselineSinceMs = 0;
   momentaryOrphanRun = false;
   momentaryStaleSinceMs = 0;
+  momentaryFirmwareCutPending = false;
+  momentarySettledWeightCutArmed = false;
   if (machineSense.weightFresh) {
     momentarySawScale = true;
     const float weight = momentaryLiveWeightG();
@@ -128,7 +132,57 @@ void noteMomentaryDisqualifiedPress(bool restoreRunning) {
   }
 }
 
+void settleMomentaryInferredOff() {
+  momentaryEspressoConfirmed = false;
+  momentaryRisingSinceMs = 0;
+  momentaryLowFlowSinceMs = 0;
+  momentaryStopAwaitingAck = false;
+  momentaryStopRetryPending = false;
+  momentaryStartAwaitingAck = false;
+  momentaryStartBaselineSinceMs = 0;
+  momentaryOrphanRun = false;
+  momentaryLogicalRunActive = false;
+  momentaryFirmwareCutPending = false;
+  momentarySettledWeightCutArmed = false;
+  momentaryInferredState = MachineRunState::CONFIRMED_OFF;
+}
+
+void machineOverrideInferredOff() { settleMomentaryInferredOff(); }
+
+void machineOverrideInferredOn() {
+  momentaryStopAwaitingAck = false;
+  momentaryStopRetryPending = false;
+  momentaryStartAwaitingAck = false;
+  momentaryStartBaselineSinceMs = 0;
+  momentaryOrphanRun = false;
+  momentaryFirmwareCutPending = false;
+  momentarySettledWeightCutArmed = false;
+  momentaryEspressoConfirmed = true;
+  momentaryInferredState = MachineRunState::CONFIRMED_ON;
+  momentaryLogicalRunActive = true;
+  momentaryLogicalRunStartedAtMs = millis();
+  momentaryLogicalOperationalLimitMs = runtimeConfig.operationalWallMs;
+}
+
+void machineArmSettledWeightCutOff() { momentarySettledWeightCutArmed = true; }
+
+void machineCancelSettledWeightCutOff() {
+  momentarySettledWeightCutArmed = false;
+}
+
+void machineNoteSettledWeightCutOff() {
+  if (!momentarySettledWeightCutArmed) {
+    return;
+  }
+  settleMomentaryInferredOff();
+}
+
 void serviceMomentaryRunSensors() {
+  if (machineSense.scaleConnectedEdge &&
+      runtimeConfig.assumeIdleWhenScaleConnects &&
+      !machineSense.brewCycleActive) {
+    settleMomentaryInferredOff();
+  }
   if (momentaryLogicalRunActive &&
       momentaryInferredState == MachineRunState::CONFIRMED_OFF &&
       !momentaryStopAwaitingAck && momentaryStartAwaitingAck) {
@@ -203,7 +257,8 @@ void serviceMomentaryRunSensors() {
       (momentaryStopAwaitingAck || momentaryOrphanRun ||
        (!momentaryLogicalRunActive &&
         momentaryInferredState != MachineRunState::CONFIRMED_ON &&
-        momentaryInferredState != MachineRunState::ASSUMED_ON))) {
+        momentaryInferredState != MachineRunState::ASSUMED_ON &&
+        momentaryInferredState != MachineRunState::ASSUMED_OFF))) {
     momentaryStopAwaitingAck = false;
     momentaryOrphanRun = false;
     momentaryEspressoConfirmed = false;
@@ -217,8 +272,19 @@ void serviceMomentaryRunSensors() {
       momentaryInferredState = MachineRunState::CONFIRMED_OFF;
     } else if (flowGps >= MOMENTARY_FLOW_ON_G_S &&
                elapsedMs(momentaryStopAwaitingSinceMs) >= MOMENTARY_STOP_RETRY_AFTER_MS) {
-      momentaryStopRetryPending = true;
-      momentaryStopAwaitingSinceMs = now;
+      if (momentaryFirmwareCutPending) {
+        momentaryStopRetryPending = true;
+        momentaryStopAwaitingSinceMs = now;
+      } else {
+        momentaryStopAwaitingAck = false;
+        momentaryEspressoConfirmed = true;
+        momentaryInferredState = MachineRunState::CONFIRMED_ON;
+        momentaryLogicalRunActive = true;
+        if (momentaryLogicalRunStartedAtMs == 0) {
+          momentaryLogicalRunStartedAtMs = now;
+        }
+        momentaryLogicalOperationalLimitMs = runtimeConfig.operationalWallMs;
+      }
     } else if (elapsedMs(momentaryStopAwaitingSinceMs) >= MOMENTARY_STOP_ACK_MS) {
       momentaryStopAwaitingAck = false;
     }
@@ -229,13 +295,14 @@ void serviceMomentaryRunSensors() {
       if (momentaryStartBaselineSinceMs == 0) {
         momentaryStartBaselineSinceMs = now;
       }
-      if (elapsedMs(momentaryStartBaselineSinceMs) >= MOMENTARY_START_NACK_MS) {
+      if (elapsedMs(momentaryStartBaselineSinceMs) >=
+          runtimeShotReactTimeoutMs(runtimeConfig)) {
         momentaryStartAwaitingAck = false;
         momentaryStartBaselineSinceMs = 0;
         momentaryLogicalRunActive = false;
         momentaryEspressoConfirmed = false;
         momentaryOrphanRun = false;
-        momentaryInferredState = MachineRunState::CONFIRMED_OFF;
+        momentaryInferredState = MachineRunState::ASSUMED_OFF;
       }
     } else {
       momentaryStartBaselineSinceMs = 0;
@@ -266,7 +333,8 @@ void serviceMomentaryRunSensors() {
       delta <= runtimeConfig.maxRecoveryWeightG;
   const bool canConfirmOn =
       (momentaryLogicalRunActive ||
-       momentaryInferredState == MachineRunState::ASSUMED_ON) &&
+       momentaryInferredState == MachineRunState::ASSUMED_ON ||
+       momentaryInferredState == MachineRunState::ASSUMED_OFF) &&
       !finger && !accidental && !skipFlow && !momentaryStopAwaitingAck &&
       momentaryInferredState != MachineRunState::CONFIRMED_OFF && inShotBand &&
       flowGps >= MOMENTARY_FLOW_ON_G_S && flowGps <= 8.0f;
@@ -276,10 +344,19 @@ void serviceMomentaryRunSensors() {
     }
     if (elapsedMs(momentaryRisingSinceMs) >= MOMENTARY_FLOW_HOLD_MS &&
         elapsedMs(momentaryLogicalRunStartedAtMs) >= MOMENTARY_CONFIRM_MIN_RUN_MS) {
+      const bool recoverFromAssumedOff =
+          momentaryInferredState == MachineRunState::ASSUMED_OFF;
       momentaryEspressoConfirmed = true;
       momentaryStartAwaitingAck = false;
       momentaryStartBaselineSinceMs = 0;
       momentaryInferredState = MachineRunState::CONFIRMED_ON;
+      if (recoverFromAssumedOff) {
+        momentaryLogicalRunActive = true;
+        if (momentaryLogicalRunStartedAtMs == 0) {
+          momentaryLogicalRunStartedAtMs = now;
+        }
+        momentaryLogicalOperationalLimitMs = runtimeConfig.operationalWallMs;
+      }
     }
   } else if (skipFlow || flowGps < MOMENTARY_FLOW_OFF_G_S) {
     momentaryRisingSinceMs = 0;

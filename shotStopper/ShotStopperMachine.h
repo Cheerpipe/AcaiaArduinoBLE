@@ -96,6 +96,11 @@ inline bool machineSupportsRinse() { return true; }
 inline void machineNoteFirmwareStop() {}
 inline void machineSampleInput() { updateActivatorInput(); }
 inline void serviceMachine() { machineServiceReminders(); }
+inline void machineOverrideInferredOff() {}
+inline void machineOverrideInferredOn() {}
+inline void machineArmSettledWeightCutOff() {}
+inline void machineNoteSettledWeightCutOff() {}
+inline void machineCancelSettledWeightCutOff() {}
 #else
 #include "ShotStopperMachineMomentaryInput.h"
 #if SHOT_STOPPER_MACHINE_TYPE == 2
@@ -104,6 +109,14 @@ inline void serviceMachine() { machineServiceReminders(); }
 #include "ShotStopperMachineMomentaryOnlyState.h"
 #endif
 #include "ShotStopperMachineMomentaryControl.h"
+
+#if SHOT_STOPPER_MACHINE_TYPE == 2
+inline void machineOverrideInferredOff() {}
+inline void machineOverrideInferredOn() {}
+inline void machineArmSettledWeightCutOff() {}
+inline void machineNoteSettledWeightCutOff() {}
+inline void machineCancelSettledWeightCutOff() {}
+#endif
 
 inline bool machineSupportsRinse() { return false; }
 inline void machineBeginCycle(bool) {}

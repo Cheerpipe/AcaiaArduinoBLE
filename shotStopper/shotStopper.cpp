@@ -427,6 +427,7 @@ portMUX_TYPE webStatusMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE bleCompanionMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE debugLogMux = portMUX_INITIALIZER_UNLOCKED;
 ScaleLinkState scaleLinkState = ScaleLinkState::DISCONNECTED;
+bool pendingScaleConnectIdleSync = false;
 uint32_t scaleDisconnectSequence = 0;
 uint32_t scaleConnectionGeneration = 0;
 uint32_t scalePacketSequence = 0;
@@ -1098,6 +1099,7 @@ void setScaleLinkState(ScaleLinkState state) {
     if (scaleConnectionGeneration == 0) {
       scaleConnectionGeneration = 1;
     }
+    pendingScaleConnectIdleSync = true;
   }
   scaleLinkState = state;
   scaleWorkerProgressAtMs = progressAtMs;
@@ -1524,6 +1526,12 @@ void observeMachineSenseFromSession() {
   sense.weightFresh = currentWeightIsFresh();
   sense.accidentalHold = session.accidentalTouchHolding;
   sense.brewCycleActive = session.active;
+  bool scaleEdge = false;
+  portENTER_CRITICAL(&scaleLinkMux);
+  scaleEdge = pendingScaleConnectIdleSync;
+  pendingScaleConnectIdleSync = false;
+  portEXIT_CRITICAL(&scaleLinkMux);
+  sense.scaleConnectedEdge = scaleEdge;
   machineObserveSense(sense);
 }
 
@@ -2062,6 +2070,14 @@ void pendingShotFinalizeTask() {
                                  snapshot.lastKnownWeightValid)) {
     finalWeightG = currentWeight;
     postDripWeightValid = snapshot.startedWithScale;
+  }
+
+  if (snapshot.endReason == EndReason::SCALE_THRESHOLD) {
+    if (postDripWeightValid) {
+      machineNoteSettledWeightCutOff();
+    } else {
+      machineCancelSettledWeightCutOff();
+    }
   }
 
   ActualWeightSource weightSource = ActualWeightSource::NONE;
@@ -3892,6 +3908,11 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   cancelScaleCompletionBeep();
   // GPIO first, then the machine circuit-open cue. BLE advertising resume is not on this
   // path (BLE worker + servicePendingBrewRfRestore after the buzzer starts).
+  if (reason == EndReason::SCALE_THRESHOLD) {
+    machineArmSettledWeightCutOff();
+  } else {
+    machineCancelSettledWeightCutOff();
+  }
   machineRequestStop();
   session.endReason = reason;
   if (shotCompletionGetsLongBeep(reason)) {
@@ -4665,6 +4686,24 @@ void processWebCommand(const WebCommand &command) {
               ? EndReason::WEB_HEARTBEAT_TIMEOUT
               : EndReason::WEB_STOP,
           nextStateForUserHold(machineLastIntention()));
+      reportControlCommandResult(command, CommandResultState::APPLIED);
+      return;
+
+    case WebCommandType::STATE_OVERRIDE_OFF:
+      machineOverrideInferredOff();
+      if (session.active) {
+        finalizeCycle(EndReason::WEB_STOP,
+                      nextStateForUserHold(machineLastIntention()));
+      }
+      addDebugEvent(DebugCategory::WEB, DebugCode::WEB_COMMAND_ACCEPTED,
+                    static_cast<int32_t>(command.type));
+      reportControlCommandResult(command, CommandResultState::APPLIED);
+      return;
+
+    case WebCommandType::STATE_OVERRIDE_ON:
+      machineOverrideInferredOn();
+      addDebugEvent(DebugCategory::WEB, DebugCode::WEB_COMMAND_ACCEPTED,
+                    static_cast<int32_t>(command.type));
       reportControlCommandResult(command, CommandResultState::APPLIED);
       return;
 

@@ -4,16 +4,19 @@
 
 # Advanced Shot Stopper
 
-ESP32-S3 firmware for a **La Marzocco Linea Micra**. It adds brew-by-weight
-and related workflow controls without replacing the machine’s own brew switch.
+ESP32-S3 firmware that began on a **La Marzocco Linea Micra**. It adds
+brew-by-weight and related workflow controls without replacing the machine’s
+own brew switch.
 
-The controller reads the physical paddle on a GPIO and drives the machine’s
-brew circuit through an isolated relay. A Bluetooth scale (designed first
-for **Bookoo** Themis Mini / Ultra) supplies the weight. Other compatible
+The controller reads the physical brew switch on a GPIO and drives the
+machine’s brew circuit through an isolated relay. A Bluetooth scale (designed
+first for **Bookoo** Themis Mini / Ultra) supplies the weight. Other compatible
 scales work through the vendored AcaiaArduinoBLE library.
 
-This firmware is **dedicated to the Micra**. It is not a generic multi-machine
-stopper.
+It was built for the Micra first. It is **not** a certified kit for every
+machine — but the same isolated-relay contract has three compile-time builds
+(paddle / latch, momentary, and momentary + reed). See
+[Machine types](#machine-types).
 
 > **Safety:** check isolation, polarity, and that the relay stays **open** on
 > startup, reset, and power loss. Complete the
@@ -25,29 +28,62 @@ stopper.
 
 This project is for people who want intelligent, reliable, safe, and advanced
 brew-by-weight without changing the machine’s human-machine interface. No extra
-buttons on the bar. You keep using the Micra with the paddle the same way you
-always have.
+buttons on the bar. You keep using the brew switch the same way you always
+have. The day-to-day goal is to forget the stopper is there: put the cup down,
+start the shot, walk away. The intelligence lives in firmware defaults, not in
+a new control panel.
 
-This project started from
+That “forget it exists” outcome is what the firmware grew into. The original
+motivation had two parts.
+
+**Workflow.** This project started from
 [tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/AcaiaArduinoBLE),
-the original ESP32 firmware that stops an extraction by weight over Bluetooth.
-Small Micra-specific changes grew into a dedicated rewrite: independent paddle
-read and machine control, a walk-away workflow, and extra guards so a late cup, a
-finger on the pan, or a dropped scale does not ruin the shot.
+the original ESP32 Shot Stopper that stops an extraction by weight over
+Bluetooth. That firmware proved BLE brew-by-weight was possible — and it
+inspired this rewrite — but it has hard limits once a shot is running: it does
+not see paddle motion mid-shot, and you must return the paddle to a known
+position for the workflow to work. That legacy feel is preserved here as
+[Original](docs/settings/paddle.md) paddle mode. The first goal was brew-by-weight
+that is automatic, simple, natural, and safe: the paddle feels like the
+machine’s own switch ([Natural](docs/settings/paddle.md) / [Auto](docs/settings/paddle.md)),
+and the firmware finishes the shot.
 
-The original project proved that BLE brew-by-weight stop was possible.
+**Access and cost.** tatemazer’s board and kit are an excellent, plug-and-play
+design. Outside the USA and Canada, shipping, taxes, and duties can push the
+price easily to **200–250 USD or more**. That is a lot for hardware that is, at
+heart, an ESP32 and a relay — especially if you already buy ESP32 boards from
+marketplaces. After looking around, development settled on a cheap ESP32-S3
+1-channel relay board that is enough for safe brew-by-weight. A bonus: it runs
+from **5–60 V DC**, so it can be powered on a very wide range of machines, and
+it exposes GPIOs for reed/hall sensors and an optional buzzer for local sound.
+The board used here:
+[ESP32-S3 1-channel relay (AliExpress)](https://es.aliexpress.com/item/1005011880181624.html).
+So the goal is not only powerful BBW — it is also **affordable** BBW.
+
+**BBW for more machines.** The project started on the Micra (latch paddle). To
+keep brew-by-weight from staying locked to that one switch type, a large amount
+of time, effort, and tokens went into supporting both **latch** and
+**momentary** brew switches. Machine type is compile-time
+(`SHOT_STOPPER_MACHINE_TYPE`); you do not pick it in the Web UI. See
+[Machine types](#machine-types).
+
+**What this is not.** Unlike the original Shot Stopper — designed and sold as
+a kit you install and run — this repository provides **firmware and hardware
+guidelines only**. It is not a product, not sold in packs, and not supported as
+a commercial kit. You still need to know what to wire and how. See the
+[Disclaimer](#disclaimer).
+
 Advanced Shot Stopper is now the main application in this repository. The
 derived scale library remains here as a local dependency.
 
-The day-to-day goal stays simple: put the cup down, flip the paddle, walk
-away. The intelligence lives in firmware defaults, not in a new control panel.
-
 ## How it works
 
-The Micra paddle does **not** connect to the brew circuit. It connects only between a
-configured ESP32-S3 GPIO and GND. The relay COM/NO contact is the only
-connection to that circuit. The firmware can therefore read the paddle and control the
-machine independently.
+On the **paddle / latch** build (the Micra case), the brew switch does **not**
+connect to the brew circuit. It connects only between a configured ESP32-S3
+GPIO and GND. The relay COM/NO contact is the only connection to that circuit.
+The firmware can therefore read the paddle and control the machine
+independently. Momentary builds use the same isolated relay contract with a
+different switch model — see [Machine types](#machine-types).
 
 That split is what makes the firmware “advanced”:
 
@@ -59,8 +95,27 @@ That split is what makes the firmware “advanced”:
 - Guards for extractions that finish too fast or too slow.
 
 Development used the ESP32-S3 1-channel relay board shown in
-[`ESP32-S3_Relay_X1.png`](docs/images/ESP32-S3_Relay_X1.png). The firmware’s default GPIO
-map matches that board. Details are in [Hardware](docs/HARDWARE.md).
+[`ESP32-S3_Relay_X1.png`](docs/images/ESP32-S3_Relay_X1.png)
+([AliExpress listing](https://es.aliexpress.com/item/1005011880181624.html)).
+The firmware’s default GPIO map matches that board. Details are in
+[Hardware](docs/HARDWARE.md).
+
+## Machine types
+
+Machine type is fixed at compile time with `SHOT_STOPPER_MACHINE_TYPE`. It is
+not a Web UI setting. Rebuild (and usually reflash) to change it. Details:
+[Paddle](docs/settings/paddle.md), [Momentary](docs/settings/momentary.md),
+[Hardware](docs/HARDWARE.md).
+
+| Type | `SHOT_STOPPER_MACHINE_TYPE` | What it is |
+| --- | ---: | --- |
+| **Paddle / latch** | `0` (default) | The brew switch stays ON or OFF. Firmware reads the paddle on GPIO and drives the machine circuit through the relay independently. This is the Micra case and the architecture in [How it works](#how-it-works). |
+| **Momentary** | `1` | The button does not latch. The relay mirrors the press 1:1; firmware sends an auto-stop pulse to cut by weight. Without an extra sensor, “is the group running?” is **inferred** from scale flow — less reliable, and without a scale there is no safe automatic cut. |
+| **Momentary + reed** | `2` | Same as momentary, plus a reed or hall sensor (default GPIO **4**) that reports whether the group/solenoid is actually ON. That reading is canonical. |
+
+**Strong recommendation:** on momentary machines, use a reed (or hall) on the
+solenoid or group. The development board exposes GPIOs for exactly that.
+Momentary without a reed is a fallback, not the preferred install.
 
 ## Main features
 
@@ -233,6 +288,7 @@ claim the Web UI to save your home Wi-Fi. Step-by-step notes are in
 
 **Building and hardware**
 
+- [Machine types](#machine-types) — paddle/latch, momentary, momentary+reed (compile-time)
 - [Build environment](docs/BUILD.md) — macOS and Linux, from `git clone` to a flashable image. ESP-IDF only.
 - [Build scripts](docs/SCRIPTS.md) — IDF commands and legacy Arduino-cli (unsupported).
 - [Hardware](docs/HARDWARE.md) — development board, default GPIOs; BOM and schematic are TODO.
@@ -310,9 +366,15 @@ Portions derive from [tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/Ac
 Advanced Shot Stopper would not exist without
 **[tatemazer](https://github.com/tatemazer)** and
 [tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/AcaiaArduinoBLE).
-That repository proved BLE brew-by-weight stop and shared the core scale
-protocol work. This application firmware, Web UI, Micra paddle/machine circuit model, and
-safety workflow are new work on top of that foundation.
+That project proved BLE brew-by-weight stop, shared the core scale protocol
+work, and shipped the original Shot Stopper as a plug-and-play kit. This
+application firmware, Web UI, paddle and momentary machine models, and safety
+workflow are new work on top of that foundation.
+
+Thanks to **[AtomHeart-Lang](https://github.com/AtomHeart-Lang)** for AtomHeart
+Eclair scale support, contributed upstream in
+[tatemazer/AcaiaArduinoBLE#41](https://github.com/tatemazer/AcaiaArduinoBLE/pull/41).
+That work is vendored here and keeps Eclair in the supported scale set.
 
 The vendored library also credits:
 
@@ -320,7 +382,7 @@ The vendored library also credits:
 - [pyacaia](https://github.com/lucapinello/pyacaia) (lucapinello)
 - Felicita Arc: baettigp, A-TWJ
 - Bookoo: philgood, same31
-- AtomHeart Eclair: AtomHeart-Lang
+- AtomHeart Eclair: [AtomHeart-Lang](https://github.com/AtomHeart-Lang)
 - Lunar 2019: jniebuhr
 
 See the [library acknowledgement](libraries/AcaiaArduinoBLE/README.md#acknowledgement).

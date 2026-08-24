@@ -19,7 +19,8 @@ before connecting a live machine.
 
 Firmware was developed on an **ESP32-S3 1-channel relay** board (WROOM-1
 **N16R8** module: 16 MB flash, 8 MB OPI PSRAM, USB-C, onboard Songle relay
-with COM / NO / NC screw terminals).
+with COM / NO / NC screw terminals). Product listing used for development:
+[ESP32-S3 1-channel relay (AliExpress)](https://es.aliexpress.com/item/1005011880181624.html).
 
 ![ESP32-S3 1-channel relay development board](images/ESP32-S3_Relay_X1.png)
 
