@@ -285,6 +285,15 @@ struct PendingShotFinalize {
   float lastKnownWeightG = 0.0f;
   uint8_t activePresetId = 0;
   uint32_t cycleId = 0;
+  bool retarePerformed = false;
+  float minRecoveryWeightG = DEFAULT_MIN_RECOVERY_WEIGHT_G;
+  bool autoToManualGuardEnabled = false;
+  bool autoToManualGuardEnforced = false;
+  bool autoToManualGuardArmed = false;
+  uint32_t autoToManualGuardRemainingMs = 0;
+  bool noScaleShotGuardEnabled = false;
+  bool noScaleShotGuardArmed = false;
+  char scaleProtocol[20] = "none";
   ShotCurveRecord curve = {};
 };
 
@@ -817,6 +826,56 @@ void persistLastShotSnapshot(const PersistedLastShot &snapshot) {
   persistedLastShot = snapshot;
   lastShotStore.adopt(snapshot);
   lastShotNvsDirty = true;
+}
+
+void persistLastShotFromFinalize(const PendingShotFinalize &snapshot,
+                                 float finalWeightG, bool finalWeightValid) {
+  PersistedLastShot last = {};
+  last.valid = true;
+  last.cycleId = snapshot.cycleId;
+  last.durationMs = static_cast<uint32_t>(snapshot.durationDs) * 100U;
+  last.endReason = snapshot.endReason;
+  last.weightValid = finalWeightValid;
+  last.currentWeightG = finalWeightValid ? finalWeightG : 0.0f;
+  last.goalWeightG = snapshot.goalWeightG;
+  last.extractionExtended =
+      snapshot.extractionExtended && snapshot.extractionGuardEnabled;
+  last.slowExtractionExtended =
+      snapshot.slowExtractionExtended && snapshot.slowExtractionGuardEnabled;
+  last.activeStopWeightG =
+      last.extractionExtended
+          ? snapshot.maxRecoveryWeightG
+          : (last.slowExtractionExtended
+                 ? snapshot.minRecoveryWeightG
+                 : static_cast<float>(snapshot.goalWeightG));
+  if (snapshot.firstDropDs != SHOT_LOG_METRIC_MISSING) {
+    last.firstDropElapsedMs =
+        static_cast<uint32_t>(snapshot.firstDropDs) * 100U;
+  }
+  last.retarePerformed = snapshot.retarePerformed;
+  last.shotType = static_cast<uint8_t>(lastShotTypeFromCycle(
+      snapshot.finalState, snapshot.startedWithScale, snapshot.timerOnly,
+      snapshot.automaticBrew));
+  last.scaleAvailable = snapshot.startedWithScale;
+  last.fastExtractionGuardEnabled = snapshot.extractionGuardEnabled;
+  last.slowExtractionGuardEnabled = snapshot.slowExtractionGuardEnabled;
+  last.autoToManualGuardEnabled = snapshot.autoToManualGuardEnabled;
+  last.autoToManualGuardEnforced = snapshot.autoToManualGuardEnforced;
+  last.autoToManualGuardArmed = snapshot.autoToManualGuardArmed;
+  last.autoToManualGuardRemainingMs = snapshot.autoToManualGuardRemainingMs;
+  last.noScaleShotGuardEnabled = snapshot.noScaleShotGuardEnabled;
+  last.noScaleShotGuardArmed = snapshot.noScaleShotGuardArmed;
+  copyCString(last.scaleProtocol, sizeof(last.scaleProtocol),
+              snapshot.scaleProtocol);
+  last.scaleProtocol[sizeof(last.scaleProtocol) - 1] = '\0';
+  if (last.extractionExtended) {
+    last.minBrewTimeRemainingMs =
+        last.durationMs >= snapshot.minBrewTimeMs
+            ? 0U
+            : snapshot.minBrewTimeMs - last.durationMs;
+  }
+  persistLastShotSnapshot(last);
+  lastShotCurve = snapshot.curve;
 }
 
 void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
@@ -1696,11 +1755,14 @@ bool recordWeightSample(float weight, uint32_t receivedAtMs) {
 
 void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   const bool logEligible = shotLogEligible(reason, durationMs);
+  const bool bbwEligible =
+      shotLogBbwEligible(session.startedWithScale, session.config.timerOnly,
+                         shot.automaticBrew);
   const bool offsetAnalysis = shot.automaticBrew && !session.config.timerOnly &&
                               session.calibrationEligible &&
                               !session.extractionExtended &&
                               !session.slowExtractionExtended;
-  if (!logEligible && !offsetAnalysis) {
+  if (!(logEligible && bbwEligible) && !offsetAnalysis) {
     return;
   }
 
@@ -1752,6 +1814,27 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
                                        ? session.activePresetId
                                        : presetBank.activeId;
   pendingFinalize.cycleId = session.id;
+  pendingFinalize.retarePerformed = session.retarePerformed;
+  pendingFinalize.minRecoveryWeightG = session.config.minRecoveryWeightG;
+  pendingFinalize.autoToManualGuardEnabled =
+      session.config.autoToManualGuardEnabled;
+  pendingFinalize.autoToManualGuardEnforced = session.autoToManualGuardEnforced;
+  pendingFinalize.autoToManualGuardArmed = session.autoToManualGuardArmed;
+  if (session.autoToManualGuardEnforced) {
+    const uint32_t nowMs = millis();
+    pendingFinalize.autoToManualGuardRemainingMs =
+        static_cast<int32_t>(session.autoToManualGuardDeadlineAtMs - nowMs) <=
+                0
+            ? 0U
+            : session.autoToManualGuardDeadlineAtMs - nowMs;
+  }
+  pendingFinalize.noScaleShotGuardEnabled =
+      runtimeConfig.avoidBbwShotWithoutScale;
+  pendingFinalize.noScaleShotGuardArmed = noScaleShotGuardArmed;
+  copyCString(pendingFinalize.scaleProtocol,
+              sizeof(pendingFinalize.scaleProtocol), scaleProtocolName);
+  pendingFinalize.scaleProtocol[sizeof(pendingFinalize.scaleProtocol) - 1] =
+      '\0';
   if (session.hasWeightAnchor) {
     shotCurveSampler.accept(session.lastAcceptedWeightG, millis());
     shotCurveSampler.captureEnd(millis(), session.lastAcceptedWeightG);
@@ -1866,9 +1949,6 @@ void cancelPendingFinalize(const char *reason) {
   serialTrace(LogLevel::INFO, reason != nullptr
                                   ? reason
                                   : "Previous drip analysis cancelled");
-  if (!snapshot.logEligible) {
-    return;
-  }
   ActualWeightSource source = ActualWeightSource::NONE;
   float weightG = 0.0f;
   bool valid = false;
@@ -1877,13 +1957,25 @@ void cancelPendingFinalize(const char *reason) {
     weightG = snapshot.lastKnownWeightG;
     valid = true;
   }
+  const bool persistEligible =
+      snapshot.logEligible &&
+      shotLogBbwEligible(snapshot.startedWithScale, snapshot.timerOnly,
+                         snapshot.automaticBrew) &&
+      shotLogWeightEligible(weightG, valid);
+  if (!persistEligible) {
+    return;
+  }
   commitPendingShotLog(snapshot, weightG, valid, source);
+  persistLastShotFromFinalize(snapshot, weightG, valid);
 }
 
 void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
                                        float finalWeightG,
                                        bool postDripWeightValid) {
   if (!postDripWeightValid || snapshot.timerOnly ||
+      !shotLogBbwEligible(snapshot.startedWithScale, snapshot.timerOnly,
+                          snapshot.automaticBrew) ||
+      !shotLogWeightEligible(finalWeightG, postDripWeightValid) ||
       snapshot.extractionExtended || snapshot.slowExtractionExtended ||
       snapshot.endReason == EndReason::AUTO_TO_MANUAL_GUARD ||
       snapshot.endReason == EndReason::RINSE_COMPLETE ||
@@ -1953,15 +2045,15 @@ void pendingShotFinalizeTask() {
     logWeightG = snapshot.lastKnownWeightG;
   }
 
-  if (snapshot.logEligible) {
-    commitPendingShotLog(snapshot, logWeightG, logWeightValid, weightSource);
-  }
+  const bool persistEligible =
+      snapshot.logEligible &&
+      shotLogBbwEligible(snapshot.startedWithScale, snapshot.timerOnly,
+                         snapshot.automaticBrew) &&
+      shotLogWeightEligible(logWeightG, logWeightValid);
 
-  if (logWeightValid && persistedLastShot.valid &&
-      persistedLastShot.cycleId == snapshot.cycleId) {
-    persistedLastShot.weightValid = true;
-    persistedLastShot.currentWeightG = logWeightG;
-    persistLastShotSnapshot(persistedLastShot);
+  if (persistEligible) {
+    commitPendingShotLog(snapshot, logWeightG, logWeightValid, weightSource);
+    persistLastShotFromFinalize(snapshot, logWeightG, logWeightValid);
   }
 
   maybeQueueAutoToManualGuardSample(snapshot, finalWeightG, postDripWeightValid);
@@ -1982,6 +2074,12 @@ void pendingShotFinalizeTask() {
   }
 
   finalWeightG = currentWeight;
+
+  if (!shotLogWeightEligible(finalWeightG, true)) {
+    serialTrace(LogLevel::INFO,
+                "Final weight below history threshold; offset unchanged");
+    return;
+  }
 
   serialTracef(LogLevel::INFO,
                "Final weight: %.2fg; cycle goal: %.2fg; cycle offset: %.2fg",
@@ -3790,7 +3888,6 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
       lastCycle.weightValid ? elapsedMs(currentWeightReceivedAtMs) : 0;
   lastCycle.weightControlState = session.weightControlState;
   lastCycle.calibrationEligible = session.calibrationEligible;
-  persistLastShotFromEndedCycle(reason, durationMs);
   if (reason != EndReason::RINSE_COMPLETE &&
       stopperState != StopperState::RINSE) {
     noScaleShotGuardActivityAtMs = millis();

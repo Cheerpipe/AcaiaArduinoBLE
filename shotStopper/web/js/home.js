@@ -7,7 +7,6 @@ export function init(){
   if(ready)return;
   ready=true;
   R.registerViewStatus('home',applyStatus);
-  
   $('rinseButton').onclick=()=>R.command('/api/v1/control/rinse');
   $('stopButton').onclick=()=>$('stopButton').dataset.mode==='stop'?R.command('/api/v1/control/stop'):R.command('/api/v1/control/paddle',{on:true});
   $('clearLastShotButton').onclick=R.clearLastShot;
@@ -18,7 +17,5 @@ export function init(){
   if($('homeSlowExtractionGuardEnabled'))$('homeSlowExtractionGuardEnabled').onchange=()=>R.persistHomeGuard('homeSlowExtractionGuardEnabled','homeSlowExtractionGuardEnabledState','slowExtractionGuardEnabled',1);
   if($('homeAutoToManualGuardEnabled'))$('homeAutoToManualGuardEnabled').onchange=()=>R.persistHomeGuard('homeAutoToManualGuardEnabled','homeAutoToManualGuardEnabledState','autoToManualGuardEnabled',1);
   if($('homeCupProtectionEnabled'))$('homeCupProtectionEnabled').onchange=()=>R.persistHomeGuard('homeCupProtectionEnabled','homeCupProtectionEnabledState','cupProtectionEnabled',1);
-
-  
 }
 export function activate(){}

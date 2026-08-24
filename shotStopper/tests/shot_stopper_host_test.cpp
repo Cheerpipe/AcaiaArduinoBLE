@@ -5980,6 +5980,13 @@ void s01_shot_log_filters_short_and_rinse() {
   CHECK(!shotLogEligible(EndReason::RINSE_COMPLETE, 15000));
   CHECK(!shotLogEligible(EndReason::PADDLE, 9000));
   CHECK(shotLogEligible(EndReason::PADDLE, 10000));
+  CHECK(!shotLogBbwEligible(false, false, true));
+  CHECK(!shotLogBbwEligible(true, true, true));
+  CHECK(!shotLogBbwEligible(true, false, false));
+  CHECK(shotLogBbwEligible(true, false, true));
+  CHECK(!shotLogWeightEligible(0.9f, true));
+  CHECK(shotLogWeightEligible(1.0f, true));
+  CHECK(!shotLogWeightEligible(1.0f, false));
 }
 
 void s01b_shot_log_stop_detail_names_end_reasons() {
@@ -6031,14 +6038,64 @@ void s02_shot_log_appends_after_drip_delay() {
   pendingFinalize.endedAtMs = hostMillis;
   runLoopAfter(pendingFinalize.dripDelayMs);
   CHECK(!pendingFinalize.pending);
+  CHECK(shotLog.count() == 0);
+}
+
+void s02e_shot_log_appends_auto_bbw_after_drip_delay() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  shotLog.clear();
+  pendingFinalize = PendingShotFinalize{};
+  pendingFinalize.pending = true;
+  pendingFinalize.logEligible = true;
+  pendingFinalize.startedWithScale = true;
+  pendingFinalize.timerOnly = false;
+  pendingFinalize.automaticBrew = true;
+  pendingFinalize.lastKnownWeightValid = true;
+  pendingFinalize.lastKnownWeightG = 36.0f;
+  pendingFinalize.finalState = StopperState::BREW;
+  pendingFinalize.endReason = EndReason::SCALE_THRESHOLD;
+  pendingFinalize.bootId = shotLog.bootId();
+  pendingFinalize.durationDs = 120;
+  pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  pendingFinalize.weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
+  pendingFinalize.endedAtMs = hostMillis;
+  runLoopAfter(pendingFinalize.dripDelayMs);
+  CHECK(!pendingFinalize.pending);
   CHECK(shotLog.count() == 1);
   ShotLogRecord records[1] = {};
   CHECK(shotLog.copyNewestFirst(records, 1) == 1);
   CHECK(records[0].durationDs == 120);
-  CHECK(records[0].shotType ==
-        static_cast<uint8_t>(ShotLogType::MANUAL));
-  CHECK(records[0].stopDetail == static_cast<uint8_t>(ShotLogStopDetail::PADDLE));
-  CHECK(records[0].cutType == static_cast<uint8_t>(ShotLogCut::MANUAL));
+  CHECK(records[0].shotType == static_cast<uint8_t>(ShotLogType::AUTO));
+  CHECK(records[0].stopDetail ==
+        static_cast<uint8_t>(ShotLogStopDetail::NORMAL_TARGET));
+  CHECK(records[0].cutType == static_cast<uint8_t>(ShotLogCut::AUTO));
+}
+
+void s02f_shot_log_skips_sub_one_gram_weight() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  shotLog.clear();
+  pendingFinalize = PendingShotFinalize{};
+  pendingFinalize.pending = true;
+  pendingFinalize.logEligible = true;
+  pendingFinalize.startedWithScale = true;
+  pendingFinalize.timerOnly = false;
+  pendingFinalize.automaticBrew = true;
+  pendingFinalize.lastKnownWeightValid = true;
+  pendingFinalize.lastKnownWeightG = 0.5f;
+  pendingFinalize.finalState = StopperState::BREW;
+  pendingFinalize.endReason = EndReason::SCALE_THRESHOLD;
+  pendingFinalize.bootId = shotLog.bootId();
+  pendingFinalize.durationDs = 120;
+  pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  pendingFinalize.weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
+  pendingFinalize.endedAtMs = hostMillis;
+  runLoopAfter(pendingFinalize.dripDelayMs);
+  CHECK(!pendingFinalize.pending);
+  CHECK(shotLog.count() == 0);
+  CHECK(shotCurves.count() == 0);
+  CHECK(!persistedLastShot.valid);
 }
 
 void s02c_shot_curve_samples_on_two_second_grid_and_latches_slow() {
@@ -6067,6 +6124,8 @@ void s02c_shot_curve_samples_on_two_second_grid_and_latches_slow() {
   hostMillis += 4000;
   acceptWeightIntoTrajectory(18.0f, hostMillis, 3);
   session.lastAcceptedWeightG = 18.0f;
+  shot.automaticBrew = true;
+  session.config.timerOnly = false;
   schedulePendingShotFinalize(EndReason::SLOW_EXTRACTION_MAX_TIME, 12000);
   CHECK(pendingFinalize.curve.count >= 2);
   CHECK(pendingFinalize.curve.extended.atDs == 21);
@@ -6122,6 +6181,8 @@ void s02d_shot_curve_latches_first_drop_fast_and_atm() {
   CHECK(shotCurveSampler.atmClearedDs == 145);
   hostMillis = t0 + 15100;
   session.lastAcceptedWeightG = 43.7f;
+  shot.automaticBrew = true;
+  session.config.timerOnly = false;
   schedulePendingShotFinalize(EndReason::FAST_EXTRACTION_MAX_WEIGHT, 15100);
   CHECK(pendingFinalize.curve.firstDrop.atDs == 45);
   CHECK(pendingFinalize.curve.extended.atDs == 133);
@@ -6155,6 +6216,8 @@ void s02d_shot_curve_latches_first_drop_fast_and_atm() {
   CHECK(shotCurveSampler.atm.atDs == 120);
   CHECK(shotCurveSampler.atmClearedDs == SHOT_LOG_METRIC_MISSING);
   hostMillis = t1 + 18000;
+  shot.automaticBrew = true;
+  session.config.timerOnly = false;
   schedulePendingShotFinalize(EndReason::AUTO_TO_MANUAL_GUARD, 18000);
   CHECK(pendingFinalize.curve.atm.atDs == 120);
   CHECK(pendingFinalize.curve.atmClearedDs == SHOT_LOG_METRIC_MISSING);
@@ -6166,6 +6229,9 @@ void s02b_drip_delay_is_snapshotted_and_honors_boundaries() {
   reachReadyFromBoot();
   session.config = snapshotConfig(runtimeConfig);
   session.config.dripDelayMs = 1700;
+  session.startedWithScale = true;
+  session.config.timerOnly = false;
+  shot.automaticBrew = true;
   schedulePendingShotFinalize(EndReason::PADDLE, 12000);
   CHECK(pendingFinalize.dripDelayMs == 1700);
 
@@ -6199,6 +6265,8 @@ void s17_new_cycle_commits_pending_log_as_last_known() {
   pendingFinalize.lastKnownWeightValid = true;
   pendingFinalize.lastKnownWeightG = 43.7f;
   pendingFinalize.startedWithScale = true;
+  pendingFinalize.timerOnly = false;
+  pendingFinalize.automaticBrew = true;
   pendingFinalize.finalState = StopperState::BREW;
   pendingFinalize.endReason = EndReason::SCALE_THRESHOLD;
   pendingFinalize.bootId = shotLog.bootId();
@@ -6257,18 +6325,14 @@ void s03_shot_log_clear_empties_records() {
   CHECK(shotLog.count() == 0);
 }
 
-void s14_last_shot_persists_every_cycle() {
+void s14_last_shot_skips_manual_cycle() {
   resetHarness(false, false);
   reachReadyFromBoot();
   CHECK(!persistedLastShot.valid);
   const uint32_t rawOnAt = startCycle();
   releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs + 100);
-  CHECK(persistedLastShot.valid);
-  CHECK(persistedLastShot.cycleId == lastCycle.cycleId);
-  CHECK(persistedLastShot.durationMs == lastCycle.durationMs);
-  CHECK(persistedLastShot.shotType ==
-        static_cast<uint8_t>(LastShotType::MANUAL));
-  CHECK(!persistedLastShot.noScaleShotGuardEnabled);
+  runLoopAfter(runtimeConfig.dripDelayMs);
+  CHECK(!persistedLastShot.valid);
 }
 
 void s15b_cup_off_after_end_keeps_last_known_actual() {
@@ -6290,6 +6354,8 @@ void s15b_cup_off_after_end_keeps_last_known_actual() {
   pendingFinalize.cycleId = 9;
   pendingFinalize.logEligible = true;
   pendingFinalize.startedWithScale = true;
+  pendingFinalize.timerOnly = false;
+  pendingFinalize.automaticBrew = true;
   pendingFinalize.lastKnownWeightValid = true;
   pendingFinalize.lastKnownWeightG = 42.1f;
   pendingFinalize.finalState = StopperState::BREW;
@@ -6333,31 +6399,31 @@ void s15c_last_shot_prefers_last_accepted_over_cup_off() {
   CHECK(persistedLastShot.firstDropElapsedMs == 4500);
 }
 
-void s15_last_shot_updates_weight_after_drip() {
+void s15_last_shot_persists_after_drip_when_eligible() {
   resetHarness(false, true);
   reachReadyFromBoot();
   persistedLastShot = PersistedLastShot{};
-  persistedLastShot.valid = true;
-  persistedLastShot.cycleId = 7;
-  persistedLastShot.weightValid = true;
-  persistedLastShot.currentWeightG = 10.0f;
-  persistLastShotSnapshot(persistedLastShot);
-
   currentWeight = 36.4f;
   currentWeightSequence = 5;
   currentWeightReceivedAtMs = hostMillis + 1;
   pendingFinalize = PendingShotFinalize{};
   pendingFinalize.pending = true;
   pendingFinalize.cycleId = 7;
-  pendingFinalize.logEligible = false;
+  pendingFinalize.logEligible = true;
   pendingFinalize.startedWithScale = true;
-  pendingFinalize.lastKnownWeightValid = true;
-  pendingFinalize.lastKnownWeightG = 10.0f;
+  pendingFinalize.timerOnly = false;
+  pendingFinalize.automaticBrew = true;
+  pendingFinalize.finalState = StopperState::BREW;
+  pendingFinalize.endReason = EndReason::SCALE_THRESHOLD;
+  pendingFinalize.durationDs = 120;
+  pendingFinalize.goalWeightG = DEFAULT_GOAL_WEIGHT_G;
+  pendingFinalize.bootId = shotLog.bootId();
   pendingFinalize.endedAtMs = hostMillis;
   pendingFinalize.endedWeightSequence = 4;
   runLoopAfter(pendingFinalize.dripDelayMs);
   CHECK(!pendingFinalize.pending);
   CHECK(persistedLastShot.valid);
+  CHECK(persistedLastShot.cycleId == 7);
   CHECK(fabsf(persistedLastShot.currentWeightG - 36.4f) < 0.001f);
 }
 
@@ -6388,7 +6454,19 @@ void s18_last_shot_keeps_no_scale_guard_from_cycle() {
   enableNoScaleShotGuardForTest();
   reachReadyFromBoot();
   const uint32_t rawOnAt = startCycle();
-  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs + 100);
+  advanceToBrew();
+  ScaleEvent fresh{};
+  fresh.type = ScaleEventType::WEIGHT;
+  fresh.weightG = 18.0f;
+  fresh.receivedAtMs = hostMillis;
+  fresh.packetSequence = ++currentWeightSequence;
+  publishScaleEvent(fresh, false);
+  processScaleWorkerEvents();
+  acceptWeightIntoTrajectory(18.0f, hostMillis, currentWeightSequence);
+  session.lastAcceptedWeightG = 18.0f;
+  session.hasWeightAnchor = true;
+  releaseAtPhysicalDuration(rawOnAt, 12000);
+  runLoopAfter(runtimeConfig.dripDelayMs);
   CHECK(persistedLastShot.valid);
   CHECK(persistedLastShot.noScaleShotGuardEnabled);
   CHECK(persistedLastShot.noScaleShotGuardArmed);
@@ -9092,14 +9170,16 @@ const TestCase testCases[] = {
     {"S01", s01_shot_log_filters_short_and_rinse},
     {"S01b", s01b_shot_log_stop_detail_names_end_reasons},
     {"S02", s02_shot_log_appends_after_drip_delay},
+    {"S02E", s02e_shot_log_appends_auto_bbw_after_drip_delay},
+    {"S02F", s02f_shot_log_skips_sub_one_gram_weight},
     {"S02C", s02c_shot_curve_samples_on_two_second_grid_and_latches_slow},
     {"S02D", s02d_shot_curve_latches_first_drop_fast_and_atm},
     {"S02B", s02b_drip_delay_is_snapshotted_and_honors_boundaries},
     {"S17", s17_new_cycle_commits_pending_log_as_last_known},
     {"W90", w90_save_unknown_preset_id_does_not_overwrite_active},
     {"S03", s03_shot_log_clear_empties_records},
-    {"S14", s14_last_shot_persists_every_cycle},
-    {"S15", s15_last_shot_updates_weight_after_drip},
+    {"S14", s14_last_shot_skips_manual_cycle},
+    {"S15", s15_last_shot_persists_after_drip_when_eligible},
     {"S15b", s15b_cup_off_after_end_keeps_last_known_actual},
     {"S15c", s15c_last_shot_prefers_last_accepted_over_cup_off},
     {"S16", s16_last_shot_clear_empties_snapshot},

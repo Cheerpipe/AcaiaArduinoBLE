@@ -40,6 +40,7 @@ inline bool shotLogPageSlice(size_t total, size_t offset, size_t limit,
 }
 
 constexpr uint32_t MIN_SHOT_LOG_DURATION_MS = 10000;
+constexpr float MIN_SHOT_LOG_WEIGHT_G = 1.0f;
 // INT16_MIN leaves the full positive int16 centigram range usable.
 constexpr int16_t SHOT_LOG_WEIGHT_MISSING = INT16_MIN;
 constexpr int16_t SHOT_LOG_WEIGHT_MISSING_LEGACY = INT16_MAX;
@@ -237,6 +238,15 @@ inline bool shotLogEligible(EndReason reason, uint32_t durationMs) {
     return false;
   }
   return durationMs >= MIN_SHOT_LOG_DURATION_MS;
+}
+
+inline bool shotLogWeightEligible(float weightG, bool valid) {
+  return valid && isfinite(weightG) && weightG >= MIN_SHOT_LOG_WEIGHT_G;
+}
+
+inline bool shotLogBbwEligible(bool startedWithScale, bool timerOnly,
+                               bool automaticBrew) {
+  return startedWithScale && !timerOnly && automaticBrew;
 }
 
 inline ShotLogType shotLogTypeFromCycle(StopperState finalState,
