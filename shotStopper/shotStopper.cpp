@@ -30,8 +30,8 @@
     per loop, builds GuardInputs, pushes MachineSense and activator-drive
     permission, and applies scale/cup effects. Guards never call machine.
 
-  Released under the MIT license.
-  https://github.com/tatemazer/AcaiaArduinoBLE
+  Released under the GNU Affero General Public License v3.0.
+  https://github.com/Cheerpipe/AcaiaArduinoBLE
 */
 
 #if defined(SHOT_STOPPER_HOST_TEST)

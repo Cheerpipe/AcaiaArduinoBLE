@@ -290,9 +290,22 @@ testing workflows; human review, hardware validation, and safety judgment remain
 the author’s responsibility. Use on real espresso equipment only after you have
 verified wiring, isolation, and behavior on your own setup.
 
-## Credits
+## License
 
-The project retains the MIT license in [LICENSE](LICENSE).
+Advanced Shot Stopper is licensed under the
+[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+
+You may use, modify, and distribute it freely, including for commercial
+purposes. If you distribute a modified version, or offer one to users over a
+network, you must provide the complete corresponding source code under the
+AGPL. Closed proprietary forks are not allowed.
+
+Earlier snapshots of this repository were published under the MIT License.
+Those historical releases remain available to their recipients under MIT.
+Portions derive from [tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/AcaiaArduinoBLE)
+(MIT); see [LICENSE](LICENSE) for the full terms and upstream notice.
+
+## Credits
 
 Advanced Shot Stopper would not exist without
 **[tatemazer](https://github.com/tatemazer)** and
