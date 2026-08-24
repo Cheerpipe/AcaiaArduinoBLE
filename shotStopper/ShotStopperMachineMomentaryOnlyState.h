@@ -13,8 +13,9 @@
 //       start tare / late-cup retare are visible to inference. CONFIRMED_ON
 //       expires without recent flow so auto-cut cannot pulse a stopped group.
 //       A logical stop goes to ASSUMED_OFF (stop-settling) until the pan is
-//       quiet, including after the stop-ack timeout. Consumes MachineSense
-//       pushed by the stopper.
+//       quiet, including after the stop-ack timeout. Cup REMOVED while
+//       ASSUMED_OFF settles to CONFIRMED_OFF immediately (MachineSense edge).
+//       Consumes MachineSense pushed by the stopper.
 //
 // BOUNDARY: This file alone determines momentary-only run state. Do not put
 // reed GPIO here (that is MomentaryReedState). Do not put paddle latch logic
@@ -211,6 +212,10 @@ void serviceMomentaryRunSensors() {
   if (machineSense.scaleConnectedEdge &&
       runtimeConfig.assumeIdleWhenScaleConnects &&
       !machineSense.brewCycleActive) {
+    settleMomentaryInferredOff();
+  }
+  if (machineSense.cupRemovedEdge &&
+      momentaryInferredState == MachineRunState::ASSUMED_OFF) {
     settleMomentaryInferredOff();
   }
   if (momentaryLogicalRunActive &&

@@ -856,6 +856,68 @@ void t_start_nack_quiet_does_not_idle() {
   CHECK(machineRunState() != MachineRunState::CONFIRMED_OFF);
 }
 
+void pushCupRemovedSettleEdge() {
+  MachineSense sense = machineSense;
+  sense.cupRemovedEdge = true;
+  sense.weightFresh = true;
+  machineObserveSense(sense);
+  serviceMomentaryRunSensors();
+}
+
+void t_cup_removed_settles_assumed_off_after_stop() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  confirmEspressoFlow();
+  CHECK(machineRequestStop());
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  CHECK(momentaryStopSettling);
+  pushCupRemovedSettleEdge();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  CHECK(!momentaryStopSettling);
+  CHECK(!machineIsRunning());
+}
+
+void t_cup_removed_settles_start_nack_assumed_off() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
+  for (int step = 0; step < 61; ++step) {
+    dripFreshWeight(0.0f, 200);
+  }
+  CHECK(machineRunState() == MachineRunState::ASSUMED_OFF);
+  CHECK(!momentaryStopSettling);
+  pushCupRemovedSettleEdge();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+}
+
+void t_cup_removed_ignored_while_assumed_on() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  pushCupRemovedSettleEdge();
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+}
+
+void t_cup_removed_ignored_while_confirmed_on() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  confirmEspressoFlow();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  pushCupRemovedSettleEdge();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+}
+
 void t_firmware_cut_settles_off_after_drip() {
   resetMomentaryHarness();
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
@@ -1438,6 +1500,10 @@ const TestCase kTests[] = {
     {"P25B", t_start_nack_timeout_follows_setting},
     {"P25C", t_flow_after_assumed_off_confirms_on_without_pulse},
     {"P25I", t_start_nack_quiet_does_not_idle},
+    {"P25I2", t_cup_removed_settles_assumed_off_after_stop},
+    {"P25I3", t_cup_removed_settles_start_nack_assumed_off},
+    {"P25I4", t_cup_removed_ignored_while_assumed_on},
+    {"P25I5", t_cup_removed_ignored_while_confirmed_on},
     {"P25J", t_firmware_cut_settles_off_after_drip},
     {"P25K", t_firmware_cut_settles_off_without_pending_finalize},
     {"P25L", t_firmware_cut_stale_weight_stays_assumed_off},

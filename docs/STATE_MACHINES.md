@@ -240,7 +240,10 @@ pulse. A logical STOP (user or firmware) goes to `ASSUMED_OFF` while the
 pan settles. A STOP ack needs a quiet pan; timeout without quiet does
 **not** force Idle, but later quiet still settles to Confirmed off. A START
 nack that stays `ASSUMED_OFF` without stop-settling does **not** idle on
-quiet — late espresso-like flow still confirms ON with no extra pulse. If
+quiet — late espresso-like flow still confirms ON with no extra pulse. Cup
+presence `REMOVED` while `ASSUMED_OFF` settles immediately to Confirmed off
+(no quiet wait); this does not apply from `ASSUMED_ON` / `CONFIRMED_ON` and
+has no effect on reed builds. If
 espresso-like flow continues after an assumed user STOP, polarity is
 wrong: go to `CONFIRMED_ON` without an extra pulse. Firmware-cut stop
 retries still pulse while the stop-ack window is open. Scale connect can

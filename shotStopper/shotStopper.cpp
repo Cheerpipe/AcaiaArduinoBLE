@@ -432,6 +432,7 @@ portMUX_TYPE bleCompanionMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE debugLogMux = portMUX_INITIALIZER_UNLOCKED;
 ScaleLinkState scaleLinkState = ScaleLinkState::DISCONNECTED;
 bool pendingScaleConnectIdleSync = false;
+bool pendingCupRemovedSettle = false;
 uint32_t scaleDisconnectSequence = 0;
 uint32_t scaleConnectionGeneration = 0;
 uint32_t scalePacketSequence = 0;
@@ -1634,6 +1635,8 @@ void observeMachineSenseFromSession() {
   pendingScaleConnectIdleSync = false;
   portEXIT_CRITICAL(&scaleLinkMux);
   sense.scaleConnectedEdge = scaleEdge;
+  sense.cupRemovedEdge = pendingCupRemovedSettle;
+  pendingCupRemovedSettle = false;
   machineObserveSense(sense);
 }
 
@@ -1702,14 +1705,17 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
 
   const CupPresenceEvent cupEvent =
       feedCupPresence(weight, receivedAtMs, packetSequence);
-  if (cupEvent == CupPresenceEvent::REMOVED && session.active &&
-      stopperState == StopperState::BREW && !session.config.timerOnly &&
-      session.config.cupProtectionEnabled && session.config.stopIfCupRemoved &&
-      session.startedWithScale) {
-    session.cupRemovedPending = true;
-    addDebugEvent(DebugCategory::SCALE, DebugCode::CUP_REMOVED_CONFIRMED,
-                  weightToCentigrams(weight),
-                  static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+  if (cupEvent == CupPresenceEvent::REMOVED) {
+    // Run-state settle for momentary-only ASSUMED_OFF — independent of cut.
+    pendingCupRemovedSettle = true;
+    if (session.active && stopperState == StopperState::BREW &&
+        !session.config.timerOnly && session.config.cupProtectionEnabled &&
+        session.config.stopIfCupRemoved && session.startedWithScale) {
+      session.cupRemovedPending = true;
+      addDebugEvent(DebugCategory::SCALE, DebugCode::CUP_REMOVED_CONFIRMED,
+                    weightToCentigrams(weight),
+                    static_cast<int32_t>(elapsedMs(session.startedAtMs)));
+    }
   }
   if (cupEvent == CupPresenceEvent::PLACED && session.active &&
       session.startedWithScale && retareWindowOpen() &&

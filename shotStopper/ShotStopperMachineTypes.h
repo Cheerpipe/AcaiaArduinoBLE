@@ -45,6 +45,9 @@ struct MachineSense {
   // One control-loop tick: scale just became CONNECTED. Set by the stopper
   // after consuming a BLE-worker pending flag — never mutated on the BLE task.
   bool scaleConnectedEdge = false;
+  // One control-loop tick: cup presence emitted REMOVED. Momentary-only uses
+  // this to settle ASSUMED_OFF → CONFIRMED_OFF without waiting for quiet pan.
+  bool cupRemovedEdge = false;
 };
 
 inline bool machinePreferBleAirtime = false;
