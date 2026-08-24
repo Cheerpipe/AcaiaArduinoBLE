@@ -20,6 +20,8 @@
 //   machine specialization.
 // - Does not own cup presence or scale link; consumes GuardInputs / session
 //   snapshots the stopper already built.
+// - Start-guard WouldBlock predicates are read-only. They must not call
+//   machineSet* or drive K1; the stopper composes them into the façade bit.
 
 bool fastExtractionGuardSession();
 bool slowExtractionGuardSession();
@@ -491,6 +493,11 @@ bool cupStartGuardWouldBlock(const GuardInputs &inputs) {
   return effective.cupProtectionEnabled && effective.requireCupToStart &&
          !effective.timerOnly && inputs.scaleUsable &&
          inputs.cup != CupPresenceState::PRESENT;
+}
+
+// Read-only composition for the stopper. Does not arm, consume, or call machine.
+bool guardsWouldBlockActivatorDrive(const GuardInputs &inputs) {
+  return noScaleShotGuardWouldBlock(inputs) || cupStartGuardWouldBlock(inputs);
 }
 
 void serviceCupStartGuard(const GuardInputs &inputs) {

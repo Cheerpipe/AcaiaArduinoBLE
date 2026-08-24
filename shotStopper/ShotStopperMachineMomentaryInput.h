@@ -3,11 +3,12 @@
 // =============================================================================
 // SPECIALIZATION: Momentary switch — GPIO input
 // =============================================================================
-// WHAT: Debounce and live 1:1 relay mirror. Start/stop for brew follows
-//       momentaryStartOnPress: on press (default) or on release of a hold no
-//       longer than Single-press limit. A longer hold is still mirrored
-//       (machine-native rinse) and is not a start/stop: in press mode the
-//       tentative edge is undone; in release mode it is never applied.
+// WHAT: Debounce and live 1:1 relay mirror when the façade allows activator
+//       drive. Start/stop for brew follows momentaryStartOnPress: on press
+//       (default) or on release of a hold no longer than Single-press limit.
+//       A longer hold is still mirrored (machine-native rinse) when drive is
+//       allowed and is not a start/stop: in press mode the tentative edge is
+//       undone; in release mode it is never applied.
 //
 // BOUNDARY: Momentary-only. Writes shared activator sample + momentary runtime.
 // Stopper/brew/cup/scale must not read these fields or know press vs release —

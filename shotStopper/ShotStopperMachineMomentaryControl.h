@@ -5,9 +5,10 @@
 // =============================================================================
 // SPECIALIZATION: Momentary switch — actuator (control)
 // =============================================================================
-// WHAT: K1 mirrors the physical switch 1:1. The only synthetic close is a
-//       firmware stop pulse (weight cut / walls), aborted if the user presses.
-//       Logical run walls reuse tripRelaySafety so brew sees existing flags.
+// WHAT: K1 mirrors the physical switch 1:1 when the façade allows activator
+//       drive. The only synthetic close is a firmware stop pulse (weight cut /
+//       walls), aborted if the user presses. Logical run walls reuse
+//       tripRelaySafety so brew sees existing flags.
 //
 // BOUNDARY: Momentary-only. No paddle latch/PaddleMode policy. Stopper/brew
 // call machineRequestStart/Stop on the façade and must not know about pulses
@@ -25,11 +26,18 @@ void abortFirmwarePulseIfActive() {
 void applyMomentaryRelayDrive() {
   if (momentaryPhysicalOn) {
     abortFirmwarePulseIfActive();
+    if (!machineMayForwardActivatorOn()) {
+      if (getRelaySafetySnapshot().closed) {
+        (void)setMachineCircuitClosed(false);
+      }
+      return;
+    }
     if (!getRelaySafetySnapshot().closed) {
       (void)setMachineCircuitClosed(true, HARD_MAX_CIRCUIT_CLOSED_MS);
     }
     return;
   }
+  machineNoteActivatorReleased();
   if (pulseOutputActive) {
     if (static_cast<int32_t>(millis() - pulseOutputEndsAtMs) >= 0) {
       (void)setMachineCircuitClosed(false);

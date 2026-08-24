@@ -26,6 +26,10 @@
 // - Brew rinse duration and "stop within X ms is a rinse" live in the stopper;
 //   the machine only reports start/stop/hold (paddle may surface early OFF as
 //   STOP so that rule can run). Brew/scale/cup never call actuators here.
+// - Activator→K1 forwarding permission is a one-way stopper push
+//   (machineSetActivatorDriveAllowed), like preferBleAirtime. Guards never
+//   write it. machineRequestStart/Stop and the relay driver must not consult
+//   it (rinse, web, firmware stop pulse still close K1).
 
 #include "ShotStopperMachineRelay.h"
 #include "ShotStopperMachineActivatorSample.h"
@@ -54,6 +58,30 @@ inline void machineObserveSense(const MachineSense &sense) {
 
 inline void machineSetPreferBleAirtime(bool prefer) {
   machinePreferBleAirtime = prefer;
+}
+
+// Dumb drive bit + hold-continuity latch. Specializations must not know why
+// the stopper cleared the bit (no-scale BBW, cup-start, or a future guard).
+bool machineActivatorDriveAllowed = true;
+bool machineActivatorDriveSuppressedThisHold = false;
+
+inline void machineSetActivatorDriveAllowed(bool allowed) {
+  machineActivatorDriveAllowed = allowed;
+}
+
+inline bool machineMayForwardActivatorOn() {
+  if (!machineActivatorDriveAllowed) {
+    machineActivatorDriveSuppressedThisHold = true;
+    return false;
+  }
+  if (machineActivatorDriveSuppressedThisHold) {
+    return false;
+  }
+  return true;
+}
+
+inline void machineNoteActivatorReleased() {
+  machineActivatorDriveSuppressedThisHold = false;
 }
 
 #if SHOT_STOPPER_MACHINE_TYPE == 0
@@ -122,6 +150,8 @@ inline void machineInitialize() {
     pinMode(CIRCUIT_FEEDBACK_GPIO, INPUT_PULLUP);
   }
   initializeActivatorInput();
+  machineSetActivatorDriveAllowed(true);
+  machineNoteActivatorReleased();
 }
 
 inline bool machineBootActivatorHeldStably() {

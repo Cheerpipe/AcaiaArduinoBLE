@@ -121,6 +121,8 @@ void resetMomentaryHarness() {
 #endif
   initializeActivatorInput();
   machineOnActivatorReady();
+  machineSetActivatorDriveAllowed(true);
+  machineNoteActivatorReleased();
 #if SHOT_STOPPER_MACHINE_TYPE == 1
   momentaryInferredState = MachineRunState::CONFIRMED_OFF;
   momentarySawScale = false;
@@ -246,7 +248,7 @@ void t_second_short_press_stops_without_rinse() {
   CHECK(!session.active || stopperState == StopperState::READY);
 }
 
-void t_guard_reject_still_mirrors() {
+void t_guard_reject_does_not_mirror() {
   resetMomentaryHarness();
   runtimeConfig.cupProtectionEnabled = true;
   runtimeConfig.requireCupToStart = true;
@@ -258,11 +260,49 @@ void t_guard_reject_still_mirrors() {
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   const size_t closedBefore = hostRelayClosedWrites;
   pressDown();
-  CHECK(hostRelayClosedWrites > closedBefore);
-  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(hostRelayClosedWrites == closedBefore);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(!session.active);
+  CHECK(stopperState == StopperState::READY);
   releaseUp();
   CHECK(!session.active);
   CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void t_no_scale_bbw_armed_does_not_mirror_then_idle_allows() {
+  resetMomentaryHarness();
+  runtimeConfig.timerOnly = false;
+  runtimeConfig.avoidBbwShotWithoutScale = true;
+  mutableActiveShotPreset(presetBank).brewByWeight = true;
+  runtimeConfig = composeEffectiveConfig(runtimeConfig, presetBank);
+  runtimeConfig.avoidBbwShotWithoutScale = true;
+  noScaleShotGuardArmed = true;
+  noScaleShotGuardHold = false;
+  noScaleShotGuardActivityAtMs = 0;
+  scale.connected = false;
+  setScaleLinkState(ScaleLinkState::DISCONNECTED);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(noScaleShotGuardArmed);
+  const size_t closedBefore = hostRelayClosedWrites;
+  pressDown();
+  CHECK(hostRelayClosedWrites == closedBefore);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(!session.active);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(noScaleShotGuardArmed);
+  CHECK(noScaleShotGuardHold);
+  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+  CHECK(!noScaleShotGuardArmed);
+  CHECK(!noScaleShotGuardHold);
+  CHECK(!session.active);
+  CHECK(!getRelaySafetySnapshot().closed);
+  releaseUp();
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(!session.active);
+  pressDown();
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(session.active);
 }
 
 void t_user_stop_without_session_does_not_leave_orphan_run() {
@@ -1003,7 +1043,8 @@ const TestCase kTests[] = {
     {"P36", t_default_starts_on_press},
     {"P40", t_release_mode_starts_on_release_not_press},
     {"P38", t_second_short_press_stops_without_rinse},
-    {"P02", t_guard_reject_still_mirrors},
+    {"P02", t_guard_reject_does_not_mirror},
+    {"P50", t_no_scale_bbw_armed_does_not_mirror_then_idle_allows},
     {"P39", t_user_stop_without_session_does_not_leave_orphan_run},
     {"P03", t_long_press_mirrors_from_first_instant},
     {"P41", t_release_mode_long_press_ignored_as_start},

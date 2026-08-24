@@ -467,9 +467,14 @@ not a state machine; it only filters which peripheral may enter
 ## 11. No-scale BBW guard
 
 **Purpose.** When brew-by-weight is on and there is no usable scale,
-do **not** start a full automatic shot on a long paddle. A rinse
-gesture still rinses. The next long start is manual. See
-[No-scale BBW](settings/no-scale-bbw.md).
+do **not** start a full automatic shot on a long activator ON (paddle or
+momentary switch). On paddle, a rinse gesture still rinses. The next long
+start is manual. See [No-scale BBW](settings/no-scale-bbw.md).
+
+The stopper, not the guard, pushes `machineSetActivatorDriveAllowed` so
+momentary does not 1:1-forward while this guard (or cup-start) would
+block. Paddle has no GPIO→K1 mirror; `beginCycle` still withholds
+`machineRequestStart`.
 
 Not a C++ enum; latches `noScaleShotGuardArmed` / `Idle`.
 
@@ -478,16 +483,16 @@ Not a C++ enum; latches `noScaleShotGuardArmed` / `Idle`.
 | State (UI) | Meaning |
 | --- | --- |
 | Off | Setting disabled or BBW off. Guard does nothing. |
-| Armed | Next long paddle ON is blocked (machine circuit stays open, triple beep). |
-| Idle | Guard consumed (blocked start, rinse, or finished non-rinse shot). Re-arms on scale connect, boot, or **Last shot cooldown**. |
+| Armed | Next long activator ON is blocked (machine circuit stays open, triple beep). |
+| Idle | Guard consumed (blocked start, paddle rinse, or finished non-rinse shot). Re-arms on scale connect, boot, or **Last shot cooldown**. |
 
 ### Events
 
 | Event | Effect |
 | --- | --- |
 | Scale becomes usable | Arm immediately. |
-| Long paddle while Armed | Block; hold then consume → Idle. |
-| Short ON→OFF (rinse) while Armed | Rinse runs; consume → Idle. |
+| Long activator ON while Armed | Block; hold then consume → Idle. Circuit stays open (paddle: no start; momentary: no 1:1 forward). |
+| Short ON→OFF (rinse) while Armed | Paddle: rinse runs; consume → Idle. Momentary: no firmware rinse; the hold is not forwarded. |
 | Shot (non-rinse) ends | Idle; cooldown then Arm. |
 | Cooldown elapsed / boot | Arm. |
 

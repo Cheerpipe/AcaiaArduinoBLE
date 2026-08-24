@@ -18,16 +18,17 @@
   - The activator reads GPIO and translates it to UserIntent / MachineIntention.
     The stopper talks to Machine only through that abstract façade
     (machinePollIntention, machineRequestStart/Stop, machineRunState,
-    MachineSense). It must NOT include paddle/momentary specialization headers,
-    branch on MachineType, or know reed/pulse/PaddleMode internals.
+    MachineSense, machineSetActivatorDriveAllowed). It must NOT include
+    paddle/momentary specialization headers, branch on MachineType, or know
+    reed/pulse/PaddleMode internals.
   - Paddle logic stays in ShotStopperMachinePaddle*; momentary in
     ShotStopperMachineMomentary*. Run state is owned only by each type's
     *State* file. Brew / cup / scale / guards likewise never talk to switch
     or paddle details — if a guard uses paddle- or momentary-specific code,
     that is a layer bug.
   - Brew, cup, and scale do not call each other; this file polls machine once
-    per loop, builds GuardInputs, pushes MachineSense, and applies scale/cup
-    effects.
+    per loop, builds GuardInputs, pushes MachineSense and activator-drive
+    permission, and applies scale/cup effects. Guards never call machine.
 
   Released under the MIT license.
   https://github.com/tatemazer/AcaiaArduinoBLE
@@ -1542,6 +1543,12 @@ void captureLoopGuards() {
 
 void refreshLoopGuardsFromLastIntention() {
   fillLoopGuardsFromIntention(machineLastIntention());
+}
+
+void pushActivatorDrivePermission() {
+  refreshLoopGuardsFromLastIntention();
+  machineSetActivatorDriveAllowed(
+      session.active || !guardsWouldBlockActivatorDrive(loopGuardInputs));
 }
 
 void orchestratePostTareBaselineArm() {
@@ -6370,6 +6377,7 @@ void loop() {
     loopIntervalGapMs = healthIntervalMaxGapMs;
     healthIntervalMaxGapMs = 0;
   }
+  pushActivatorDrivePermission();
   machineSampleInput();
   processScaleWorkerEvents();
   observeMachineSenseFromSession();

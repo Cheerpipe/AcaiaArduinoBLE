@@ -6,14 +6,22 @@ This page applies to firmware compiled as `SHOT_STOPPER_MACHINE_TYPE=1`
 hide **Paddle** and **Quick rinse**. Paddle / latch builds do the reverse.
 The groups are mutually exclusive.
 
-The relay **mirrors the switch 1:1**. If you hold 234 ms, K1 is closed for
-those 234 ms while you hold. A long hold is copied in full. The firmware
-does not replay, delay, or replace your gesture. The only extra pulse is
-the **auto-stop pulse** it sends when a weight cut (or a safety wall) needs
-to toggle the group.
+The relay **mirrors the switch 1:1** while a start-guard is not blocking.
+If you hold 234 ms, K1 is closed for those 234 ms while you hold. A long
+hold is copied in full. The firmware does not replay, delay, or replace
+your gesture. The only extra pulse is the **auto-stop pulse** it sends when
+a weight cut (or a safety wall) needs to toggle the group.
+
+If **Avoid BBW shot without scale** is Armed (BBW on, no usable scale) or
+**Require cup to start** would reject the start, the relay does **not**
+mirror: K1 stays open for that whole hold, even after the guard goes Idle
+mid-press. Release, then press again with the guard Idle / a cup present,
+and the 1:1 mirror resumes. See [No-scale BBW](no-scale-bbw.md) and
+[Cup protection](../features/cup-protection.md).
 
 **Start/stop on** chooses when firmware treats the shot as started or
-stopped (tare, timer). It does not change the 1:1 relay mirror.
+stopped (tare, timer). It does not change the 1:1 relay mirror, except
+that a blocked start also leaves K1 open.
 
 | Mode | Default | When start/stop fires |
 | --- | --- | --- |
@@ -32,7 +40,7 @@ Related: [Paddle](paddle.md), [Quick rinse](quick-rinse.md),
 | --- | --- | --- | --- |
 | **Auto-stop pulse (ms)** | 300 | 50–1000 | Length of the pulse the firmware sends to mimic a single button press when it needs to stop the brew automatically (target weight, time walls). |
 | **Single-press limit (ms)** | 1000 | 100–5000 | Longest hold that still counts as a single press (start or stop). Applies in **Button press** and **Button release**. A longer hold is not a start/stop (for example a machine rinse): the relay still mirrors it. In press mode the tentative start/stop is undone and, on reed builds, a confirm-timeout grace runs before reed is canonical again. In release mode the edge is never applied. |
-| **Start/stop on** | Button press | Button press / Button release | When firmware treats the shot as started or stopped, and when the reed confirm window starts. Does not change the 1:1 relay mirror. |
+| **Start/stop on** | Button press | Button press / Button release | When firmware treats the shot as started or stopped, and when the reed confirm window starts. Does not change the 1:1 relay mirror except when a start-guard blocks forwarding. |
 | **Reed confirm timeout (s)** | 1.0 | 0.2–5 | Momentary+reed only (`SHOT_STOPPER_MACHINE_TYPE=2`). How long after the Start/stop on edge the machine may stay Assumed on while the reed is still off (or Assumed off while the reed is still on). The clock starts on that press or release, not when the relay mirrors the hold. If the reed matches sooner, confirm immediately. When the timeout elapses, confirm the actual reed. |
 
 Reed is polled every control loop (`digitalRead` plus 30 ms debounce). A
