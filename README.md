@@ -59,7 +59,7 @@ That split is what makes the firmware “advanced”:
 - Guards for extractions that finish too fast or too slow.
 
 Development used the ESP32-S3 1-channel relay board shown in
-[`ESP32-S3_Relay_X1.png`](ESP32-S3_Relay_X1.png). The firmware’s default GPIO
+[`ESP32-S3_Relay_X1.png`](docs/images/ESP32-S3_Relay_X1.png). The firmware’s default GPIO
 map matches that board. Details are in [Hardware](docs/HARDWARE.md).
 
 ## Main features

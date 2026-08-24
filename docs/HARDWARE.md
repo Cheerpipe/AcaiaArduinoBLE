@@ -21,7 +21,7 @@ Firmware was developed on an **ESP32-S3 1-channel relay** board (WROOM-1
 **N16R8** module: 16 MB flash, 8 MB OPI PSRAM, USB-C, onboard Songle relay
 with COM / NO / NC screw terminals).
 
-![ESP32-S3 1-channel relay development board](../ESP32-S3_Relay_X1.png)
+![ESP32-S3 1-channel relay development board](images/ESP32-S3_Relay_X1.png)
 
 The firmware **default GPIO map matches this board**. It is not a generic
 DevKit pinout.
