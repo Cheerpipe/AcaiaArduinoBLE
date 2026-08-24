@@ -36,6 +36,12 @@ struct MachineSense {
   bool weightFresh = false;
   bool accidentalHold = false;
   bool brewCycleActive = false;
+  // BLE packet generation for this reading. Momentary flow uses this to ignore
+  // control-loop resamples of the same packet; paddle does not read it.
+  uint32_t weightSequence = 0;
+  // Brew has latched first drops this cycle. Momentary uses it to pulse a
+  // weight cut even if inferred state already fell back to ASSUMED_ON.
+  bool firstDropSeen = false;
   // One control-loop tick: scale just became CONNECTED. Set by the stopper
   // after consuming a BLE-worker pending flag — never mutated on the BLE task.
   bool scaleConnectedEdge = false;

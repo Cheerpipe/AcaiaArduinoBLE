@@ -1537,12 +1537,17 @@ void observeMachineSenseFromSession() {
   if (session.active && session.hasWeightAnchor &&
       isfinite(session.lastAcceptedWeightG)) {
     sense.weightG = session.lastAcceptedWeightG;
+    sense.weightSequence = session.lastAcceptedPacketSequence != 0
+                               ? session.lastAcceptedPacketSequence
+                               : currentWeightSequence;
   } else {
     sense.weightG = currentWeight;
+    sense.weightSequence = currentWeightSequence;
   }
   sense.weightFresh = currentWeightIsFresh();
   sense.accidentalHold = session.accidentalTouchHolding;
   sense.brewCycleActive = session.active;
+  sense.firstDropSeen = session.firstDropMs != 0;
   bool scaleEdge = false;
   portENTER_CRITICAL(&scaleLinkMux);
   scaleEdge = pendingScaleConnectIdleSync;

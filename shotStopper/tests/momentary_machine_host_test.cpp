@@ -127,6 +127,7 @@ void resetMomentaryHarness() {
   momentaryInferredState = MachineRunState::CONFIRMED_OFF;
   momentarySawScale = false;
   momentaryEspressoConfirmed = false;
+  momentarySawEspresso = false;
   momentaryStopAwaitingAck = false;
   momentaryStopRetryPending = false;
   momentaryStartAwaitingAck = false;
@@ -136,6 +137,7 @@ void resetMomentaryHarness() {
   momentaryLowFlowSinceMs = 0;
   momentaryRisingSinceMs = 0;
   momentaryQuietSinceMs = 0;
+  momentaryLastWeightSequence = 0;
   momentaryLogicalRunActive = false;
   momentaryLogicalRunStartedAtMs = 0;
   clearMomentaryElapsedLatch();
@@ -486,6 +488,55 @@ void t_tare_rebases_flow_signature() {
   const size_t closedQuiet = hostRelayClosedWrites;
   CHECK(machineRequestStop());
   CHECK(hostRelayClosedWrites == closedQuiet);
+}
+
+void t_fast_control_loop_still_confirms_on() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  currentWeight = 0.2f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  runLoopAfter(50);
+  for (int step = 0; step < 8; ++step) {
+    currentWeight += 0.45f;
+    currentWeightReceivedAtMs = hostMillis;
+    ++currentWeightSequence;
+    for (int tick = 0; tick < 10; ++tick) {
+      runLoopAfter(10);
+    }
+  }
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  CHECK(machineAllowsFirmwareStopPulse());
+  const size_t closedBefore = hostRelayClosedWrites;
+  CHECK(machineRequestStop());
+  CHECK(hostRelayClosedWrites == closedBefore + 1);
+}
+
+void t_start_tare_drop_rebases_then_confirms() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  currentWeight = 40.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  runLoopAfter(100);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  currentWeight = 0.2f;
+  currentWeightReceivedAtMs = hostMillis;
+  ++currentWeightSequence;
+  runLoopAfter(100);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  for (int step = 0; step < 8; ++step) {
+    currentWeight += 0.45f;
+    currentWeightReceivedAtMs = hostMillis;
+    ++currentWeightSequence;
+    runLoopAfter(100);
+  }
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  const size_t closedBefore = hostRelayClosedWrites;
+  CHECK(machineRequestStop());
+  CHECK(hostRelayClosedWrites == closedBefore + 1);
 }
 
 void t_user_stop_does_not_extra_pulse_when_assumed_on() {
@@ -970,6 +1021,34 @@ void t_settled_weight_cut_flow_is_not_polarity() {
   CHECK(hostRelayClosedWrites == closedBefore);
 }
 
+void t_weight_cut_pulses_after_confirmed_expires_to_assumed() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  confirmEspressoFlow();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  holdStableWeight(600);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  machineArmSettledWeightCutOff();
+  const size_t closedBefore = hostRelayClosedWrites;
+  CHECK(machineRequestStop());
+  CHECK(hostRelayClosedWrites == closedBefore + 1);
+}
+
+void t_weight_cut_pulses_on_assumed_on_after_first_drop() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  CHECK(machineRunState() == MachineRunState::ASSUMED_ON);
+  session.firstDropMs = millis();
+  runLoopAfter(20);
+  CHECK(!machineAllowsFirmwareStopPulse());
+  machineArmSettledWeightCutOff();
+  const size_t closedBefore = hostRelayClosedWrites;
+  CHECK(machineRequestStop());
+  CHECK(hostRelayClosedWrites == closedBefore + 1);
+}
+
 void t_user_stop_after_preinfusion_does_not_pulse() {
   resetMomentaryHarness();
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
@@ -1343,6 +1422,8 @@ const TestCase kTests[] = {
     {"P04", t_only_auto_cut_needs_confirmed_on},
     {"P05", t_quiet_pan_does_not_force_cut_when_unknown},
     {"P09", t_tare_rebases_flow_signature},
+    {"P09B", t_fast_control_loop_still_confirms_on},
+    {"P09C", t_start_tare_drop_rebases_then_confirms},
     {"P10", t_user_stop_does_not_extra_pulse_when_assumed_on},
     {"P11", t_wall_with_quiet_pan_does_not_auto_pulse},
     {"P12", t_settings_lock_follows_logical_run},
@@ -1366,6 +1447,8 @@ const TestCase kTests[] = {
     {"P25F", t_settled_weight_cut_confirms_off},
     {"P25G", t_settled_weight_cut_stays_armed_while_pouring},
     {"P25H", t_settled_weight_cut_flow_is_not_polarity},
+    {"P25N", t_weight_cut_pulses_after_confirmed_expires_to_assumed},
+    {"P25O", t_weight_cut_pulses_on_assumed_on_after_first_drop},
     {"P26", t_user_stop_after_preinfusion_does_not_pulse},
     {"P27", t_accidental_touch_does_not_confirm_on},
     {"P28", t_gap_skip_does_not_confirm_from_step},

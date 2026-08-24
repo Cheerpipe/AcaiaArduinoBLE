@@ -6,10 +6,15 @@
 // WHAT: MachineRunState without reed. Never canonical: boot is OFF, a missing
 //       scale is UNKNOWN (no auto-cut), quiet pan reinforces OFF, and
 //       espresso-like rising flow (g/s) is the only path to CONFIRMED_ON.
-//       CONFIRMED_ON expires without recent flow so auto-cut cannot pulse a
-//       stopped group. A logical stop goes to ASSUMED_OFF (stop-settling) until
-//       the pan is quiet, including after the stop-ack timeout. Consumes
-//       MachineSense pushed by the stopper.
+//       Flow uses BLE sample spacing, not the control-loop period: a still-
+//       fresh reading resampled every few ms must not reset the rising window,
+//       or the state stays ASSUMED_ON and auto-cut never pulses. A tare-like
+//       drop to ~0 g rebases the shot baseline even before CONFIRMED_ON, so
+//       start tare / late-cup retare are visible to inference. CONFIRMED_ON
+//       expires without recent flow so auto-cut cannot pulse a stopped group.
+//       A logical stop goes to ASSUMED_OFF (stop-settling) until the pan is
+//       quiet, including after the stop-ack timeout. Consumes MachineSense
+//       pushed by the stopper.
 //
 // BOUNDARY: This file alone determines momentary-only run state. Do not put
 // reed GPIO here (that is MomentaryReedState). Do not put paddle latch logic
@@ -35,11 +40,13 @@ constexpr uint32_t MOMENTARY_STALE_UNKNOWN_MS = 1500;
 MachineRunState momentaryInferredState = MachineRunState::CONFIRMED_OFF;
 bool momentarySawScale = false;
 bool momentaryEspressoConfirmed = false;
+bool momentarySawEspresso = false;
 float momentaryShotBaselineG = 0.0f;
 float momentaryQuietBaselineG = 0.0f;
 uint32_t momentaryQuietSinceMs = 0;
 float momentaryLastWeightG = 0.0f;
 uint32_t momentaryLastWeightAtMs = 0;
+uint32_t momentaryLastWeightSequence = 0;
 uint32_t momentaryRisingSinceMs = 0;
 uint32_t momentaryLowFlowSinceMs = 0;
 bool momentaryStopAwaitingAck = false;
@@ -60,6 +67,7 @@ inline float momentaryLiveWeightG() { return machineSense.weightG; }
 void noteMomentaryLogicalStart() {
   momentaryInferredState = MachineRunState::ASSUMED_ON;
   momentaryEspressoConfirmed = false;
+  momentarySawEspresso = false;
   momentaryRisingSinceMs = 0;
   momentaryLowFlowSinceMs = 0;
   momentaryStopAwaitingAck = false;
@@ -79,6 +87,7 @@ void noteMomentaryLogicalStart() {
     momentaryQuietBaselineG = weight;
     momentaryLastWeightG = weight;
     momentaryLastWeightAtMs = millis();
+    momentaryLastWeightSequence = machineSense.weightSequence;
   } else {
     momentaryShotBaselineG = 0.0f;
   }
@@ -145,6 +154,7 @@ void noteMomentaryDisqualifiedPress(bool restoreRunning) {
 
 void settleMomentaryInferredOff() {
   momentaryEspressoConfirmed = false;
+  momentarySawEspresso = false;
   momentaryRisingSinceMs = 0;
   momentaryLowFlowSinceMs = 0;
   momentaryStopAwaitingAck = false;
@@ -171,6 +181,7 @@ void machineOverrideInferredOn() {
   momentarySettledWeightCutArmed = false;
   momentaryStopSettling = false;
   momentaryEspressoConfirmed = true;
+  momentarySawEspresso = true;
   momentaryInferredState = MachineRunState::CONFIRMED_ON;
   momentaryLogicalRunActive = true;
   momentaryLogicalRunStartedAtMs = millis();
@@ -208,6 +219,9 @@ void serviceMomentaryRunSensors() {
       momentaryStartAwaitingAck) {
     momentaryInferredState = MachineRunState::ASSUMED_ON;
   }
+  if (machineSense.firstDropSeen) {
+    momentarySawEspresso = true;
+  }
   if (!machineSense.weightFresh) {
     if (momentaryStaleSinceMs == 0) {
       momentaryStaleSinceMs = millis();
@@ -240,21 +254,32 @@ void serviceMomentaryRunSensors() {
   momentarySawScale = true;
   const float weight = momentaryLiveWeightG();
   const uint32_t now = millis();
+  const bool uninitialized = momentaryLastWeightAtMs == 0;
   const uint32_t dtMs =
-      momentaryLastWeightAtMs == 0 ? 0U : elapsedMs(momentaryLastWeightAtMs);
+      uninitialized ? 0U : elapsedMs(momentaryLastWeightAtMs);
   const float jump = fabsf(weight - momentaryLastWeightG);
   const bool finger = jump > MOMENTARY_FINGER_JUMP_G;
   const bool accidental = machineSense.accidentalHold;
-  const bool skipFlow = finger || accidental || dtMs < 40U ||
+  // Same BLE packet re-pushed every control-loop tick. Do not treat that as a
+  // new sample: after ~40 ms the dt would look like 0 g/s and reset rising,
+  // so the state would stay ASSUMED_ON for the whole shot.
+  const bool sameSample =
+      !uninitialized && machineSense.weightSequence != 0 &&
+      machineSense.weightSequence == momentaryLastWeightSequence;
+  const bool tooSoon = !uninitialized && !sameSample && dtMs < 40U;
+  const bool resample = (sameSample || tooSoon) && !finger && !accidental;
+  const bool skipFlow = finger || accidental || uninitialized || resample ||
                         dtMs >= MOMENTARY_FLOW_GAP_SKIP_MS;
   float flowGps = 0.0f;
   if (!skipFlow) {
     flowGps = (weight - momentaryLastWeightG) * 1000.0f / static_cast<float>(dtMs);
   }
 
-  if (momentaryLogicalRunActive && !finger && !accidental &&
-      momentaryEspressoConfirmed && weight < MOMENTARY_TARE_RESET_G &&
-      momentaryLastWeightG > 2.0f) {
+  // Tare / late retare: the scale drops to ~0 g, often as a finger-sized jump.
+  // Rebase even before espresso is confirmed so start tare and cup retare do
+  // not leave the shot baseline on the pre-tare cup mass.
+  if (momentaryLogicalRunActive && !accidental &&
+      weight < MOMENTARY_TARE_RESET_G && momentaryLastWeightG > 2.0f) {
     momentaryShotBaselineG = weight;
     momentaryQuietBaselineG = weight;
     momentaryEspressoConfirmed = false;
@@ -303,6 +328,7 @@ void serviceMomentaryRunSensors() {
         momentaryStopAwaitingAck = false;
         momentaryStopSettling = false;
         momentaryEspressoConfirmed = true;
+        momentarySawEspresso = true;
         momentaryInferredState = MachineRunState::CONFIRMED_ON;
         momentaryLogicalRunActive = true;
         if (momentaryLogicalRunStartedAtMs == 0) {
@@ -341,9 +367,14 @@ void serviceMomentaryRunSensors() {
         momentaryLowFlowSinceMs = now;
       }
       if (elapsedMs(momentaryLowFlowSinceMs) >= MOMENTARY_FLOW_HOLD_MS) {
-        momentaryEspressoConfirmed = false;
+        const bool keepConfirmed =
+            machineSense.brewCycleActive && machineSense.firstDropSeen &&
+            (weight - momentaryShotBaselineG) >= MOMENTARY_CONFIRM_DELTA_G;
         momentaryLowFlowSinceMs = 0;
-        momentaryInferredState = MachineRunState::ASSUMED_ON;
+        if (!keepConfirmed) {
+          momentaryEspressoConfirmed = false;
+          momentaryInferredState = MachineRunState::ASSUMED_ON;
+        }
       }
     } else {
       momentaryLowFlowSinceMs = 0;
@@ -374,6 +405,7 @@ void serviceMomentaryRunSensors() {
       const bool recoverFromAssumedOff =
           momentaryInferredState == MachineRunState::ASSUMED_OFF;
       momentaryEspressoConfirmed = true;
+      momentarySawEspresso = true;
       momentaryStartAwaitingAck = false;
       momentaryStartBaselineSinceMs = 0;
       momentaryStopSettling = false;
@@ -386,17 +418,29 @@ void serviceMomentaryRunSensors() {
         momentaryLogicalOperationalLimitMs = runtimeConfig.operationalWallMs;
       }
     }
-  } else if (skipFlow || flowGps < MOMENTARY_FLOW_OFF_G_S) {
+  } else if (!resample &&
+             (skipFlow || flowGps < MOMENTARY_FLOW_OFF_G_S)) {
     momentaryRisingSinceMs = 0;
   }
 
-  momentaryLastWeightG = weight;
-  momentaryLastWeightAtMs = now;
+  if (!resample) {
+    momentaryLastWeightG = weight;
+    momentaryLastWeightAtMs = now;
+    momentaryLastWeightSequence = machineSense.weightSequence;
+  }
 }
 
 bool machineAllowsFirmwareStopPulse() {
-  return momentaryInferredState == MachineRunState::CONFIRMED_ON &&
-         !momentaryPhysicalOn;
+  if (momentaryPhysicalOn) {
+    return false;
+  }
+  if (momentaryInferredState == MachineRunState::CONFIRMED_ON) {
+    return true;
+  }
+  // Weight cut after coffee was on the pan: flow may already have dropped to
+  // ASSUMED_ON. Do not pulse walls or user-stop from a never-confirmed start.
+  return momentarySettledWeightCutArmed && momentarySawEspresso &&
+         momentaryInferredState == MachineRunState::ASSUMED_ON;
 }
 
 inline bool machineRunningElapsed(uint32_t &elapsedOut) {
