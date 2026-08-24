@@ -89,6 +89,11 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
 .stateReady{color:var(--ok);font-weight:700}
 .stateActive{color:var(--ac);font-weight:700}
 .stateFault{color:var(--dn);font-weight:700}
+#machineStateValue.stateReady{color:var(--ok);font-weight:700}
+#machineStateValue.stateActive{color:var(--ac);font-weight:700}
+#machineStateValue.stateFault{color:var(--dn);font-weight:700}
+#machineStateValue a{color:inherit;font:inherit;font-weight:inherit;text-decoration:underline;cursor:pointer}
+#machineStateValue a[aria-disabled=true]{pointer-events:none;cursor:default}
 .error{color:var(--dn)}.ok{color:var(--ok)}.warn{color:var(--wn)}
 .hidden{display:none}.fieldOff{opacity:.45}
 html.momentaryMachine .paddleOnly,html:not(.reedMachine) .reedOnly,html:not(.momentaryMachine) .momentaryOnly,html.reedMachine .switchOnly,html:not(.momentaryMachine) .switchOnly{display:none}

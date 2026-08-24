@@ -983,11 +983,16 @@ if (!html.includes('<summary>Switch</summary>') ||
     !ui.includes('reedConfirmTimeoutMs:') ||
     !ui.includes('assumeIdleWhenScaleConnects:') ||
     !ui.includes('shotReactTimeoutS:') ||
-    !ui.includes('id="overrideIdleButton"') ||
-    !ui.includes('id="overrideBrewingButton"') ||
+    !ui.includes('id="overrideIdleLink"') ||
+    !ui.includes('id="overrideBrewingLink"') ||
+    !ui.includes('id="machineStateValue"') ||
     !ui.includes('/api/v1/control/state-override') ||
     !ui.includes('updateHomeAdminActions') ||
-    !ui.includes("d.classList.contains('momentaryMachine')&&!d.classList.contains('reedMachine')") ||
+    !ui.includes('function updateHomeAdminActions(unlocked){const panel=$(') ||
+    !ui.includes('show=!!unlocked') ||
+    ui.includes('id="overrideIdleButton"') ||
+    ui.includes('id="overrideBrewingButton"') ||
+    ui.includes("d.classList.contains('momentaryMachine')&&!d.classList.contains('reedMachine')") ||
     !html.includes('Assume idle when the scale connects') ||
     !html.includes('On connect with no brew, mark idle. No pulse.') ||
     !html.includes('Shot reaction timeout') ||

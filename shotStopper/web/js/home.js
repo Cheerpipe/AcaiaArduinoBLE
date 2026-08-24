@@ -10,7 +10,7 @@ export function init(){
   $('rinseButton').onclick=()=>R.command('/api/v1/control/rinse');
   $('stopButton').onclick=()=>$('stopButton').dataset.mode==='stop'?R.command('/api/v1/control/stop'):R.command('/api/v1/control/paddle',{on:true});
   $('clearLastShotButton').onclick=R.clearLastShot;
-  [['overrideIdleButton','off'],['overrideBrewingButton','on']].forEach(([i,s])=>{const b=$(i);if(b)b.onclick=()=>R.command('/api/v1/control/state-override',{state:s})});
+  [['overrideIdleLink','off'],['overrideBrewingLink','on']].forEach(([i,s])=>{const a=$(i);if(!a)return;a.onclick=e=>{e.preventDefault();if(a.getAttribute('aria-disabled')==='true')return;R.command('/api/v1/control/state-override',{state:s})}});
   if($('homeBrewByWeight'))$('homeBrewByWeight').onchange=R.persistHomeBrewByWeight;
   if($('homeAvoidBbwShotWithoutScale'))$('homeAvoidBbwShotWithoutScale').onchange=()=>R.persistHomeGuard('homeAvoidBbwShotWithoutScale','homeAvoidBbwShotWithoutScaleState','avoidBbwShotWithoutScale',0);
   if($('homeFastExtractionGuardEnabled'))$('homeFastExtractionGuardEnabled').onchange=()=>R.persistHomeGuard('homeFastExtractionGuardEnabled','homeFastExtractionGuardEnabledState','fastExtractionGuardEnabled',1);
