@@ -79,7 +79,9 @@ internal fallback) + placement `new` so small host objects skip the
 ALWAYSINTERNAL DRAM threshold and a failed alloc drops the advert instead of
 `abort()` via `bad_alloc`. VHCI RX/TX stream ops, ACL credit waits, and ATT
 indication confirms use ≤1 s deadlines (or the configured ATT timeout). The
-VHCI stream buffers and `bleTask` stack stay in internal SRAM. Idle discovery
+VHCI stream buffers stay in internal SRAM. `bleTask` uses a 4 KiB internal
+stack (stock ArduinoBLE 2.1.0 is 2048 bytes, which overflows on IDF 5.5
+VHCI send). Idle discovery
 keeps that scan enabled until a match or filter change; `startScan()` /
 `pollScan()` do not cycle GAP every 1 s or 3 s. GATT connect is stepped across
 `pollScan()` calls so the owner task can feed its watchdog between ATT ops.

@@ -118,6 +118,9 @@ constexpr size_t BLE_COMPANION_RESULT_QUEUE_LENGTH = 8;
 // Measured high-water headroom with the full Companion profile is over 6 KiB.
 // Keep spare above that while returning scarce internal RAM to LwIP/httpd.
 constexpr uint32_t SCALE_WORKER_TASK_STACK_SIZE = 6656;
+// HCI reset + local version + event masks after controller enable. Stay under
+// the 5 s task WDT; yield so the worker on this core can run BLE.begin().
+constexpr uint32_t BLE_STACK_READY_WAIT_MS = 4000;
 // Persist blob is PSRAM BSS, not a 3 KiB stack local. Keep headroom for
 // Preferences / TWDT on the flash-writing task (stack stays internal).
 constexpr uint32_t SETTINGS_PERSIST_TASK_STACK_SIZE = 4096;
@@ -3700,6 +3703,17 @@ bool initializeScaleWorker() {
     scaleWorkerTaskHandle = nullptr;
     return false;
   }
+#if !defined(SHOT_STOPPER_HOST_TEST)
+  // BLE.begin() runs on this worker. Do not start OTA/Wi-Fi until the
+  // controller has finished HCI reset: setup() continues on the same core
+  // and network_manager shares core 0 with bleTask.
+  const uint32_t bleWaitStartMs = millis();
+  while (scaleWorkerTaskHandle != nullptr && !bleStackReady &&
+         elapsedMs(bleWaitStartMs) < BLE_STACK_READY_WAIT_MS) {
+    (void)feedCurrentTaskWatchdog();
+    delay(20);
+  }
+#endif
   return true;
 }
 

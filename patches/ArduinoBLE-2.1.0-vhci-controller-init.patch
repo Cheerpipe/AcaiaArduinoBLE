@@ -1,0 +1,176 @@
+diff -ruN a/src/utility/HCIVirtualTransport.cpp b/src/utility/HCIVirtualTransport.cpp
+--- a/src/utility/HCIVirtualTransport.cpp	2026-08-24 18:33:58
++++ b/src/utility/HCIVirtualTransport.cpp	2026-08-24 18:33:58
+@@ -34,8 +34,28 @@
+ #define HCI_VHCI_IO_TIMEOUT_MS 1000
+ #endif
+ 
++// IDF 5.5 VHCI send uses the caller's stack for controller/coex work. Stock
++// ArduinoBLE's 2048-byte bleTask overflows; the next take is a 0xffffffff
++// semaphore and the internal heap is smashed.
++#ifndef HCI_VHCI_TASK_STACK
++#define HCI_VHCI_TASK_STACK 4096
++#endif
++
++#ifndef HCI_VHCI_TASK_CORE
++#ifdef CONFIG_BT_CTRL_PINNED_TO_CORE
++#define HCI_VHCI_TASK_CORE CONFIG_BT_CTRL_PINNED_TO_CORE
++#else
++#define HCI_VHCI_TASK_CORE 0
++#endif
++#endif
++
++static uint8_t vhci_tx_buf[258];
++
+ static int notify_host_recv(uint8_t *data, uint16_t length)
+ {
++  if (rec_buffer == nullptr) {
++    return 0;
++  }
+   // Bound the VHCI RX callback: drop if the host is not draining within 1 s.
+   (void)xStreamBufferSend(rec_buffer, data, length, pdMS_TO_TICKS(HCI_VHCI_IO_TIMEOUT_MS));
+   return 0;
+@@ -48,12 +68,15 @@
+ 
+ void bleTask(void *pvParameters)
+ {
+-  esp_vhci_host_register_callback(&vhci_host_cb);
++  (void)pvParameters;
+   size_t length;
+-  uint8_t mybuf[258];
+ 
+   while(true){
+-    length = xStreamBufferReceive(send_buffer,mybuf,258,portMAX_DELAY);
++    if (send_buffer == nullptr) {
++      vTaskDelay(1);
++      continue;
++    }
++    length = xStreamBufferReceive(send_buffer, vhci_tx_buf, 258, portMAX_DELAY);
+     if (length == 0) {
+       continue;
+     }
+@@ -64,8 +87,9 @@
+       }
+       vTaskDelay(1);
+     }
+-    if (esp_vhci_host_check_send_available()) {
+-      esp_vhci_host_send_packet(mybuf, length);
++    if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED &&
++        esp_vhci_host_check_send_available()) {
++      esp_vhci_host_send_packet(vhci_tx_buf, length);
+     }
+   }
+ }
+@@ -85,12 +109,23 @@
+ 
+   rec_buffer = xStreamBufferCreate(258, 1);
+   send_buffer = xStreamBufferCreate(258, 1);
++  if (rec_buffer == nullptr || send_buffer == nullptr) {
++    end();
++    return 0;
++  }
+ 
+   esp_err_t ret = nvs_flash_init();
+   if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+-    ESP_ERROR_CHECK(nvs_flash_erase());
++    if (nvs_flash_erase() != ESP_OK) {
++      end();
++      return 0;
++    }
+     ret = nvs_flash_init();
+   }
++  if (ret != ESP_OK) {
++    end();
++    return 0;
++  }
+   esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+   
+ #if CONFIG_IDF_TARGET_ESP32
+@@ -101,20 +136,48 @@
+ #endif
+ #endif
+ 
+-  esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+-  esp_bt_controller_init(&bt_cfg);
+-  esp_bt_controller_enable(ESP_BT_MODE_BLE);
+-  xTaskCreatePinnedToCore(&bleTask, "bleTask", 2048, NULL, 5, &bleHandle, 0);
++  (void)esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
++  if (esp_bt_controller_init(&bt_cfg) != ESP_OK) {
++    end();
++    return 0;
++  }
++  if (esp_bt_controller_enable(ESP_BT_MODE_BLE) != ESP_OK) {
++    end();
++    return 0;
++  }
++  if (esp_vhci_host_register_callback(&vhci_host_cb) != ESP_OK) {
++    end();
++    return 0;
++  }
++  if (xTaskCreatePinnedToCore(&bleTask, "bleTask", HCI_VHCI_TASK_STACK, NULL, 5,
++                              &bleHandle, HCI_VHCI_TASK_CORE) != pdPASS) {
++    bleHandle = nullptr;
++    end();
++    return 0;
++  }
+   return 1;
+ }
+ 
+ void HCIVirtualTransportClass::end()
+ {
+-  vStreamBufferDelete(rec_buffer);
+-  vStreamBufferDelete(send_buffer);
+-  esp_bt_controller_disable();
+-  esp_bt_controller_deinit();
+-  vTaskDelete(bleHandle);
++  if (bleHandle != nullptr) {
++    vTaskDelete(bleHandle);
++    bleHandle = nullptr;
++  }
++  if (rec_buffer != nullptr) {
++    vStreamBufferDelete(rec_buffer);
++    rec_buffer = nullptr;
++  }
++  if (send_buffer != nullptr) {
++    vStreamBufferDelete(send_buffer);
++    send_buffer = nullptr;
++  }
++  if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED) {
++    (void)esp_bt_controller_disable();
++  }
++  if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_INITED) {
++    (void)esp_bt_controller_deinit();
++  }
+ }
+ 
+ void HCIVirtualTransportClass::wait(unsigned long timeout)
+@@ -128,6 +191,9 @@
+ 
+ int HCIVirtualTransportClass::available()
+ {
++  if (rec_buffer == nullptr) {
++    return 0;
++  }
+   size_t bytes	= xStreamBufferBytesAvailable(rec_buffer);
+   return bytes;
+ }
+@@ -142,7 +208,8 @@
+ {
+   uint8_t c;
+   // poll() already waited for availability; bound any residual receive.
+-  if (xStreamBufferReceive(rec_buffer, &c, 1, pdMS_TO_TICKS(HCI_VHCI_IO_TIMEOUT_MS))) {
++  if (rec_buffer != nullptr &&
++      xStreamBufferReceive(rec_buffer, &c, 1, pdMS_TO_TICKS(HCI_VHCI_IO_TIMEOUT_MS))) {
+     return c;
+   }
+   return -1;
+@@ -150,6 +217,9 @@
+ 
+ size_t HCIVirtualTransportClass::write(const uint8_t* data, size_t length)
+ {
++  if (send_buffer == nullptr) {
++    return 0;
++  }
+   return xStreamBufferSend(send_buffer, data, length, pdMS_TO_TICKS(HCI_VHCI_IO_TIMEOUT_MS));
+ }
+ 
