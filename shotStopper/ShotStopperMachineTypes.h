@@ -38,6 +38,54 @@ enum class UserIntent : uint8_t {
   STABLE_IDLE = 4
 };
 
+// Latch-switch brew feel. Snapshot by the machine at cycle start; brew/stopper
+// never branch on this enum. Natural = OFF ends the shot. Original = legacy
+// start gesture (BBW+scale: OFF after rinse keeps the circuit closed until
+// weight stop; ON again promotes to Natural). Auto = BBW finish regardless of
+// ON/OFF (no promote, no hold-off of automation).
+enum class PaddleMode : uint8_t {
+  NATURAL = 0,
+  ORIGINAL = 1,
+  AUTO = 2
+};
+
+inline bool validPaddleMode(uint8_t mode) {
+  return mode == static_cast<uint8_t>(PaddleMode::NATURAL) ||
+         mode == static_cast<uint8_t>(PaddleMode::ORIGINAL) ||
+         mode == static_cast<uint8_t>(PaddleMode::AUTO);
+}
+
+inline const char *paddleModeId(uint8_t mode) {
+  switch (static_cast<PaddleMode>(mode)) {
+    case PaddleMode::ORIGINAL:
+      return "original";
+    case PaddleMode::AUTO:
+      return "auto";
+    case PaddleMode::NATURAL:
+    default:
+      return "natural";
+  }
+}
+
+inline bool parsePaddleMode(const char *text, uint8_t &mode) {
+  if (text == nullptr) {
+    return false;
+  }
+  if (strcmp(text, "natural") == 0) {
+    mode = static_cast<uint8_t>(PaddleMode::NATURAL);
+    return true;
+  }
+  if (strcmp(text, "original") == 0) {
+    mode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
+    return true;
+  }
+  if (strcmp(text, "auto") == 0) {
+    mode = static_cast<uint8_t>(PaddleMode::AUTO);
+    return true;
+  }
+  return false;
+}
+
 inline const char *momentaryStartEdgeId(bool startOnPress) {
   return startOnPress ? "press" : "release";
 }

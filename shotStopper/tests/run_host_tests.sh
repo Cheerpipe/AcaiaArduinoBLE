@@ -29,9 +29,11 @@ scan_firmware_sources() {
     "$firmware_dir/ShotStopperHardware.h" \
     "$firmware_dir/ShotStopperMachine.h" \
     "$firmware_dir/ShotStopperMachineRelay.h" \
+    "$firmware_dir/ShotStopperMachineSwitchSample.h" \
     "$firmware_dir/ShotStopperMachinePaddleInput.h" \
     "$firmware_dir/ShotStopperMachinePaddleControl.h" \
     "$firmware_dir/ShotStopperMachinePaddleState.h" \
+    "$firmware_dir/ShotStopperMachinePaddlePolicy.h" \
     "$firmware_dir/ShotStopperMachineMomentaryInput.h" \
     "$firmware_dir/ShotStopperMachineMomentaryControl.h" \
     "$firmware_dir/ShotStopperMachineMomentaryReedState.h" \
@@ -163,6 +165,16 @@ for removed_symbol in REEDSWITCH REED_IN BUTTON_STATE_ARRAY_LENGTH; do
 done
 
 echo "Legacy Micra-incompatible paths: absent"
+
+for machine_gpio_leak in 'readRawPaddleOn(' 'pinMode(RELAY_GPIO' \
+    '#if SHOT_STOPPER_MACHINE_TYPE'; do
+  if grep -n "$machine_gpio_leak" "$firmware_file"; then
+    echo "Machine GPIO/type leak remains in shotStopper.cpp: $machine_gpio_leak" >&2
+    exit 1
+  fi
+done
+
+echo "shotStopper.cpp machine GPIO/type leaks: absent"
 
 for removed_led_path in LED_RED_PIN LED_BLUE_PIN LED_GREEN_PIN 'analogWrite(' \
     SHOT_STOPPER_ENABLE_ALED rgbLedWrite status_indicator WS2812; do

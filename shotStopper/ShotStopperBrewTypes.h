@@ -10,52 +10,6 @@
 
 namespace shotstopper {
 
-// Natural = current FW paddle semantics. Original = legacy Shot Stopper
-// start gesture (BBW+scale only). Auto = BBW finish regardless of paddle
-// ON/OFF (auto-natural vs auto-original in the same shot).
-enum class PaddleMode : uint8_t {
-  NATURAL = 0,
-  ORIGINAL = 1,
-  AUTO = 2
-};
-
-inline bool validPaddleMode(uint8_t mode) {
-  return mode == static_cast<uint8_t>(PaddleMode::NATURAL) ||
-         mode == static_cast<uint8_t>(PaddleMode::ORIGINAL) ||
-         mode == static_cast<uint8_t>(PaddleMode::AUTO);
-}
-
-inline const char *paddleModeId(uint8_t mode) {
-  switch (static_cast<PaddleMode>(mode)) {
-    case PaddleMode::ORIGINAL:
-      return "original";
-    case PaddleMode::AUTO:
-      return "auto";
-    case PaddleMode::NATURAL:
-    default:
-      return "natural";
-  }
-}
-
-inline bool parsePaddleMode(const char *text, uint8_t &mode) {
-  if (text == nullptr) {
-    return false;
-  }
-  if (strcmp(text, "natural") == 0) {
-    mode = static_cast<uint8_t>(PaddleMode::NATURAL);
-    return true;
-  }
-  if (strcmp(text, "original") == 0) {
-    mode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
-    return true;
-  }
-  if (strcmp(text, "auto") == 0) {
-    mode = static_cast<uint8_t>(PaddleMode::AUTO);
-    return true;
-  }
-  return false;
-}
-
 constexpr uint32_t DEFAULT_LAST_SHOT_COOLDOWN_MS = 60UL * 60UL * 1000UL;
 constexpr uint32_t MIN_LAST_SHOT_COOLDOWN_MS = 5UL * 60UL * 1000UL;
 constexpr uint32_t MAX_LAST_SHOT_COOLDOWN_MS = 240UL * 60UL * 1000UL;

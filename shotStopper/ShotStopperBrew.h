@@ -3,7 +3,7 @@
 #include "ShotStopperAlert.h"
 #include "ShotStopperBrewTypes.h"
 
-// Brew-by-weight policy, extraction guards, paddle-mode semantics.
+// Brew-by-weight policy and extraction guards.
 // Included from shotStopper.cpp after Machine and session BSS. No heap.
 
 bool fastExtractionGuardSession();
@@ -467,7 +467,7 @@ void serviceNoScaleShotGuard() {
   if (noScaleShotGuardHold) {
     if (!noScaleShotGuardWouldBlock()) {
       noScaleShotGuardHold = false;
-    } else if (rawPaddleOn &&
+    } else if (machinePollIntention().holdActive &&
                elapsedMs(noScaleShotGuardHoldAtMs) >
                    runtimeConfig.rinseGestureMs) {
       blockNoScaleShotGuard();
@@ -508,7 +508,7 @@ void serviceCupStartGuard() {
     cupStartGuardHold = false;
     return;
   }
-  if (rawPaddleOn &&
+  if (machinePollIntention().holdActive &&
       elapsedMs(cupStartGuardHoldAtMs) > runtimeConfig.rinseGestureMs) {
     cupStartGuardHold = false;
     addDebugEvent(DebugCategory::STATE, DebugCode::CUP_START_GUARD_BLOCKED,
@@ -551,30 +551,6 @@ bool autoToManualGuardDeadlineDue() {
   return static_cast<int32_t>(millis() -
                               session.autoToManualGuardDeadlineAtMs) >= 0;
 }
-bool paddleModeOriginal() {
-  return session.config.paddleMode ==
-         static_cast<uint8_t>(PaddleMode::ORIGINAL);
-}
-
-bool paddleModeAuto() {
-  return session.config.paddleMode == static_cast<uint8_t>(PaddleMode::AUTO);
-}
-
-bool originalBbwSemanticsActive() {
-  return session.active && paddleModeOriginal() &&
-         !session.paddlePromotedToNatural && session.startedWithScale &&
-         !session.config.timerOnly && stopperState == StopperState::BREW;
-}
-
-bool autoBbwSemanticsActive() {
-  return session.active && paddleModeAuto() && session.startedWithScale &&
-         !session.config.timerOnly && stopperState == StopperState::BREW;
-}
-
-bool originalBbwHoldOverride() {
-  return originalBbwSemanticsActive() && (paddleOn || rawPaddleOn);
-}
-
 bool automaticScaleStopDue() {
   if (session.config.timerOnly || stopperState != StopperState::BREW ||
       bbwWeightStopInhibited()) {

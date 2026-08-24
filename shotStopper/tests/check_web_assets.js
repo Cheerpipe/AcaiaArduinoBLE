@@ -15,9 +15,11 @@ const firmware = [
   fs.readFileSync(path.join(sketchDir, 'ShotStopperHardware.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachine.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineRelay.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineSwitchSample.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleInput.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleControl.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleState.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddlePolicy.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryInput.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryControl.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineMomentaryReedState.h'), 'utf8'),
@@ -384,7 +386,7 @@ if (!network.includes('"firstDropBeep"') ||
     !firmware.includes('localBuzzer') ||
     !firmware.includes('BUZZER_SUPPORT_ENABLED') ||
     !firmware.includes('BUZZER_GPIO') ||
-    !firmware.includes('servicePaddleReturnReminder')) {
+    !firmware.includes('machineServiceReminders')) {
   throw new Error('Scale beep settings must be configurable end-to-end');
 }
 if (firmware.includes('SHOT_STOPPER_ENABLE_ALED') ||
@@ -860,12 +862,35 @@ if (!html.includes('<summary>Paddle</summary>') ||
     !network.includes('paddleMode must be auto, natural or original.') ||
     !network.includes('jsonPaddleMode') ||
     !firmware.includes('candidate.paddleMode = command.config.paddleMode') ||
-    !firmware.includes('autoBbwSemanticsActive()') ||
+    !firmware.includes('machineHidesPhysicalStop()') ||
+    !firmware.includes('machineAllowsAutomationStop()') ||
+    !firmware.includes('machineBeginCycle') ||
     !domain.includes('enum class PaddleMode') ||
     !domain.includes('NATURAL = 0') ||
     !domain.includes('ORIGINAL = 1') ||
-    !domain.includes('AUTO = 2')) {
+    !domain.includes('AUTO = 2') ||
+    !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineTypes.h'), 'utf8')
+         .includes('enum class PaddleMode') ||
+    !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddlePolicy.h'), 'utf8')
+         .includes('machinePollIntention()') ||
+    fs.readFileSync(path.join(sketchDir, 'ShotStopperBrewTypes.h'), 'utf8')
+        .includes('enum class PaddleMode') ||
+    fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8')
+        .includes('PaddleMode') ||
+    fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8')
+        .includes('paddleMode')) {
   throw new Error('Machine Paddle mode must expose Auto/Natural/Original in UI, API, and APPLY_CONFIG');
+}
+if (firmwareCore.includes('readRawPaddleOn()') ||
+    firmwareCore.includes('pinMode(RELAY_GPIO') ||
+    firmwareCore.includes('#if SHOT_STOPPER_MACHINE_TYPE') ||
+    !firmware.includes('pinMode(RELAY_GPIO, OUTPUT)') ||
+    !firmware.includes('machineBootSwitchHeldStably()') ||
+    !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineSwitchSample.h'), 'utf8')
+         .includes('bool rawPaddleOn') ||
+    firmwareCore.includes('bool rawPaddleOn')) {
+  throw new Error(
+      'Machine GPIO, switch sample BSS, and boot debounce must live in machine headers — not shotStopper.cpp');
 }
 if (!html.includes('<summary>Momentary</summary>') ||
     !html.includes('id="momentaryStartEdge"') ||

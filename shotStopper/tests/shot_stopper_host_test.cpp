@@ -231,6 +231,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   paddleTurnedOff = false;
   rawPaddleChangedAtMs = 0;
   virtualPaddleOn = false;
+  machineEndCycle();
   circuitClosed = false;
   relaySafetyTripped = false;
   operationalLimitTripped = false;
@@ -322,11 +323,12 @@ void verifySafetyInvariants() {
     std::cerr << "Safety invariant failed: safe state has machine circuit closed\n";
     ++failures;
   }
-  if (!MACHINE_USES_MOMENTARY_SWITCH && !paddleOn && !rawPaddleOn &&
+  if (!MACHINE_USES_MOMENTARY_SWITCH &&
+      machinePollIntention().stablyOff &&
       stopperState != StopperState::RINSE &&
       session.source != ControlSource::WEB && relay.closed &&
-      !originalBbwSemanticsActive() && !autoBbwSemanticsActive()) {
-    std::cerr << "Safety invariant failed: stable paddle OFF has machine circuit closed\n";
+      !machineHidesPhysicalStop()) {
+    std::cerr << "Safety invariant failed: stable idle has machine circuit closed\n";
     ++failures;
   }
 }
@@ -8382,13 +8384,13 @@ void pm01_original_bbw_release_after_rinse_keeps_machine_running() {
   startCycle();
   advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
-  CHECK(originalBbwSemanticsActive());
+  CHECK(machineHidesPhysicalStop());
   setRawPaddle(false);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.active);
   CHECK(getRelaySafetySnapshot().closed);
-  CHECK(originalBbwSemanticsActive());
+  CHECK(machineHidesPhysicalStop());
 }
 
 void pm02_original_bbw_release_inside_rinse_is_rinse() {
@@ -8442,8 +8444,8 @@ void pm05_original_bbw_promote_then_off_ends_like_natural() {
   CHECK(getRelaySafetySnapshot().closed);
   setRawPaddle(true);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
-  CHECK(session.paddlePromotedToNatural);
-  CHECK(!originalBbwSemanticsActive());
+  CHECK(machineCyclePromotedToNaturalForTest());
+  CHECK(!machineHidesPhysicalStop());
   CHECK(stopperState == StopperState::BREW);
   CHECK(getRelaySafetySnapshot().closed);
   setRawPaddle(false);
@@ -8527,7 +8529,7 @@ void pm10_original_bbw_hold_skips_operational_wall() {
   configureOriginalBbwShortWall();
   startCycle();
   advanceToBrew();
-  CHECK(session.originalBbwHardMaxArmed);
+  CHECK(machineCycleHardMaxArmedForTest());
   CHECK(getRelaySafetySnapshot().operationalLimitMs == HARD_MAX_CIRCUIT_CLOSED_MS);
   advanceToOriginalBbwOperationalWall();
   CHECK(stopperState == StopperState::BREW);
@@ -8546,7 +8548,7 @@ void pm11_original_bbw_release_honors_operational_wall() {
   runLoopAfter(PADDLE_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::BREW);
   CHECK(getRelaySafetySnapshot().closed);
-  CHECK(originalBbwSemanticsActive());
+  CHECK(machineHidesPhysicalStop());
   advanceToOriginalBbwOperationalWall();
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(session.endReason == EndReason::CONFIGURED_WALL_LIMIT);
@@ -8561,14 +8563,14 @@ void pm12_auto_bbw_release_after_rinse_keeps_machine_running() {
   startCycle();
   advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
-  CHECK(autoBbwSemanticsActive());
-  CHECK(!session.originalBbwHardMaxArmed);
+  CHECK(machineHidesPhysicalStop());
+  CHECK(!machineCycleHardMaxArmedForTest());
   setRawPaddle(false);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.active);
   CHECK(getRelaySafetySnapshot().closed);
-  CHECK(autoBbwSemanticsActive());
+  CHECK(machineHidesPhysicalStop());
 }
 
 void pm13_auto_bbw_hold_allows_auto_stop() {
@@ -8596,11 +8598,11 @@ void pm14_auto_bbw_off_on_off_stays_brewing() {
   runLoopAfter(PADDLE_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::BREW);
   CHECK(getRelaySafetySnapshot().closed);
-  CHECK(autoBbwSemanticsActive());
+  CHECK(machineHidesPhysicalStop());
   setRawPaddle(true);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
-  CHECK(!session.paddlePromotedToNatural);
-  CHECK(autoBbwSemanticsActive());
+  CHECK(!machineCyclePromotedToNaturalForTest());
+  CHECK(machineHidesPhysicalStop());
   CHECK(stopperState == StopperState::BREW);
   CHECK(getRelaySafetySnapshot().closed);
   setRawPaddle(false);
@@ -8608,7 +8610,7 @@ void pm14_auto_bbw_off_on_off_stays_brewing() {
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.active);
   CHECK(getRelaySafetySnapshot().closed);
-  CHECK(autoBbwSemanticsActive());
+  CHECK(machineHidesPhysicalStop());
 }
 
 void pm15_auto_no_scale_paddle_off_ends_shot() {
@@ -8633,7 +8635,7 @@ void pm16_auto_timer_only_paddle_off_ends_shot() {
   startCycle();
   advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
-  CHECK(!autoBbwSemanticsActive());
+  CHECK(!machineHidesPhysicalStop());
   setRawPaddle(false);
   runLoopAfter(PADDLE_DEBOUNCE_MS);
   CHECK(stopperState == StopperState::READY);

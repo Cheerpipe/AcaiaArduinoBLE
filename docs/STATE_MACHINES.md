@@ -228,25 +228,26 @@ safety.
 
 ## 4. User intent (`UserIntent`)
 
-**Purpose.** Debounced paddle as a *request*, not as machine circuit. The Micra
-paddle is only a GPIO; this machine is how brew policy hears the
-barista.
+**Purpose.** Generic brew request after the machine translates the physical
+switch. The stopper never reads GPIO, paddle mode, or machine type.
 
-Source: `ShotStopperMachineTypes.h`, `machinePollIntention()`.
+Source: `ShotStopperMachineTypes.h`, `machinePollIntention()`. Latch TYPE=0
+maps GPIO + snapshotted `PaddleMode` onto these intents (Original/Auto may
+omit `REQUEST_STOP` after the rinse window). Momentary maps short/long press
+to the same intents.
 
 ### States (snapshot, not latched)
 
 | State | Meaning |
 | --- | --- |
 | `NONE` | No classified edge this sample (transient). |
-| `REQUEST_START` | Rising edge after debounce (`paddleTurnedOn`). On momentary builds this edge is synthetic: **On release** (default) or **On press**, from [Momentary](settings/momentary.md). |
-| `REQUEST_STOP` | Falling edge (`paddleTurnedOff`). |
-| `HOLD_ACTIVE` | Paddle is ON, no new edge. |
-| `STABLE_IDLE` | Paddle OFF long enough to leave `REQUIRES_OFF`. |
+| `REQUEST_START` | User asked to start. |
+| `REQUEST_STOP` | User asked to stop (or rinse if still in the brew rinse window). |
+| `HOLD_ACTIVE` | User is still requesting brew. |
+| `STABLE_IDLE` | User is idle long enough to leave `REQUIRES_OFF`. |
 
-Raw vs stable: `rawPaddleOn` is the pin; `paddleOn` is after
-`PADDLE_DEBOUNCE_MS`. The stopper uses both so a bounce cannot re-close
-Machine circuit.
+The machine owns debounce and bounce-safety. The stopper only sees
+`HOLD_ACTIVE` vs `STABLE_IDLE`.
 
 ---
 
@@ -642,7 +643,7 @@ FSM.
 
 One pass of the control task, simplified:
 
-1. Feed watchdogs. Poll paddle → user intent.
+1. Feed watchdogs. Machine samples the switch and publishes `UserIntent`.
 2. Service relay safety (honor ISR trips, echo GPIO if present).
 3. Recovery gesture only in the boot window; it never closes the machine circuit.
 4. Apply stopper `switch (stopperState)` using intent, weight control,
@@ -663,7 +664,7 @@ from IRAM.
 
 | Name | Why it is omitted |
 | --- | --- |
-| `PaddleMode` (Natural / Original / Auto) | Setting that **changes which stopper events end `BREW`**. |
+| `PaddleMode` (Natural / Original / Auto) | Latch TYPE=0 translator setting. Lives in `ShotStopperMachineTypes.h`; the stopper never branches on it. |
 | `BrewCommand` | Declared, unused at runtime. |
 | `AlertEvent` | Outputs (beeps), not a mode. |
 | `TaskProfilerState` | Diagnostics only. |

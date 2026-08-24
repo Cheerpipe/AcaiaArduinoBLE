@@ -246,8 +246,6 @@ struct CycleSession {
   bool autoToManualGuardEnforced = false;
   uint32_t autoToManualGuardDeadlineAtMs = 0;
   uint8_t activePresetId = 0;
-  bool paddlePromotedToNatural = false;
-  bool originalBbwHardMaxArmed = false;
   bool cupRemovedPending = false;
   AccidentalTouchPhase accidentalTouchPhase = AccidentalTouchPhase::STARTUP;
   AccidentalTouchClass accidentalTouchClass = AccidentalTouchClass::OK;
@@ -439,11 +437,6 @@ uint32_t paddleReturnReminderStartedAtMs = 0;
 bool scaleCompletionBeepPending = false;
 bool scaleCompletionBeepScheduled = false;
 
-bool rawPaddleOn = false;
-bool paddleOn = false;
-bool paddleTurnedOn = false;
-bool paddleTurnedOff = false;
-uint32_t rawPaddleChangedAtMs = 0;
 bool virtualPaddleOn = false;
 // Keep status snapshots in internal DRAM: loop copies ~4 KiB every 50 ms.
 ControlStatusSnapshot publishedControlStatus;
@@ -1319,7 +1312,18 @@ void serviceScaleConnectedLed() {
   scaleConnectedLedInitialized = true;
 }
 
+AlertOutputChannel currentAlertOutputChannel();
+bool soundAlertsEnabled();
+void cancelScalePaddleReturnReminderBeep();
+#ifndef SHOT_STOPPER_HOST_TEST
+void serviceBootRecoverySafety();
+#endif
+
 #include "ShotStopperMachine.h"
+
+StopperState nextStateForUserHold(const MachineIntention &intent) {
+  return intent.holdActive ? StopperState::REQUIRES_OFF : StopperState::READY;
+}
 
 void servicePendingBrewRfRestore() {
   if (!pendingBrewRfRestore) {
@@ -2620,64 +2624,6 @@ void serviceScaleCompletionBeep() {
   requestCompletionAlert();
 }
 
-void servicePaddleReturnReminder() {
-  if (MACHINE_USES_MOMENTARY_SWITCH) {
-    return;
-  }
-  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
-  // Read the GPIO here rather than a debounced state: this reminder describes
-  // the physical paddle circuit as it is wired at this instant.
-  const bool paddleOnCircuitOff = readRawPaddleOn() && !relay.closed;
-  const AlertOutputChannel channel = currentAlertOutputChannel();
-  const bool localBuzzerUsable =
-      BUZZER_SUPPORT_ENABLED && localBuzzer.ready;
-  const bool scaleUsable = scaleAvailable();
-  bool outputUsable = false;
-  switch (channel) {
-    case AlertOutputChannel::SCALE_ONLY:
-      outputUsable = scaleUsable;
-      break;
-    case AlertOutputChannel::BUZZER_ONLY:
-      outputUsable = localBuzzerUsable;
-      break;
-    case AlertOutputChannel::SCALE_PRIORITY:
-      outputUsable = scaleUsable || localBuzzerUsable;
-      break;
-  }
-  const bool shouldRemind =
-      soundAlertsEnabled() && runtimeConfig.paddleReturnReminderBeep &&
-      paddleOnCircuitOff && outputUsable;
-  if (!shouldRemind) {
-    paddleReturnReminderActive = false;
-    paddleReturnReminderLastAtMs = 0;
-    paddleReturnReminderStartedAtMs = 0;
-    cancelScalePaddleReturnReminderBeep();
-    return;
-  }
-
-  const uint32_t now = millis();
-  if (!paddleReturnReminderActive) {
-    paddleReturnReminderActive = true;
-    paddleReturnReminderLastAtMs = now;
-    paddleReturnReminderStartedAtMs = now;
-    return;
-  }
-  if (elapsedMs(paddleReturnReminderStartedAtMs) >=
-      runtimeConfig.paddleReturnReminderMaxDurationMs) {
-    paddleReturnReminderActive = false;
-    paddleReturnReminderLastAtMs = 0;
-    paddleReturnReminderStartedAtMs = 0;
-    cancelScalePaddleReturnReminderBeep();
-    return;
-  }
-  if (elapsedMs(paddleReturnReminderLastAtMs) >=
-      runtimeConfig.paddleReturnReminderIntervalMs) {
-    if (emitAlert(AlertEvent::PADDLE_REMINDER)) {
-      paddleReturnReminderLastAtMs = now;
-    }
-  }
-}
-
 void executeScaleCommand(const ScaleCommand &command) {
   switch (command.type) {
     case ScaleCommandType::START_TIMER_AND_TARE:
@@ -3705,17 +3651,12 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   resetShotTrajectory(session.startedAtMs);
   initializeBbwProtection();
 
-  const bool originalBbwStart =
-      session.config.paddleMode ==
-          static_cast<uint8_t>(PaddleMode::ORIGINAL) &&
-      session.startedWithScale && !session.config.timerOnly;
-  session.originalBbwHardMaxArmed = originalBbwStart;
-  const uint32_t closeLimitMs = originalBbwStart
-                                    ? HARD_MAX_CIRCUIT_CLOSED_MS
-                                    : session.config.operationalWallMs;
-  if (!machineRequestStart(closeLimitMs)) {
+  machineBeginCycle(session.startedWithScale && !session.config.timerOnly);
+  if (!machineRequestStart(
+          machineCloseLimitMs(session.config.operationalWallMs))) {
     session.active = false;
     session.endReason = EndReason::RELAY_SAFETY_FAILURE;
+    machineEndCycle();
     transitionTo(StopperState::REQUIRES_OFF);
     return;
   }
@@ -3794,6 +3735,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   session.awaitingPostTareBaseline = false;
   holdCupPresenceTransitions(false);
   virtualPaddleOn = false;
+  machineEndCycle();
   addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_ENDED,
                 static_cast<int32_t>(reason));
   transitionTo(nextState);
@@ -3816,9 +3758,11 @@ bool beginRinseCycle(ControlSource source) {
   session.automaticEnabled = false;
   virtualPaddleOn = false;
   resetShotTrajectory(session.startedAtMs);
+  machineBeginCycle(false);
   if (!machineRequestStart(session.config.operationalWallMs)) {
     session.active = false;
     session.endReason = EndReason::RELAY_SAFETY_FAILURE;
+    machineEndCycle();
     transitionTo(StopperState::REQUIRES_OFF);
     return false;
   }
@@ -3849,7 +3793,7 @@ bool beginRinseCycle(ControlSource source) {
 void enterRinse() {
   // The duration is measured from the beginning of the stable OFF level, not
   // from 30 ms later when debounce accepts the transition.
-  session.rinseStartedAtMs = rawPaddleChangedAtMs;
+  session.rinseStartedAtMs = machineLastRawEdgeMs();
   session.automaticEnabled = false;
   session.autoToManualGuardArmed = false;
   session.autoToManualGuardEnforced = false;
@@ -3883,9 +3827,6 @@ void enterBrewOrManualFromStart() {
 void demoteActiveCycleToRinseOrEnd() {
   if (withinRinseGestureWindow()) {
     enterRinse();
-    return;
-  }
-  if (originalBbwSemanticsActive() || autoBbwSemanticsActive()) {
     return;
   }
   if (session.automaticEnabled) {
@@ -3940,18 +3881,22 @@ void stateMachineTask() {
     handleOperationalLimitTrip();
     return;
   }
-  if (relay.closed && session.active && session.originalBbwHardMaxArmed &&
-      !originalBbwHoldOverride() &&
+  if (relay.closed && session.active &&
+      machineCloseLimitMs(session.config.operationalWallMs) ==
+          HARD_MAX_CIRCUIT_CLOSED_MS &&
+      machineAllowsAutomationStop() &&
       elapsedMs(relay.closedAtMs) >= session.config.operationalWallMs) {
     handleOperationalLimitTrip();
     return;
   }
 
+  const MachineIntention intent = machinePollIntention();
+
   if (maintenanceLease.active) {
     if (relay.closed) {
       machineRequestStop();
     }
-    if (paddleOn || rawPaddleOn) {
+    if (intent.holdActive) {
       if (!maintenanceLease.forwarded) {
         addDebugEvent(DebugCategory::SECURITY,
                       DebugCode::MAINTENANCE_CANCELED,
@@ -3973,26 +3918,23 @@ void stateMachineTask() {
   }
 
   if (session.active && session.source == ControlSource::WEB &&
-      (paddleTurnedOn || paddleTurnedOff)) {
-    const bool mustRelease = paddleOn || rawPaddleOn;
-    finalizeCycle(EndReason::PHYSICAL_OVERRIDE,
-                  mustRelease ? StopperState::REQUIRES_OFF
-                              : StopperState::READY);
+      (intent.turnedOn || intent.turnedOff)) {
+    finalizeCycle(EndReason::PHYSICAL_OVERRIDE, nextStateForUserHold(intent));
     return;
   }
 
   switch (stopperState) {
     case StopperState::REQUIRES_OFF:
-      if (paddleIsStablyOff()) {
+      if (intent.intent == UserIntent::STABLE_IDLE || intent.stablyOff) {
         transitionTo(StopperState::READY);
       }
       return;
 
     case StopperState::READY:
-      if (paddleTurnedOn) {
+      if (intent.intent == UserIntent::REQUEST_START) {
         beginCycle(ControlSource::PHYSICAL);
       }
-      if (paddleTurnedOff &&
+      if (intent.intent == UserIntent::REQUEST_STOP &&
           ((noScaleShotGuardHold &&
             elapsedMs(noScaleShotGuardHoldAtMs) <=
                 runtimeConfig.rinseGestureMs) ||
@@ -4009,38 +3951,26 @@ void stateMachineTask() {
       return;
 
     case StopperState::RINSE:
-      // All paddle transitions are intentionally consumed while rinsing.
+      // Physical edges are consumed by the machine while rinsing.
       if (elapsedMs(session.rinseStartedAtMs) >=
           session.config.rinseDurationMs) {
-        const bool mustReleasePaddle = paddleOn || rawPaddleOn;
-        finalizeCycle(EndReason::RINSE_COMPLETE,
-                      mustReleasePaddle ? StopperState::REQUIRES_OFF
-                                        : StopperState::READY);
+        finalizeCycle(EndReason::RINSE_COMPLETE, nextStateForUserHold(intent));
       }
       return;
 
     case StopperState::BREW:
-      // Early paddle OFF demotes the brew to a rinse; otherwise ends the shot
-      // unless Original or Auto BBW semantics keep machine circuit closed after the rinse
-      // window.
-      if (paddleTurnedOff) {
+      if (intent.intent == UserIntent::REQUEST_STOP) {
         demoteActiveCycleToRinseOrEnd();
         if (!session.active || stopperState != StopperState::BREW) {
           return;
         }
-      }
-      if (paddleTurnedOn && originalBbwSemanticsActive()) {
-        session.paddlePromotedToNatural = true;
       }
 
       expirePostTareBaselineIfNeeded();
       serviceBbwProtectionPhases();
 
       if (session.cupRemovedPending) {
-        const StopperState afterCupRemoved =
-            (paddleOn || rawPaddleOn) ? StopperState::REQUIRES_OFF
-                                      : StopperState::READY;
-        finalizeCycle(EndReason::CUP_REMOVED, afterCupRemoved);
+        finalizeCycle(EndReason::CUP_REMOVED, nextStateForUserHold(intent));
         return;
       }
 
@@ -4053,10 +3983,8 @@ void stateMachineTask() {
         serialTrace(LogLevel::WARNING, "Scale stream suspended during brew");
       }
 
-      if (!originalBbwHoldOverride()) {
-        const StopperState afterAutomation =
-            (paddleOn || rawPaddleOn) ? StopperState::REQUIRES_OFF
-                                      : StopperState::READY;
+      if (machineAllowsAutomationStop()) {
+        const StopperState afterAutomation = nextStateForUserHold(intent);
         if (autoToManualGuardDeadlineDue()) {
           addDebugEvent(DebugCategory::SCALE,
                         DebugCode::AUTO_TO_MANUAL_GUARD_FIRED,
@@ -4075,7 +4003,7 @@ void stateMachineTask() {
       return;
 
     case StopperState::MANUAL_NO_SCALE:
-      if (paddleTurnedOff) {
+      if (intent.intent == UserIntent::REQUEST_STOP) {
         demoteActiveCycleToRinseOrEnd();
         return;
       }
@@ -4099,7 +4027,7 @@ void maybeRequestNtpSyncOnActivity() {
 
 bool controlAllowsConfigurationNow() {
   return stopperState == StopperState::READY && !session.active &&
-         !machineIsRunning() && !paddleOn && !rawPaddleOn &&
+         !machineIsRunning() && !machinePollIntention().holdActive &&
          !maintenanceLease.active;
 }
 
@@ -4189,7 +4117,7 @@ bool webCommandAllowsUnsafeConfiguration(const WebCommand &command) {
 
 void serviceMaintenanceLease() {
   if (!maintenanceLease.active || maintenanceLease.forwarded ||
-      !paddleIsStablyOff() ||
+      !machinePollIntention().stablyOff ||
       elapsedMs(maintenanceLease.startedAtMs) <
           MAINTENANCE_LEASE_SETTLE_MS) {
     return;
@@ -4489,7 +4417,7 @@ void completeMaintenanceLease(const WebCommand &result) {
                                  : DebugCode::COMMAND_FAILED,
                 static_cast<int32_t>(maintenanceLease.id));
   maintenanceLease = MaintenanceLease{};
-  if (paddleOn || rawPaddleOn) {
+  if (machinePollIntention().holdActive) {
     transitionTo(StopperState::REQUIRES_OFF);
   }
 }
@@ -4513,9 +4441,7 @@ void processWebCommand(const WebCommand &command) {
         rejectWebCommand(command);
         return;
       }
-#if SHOT_STOPPER_MACHINE_TYPE != 0
-      momentaryUserStopThisCycle = true;
-#endif
+      machineNoteFirmwareStop();
       addDebugEvent(DebugCategory::WEB,
                     command.type == WebCommandType::PADDLE_OFF
                         ? DebugCode::WEB_PADDLE_OFF
@@ -4531,8 +4457,7 @@ void processWebCommand(const WebCommand &command) {
           command.type == WebCommandType::STOP_HEARTBEAT
               ? EndReason::WEB_HEARTBEAT_TIMEOUT
               : EndReason::WEB_STOP,
-          (paddleOn || rawPaddleOn) ? StopperState::REQUIRES_OFF
-                                    : StopperState::READY);
+          nextStateForUserHold(machinePollIntention()));
       reportControlCommandResult(command, CommandResultState::APPLIED);
       return;
 
@@ -5109,10 +5034,7 @@ void publishControlStatus() {
   next.activeCycle = session.active;
   next.relayClosed = relay.closed;
   next.machineRunning = machineIsRunning();
-  next.reedOn = reedIsOn();
-  // Status intentionally reports the actual GPIO level, not the debounced
-  // state used by the control state machine.
-  next.physicalPaddleOn = readRawPaddleOn();
+  machineFillStatus(next);
   next.virtualPaddleOn = virtualPaddleOn;
   next.remoteControlEnabled = REMOTE_MACHINE_CONTROL_ENABLED;
   next.source = session.active ? session.source : ControlSource::NONE;
@@ -5122,9 +5044,6 @@ void publishControlStatus() {
   next.maintenanceLeaseId = maintenanceLease.active ? maintenanceLease.id : 0;
   next.maintenanceStartedAtMs =
       maintenanceLease.active ? maintenanceLease.startedAtMs : 0;
-  next.circuitElapsedMs = MACHINE_USES_MOMENTARY_SWITCH
-      ? machineElapsedMs()
-      : (relay.closed ? elapsedMs(relay.closedAtMs) : 0);
   next.safetyState = relay.state;
   next.safetyFault = relay.fault;
   next.safetyGeneration = relay.generation;
@@ -5262,11 +5181,6 @@ void publishControlStatus() {
   next.noScaleShotGuardEnabled = runtimeConfig.avoidBbwShotWithoutScale;
   next.noScaleShotGuardArmed = noScaleShotGuardArmed;
   next.machineRunState = machineRunState();
-#if SHOT_STOPPER_MACHINE_TYPE == 1
-  next.machineStartAckPending = momentaryStartAwaitingAck;
-  next.machineStopAckPending = momentaryStopAwaitingAck;
-  next.machineOrphanRun = momentaryOrphanRun;
-#endif
   next.cupPresenceState = cupPresenceState();
   next.cupPresent = next.cupPresenceState == CupPresenceState::PRESENT;
   next.configPersistPending = runtimePersistPending;
@@ -5790,9 +5704,10 @@ void holdFailedBootRecovery() {
     // Persistence did not reach a verified state. Keep machine circuit open. A power cycle
     // retries the durable intent; the same paddle recovery gesture can also
     // re-enter NETWORK_ACCESS_RESET / FACTORY_RESET without cycling power.
-    updatePaddleInput();
+    machineSampleInput();
+    const MachineIntention intent = machinePollIntention();
     const RecoveryGestureResult result = gesture.update(
-        millis(), paddleOn, paddleTurnedOn, paddleTurnedOff);
+        millis(), intent.holdActive, intent.turnedOn, intent.turnedOff);
     if (result == RecoveryGestureResult::NETWORK_ACCESS_RESET) {
       completeBootRecovery(RecoveryOperation::NETWORK_ACCESS_RESET);
     } else if (result == RecoveryGestureResult::FACTORY_RESET) {
@@ -5854,26 +5769,10 @@ void resumePendingBootRecovery() {
   }
 }
 
-bool bootPaddleHeldOnStably() {
-  if (!readRawPaddleOn()) {
-    return false;
-  }
-  const uint32_t startedAtMs = millis();
-  while (static_cast<uint32_t>(millis() - startedAtMs) <
-         PADDLE_DEBOUNCE_MS) {
-    if (!readRawPaddleOn()) {
-      return false;
-    }
-    serviceBootRecoverySafety();
-    vTaskDelay(pdMS_TO_TICKS(1));
-  }
-  return readRawPaddleOn();
-}
-
 void maybeRunBootRecoveryGesture() {
   const bool powerOnReset = currentSafetyResetIsPowerOn();
-  const bool paddleStablyOn = powerOnReset && bootPaddleHeldOnStably();
-  if (!recoveryGestureEntryAllowed(powerOnReset, paddleStablyOn)) {
+  const bool switchStablyOn = powerOnReset && machineBootSwitchHeldStably();
+  if (!recoveryGestureEntryAllowed(powerOnReset, switchStablyOn)) {
     return;
   }
 
@@ -5882,9 +5781,10 @@ void maybeRunBootRecoveryGesture() {
   (void)playRecoveryCue(BuzzerCue::RECOVERY_START);
 
   for (;;) {
-    updatePaddleInput();
+    machineSampleInput();
+    const MachineIntention intent = machinePollIntention();
     const RecoveryGestureResult result = recognizer.update(
-        millis(), paddleOn, paddleTurnedOn, paddleTurnedOff);
+        millis(), intent.holdActive, intent.turnedOn, intent.turnedOff);
     if (result == RecoveryGestureResult::NETWORK_ACCESS_RESET) {
       completeBootRecovery(RecoveryOperation::NETWORK_ACCESS_RESET);
     }
@@ -5911,14 +5811,7 @@ void setup() {
   // Safe OPEN before Serial, EEPROM or BLE. Arduino-ESP32 3.x rejects
   // digitalWrite until the pad is a GPIO. After reset the pin is Hi-Z and
   // the output latch is 0, which is OPEN for the active-HIGH relay.
-  pinMode(RELAY_GPIO, OUTPUT);
-  digitalWrite(RELAY_GPIO, RELAY_OPEN_LEVEL);
-
-  if (EXTERNAL_SAFETY_HARDWARE_PRESENT) {
-    pinMode(SAFETY_HEARTBEAT_GPIO, OUTPUT);
-    digitalWrite(SAFETY_HEARTBEAT_GPIO, LOW);
-    pinMode(CIRCUIT_FEEDBACK_GPIO, INPUT_PULLUP);
-  }
+  machineInitialize();
   initializeScaleConnectedLed();
 #ifndef SHOT_STOPPER_HOST_TEST
   set_arduino_panic_handler(shotStopperPanicHandler, nullptr);
@@ -5927,7 +5820,6 @@ void setup() {
 
   localBuzzer.begin(BUZZER_GPIO);
 
-  initializePaddleInput();
   platformClockReady = setCpuFrequencyMhz(80);
   relaySafetyTimersReady = initializeRelaySafetyTimer();
   taskWatchdogReady =
@@ -6295,17 +6187,16 @@ void loop() {
     loopIntervalGapMs = healthIntervalMaxGapMs;
     healthIntervalMaxGapMs = 0;
   }
-  updatePaddleInput();
+  machineSampleInput();
   serviceMachine();
   // Consume only the latest attributed weight before making automatic
-  // decisions. Paddle and relay safety were already sampled first, so their
+  // decisions. Switch and relay safety were already sampled first, so their
   // priority is preserved without adding a full event backlog to this loop.
   processScaleWorkerEvents();
   serviceNoScaleShotGuard();
   serviceCupStartGuard();
   stateMachineTask();
   machineReconcileBrewOutcome();
-  servicePaddleReturnReminder();
   serviceExtendedPulseAlert();
   localBuzzer.service(millis());
   servicePendingBrewRfRestore();
