@@ -1288,6 +1288,23 @@ uint32_t cycleShotElapsedMs() {
   return machineElapsedMs();
 }
 
+void captureCycleCircuitStart() {
+  const RelaySafetySnapshot startedRelay = getRelaySafetySnapshot();
+  session.circuitClosedAtMs =
+      startedRelay.closed ? startedRelay.closedAtMs : session.startedAtMs;
+}
+
+uint32_t endedCycleDurationMs() {
+  uint32_t durationMs = machineElapsedMs();
+  if (durationMs != 0U) {
+    return durationMs;
+  }
+  const uint32_t startMs = session.circuitClosedAtMs != 0U
+                               ? session.circuitClosedAtMs
+                               : session.startedAtMs;
+  return startMs != 0U ? elapsedMs(startMs) : 0U;
+}
+
 void flushPendingScaleTimerStopNow() {
   if (!pendingScaleTimerStop.pending) {
     return;
@@ -3874,7 +3891,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
     transitionTo(StopperState::REQUIRES_OFF);
     return;
   }
-  session.circuitClosedAtMs = getRelaySafetySnapshot().closedAtMs;
+  captureCycleCircuitStart();
 
   emitCircuitCycleAlert(session.startedWithScale && session.config.autoTare &&
                             session.config.canTareStartTimer
@@ -3900,8 +3917,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
 }
 
 void finalizeCycle(EndReason reason, StopperState nextState) {
-  const RelaySafetySnapshot relayBeforeOpen = getRelaySafetySnapshot();
-  const uint32_t durationMs = elapsedMs(relayBeforeOpen.closedAtMs);
+  const uint32_t durationMs = endedCycleDurationMs();
 
   stopPulseTrains();
   cancelScaleBrewBeep(session.id);
@@ -3991,7 +4007,7 @@ bool beginRinseCycle(ControlSource source) {
     transitionTo(StopperState::REQUIRES_OFF);
     return false;
   }
-  session.circuitClosedAtMs = getRelaySafetySnapshot().closedAtMs;
+  captureCycleCircuitStart();
   emitCircuitCycleAlert(AlertEvent::START_TIMER, true);
   // Only an Armed no-scale rinse clears the latch; keep Armed when the scale
   // is usable (e.g. web rinse with a connected scale).

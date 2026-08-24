@@ -25,6 +25,8 @@ bool momentaryStartEdgeThisCycle = false;
 bool momentaryLogicalRunActive = false;
 uint32_t momentaryLogicalRunStartedAtMs = 0;
 uint32_t momentaryLogicalOperationalLimitMs = HARD_MAX_CIRCUIT_CLOSED_MS;
+bool momentaryElapsedLatched = false;
+uint32_t momentaryLatchedElapsedMs = 0;
 bool momentaryGesturePending = false;
 bool momentaryGestureRestoreRunning = false;
 MachineRunState momentaryGesturePreState = MachineRunState::CONFIRMED_OFF;
@@ -49,6 +51,19 @@ MachineRunState machineRunState();
 void resetReedRuntime();
 #endif
 
+void clearMomentaryElapsedLatch() {
+  momentaryElapsedLatched = false;
+  momentaryLatchedElapsedMs = 0;
+}
+
+void latchMomentaryElapsed() {
+  if (momentaryElapsedLatched || momentaryLogicalRunStartedAtMs == 0) {
+    return;
+  }
+  momentaryLatchedElapsedMs = elapsedMs(momentaryLogicalRunStartedAtMs);
+  momentaryElapsedLatched = true;
+}
+
 // Logical start/stop for brew and the reed assume window. Same edge as
 // momentaryStartOnPress (press, or a short-press release). Not the 1:1 relay.
 void applyMomentaryStartStopEdge() {
@@ -57,6 +72,7 @@ void applyMomentaryStartStopEdge() {
     activatorTurnedOff = true;
     momentaryUserStopThisCycle = true;
     momentarySkipFirmwareStopPulse = true;
+    latchMomentaryElapsed();
     momentaryLogicalRunActive = false;
     noteMomentaryLogicalStop();
     return;
@@ -64,6 +80,7 @@ void applyMomentaryStartStopEdge() {
   activatorOn = false;
   activatorTurnedOn = true;
   momentaryStartEdgeThisCycle = true;
+  clearMomentaryElapsedLatch();
   noteMomentaryLogicalStart();
   momentaryLogicalRunActive = true;
   momentaryLogicalRunStartedAtMs = millis();
@@ -84,6 +101,7 @@ void revertDisqualifiedSinglePress() {
     activatorTurnedOff = true;
     momentaryUserStopThisCycle = true;
     momentarySkipFirmwareStopPulse = true;
+    latchMomentaryElapsed();
     momentaryLogicalRunActive = false;
     noteMomentaryDisqualifiedPress(false);
     return;
@@ -109,6 +127,7 @@ void initializeActivatorInput() {
   momentaryUserStopThisCycle = false;
   momentarySkipFirmwareStopPulse = false;
   momentaryLogicalRunActive = false;
+  clearMomentaryElapsedLatch();
   momentaryGesturePending = false;
   momentaryGestureRestoreRunning = false;
   pulseOutputActive = false;
@@ -126,6 +145,7 @@ void machineOnBrewOutcome(bool brewActive) {
     activatorOn = false;
     momentaryLogicalRunActive = false;
     momentaryGesturePending = false;
+    clearMomentaryElapsedLatch();
     noteMomentaryLogicalStartCanceled();
   }
 }

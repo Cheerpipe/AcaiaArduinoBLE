@@ -6406,6 +6406,20 @@ void s14_last_shot_persists_manual_cycle() {
   CHECK(shotLog.count() == 0);
 }
 
+void s14c_last_shot_keeps_no_scale_duration() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  persistedLastShot = PersistedLastShot{};
+  shotLog.clear();
+  const uint32_t rawOnAt = startCycle();
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  releaseAtPhysicalDuration(rawOnAt, 12500);
+  CHECK(persistedLastShot.valid);
+  CHECK(persistedLastShot.durationMs >= 12000);
+  CHECK(!persistedLastShot.weightValid);
+  CHECK(shotLog.count() == 0);
+}
+
 void s14b_rinse_does_not_overwrite_last_shot() {
   resetHarness(false, false);
   reachReadyFromBoot();
@@ -9270,6 +9284,7 @@ const TestCase testCases[] = {
     {"W90", w90_save_unknown_preset_id_does_not_overwrite_active},
     {"S03", s03_shot_log_clear_empties_records},
     {"S14", s14_last_shot_persists_manual_cycle},
+    {"S14c", s14c_last_shot_keeps_no_scale_duration},
     {"S14b", s14b_rinse_does_not_overwrite_last_shot},
     {"S15", s15_last_shot_persists_after_drip_when_eligible},
     {"S15b", s15b_cup_off_after_end_keeps_last_known_actual},

@@ -1405,6 +1405,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !network.includes('lastShotClearHandler') ||
     !network.includes('LAST_SHOT_CLEAR_NOT_CONFIRMED') ||
     !firmware.includes('persistLastShotFromEndedCycle') ||
+    !firmware.includes('endedCycleDurationMs') ||
+    firmware.includes('elapsedMs(relayBeforeOpen.closedAtMs)') ||
     !firmware.includes('clearLastShot') ||
     !firmware.includes('clearLastShotSnapshot') ||
     !firmware.includes('serviceShotStorePersistence') ||

@@ -93,6 +93,7 @@ void endMomentaryLogicalRunForWall() {
   const bool noScaleCut =
       !cut && !momentarySawScale && !machineSense.weightFresh &&
       !momentaryPhysicalOn;
+  latchMomentaryElapsed();
   momentaryLogicalRunActive = false;
   if (cut) {
     maybeEmitFirmwareStopPulse();
@@ -120,6 +121,7 @@ void serviceLogicalRunWalls() {
 #if SHOT_STOPPER_MACHINE_TYPE == 1
     endMomentaryLogicalRunForWall();
 #else
+    latchMomentaryElapsed();
     momentaryLogicalRunActive = false;
     if (machineAllowsFirmwareStopPulse()) {
       maybeEmitFirmwareStopPulse();
@@ -134,6 +136,7 @@ void serviceLogicalRunWalls() {
 #if SHOT_STOPPER_MACHINE_TYPE == 1
     endMomentaryLogicalRunForWall();
 #else
+    latchMomentaryElapsed();
     momentaryLogicalRunActive = false;
     if (machineAllowsFirmwareStopPulse()) {
       maybeEmitFirmwareStopPulse();
@@ -144,6 +147,7 @@ void serviceLogicalRunWalls() {
 }
 
 inline bool machineRequestStart(uint32_t operationalLimitMs) {
+  clearMomentaryElapsedLatch();
   noteMomentaryLogicalStart();
   momentaryLogicalRunActive = true;
   momentaryLogicalRunStartedAtMs = millis();
@@ -154,6 +158,7 @@ inline bool machineRequestStart(uint32_t operationalLimitMs) {
 }
 
 inline bool machineRequestStop() {
+  latchMomentaryElapsed();
   momentaryLogicalRunActive = false;
   const bool skipPulse =
       momentaryPhysicalOn || momentarySkipFirmwareStopPulse;

@@ -201,8 +201,10 @@ inline bool machineIsRunning() {
 
 inline uint32_t machineElapsedMs() {
   uint32_t elapsed = 0U;
-  (void)machineRunningElapsed(elapsed);
-  return elapsed;
+  if (machineRunningElapsed(elapsed)) {
+    return elapsed;
+  }
+  return momentaryElapsedLatched ? momentaryLatchedElapsedMs : 0U;
 }
 
 inline MachineRunState machineRunState() {

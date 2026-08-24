@@ -138,6 +138,7 @@ void resetMomentaryHarness() {
   momentaryQuietSinceMs = 0;
   momentaryLogicalRunActive = false;
   momentaryLogicalRunStartedAtMs = 0;
+  clearMomentaryElapsedLatch();
   momentaryFirmwareCutPending = false;
   momentarySettledWeightCutArmed = false;
 #endif
@@ -248,6 +249,35 @@ void t_second_short_press_stops_without_rinse() {
   shortPress(180);
   CHECK(stopperState != StopperState::RINSE);
   CHECK(!session.active || stopperState == StopperState::READY);
+}
+
+void t_noscale_last_shot_keeps_logical_duration() {
+  resetMomentaryHarness();
+  runtimeConfig.avoidBbwShotWithoutScale = false;
+  scale.connected = false;
+  setScaleLinkState(ScaleLinkState::DISCONNECTED);
+  currentWeightSequence = 0;
+  persistedLastShot = PersistedLastShot{};
+  shotLog.clear();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  CHECK(session.active);
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+#if SHOT_STOPPER_MACHINE_TYPE == 2
+  setRawReed(true);
+#endif
+  runLoopAfter(12000);
+  CHECK(machineElapsedMs() >= 11000);
+  shortPress(150);
+  CHECK(!session.active);
+  CHECK(persistedLastShot.valid);
+  CHECK(persistedLastShot.durationMs >= 11000);
+  CHECK(!persistedLastShot.weightValid);
+#if SHOT_STOPPER_MACHINE_TYPE == 1
+  CHECK(!machineIsRunning());
+  CHECK(machineElapsedMs() >= 11000);
+#endif
+  CHECK(shotLog.count() == 0);
 }
 
 void t_guard_reject_does_not_mirror() {
@@ -1204,6 +1234,7 @@ const TestCase kTests[] = {
     {"P36", t_default_starts_on_press},
     {"P40", t_release_mode_starts_on_release_not_press},
     {"P38", t_second_short_press_stops_without_rinse},
+    {"P52", t_noscale_last_shot_keeps_logical_duration},
     {"P02", t_guard_reject_does_not_mirror},
     {"P50", t_no_scale_bbw_armed_does_not_mirror_then_idle_allows},
     {"P39", t_user_stop_without_session_does_not_leave_orphan_run},
