@@ -132,6 +132,7 @@ void resetMomentaryHarness() {
   momentaryInferredState = MachineRunState::CONFIRMED_OFF;
   momentarySawScale = false;
   momentaryEspressoConfirmed = false;
+  momentaryHadEspressoConfirm = false;
   momentarySawEspresso = false;
   momentaryStopAwaitingAck = false;
   momentaryStopRetryPending = false;
@@ -1015,6 +1016,22 @@ void t_no_flow_hard_cap_skips_when_espresso_confirmed() {
   CHECK(lastCycle.endReason != EndReason::UNCONFIRMED_START);
 }
 
+void t_no_flow_hard_cap_skips_after_espresso_pan_returns() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  armLiveScaleTimerOnlyStart(0.0f);
+  shortPress(150);
+  CHECK(stopperState == StopperState::BREW);
+  confirmEspressoFlow();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  dripFreshWeight(0.0f, 200);
+  dripFreshWeight(0.0f, 400);
+  CHECK(machineRunState() != MachineRunState::CONFIRMED_ON);
+  CHECK(momentaryHadEspressoConfirm);
+  dripUntilHardCap(noFlowIdleFlatWeight);
+  CHECK(lastCycle.endReason != EndReason::UNCONFIRMED_START);
+}
+
 void t_no_flow_hard_cap_skips_when_mass_above_band() {
   resetMomentaryHarness();
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
@@ -1714,6 +1731,7 @@ const TestCase kTests[] = {
     {"P25I7", t_no_flow_hard_cap_idles_after_nack},
     {"P25I8", t_no_flow_hard_cap_idles_assumed_on_noise},
     {"P25I9", t_no_flow_hard_cap_skips_when_espresso_confirmed},
+    {"P25I12", t_no_flow_hard_cap_skips_after_espresso_pan_returns},
     {"P25I10", t_no_flow_hard_cap_skips_when_mass_above_band},
     {"P25I11", t_no_flow_hard_cap_skips_when_stale},
     {"P25I2", t_cup_removed_settles_assumed_off_after_stop},
