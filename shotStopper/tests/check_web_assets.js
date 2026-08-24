@@ -1438,6 +1438,10 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('id="dBrew"') ||
       !diagHtml.includes('id="dCup"') ||
       !diagHtml.includes('id="dPaddle"') ||
+      !diagHtml.includes('id="dReed"') ||
+      !diagHtml.includes('class="paddleOnly">Paddle</strong>') ||
+      !diagHtml.includes('class="momentaryOnly">Switch</strong>') ||
+      !diagHtml.includes('class="metric reedOnly"') ||
       !diagHtml.includes('id="dRelay"') ||
       !diagHtml.includes('id="dSource"') ||
       !diagHtml.includes('id="dSafety"') ||
@@ -1453,6 +1457,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes("t('dBrew',s.state)") ||
       !ui.includes("t('dCup',cp.state)") ||
       !ui.includes("t('dPaddle',s.physicalPaddleOn?'ON':'OFF')") ||
+      !ui.includes("t('dReed',s.reedOn?'ON':'OFF')") ||
       !ui.includes("t('dStream',sc.streamState)") ||
       !ui.includes("t('dControl',sc.controlState)") ||
       !diagHtml.includes('<strong>Heap min</strong>') ||
@@ -2384,7 +2389,7 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
         'statusPageOk(admin) must accept a locked payload and validate unlocked network/BLE/NTP/OTA');
   }
   if (!ui.includes(
-          "v==='diagnostic'?!!(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalPaddleOn==='boolean'&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags)")) {
+          "v==='diagnostic'?!!(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalPaddleOn==='boolean'&&'reedOn' in s&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags)")) {
     throw new Error(
         'statusPageOk(diagnostic) must validate states, machine I/O, and diagnostic metrics');
   }
@@ -2411,7 +2416,7 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'bleHostAllocPsram', 'bleHostAllocFallback',
     'resetReasonCode', 'packetGaps', 'rejectedPackets', 'reconnects',
     'eventsDropped', 'lastCommand', 'loopIntervalGapMs', 'loopMaxGapMs',
-    'machineState', 'physicalPaddleOn', 'controlSource', 'cupPresence',
+    'machineState', 'physicalPaddleOn', 'reedOn', 'controlSource', 'cupPresence',
     'streamState', 'controlState', 'taskWatchdogReady', 'recoveryRequired',
     'compileFlags', 'remoteMachineControl'
   ]) {
