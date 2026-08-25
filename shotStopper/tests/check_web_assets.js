@@ -561,6 +561,22 @@ if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0')
     !kconfig.includes('0=off, 1=passive RTTTL')) {
   throw new Error('Local buzzer must be compile-time off (0) or passive RTTTL (1)');
 }
+if (!domainCore.includes('#ifndef SHOT_STOPPER_DEVELOPMENT') ||
+    !domainCore.includes('#define SHOT_STOPPER_DEVELOPMENT 0') ||
+    !domainCore.includes('DEVELOPMENT_BUILD = SHOT_STOPPER_DEVELOPMENT == 1') ||
+    !domainCore.includes('SHOT_STOPPER_DEVELOPMENT must be 0 or 1') ||
+    !domainCore.includes('CONFIG_SHOT_STOPPER_DEVELOPMENT') ||
+    !kconfig.includes('config SHOT_STOPPER_DEVELOPMENT') ||
+    !kconfig.includes('bypass WebUI admin unlock') ||
+    !network.includes('SHOT_STOPPER_DEVELOPMENT == 1') ||
+    !network.includes('adminUnlockAllowed') ||
+    (network.match(/\\"development\\":%s/g) || []).length < 4 ||
+    !js.includes('developmentMode') ||
+    !js.includes("'development'in s") ||
+    !js.includes('||developmentMode')) {
+  throw new Error(
+      'SHOT_STOPPER_DEVELOPMENT must default off, bypass adminUnlockAllowed when on, and unlock Web UI');
+}
 if (ui.includes('authenticatedOnly') ||
     ui.includes("s.setItem('shotStopperToken'") ||
     ui.includes('pageNav authenticatedOnly') ||
@@ -2663,7 +2679,8 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'eventsDropped', 'lastCommand', 'loopIntervalGapMs', 'loopMaxGapMs',
     'machineState', 'physicalActivatorOn', 'reedOn', 'controlSource', 'cupPresence',
     'streamState', 'controlState', 'taskWatchdogReady', 'recoveryRequired',
-    'compileFlags', 'remoteMachineControl', 'complete', 'degraded', 'scaleWorker'
+    'compileFlags', 'remoteMachineControl', 'complete', 'degraded', 'scaleWorker',
+    'development'
   ]) {
     if (!diagBody.includes(field)) {
       throw new Error('status/diagnostic missing required field: ' + field);
@@ -3680,6 +3697,9 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
   }
   if ((statusFormat.match(/\\"adminUnlocked\\":%s/g) || []).length < 3) {
     throw new Error('status/home, status/admin, and status/diagnostic must report adminUnlocked');
+  }
+  if ((statusFormat.match(/\\"adminUnlocked\\":%s,\\"development\\":%s/g) || []).length < 3) {
+    throw new Error('status/home, status/admin, and status/diagnostic must report development with adminUnlocked');
   }
   if (!network.includes('page == StatusPage::Admin || page == StatusPage::Home') ||
       !network.includes('page == StatusPage::Diagnostic') ||

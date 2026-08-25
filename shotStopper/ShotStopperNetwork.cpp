@@ -3312,6 +3312,10 @@ void ShotStopperNetwork::touchAdminUnlock() {
 }
 
 bool ShotStopperNetwork::adminUnlockAllowed(httpd_req_t *request) {
+#if SHOT_STOPPER_DEVELOPMENT == 1
+  (void)request;
+  return true;
+#else
   char clientId[WEB_UI_CLIENT_ID_CAPACITY] = {};
   if (!readWebUiClientId(request, clientId, sizeof(clientId))) {
     return false;
@@ -3332,6 +3336,7 @@ bool ShotStopperNetwork::adminUnlockAllowed(httpd_req_t *request) {
   portEXIT_CRITICAL(&dataMux_);
   memset(clientId, 0, sizeof(clientId));
   return allowed;
+#endif
 }
 
 bool ShotStopperNetwork::requireAdminUnlock(httpd_req_t *request) {
@@ -4081,8 +4086,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   }
 
   if (ok && page == StatusPage::Home) {
-    ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s",
-                          adminUnlocked ? "true" : "false");
+    ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s,\"development\":%s",
+                          adminUnlocked ? "true" : "false",
+                          DEVELOPMENT_BUILD ? "true" : "false");
   }
   if (ok && page == StatusPage::Home) {
     ok = statusJsonAppend(
@@ -4222,8 +4228,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned>(runtimeShotReactTimeoutS(control.config)));
   } else if (ok && page == StatusPage::Admin) {
     // Locked admin: confirm-window hint only. Unlocked: Wi-Fi/AP + BLE + OTA.
-    ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s",
-                          adminUnlocked ? "true" : "false");
+    ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s,\"development\":%s",
+                          adminUnlocked ? "true" : "false",
+                          DEVELOPMENT_BUILD ? "true" : "false");
     if (ok && !adminUnlocked) {
       ok = statusJsonAppend(
           &used,
@@ -4277,8 +4284,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       }
     }
   } else if (ok && page == StatusPage::Diagnostic) {
-    ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s",
-                          adminUnlocked ? "true" : "false");
+    ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s,\"development\":%s",
+                          adminUnlocked ? "true" : "false",
+                          DEVELOPMENT_BUILD ? "true" : "false");
     if (ok && adminUnlocked) {
     // Lean diagnostic snapshot: metrics + log controls only (no STA address
     // form fields; those stay on status/admin).
@@ -4325,7 +4333,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"},"
         "\"compileFlags\":{\"buzzer\":\"%s\",\"remoteMachineControl\":%s,"
         "\"arch\":\"%s\",\"machineType\":\"%s\",\"stopPulseMs\":%lu,"
-        "\"maxSinglePressMs\":%lu},"
+        "\"maxSinglePressMs\":%lu,\"development\":%s},"
         "\"boot\":{\"complete\":%s,\"degraded\":%s,\"scaleWorker\":%s}",
         stopperStateName(control.state),
         machineRunStateName(control.machineRunState),
@@ -4402,6 +4410,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         compiledMachineTypeId(),
         static_cast<unsigned long>(COMPILED_STOP_PULSE_MS),
         static_cast<unsigned long>(COMPILED_MAX_SINGLE_PRESS_MS),
+        DEVELOPMENT_BUILD ? "true" : "false",
         control.bootComplete ? "true" : "false",
         control.bootDegraded ? "true" : "false",
         control.scaleWorkerReady ? "true" : "false");
@@ -5067,7 +5076,7 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            "\"extractionExtended\":%s,\"slowExtractionExtended\":%s},"
            "\"compileFlags\":{\"buzzer\":\"%s\",\"remoteMachineControl\":%s,"
            "\"arch\":\"%s\",\"machineType\":\"%s\",\"stopPulseMs\":%lu,"
-           "\"maxSinglePressMs\":%lu},",
+           "\"maxSinglePressMs\":%lu,\"development\":%s},",
            c.lastShot.valid ? "true" : "false",
            static_cast<unsigned>(c.lastShot.goalWeightG),
            static_cast<unsigned long>(c.lastShot.durationMs),
@@ -5079,7 +5088,8 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            REMOTE_MACHINE_CONTROL_ENABLED ? "true" : "false",
            FW_BOARD_ARCH_STRING, compiledMachineTypeId(),
            static_cast<unsigned long>(COMPILED_STOP_PULSE_MS),
-           static_cast<unsigned long>(COMPILED_MAX_SINGLE_PRESS_MS));
+           static_cast<unsigned long>(COMPILED_MAX_SINGLE_PRESS_MS),
+           DEVELOPMENT_BUILD ? "true" : "false");
 
   ok = ok &&
        debugExportChunkf(

@@ -37,6 +37,13 @@
 #define SHOT_STOPPER_MACHINE_TYPE CONFIG_SHOT_STOPPER_MACHINE_TYPE
 #endif
 #endif
+#ifndef SHOT_STOPPER_DEVELOPMENT
+#ifdef CONFIG_SHOT_STOPPER_DEVELOPMENT
+#define SHOT_STOPPER_DEVELOPMENT 1
+#else
+#define SHOT_STOPPER_DEVELOPMENT 0
+#endif
+#endif
 #endif
 
 #include "ShotStopperMachineTypes.h"
@@ -146,6 +153,14 @@ inline const char *compiledBuzzerModeId() {
   }
   return "off";
 }
+
+#ifndef SHOT_STOPPER_DEVELOPMENT
+#define SHOT_STOPPER_DEVELOPMENT 0
+#endif
+
+constexpr bool DEVELOPMENT_BUILD = SHOT_STOPPER_DEVELOPMENT == 1;
+static_assert(SHOT_STOPPER_DEVELOPMENT == 0 || SHOT_STOPPER_DEVELOPMENT == 1,
+              "SHOT_STOPPER_DEVELOPMENT must be 0 or 1");
 
 #ifndef SHOT_STOPPER_MACHINE_TYPE
 #define SHOT_STOPPER_MACHINE_TYPE 0

@@ -46,6 +46,10 @@ prompting. The same applies with `SHOTSTOPPER_NONINTERACTIVE=1`.
 Suggested `--flags` at the prompt (Enter accepts them):
 `-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1 -DSHOT_STOPPER_ENABLE_BUZZER=1`.
 
+For local development only, add `-DSHOT_STOPPER_DEVELOPMENT=1` to bypass WebUI
+admin unlock (Admin / Diagnostic / Home Actions without the device password).
+Do not ship development builds to production devices.
+
 `idf.py` does not reconfigure when only the environment changes. Changing
 `--flags` (for example `-DSHOT_STOPPER_MACHINE_TYPE=1`) drops the IDF CMake
 cache so the new `-D` flags actually reach the compiler. Diagnostic **Type**

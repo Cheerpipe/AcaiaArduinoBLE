@@ -30,4 +30,14 @@ menu "Advanced Shot Stopper"
             0=off, 1=passive piezo (PWM/RTTTL melodies).
             Command-line -DSHOT_STOPPER_ENABLE_BUZZER=… still overrides.
 
+    config SHOT_STOPPER_DEVELOPMENT
+        bool "Development build (bypass WebUI admin unlock)"
+        default n
+        help
+            When enabled, compiles with SHOT_STOPPER_DEVELOPMENT=1 so the
+            WebUI treats every client as admin-unlocked: Admin and Diagnostic
+            controls and Home Actions need no device-password session.
+            For local/dev builds only — never ship to production devices.
+            Command-line -DSHOT_STOPPER_DEVELOPMENT=… still overrides.
+
 endmenu

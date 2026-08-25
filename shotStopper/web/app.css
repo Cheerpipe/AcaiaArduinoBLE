@@ -24,6 +24,7 @@ body{font-family:system-ui;max-width:760px;margin:0 auto;padding:0 1rem 1.25rem;
 .pageNav .navLock{display:flex;align-items:center;min-height:var(--tap);padding:.35rem .55rem;border-radius:.5rem;font-size:inherit;text-align:left}
 .navLock.hidden,.textLock.hidden{display:none}
 .adminSession{display:flex;align-items:baseline;flex-wrap:wrap;gap:.15rem;margin:0 0 .55rem;color:var(--mu);font-size:.82rem;line-height:1.35}
+body.devBuild .adminSession,body.devBuild #navAdminLock{display:none}
 @media(min-width:700px){
 :root{--hdr:4.7rem}
 .navToggle{display:none}
