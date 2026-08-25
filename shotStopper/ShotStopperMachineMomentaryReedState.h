@@ -4,8 +4,10 @@
 // SPECIALIZATION: Momentary + reed — run view (state)
 // =============================================================================
 // WHAT: Outside an assumed window, the reed is canonical: OFF → CONFIRMED_OFF,
-//       ON → CONFIRMED_ON. Boot with the reed already ON is UNKNOWN until that
-//       OFF. Firmware auto-cut pulses only while the reed is canonically ON.
+//       ON → CONFIRMED_ON. Boot with the reed already ON is CONFIRMED_ON.
+//       K1 TRIPPED/LOCKOUT does not hide the reed. Firmware auto-cut still
+//       requires a stable OFF earlier this boot (reedSawStableOff) so a
+//       stuck-ON reed is not pulsed.
 //
 //       ASSUMED_ON/OFF is the short window after the shot start/stop edge — the
 //       same press or release chosen by momentaryStartOnPress — where machine
@@ -208,18 +210,7 @@ inline uint32_t machineElapsedMs() {
 }
 
 inline MachineRunState machineRunState() {
-  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
-  if (relay.state == RelaySafetyState::LOCKOUT ||
-      relay.state == RelaySafetyState::TRIPPED) {
-    return (reedOn || reedAssume == ReedAssume::ON ||
-            reedAssume == ReedAssume::GRACE_ON || momentaryLogicalRunActive)
-               ? MachineRunState::UNKNOWN
-               : MachineRunState::CONFIRMED_OFF;
-  }
   sampleReed();
-  if (!reedSawStableOff && reedOn) {
-    return MachineRunState::UNKNOWN;
-  }
   if ((reedAssume == ReedAssume::ON || reedAssume == ReedAssume::GRACE_ON) &&
       !reedOn) {
     return MachineRunState::ASSUMED_ON;
