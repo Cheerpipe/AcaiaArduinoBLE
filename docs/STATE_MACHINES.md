@@ -89,9 +89,11 @@ arming, then `CONFIRMED_ON`.
 **During a shot.** The stopper is `BREW` or `MANUAL_NO_SCALE`. Weight
 control is `ACTIVE` only if the cycle started with a usable scale and
 brew-by-weight is on. Fresh BLE weights update the stream, cup
-presence, first-flow, and accidental-touch detectors. A lost or stale
-stream **suspends** weight control; the stopper stays in `BREW` and
-A→M may still cut later. Cup `REMOVED` can cut if that option is on.
+presence, first-flow, and accidental-touch detectors. BLE drop or
+**silent notifications** (no parsed `WEIGHT` for 1 s) **suspends**
+weight control; rejected brew samples (post-tare, slew) and a stable
+accepted weight do not. The stopper stays in `BREW` and A→M may still
+cut later. Cup `REMOVED` can cut if that option is on.
 
 **Stop.** Brew policy (`SCALE_THRESHOLD`, paddle OFF, guards, Web Stop)
 or a safety trip asks to open the machine circuit. `machineRequestStop` drives safety
@@ -327,9 +329,10 @@ The machine owns debounce and bounce-safety. The stopper only sees
 
 ## 5. Weight control (`WeightControlState`)
 
-**Purpose.** Whether **this cycle** may use the pan to stop. Losing
-the scale must not slam machine circuit open; it **suspends** automation and lets
-A→M / paddle / walls decide.
+**Purpose.** Whether **this cycle** may use the pan to stop. A dropped
+link or silent notifications must not slam machine circuit open; they
+**suspend** automation and let A→M / paddle / walls decide. Brew
+rejecting a sample is not a lost scale.
 
 Source: `ShotStopperScaleTypes.h`, `setWeightControlState()` in
 `shotStopper.cpp`.
@@ -341,7 +344,7 @@ Source: `ShotStopperScaleTypes.h`, `setWeightControlState()` in
 | `INACTIVE` | This cycle will not stop on weight (no scale at start, or timer-only). |
 | `VALIDATING` | Last sample was implausible (range, slew, reconnect). Need coherent recovery samples before trusting a cut. |
 | `ACTIVE` | Samples are accepted into the trajectory; threshold/guards may cut. |
-| `SUSPENDED` | Scale link or freshness lost mid-shot. A→M becomes **enforced** if it was armed. Reconnect with three coherent samples can return to `ACTIVE`. |
+| `SUSPENDED` | Link dropped, connection generation changed, or **notifications went silent** mid-shot (`observedWeight` older than 1 s). Rejected brew samples and unchanged grams do not suspend. A→M becomes **enforced** if it was armed. Reconnect with three coherent samples can return to `ACTIVE`. |
 | `FAULT_STOPPED` | Weight path gave up for this cycle (e.g. persistent overload policy). No further automatic cut from weight. |
 
 ### Events
@@ -350,7 +353,7 @@ Source: `ShotStopperScaleTypes.h`, `setWeightControlState()` in
 | --- | --- |
 | Cycle start with usable scale + BBW | `INACTIVE`/`—` → `ACTIVE`. |
 | Cycle start without scale or timer-only | Stays `INACTIVE`. |
-| Stream stale / disconnect / generation change | `ACTIVE`/`VALIDATING` → `SUSPENDED` (A→M armed → enforced). |
+| Notifications silent / disconnect / generation change | `ACTIVE`/`VALIDATING` → `SUSPENDED` (A→M armed → enforced). Parsed packets keep control off this path even if brew rejects them. |
 | Three coherent recovery samples | `SUSPENDED`/`VALIDATING` → `ACTIVE` (A→M enforcement cleared). |
 | Out-of-range / overload sample | `ACTIVE` → `VALIDATING`, stream `OVERLOAD`. |
 | Tare / post-tare grace | May promote `VALIDATING` → `ACTIVE` so the new zero is used. |
@@ -359,10 +362,13 @@ Source: `ShotStopperScaleTypes.h`, `setWeightControlState()` in
 
 ## 6. Weight stream (`WeightStreamState`)
 
-**Purpose.** Quality of the **latest** sample, for diagnostics and for
-deciding whether control may use it. Not the same as weight control:
-the stream can be `FRESH` while control is `SUSPENDED` after a gap, or
-`STALE` while control is still `ACTIVE` until the next loop notices.
+**Purpose.** Quality of the **latest parsed notification**, for
+diagnostics and for whether A→M may treat the scale as lost. Not the
+same as weight control (accepted grams for a cut): the stream can be
+`FRESH` while control is `VALIDATING` on slew, or `STALE` while
+control is still `ACTIVE` until the next loop notices. Control
+`SUSPENDED` after a disconnect can also overlap a still-`FRESH`
+observed sample until the 1 s timer elapses.
 
 Source: `ShotStopperScaleTypes.h`.
 
@@ -371,16 +377,17 @@ Source: `ShotStopperScaleTypes.h`.
 | State | Meaning |
 | --- | --- |
 | `NO_SAMPLE` | No usable weight this boot / this link. |
-| `FRESH` | Last accepted sample is within `MAX_AUTOMATION_WEIGHT_AGE_MS` (1 s) on the current connection generation. |
-| `STALE` | Age exceeded or link dropped during `BREW` while control was still tracking. |
+| `FRESH` | Last **parsed** notification (`observedWeight`) is within `MAX_AUTOMATION_WEIGHT_AGE_MS` (1 s) on the current connection generation. Brew accept/reject does not change this. |
+| `STALE` | No parsed notification within 1 s, or the link dropped, during `BREW` while control was still tracking. |
 | `ANOMALOUS` | Sample failed slew/plausibility vs the accepted trajectory. |
 | `OVERLOAD` | Absolute weight outside the automation window (pan slammed or protocol glitch). |
 
 ### Events
 
 New BLE `WEIGHT` samples, connection generation changes, and the
-1 s freshness timer. Overload/anomaly are classified in
-`recordWeightSampleWithProvenance`.
+1 s **notification** freshness timer. Overload/anomaly are classified in
+`recordWeightSampleWithProvenance` and do not by themselves mark the
+stream `STALE`.
 
 ---
 
@@ -709,7 +716,7 @@ ran, stored on the session, last-shot blob, and shot log.
 | `FAST_EXTRACTION_MIN_TIME` | Fast guard: min brew time reached after an early target. |
 | `SLOW_EXTRACTION_MAX_TIME` | Slow guard: max brew time with enough mass. |
 | `SLOW_EXTRACTION_MIN_WEIGHT` | Slow guard: floor weight after extend. |
-| `AUTO_TO_MANUAL_GUARD` | Scale lost; A→M deadline from shot start. |
+| `AUTO_TO_MANUAL_GUARD` | Notifications silent or link lost; A→M deadline from shot start. |
 | `CUP_REMOVED` | Cup presence `REMOVED` with stop-if-removed on. |
 | `UNCONFIRMED_START` | Switch-only: live scale, no espresso-like flow, net mass still within 1 g of the shot baseline at the 60 s hard cap. Silent; no last-shot / history row. |
 
