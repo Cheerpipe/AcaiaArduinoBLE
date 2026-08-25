@@ -56,3 +56,8 @@ target_compile_options(${_ss_arduino_lib} PRIVATE -Wno-missing-field-initializer
 # -Wstringop-truncation on its own strncpy in port_tcp_utils.c. Not our code.
 idf_component_get_property(_ss_modbus_lib espressif__esp-modbus COMPONENT_LIB)
 target_compile_options(${_ss_modbus_lib} PRIVATE -Wno-error=stringop-truncation)
+
+# esp-modbus (pulled by arduino-esp32) forces -Werror. Under -O2, GCC raises
+# -Wstringop-truncation on its own strncpy in port_tcp_utils.c. Not our code.
+idf_component_get_property(_ss_modbus_lib espressif__esp-modbus COMPONENT_LIB)
+target_compile_options(${_ss_modbus_lib} PRIVATE -Wno-error=stringop-truncation)
