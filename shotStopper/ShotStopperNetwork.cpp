@@ -143,7 +143,9 @@ constexpr const char *STATUS_UNAUTHORIZED = "401 Unauthorized";
 constexpr const char *STATUS_FORBIDDEN = "403 Forbidden";
 constexpr const char *STATUS_TOO_LARGE = "413 Content Too Large";
 constexpr const char *STATUS_SERVER_ERROR = "500 Internal Server Error";
-constexpr const char *OTA_TOKEN_HEADER = "X-OTA-Token";
+constexpr const char *DEVICE_PASSWORD_HEADER = "X-Device-Password";
+// Legacy header name kept so older CLI scripts still authenticate.
+constexpr const char *DEVICE_PASSWORD_HEADER_LEGACY = "X-OTA-Token";
 constexpr const char *OTA_ALLOW_DOWNGRADE_HEADER = "X-OTA-Allow-Downgrade";
 constexpr size_t OTA_STATUS_JSON_CAPACITY = NetworkWorkBuf::kOtaJson;
 constexpr const char *STATUS_TOO_MANY = "429 Too Many Requests";
@@ -6811,17 +6813,17 @@ esp_err_t ShotStopperNetwork::devicePasswordHandler(httpd_req_t *request) {
   if (!parsed) {
     memset(command.password, 0, sizeof(command.password));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_DEVICE_PASSWORD",
-                     "New password is required.");
+                     "New device password is required.");
   }
   if (!validDevicePassword(command.password)) {
     memset(command.password, 0, sizeof(command.password));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_DEVICE_PASSWORD",
-                     "New password must be 8–63 characters.");
+                     "New device password must be 8–63 characters.");
   }
   if (isFactoryDefaultPassword(command.password)) {
     memset(command.password, 0, sizeof(command.password));
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_DEVICE_PASSWORD",
-                     "New password cannot be the factory default.");
+                     "New device password cannot be the factory default.");
   }
   if (!self.callbacks_.enqueueWebCommand(command)) {
     memset(command.password, 0, sizeof(command.password));
@@ -6909,7 +6911,7 @@ struct OtaTransfer {
   httpd_req_t *request = nullptr;
 };
 
-bool otaTokensMatch(const char *candidate, const char *expected) {
+bool devicePasswordsMatch(const char *candidate, const char *expected) {
   return secretsMatch(candidate, expected);
 }
 
@@ -7010,33 +7012,26 @@ void appendOtaTag(char *buffer, size_t capacity, size_t &used,
 }  // namespace
 
 bool ShotStopperNetwork::authorizeOtaRequest(httpd_req_t *request) {
-  char token[WIFI_PASSWORD_CAPACITY] = {};
+  char password[WIFI_PASSWORD_CAPACITY] = {};
   char expected[WIFI_PASSWORD_CAPACITY] = {};
-  const size_t length = httpd_req_get_hdr_value_len(request, OTA_TOKEN_HEADER);
-  bool tokenAuthorized = false;
-  bool factoryPassword = true;
-  if (length > 0 && length + 1 <= sizeof(token) &&
-      httpd_req_get_hdr_value_str(request, OTA_TOKEN_HEADER, token,
-                                  sizeof(token)) == ESP_OK) {
-    portENTER_CRITICAL(&dataMux_);
-    memcpy(expected, settings_.devicePassword, sizeof(expected));
-    portEXIT_CRITICAL(&dataMux_);
-    factoryPassword = isFactoryDefaultPassword(expected);
-    // A controller still on the published factory credential has no secret to
-    // authenticate with, so firmware updates stay closed until it is changed.
-    tokenAuthorized = !factoryPassword && otaTokensMatch(token, expected);
-  } else {
-    portENTER_CRITICAL(&dataMux_);
-    memcpy(expected, settings_.devicePassword, sizeof(expected));
-    portEXIT_CRITICAL(&dataMux_);
-    factoryPassword = isFactoryDefaultPassword(expected);
+  const char *header = DEVICE_PASSWORD_HEADER;
+  size_t length = httpd_req_get_hdr_value_len(request, header);
+  if (length == 0) {
+    header = DEVICE_PASSWORD_HEADER_LEGACY;
+    length = httpd_req_get_hdr_value_len(request, header);
   }
-  memset(token, 0, sizeof(token));
+  bool passwordAuthorized = false;
+  if (length > 0 && length + 1 <= sizeof(password) &&
+      httpd_req_get_hdr_value_str(request, header, password,
+                                  sizeof(password)) == ESP_OK) {
+    portENTER_CRITICAL(&dataMux_);
+    memcpy(expected, settings_.devicePassword, sizeof(expected));
+    portEXIT_CRITICAL(&dataMux_);
+    passwordAuthorized = devicePasswordsMatch(password, expected);
+  }
+  memset(password, 0, sizeof(password));
   memset(expected, 0, sizeof(expected));
-  if (factoryPassword) {
-    return false;
-  }
-  if (tokenAuthorized) {
+  if (passwordAuthorized) {
     return true;
   }
   if (adminUnlockAllowed(request)) {
@@ -7055,13 +7050,12 @@ void ShotStopperNetwork::buildOtaJson(char *buffer, size_t capacity,
   ShotStopperOta &ota = ShotStopperOta::instance();
   const OtaStatusSnapshot ota_ = ota.snapshot();
   const bool safe = controlAllowsConfiguration(control);
-  const NetworkStatusSnapshot network = snapshot();
   int written = snprintf(
       buffer, capacity,
       "{\"available\":%s,\"state\":\"%s\",\"slotBytes\":%lu,"
       "\"receivedBytes\":%lu,\"expectedBytes\":%lu,\"pendingVerify\":%s,"
       "\"confirmed\":%s,\"safe\":%s,\"lockReason\":\"%s\","
-      "\"tokenRequired\":true,\"tokenAvailable\":%s,\"restartPending\":%s",
+      "\"passwordRequired\":true,\"passwordAvailable\":true,\"restartPending\":%s",
       ota.available() ? "true" : "false",
       ShotStopperOta::stateName(ota_.state),
       static_cast<unsigned long>(ota_.slotBytes),
@@ -7070,7 +7064,6 @@ void ShotStopperNetwork::buildOtaJson(char *buffer, size_t capacity,
       ota_.pendingVerify ? "true" : "false",
       ota_.confirmed ? "true" : "false", safe ? "true" : "false",
       configLockReason(control),
-      network.devicePasswordFactory ? "false" : "true",
       otaRestartPending_ ? "true" : "false");
   if (written <= 0 || static_cast<size_t>(written) >= capacity) {
     snprintf(buffer, capacity, "{\"available\":false}");
@@ -7150,8 +7143,8 @@ void ShotStopperNetwork::otaTransferProgress(void *context, uint32_t received,
 esp_err_t ShotStopperNetwork::otaStatusHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   if (!self.authorizeOtaRequest(request)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
-                     "Send the device password in X-OTA-Token, or unlock administration first.");
+    return sendError(request, STATUS_UNAUTHORIZED, "DEVICE_PASSWORD_INVALID",
+                     "Send the device password, or unlock administration first.");
   }
   return self.sendOtaSnapshot(request, STATUS_OK);
 }
@@ -7171,8 +7164,8 @@ esp_err_t ShotStopperNetwork::otaUploadHandler(httpd_req_t *request) {
     return sent;
   };
   if (!self.authorizeOtaRequest(request)) {
-    return rejectUpload(STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
-                        "Send the device password in X-OTA-Token, or unlock administration first.");
+    return rejectUpload(STATUS_UNAUTHORIZED, "DEVICE_PASSWORD_INVALID",
+                        "Send the device password, or unlock administration first.");
   }
   ShotStopperOta &ota = ShotStopperOta::instance();
 
@@ -7238,8 +7231,8 @@ esp_err_t ShotStopperNetwork::otaUploadHandler(httpd_req_t *request) {
 esp_err_t ShotStopperNetwork::otaFlashHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   if (!self.authorizeOtaRequest(request)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
-                     "Send the device password in X-OTA-Token, or unlock administration first.");
+    return sendError(request, STATUS_UNAUTHORIZED, "DEVICE_PASSWORD_INVALID",
+                     "Send the device password, or unlock administration first.");
   }
   ShotStopperOta &ota = ShotStopperOta::instance();
   const ControlGateSnapshot control = self.controlGate();
@@ -7281,8 +7274,8 @@ esp_err_t ShotStopperNetwork::otaFlashHandler(httpd_req_t *request) {
 esp_err_t ShotStopperNetwork::otaAbortHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   if (!self.authorizeOtaRequest(request)) {
-    return sendError(request, STATUS_UNAUTHORIZED, "OTA_TOKEN_INVALID",
-                     "Send the device password in X-OTA-Token, or unlock administration first.");
+    return sendError(request, STATUS_UNAUTHORIZED, "DEVICE_PASSWORD_INVALID",
+                     "Send the device password, or unlock administration first.");
   }
   ShotStopperOta::instance().discard();
   return self.sendOtaSnapshot(request, STATUS_OK);

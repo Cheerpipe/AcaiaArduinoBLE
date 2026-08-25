@@ -87,7 +87,7 @@ reboot. Automatic SoftAP from boot is still torn down when STA comes up.
 | --- | --- | --- |
 | `REBOOT` | none | Restarts firmware (safety gate) |
 | `FACTORY_RESET` | none | Wipes Wi-Fi, settings, calibration, and shots; device password `ineedacoffee`; restarts (safety gate) |
-| `SET_DEVICE_PASSWORD` | `<password>` | Sets the device password (8–63 chars, not `ineedacoffee`). Used for SoftAP WPA2 and OTA. Does not require the current password. Safety gate |
+| `SET_DEVICE_PASSWORD` | `<password>` | Sets the device password (8–63 chars, not `ineedacoffee`). SoftAP WPA2, Admin unlock, and OTA use it. Does not require the current device password. Safety gate |
 | `RESET_DEVICE_PASSWORD` | none | Restores device password `ineedacoffee`. STA unchanged. Safety gate |
 
 ## STA credentials (persist + reboot)
@@ -115,7 +115,7 @@ reboot. Automatic SoftAP from boot is still torn down when STA comes up.
 | --- | --- | --- |
 | `AP_START` | none | Raises SoftAP (`AdvancedShotStopperAP` at `192.168.4.1`). Stays up if STA is connected. Does not start HTTP if `WEBUI_STOP` is held |
 | `AP_STOP` | none | Stops SoftAP and holds auto-raise. HTTP stays if STA is up |
-| `AP_STATUS` | none | Dumps SoftAP state (never the password) |
+| `AP_STATUS` | none | Dumps SoftAP state (never the device password) |
 
 ## Web UI
 

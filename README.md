@@ -193,9 +193,8 @@ stop offset are per preset. Load, save, duplicate, or delete from
 
 ### OTA
 
-Update firmware over Wi-Fi without USB. CLI uses the device password as
-`X-OTA-Token`; the Web UI uses the Admin unlock (change the password from
-the factory default first). Dual-slot update with rollback if
+Update firmware over Wi-Fi without USB. CLI uses the device password;
+the Web UI uses the Admin unlock. Dual-slot update with rollback if
 the new image fails to serve the Web UI. See [OTA](docs/features/ota.md) and
 [Build scripts](docs/SCRIPTS.md).
 
@@ -224,12 +223,12 @@ need to change them after first setup.
 
 ## Admin
 
-The Admin page is locked until you enter the device password (**Unlock administration**). The unlock stays active while that Admin page is open, or for 15 minutes after the last privileged action (Start/Stop, rinse, Wi-Fi, OTA). **Lock** (header or Admin) closes it immediately. USB serial does not ask for the password.
+The Admin page is locked until you enter the device password (**Unlock administration**). The unlock stays active while that Admin page is open, or for 15 minutes after the last privileged action (Start/Stop, rinse, Wi-Fi, OTA). **Lock** (header or Admin) closes it immediately. USB serial does not ask for the device password.
 
 | Group | What it covers |
 | --- | --- |
 | **[Wi-Fi](docs/settings/wifi.md)** | Join your home network (STA), DHCP or static IP, first-boot fallback. |
-| **Device password** | Single firmware password: SoftAP WPA2, OTA, and Admin unlock. Changed from **Admin → Device password** after unlocking. |
+| **Device password** | Single secret for SoftAP WPA2, OTA, and Admin unlock. Changed from **Admin → Device password** after unlocking. |
 | **[AP](docs/settings/ap.md)** | Fallback access point `AdvancedShotStopperAP`. Uses the device password. |
 | **[Factory reset](docs/settings/factory-reset.md)** | Erase settings, Wi-Fi, calibration, and shot history. |
 
@@ -240,7 +239,7 @@ On a fresh flash or after factory reset:
 | | Value |
 | --- | --- |
 | **Fallback Wi-Fi (AP) name** | `AdvancedShotStopperAP` |
-| **Device password** | `ineedacoffee` (SoftAP WPA2 and OTA token) |
+| **Device password** | `ineedacoffee` (SoftAP WPA2 and OTA) |
 | **Web UI address (AP mode)** | `http://192.168.4.1` |
 
 The password is case-sensitive. Join the AP, open the address above, then

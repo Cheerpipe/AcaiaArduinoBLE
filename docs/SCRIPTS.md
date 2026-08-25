@@ -20,8 +20,9 @@ from:
 4. An interactive prompt (Enter accepts the value in brackets)
 
 After a successful run, non-secret values are saved, so the next command can
-be just `./scripts/bfm-idf`. The **OTA token is never stored or suggested** —
-pass `--token` or `SHOTSTOPPER_OTA_TOKEN` every time.
+be just `./scripts/bfm-idf`. The **device password is never stored or
+suggested** — pass `--password` / `-t` or `SHOTSTOPPER_DEVICE_PASSWORD`
+every time.
 
 `.shotstopper` is created mode `600` and is gitignored.
 
@@ -37,7 +38,7 @@ prompting. The same applies with `SHOTSTOPPER_NONINTERACTIVE=1`.
 | `-a`, `--arch` | `SHOTSTOPPER_ARCH` | `n8r4` or `n16r8` (alias `esp32s3` → `n16r8`). |
 | `-s`, `--speed` | `SHOTSTOPPER_SPEED` | Serial monitor baud, e.g. `115200`. |
 | `-H`, `--host` | `SHOTSTOPPER_HOST` | Controller IP or hostname for OTA. |
-| `-t`, `--token` | `SHOTSTOPPER_OTA_TOKEN` | OTA token: the device password. Never persisted. |
+| `-t`, `--password` | `SHOTSTOPPER_DEVICE_PASSWORD` | Device password. Never persisted. |
 | `-f`, `--flags` | `SHOTSTOPPER_FLAGS` | Extra compile flags, as a single string. |
 | `-b`, `--build-dir` | `SHOTSTOPPER_BUILD_DIR_OVERRIDE` | Build directory (`static` legacy only). |
 | `-o`, `--output-dir` | `SHOTSTOPPER_OUTPUT_DIR` | Reports directory (`static` / `static-idf` only). |
@@ -65,11 +66,11 @@ Writes to `build-idf/<architecture>` (`shotstopper.bin`).
 | `./scripts/build-idf` | `b-idf` | `--arch` (`--flags` optional) | Generate version and Web UI, build with ESP-IDF. |
 | `./scripts/flash-idf` | `f-idf` | `--port`, `--arch` | Flash the existing binary; does not rebuild or open the monitor. |
 | `./scripts/monitor-idf` | `m-idf` | `--port`, `--speed` | IDF serial monitor (Ctrl+] to exit). |
-| `./scripts/ota-idf` | `o-idf` | `--arch`, `--host`, `--token` | Wi-Fi update with the already-built IDF binary. |
+| `./scripts/ota-idf` | `o-idf` | `--arch`, `--host`, `--password` | Wi-Fi update with the already-built IDF binary. |
 | `./scripts/static-idf` | `s-idf` | `--arch` | Cppcheck against the IDF compilation database. Does not build. |
 | `./scripts/bf-idf` | | `--port`, `--arch` | build-idf then flash-idf. |
 | `./scripts/bfm-idf` | | `--port`, `--arch`, `--speed` | build-idf, flash-idf, monitor-idf. |
-| `./scripts/bo-idf` | | `--arch`, `--host`, `--token` | build-idf then ota-idf. |
+| `./scripts/bo-idf` | | `--arch`, `--host`, `--password` | build-idf then ota-idf. |
 | `./scripts/bsfm-idf` | | `--port`, `--arch`, `--speed` | build-idf, static-idf, flash-idf, monitor-idf. Does not flash if analysis reports diagnostics. |
 | `./scripts/gcc_analyzer` | | `--arch` (`--flags` optional) | Build with GCC `-fanalyzer` into `reports/gcc-analyzer/`. |
 

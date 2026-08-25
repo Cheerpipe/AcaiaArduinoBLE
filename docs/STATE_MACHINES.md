@@ -569,7 +569,7 @@ paddle already stably ON.
 | Result | Meaning |
 | --- | --- |
 | `NONE` | Still listening. |
-| `NETWORK_ACCESS_RESET` | Three complete OFF→ON cycles, then 3 s confirmation with paddle ON. Restores AP/password access. |
+| `NETWORK_ACCESS_RESET` | Three complete OFF→ON cycles, then 3 s confirmation with paddle ON. Restores AP / device-password access. |
 | `FACTORY_RESET` | Five cycles + confirmation. Erases settings and history. |
 | `TIMED_OUT` | 60 s elapsed with no confirmed gesture. |
 

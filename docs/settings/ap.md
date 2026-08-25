@@ -12,17 +12,17 @@ STA fails to associate at boot.
 - After a successful STA join, a later drop does **not** raise SoftAP.
   Use USB `AP_START` or reboot. See [USB serial CLI](../SERIAL_CLI.md).
 
-The AP name is fixed. The WPA2 password is the **device password**. Change it
+The AP name is fixed. SoftAP WPA2 uses the **device password**. Change it
 from **Admin** (unlock with the device password) **→ Device password** or from USB
-(`SET_DEVICE_PASSWORD` / `RESET_DEVICE_PASSWORD`). The same secret is the
-OTA token.
+(`SET_DEVICE_PASSWORD` / `RESET_DEVICE_PASSWORD`). Admin unlock and OTA use
+that same device password.
 
 ## Parameters
 
 | Setting | Default | Notes |
 | --- | --- | --- |
 | **AP name** | `AdvancedShotStopperAP` | Not user-editable. |
-| **Device password** | `ineedacoffee` | Case-sensitive. 8–63 characters when you change it; USB `SET_DEVICE_PASSWORD` will not accept the factory string as the new value. Also used as the SoftAP WPA2 password and the OTA token. |
+| **Device password** | `ineedacoffee` | Case-sensitive. 8–63 characters when you change it; USB `SET_DEVICE_PASSWORD` will not accept the factory string as the new value. SoftAP WPA2, Admin unlock, and OTA all use this same device password. |
 | **AP address** | `http://192.168.4.1` | SoftAP IPv4. |
 
 ## First connection

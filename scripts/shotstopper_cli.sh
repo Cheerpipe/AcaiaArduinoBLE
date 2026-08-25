@@ -10,13 +10,14 @@
 #      (Enter accepts the suggestion shown in brackets)
 #
 # After a successful resolve the values used are merged into .shotstopper.
-# The OTA token is never loaded, suggested, or persisted (use env/CLI each run).
+# The device password is never loaded, suggested, or persisted (use env/CLI
+# each run).
 #
 # Written for bash 3.2 (the system bash on macOS): no associative arrays,
 # no ${var,,} case conversion.
 
-SS_CLI_KEYS="port arch speed host token flags build_dir output_dir"
-SS_CLI_SECRET_KEYS="token"
+SS_CLI_KEYS="port arch speed host password flags build_dir output_dir"
+SS_CLI_SECRET_KEYS="password"
 # Extra compiler flags offered when the prompt for --flags is answered with Enter.
 SS_CLI_DEFAULT_FLAGS='-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1 -DSHOT_STOPPER_ENABLE_BUZZER=1'
 # Per-run path overrides. Persisting them would let a stale build_dir silently
@@ -87,7 +88,7 @@ ss_env_name() {
     arch) printf 'SHOTSTOPPER_ARCH' ;;
     speed) printf 'SHOTSTOPPER_SPEED' ;;
     host) printf 'SHOTSTOPPER_HOST' ;;
-    token) printf 'SHOTSTOPPER_OTA_TOKEN' ;;
+    password) printf 'SHOTSTOPPER_DEVICE_PASSWORD' ;;
     flags) printf 'SHOTSTOPPER_FLAGS' ;;
     build_dir) printf 'SHOTSTOPPER_BUILD_DIR_OVERRIDE' ;;
     output_dir) printf 'SHOTSTOPPER_OUTPUT_DIR' ;;
@@ -101,7 +102,7 @@ Named parameters (long and short):
   -a, --arch <arch>        n8r4 | n16r8
   -s, --speed <baud>       Serial monitor baud rate, e.g. 115200
   -H, --host <ip|name>     Controller address for OTA
-  -t, --token <key>        OTA token (the device password)
+  -t, --password <pw>      Device password (never persisted)
   -f, --flags "<flags>"    Extra compile flags (single string)
   -b, --build-dir <path>   Build directory (static / static-idf only)
   -o, --output-dir <path>  Reports directory (static / static-idf only)
@@ -111,7 +112,7 @@ No script silently fills in missing values. Each parameter comes from the flag,
 its environment variable, the .shotstopper file at the repository root, or a
 prompt. At the prompt, Enter accepts the suggested value in brackets.
 After resolving parameters, the values used are saved to .shotstopper
-(the OTA token is never saved or suggested).
+(the device password is never saved or suggested).
 EOF
 }
 
@@ -137,7 +138,7 @@ ss_cli_parse() {
       -a|--arch) key="arch" ;;
       -s|--speed) key="speed" ;;
       -H|--host) key="host" ;;
-      -t|--token) key="token" ;;
+      -t|--password|--token) key="password" ;;
       -f|--flags) key="flags" ;;
       -b|--build-dir) key="build_dir" ;;
       -o|--output-dir) key="output_dir" ;;
@@ -211,6 +212,10 @@ ss_cli_apply_env() {
     name="$(ss_env_name "$key")"
     [[ -n "$name" ]] || continue
     eval "value=\${$name-}"
+    # Legacy alias: older docs/scripts used SHOTSTOPPER_OTA_TOKEN.
+    if [[ -z "$value" && "$key" == "password" ]]; then
+      value="${SHOTSTOPPER_OTA_TOKEN-}"
+    fi
     # Only an exported, non-empty value counts; an empty export is ignored so
     # a stale `export SHOTSTOPPER_HOST=` cannot silently win over the store.
     [[ -n "$value" ]] || continue
@@ -310,7 +315,7 @@ ss_prompt_text() {
     arch) printf 'Architecture (n8r4 or n16r8)' ;;
     speed) printf 'Monitor baud rate' ;;
     host) printf 'Controller address (IP or hostname)' ;;
-    token) printf 'OTA token = device password' ;;
+    password) printf 'Device password' ;;
     flags) printf 'Extra compile flags' ;;
     build_dir) printf 'Build directory' ;;
     output_dir) printf 'Reports directory' ;;
@@ -346,7 +351,7 @@ ss_prompt_suggestion() {
     arch) printf 'n16r8' ;;
     speed) printf '115200' ;;
     host) printf '192.168.4.1' ;;
-    token) return 0 ;;
+    password) return 0 ;;
     flags) printf '%s' "$SS_CLI_DEFAULT_FLAGS" ;;
     build_dir)
       arch_s="$(ss_get arch)"
@@ -431,7 +436,7 @@ ss_validate_key() {
           ;;
       esac
       ;;
-    port|token|build_dir|output_dir)
+    port|password|build_dir|output_dir)
       if [[ -z "$value" ]]; then
         ss_cli_die "Parameter --$(printf '%s' "$key" | tr '_' '-') cannot be empty."
         return 1
@@ -520,7 +525,7 @@ ss_cli_save() {
   chmod 600 "$tmp" 2>/dev/null || true
   {
     printf '# Values remembered by the Shot Stopper scripts.\n'
-    printf '# Local file, ignored by git. Does not store the OTA token.\n'
+    printf '# Local file, ignored by git. Does not store the device password.\n'
     for key in $SS_CLI_KEYS; do
       ss_is_transient "$key" && continue
       ss_is_secret "$key" && continue
@@ -559,9 +564,9 @@ ss_cli_flags_for() {
       arch) SS_CLI_FORWARD+=(--arch "$(ss_get arch)") ;;
       speed) SS_CLI_FORWARD+=(--speed "$(ss_get speed)") ;;
       host) SS_CLI_FORWARD+=(--host "$(ss_get host)") ;;
-      # token is deliberately absent: a command line is world-readable through
-      # `ps` for as long as the child runs, which for an OTA is minutes. Use
-      # ss_cli_export_secrets instead.
+      # password is deliberately absent: a command line is world-readable
+      # through `ps` for as long as the child runs, which for an OTA is
+      # minutes. Use ss_cli_export_secrets instead.
       flags) SS_CLI_FORWARD+=(--flags "$(ss_get flags)") ;;
       build_dir) SS_CLI_FORWARD+=(--build-dir "$(ss_get build_dir)") ;;
       output_dir) SS_CLI_FORWARD+=(--output-dir "$(ss_get output_dir)") ;;
@@ -572,9 +577,9 @@ ss_cli_flags_for() {
 # Hands secrets to a child process through the environment, which other users
 # cannot read, rather than through argv, which they can.
 ss_cli_export_secrets() {
-  if ss_is_set token; then
-    SHOTSTOPPER_OTA_TOKEN="$(ss_get token)"
-    export SHOTSTOPPER_OTA_TOKEN
+  if ss_is_set password; then
+    SHOTSTOPPER_DEVICE_PASSWORD="$(ss_get password)"
+    export SHOTSTOPPER_DEVICE_PASSWORD
   fi
 }
 

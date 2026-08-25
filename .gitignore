@@ -17,7 +17,7 @@ Desktop.ini
 .env
 .env.*
 !.env.example
-# Remembered script parameters, including the OTA token
+# Remembered script parameters (device password is never stored)
 .shotstopper
 secrets.h
 credentials.h

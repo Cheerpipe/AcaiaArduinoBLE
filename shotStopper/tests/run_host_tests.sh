@@ -247,8 +247,8 @@ done
 
 # A command line is readable by every user on the machine through `ps`, for as
 # long as the child runs. An OTA upload runs for minutes.
-if grep -n -E '\-\-token[[:space:]]+"' "$repo_root"/scripts/* ; then
-  echo "The OTA token must reach a child through the environment, not argv" >&2
+if grep -n -E '\-\-(token|password)[[:space:]]+"' "$repo_root"/scripts/* ; then
+  echo "The device password must reach a child through the environment, not argv" >&2
   exit 1
 fi
 

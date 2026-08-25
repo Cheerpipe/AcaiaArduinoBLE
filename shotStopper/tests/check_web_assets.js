@@ -3690,10 +3690,18 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
   if ((otaHandlers.match(/authorizeOtaRequest\(request\)/g) || []).length !== 4) {
     throw new Error('Every OTA route must authenticate the request');
   }
-  if (!network.includes('isFactoryDefaultPassword(expected)') ||
-      !network.includes('otaTokensMatch(token, expected)')) {
+  if (!network.includes('devicePasswordsMatch(password, expected)')) {
     throw new Error(
-      'OTA authentication must reject the factory default password and compare in constant time');
+      'OTA authentication must compare the device password in constant time');
+  }
+  if (network.includes('tokenAuthorized = !factoryPassword && otaTokensMatch') ||
+      network.includes('passwordAuthorized = !factoryPassword') ||
+      (network.includes('authorizeOtaRequest') &&
+       network.slice(network.indexOf('ShotStopperNetwork::authorizeOtaRequest'),
+                     network.indexOf('ShotStopperNetwork::buildOtaJson'))
+           .includes('if (factoryPassword)'))) {
+    throw new Error(
+      'OTA authentication must accept the factory default device password');
   }
   const currentDeviceAt = html.indexOf('id="currentDevicePassword"');
   const newDeviceAt = html.indexOf('id="newDevicePassword"');
@@ -3885,13 +3893,17 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
     }
   }
   if (html.includes('id="otaToken"') || js.includes('otaGuardToken') ||
-      js.includes('X-OTA-Token')) {
-    throw new Error('Web UI OTA must not collect a separate token after admin unlock');
+      js.includes('X-OTA-Token') || js.includes('X-Device-Password') ||
+      js.includes('OTA token') || js.includes('ota password')) {
+    throw new Error(
+      'Web UI OTA must not collect a separate password after admin unlock');
   }
   if (!js.includes('xhr.setRequestHeader(WEB_UI_CLIENT_HEADER,webUiClientId)') ||
       !network.includes('adminUnlockAllowed(request)') ||
-      !network.includes('otaTokensMatch(token, expected)')) {
-    throw new Error('OTA must accept an admin unlock session or X-OTA-Token');
+      !network.includes('devicePasswordsMatch(password, expected)') ||
+      !network.includes('X-Device-Password')) {
+    throw new Error(
+      'OTA must accept an admin unlock session or the device password header');
   }
   // Two steps: verify writes the spare slot, a separate button flashes it.
   if (!js.includes("otaSend('/api/v1/ota',file") ||

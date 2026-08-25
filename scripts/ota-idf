@@ -17,9 +17,8 @@ Usage: ./scripts/ota-idf [flags]
 Upload the already-built ESP-IDF image to the controller, verify it, and leave
 it ready to boot.
 
-Required parameters: --arch, --host, and --token.
-The token is the device password. The controller rejects
-updates while that password is still the factory default.
+Required parameters: --arch, --host, and --password.
+Pass the device password (including the factory default if unchanged).
 
 $(ss_flag_help)
 
@@ -41,7 +40,7 @@ if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
   exit 0
 fi
 
-ss_cli_resolve "arch host token" || exit $?
+ss_cli_resolve "arch host password" || exit $?
 shotstopper_resolve_board "$(ss_get arch)"
 ss_idf_resolve_paths
 
@@ -66,20 +65,20 @@ base="http://$host"
 echo "Local image identity:"
 node ./scripts/image_tag.js "$image" --expect-arch "$SHOTSTOPPER_ARCH"
 
-# The token travels in a curl config file, not on the command line where any
-# `ps` would expose it.
+# The device password travels in a curl config file, not on the command line
+# where any `ps` would expose it.
 curl_config="$(mktemp "${TMPDIR:-/tmp}/shotstopper-ota.XXXXXX")"
 chmod 600 "$curl_config"
 cleanup() { rm -f "$curl_config" "${body_file:-}"; }
 trap cleanup EXIT
 # Inside curl config-file quotes, \ and " are escapes. A WPA2 password may
-# contain both: without escaping them the token arrives truncated and the
-# controller replies OTA_TOKEN_INVALID with no further clues.
-ota_token="$(ss_get token)"
-ota_token="${ota_token//\\/\\\\}"
-ota_token="${ota_token//\"/\\\"}"
-printf 'header = "X-OTA-Token: %s"\n' "$ota_token" > "$curl_config"
-unset ota_token
+# contain both: without escaping them the device password arrives truncated
+# and the controller replies DEVICE_PASSWORD_INVALID with no further clues.
+device_password="$(ss_get password)"
+device_password="${device_password//\\/\\\\}"
+device_password="${device_password//\"/\\\"}"
+printf 'header = "X-Device-Password: %s"\n' "$device_password" > "$curl_config"
+unset device_password
 
 body_file="$(mktemp "${TMPDIR:-/tmp}/shotstopper-ota-body.XXXXXX")"
 
