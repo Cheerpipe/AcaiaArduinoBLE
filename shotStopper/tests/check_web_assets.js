@@ -253,7 +253,7 @@ if (htmlBytes > 50000) {
 if (jsBytes > 128000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 177000) {
+if (htmlBytes + jsBytes > 178000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -688,9 +688,12 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
 if (!ui.includes('id="shotPanel"') ||
     !ui.includes('id="shotBar"') ||
     !ui.includes('id="shotBarFast"') ||
+    !ui.includes('id="shotBarTicks"') ||
+    !partialHtml.home.includes('id="shotBarTicks"') ||
+    !css.includes('content:"Weight (g)"') ||
     ui.includes('shotMark') ||
     !ui.includes('Math.max(goal,wt)') ||
-    !css.includes('.shotTrack{position:relative;height:1rem;background:var(--ln);border-radius:.5rem;margin:.35rem 0 .95rem;overflow:hidden}') ||
+    !css.includes('.shotTrack{position:relative;height:1rem;background:var(--ln);border-radius:.5rem;overflow:hidden}') ||
     !css.includes('.shotTrack #shotBarFast{background:#d97706}') ||
     css.includes('.shotMark') ||
     css.includes('max-width:150%') ||
@@ -698,14 +701,20 @@ if (!ui.includes('id="shotPanel"') ||
     !html.includes('id="shotSparkHost"') ||
     !css.includes('.shotSparkHost') ||
     !css.includes('.shotSpark{') ||
+    !css.includes('.shotSparkY{') ||
+    !css.includes('.shotSparkHost .ruleChartTicks') ||
     !css.includes('.shotSparkHost[hidden]') ||
     !css.includes('#shotTable tr.noSpark{') ||
-    !css.includes('.shotSpark{display:block;width:100%;height:100%;color:var(--ok);overflow:visible}') ||
+    !css.includes('.shotSpark{grid-area:plot;display:block;width:100%;height:100%;color:var(--ok);overflow:visible}') ||
     !ui.includes('function renderShotSpark(') ||
     !runtimeJs.includes('function buildShotSparkModel(') ||
+    !runtimeJs.includes('function axisLabel(') ||
+    !runtimeJs.includes('function fillChartTicks(') ||
     !runtimeJs.includes('function shotDisplayFlowGS(') ||
     !runtimeJs.includes('lastCurveWeightG(w)===null') ||
     !runtimeJs.includes('model.firstDropS>0&&dur>0') ||
+    !runtimeJs.includes("'1st '+L(") ||
+    !runtimeJs.includes('fillChartTicks($(\'shotBarTicks\')') ||
     !runtimeJs.includes('stroke="\'+cN+\'"') ||
     runtimeJs.includes('stroke="currentColor"') ||
     !runtimeJs.includes("if(spark.hidden)row.classList.add('noSpark')") ||
@@ -3062,7 +3071,7 @@ if (generated.gzip.length > 4096) {
 if (generated.jsGzip.length > 6144) {
   throw new Error('Compressed Web UI shell JS exceeds the 6 KiB gzip budget');
 }
-if (generated.runtimeGzip.length > 26112) {
+if (generated.runtimeGzip.length > 26240) {
   throw new Error('Compressed Web UI runtime JS exceeds the 25 KiB gzip budget');
 }
 if (generated.secondaryGzip.length > 4096) {
