@@ -7,7 +7,7 @@ the mode in **Settings → Machine and scale → Paddle** (`paddleMode`). It is
 
 This page applies to firmware compiled as `SHOT_STOPPER_MACHINE_TYPE=0`
 (paddle / latch). That firmware shows **Paddle**. **Quick rinse** is shared
-with momentary (Enable rinse defaults off on both). Momentary builds hide
+with momentary (Enable quick rinse defaults off on both). Momentary builds hide
 **Paddle** and show [Momentary](momentary.md) instead.
 
 This is the main day-to-day choice. All modes still share quick rinse, machine circuit

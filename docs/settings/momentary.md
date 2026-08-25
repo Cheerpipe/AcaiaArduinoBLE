@@ -3,7 +3,7 @@
 How a **momentary** brew switch tells the stopper to start or stop a shot.
 This page applies to firmware compiled as `SHOT_STOPPER_MACHINE_TYPE=1`
 (momentary) or `2` (momentary + reed). Those builds show **Switch** and
-hide **Paddle**. **Quick rinse** is shared with paddle firmware (Enable rinse
+hide **Paddle**. **Quick rinse** is shared with paddle firmware (Enable quick rinse
 defaults **off** on every machine type). Paddle / latch builds hide **Switch**.
 
 The relay **mirrors the switch 1:1** while a start-guard is not blocking
@@ -29,7 +29,7 @@ that a blocked start also leaves K1 open.
 | Mode | Default | When start/stop fires |
 | --- | --- | --- |
 | **Button press** | yes | On the debounced press. If the hold then exceeds **Single-press limit**, that edge is undone (not a start/stop). Release does not toggle again. |
-| **Button release** | no | On release, and only if the hold is no longer than **Single-press limit** (unless Enable rinse is on and this hold started from idle: the rinse gesture wins). A longer hold is mirror-only when rinse is off. |
+| **Button release** | no | On release, and only if the hold is no longer than **Single-press limit** (unless Enable quick rinse is on and this hold started from idle: the rinse gesture wins). A longer hold is mirror-only when rinse is off. |
 
 Without a scale, or with brew by weight off, the stopper does not send
 weight cuts. The 1:1 relay mirror still copies the switch. **Max BBW time

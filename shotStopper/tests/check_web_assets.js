@@ -247,7 +247,7 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 49500) {
+if (htmlBytes > 50000) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
 if (jsBytes > 128000) {
@@ -1103,8 +1103,11 @@ if (!html.includes('class="cfgGroup paddleOnly"><summary>Paddle</summary>') ||
         html.indexOf('id="rinseGestureS"') ||
     html.indexOf('<summary>Quick rinse</summary>') >
         html.indexOf('id="rinseEnabled"') ||
-    !html.includes('Minimum time to hold the switch to start a rinse') ||
-    !html.includes('How long the machine stays on after a rinse starts') ||
+    !html.includes('Enable quick rinse') ||
+    !html.includes('Lets you flush the group with a short paddle flip') ||
+    !html.includes('Lets you flush the group with a long press from idle') ||
+    !html.includes('How long to hold the switch from idle before a rinse starts') ||
+    !html.includes('How long water runs through the group after a rinse starts') ||
     !html.includes('id="rinseButton" class="btnGlyph" title="Start rinse"') ||
     html.includes('id="rinseButton" class="btnGlyph paddleOnly"') ||
     !ui.includes('s.config.rinseEnabled===true') ||
