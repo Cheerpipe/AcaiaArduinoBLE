@@ -1848,6 +1848,8 @@ struct ControlStatusSnapshot {
   uint32_t scalePacketGaps = 0;
   uint32_t scaleRejectedPackets = 0;
   uint32_t scaleReconnects = 0;
+  uint32_t scaleRecoveredStaleCount = 0;
+  uint32_t scaleRecoveredStaleMs = 0;
   uint8_t scaleLastDisconnectReason = 0;
   uint32_t uptimeMs = 0;
   // Recent loop gap: max over the last completed ~5 s health window (and any

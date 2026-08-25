@@ -193,6 +193,12 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   lastScalePacketGapLogMs = 0;
   scaleRejectedPackets = 0;
   scaleReconnects = 0;
+  scaleRecoveredStaleCount = 0;
+  scaleRecoveredStaleMs = 0;
+  recoverableStaleOpen = false;
+  recoverableStaleStartedAtMs = 0;
+  recoverableStaleDisconnectSequence = 0;
+  recoverableStaleConnectionGeneration = 0;
   scaleLastDisconnectReason = 0;
   scaleTimerValid = false;
   scaleTimerMs = 0;
@@ -5041,6 +5047,91 @@ void r35_connected_without_weight_stream_is_not_available() {
   CHECK(!status.currentWeightValid);
 }
 
+void r36_recovered_stale_metrics_count_connected_gaps_only() {
+  ControlStatusSnapshot status;
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  publishWeight(12.0f);
+  publishControlStatus();
+  copyControlStatus(status);
+  CHECK(status.weightStreamState == WeightStreamState::FRESH);
+  CHECK(status.scaleRecoveredStaleCount == 0);
+  CHECK(status.scaleRecoveredStaleMs == 0);
+
+  hostMillis += MAX_AUTOMATION_WEIGHT_AGE_MS + 100;
+  markScaleWorkerProgress();
+  publishControlStatus();
+  copyControlStatus(status);
+  CHECK(status.weightStreamState == WeightStreamState::STALE);
+  CHECK(status.scaleRecoveredStaleCount == 0);
+  CHECK(status.scaleRecoveredStaleMs == 0);
+
+  hostMillis += 250;
+  markScaleWorkerProgress();
+  publishWeight(12.1f);
+  publishControlStatus();
+  copyControlStatus(status);
+  CHECK(status.weightStreamState == WeightStreamState::FRESH);
+  CHECK(status.scaleRecoveredStaleCount == 1);
+  CHECK(status.scaleRecoveredStaleMs == 250);
+
+  hostMillis += MAX_AUTOMATION_WEIGHT_AGE_MS + 100;
+  markScaleWorkerProgress();
+  publishControlStatus();
+  copyControlStatus(status);
+  CHECK(status.weightStreamState == WeightStreamState::STALE);
+  CHECK(status.scaleRecoveredStaleCount == 1);
+  hostMillis += 400;
+  markScaleWorkerProgress();
+  publishWeight(12.2f);
+  publishControlStatus();
+  copyControlStatus(status);
+  CHECK(status.weightStreamState == WeightStreamState::FRESH);
+  CHECK(status.scaleRecoveredStaleCount == 2);
+  CHECK(status.scaleRecoveredStaleMs == 650);
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  publishWeight(12.0f);
+  publishControlStatus();
+  hostMillis += MAX_AUTOMATION_WEIGHT_AGE_MS + 100;
+  markScaleWorkerProgress();
+  publishControlStatus();
+  copyControlStatus(status);
+  CHECK(status.weightStreamState == WeightStreamState::STALE);
+  setScaleConnected(false);
+  publishControlStatus();
+  copyControlStatus(status);
+  CHECK(status.scaleRecoveredStaleCount == 0);
+  CHECK(status.scaleRecoveredStaleMs == 0);
+
+  setScaleConnected(true);
+  publishWeight(12.0f);
+  publishControlStatus();
+  copyControlStatus(status);
+  CHECK(status.weightStreamState == WeightStreamState::FRESH);
+  CHECK(status.scaleRecoveredStaleCount == 0);
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  publishWeight(12.0f);
+  publishControlStatus();
+  setScaleConnected(false);
+  publishControlStatus();
+  setScaleConnected(true);
+  publishControlStatus();
+  copyControlStatus(status);
+  CHECK(status.weightStreamState == WeightStreamState::STALE);
+  CHECK(status.scaleRecoveredStaleCount == 0);
+  publishWeight(12.0f);
+  publishControlStatus();
+  copyControlStatus(status);
+  CHECK(status.weightStreamState == WeightStreamState::FRESH);
+  CHECK(status.scaleRecoveredStaleCount == 0);
+  CHECK(status.scaleRecoveredStaleMs == 0);
+}
+
 bool debugEventExists(DebugCode code, int32_t argument1,
                       int32_t argument2) {
   DebugEvent events[DEBUG_EVENT_CAPACITY] = {};
@@ -7548,6 +7639,8 @@ void sc15_status_printers_use_dump_views() {
   CHECK(serialTxContains("SCALE_STATUS"));
   CHECK(serialTxContains("state=CONNECTED"));
   CHECK(serialTxContains("preferredMac=AA:BB:CC:DD:EE:FF"));
+  CHECK(serialTxContains("recoveredStaleCount=0"));
+  CHECK(serialTxContains("recoveredStaleMs=0"));
   CHECK(serialTxContains("weightG=18.50"));
 
   SerialCliNtpDump ntp;
@@ -9815,6 +9908,7 @@ const TestCase testCases[] = {
     {"R33", r33_weight_mailbox_keeps_latest_and_reports_gap},
     {"R34", r34_suspended_control_recovers_after_three_attributed_samples},
     {"R35", r35_connected_without_weight_stream_is_not_available},
+    {"R36", r36_recovered_stale_metrics_count_connected_gaps_only},
     {"R41", r41_negative_weight_in_range_starts_automatic_cycle},
     {"CP01", cp01_zero_pre_tare_weight_blocks_brew},
     {"CP02", cp02_negative_pre_tare_weight_blocks_brew},

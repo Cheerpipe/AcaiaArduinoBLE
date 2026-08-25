@@ -134,7 +134,7 @@ if (!network.includes('copyTaskProfiler') ||
     !network.includes('static constexpr size_t kStatusJson = 12288') ||
     !networkHeader.includes('void (*copyTaskProfiler)(TaskProfilerSnapshot &out)') ||
     !fs.readFileSync(path.join(sketchDir, 'ShotStopperDebugExport.h'), 'utf8')
-        .includes('DEBUG_EXPORT_SCHEMA_VERSION = 3')) {
+        .includes('DEBUG_EXPORT_SCHEMA_VERSION = 4')) {
   throw new Error(
       'Diagnostic status, POST /api/v1/diagnostic/profiler, and debug export must expose tasks');
 }
@@ -350,7 +350,7 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 51600) {
+if (htmlBytes > 51650) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
 if (jsBytes > 131500) {
@@ -1807,6 +1807,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('id="dRecovery"') ||
       !diagHtml.includes('id="dStream"') ||
       !diagHtml.includes('id="dControl"') ||
+      !diagHtml.includes('id="hRecoveredStales"') ||
+      !diagHtml.includes('id="hStaleTime"') ||
       !ui.includes("t('dMachine',s.machineState)") ||
       !ui.includes("t('hFirmware',s.firmwareVersion)") ||
       !ui.includes("t('hBoot',typeof s.bootId==='number'&&s.bootId?'#'+s.bootId:'')") ||
@@ -1819,6 +1821,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes("t('dReed',s.reedOn?'ON':'OFF')") ||
       !ui.includes("t('dStream',sc.streamState)") ||
       !ui.includes("t('dControl',sc.controlState)") ||
+      !ui.includes("t('hRecoveredStales',String(sc.recoveredStaleCount))") ||
+      !ui.includes("t('hStaleTime',typeof sc.recoveredStaleMs==='number'?sc.recoveredStaleMs+' ms':'')") ||
       !diagHtml.includes('<strong>Heap min</strong>') ||
       !diagHtml.includes('<strong>Heap largest</strong>') ||
       !diagHtml.includes('<strong>PSRAM size</strong>') ||
@@ -2794,7 +2798,8 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'bleHostAllocPsram', 'bleHostAllocFallback',
     'workBufExternal', 'jsonArenaExternal', 'allocExternalFallback',
     'resetReasonCode', 'packetGaps', 'rejectedPackets', 'reconnects',
-    'eventsDropped', 'lastCommand', 'loopIntervalGapMs', 'loopMaxGapMs',
+    'eventsDropped', 'recoveredStaleCount', 'recoveredStaleMs',
+    'lastCommand', 'loopIntervalGapMs', 'loopMaxGapMs',
     'machineState', 'physicalActivatorOn', 'reedOn', 'controlSource', 'cupPresence',
     'streamState', 'controlState', 'taskWatchdogReady', 'recoveryRequired',
     'compileFlags', 'remoteMachineControl', 'complete', 'degraded', 'scaleWorker',

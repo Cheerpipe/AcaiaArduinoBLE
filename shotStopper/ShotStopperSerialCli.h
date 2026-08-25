@@ -613,6 +613,8 @@ struct SerialCliScaleDump {
   uint32_t packetGaps = 0;
   uint32_t rejectedPackets = 0;
   uint32_t reconnects = 0;
+  uint32_t recoveredStaleCount = 0;
+  uint32_t recoveredStaleMs = 0;
   uint8_t lastDisconnectReason = 0;
   uint32_t workerAgeMs = 0;
   bool timerValid = false;
@@ -843,6 +845,10 @@ inline void serialCliPrintScaleStatus(const SerialCliScaleDump &dump) {
   Serial.println(dump.preferredName[0] != '\0' ? dump.preferredName : "-");
   Serial.print("reconnects=");
   Serial.println(static_cast<unsigned long>(dump.reconnects));
+  Serial.print("recoveredStaleCount=");
+  Serial.println(static_cast<unsigned long>(dump.recoveredStaleCount));
+  Serial.print("recoveredStaleMs=");
+  Serial.println(static_cast<unsigned long>(dump.recoveredStaleMs));
   Serial.print("packetGaps=");
   Serial.println(static_cast<unsigned long>(dump.packetGaps));
   Serial.print("rejectedPackets=");

@@ -378,7 +378,7 @@ Source: `ShotStopperScaleTypes.h`.
 | --- | --- |
 | `NO_SAMPLE` | No usable weight this boot / this link. |
 | `FRESH` | Last **parsed** notification (`observedWeight`) is within `MAX_AUTOMATION_WEIGHT_AGE_MS` (1 s) on the current connection generation. Brew accept/reject does not change this. |
-| `STALE` | No parsed notification within 1 s, or the link dropped, during `BREW` while control was still tracking. |
+| `STALE` | No parsed notification within 1 s, or the link dropped, during `BREW` while control was still tracking. Diagnostics **Recovered stales** / **Stale time** count only live stream → STALE → live recoveries on the same BLE link; stales that end in disconnect are discarded. |
 | `ANOMALOUS` | Sample failed slew/plausibility vs the accepted trajectory. |
 | `OVERLOAD` | Absolute weight outside the automation window (pan slammed or protocol glitch). |
 

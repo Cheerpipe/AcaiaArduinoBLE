@@ -4398,7 +4398,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"scale\":{\"streamState\":\"%s\",\"controlState\":\"%s\","
         "\"packetGaps\":%lu,\"rejectedPackets\":%lu,"
         "\"reconnects\":%lu,\"lastDisconnectReasonName\":\"%s\","
-        "\"eventsDropped\":%lu},"
+        "\"eventsDropped\":%lu,\"recoveredStaleCount\":%lu,"
+        "\"recoveredStaleMs\":%lu},"
         "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"},"
         "\"compileFlags\":{\"buzzer\":\"%s\",\"remoteMachineControl\":%s,"
         "\"arch\":\"%s\",\"machineType\":\"%s\",\"stopPulseMs\":%lu,"
@@ -4471,6 +4472,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.scaleReconnects),
         scaleDisconnectReasonName(control.scaleLastDisconnectReason),
         static_cast<unsigned long>(control.scaleEventsDropped),
+        static_cast<unsigned long>(control.scaleRecoveredStaleCount),
+        static_cast<unsigned long>(control.scaleRecoveredStaleMs),
         static_cast<unsigned long>(network.lastCommandRequestId),
         commandResultStateName(network.lastCommandState),
         compiledBuzzerModeId(),
@@ -4999,6 +5002,7 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            "\"scaleLink\":{\"state\":\"%s\",\"disconnectSequence\":%lu,"
            "\"connectionGeneration\":%lu,\"packetSequence\":%lu,"
            "\"packetGaps\":%lu,\"rejectedPackets\":%lu,\"reconnects\":%lu,"
+           "\"recoveredStaleCount\":%lu,\"recoveredStaleMs\":%lu,"
            "\"workerProgressAtMs\":%lu,\"timerValid\":%s,\"timerMs\":%lu,"
            "\"timerAgeMs\":%lu,\"protocol\":\"%s\","
            "\"lastDisconnectReasonName\":\"%s\"},",
@@ -5009,6 +5013,8 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            static_cast<unsigned long>(c.scalePacketGaps),
            static_cast<unsigned long>(c.scaleRejectedPackets),
            static_cast<unsigned long>(c.scaleReconnects),
+           static_cast<unsigned long>(c.scaleRecoveredStaleCount),
+           static_cast<unsigned long>(c.scaleRecoveredStaleMs),
            static_cast<unsigned long>(x.scaleWorkerProgressAtMs),
            x.scaleTimerValid ? "true" : "false",
            static_cast<unsigned long>(x.scaleTimerMs),

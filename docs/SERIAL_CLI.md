@@ -152,7 +152,7 @@ persist.
 | --- | --- | --- |
 | `LOG_DUMP` | none | Prints the RAM debug ring (oldest first), one event at a time. Deferred while a cycle is active or machine circuit is closed. Says so if empty or retain is none |
 | `HEALTH` | none | Heap, PSRAM, BLE host alloc counters, loop gap (interval + max), task stacks, CPU load, temperature, alert latches |
-| `SCALE_STATUS` | none | BLE scale link, preferred MAC/name, weight freshness |
+| `SCALE_STATUS` | none | BLE scale link, preferred MAC/name, weight freshness, recovered stale count/time |
 | `NTP_STATUS` | none | Wall clock / NTP state. Notes if STA is down |
 | `BLE_COMPAT_ENABLE` | none | Enables the ShotStopper Companion GATT profile on the next boot; restart required |
 | `BLE_COMPAT_DISABLE` | none | Disables the Companion GATT profile on the next boot so its RAM is not allocated; restart required |

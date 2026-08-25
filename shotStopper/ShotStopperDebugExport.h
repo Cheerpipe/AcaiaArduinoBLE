@@ -15,7 +15,7 @@
 
 namespace shotstopper {
 
-constexpr uint32_t DEBUG_EXPORT_SCHEMA_VERSION = 3;
+constexpr uint32_t DEBUG_EXPORT_SCHEMA_VERSION = 4;
 constexpr size_t DEBUG_EXPORT_SHOT_SUMMARY_LIMIT = 10;
 
 // Internals not fully represented on ControlStatusSnapshot / status APIs.

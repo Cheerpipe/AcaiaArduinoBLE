@@ -452,6 +452,12 @@ uint32_t scalePacketGaps = 0;
 uint32_t lastScalePacketGapLogMs = 0;
 uint32_t scaleRejectedPackets = 0;
 uint32_t scaleReconnects = 0;
+uint32_t scaleRecoveredStaleCount = 0;
+uint32_t scaleRecoveredStaleMs = 0;
+bool recoverableStaleOpen = false;
+uint32_t recoverableStaleStartedAtMs = 0;
+uint32_t recoverableStaleDisconnectSequence = 0;
+uint32_t recoverableStaleConnectionGeneration = 0;
 uint8_t scaleLastDisconnectReason = 0;
 bool scaleTimerValid = false;
 uint32_t scaleTimerMs = 0;
@@ -1292,6 +1298,41 @@ bool bleCompanionStatusShouldPublish(bool scaleLinked, bool changed,
   return lastPublishMs == 0U ||
          static_cast<uint32_t>(nowMs - lastPublishMs) >=
              BLE_COMPANION_NO_SCALE_PUBLISH_MS;
+}
+
+bool weightStreamIsLive(WeightStreamState state) {
+  return state == WeightStreamState::FRESH ||
+         state == WeightStreamState::OVERLOAD ||
+         state == WeightStreamState::ANOMALOUS;
+}
+
+void noteRecoverableStaleTransition(WeightStreamState previous,
+                                    WeightStreamState next,
+                                    const ScaleLinkSnapshot &link,
+                                    uint32_t now) {
+  if (recoverableStaleOpen) {
+    const bool sameLink =
+        link.state == ScaleLinkState::CONNECTED &&
+        link.disconnectSequence == recoverableStaleDisconnectSequence &&
+        link.connectionGeneration == recoverableStaleConnectionGeneration;
+    if (!sameLink) {
+      recoverableStaleOpen = false;
+    } else if (weightStreamIsLive(next)) {
+      ++scaleRecoveredStaleCount;
+      scaleRecoveredStaleMs +=
+          static_cast<uint32_t>(now - recoverableStaleStartedAtMs);
+      recoverableStaleOpen = false;
+    }
+  }
+  if (!recoverableStaleOpen && next == WeightStreamState::STALE &&
+      weightStreamIsLive(previous) &&
+      link.state == ScaleLinkState::CONNECTED &&
+      observedWeightConnectionGeneration == link.connectionGeneration) {
+    recoverableStaleOpen = true;
+    recoverableStaleStartedAtMs = now;
+    recoverableStaleDisconnectSequence = link.disconnectSequence;
+    recoverableStaleConnectionGeneration = link.connectionGeneration;
+  }
 }
 
 bool currentWeightIsFresh(uint32_t now = millis()) {
@@ -5642,6 +5683,10 @@ void publishControlStatus() {
   } else {
     next.weightStreamState = weightStreamState;
   }
+  noteRecoverableStaleTransition(publishedControlStatus.weightStreamState,
+                                 next.weightStreamState, scaleLink, now);
+  next.scaleRecoveredStaleCount = scaleRecoveredStaleCount;
+  next.scaleRecoveredStaleMs = scaleRecoveredStaleMs;
   next.currentWeightValid = next.scaleAvailable && currentWeightIsFresh(now);
   next.currentWeightG = next.currentWeightValid ? currentWeight : 0.0f;
   next.currentWeightAgeMs =
@@ -5996,6 +6041,8 @@ void serialCliPrintLiveScaleStatus() {
   dump.packetGaps = link.packetGaps;
   dump.rejectedPackets = link.rejectedPackets;
   dump.reconnects = link.reconnects;
+  dump.recoveredStaleCount = scaleRecoveredStaleCount;
+  dump.recoveredStaleMs = scaleRecoveredStaleMs;
   dump.lastDisconnectReason = link.lastDisconnectReason;
   dump.workerAgeMs = elapsedMs(link.workerProgressAtMs);
   dump.timerValid = link.timerValid;
