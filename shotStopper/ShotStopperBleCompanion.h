@@ -274,11 +274,17 @@ class ShotStopperBleCompanion {
       return;
     }
     if (paused) {
+      if (advertisingPaused_ && !status_.advertising) {
+        return;
+      }
       if (status_.advertising) {
         BLE.stopAdvertise();
         status_.advertising = false;
       }
       advertisingPaused_ = true;
+      return;
+    }
+    if (!advertisingPaused_ && status_.advertising) {
       return;
     }
     advertisingPaused_ = false;

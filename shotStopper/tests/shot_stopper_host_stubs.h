@@ -216,6 +216,7 @@ class HostBLE {
  public:
   bool begin() { return beginSucceeds; }
   void poll() {}
+  void poll(unsigned long timeout) { (void)timeout; }
   void setTimeout(unsigned long timeout) { configuredTimeoutMs = timeout; }
 
   bool beginSucceeds = true;
@@ -412,6 +413,7 @@ class AcaiaArduinoBLE {
   uint32_t lastTimerAgeMs() const { return timerValid ? timerAgeMs : 0xffffffffUL; }
   bool heartbeatRequired() const { return heartbeatRequiredValue; }
   bool isConnected() const { return connected; }
+  bool isLinkUp() const { return connected; }
   void disconnect() {
     connected = false;
     connecting = false;

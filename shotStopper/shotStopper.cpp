@@ -119,6 +119,9 @@ constexpr uint32_t LOOP_NO_SCALE_DELAY_MS = 5;
 constexpr uint32_t CONTROL_STATUS_PUBLISH_MS = 50;
 constexpr uint32_t CONTROL_STATUS_PUBLISH_NO_SCALE_MS = 100;
 constexpr uint32_t BLE_COMPANION_NO_SCALE_PUBLISH_MS = 50;
+constexpr uint32_t BLE_COMPANION_RUNTIME_PUBLISH_MS = 100;
+constexpr uint32_t SCALE_WORKER_BACKGROUND_MS = 25;
+constexpr uint32_t SCALE_LINK_SNAPSHOT_INTERVAL_MS = 50;
 constexpr uint32_t SCALE_ATT_TIMEOUT_MS = 1000;
 constexpr size_t SCALE_COMMAND_QUEUE_LENGTH = 12;
 constexpr size_t SCALE_EVENT_QUEUE_LENGTH = 32;
@@ -1086,7 +1089,8 @@ void publishBleCompanionRuntimeSnapshot() {
   static uint32_t lastPublishedMs = 0;
   const uint32_t nowMs = millis();
   if (lastPublishedMs != 0 &&
-      static_cast<uint32_t>(nowMs - lastPublishedMs) < 25U) {
+      static_cast<uint32_t>(nowMs - lastPublishedMs) <
+          BLE_COMPANION_RUNTIME_PUBLISH_MS) {
     return;
   }
   lastPublishedMs = nowMs;
@@ -1250,7 +1254,7 @@ bool scaleAvailable() {
 }
 
 uint32_t scaleWorkerTickDelayMs() {
-  if (scale.isConnected() || scale.isConnecting()) {
+  if (scale.isLinkUp() || scale.isConnecting()) {
     return 1;
   }
   if (scaleCommandQueue != nullptr &&
@@ -1290,9 +1294,9 @@ bool bleCompanionStatusUnchanged(const BleCompanionStatusSnapshot &a,
          a.rejectedWrites == b.rejectedWrites && a.lastReject == b.lastReject;
 }
 
-bool bleCompanionStatusShouldPublish(bool scaleLinked, bool changed,
+bool bleCompanionStatusShouldPublish(bool /*scaleLinked*/, bool changed,
                                      uint32_t lastPublishMs, uint32_t nowMs) {
-  if (scaleLinked || changed) {
+  if (changed) {
     return true;
   }
   return lastPublishMs == 0U ||
@@ -1822,10 +1826,10 @@ void observeMachineSenseFromSession() {
 
 void fillLoopGuardsFromIntention(const MachineIntention &intention) {
   loopGuardInputs.holdActive = intention.holdActive;
-  loopGuardInputs.scaleAvailable = scaleAvailable();
   const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+  loopGuardInputs.scaleAvailable = scaleLinkAvailable(link);
   loopGuardInputs.scaleUsable =
-      scaleLinkAvailable(link) && currentWeightIsFresh();
+      loopGuardInputs.scaleAvailable && currentWeightIsFresh();
   loopGuardInputs.cup = cupPresenceState();
   loopGuardInputs.currentWeightG = currentWeight;
   // Product reuses the machine rinse-gesture window as the blocked-start hold
@@ -2580,28 +2584,29 @@ void updateWorkerLinkState() {
   scaleTimerMs = timerMs;
   scaleTimerAgeMs = timerAgeMs;
   portEXIT_CRITICAL(&scaleLinkMux);
-  setScaleLinkState(scale.isConnected() ? ScaleLinkState::CONNECTED
+  setScaleLinkState(scale.isLinkUp() ? ScaleLinkState::CONNECTED
                                         : ScaleLinkState::DISCONNECTED);
 }
 
-void publishPendingScaleWeightEvent() {
-  if (!scale.isConnected()) {
-    return;
+bool publishPendingScaleWeightEvent() {
+  if (!scale.isLinkUp()) {
+    return false;
   }
   const bool weightAvailable = scale.newWeightAvailable();
-  if (!scale.isConnected()) {
+  if (!scale.isLinkUp()) {
     updateWorkerLinkState();
     setScaleLinkState(ScaleLinkState::DISCONNECTED);
-    return;
+    return false;
   }
   if (!weightAvailable) {
-    return;
+    return false;
   }
   ScaleEvent event;
   event.type = ScaleEventType::WEIGHT;
   event.receivedAtMs = millis();
   event.weightG = scale.getWeight();
   publishScaleEvent(event, false);
+  return true;
 }
 
 void yieldBetweenScaleAttOps() {
@@ -3228,11 +3233,14 @@ ScaleMacCacheMode currentScaleMacCacheMode() {
   return static_cast<ScaleMacCacheMode>(runtimeConfig.scaleMacCacheMode);
 }
 
-// Pause companion advertising while discovering/connecting a scale, and while
-// machine circuit is closed (existing brew RF preference). Scan can coexist with
-// advertising; GAP connect as central usually cannot.
+// Pause companion advertising while connecting to a scale (GAP connect cannot
+// coexist with a peripheral advert), while the machine circuit is closed
+// (brew RF preference), and while a scale GATT link is up (dual-role
+// advertising is the btController hog). Scan can coexist with advertising, so
+// idle/disconnected discovery still lets a phone find Companion.
 bool companionAdvertisingShouldPause() {
-  return !scale.isConnected() || getRelaySafetySnapshot().closed;
+  return scale.isConnecting() || scale.isLinkUp() ||
+         getRelaySafetySnapshot().closed;
 }
 
 void syncCompanionAdvertisingForScaleLink() {
@@ -3703,22 +3711,33 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
 }
 
 void serviceScaleWorkerLink() {
-  if (!scale.isConnected()) {
+  if (!scale.isLinkUp()) {
     updateWorkerLinkState();
     setScaleLinkState(ScaleLinkState::DISCONNECTED);
     return;
   }
 
+  bool snapshotDirty = false;
   if (scale.heartbeatRequired()) {
     if (!scale.heartbeat()) {
       updateWorkerLinkState();
       setScaleLinkState(ScaleLinkState::DISCONNECTED);
       return;
     }
+    snapshotDirty = true;
   }
 
-  publishPendingScaleWeightEvent();
-  updateWorkerLinkState();
+  if (publishPendingScaleWeightEvent()) {
+    snapshotDirty = true;
+  }
+  if (!scale.isLinkUp()) {
+    updateWorkerLinkState();
+    setScaleLinkState(ScaleLinkState::DISCONNECTED);
+    return;
+  }
+  if (snapshotDirty) {
+    updateWorkerLinkState();
+  }
 }
 
 void scaleWorkerTask(void *) {
@@ -3769,10 +3788,24 @@ void scaleWorkerTask(void *) {
 #endif
 
   for (;;) {
-    // The control task treats a connected link with no worker progress as
-    // unavailable, preventing stale prediction data from ending a shot.
-    markScaleWorkerProgress();
-    BLE.poll();
+    // Block up to the tick budget waiting for HCI. Same 1 ms connected
+    // bound as vTaskDelay(1), but the core sleeps until a packet arrives.
+    const uint32_t tickDelayMs = scaleWorkerTickDelayMs();
+    BLE.poll(tickDelayMs);
+
+    const uint32_t nowMs = millis();
+    static uint32_t lastBackgroundMs = 0;
+    const bool backgroundDue =
+        lastBackgroundMs == 0 ||
+        static_cast<uint32_t>(nowMs - lastBackgroundMs) >=
+            SCALE_WORKER_BACKGROUND_MS;
+    if (backgroundDue) {
+      lastBackgroundMs = nowMs;
+      markScaleWorkerProgress();
+    }
+    // Must run every tick: pollScan() defers GAP connect by one Settle step,
+    // and advertising as peripheral during connect() fails on ESP32-S3.
+    // setAdvertisingPaused() is a no-op when the pause state is unchanged.
     syncCompanionAdvertisingForScaleLink();
 
 #if !defined(SHOT_STOPPER_HOST_TEST)
@@ -3782,37 +3815,51 @@ void scaleWorkerTask(void *) {
              xQueueReceive(bleCompanionResultQueue, &bleResult, 0) == pdTRUE) {
         bleCompanion->noteResult(bleResult);
       }
-      BleCompanionRuntimeSnapshot bleSnapshot;
-      copyBleCompanionRuntimeSnapshot(bleSnapshot);
-      bleCompanion->service(bleSnapshot, millis());
-      const BleCompanionStatusSnapshot status = bleCompanion->status();
-      static BleCompanionStatusSnapshot lastCompanionStatus = {};
-      static uint32_t lastCompanionPublishMs = 0;
-      static bool haveCompanionStatus = false;
-      const uint32_t companionNowMs = millis();
-      const bool companionChanged =
-          !haveCompanionStatus ||
-          !bleCompanionStatusUnchanged(status, lastCompanionStatus);
-      if (bleCompanionStatusShouldPublish(scale.isConnected(), companionChanged,
-                                          lastCompanionPublishMs,
-                                          companionNowMs)) {
-        publishBleCompanionStatus(status);
-        lastCompanionStatus = status;
-        lastCompanionPublishMs = companionNowMs;
-        haveCompanionStatus = true;
+      if (backgroundDue) {
+        BleCompanionRuntimeSnapshot bleSnapshot;
+        copyBleCompanionRuntimeSnapshot(bleSnapshot);
+        bleCompanion->service(bleSnapshot, nowMs);
+        const BleCompanionStatusSnapshot status = bleCompanion->status();
+        static BleCompanionStatusSnapshot lastCompanionStatus = {};
+        static uint32_t lastCompanionPublishMs = 0;
+        static bool haveCompanionStatus = false;
+        const bool companionChanged =
+            !haveCompanionStatus ||
+            !bleCompanionStatusUnchanged(status, lastCompanionStatus);
+        if (bleCompanionStatusShouldPublish(scale.isLinkUp(), companionChanged,
+                                            lastCompanionPublishMs, nowMs)) {
+          publishBleCompanionStatus(status);
+          lastCompanionStatus = status;
+          lastCompanionPublishMs = nowMs;
+          haveCompanionStatus = true;
+        }
       }
     }
 #endif
 
+    // Live GAP check once per tick. Packet timeouts and HCI events cover the
+    // rest of the hot path via isLinkUp().
+    const bool linked = scale.isConnected();
+    static uint32_t lastLinkSnapshotMs = 0;
+    const bool linkSnapshotDue =
+        lastLinkSnapshotMs == 0 ||
+        static_cast<uint32_t>(nowMs - lastLinkSnapshotMs) >=
+            SCALE_LINK_SNAPSHOT_INTERVAL_MS;
+
     // Packet timeout / remote-drop detection must not wait behind beeps or
     // queued commands. Bookoo has no heartbeat; silence is the only watchdog.
-    if (scale.isConnected()) {
+    if (linked) {
       connectAttemptSeriesActive = false;
       connectRetryMs = SCALE_CONNECT_RETRY_MS;
       serviceScaleWorkerLink();
+      if (linkSnapshotDue) {
+        lastLinkSnapshotMs = nowMs;
+        updateWorkerLinkState();
+      }
     } else if (getScaleLinkSnapshot().state == ScaleLinkState::CONNECTED) {
       updateWorkerLinkState();
       setScaleLinkState(ScaleLinkState::DISCONNECTED);
+      lastLinkSnapshotMs = nowMs;
     }
 
     ScaleCommand command;
@@ -3838,7 +3885,7 @@ void scaleWorkerTask(void *) {
         uint8_t debugLevel = 0;
         if (takeScaleDebugCommand(debugAction, debugLevel)) {
           executeScaleDebugCommand(debugAction, debugLevel);
-        } else if (!scale.isConnected() && !applyScaleDiscoveryPause()) {
+        } else if (!linked && !applyScaleDiscoveryPause()) {
           serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                                       connectRetryMs,
                                       connectAttemptSeriesActive,
@@ -3846,6 +3893,10 @@ void scaleWorkerTask(void *) {
         }
       }
     }
+
+    // Pause advertising on the same tick beginConnection() sets _connecting,
+    // so the next Settle/Connect steps never race a live peripheral advert.
+    syncCompanionAdvertisingForScaleLink();
 
     if (!feedCurrentTaskWatchdog()) {
       reportTaskWatchdogFault();
@@ -3855,7 +3906,6 @@ void scaleWorkerTask(void *) {
       scaleWorkerStackMinWords =
           static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
     }
-    vTaskDelay(pdMS_TO_TICKS(scaleWorkerTickDelayMs()));
   }
 }
 
@@ -6880,7 +6930,6 @@ void loop() {
   pendingShotFinalizeTask();
   serviceSerialCli();
   serviceMaintenanceCancellation();
-  serviceControlCommandResult();
   processBleCompanionRequests();
   processWebCommands();
   taskProfiler.service(millis());

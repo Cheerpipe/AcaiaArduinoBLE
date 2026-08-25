@@ -5,6 +5,7 @@
 #  3) BLE host objects in PSRAM (GAP/ATT/GATT/local values; VHCI stream buffers untouched)
 #  4) Bound ESP32 VHCI / HCI ACL / ATT indication waits (no indefinite blocks)
 #  5) Check BT controller init/enable, 4 KiB bleTask stack, idempotent end()
+#  6) Block BLE.poll(timeout) on VHCI RX instead of busy-spinning
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,6 +13,7 @@ oom_patch="$script_dir/../patches/ArduinoBLE-2.1.0-oom-safe-discover.patch"
 psram_patch="$script_dir/../patches/ArduinoBLE-2.1.0-ble-host-psram.patch"
 hci_patch="$script_dir/../patches/ArduinoBLE-2.1.0-hci-bounded-waits.patch"
 vhci_init_patch="$script_dir/../patches/ArduinoBLE-2.1.0-vhci-controller-init.patch"
+hci_wait_patch="$script_dir/../patches/ArduinoBLE-2.1.0-hci-blocking-wait.patch"
 
 candidates=()
 if [[ -n "${ARDUINO_BLE_HOME:-}" ]]; then
@@ -58,6 +60,7 @@ apply_oom=0
 apply_psram=0
 apply_hci=0
 apply_vhci_init=0
+apply_hci_wait=0
 
 if grep -q 'leSetScanParameters(0x01, 0x0020, 0x0020' "$gap"; then
   restore_scan=0
@@ -87,9 +90,15 @@ if [[ -f "$vhci" ]] && grep -q 'HCI_VHCI_IO_TIMEOUT_MS' "$vhci" && \
   apply_vhci_init=1
 fi
 
+if [[ -f "$vhci" ]] && grep -q 'HCI_VHCI_TASK_STACK' "$vhci" && \
+   ! grep -q 'hci_wait_task' "$vhci"; then
+  apply_hci_wait=1
+fi
+
 if [[ "$restore_scan" -eq 0 && "$apply_oom" -eq 0 && "$apply_psram" -eq 0 && \
-      "$apply_hci" -eq 0 && "$apply_vhci_init" -eq 0 ]]; then
-  echo "ArduinoBLE already patched (GAP scan stock 20/20 + OOM-safe + host PSRAM + HCI waits + VHCI init): $target"
+      "$apply_hci" -eq 0 && "$apply_vhci_init" -eq 0 && \
+      "$apply_hci_wait" -eq 0 ]]; then
+  echo "ArduinoBLE already patched (GAP scan stock 20/20 + OOM-safe + host PSRAM + HCI waits + VHCI init + blocking HCI wait): $target"
   exit 0
 fi
 
@@ -205,4 +214,26 @@ if [[ "$apply_vhci_init" -eq 1 ]]; then
   fi
   patch -p1 -d "$target" < "$vhci_init_patch"
   echo "Patched ArduinoBLE VHCI controller init: $target"
+  if [[ -f "$vhci" ]] && grep -q 'HCI_VHCI_TASK_STACK' "$vhci" && \
+     ! grep -q 'hci_wait_task' "$vhci"; then
+    apply_hci_wait=1
+  fi
+fi
+
+if [[ "$apply_hci_wait" -eq 1 ]]; then
+  if [[ ! -f "$hci_wait_patch" ]]; then
+    echo "Missing HCI blocking-wait patch: $hci_wait_patch" >&2
+    exit 1
+  fi
+  if ! command -v patch >/dev/null 2>&1; then
+    echo "patch(1) is required to apply $hci_wait_patch" >&2
+    exit 1
+  fi
+  if ! patch -p1 --dry-run -d "$target" < "$hci_wait_patch" >/dev/null 2>&1; then
+    echo "HCI blocking-wait patch does not apply cleanly to: $target" >&2
+    echo "Install stock ArduinoBLE@2.1.0, apply prior patches, then retry." >&2
+    exit 1
+  fi
+  patch -p1 -d "$target" < "$hci_wait_patch"
+  echo "Patched ArduinoBLE HCI blocking wait: $target"
 fi

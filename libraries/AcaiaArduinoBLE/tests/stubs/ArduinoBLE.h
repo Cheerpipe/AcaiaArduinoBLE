@@ -225,6 +225,7 @@ public:
         return BLEDevice(availableState);
     }
     void poll() {}
+    void poll(unsigned long timeout) { (void)timeout; }
     void setTimeout(unsigned long timeout) {
         timeoutMs = timeout;
         FakeBLE::currentTimeoutMs = timeout;

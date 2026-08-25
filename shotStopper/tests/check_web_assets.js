@@ -271,11 +271,30 @@ if (/#define\s+BLE_CONNECT_TIMEOUT_MS\s+4000UL/.test(bleLibrary)) {
         'pollScan must capture MAC/name once into C buffers and reuse them');
   }
 }
+{
+  const nwStart = bleLibrary.indexOf('bool AcaiaArduinoBLE::newWeightAvailable()');
+  const nwEnd = bleLibrary.indexOf('bool AcaiaArduinoBLE::supportedPacketLength', nwStart);
+  const nw = nwStart >= 0 && nwEnd > nwStart ? bleLibrary.slice(nwStart, nwEnd) : '';
+  if (!bleLibrary.includes('bool AcaiaArduinoBLE::isLinkUp()') ||
+      !nw.includes('if (!_connected)') ||
+      nw.includes('isConnected()')) {
+    throw new Error(
+        'Acaia newWeightAvailable must use the local link flag, not a live GAP isConnected()');
+  }
+}
+if (firmwareCore.includes('if (scaleLinked || changed)')) {
+  throw new Error(
+      'Companion status publish must not force every tick while the scale is linked');
+}
 if (!firmwareCore.includes('companionAdvertisingShouldPause') ||
     !firmwareCore.includes('syncCompanionAdvertisingForScaleLink') ||
+    !firmwareCore.includes('scale.isConnecting()') ||
+    !firmwareCore.includes('BLE.poll(tickDelayMs)') ||
+    firmwareCore.includes('vTaskDelay(pdMS_TO_TICKS(scaleWorkerTickDelayMs()))') ||
+    (firmwareCore.split('syncCompanionAdvertisingForScaleLink();').length - 1) < 3 ||
     !bleCompanion.includes('advertisingPaused_ && !status_.connected')) {
   throw new Error(
-      'Companion advertising must pause while the scale is not connected');
+      'Companion advertising must pause while connecting or scale-linked; worker must block on HCI');
 }
 if (!network.includes('\\"lastDisconnectReasonName\\":\\"%s\\"},') ||
     !network.includes('\\"macCachePauseRemainingMs\\":%lu,')) {

@@ -129,7 +129,10 @@ class AcaiaArduinoBLE {
         uint32_t getTimerMs() const;
         uint32_t lastTimerAgeMs() const;
         bool heartbeatRequired() const;
+        // GAP/HCI probe. The worker should call this once per tick; hot paths
+        // use isLinkUp() so packet handling does not re-query the controller.
         bool isConnected();
+        bool isLinkUp() const;
         bool newWeightAvailable();
         const char* connectedProtocolName() const;
         // Empty when not connected / no remembered peripheral. Pointers are

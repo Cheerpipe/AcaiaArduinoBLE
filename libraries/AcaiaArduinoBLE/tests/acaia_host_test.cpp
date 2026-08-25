@@ -358,6 +358,7 @@ void testConnectRetriesThenSucceeds() {
     }
     CHECK(connected);
     CHECK(scale.isConnected());
+    CHECK(scale.isLinkUp());
     CHECK(fixture.peripheral->connectCalls == SCALE_CONNECT_ATTEMPTS);
     CHECK(fixture.peripheral->timeoutMsAtConnect == BLE_CONNECT_TIMEOUT_MS);
     CHECK(BLE.timeoutMs == BLE_OPERATION_TIMEOUT_MS);

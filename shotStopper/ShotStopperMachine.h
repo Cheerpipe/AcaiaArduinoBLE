@@ -116,7 +116,6 @@ inline void machineSampleInput() {
 }
 inline void serviceMachine() {
   machineServiceReminders();
-  applyPaddleRelayDrive();
 }
 inline void machineOverrideInferredOff() {}
 inline void machineOverrideInferredOn() {}

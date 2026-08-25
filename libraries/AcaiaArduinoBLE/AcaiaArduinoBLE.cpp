@@ -824,7 +824,7 @@ bool AcaiaArduinoBLE::setBeepLevel(uint8_t level) {
 }
 
 bool AcaiaArduinoBLE::heartbeat() {
-    if ((_type != OLD && _type != NEW) || !isConnected()) {
+    if ((_type != OLD && _type != NEW) || !_connected) {
         return false;
     }
     if (!writeCommand(HEARTBEAT, sizeof(HEARTBEAT))) {
@@ -866,6 +866,10 @@ bool AcaiaArduinoBLE::isConnected() {
     return true;
 }
 
+bool AcaiaArduinoBLE::isLinkUp() const {
+    return _connected;
+}
+
 const char* AcaiaArduinoBLE::connectedProtocolName() const {
     if (!_connected) {
         return "none";
@@ -893,7 +897,7 @@ bool AcaiaArduinoBLE::isDirectedScan() const {
 }
 
 bool AcaiaArduinoBLE::newWeightAvailable() {
-    if (!isConnected()) {
+    if (!_connected) {
         return false;
     }
 

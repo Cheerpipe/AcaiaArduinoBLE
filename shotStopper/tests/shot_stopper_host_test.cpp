@@ -4066,10 +4066,11 @@ void d14_control_status_interval_follows_scale() {
 }
 
 void d15_companion_publish_throttles_without_scale() {
-  CHECK(bleCompanionStatusShouldPublish(true, false, 10, 11));
+  CHECK(!bleCompanionStatusShouldPublish(true, false, 10, 11));
   CHECK(bleCompanionStatusShouldPublish(false, true, 10, 11));
   CHECK(!bleCompanionStatusShouldPublish(false, false, 10, 59));
   CHECK(bleCompanionStatusShouldPublish(false, false, 10, 60));
+  CHECK(bleCompanionStatusShouldPublish(true, false, 10, 60));
   CHECK(bleCompanionStatusShouldPublish(false, false, 0, 1));
   BleCompanionStatusSnapshot a;
   BleCompanionStatusSnapshot b;
@@ -4356,13 +4357,21 @@ void d12_advertisement_history_does_not_dirty_persist() {
   CHECK(scalePreferredMacDirty);
 }
 
-void d10_companion_pauses_while_scale_disconnected() {
+void d10_companion_pauses_while_scale_connected_or_connecting() {
   resetHarness(false, false);
   reachReadyFromBoot();
   scale.connected = false;
-  CHECK(companionAdvertisingShouldPause());
-  scale.connected = true;
+  scale.connecting = false;
+  scale.scanning = false;
   CHECK(!companionAdvertisingShouldPause());
+  scale.scanning = true;
+  CHECK(!companionAdvertisingShouldPause());
+  scale.scanning = false;
+  scale.connecting = true;
+  CHECK(companionAdvertisingShouldPause());
+  scale.connecting = false;
+  scale.connected = true;
+  CHECK(companionAdvertisingShouldPause());
 }
 
 void d11_select_preferred_is_noop_when_unchanged() {
@@ -10124,7 +10133,7 @@ const TestCase testCases[] = {
     {"D08", d08_select_none_clears_without_pause},
     {"D09", d09_first_mode_connects_seen_advertisement},
     {"D12", d12_advertisement_history_does_not_dirty_persist},
-    {"D10", d10_companion_pauses_while_scale_disconnected},
+    {"D10", d10_companion_pauses_while_scale_connected_or_connecting},
     {"D11", d11_select_preferred_is_noop_when_unchanged},
     {"S01", s01_shot_log_filters_short_and_rinse},
     {"S01b", s01b_shot_log_stop_detail_names_end_reasons},
