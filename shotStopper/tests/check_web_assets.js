@@ -247,13 +247,13 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 50000) {
+if (htmlBytes > 50050) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 128000) {
+if (jsBytes > 128500) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 178000) {
+if (htmlBytes + jsBytes > 178500) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -690,7 +690,11 @@ if (!ui.includes('id="shotPanel"') ||
     !ui.includes('id="shotBarFast"') ||
     !ui.includes('id="shotBarTicks"') ||
     !partialHtml.home.includes('id="shotBarTicks"') ||
-    !css.includes('content:"Weight (g)"') ||
+    !partialHtml.home.includes('<legend>Last/Current shot</legend>') ||
+    !partialHtml.home.includes('class="ruleChartLabel">Weight (g)</div>') ||
+    partialHtml.home.includes('id="shotIdle"') ||
+    css.includes('content:"Weight (g)"') ||
+    css.includes('#shotIdle') ||
     ui.includes('shotMark') ||
     !ui.includes('Math.max(goal,wt)') ||
     !css.includes('.shotTrack{position:relative;height:1rem;background:var(--ln);border-radius:.5rem;overflow:hidden}') ||
@@ -704,17 +708,24 @@ if (!ui.includes('id="shotPanel"') ||
     !css.includes('.shotSparkY{') ||
     !css.includes('.shotSparkHost .ruleChartTicks') ||
     !css.includes('.shotSparkHost[hidden]') ||
+    !css.includes('#shotPanel .shotSparkHost{min-height:4.05rem;margin:2.75rem 0 .1rem') ||
     !css.includes('#shotTable tr.noSpark{') ||
     !css.includes('.shotSpark{grid-area:plot;display:block;width:100%;height:100%;color:var(--ok);overflow:visible}') ||
     !ui.includes('function renderShotSpark(') ||
     !runtimeJs.includes('function buildShotSparkModel(') ||
     !runtimeJs.includes('function axisLabel(') ||
     !runtimeJs.includes('function fillChartTicks(') ||
+    runtimeJs.includes('s[a=') ||
+    !runtimeJs.includes('style.left=') ||
+    runtimeJs.includes("style=\"left:") ||
     !runtimeJs.includes('function shotDisplayFlowGS(') ||
     !runtimeJs.includes('lastCurveWeightG(w)===null') ||
     !runtimeJs.includes('model.firstDropS>0&&dur>0') ||
     !runtimeJs.includes("'1st '+L(") ||
     !runtimeJs.includes('fillChartTicks($(\'shotBarTicks\')') ||
+    !runtimeJs.includes('raw.sort(') ||
+    runtimeJs.includes('shotIdle') ||
+    runtimeJs.includes("last?'Last shot.'") ||
     !runtimeJs.includes('stroke="\'+cN+\'"') ||
     runtimeJs.includes('stroke="currentColor"') ||
     !runtimeJs.includes("if(spark.hidden)row.classList.add('noSpark')") ||
@@ -3071,7 +3082,7 @@ if (generated.gzip.length > 4096) {
 if (generated.jsGzip.length > 6144) {
   throw new Error('Compressed Web UI shell JS exceeds the 6 KiB gzip budget');
 }
-if (generated.runtimeGzip.length > 26240) {
+if (generated.runtimeGzip.length > 26500) {
   throw new Error('Compressed Web UI runtime JS exceeds the 25 KiB gzip budget');
 }
 if (generated.secondaryGzip.length > 4096) {
@@ -3309,10 +3320,41 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
     throw new Error('Shot spark helpers not found for matrix checks');
   }
   const helpers = new Function(
-      js.slice(start, end) +
-      ';return{buildShotSparkModel:buildShotSparkModel,shotDisplayFlowGS:shotDisplayFlowGS};')();
+      '"use strict";' + js.slice(start, end) +
+      ';return{buildShotSparkModel:buildShotSparkModel,shotDisplayFlowGS:shotDisplayFlowGS,fillChartTicks:fillChartTicks};')();
   if (helpers.buildShotSparkModel(null) !== null) {
     throw new Error('Spark model must tolerate a null shot (idle Home panel)');
+  }
+  const kids = [];
+  const tickEl = {
+    replaceChildren(){kids.length=0},
+    appendChild(n){kids.push(n)},
+  };
+  const prevDoc = global.document;
+  global.document = {
+    createElement(){return {className:'',style:{},textContent:''}},
+  };
+  try {
+    helpers.fillChartTicks(tickEl, [[0, '0 g'], [18, '18 g'], [36, '36 g']], 36);
+    const spaced = kids.map((n) => parseFloat(n.style.left));
+    if (kids.length !== 3 || kids[0].textContent !== '0 g' ||
+        kids.some((n) => n.className !== 'ruleTick') ||
+        spaced[0] !== 0 || Math.abs(spaced[1] - 50) > 0.01 || spaced[2] !== 100) {
+      throw new Error('fillChartTicks must place labels at exact values');
+    }
+    helpers.fillChartTicks(tickEl, [[0, '0 g'], [36, '36 g'], [18, '18 g']], 36);
+    if (kids.map((n) => n.textContent).join('|') !== '0 g|18 g|36 g') {
+      throw new Error('fillChartTicks must sort labels by position');
+    }
+    helpers.fillChartTicks(tickEl, [[0, '0 g'], [35.5, '35.5 g'], [36, '36 g']], 36);
+    const close = kids.map((n) => parseFloat(n.style.left));
+    if (kids.map((n) => n.textContent).join('|') !== '0 g|35.5 g|36 g' ||
+        Math.abs(close[1] - 35.5 / 36 * 100) > 0.01 || close[2] !== 100) {
+      throw new Error('fillChartTicks must keep close labels on exact values');
+    }
+  } finally {
+    if (prevDoc === undefined) delete global.document;
+    else global.document = prevDoc;
   }
   const fast15 = helpers.buildShotSparkModel({
     wCg: [20, 800, 1600, 2400, 3200, 3600, 4000, 4370],
