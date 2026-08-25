@@ -232,7 +232,7 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 #shotTable .shotErrHi,.shotCard .shotErrHi{color:var(--ac)}
 #shotTable .shotErrLo,.shotCard .shotErrLo{color:var(--ok)}
 .shotSparkHost,#shotTable td.shotSparkCell{grid-area:spark;display:grid;grid-template-columns:2.4rem 1fr;grid-template-rows:2.55rem auto;grid-template-areas:"y plot" ". x";gap:0 .28rem;min-height:3.55rem;margin:.15rem 0 0}
-#shotPanel .shotSparkHost{min-height:4.05rem;margin:2.75rem 0 .1rem;grid-template-rows:3rem auto}
+#shotPanel .shotSparkHost{min-height:4.05rem;margin:.55rem 0 .1rem;grid-template-rows:3rem auto}
 #shotTable td.shotSparkCell{margin:.55rem 0 0}
 .shotSparkY{grid-area:y;display:flex;flex-direction:column;justify-content:space-between;font-size:.68rem;color:var(--mu);line-height:1;text-align:right;padding:.02rem 0}
 .shotSparkY:after{content:"0 g"}
@@ -245,7 +245,8 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 #shotTable .btnGlyph,#shotPanel .btnGlyph{border:0;border-radius:.4rem;border-left:0;min-height:2.35rem;min-width:2.35rem;padding:0;flex:0 0 auto;background:transparent;color:#c62828;box-shadow:none}
 #shotTable .btnGlyph.btnDanger,#shotPanel .btnGlyph.btnDanger{border:0;box-shadow:none;background:transparent;color:#c62828}
 #shotTable .btnGlyph .g{display:inline-flex;width:1.25rem;height:1.25rem;font-size:1.45rem}
-#shotPanel{position:relative}
+#shotPanel{position:relative;padding-right:3.4rem}
+#shotPanel .shotDel{top:.35rem;right:.35rem}
 #shotPanel .btnGlyph{min-height:2.85rem;min-width:2.85rem}
 #shotPanel .btnGlyph .g{display:inline-flex;width:1.6rem;height:1.6rem;font-size:1.85rem}
 

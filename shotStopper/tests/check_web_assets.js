@@ -724,7 +724,9 @@ if (!ui.includes('id="shotPanel"') ||
     !css.includes('.shotSparkY{') ||
     !css.includes('.shotSparkHost .ruleChartTicks') ||
     !css.includes('.shotSparkHost[hidden]') ||
-    !css.includes('#shotPanel .shotSparkHost{min-height:4.05rem;margin:2.75rem 0 .1rem') ||
+    !css.includes('#shotPanel .shotSparkHost{min-height:4.05rem;margin:.55rem 0 .1rem') ||
+    !css.includes('#shotPanel{position:relative;padding-right:3.4rem') ||
+    !css.includes('#shotPanel .shotDel{top:.35rem;right:.35rem') ||
     !css.includes('#shotTable tr.noSpark{') ||
     !css.includes('.shotSpark{grid-area:plot;display:block;width:100%;height:100%;color:var(--ok);overflow:visible}') ||
     !ui.includes('function renderShotSpark(') ||
@@ -1505,7 +1507,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
     html.indexOf('id="shotPanel"') > html.indexOf('id="clearLastShotButton"') ||
     (html.includes('id="clearLastShotButton"') &&
      html.includes('<span class="t">Clear</span>')) ||
-    !css.includes('#shotPanel{position:relative') ||
+    !css.includes('#shotPanel{position:relative;padding-right:3.4rem') ||
     !css.includes('#shotPanel .btnGlyph{min-height:2.85rem') ||
     html.includes('id="lastCycle"') ||
     !ui.includes('function renderShotPanel(') ||
