@@ -148,12 +148,13 @@ struct NetworkBridgeCallbacks {
   void (*copyScaleHistory)(ScaleHistoryEntry *out) = nullptr;
   void (*copyPresetBank)(ShotPresetBank *out) = nullptr;
   void (*copyRuntimeConfig)(RuntimeConfig *out) = nullptr;
-  void (*copyDebugExportExtras)(DebugExportExtras &out) = nullptr;
+  void (*copyDebugExportExtras)(DebugExportExtras &out,
+                                const ControlStatusSnapshot &control) = nullptr;
 };
 
 class ShotStopperNetwork {
  public:
-  ShotStopperNetwork() = default;
+  ShotStopperNetwork();
   ShotStopperNetwork(const ShotStopperNetwork &) = delete;
   ShotStopperNetwork &operator=(const ShotStopperNetwork &) = delete;
 
@@ -209,7 +210,7 @@ class ShotStopperNetwork {
 
   static ShotStopperNetwork *instance_;
 
-  PersistedSettings settings_ = {};
+  PersistedSettings &settings_;
   NetworkBridgeCallbacks callbacks_ = {};
   QueueHandle_t acceptedCommandQueue_ = nullptr;
   TaskHandle_t taskHandle_ = nullptr;

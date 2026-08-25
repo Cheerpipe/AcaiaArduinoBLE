@@ -12,6 +12,7 @@ constexpr size_t JSON_ARENA_CAPACITY = 16384;
 
 inline void initJsonArenaHooks();
 inline bool jsonArenaHooksInstalled();
+inline bool jsonArenaIsExternal();
 inline cJSON *parseJsonInArena(const char *body);
 inline void resetJsonArena();
 inline size_t jsonArenaBytesUsed();
@@ -75,6 +76,10 @@ inline void initJsonArenaHooks() {
 
 inline bool jsonArenaHooksInstalled() {
   return detail::g_jsonArenaHooksInstalled;
+}
+
+inline bool jsonArenaIsExternal() {
+  return pointerIsExternal(detail::jsonArenaStorage());
 }
 
 // Fail closed: never parse through the process-global cJSON heap if the

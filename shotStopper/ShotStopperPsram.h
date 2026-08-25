@@ -7,6 +7,7 @@
 #if !defined(SHOT_STOPPER_HOST_TEST) &&                                        \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
 #include <esp_heap_caps.h>
+#include <esp_memory_utils.h>
 #ifdef ARDUINO
 #include <Arduino.h>
 #endif
@@ -27,13 +28,52 @@
 
 namespace shotstopper {
 
-// Explicit caps: do not rely on malloc()>4KiB landing in PSRAM.
-inline void *allocExternalOrInternal(size_t bytes) {
+namespace detail {
+
+inline uint32_t g_allocExternalOk = 0;
+inline uint32_t g_allocExternalFallback = 0;
+inline bool g_workBufExternal = false;
+
+}  // namespace detail
+
+inline uint32_t allocExternalOkCount() { return detail::g_allocExternalOk; }
+
+inline uint32_t allocExternalFallbackCount() {
+  return detail::g_allocExternalFallback;
+}
+
+inline bool workBufIsExternal() { return detail::g_workBufExternal; }
+
+inline void noteWorkBufExternal(bool isExternal) {
+  detail::g_workBufExternal = isExternal;
+}
+
+inline bool pointerIsExternal(const void *block) {
+  if (block == nullptr) {
+    return false;
+  }
+#if defined(SHOT_STOPPER_HOST_TEST) ||                                         \
+    defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
+  return true;
+#else
+  return esp_ptr_external_ram(block);
+#endif
+}
+
+// SPIRAM only. Large blobs that must not punch a hole in internal DRAM
+// (NetworkWorkBuf, Wi-Fi AP records). Returns nullptr if SPIRAM cannot
+// satisfy — callers fail closed.
+inline void *allocExternal(size_t bytes) {
   if (bytes == 0) {
     return nullptr;
   }
-#if defined(SHOT_STOPPER_HOST_TEST) || defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
-  return malloc(bytes);
+#if defined(SHOT_STOPPER_HOST_TEST) ||                                         \
+    defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
+  void *block = malloc(bytes);
+  if (block != nullptr) {
+    ++detail::g_allocExternalOk;
+  }
+  return block;
 #else
   void *block = nullptr;
 #if defined(BOARD_HAS_PSRAM)
@@ -41,8 +81,46 @@ inline void *allocExternalOrInternal(size_t bytes) {
     block = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   }
 #endif
-  if (block == nullptr) {
-    block = heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (block != nullptr && pointerIsExternal(block)) {
+    ++detail::g_allocExternalOk;
+    return block;
+  }
+  if (block != nullptr) {
+    heap_caps_free(block);
+  }
+  return nullptr;
+#endif
+}
+
+// Explicit caps: do not rely on malloc()>4KiB landing in PSRAM.
+inline void *allocExternalOrInternal(size_t bytes) {
+  if (bytes == 0) {
+    return nullptr;
+  }
+#if defined(SHOT_STOPPER_HOST_TEST) || defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
+  void *block = malloc(bytes);
+  if (block != nullptr) {
+    ++detail::g_allocExternalOk;
+  }
+  return block;
+#else
+  void *block = nullptr;
+#if defined(BOARD_HAS_PSRAM)
+  if (psramFound()) {
+    block = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  }
+#endif
+  if (block != nullptr && pointerIsExternal(block)) {
+    ++detail::g_allocExternalOk;
+    return block;
+  }
+  if (block != nullptr) {
+    heap_caps_free(block);
+    block = nullptr;
+  }
+  block = heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (block != nullptr) {
+    ++detail::g_allocExternalFallback;
   }
   return block;
 #endif

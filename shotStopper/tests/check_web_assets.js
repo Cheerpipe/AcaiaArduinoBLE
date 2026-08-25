@@ -95,6 +95,9 @@ if (!psram.includes('#define SHOT_STOPPER_PSRAM_BSS EXT_RAM_BSS_ATTR') ||
         'constexpr uint32_t SETTINGS_PERSIST_TASK_STACK_SIZE = 4096') ||
     !network.includes(
         'static SHOT_STOPPER_PSRAM_BSS WifiScanSnapshot g_wifiScan') ||
+    !network.includes(
+        'static SHOT_STOPPER_PSRAM_BSS PersistedSettings g_networkSettings') ||
+    !networkHeader.includes('PersistedSettings &settings_') ||
     !firmwareCore.includes(
         'SHOT_STOPPER_PSRAM_BSS DebugRingBuffer debugLog') ||
     !flashIoScratch.includes('allocInternal(FLASH_IO_SCRATCH_BYTES)') ||
@@ -104,10 +107,20 @@ if (!psram.includes('#define SHOT_STOPPER_PSRAM_BSS EXT_RAM_BSS_ATTR') ||
 }
 if (network.includes('ControlStatusSnapshot status;') ||
     network.includes('ControlStatusSnapshot control;') ||
+    firmwareCore.includes('ControlStatusSnapshot status;') ||
     !network.includes('ControlGateSnapshot ShotStopperNetwork::controlGate()') ||
     !firmwareCore.includes('void copyControlGate(ControlGateSnapshot &output)')) {
   throw new Error(
       'Network/httpd gate checks must copy ControlGateSnapshot, not a stack ControlStatusSnapshot');
+}
+if (firmwareCore.includes('portENTER_CRITICAL(&webStatusMux)') ||
+    firmwareCore.includes('next.presets = presetBank') ||
+    firmwareCore.includes('copyScaleHistory(next.scaleHistory)') ||
+    !firmwareCore.includes('__atomic_fetch_add(&controlStatusSeq') ||
+    !network.includes('self.callbacks_.copyPresetBank(&g_work->presetBank)') ||
+    !network.includes('self.callbacks_.copyScaleHistory(g_work->scaleHistory)')) {
+  throw new Error(
+      'Status snapshot publish must use a seqlock and fill presets/history on demand');
 }
 if (network.includes('composeEffectiveConfig(candidate, status.presets)') ||
     network.includes('status.presets') ||
@@ -138,6 +151,21 @@ if (!bleLibrary.includes('BLE_CONNECT_TIMEOUT_MS') ||
 if (/#define\s+BLE_CONNECT_TIMEOUT_MS\s+4000UL/.test(bleLibrary)) {
   throw new Error(
       'GAP connect timeout must stay under the 5 s task watchdog (not 4 s)');
+}
+{
+  const pollScanStart = bleLibrary.indexOf('bool AcaiaArduinoBLE::pollScan()');
+  const pollScanEnd = bleLibrary.indexOf('bool AcaiaArduinoBLE::beginConnection', pollScanStart);
+  const pollScan = pollScanStart >= 0 && pollScanEnd > pollScanStart
+      ? bleLibrary.slice(pollScanStart, pollScanEnd)
+      : '';
+  if (!pollScan.includes('char mac[ACAIA_MAC_CAPACITY]') ||
+      !pollScan.includes('char name[ACAIA_NAME_CAPACITY]') ||
+      !pollScan.includes('isScaleName(name)') ||
+      (pollScan.match(/peripheral\.address\(\)/g) || []).length > 1 ||
+      (pollScan.match(/peripheral\.localName\(\)/g) || []).length > 1) {
+    throw new Error(
+        'pollScan must capture MAC/name once into C buffers and reuse them');
+  }
 }
 if (!firmwareCore.includes('companionAdvertisingShouldPause') ||
     !firmwareCore.includes('syncCompanionAdvertisingForScaleLink') ||
@@ -1414,6 +1442,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !firmware.includes('clearLastShotSnapshot') ||
     !firmware.includes('serviceShotStorePersistence') ||
     !firmwareCore.includes('shotLogPersistFailLatched') ||
+    !firmwareCore.includes('shotStorePersistRetryAtMs') ||
+    !firmwareCore.includes('SHOT_STORE_PERSIST_RETRY_MS') ||
     !firmwareCore.includes('noteScaleHistory(seenMac, seenName, false)') ||
     !firmwareCore.includes('constexpr uint32_t kTryLockMs = 0') ||
     wallClock.includes('monotonicMs >= anchorMonotonicMs_') ||
@@ -1534,6 +1564,9 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !network.includes('\\"psramLargestFreeBlockBytes\\"') ||
       !network.includes('\\"bleHostAllocPsram\\"') ||
       !network.includes('\\"bleHostAllocFallback\\"') ||
+      !network.includes('\\"workBufExternal\\"') ||
+      !network.includes('\\"jsonArenaExternal\\"') ||
+      !network.includes('\\"allocExternalFallback\\"') ||
       !network.includes('\\"resetReasonCode\\"') ||
       !diagHtml.includes('id="diagnosticsPanel"') ||
       !diagHtml.includes('<legend>Diagnostics</legend>') ||
@@ -2555,6 +2588,7 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'freeHeapBytes', 'minimumFreeHeapBytes', 'largestFreeHeapBlockBytes',
     'psramSizeBytes', 'psramFreeBytes', 'psramLargestFreeBlockBytes',
     'bleHostAllocPsram', 'bleHostAllocFallback',
+    'workBufExternal', 'jsonArenaExternal', 'allocExternalFallback',
     'resetReasonCode', 'packetGaps', 'rejectedPackets', 'reconnects',
     'eventsDropped', 'lastCommand', 'loopIntervalGapMs', 'loopMaxGapMs',
     'machineState', 'physicalActivatorOn', 'reedOn', 'controlSource', 'cupPresence',
@@ -2618,6 +2652,12 @@ if (!network.includes('ShotStopperDebugExport.h') ||
     !network.includes('\\"guards\\"') ||
     !network.includes('\\"bbwEnabled\\"') ||
     !firmware.includes('copyDebugExportExtras') ||
+    !firmwareCore.includes('const ControlStatusSnapshot &control') ||
+    !network.includes(
+        'self.callbacks_.copyDebugExportExtras(work.debugExport, work.control)') ||
+    !network.includes(
+        'return sendCopiedChunk(request, text, strlen(text)) == ESP_OK') ||
+    network.includes('httpd_resp_send_chunk(request, text, HTTPD_RESP_USE_STRLEN)') ||
     !firmware.includes('ShotStopperDebugExport.h') ||
     !ui.includes('/api/v1/debug/export') ||
     !ui.includes('exportDebugDataButton') ||
@@ -2689,6 +2729,12 @@ if (!domain.includes('selectBestStaAp') ||
 if (!network.includes('staBssid') ||
     !serialCli.includes('staBssid=')) {
   throw new Error('Associated AP BSSID must be exposed on status and WIFI_STATUS');
+}
+if (!serialCli.includes('workBufExternal=') ||
+    !serialCli.includes('jsonArenaExternal=') ||
+    !serialCli.includes('allocExternalFallback=')) {
+  throw new Error(
+      'Serial HEALTH must report WorkBuf/JSON arena placement and allocExternalFallback');
 }
 if (!network.includes('WiFi.scanNetworks(true, false, false, 120)') ||
     !network.includes('esp_wifi_scan_stop()') ||
@@ -2885,7 +2931,7 @@ if (immediateCommandAlertCalls < 3 || circuitCycleAlertCalls < 4 ||
     !firmware.includes(
         'emitCircuitCycleAlert(session.startedWithScale && session.config.autoTare &&\n                            session.config.canTareStartTimer\n                        ? AlertEvent::TARE_START\n                        : AlertEvent::START_TIMER,\n                    true);') ||
     !firmware.includes(
-        'if (shotCompletionGetsLongBeep(reason)) {\n    // Completion LONG replaces the stop-timer SINGLE so ends are one cue.\n    requestCompletionAlert();\n  } else {\n    emitCircuitCycleAlert(AlertEvent::STOP_TIMER, true);') ||
+        'if (shotCompletionGetsLongBeep(reason)) {\n      // Completion LONG replaces the stop-timer SINGLE so ends are one cue.\n      requestCompletionAlert();\n    } else {\n      emitCircuitCycleAlert(AlertEvent::STOP_TIMER, true);') ||
     !firmware.includes('emitImmediateCommandAlertIfBuzzer(AlertEvent::TARE);\n  markRetareEnded') ||
     !firmware.includes('emitCircuitCycleAlert(AlertEvent::START_TIMER, true);')) {
   throw new Error('Command alerts must fire at circuit/paddle/retare, not after BLE');
@@ -3018,7 +3064,11 @@ if (!network.includes('sendCopiedBody(request, SHOT_STOPPER_WEB_UI_GZIP') ||
     !network.includes('return sendCopiedBody(request, json, length)') ||
     !network.includes('HTTP_DRAM_BOUNCE_BYTES') ||
     !network.includes('g_httpSendBounce') ||
-    !network.includes('allocExternalOrInternal(sizeof(NetworkWorkBuf))') ||
+    !network.includes('allocExternal(sizeof(NetworkWorkBuf))') ||
+    !network.includes(
+        'allocExternal(sizeof(wifi_ap_record_t) * kWifiScanFetchMax)') ||
+    !psram.includes('inline void *allocExternal(size_t bytes)') ||
+    !jsonArena.includes('jsonArenaIsExternal()') ||
     !network.includes(
         'sendCopiedChunk(request, work.jsonItem, strlen(work.jsonItem))')) {
   throw new Error(

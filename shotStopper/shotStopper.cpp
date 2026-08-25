@@ -80,6 +80,9 @@
 #include "ShotStopperWatchdog.h"
 #include "ShotStopperHwmon.h"
 #include "ShotStopperPsram.h"
+#ifndef SHOT_STOPPER_HOST_TEST
+#include "ShotStopperJsonArena.h"
+#endif
 #include "ShotStopperHardware.h"
 
 #include <stdarg.h>
@@ -129,6 +132,7 @@ constexpr uint32_t SCALE_STOP_RETRY_WINDOW_MS = 5000;
 constexpr uint8_t SCALE_STOP_MAX_ATTEMPTS = 3;
 constexpr uint32_t MAINTENANCE_LEASE_SETTLE_MS = 100;
 constexpr uint32_t RUNTIME_PERSIST_RETRY_MS = 500;
+constexpr uint32_t SHOT_STORE_PERSIST_RETRY_MS = 500;
 constexpr uint32_t RUNTIME_PERSIST_DEBOUNCE_MS = 300;
 constexpr uint32_t SETTINGS_PERSIST_IDLE_WAIT_MS = 1000;
 constexpr uint32_t HEALTH_TELEMETRY_INTERVAL_MS = 5000;
@@ -396,6 +400,8 @@ PersistedLastShot persistedLastShot;
 bool lastShotNvsDirty = false;
 bool shotLogPersistFailLatched = false;
 bool shotCurvePersistFailLatched = false;
+bool lastShotPersistFailLatched = false;
+uint32_t shotStorePersistRetryAtMs = 0;
 
 bool noScaleShotGuardArmed = true;
 uint32_t noScaleShotGuardActivityAtMs = 0;
@@ -427,7 +433,6 @@ portMUX_TYPE scaleBeepMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE scaleDebugMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE scaleCriticalEventMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE scaleWeightEventMux = portMUX_INITIALIZER_UNLOCKED;
-portMUX_TYPE webStatusMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE bleCompanionMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE debugLogMux = portMUX_INITIALIZER_UNLOCKED;
 ScaleLinkState scaleLinkState = ScaleLinkState::DISCONNECTED;
@@ -471,9 +476,11 @@ bool scaleCompletionBeepPending = false;
 bool scaleCompletionBeepScheduled = false;
 
 bool virtualHoldOn = false;
-// Keep status snapshots in internal DRAM: loop copies ~4 KiB every 50 ms.
+// Keep status snapshots in internal DRAM: loop copies ~2 KiB every 50 ms.
 ControlStatusSnapshot publishedControlStatus;
 ControlStatusSnapshot stagingControlStatus;
+uint32_t controlStatusSeq = 0;
+constexpr uint32_t kControlStatusSeqlockTries = 64;
 MaintenanceLease maintenanceLease;
 WebCommand maintenanceCancellationCommand;
 bool maintenanceCancellationPending = false;
@@ -771,18 +778,36 @@ size_t copyDebugEvents(uint32_t afterSequence, DebugEvent *output,
 }
 
 void copyControlStatus(ControlStatusSnapshot &output) {
-  portENTER_CRITICAL(&webStatusMux);
+  for (uint32_t attempt = 0; attempt < kControlStatusSeqlockTries; ++attempt) {
+    const uint32_t s0 = __atomic_load_n(&controlStatusSeq, __ATOMIC_ACQUIRE);
+    if ((s0 & 1U) != 0U) {
+      continue;
+    }
+    output = publishedControlStatus;
+    const uint32_t s1 = __atomic_load_n(&controlStatusSeq, __ATOMIC_ACQUIRE);
+    if (s0 == s1) {
+      return;
+    }
+  }
   output = publishedControlStatus;
-  portEXIT_CRITICAL(&webStatusMux);
 }
 
 ScaleLinkSnapshot getScaleLinkSnapshot();
 RelaySafetySnapshot getRelaySafetySnapshot();
 
 void copyControlGate(ControlGateSnapshot &output) {
-  portENTER_CRITICAL(&webStatusMux);
+  for (uint32_t attempt = 0; attempt < kControlStatusSeqlockTries; ++attempt) {
+    const uint32_t s0 = __atomic_load_n(&controlStatusSeq, __ATOMIC_ACQUIRE);
+    if ((s0 & 1U) != 0U) {
+      continue;
+    }
+    output = controlGateOf(publishedControlStatus);
+    const uint32_t s1 = __atomic_load_n(&controlStatusSeq, __ATOMIC_ACQUIRE);
+    if (s0 == s1) {
+      return;
+    }
+  }
   output = controlGateOf(publishedControlStatus);
-  portEXIT_CRITICAL(&webStatusMux);
 }
 
 void reportTaskWatchdogFault() {
@@ -1538,7 +1563,8 @@ void serviceRemoteTimerStopRetry() {
 #include "ShotStopperBrew.h"
 #include "ShotStopperScaleSense.h"
 
-void copyDebugExportExtras(DebugExportExtras &out) {
+void copyDebugExportExtras(DebugExportExtras &out,
+                           const ControlStatusSnapshot &control) {
   out = DebugExportExtras{};
   if (session.active) {
     out.sessionActive = true;
@@ -1592,20 +1618,16 @@ void copyDebugExportExtras(DebugExportExtras &out) {
                 link.protocolName);
   }
   out.relay = getRelaySafetySnapshot();
-  {
-    ControlStatusSnapshot status;
-    copyControlStatus(status);
-    out.rawActivatorOn = status.rawActivatorOn;
-    out.physicalActivatorOn = status.physicalActivatorOn;
-    out.machineRunState = static_cast<uint8_t>(status.machineRunState);
-    out.machineStartAckPending = status.machineStartAckPending;
-    out.machineStopAckPending = status.machineStopAckPending;
-    out.machineOrphanRun = status.machineOrphanRun;
-    out.noScaleShotGuardHold = status.noScaleShotGuardHold;
-    out.noScaleShotGuardScaleWasAvailable =
-        status.noScaleShotGuardScaleWasAvailable;
-    out.cupStartGuardHold = status.cupStartGuardHold;
-  }
+  out.rawActivatorOn = control.rawActivatorOn;
+  out.physicalActivatorOn = control.physicalActivatorOn;
+  out.machineRunState = static_cast<uint8_t>(control.machineRunState);
+  out.machineStartAckPending = control.machineStartAckPending;
+  out.machineStopAckPending = control.machineStopAckPending;
+  out.machineOrphanRun = control.machineOrphanRun;
+  out.noScaleShotGuardHold = control.noScaleShotGuardHold;
+  out.noScaleShotGuardScaleWasAvailable =
+      control.noScaleShotGuardScaleWasAvailable;
+  out.cupStartGuardHold = control.cupStartGuardHold;
   out.healthHeapAlertLatched = healthHeapAlertLatched;
   out.healthStackAlertLatched = healthStackAlertLatched;
   out.healthLoopGapAlertLatched = healthLoopGapAlertLatched;
@@ -4672,31 +4694,53 @@ void serviceShotStorePersistence() {
   if (session.active || machineIsRunning()) {
     return;
   }
+  if (static_cast<int32_t>(millis() - shotStorePersistRetryAtMs) < 0) {
+    return;
+  }
   // Do not wait on the durable flash mutex from the 1 ms control loop: a
   // 50 ms take while settings_persist holds the lock stalls pala/weight and
   // can spam SHOT_LOG_PERSIST_FAILED into the 96-event ring.
   constexpr uint32_t kTryLockMs = 0;
+  bool anyFail = false;
   if (shotLog.dirty()) {
     if (shotLog.flush(kTryLockMs)) {
       shotLogPersistFailLatched = false;
-    } else if (!shotLogPersistFailLatched) {
-      shotLogPersistFailLatched = true;
-      addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
-                    static_cast<int32_t>(shotLog.count()), 0);
+    } else {
+      anyFail = true;
+      if (!shotLogPersistFailLatched) {
+        shotLogPersistFailLatched = true;
+        addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
+                      static_cast<int32_t>(shotLog.count()), 0);
+      }
     }
   }
   if (shotCurves.dirty()) {
     if (shotCurves.flush(kTryLockMs)) {
       shotCurvePersistFailLatched = false;
-    } else if (!shotCurvePersistFailLatched) {
-      shotCurvePersistFailLatched = true;
-      addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
-                    static_cast<int32_t>(shotCurves.count()), 1);
+    } else {
+      anyFail = true;
+      if (!shotCurvePersistFailLatched) {
+        shotCurvePersistFailLatched = true;
+        addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
+                      static_cast<int32_t>(shotCurves.count()), 1);
+      }
     }
   }
-  if (lastShotNvsDirty && lastShotStore.save(kTryLockMs)) {
-    lastShotNvsDirty = false;
+  if (lastShotNvsDirty) {
+    if (lastShotStore.save(kTryLockMs)) {
+      lastShotNvsDirty = false;
+      lastShotPersistFailLatched = false;
+    } else {
+      anyFail = true;
+      if (!lastShotPersistFailLatched) {
+        lastShotPersistFailLatched = true;
+        addDebugEvent(DebugCategory::CONFIG, DebugCode::SHOT_LOG_PERSIST_FAILED,
+                      0, 2);
+      }
+    }
   }
+  shotStorePersistRetryAtMs =
+      anyFail ? millis() + SHOT_STORE_PERSIST_RETRY_MS : 0;
 }
 
 void serviceRuntimePersistence() {
@@ -5476,10 +5520,16 @@ void publishControlStatus() {
   next.psramLargestFreeBlockBytes = psramLargestFreeBlockBytes;
   next.bleHostAllocPsramCount = bleHostAllocPsramCount;
   next.bleHostAllocFallbackCount = bleHostAllocFallbackCount;
+  next.workBufExternal = workBufIsExternal();
+#ifndef SHOT_STOPPER_HOST_TEST
+  next.jsonArenaExternal = jsonArenaIsExternal();
+#else
+  next.jsonArenaExternal = false;
+#endif
+  next.allocExternalFallbackCount = allocExternalFallbackCount();
   next.hwmon = hwmonSnapshot;
   next.scaleEventsDropped = scaleEventsDropped;
   next.config = effectiveRuntimeConfig();
-  next.presets = presetBank;
   next.lastCycle = lastCycle;
   next.lastShot = persistedLastShot;
   {
@@ -5499,7 +5549,6 @@ void publishControlStatus() {
   copyPreferredScaleMac(next.preferredScaleMac, sizeof(next.preferredScaleMac));
   copyPreferredScaleName(next.preferredScaleName,
                          sizeof(next.preferredScaleName));
-  copyScaleHistory(next.scaleHistory);
   next.scaleMacCachePauseRemainingMs = scaleMacCachePauseRemainingMs(now);
   if (session.active) {
     next.cycleFlowDuringRetare = session.flowDuringRetare;
@@ -5566,7 +5615,7 @@ void publishControlStatus() {
   next.cupStartGuardHold = cupStartGuardHold;
   next.machineRunState = machineRunState();
   next.cupPresenceState = cupPresenceState();
-  next.cupPresent = next.cupPresenceState == CupPresenceState::PRESENT;
+  next.cupPresent = cupPresenceState() == CupPresenceState::PRESENT;
   next.configPersistPending = runtimePersistPending;
   next.configPersistFailed = runtimePersistFailed;
   {
@@ -5592,9 +5641,9 @@ void publishControlStatus() {
   portENTER_CRITICAL(&debugLogMux);
   next.debugEventsDropped = debugLog.overwritten();
   portEXIT_CRITICAL(&debugLogMux);
-  portENTER_CRITICAL(&webStatusMux);
+  __atomic_fetch_add(&controlStatusSeq, 1U, __ATOMIC_RELAXED);
   publishedControlStatus = next;
-  portEXIT_CRITICAL(&webStatusMux);
+  __atomic_fetch_add(&controlStatusSeq, 1U, __ATOMIC_RELEASE);
 }
 
 SerialCliParser serialCliParser;
@@ -5737,6 +5786,13 @@ void serialCliPrintLiveHealth() {
   dump.psramLargestFreeBlockBytes = psramLargestFreeBlockBytes;
   dump.bleHostAllocPsramCount = bleHostAllocPsramCount;
   dump.bleHostAllocFallbackCount = bleHostAllocFallbackCount;
+  dump.workBufExternal = workBufIsExternal();
+#ifndef SHOT_STOPPER_HOST_TEST
+  dump.jsonArenaExternal = jsonArenaIsExternal();
+#else
+  dump.jsonArenaExternal = false;
+#endif
+  dump.allocExternalFallbackCount = allocExternalFallbackCount();
   dump.loopMaxGapMs = loopMaxGapMs;
   dump.healthIntervalMaxGapMs =
       healthIntervalMaxGapMs > loopIntervalGapMs ? healthIntervalMaxGapMs
@@ -6325,11 +6381,6 @@ void setup() {
   logEmit(taskWatchdogReady ? LogLevel::INFO : LogLevel::CRITICAL,
           DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
           BOOT_SUBSYSTEM_TASK_WDT, taskWatchdogReady ? 1 : 0);
-#ifndef SHOT_STOPPER_HOST_TEST
-  logEmit(psramFound() ? LogLevel::INFO : LogLevel::CRITICAL,
-          DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM, BOOT_SUBSYSTEM_PSRAM,
-          psramFound() ? 1 : 0);
-#endif
   if (safetyResetStatus.recoveryRequired) {
     addDebugEvent(DebugCategory::SECURITY, DebugCode::SAFETY_LOCKOUT_ACTIVE);
   }
@@ -6451,6 +6502,10 @@ void setup() {
     logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
             BOOT_SUBSYSTEM_NETWORK, 0);
   }
+  const bool psramOk =
+      psramFound() && (!settingsLoaded || workBufIsExternal());
+  logEmit(psramOk ? LogLevel::INFO : LogLevel::CRITICAL, DebugCategory::BOOT,
+          DebugCode::BOOT_SUBSYSTEM, BOOT_SUBSYSTEM_PSRAM, psramOk ? 1 : 0);
 #endif
 
   addDebugEvent(DebugCategory::BOOT, DebugCode::BOOT_READY);

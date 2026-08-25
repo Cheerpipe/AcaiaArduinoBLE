@@ -1841,9 +1841,11 @@ struct ControlStatusSnapshot {
   uint32_t psramLargestFreeBlockBytes = 0;
   uint32_t bleHostAllocPsramCount = 0;
   uint32_t bleHostAllocFallbackCount = 0;
+  bool workBufExternal = false;
+  bool jsonArenaExternal = false;
+  uint32_t allocExternalFallbackCount = 0;
   uint32_t scaleEventsDropped = 0;
   RuntimeConfig config = {};
-  ShotPresetBank presets = {};
   LastCycleSummary lastCycle = {};
   PersistedLastShot lastShot = {};
   uint8_t shotCurveCount = 0;
@@ -1889,7 +1891,6 @@ struct ControlStatusSnapshot {
   char scaleProtocol[20] = "none";
   char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
   char preferredScaleName[PREFERRED_SCALE_NAME_CAPACITY] = {};
-  ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY] = {};
   uint32_t scaleMacCachePauseRemainingMs = 0;
   bool noScaleShotGuardEnabled = true;
   bool noScaleShotGuardArmed = true;

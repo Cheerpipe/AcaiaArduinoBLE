@@ -11,6 +11,7 @@ namespace {
 
 using shotstopper::initJsonArenaHooks;
 using shotstopper::jsonArenaBytesUsed;
+using shotstopper::jsonArenaIsExternal;
 using shotstopper::resetJsonArena;
 
 int failures = 0;
@@ -29,6 +30,7 @@ void testArenaResetAndHooks() {
   initJsonArenaHooks();
   resetJsonArena();
   CHECK(jsonArenaBytesUsed() == 0);
+  CHECK(jsonArenaIsExternal());
   void *block = shotstopper::detail::jsonArenaMalloc(64);
   CHECK(block != nullptr);
   CHECK(jsonArenaBytesUsed() >= 64);

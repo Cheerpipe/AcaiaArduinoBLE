@@ -54,6 +54,8 @@ struct NetworkWorkBuf {
   ShotCurveRecord shotCurves[SHOT_CURVE_CAPACITY]{};
   ControlStatusSnapshot control{};
   DebugExportExtras debugExport{};
+  ShotPresetBank presetBank{};
+  ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY]{};
   // Must match ShotStopperNetwork::REQUEST_BODY_CAPACITY (asserted in begin()).
   char requestBody[2048]{};
   WifiScanSnapshot wifiScan{};
@@ -65,6 +67,7 @@ constexpr uint16_t kWifiScanFetchMax = MAX_WIFI_SCAN_RESULTS;
 static wifi_ap_record_t *g_wifiApRecords = nullptr;
 static SHOT_STOPPER_PSRAM_BSS WifiScanSnapshot g_wifiScan;
 static SHOT_STOPPER_PSRAM_BSS WifiScanSnapshot g_wifiScanWorking;
+static SHOT_STOPPER_PSRAM_BSS PersistedSettings g_networkSettings;
 
 namespace {
 
@@ -751,7 +754,7 @@ bool statusJsonAppend(size_t *used, const char *fmt, ...) {
   return true;
 }
 
-void buildSlimPresetsJson(const ControlStatusSnapshot &control) {
+void buildSlimPresetsJson(const ShotPresetBank &presets) {
   if (g_work == nullptr) {
     return;
   }
@@ -762,12 +765,12 @@ void buildSlimPresetsJson(const ControlStatusSnapshot &control) {
   buf[2] = 0;
   size_t used = 0;
   int n = snprintf(buf, cap, "{\"activeId\":%u,\"items\":[",
-                   static_cast<unsigned>(control.presets.activeId));
+                   static_cast<unsigned>(presets.activeId));
   if (n > 0) {
     used = static_cast<size_t>(n);
   }
-  for (uint8_t i = 0; i < control.presets.count && i < MAX_SHOT_PRESETS; ++i) {
-    const ShotPreset &p = control.presets.presets[i];
+  for (uint8_t i = 0; i < presets.count && i < MAX_SHOT_PRESETS; ++i) {
+    const ShotPreset &p = presets.presets[i];
     char safeName[SHOT_PRESET_NAME_CAPACITY * 2] = {};
     sanitizeJsonEmbed(p.name, safeName, sizeof(safeName));
     n = snprintf(
@@ -791,7 +794,7 @@ void buildSlimPresetsJson(const ControlStatusSnapshot &control) {
   }
 }
 
-void buildScaleHistoryJson(const ControlStatusSnapshot &control) {
+void buildScaleHistoryJson(const ScaleHistoryEntry *entries) {
   if (g_work == nullptr) {
     return;
   }
@@ -807,7 +810,7 @@ void buildScaleHistoryJson(const ControlStatusSnapshot &control) {
   }
   bool first = true;
   for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
-    const ScaleHistoryEntry &entry = control.scaleHistory[i];
+    const ScaleHistoryEntry &entry = entries[i];
     if (entry.mac[0] == '\0') {
       continue;
     }
@@ -834,6 +837,8 @@ void buildScaleHistoryJson(const ControlStatusSnapshot &control) {
 
 ShotStopperNetwork *ShotStopperNetwork::instance_ = nullptr;
 
+ShotStopperNetwork::ShotStopperNetwork() : settings_(g_networkSettings) {}
+
 bool ShotStopperNetwork::begin(const PersistedSettings &settings,
                                const NetworkBridgeCallbacks &callbacks) {
   if (instance_ != nullptr || callbacks.copyControlStatus == nullptr ||
@@ -859,22 +864,25 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
     return false;
   }
   workBuf_ = static_cast<NetworkWorkBuf *>(
-      allocExternalOrInternal(sizeof(NetworkWorkBuf)));
+      allocExternal(sizeof(NetworkWorkBuf)));
   if (workBuf_ == nullptr) {
     vSemaphoreDelete(statusResponseMux_);
     statusResponseMux_ = nullptr;
     vQueueDelete(acceptedCommandQueue_);
     acceptedCommandQueue_ = nullptr;
+    noteWorkBufExternal(false);
     return false;
   }
   new (workBuf_) NetworkWorkBuf{};
+  noteWorkBufExternal(true);
   auto destroyWorkBuf = [&]() {
     workBuf_->~NetworkWorkBuf();
     heapCapsFree(workBuf_);
     workBuf_ = nullptr;
+    noteWorkBufExternal(false);
   };
-  g_wifiApRecords = static_cast<wifi_ap_record_t *>(allocExternalOrInternal(
-      sizeof(wifi_ap_record_t) * kWifiScanFetchMax));
+  g_wifiApRecords = static_cast<wifi_ap_record_t *>(
+      allocExternal(sizeof(wifi_ap_record_t) * kWifiScanFetchMax));
   if (g_wifiApRecords == nullptr) {
     destroyWorkBuf();
     vSemaphoreDelete(statusResponseMux_);
@@ -3847,14 +3855,24 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       page == StatusPage::Home || page == StatusPage::Settings;
   const bool needHistory = page == StatusPage::Settings;
   if (needPresets) {
-    buildSlimPresetsJson(control);
+    if (self.callbacks_.copyPresetBank != nullptr) {
+      self.callbacks_.copyPresetBank(&g_work->presetBank);
+    } else {
+      memset(&g_work->presetBank, 0, sizeof(g_work->presetBank));
+    }
+    buildSlimPresetsJson(g_work->presetBank);
   } else {
     g_work->presetsJson[0] = '{';
     g_work->presetsJson[1] = '}';
     g_work->presetsJson[2] = 0;
   }
   if (needHistory) {
-    buildScaleHistoryJson(control);
+    if (self.callbacks_.copyScaleHistory != nullptr) {
+      self.callbacks_.copyScaleHistory(g_work->scaleHistory);
+    } else {
+      memset(g_work->scaleHistory, 0, sizeof(g_work->scaleHistory));
+    }
+    buildScaleHistoryJson(g_work->scaleHistory);
   } else {
     g_work->historyJson[0] = '[';
     g_work->historyJson[1] = ']';
@@ -4282,6 +4300,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"psramSizeBytes\":%lu,\"psramFreeBytes\":%lu,"
         "\"psramLargestFreeBlockBytes\":%lu,"
         "\"bleHostAllocPsram\":%lu,\"bleHostAllocFallback\":%lu,"
+        "\"workBufExternal\":%s,\"jsonArenaExternal\":%s,"
+        "\"allocExternalFallback\":%lu,"
         "\"hwmon\":{\"cpuLoad5s\":%.2f,\"cpuLoad1m\":%.2f,\"cpuLoad5m\":%.2f,"
         "\"cpu0Busy\":%.2f,\"cpu1Busy\":%.2f,\"cpuLoadValid\":%s,"
         "\"cpuMhz\":%lu,"
@@ -4337,6 +4357,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.psramLargestFreeBlockBytes),
         static_cast<unsigned long>(control.bleHostAllocPsramCount),
         static_cast<unsigned long>(control.bleHostAllocFallbackCount),
+        control.workBufExternal ? "true" : "false",
+        control.jsonArenaExternal ? "true" : "false",
+        static_cast<unsigned long>(control.allocExternalFallbackCount),
         static_cast<double>(control.hwmon.cpuLoad5s),
         static_cast<double>(control.hwmon.cpuLoad1m),
         static_cast<double>(control.hwmon.cpuLoad5m),
@@ -4461,7 +4484,7 @@ bool debugExportChunk(httpd_req_t *request, const char *text) {
   if (text == nullptr || text[0] == '\0') {
     return true;
   }
-  return httpd_resp_send_chunk(request, text, HTTPD_RESP_USE_STRLEN) == ESP_OK;
+  return sendCopiedChunk(request, text, strlen(text)) == ESP_OK;
 }
 
 bool debugExportChunkf(httpd_req_t *request, char *buf, size_t cap,
@@ -4489,7 +4512,7 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
   NetworkWorkBuf &work = *self.workBuf_;
   self.callbacks_.copyControlStatus(work.control);
   if (self.callbacks_.copyDebugExportExtras != nullptr) {
-    self.callbacks_.copyDebugExportExtras(work.debugExport);
+    self.callbacks_.copyDebugExportExtras(work.debugExport, work.control);
   } else {
     work.debugExport = DebugExportExtras{};
   }
@@ -4601,12 +4624,18 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            static_cast<int>(c.config.timezoneOffsetMinutes),
            c.config.serialDebugOutput ? "true" : "false");
 
+  if (self.callbacks_.copyPresetBank != nullptr) {
+    self.callbacks_.copyPresetBank(&work.presetBank);
+  } else {
+    memset(&work.presetBank, 0, sizeof(work.presetBank));
+  }
   ok = ok && debugExportChunk(request, "\"presets\":{\"activeId\":");
   ok = ok &&
        debugExportChunkf(request, buf, cap, "%u,\"items\":[",
-                         static_cast<unsigned>(c.presets.activeId));
-  for (uint8_t i = 0; ok && i < c.presets.count && i < MAX_SHOT_PRESETS; ++i) {
-    const ShotPreset &p = c.presets.presets[i];
+                         static_cast<unsigned>(work.presetBank.activeId));
+  for (uint8_t i = 0;
+       ok && i < work.presetBank.count && i < MAX_SHOT_PRESETS; ++i) {
+    const ShotPreset &p = work.presetBank.presets[i];
     char safeName[SHOT_PRESET_NAME_CAPACITY] = {};
     sanitizeJsonEmbed(p.name, safeName, sizeof(safeName));
     ok = debugExportChunkf(
@@ -4938,7 +4967,9 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            "\"minimumFreeHeapBytes\":%lu,\"largestFreeHeapBlockBytes\":%lu,"
            "\"psramSizeBytes\":%lu,\"psramFreeBytes\":%lu,"
            "\"psramLargestFreeBlockBytes\":%lu,\"bleHostAllocPsram\":%lu,"
-           "\"bleHostAllocFallback\":%lu,\"heapAlertLatched\":%s,"
+           "\"bleHostAllocFallback\":%lu,\"workBufExternal\":%s,"
+           "\"jsonArenaExternal\":%s,\"allocExternalFallback\":%lu,"
+           "\"heapAlertLatched\":%s,"
            "\"stackAlertLatched\":%s,\"loopGapAlertLatched\":%s,"
            "\"cpuLoad5s\":%.2f,\"cpuLoad1m\":%.2f,\"cpuLoad5m\":%.2f,"
            "\"cpuMhz\":%lu,\"tempC\":%.1f,\"tempPeakC\":%.1f},",
@@ -4955,6 +4986,9 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            static_cast<unsigned long>(c.psramLargestFreeBlockBytes),
            static_cast<unsigned long>(c.bleHostAllocPsramCount),
            static_cast<unsigned long>(c.bleHostAllocFallbackCount),
+           c.workBufExternal ? "true" : "false",
+           c.jsonArenaExternal ? "true" : "false",
+           static_cast<unsigned long>(c.allocExternalFallbackCount),
            x.healthHeapAlertLatched ? "true" : "false",
            x.healthStackAlertLatched ? "true" : "false",
            x.healthLoopGapAlertLatched ? "true" : "false",

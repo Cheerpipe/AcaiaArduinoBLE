@@ -115,6 +115,8 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   lastShotNvsDirty = false;
   shotLogPersistFailLatched = false;
   shotCurvePersistFailLatched = false;
+  lastShotPersistFailLatched = false;
+  shotStorePersistRetryAtMs = 0;
   lastShotStore.clear();
   g_hostFlashIoMutexAvailable = true;
   shotCurveSampler.reset(0);
@@ -134,6 +136,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   ringRetainLogLevel = LogLevel::INFO;
   publishedControlStatus = ControlStatusSnapshot{};
   stagingControlStatus = ControlStatusSnapshot{};
+  controlStatusSeq = 0;
   bleCompanionRuntimeSnapshot = BleCompanionRuntimeSnapshot{};
   bleCompanionRuntimeSnapshot.enabled = true;
   bleCompanionStatusSnapshot = BleCompanionStatusSnapshot{};
@@ -7209,6 +7212,9 @@ void sc15_status_printers_use_dump_views() {
   CHECK(serialTxContains("psramLargest=0"));
   CHECK(serialTxContains("bleHostAllocPsram=0"));
   CHECK(serialTxContains("bleHostAllocFallback=0"));
+  CHECK(serialTxContains("workBufExternal=false"));
+  CHECK(serialTxContains("jsonArenaExternal=false"));
+  CHECK(serialTxContains("allocExternalFallback=0"));
   CHECK(serialTxContains("stackNetwork=400"));
   CHECK(serialTxContains("cpuMhz=80"));
   CHECK(serialTxContains("cpuLoad5s=0.42"));
@@ -7416,6 +7422,9 @@ void s19_shot_store_persist_failure_logs_once_until_success() {
   serviceShotStorePersistence();
   CHECK(!debugEventExists(DebugCode::SHOT_LOG_PERSIST_FAILED));
   g_hostFlashIoMutexAvailable = true;
+  serviceShotStorePersistence();
+  CHECK(shotLog.dirty());
+  hostMillis += SHOT_STORE_PERSIST_RETRY_MS;
   serviceShotStorePersistence();
   CHECK(!shotLog.dirty());
   CHECK(!shotLogPersistFailLatched);

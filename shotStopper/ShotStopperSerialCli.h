@@ -579,6 +579,9 @@ struct SerialCliHealthDump {
   uint32_t psramLargestFreeBlockBytes = 0;
   uint32_t bleHostAllocPsramCount = 0;
   uint32_t bleHostAllocFallbackCount = 0;
+  bool workBufExternal = false;
+  bool jsonArenaExternal = false;
+  uint32_t allocExternalFallbackCount = 0;
   uint32_t loopMaxGapMs = 0;
   uint32_t healthIntervalMaxGapMs = 0;
   uint32_t loopStackMinWords = 0;
@@ -782,6 +785,12 @@ inline void serialCliPrintHealth(const SerialCliHealthDump &dump) {
   Serial.println(static_cast<unsigned long>(dump.bleHostAllocPsramCount));
   Serial.print("bleHostAllocFallback=");
   Serial.println(static_cast<unsigned long>(dump.bleHostAllocFallbackCount));
+  Serial.print("workBufExternal=");
+  Serial.println(dump.workBufExternal ? "true" : "false");
+  Serial.print("jsonArenaExternal=");
+  Serial.println(dump.jsonArenaExternal ? "true" : "false");
+  Serial.print("allocExternalFallback=");
+  Serial.println(static_cast<unsigned long>(dump.allocExternalFallbackCount));
   Serial.print("loopMaxGapMs=");
   Serial.println(static_cast<unsigned long>(dump.loopMaxGapMs));
   Serial.print("loopIntervalGapMs=");

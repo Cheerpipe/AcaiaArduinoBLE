@@ -324,29 +324,30 @@ bool AcaiaArduinoBLE::pollScan() {
     }
 
     BLEDevice peripheral = BLE.available();
-    if (_debug && peripheral) {
-        Serial.print("Found ");
-        Serial.print(peripheral.address());
-        Serial.print(" '");
-        Serial.print(peripheral.localName());
-        Serial.print("' ");
-        Serial.print(peripheral.advertisedServiceUuid());
-        Serial.println();
-    }
-
     if (peripheral) {
+        char mac[ACAIA_MAC_CAPACITY] = {};
+        char name[ACAIA_NAME_CAPACITY] = {};
+        strncpy(mac, peripheral.address().c_str(), sizeof(mac) - 1);
+        strncpy(name, peripheral.localName().c_str(), sizeof(name) - 1);
+
+        if (_debug) {
+            Serial.print("Found ");
+            Serial.print(mac);
+            Serial.print(" '");
+            Serial.print(name);
+            Serial.print("' ");
+            Serial.print(peripheral.advertisedServiceUuid());
+            Serial.println();
+        }
+
         const bool filtered = _scanMac[0] != '\0';
-        const bool nameOk = isScaleName(peripheral.localName().c_str());
-        const bool macOk =
-            filtered &&
-            macAddressEqual(peripheral.address().c_str(), _scanMac);
+        const bool nameOk = isScaleName(name);
+        const bool macOk = filtered && macAddressEqual(mac, _scanMac);
 
         if (nameOk) {
-            strncpy(_seenMac, peripheral.address().c_str(),
-                    sizeof(_seenMac) - 1);
+            strncpy(_seenMac, mac, sizeof(_seenMac) - 1);
             _seenMac[sizeof(_seenMac) - 1] = '\0';
-            strncpy(_seenName, peripheral.localName().c_str(),
-                    sizeof(_seenName) - 1);
+            strncpy(_seenName, name, sizeof(_seenName) - 1);
             _seenName[sizeof(_seenName) - 1] = '\0';
             _seenPending = true;
         }
