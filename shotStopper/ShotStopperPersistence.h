@@ -83,7 +83,14 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
     if (validPersistedSettings(settings)) {
       return true;
     }
-    if (!migratePersistedSettingsFromV12(settings)) {
+    return false;
+  }
+  if (storedLength == PERSISTED_SETTINGS_V13_SIZE) {
+    uint8_t v13Raw[PERSISTED_SETTINGS_V13_SIZE];
+    if (preferences.getBytes(key, v13Raw, sizeof(v13Raw)) != sizeof(v13Raw)) {
+      return false;
+    }
+    if (!migratePersistedSettingsFromV13(v13Raw, sizeof(v13Raw), settings)) {
       return false;
     }
     return validPersistedSettings(settings);

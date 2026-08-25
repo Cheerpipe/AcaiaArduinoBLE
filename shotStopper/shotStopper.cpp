@@ -239,6 +239,7 @@ struct CycleSession {
   uint32_t ownedConnectionGeneration = 0;
   uint32_t startedAtMs = 0;
   uint32_t circuitClosedAtMs = 0;
+  // Mirror of rinseClockStartedAtMs after the stopper accepts. Tests only.
   uint32_t rinseStartedAtMs = 0;
   uint32_t postTareBaselineDeadlineMs = 0;
   uint32_t stopTimerRetryDeadlineMs = 0;
@@ -1561,6 +1562,7 @@ void serviceRemoteTimerStopRetry() {
 
 #include "ShotStopperCupPresence.h"
 #include "ShotStopperBrew.h"
+#include "ShotStopperRinse.h"
 #include "ShotStopperScaleSense.h"
 
 void copyDebugExportExtras(DebugExportExtras &out,
@@ -1670,6 +1672,9 @@ void fillLoopGuardsFromIntention(const MachineIntention &intention) {
       scaleLinkAvailable(link) && currentWeightIsFresh();
   loopGuardInputs.cup = cupPresenceState();
   loopGuardInputs.currentWeightG = currentWeight;
+  // Product reuses the machine rinse-gesture window as the blocked-start hold
+  // timeout. Brew sees only this composed field, not rinseGestureMs.
+  loopGuardInputs.blockedHoldTimeoutMs = runtimeConfig.rinseGestureMs;
 }
 
 void captureLoopGuards() {
@@ -1921,8 +1926,18 @@ bool recordWeightSample(float weight, uint32_t receivedAtMs) {
 }
 
 
+bool endingRinseCycle(EndReason reason) {
+  return stopperState == StopperState::RINSE ||
+         reason == EndReason::RINSE_COMPLETE;
+}
+
+bool pendingFinalizeIsRinse(const PendingShotFinalize &snapshot) {
+  return snapshot.endReason == EndReason::RINSE_COMPLETE ||
+         snapshot.finalState == StopperState::RINSE;
+}
+
 void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
-  if (brewEndIsAbandonedStart(reason)) {
+  if (brewEndIsAbandonedStart(reason) || endingRinseCycle(reason)) {
     return;
   }
   const bool logEligible = shotLogEligible(reason, durationMs);
@@ -2133,11 +2148,11 @@ void cancelPendingFinalize(const char *reason) {
       shotLogBbwEligible(snapshot.startedWithScale, snapshot.timerOnly,
                          snapshot.automaticBrew) &&
       shotLogWeightEligible(weightG, valid);
-  if (persistEligible) {
+  if (persistEligible && !pendingFinalizeIsRinse(snapshot)) {
     commitPendingShotLog(snapshot, weightG, valid, source);
   }
   // Home last shot is independent of history eligibility (incl. weight < 1 g).
-  if (snapshot.endReason != EndReason::RINSE_COMPLETE &&
+  if (!pendingFinalizeIsRinse(snapshot) &&
       !brewEndIsAbandonedStart(snapshot.endReason)) {
     persistLastShotFromFinalize(snapshot, weightG, valid);
   }
@@ -2152,7 +2167,7 @@ void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
       !shotLogWeightEligible(finalWeightG, postDripWeightValid) ||
       snapshot.extractionExtended || snapshot.slowExtractionExtended ||
       snapshot.endReason == EndReason::AUTO_TO_MANUAL_GUARD ||
-      snapshot.endReason == EndReason::RINSE_COMPLETE ||
+      pendingFinalizeIsRinse(snapshot) ||
       brewEndIsAbandonedStart(snapshot.endReason) ||
       snapshot.endReason == EndReason::SHORT_SHOT ||
       snapshot.durationDs < (MIN_SHOT_LOG_DURATION_MS / 100U) ||
@@ -2234,21 +2249,21 @@ void pendingShotFinalizeTask() {
                          snapshot.automaticBrew) &&
       shotLogWeightEligible(logWeightG, logWeightValid);
 
-  if (persistEligible) {
+  if (persistEligible && !pendingFinalizeIsRinse(snapshot)) {
     commitPendingShotLog(snapshot, logWeightG, logWeightValid, weightSource);
   }
   // Home last shot always reflects the finished cycle, even when history
   // skips (weight < 1 g, non-AUTO, etc.). Rinses and abandoned starts do not
   // overwrite it.
-  if (snapshot.endReason != EndReason::RINSE_COMPLETE &&
+  if (!pendingFinalizeIsRinse(snapshot) &&
       !brewEndIsAbandonedStart(snapshot.endReason)) {
     persistLastShotFromFinalize(snapshot, logWeightG, logWeightValid);
   }
 
   maybeQueueAutoToManualGuardSample(snapshot, finalWeightG, postDripWeightValid);
 
-  if (!snapshot.offsetAnalysis || snapshot.extractionExtended ||
-      snapshot.slowExtractionExtended) {
+  if (pendingFinalizeIsRinse(snapshot) || !snapshot.offsetAnalysis ||
+      snapshot.extractionExtended || snapshot.slowExtractionExtended) {
     return;
   }
 
@@ -4050,7 +4065,14 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   } else {
     machineCancelSettledWeightCutOff();
   }
-  machineRequestStop();
+  const bool rinseEnd = endingRinseCycle(reason);
+  if (rinseEnd) {
+    machineEndRinse();
+  } else {
+    machineRequestStop();
+  }
+  rinseClear();
+  session.rinseStartedAtMs = 0;
   session.endReason = reason;
   if (!brewEndIsAbandonedStart(reason)) {
     if (shotCompletionGetsLongBeep(reason)) {
@@ -4068,9 +4090,9 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
 
   schedulePendingShotFinalize(reason, durationMs);
   // Home status must show the last shot immediately (during drip delay),
-  // including empty / sub-1 g results. Rinses and abandoned starts do not
-  // overwrite last shot.
-  if (reason != EndReason::RINSE_COMPLETE && !brewEndIsAbandonedStart(reason)) {
+  // including empty / sub-1 g results. Rinses (including early abort) and
+  // abandoned starts do not overwrite last shot.
+  if (!rinseEnd && !brewEndIsAbandonedStart(reason)) {
     persistLastShotFromEndedCycle(reason, durationMs);
   }
 
@@ -4090,8 +4112,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
       lastCycle.weightValid ? elapsedMs(currentWeightReceivedAtMs) : 0;
   lastCycle.weightControlState = session.weightControlState;
   lastCycle.calibrationEligible = session.calibrationEligible;
-  if (reason != EndReason::RINSE_COMPLETE && !brewEndIsAbandonedStart(reason) &&
-      stopperState != StopperState::RINSE) {
+  if (!rinseEnd && !brewEndIsAbandonedStart(reason)) {
     noScaleShotGuardActivityAtMs = millis();
   }
   session.active = false;
@@ -4124,7 +4145,7 @@ bool beginRinseCycle(ControlSource source) {
   resetShotTrajectory(session.startedAtMs);
   machineSetPreferBleAirtime(false);
   machineBeginCycle(false);
-  if (!machineRequestStart(session.config.operationalWallMs)) {
+  if (!machineBeginRinse(session.config.operationalWallMs)) {
     session.active = false;
     session.endReason = EndReason::RELAY_SAFETY_FAILURE;
     machineEndCycle();
@@ -4156,10 +4177,11 @@ bool beginRinseCycle(ControlSource source) {
 }
 
 void enterRinse() {
-  // The duration is measured from the beginning of the stable OFF level, not
-  // from 30 ms later when debounce accepts the transition.
-  session.rinseStartedAtMs = machineLastActivatorEdgeMs();
+  (void)machineBeginRinse(session.config.operationalWallMs);
+  session.rinseStartedAtMs = rinseBegin(session.config.rinseDurationMs);
   session.automaticEnabled = false;
+  shot.automaticBrew = false;
+  session.calibrationEligible = false;
   session.autoToManualGuardArmed = false;
   session.autoToManualGuardEnforced = false;
   session.awaitingPostTareBaseline = false;
@@ -4187,17 +4209,6 @@ void enterBrewOrManualFromStart() {
   session.bbwProtectionEnded = true;
   addDebugEvent(DebugCategory::STATE, DebugCode::MANUAL_CYCLE_STARTED);
   transitionTo(StopperState::MANUAL_NO_SCALE);
-}
-
-void demoteActiveCycleToRinseOrEnd() {
-  if (machineSupportsRinse() && withinRinseGestureWindow()) {
-    enterRinse();
-    return;
-  }
-  if (session.automaticEnabled) {
-    shot.automaticBrew = true;
-  }
-  finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
 }
 
 void handleGlobalLimitTrip() {
@@ -4299,14 +4310,7 @@ void stateMachineTask() {
       if (intent.intent == UserIntent::REQUEST_START) {
         beginCycle(ControlSource::PHYSICAL);
       }
-      if (machineSupportsRinse() &&
-          intent.intent == UserIntent::REQUEST_STOP &&
-          ((noScaleShotGuardHold &&
-            elapsedMs(noScaleShotGuardHoldAtMs) <=
-                runtimeConfig.rinseGestureMs) ||
-           (cupStartGuardHold &&
-            elapsedMs(cupStartGuardHoldAtMs) <=
-                runtimeConfig.rinseGestureMs))) {
+      if (intent.intent == UserIntent::REQUEST_RINSE && machineSupportsRinse()) {
         noScaleShotGuardHold = false;
         cupStartGuardHold = false;
         if (!beginRinseCycle(ControlSource::PHYSICAL)) {
@@ -4318,15 +4322,21 @@ void stateMachineTask() {
 
     case StopperState::RINSE:
       // Physical edges are consumed by the machine while rinsing.
-      if (elapsedMs(session.rinseStartedAtMs) >=
-          session.config.rinseDurationMs) {
+      if (rinseDeadlineReached()) {
         finalizeCycle(EndReason::RINSE_COMPLETE, nextStateForUserHold(intent));
       }
       return;
 
     case StopperState::BREW:
+      if (intent.intent == UserIntent::REQUEST_RINSE && machineSupportsRinse()) {
+        enterRinse();
+        return;
+      }
       if (intent.intent == UserIntent::REQUEST_STOP) {
-        demoteActiveCycleToRinseOrEnd();
+        if (session.automaticEnabled) {
+          shot.automaticBrew = true;
+        }
+        finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
         if (!session.active || stopperState != StopperState::BREW) {
           return;
         }
@@ -4376,8 +4386,15 @@ void stateMachineTask() {
       return;
 
     case StopperState::MANUAL_NO_SCALE:
+      if (intent.intent == UserIntent::REQUEST_RINSE && machineSupportsRinse()) {
+        enterRinse();
+        return;
+      }
       if (intent.intent == UserIntent::REQUEST_STOP) {
-        demoteActiveCycleToRinseOrEnd();
+        if (session.automaticEnabled) {
+          shot.automaticBrew = true;
+        }
+        finalizeCycle(EndReason::ACTIVATOR, StopperState::READY);
         return;
       }
       if (machineTakeNoFlowIdle()) {
@@ -4413,9 +4430,7 @@ void beginWebRinse() {
   if (!beginRinseCycle(ControlSource::WEB)) {
     return;
   }
-  session.rinseStartedAtMs = session.startedAtMs;
-  transitionTo(StopperState::RINSE);
-  maybeRequestNtpSyncOnActivity();
+  enterRinse();
 }
 
 bool forwardAcceptedNetworkCommand(const WebCommand &command) {
@@ -4928,8 +4943,8 @@ void processWebCommand(const WebCommand &command) {
       candidate.soundAlertsMuted = command.config.soundAlertsMuted;
       candidate.firstDropBeep = command.config.firstDropBeep;
       machineApplyWorkflowConfig(candidate, command.config);
-      candidate.rinseGestureMs = command.config.rinseGestureMs;
       candidate.rinseDurationMs = command.config.rinseDurationMs;
+      candidate.rinseEnabled = command.config.rinseEnabled;
       candidate.buzzerScaleLostBeep = command.config.buzzerScaleLostBeep;
       candidate.buzzerAutoToManualGuardEndBeep =
           command.config.buzzerAutoToManualGuardEndBeep;

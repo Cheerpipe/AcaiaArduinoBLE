@@ -47,10 +47,16 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 13;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 14;
+// Rinse clock default. Detection window default is DEFAULT_RINSE_GESTURE_MS
+// (machine-owned, ShotStopperMachineTypes.h).
+constexpr uint32_t DEFAULT_RINSE_DURATION_MS = 4000;
+constexpr uint32_t CONFIG_SCHEMA_VERSION_V13 = 13;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V12 = 12;
 constexpr uint32_t CONFIG_SCHEMA_VERSION_V11 = 11;
+constexpr size_t RUNTIME_CONFIG_V13_SIZE = 248;
 constexpr size_t RUNTIME_CONFIG_V11_SIZE = 244;
+constexpr size_t PERSISTED_SETTINGS_V13_SIZE = 1908;
 constexpr size_t PERSISTED_SETTINGS_V11_SIZE = 1904;
 
 constexpr size_t NTP_SERVER_HOST_CAPACITY = 64;
@@ -533,8 +539,8 @@ struct RuntimeConfig {
   // Default: buzzer_only with SHOT_STOPPER_ENABLE_BUZZER, else scale_only.
   uint8_t alertOutputChannel =
       static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL);
-  uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
-  uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
+  uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;  // machine-owned detection
+  uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;  // rinse clock
   bool autoRetare = true;
   uint32_t retareWindowMs = DEFAULT_RETARE_WINDOW_MS;
   float minimumCupWeightG = DEFAULT_MINIMUM_CUP_WEIGHT_G;
@@ -598,9 +604,11 @@ struct RuntimeConfig {
   // padding (offsets 246–247). 0 timeout = compiled 12 s default.
   bool assumeIdleWhenScaleConnects = true;
   uint8_t shotReactTimeoutS = 0;
+  // Schema 14: firmware rinse on/off. Default off for every machine type.
+  bool rinseEnabled = false;
 };
 
-static_assert(sizeof(RuntimeConfig) == 248,
+static_assert(sizeof(RuntimeConfig) == 252,
               "RuntimeConfig NVS size changed; add a schema migration");
 static_assert(offsetof(RuntimeConfig, stopPulseTenMs) == 238,
               "RuntimeConfig stopPulseTenMs offset changed");
@@ -614,6 +622,8 @@ static_assert(offsetof(RuntimeConfig, assumeIdleWhenScaleConnects) == 246,
               "RuntimeConfig assumeIdleWhenScaleConnects offset changed");
 static_assert(offsetof(RuntimeConfig, shotReactTimeoutS) == 247,
               "RuntimeConfig shotReactTimeoutS offset changed");
+static_assert(offsetof(RuntimeConfig, rinseEnabled) == 248,
+              "RuntimeConfig rinseEnabled offset changed");
 
 inline uint32_t runtimeStopPulseMs(const RuntimeConfig &config) {
   if (config.stopPulseTenMs == 0) {
@@ -713,8 +723,8 @@ struct CycleConfigSnapshot {
   uint32_t paddleReturnReminderMaxDurationMs =
       DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
   uint8_t paddleMode = static_cast<uint8_t>(PaddleMode::NATURAL);
-  uint32_t rinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
   uint32_t rinseDurationMs = DEFAULT_RINSE_DURATION_MS;
+  bool rinseEnabled = false;
   bool autoRetare = true;
   uint32_t retareWindowMs = DEFAULT_RETARE_WINDOW_MS;
   float minimumCupWeightG = DEFAULT_MINIMUM_CUP_WEIGHT_G;
@@ -767,8 +777,8 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.paddleReturnReminderMaxDurationMs =
       config.paddleReturnReminderMaxDurationMs;
   snapshot.paddleMode = config.paddleMode;
-  snapshot.rinseGestureMs = config.rinseGestureMs;
   snapshot.rinseDurationMs = config.rinseDurationMs;
+  snapshot.rinseEnabled = config.rinseEnabled;
   snapshot.autoRetare = config.autoRetare;
   snapshot.retareWindowMs = config.retareWindowMs;
   snapshot.minimumCupWeightG = config.minimumCupWeightG;

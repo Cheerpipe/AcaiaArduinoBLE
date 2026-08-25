@@ -158,6 +158,8 @@ void resetMomentaryHarness() {
 #endif
   momentarySkipFirmwareStopPulse = false;
   pulseOutputActive = false;
+  rinseActuationActive = false;
+  rinseClear();
 #if SHOT_STOPPER_MACHINE_TYPE == 2
   reedRawOn = false;
   reedOn = false;
@@ -415,6 +417,139 @@ void t_release_mode_long_press_ignored_as_start() {
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(!session.active);
+}
+
+void enableFirmwareRinseForTest() {
+  runtimeConfig.rinseEnabled = true;
+#if SHOT_STOPPER_MACHINE_TYPE == 2
+  runtimeConfig.reedConfirmTimeoutHundredMs = 50;
+#endif
+}
+
+void t_rinse_press_demotes_and_pulses() {
+  resetMomentaryHarness();
+  enableFirmwareRinseForTest();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  pressDown();
+  CHECK(session.active);
+  CHECK(stopperState != StopperState::RINSE);
+  CHECK(getRelaySafetySnapshot().closed);
+  runLoopAfter(runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(rinseActuationActive);
+  CHECK(pulseOutputActive);
+  CHECK(pulseOutputIsStart);
+  runLoopAfter(runtimeStopPulseMs(runtimeConfig) + 1);
+  CHECK(!pulseOutputActive);
+  CHECK(stopperState == StopperState::RINSE);
+  runLoopAfter(runtimeConfig.rinseDurationMs -
+               elapsedMs(session.rinseStartedAtMs));
+  CHECK(pulseOutputActive);
+  CHECK(!pulseOutputIsStart);
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(!rinseActuationActive);
+}
+
+void t_rinse_release_mode_starts_directly() {
+  resetMomentaryHarness();
+  enableFirmwareRinseForTest();
+  runtimeConfig.momentaryStartOnPress = false;
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  pressDown();
+  CHECK(!session.active);
+  CHECK(stopperState == StopperState::READY);
+  runLoopAfter(runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(session.active);
+  CHECK(pulseOutputActive);
+  CHECK(pulseOutputIsStart);
+}
+
+void t_rinse_does_not_start_during_running_shot() {
+  resetMomentaryHarness();
+  enableFirmwareRinseForTest();
+  runtimeConfig.momentaryStartOnPress = false;
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+#if SHOT_STOPPER_MACHINE_TYPE == 2
+  setRawReed(true);
+#endif
+  CHECK(session.active);
+  CHECK(stopperState != StopperState::RINSE);
+  pressDown();
+  CHECK(session.active);
+  runLoopAfter(runtimeConfig.rinseGestureMs + 50);
+  CHECK(stopperState != StopperState::RINSE);
+  CHECK(session.active);
+}
+
+void t_rinse_armed_noscale_long_press_consumes_guard() {
+  resetMomentaryHarness();
+  enableFirmwareRinseForTest();
+  runtimeConfig.timerOnly = false;
+  runtimeConfig.avoidBbwShotWithoutScale = true;
+  mutableActiveShotPreset(presetBank).brewByWeight = true;
+  runtimeConfig = composeEffectiveConfig(runtimeConfig, presetBank);
+  runtimeConfig.avoidBbwShotWithoutScale = true;
+  runtimeConfig.rinseEnabled = true;
+  runtimeConfig.buzzerManualNoScaleBeep = true;
+  noScaleShotGuardArmed = true;
+  noScaleShotGuardHold = false;
+  noScaleShotGuardActivityAtMs = 0;
+  scale.connected = false;
+  setScaleLinkState(ScaleLinkState::DISCONNECTED);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  CHECK(noScaleShotGuardArmed);
+  const uint32_t beforeBeeps = localBuzzer.acceptedRequests;
+  pressDown();
+  CHECK(stopperState == StopperState::READY);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(noScaleShotGuardArmed);
+  CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
+  runLoopAfter(runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(!noScaleShotGuardArmed);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(localBuzzer.acceptedRequests >= beforeBeeps + 2);
+}
+
+void t_rinse_release_mode_mid_hold_is_native_not_shot() {
+  resetMomentaryHarness();
+  enableFirmwareRinseForTest();
+  runtimeConfig.momentaryStartOnPress = false;
+  setRuntimeMaxSinglePressMs(runtimeConfig, 400);
+  runtimeConfig.rinseGestureMs = 1000;
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  pressDown();
+  CHECK(!session.active);
+  CHECK(getRelaySafetySnapshot().closed);
+  runLoopAfter(500);
+  CHECK(!session.active);
+  CHECK(stopperState != StopperState::RINSE);
+  releaseUp();
+  CHECK(!session.active);
+  CHECK(stopperState != StopperState::RINSE);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void t_rinse_end_aborts_start_pulse_for_stop_pulse() {
+  resetMomentaryHarness();
+  enableFirmwareRinseForTest();
+  runtimeConfig.momentaryStartOnPress = false;
+  runtimeConfig.rinseDurationMs = 500;
+  setRuntimeStopPulseMs(runtimeConfig, 1000);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  pressDown();
+  runLoopAfter(runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(pulseOutputActive);
+  CHECK(pulseOutputIsStart);
+  runLoopAfter(runtimeConfig.rinseDurationMs -
+               elapsedMs(session.rinseStartedAtMs));
+  CHECK(pulseOutputActive);
+  CHECK(!pulseOutputIsStart);
+  CHECK(!rinseActuationActive);
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
 }
 
 #if SHOT_STOPPER_MACHINE_TYPE == 1
@@ -1804,6 +1939,12 @@ const TestCase kTests[] = {
     {"P39", t_user_stop_without_session_does_not_leave_orphan_run},
     {"P03", t_long_press_mirrors_from_first_instant},
     {"P41", t_release_mode_long_press_ignored_as_start},
+    {"P60", t_rinse_press_demotes_and_pulses},
+    {"P61", t_rinse_release_mode_starts_directly},
+    {"P62", t_rinse_does_not_start_during_running_shot},
+    {"P63", t_rinse_armed_noscale_long_press_consumes_guard},
+    {"P64", t_rinse_release_mode_mid_hold_is_native_not_shot},
+    {"P65", t_rinse_end_aborts_start_pulse_for_stop_pulse},
 #if SHOT_STOPPER_MACHINE_TYPE == 1
     {"P04", t_only_auto_cut_needs_confirmed_on},
     {"P05", t_quiet_pan_does_not_force_cut_when_unknown},

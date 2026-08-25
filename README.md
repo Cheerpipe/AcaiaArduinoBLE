@@ -171,8 +171,9 @@ reminders, scale lost/connected, and extended-shot pulses. See
 ### Quick rinse
 
 A short paddle ON→OFF (within the gesture window) is a timed group-head
-rinse, not a shot. Machine circuit stays closed for the rinse duration, then opens.
-Rinses are not stored in shot history. See
+rinse, not a shot. Enable rinse is off by default on every machine type. On
+momentary firmware it turns an idle long-press into the same timed rinse via
+start/stop pulses. See
 [Quick rinse](docs/settings/quick-rinse.md).
 
 ### Shot history
@@ -215,7 +216,7 @@ need to change them after first setup.
 | **[Paddle](docs/settings/paddle.md)** | Paddle firmware only. Auto, Natural (default), or Original feel for the brew switch. Hidden on momentary. |
 | **[Momentary](docs/settings/momentary.md)** | Momentary firmware only (with or without reed). Switch timings: auto-stop pulse, single-press limit, start/stop on press or release, and reed confirm timeout (reed builds). Hidden on paddle. |
 | **[No-scale BBW](docs/settings/no-scale-bbw.md)** | Block a full automatic shot when brew-by-weight is on and the scale is missing. |
-| **[Quick rinse](docs/settings/quick-rinse.md)** | Paddle firmware only. Short paddle ON→OFF becomes a timed rinse instead of a shot. Hidden on momentary. |
+| **[Quick rinse](docs/settings/quick-rinse.md)** | Enable rinse (off by default), gesture, and duration. Paddle: short ON→OFF. Momentary: idle long-press. |
 | **[Cup](docs/settings/cup.md)** | What counts as a cup placed or lifted. |
 | **[Tare](docs/settings/tare.md)** | Automatic tare, late-cup retare, and settle time after tare. |
 | **[Scales](docs/settings/scales.md)** | Preferred scale, drip delay, Bookoo volume and combined tare. |

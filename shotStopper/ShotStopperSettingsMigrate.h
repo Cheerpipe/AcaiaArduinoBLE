@@ -19,6 +19,13 @@ inline void ensurePersistedPresetBank(PersistedSettings &settings) {
                        settings.runtime.autoRetare);
 }
 
+inline void finishMigratedPersistedSettings(PersistedSettings &out) {
+  out.schemaVersion = CONFIG_SCHEMA_VERSION;
+  out.structureSize = sizeof(PersistedSettings);
+  out.checksum = 0;
+  out.checksum = persistedSettingsChecksum(out);
+}
+
 inline bool migratePersistedSettingsFromV11(const uint8_t *raw, size_t length,
                                             PersistedSettings &out) {
   if (raw == nullptr || length != PERSISTED_SETTINGS_V11_SIZE) {
@@ -47,30 +54,52 @@ inline bool migratePersistedSettingsFromV11(const uint8_t *raw, size_t length,
   out.runtime.reedConfirmTimeoutHundredMs = 0;
   const size_t v11TailOffset =
       sizeof(PersistedSettingsHeader) + RUNTIME_CONFIG_V11_SIZE;
-  const size_t v12TailOffset =
+  const size_t currentTailOffset =
       sizeof(PersistedSettingsHeader) + sizeof(RuntimeConfig);
   const size_t tailBytes = PERSISTED_SETTINGS_V11_SIZE - v11TailOffset;
-  memcpy(reinterpret_cast<uint8_t *>(&out) + v12TailOffset, raw + v11TailOffset,
-         tailBytes);
-  out.schemaVersion = CONFIG_SCHEMA_VERSION;
-  out.structureSize = sizeof(PersistedSettings);
-  out.checksum = 0;
-  out.checksum = persistedSettingsChecksum(out);
+  memcpy(reinterpret_cast<uint8_t *>(&out) + currentTailOffset,
+         raw + v11TailOffset, tailBytes);
+  finishMigratedPersistedSettings(out);
   return true;
 }
 
-inline bool migratePersistedSettingsFromV12(PersistedSettings &settings) {
-  if (settings.magic != PERSISTED_SETTINGS_MAGIC ||
-      settings.schemaVersion != CONFIG_SCHEMA_VERSION_V12 ||
-      settings.structureSize != sizeof(PersistedSettings) ||
-      settings.checksum != persistedSettingsChecksum(settings)) {
+inline bool migratePersistedSettingsFromV13(const uint8_t *raw, size_t length,
+                                            PersistedSettings &out) {
+  if (raw == nullptr || length != PERSISTED_SETTINGS_V13_SIZE) {
     return false;
   }
-  settings.runtime.assumeIdleWhenScaleConnects = true;
-  settings.runtime.shotReactTimeoutS = 0;
-  settings.schemaVersion = CONFIG_SCHEMA_VERSION;
-  settings.checksum = 0;
-  settings.checksum = persistedSettingsChecksum(settings);
+  PersistedSettingsHeader header = {};
+  memcpy(&header, raw, sizeof(header));
+  if (header.magic != PERSISTED_SETTINGS_MAGIC ||
+      (header.schemaVersion != CONFIG_SCHEMA_VERSION_V12 &&
+       header.schemaVersion != CONFIG_SCHEMA_VERSION_V13) ||
+      header.structureSize != PERSISTED_SETTINGS_V13_SIZE) {
+    return false;
+  }
+  const size_t v13ChecksumOffset =
+      PERSISTED_SETTINGS_V13_SIZE - sizeof(uint32_t);
+  uint32_t storedChecksum = 0;
+  memcpy(&storedChecksum, raw + v13ChecksumOffset, sizeof(storedChecksum));
+  if (storedChecksum != crc32(raw, v13ChecksumOffset)) {
+    return false;
+  }
+
+  out = PersistedSettings{};
+  memcpy(&out, raw, sizeof(PersistedSettingsHeader));
+  memcpy(&out.runtime, raw + sizeof(PersistedSettingsHeader),
+         RUNTIME_CONFIG_V13_SIZE);
+  if (header.schemaVersion == CONFIG_SCHEMA_VERSION_V12) {
+    out.runtime.assumeIdleWhenScaleConnects = true;
+    out.runtime.shotReactTimeoutS = 0;
+  }
+  const size_t v13TailOffset =
+      sizeof(PersistedSettingsHeader) + RUNTIME_CONFIG_V13_SIZE;
+  const size_t currentTailOffset =
+      sizeof(PersistedSettingsHeader) + sizeof(RuntimeConfig);
+  const size_t tailBytes = PERSISTED_SETTINGS_V13_SIZE - v13TailOffset;
+  memcpy(reinterpret_cast<uint8_t *>(&out) + currentTailOffset,
+         raw + v13TailOffset, tailBytes);
+  finishMigratedPersistedSettings(out);
   return true;
 }
 

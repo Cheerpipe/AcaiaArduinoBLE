@@ -19,7 +19,7 @@
 //   compiled machine identity, that is a layer violation — move it into the
 //   machine specialization.
 // - Does not own cup presence or scale link; consumes GuardInputs / session
-//   snapshots the stopper already built.
+//   snapshots the stopper already built. Must not read rinseGestureMs.
 // - Start-guard WouldBlock predicates are read-only. They must not call
 //   machineSet* or drive K1; the stopper composes them into the façade bit.
 
@@ -89,7 +89,6 @@ bool minRecoveryWeightReached(float weight) {
 
 void requestScaleBrewBeep(uint32_t cycleId);
 void enterBrewOrManualFromStart();
-void demoteActiveCycleToRinseOrEnd();
 void calculateExpectedEndTime(float cutTargetG);
 
 void resetFirstFlowDetector() {
@@ -241,10 +240,6 @@ bool bbwWeightStopInhibited() {
     return false;
   }
   return bbwProtectionActive();
-}
-
-bool withinRinseGestureWindow() {
-  return elapsedMs(session.startedAtMs) <= session.config.rinseGestureMs;
 }
 
 void onFirstDropsDetected(uint32_t receivedAtMs) {
@@ -476,7 +471,7 @@ void serviceNoScaleShotGuard(const GuardInputs &inputs) {
       noScaleShotGuardHold = false;
     } else if (inputs.holdActive &&
                elapsedMs(noScaleShotGuardHoldAtMs) >
-                   runtimeConfig.rinseGestureMs) {
+                   inputs.blockedHoldTimeoutMs) {
       blockNoScaleShotGuard();
     }
   }
@@ -515,7 +510,7 @@ void serviceCupStartGuard(const GuardInputs &inputs) {
     return;
   }
   if (inputs.holdActive &&
-      elapsedMs(cupStartGuardHoldAtMs) > runtimeConfig.rinseGestureMs) {
+      elapsedMs(cupStartGuardHoldAtMs) > inputs.blockedHoldTimeoutMs) {
     cupStartGuardHold = false;
     addDebugEvent(DebugCategory::STATE, DebugCode::CUP_START_GUARD_BLOCKED,
                   weightToCentigrams(inputs.currentWeightG));

@@ -6,9 +6,9 @@ the mode in **Settings → Machine and scale → Paddle** (`paddleMode`). It is
 **Original**. Default is **Natural**.
 
 This page applies to firmware compiled as `SHOT_STOPPER_MACHINE_TYPE=0`
-(paddle / latch). That firmware shows **Paddle** and **Quick rinse**.
-Momentary builds (with or without reed) hide both and show
-[Momentary](momentary.md) instead. The groups are mutually exclusive.
+(paddle / latch). That firmware shows **Paddle**. **Quick rinse** is shared
+with momentary (Enable rinse defaults off on both). Momentary builds hide
+**Paddle** and show [Momentary](momentary.md) instead.
 
 This is the main day-to-day choice. All modes still share quick rinse, machine circuit
 safety limits, and physical-paddle priority. They differ in whether releasing

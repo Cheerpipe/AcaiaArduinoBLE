@@ -45,7 +45,7 @@ contact.
 | --- | --- | --- |
 | Electrical | Relay safety | Can de-energize K1 from an ISR or trip path. Hard 60 s cap. |
 | Machine view | Machine run state, user intent | Derived. Status/UI only; they do not drive GPIO themselves. |
-| Brew orchestrator | Stopper | Decides rinse vs shot vs idle, and *requests* circuit start/stop. |
+| Brew orchestrator | Stopper | Orchestrates rinse vs shot vs idle from `UserIntent` (including `REQUEST_RINSE`) and *requests* circuit start/stop. Does not classify paddle ON→OFF or long-press. |
 | In-shot sensing | Weight stream, weight control, cup presence, first flow, accidental touch | Consume scale samples. Only **weight control** can ask the stopper to cut. |
 | Scale link | BLE link + scale command/result | Connects the pan; does not close the machine circuit. |
 | Off-brew | STA, Wi-Fi scan, NTP, OTA, Web command results, recovery gesture | Must not leave machine circuit closed. OTA and recovery keep the relay open. |
@@ -131,8 +131,8 @@ Source: `ShotStopperBrewTypes.h`, orchestrated in `shotStopper.cpp`.
 | Event | From | Effect |
 | --- | --- | --- |
 | Activator ON (`REQUEST_START`) | User intent | From `READY`: `beginCycle`. May be held/blocked by no-scale or cup-start guards. |
-| Activator OFF inside rinse window | User intent | From `READY` with a held guard: start `RINSE`. From `BREW` / `MANUAL_NO_SCALE`: demote to `RINSE` if still inside the gesture window. |
-| Activator OFF after rinse window | User intent | Natural mode: end shot (`EndReason::ACTIVATOR` → `READY`). Original/Auto BBW: may keep machine circuit closed (walk-away). |
+| `REQUEST_RINSE` | Machine (paddle short ON→OFF, momentary idle long-press, or web) | From `READY`: `beginRinseCycle` + timed `RINSE`. From `BREW` / `MANUAL_NO_SCALE`: demote to `RINSE`. Clock starts when the stopper accepts, not from a raw GPIO edge. |
+| Activator OFF after rinse window | User intent | Natural mode: end shot (`EndReason::ACTIVATOR` → `READY`). Original/Auto BBW: may keep machine circuit closed (walk-away). `REQUEST_STOP` always ends a shot; it does not demote to rinse. |
 | Paddle ON during Original BBW | User intent | Promotes the rest of that shot to Natural (paddle OFF will then end it). |
 | Weight cut due | Weight control | `finalizeCycle` with `SCALE_THRESHOLD` or a guard `EndReason`. |
 | Cup removed | Cup presence | Optional cut (`CUP_REMOVED`) if cup-stop is enabled. |
@@ -302,9 +302,12 @@ reads GPIO, paddle mode, or machine type.
 
 Source: `ShotStopperMachineTypes.h`, `machinePollIntention()`. Latch TYPE=0
 maps GPIO + snapshotted `PaddleMode` onto these intents (Original/Auto may
-omit `REQUEST_STOP` after the rinse window). Momentary maps a hold no
-longer than Single-press limit to start/stop (on press or on release). A
-longer hold is mirror-only; in press mode the tentative edge is undone.
+omit `REQUEST_STOP` after the rinse window). A short ON→OFF with rinse
+enabled publishes `REQUEST_RINSE`. Momentary maps a hold no longer than
+Single-press limit to start/stop (on press or on release). With rinse
+enabled, an idle long-press at the rinse gesture publishes `REQUEST_RINSE`
+instead (press mode demotes; release mode starts rinse directly). With
+rinse off, a longer hold is mirror-only.
 
 ### States (snapshot, not latched)
 
@@ -312,7 +315,8 @@ longer hold is mirror-only; in press mode the tentative edge is undone.
 | --- | --- |
 | `NONE` | No classified edge this sample (transient). |
 | `REQUEST_START` | User asked to start. |
-| `REQUEST_STOP` | User asked to stop (or rinse if still in the brew rinse window). |
+| `REQUEST_STOP` | User asked to stop. Always ends a shot; does not demote to rinse. |
+| `REQUEST_RINSE` | Machine classified a rinse gesture. |
 | `HOLD_ACTIVE` | User is still requesting brew. |
 | `STABLE_IDLE` | User is idle long enough to leave `REQUIRES_OFF`. |
 
@@ -508,8 +512,8 @@ not a state machine; it only filters which peripheral may enter
 
 **Purpose.** When brew-by-weight is on and there is no usable scale,
 do **not** start a full automatic shot on a long activator ON (paddle or
-momentary switch). On paddle, a rinse gesture still rinses. The next long
-start is manual. See [No-scale BBW](settings/no-scale-bbw.md).
+momentary switch). A rinse gesture still rinses when Enable rinse is on.
+The next long start is manual. See [No-scale BBW](settings/no-scale-bbw.md).
 
 The stopper, not the guard, pushes `machineSetActivatorDriveAllowed` so
 momentary does not 1:1-forward while this guard (or cup-start) would
@@ -524,7 +528,7 @@ Not a C++ enum; latches `noScaleShotGuardArmed` / `Idle`.
 | --- | --- |
 | Off | Setting disabled or BBW off. Guard does nothing. |
 | Armed | Next long activator ON is blocked (machine circuit stays open, local buzzer cue). |
-| Idle | Guard consumed (blocked start, paddle rinse, or finished non-rinse shot). Re-arms on scale connect, boot, or **Last shot cooldown**. |
+| Idle | Guard consumed (blocked start, Armed rinse, or finished non-rinse shot). Re-arms on scale connect, boot, or **Last shot cooldown**. |
 
 ### Events
 
@@ -532,7 +536,7 @@ Not a C++ enum; latches `noScaleShotGuardArmed` / `Idle`.
 | --- | --- |
 | Scale becomes usable | Arm immediately. |
 | Long activator ON while Armed | Block; hold then consume → Idle. Circuit stays open (paddle: no start; momentary: no 1:1 forward). |
-| Short ON→OFF (rinse) while Armed | Paddle: rinse runs; consume → Idle. Momentary: no firmware rinse; the hold is not forwarded. |
+| Short ON→OFF / idle long-press (rinse) while Armed | If Enable rinse is on: rinse runs; consume → Idle. If off: paddle short ON→OFF ends without `RINSE`; momentary long-press is not forwarded. |
 | Shot (non-rinse) ends | Idle; cooldown then Arm. |
 | Cooldown elapsed / boot | Arm. |
 
@@ -741,7 +745,7 @@ from IRAM.
 | Name | Why it is omitted |
 | --- | --- |
 | `PaddleMode` (Natural / Original / Auto) | Latch TYPE=0 translator setting. Lives in `ShotStopperMachinePaddleConfig.h`; the stopper never branches on it. |
-| `BrewCommand` | Declared, unused at runtime. |
+| `BrewCommand` | Declared, unused at runtime. `ENTER_RINSE` was removed; rinse is `REQUEST_RINSE` via the stopper. |
 | `AlertEvent` | Outputs (beeps), not a mode. |
 | `TaskProfilerState` | Diagnostics only. |
 | Shot-log / NVS dual-slot enums | Storage format, not live control. |

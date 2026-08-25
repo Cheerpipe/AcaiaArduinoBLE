@@ -3,14 +3,17 @@
 How a **momentary** brew switch tells the stopper to start or stop a shot.
 This page applies to firmware compiled as `SHOT_STOPPER_MACHINE_TYPE=1`
 (momentary) or `2` (momentary + reed). Those builds show **Switch** and
-hide **Paddle** and **Quick rinse**. Paddle / latch builds do the reverse.
-The groups are mutually exclusive.
+hide **Paddle**. **Quick rinse** is shared with paddle firmware (Enable rinse
+defaults **off** on every machine type). Paddle / latch builds hide **Switch**.
 
-The relay **mirrors the switch 1:1** while a start-guard is not blocking.
-If you hold 234 ms, K1 is closed for those 234 ms while you hold. A long
-hold is copied in full. The firmware does not replay, delay, or replace
-your gesture. The only extra pulse is the **auto-stop pulse** it sends when
-a weight cut (or a safety wall) needs to toggle the group.
+The relay **mirrors the switch 1:1** while a start-guard is not blocking
+and a firmware rinse is not running. If you hold 234 ms, K1 is closed for
+those 234 ms while you hold. A long hold is copied in full unless
+[Quick rinse](quick-rinse.md) is enabled and the hold started from idle:
+then the firmware pulses start, keeps the group on for the rinse duration,
+and pulses stop (the auto-stop pulse width). The only other extra pulse is
+the **auto-stop pulse** it sends when a weight cut (or a safety wall) needs
+to toggle the group.
 
 If **Avoid BBW shot without scale** is Armed (BBW on, no usable scale) or
 **Require cup to start** would reject the start, the relay does **not**
@@ -26,7 +29,7 @@ that a blocked start also leaves K1 open.
 | Mode | Default | When start/stop fires |
 | --- | --- | --- |
 | **Button press** | yes | On the debounced press. If the hold then exceeds **Single-press limit**, that edge is undone (not a start/stop). Release does not toggle again. |
-| **Button release** | no | On release, and only if the hold is no longer than **Single-press limit**. A longer hold is mirror-only (for example a machine rinse). |
+| **Button release** | no | On release, and only if the hold is no longer than **Single-press limit** (unless Enable rinse is on and this hold started from idle: the rinse gesture wins). A longer hold is mirror-only when rinse is off. |
 
 Without a scale, or with brew by weight off, the stopper does not send
 weight cuts. The 1:1 relay mirror still copies the switch. **Max BBW time

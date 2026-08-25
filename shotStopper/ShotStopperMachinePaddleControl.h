@@ -37,3 +37,19 @@ inline bool machineRequestStop() {
   }
   return setMachineCircuitClosed(false);
 }
+
+inline bool machineBeginRinse(uint32_t operationalLimitMs) {
+  if (rinseActuationActive) {
+    return true;
+  }
+  rinseActuationActive = true;
+  if (getRelaySafetySnapshot().closed) {
+    return true;
+  }
+  return machineRequestStart(operationalLimitMs);
+}
+
+inline bool machineEndRinse() {
+  rinseActuationActive = false;
+  return machineRequestStop();
+}

@@ -6,9 +6,9 @@
 // WHAT: Debounce and live 1:1 relay mirror when the façade allows activator
 //       drive. Start/stop for brew follows momentaryStartOnPress: on press
 //       (default) or on release of a hold no longer than Single-press limit.
-//       A longer hold is still mirrored (machine-native rinse) when drive is
-//       allowed and is not a start/stop: in press mode the tentative edge is
-//       undone; in release mode it is never applied.
+//       A longer hold is still mirrored (machine-native rinse) when firmware
+//       rinse is off. When rinse is on, a long-press from idle publishes
+//       REQUEST_RINSE instead of a start/stop edge.
 //
 // BOUNDARY: Momentary-only. Writes shared activator sample + momentary runtime.
 // Stopper/brew/cup/scale must not read these fields or know press vs release —
@@ -29,6 +29,9 @@ bool momentaryElapsedLatched = false;
 uint32_t momentaryLatchedElapsedMs = 0;
 bool momentaryGesturePending = false;
 bool momentaryGestureRestoreRunning = false;
+bool momentaryRinseRequested = false;
+bool momentaryRinseHoldFromIdle = false;
+bool momentaryRinseEmittedThisHold = false;
 MachineRunState momentaryGesturePreState = MachineRunState::CONFIRMED_OFF;
 uint32_t momentaryGesturePreStartedAtMs = 0;
 uint32_t momentaryGesturePreLimitMs = HARD_MAX_CIRCUIT_CLOSED_MS;
@@ -131,6 +134,9 @@ void initializeActivatorInput() {
   momentaryGesturePending = false;
   momentaryGestureRestoreRunning = false;
   pulseOutputActive = false;
+  momentaryRinseRequested = false;
+  momentaryRinseHoldFromIdle = false;
+  momentaryRinseEmittedThisHold = false;
 }
 
 void machineOnActivatorReady() {
@@ -160,6 +166,7 @@ void updateActivatorInput() {
   activatorTurnedOff = false;
   momentaryUserStopThisCycle = false;
   momentaryStartEdgeThisCycle = false;
+  momentaryRinseRequested = false;
 
   const bool sampledOn = readRawActivatorOn();
   if (sampledOn != momentaryRawOn) {
@@ -185,6 +192,8 @@ void updateActivatorInput() {
   if (physicalTurnedOn) {
     momentaryPressHeld = true;
     momentaryPressStartedAtMs = millis();
+    momentaryRinseEmittedThisHold = false;
+    momentaryRinseHoldFromIdle = !machineIsRunning();
     addDebugEvent(DebugCategory::ACTIVATOR, DebugCode::ACTIVATOR_ON);
     if (startOnPress) {
       snapshotMomentaryGesture();
@@ -193,7 +202,18 @@ void updateActivatorInput() {
     }
   }
 
+  const bool idleRinseHold =
+      runtimeConfig.rinseEnabled && momentaryRinseHoldFromIdle;
+
+  if (idleRinseHold && momentaryPressHeld && !momentaryRinseEmittedThisHold &&
+      elapsedMs(momentaryPressStartedAtMs) >= runtimeConfig.rinseGestureMs) {
+    momentaryRinseRequested = true;
+    momentaryRinseEmittedThisHold = true;
+    momentaryGesturePending = false;
+  }
+
   if (startOnPress && momentaryGesturePending && momentaryPressHeld &&
+      !idleRinseHold &&
       elapsedMs(momentaryPressStartedAtMs) >
           runtimeMaxSinglePressMs(runtimeConfig)) {
     revertDisqualifiedSinglePress();
@@ -205,9 +225,12 @@ void updateActivatorInput() {
     momentaryPressHeld = false;
     momentaryGesturePending = false;
     addDebugEvent(DebugCategory::ACTIVATOR, DebugCode::ACTIVATOR_OFF);
-    if (startOnPress) {
+    if (startOnPress || momentaryRinseEmittedThisHold) {
       return;
     }
+    // Idle rinse skip of maxSinglePress is only for the in-hold press-mode
+    // revert so the gesture can demote. On release, a sub-gesture long hold
+    // stays native 1:1 (same as rinse off).
     if (heldMs > runtimeMaxSinglePressMs(runtimeConfig)) {
       return;
     }

@@ -29,6 +29,7 @@ const firmware = [
   fs.readFileSync(path.join(sketchDir, 'ShotStopperScaleSense.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperCupPresence.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperBrew.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperRinse.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperShotCurveTypes.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperAlert.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperAlertChannel.h'), 'utf8'),
@@ -1095,7 +1096,25 @@ if (!html.includes('<summary>Switch</summary>') ||
       'Momentary Switch timings must be wired in Settings, API, APPLY_CONFIG, and runtime config — not brew');
 }
 if (!html.includes('class="cfgGroup paddleOnly"><summary>Paddle</summary>') ||
-    !html.includes('class="cfgGroup paddleOnly"><summary>Quick rinse</summary>') ||
+    !html.includes('class="cfgGroup"><summary>Quick rinse</summary>') ||
+    html.includes('class="cfgGroup paddleOnly"><summary>Quick rinse</summary>') ||
+    !html.includes('id="rinseEnabled" type="checkbox"') ||
+    html.indexOf('id="rinseEnabled"') >
+        html.indexOf('id="rinseGestureS"') ||
+    html.indexOf('<summary>Quick rinse</summary>') >
+        html.indexOf('id="rinseEnabled"') ||
+    !html.includes('Minimum time to hold the switch to start a rinse') ||
+    !html.includes('How long the machine stays on after a rinse starts') ||
+    !html.includes('id="rinseButton" class="btnGlyph" title="Start rinse"') ||
+    html.includes('id="rinseButton" class="btnGlyph paddleOnly"') ||
+    !ui.includes('s.config.rinseEnabled===true') ||
+    !ui.includes('rinseEnabled:$(\'rinseEnabled\').checked') ||
+    !network.includes('"rinseEnabled"') ||
+    !network.includes('rinseEnabled must be a boolean.') ||
+    !firmwareCore.includes('candidate.rinseEnabled = command.config.rinseEnabled') ||
+    !firmware.includes('uint32_t rinseBegin(') ||
+    !firmware.includes('UserIntent::REQUEST_RINSE') ||
+    !firmware.includes('machineBeginRinse') ||
     !html.includes('class="cfgGroup momentaryOnly"><summary>Switch</summary>') ||
     !html.includes('class="paddleOnly"><input id="paddleReturnReminderBeep"') ||
     html.includes('cfgGroup paddleOnly momentaryOnly') ||
@@ -1106,7 +1125,24 @@ if (!html.includes('class="cfgGroup paddleOnly"><summary>Paddle</summary>') ||
     !ui.includes("classList.toggle('momentaryMachine',t!=='paddle')") ||
     !ui.includes("classList.toggle('reedMachine',t==='momentary_reed')")) {
   throw new Error(
-      'Paddle+Quick rinse and Momentary Settings groups must be mutually exclusive by compiled machine type');
+      'Paddle and Momentary Settings groups must be mutually exclusive by compiled machine type; Quick rinse is shared');
+}
+const rinseHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperRinse.h'), 'utf8');
+const brewTypesHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperBrewTypes.h'), 'utf8');
+if (rinseHeader.includes('session.') ||
+    rinseHeader.includes('runtimeConfig') ||
+    brewHeader.includes('runtimeConfig.rinseGestureMs') ||
+    brewTypesHeader.includes('DEFAULT_RINSE_GESTURE_MS') ||
+    brewTypesHeader.includes('DEFAULT_RINSE_DURATION_MS') ||
+    brewTypesHeader.includes('ENTER_RINSE =') ||
+    firmware.includes('machineRinseGestureMs') ||
+    domainCore.includes('snapshot.rinseGestureMs') ||
+    !firmwareCore.includes('session.rinseStartedAtMs = rinseBegin') ||
+    !firmwareCore.includes(
+        'blockedHoldTimeoutMs = runtimeConfig.rinseGestureMs') ||
+    !brewHeader.includes('inputs.blockedHoldTimeoutMs')) {
+  throw new Error(
+      'Rinse clock must not write session; brew must not read rinseGestureMs; ShotStopper copies the accept anchor');
 }
 if (!ui.includes('id="learnedOffsetG"') ||
     !ui.includes('id="weightOffsetBaselineG"') ||

@@ -23,9 +23,33 @@ void abortFirmwarePulseIfActive() {
   }
 }
 
+void serviceFirmwarePulseDrive() {
+  if (!pulseOutputActive) {
+    if (getRelaySafetySnapshot().closed) {
+      (void)setMachineCircuitClosed(false);
+    }
+    return;
+  }
+  if (static_cast<int32_t>(millis() - pulseOutputEndsAtMs) >= 0) {
+    (void)setMachineCircuitClosed(false);
+    pulseOutputActive = false;
+  } else if (!getRelaySafetySnapshot().closed) {
+    (void)setMachineCircuitClosed(true, HARD_MAX_CIRCUIT_CLOSED_MS);
+  }
+}
+
 void applyMomentaryRelayDrive() {
+  if (rinseActuationActive) {
+    serviceFirmwarePulseDrive();
+    return;
+  }
   if (momentaryPhysicalOn) {
-    abortFirmwarePulseIfActive();
+    if (!machineActivatorDriveSuppressedThisHold) {
+      abortFirmwarePulseIfActive();
+    } else if (pulseOutputActive) {
+      serviceFirmwarePulseDrive();
+      return;
+    }
     if (!machineMayForwardActivatorOn()) {
       if (getRelaySafetySnapshot().closed) {
         (void)setMachineCircuitClosed(false);
@@ -39,12 +63,7 @@ void applyMomentaryRelayDrive() {
   }
   machineNoteActivatorReleased();
   if (pulseOutputActive) {
-    if (static_cast<int32_t>(millis() - pulseOutputEndsAtMs) >= 0) {
-      (void)setMachineCircuitClosed(false);
-      pulseOutputActive = false;
-    } else if (!getRelaySafetySnapshot().closed) {
-      (void)setMachineCircuitClosed(true, HARD_MAX_CIRCUIT_CLOSED_MS);
-    }
+    serviceFirmwarePulseDrive();
     return;
   }
   if (getRelaySafetySnapshot().closed) {
@@ -52,8 +71,8 @@ void applyMomentaryRelayDrive() {
   }
 }
 
-bool emitFirmwareStopPulse() {
-  if (momentaryPhysicalOn) {
+bool emitFirmwarePulse(bool isStart) {
+  if (!rinseActuationActive && momentaryPhysicalOn) {
     return true;
   }
   if (pulseOutputActive) {
@@ -67,13 +86,17 @@ bool emitFirmwareStopPulse() {
     return false;
   }
   pulseOutputActive = true;
-  pulseOutputIsStart = false;
+  pulseOutputIsStart = isStart;
   pulseOutputEndsAtMs = millis() + durationMs;
 #if SHOT_STOPPER_MACHINE_TYPE == 1
-  momentaryFirmwareCutPending = true;
+  if (!isStart) {
+    momentaryFirmwareCutPending = true;
+  }
 #endif
   return true;
 }
+
+bool emitFirmwareStopPulse() { return emitFirmwarePulse(false); }
 
 void maybeEmitFirmwareStopPulse() {
   if (momentaryPhysicalOn) {
@@ -184,6 +207,35 @@ inline bool machineRequestStop() {
   return emitFirmwareStopPulse();
 }
 
+inline bool machineBeginRinse(uint32_t operationalLimitMs) {
+  if (rinseActuationActive) {
+    return true;
+  }
+  rinseActuationActive = true;
+  machineActivatorDriveSuppressedThisHold = true;
+  abortFirmwarePulseIfActive();
+  if (getRelaySafetySnapshot().closed) {
+    (void)setMachineCircuitClosed(false);
+  }
+  clearMomentaryElapsedLatch();
+  noteMomentaryLogicalStart();
+  momentaryLogicalRunActive = true;
+  momentaryLogicalRunStartedAtMs = millis();
+  momentaryLogicalOperationalLimitMs = operationalLimitMs;
+  return emitFirmwarePulse(true);
+}
+
+inline bool machineEndRinse() {
+  latchMomentaryElapsed();
+  momentaryLogicalRunActive = false;
+  machineActivatorDriveSuppressedThisHold = true;
+  noteMomentaryLogicalStop();
+  abortFirmwarePulseIfActive();
+  const bool ok = emitFirmwarePulse(false);
+  rinseActuationActive = false;
+  return ok;
+}
+
 inline void machineApplyWorkflowConfig(RuntimeConfig &dst,
                                        const RuntimeConfig &src) {
   dst.stopPulseTenMs = src.stopPulseTenMs;
@@ -192,6 +244,7 @@ inline void machineApplyWorkflowConfig(RuntimeConfig &dst,
   dst.reedConfirmTimeoutHundredMs = src.reedConfirmTimeoutHundredMs;
   dst.assumeIdleWhenScaleConnects = src.assumeIdleWhenScaleConnects;
   dst.shotReactTimeoutS = src.shotReactTimeoutS;
+  dst.rinseGestureMs = src.rinseGestureMs;
 }
 
 inline void serviceMachine() {

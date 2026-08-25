@@ -45,6 +45,7 @@ scan_firmware_sources() {
     "$firmware_dir/ShotStopperScaleTypes.h" \
     "$firmware_dir/ShotStopperBrew.h" \
     "$firmware_dir/ShotStopperBrewTypes.h" \
+    "$firmware_dir/ShotStopperRinse.h" \
     "$firmware_dir/ShotStopperAlert.h" \
     "$firmware_dir/ShotStopperAlertChannel.h" \
     "$firmware_dir/ShotStopperAlertTone.h" \

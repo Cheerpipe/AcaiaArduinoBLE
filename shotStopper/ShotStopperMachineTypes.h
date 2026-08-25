@@ -21,6 +21,8 @@ namespace shotstopper {
 // (Max BBW time) must never exceed this.
 constexpr uint32_t HARD_MAX_CIRCUIT_CLOSED_MS = 60000;
 constexpr uint32_t DEFAULT_OPERATIONAL_WALL_MS = 50000;
+// Default paddle ON→OFF / idle long-press window that publishes REQUEST_RINSE.
+constexpr uint32_t DEFAULT_RINSE_GESTURE_MS = 1000;
 
 enum class MachineRunState : uint8_t {
   CONFIRMED_OFF = 0,
@@ -60,7 +62,8 @@ enum class UserIntent : uint8_t {
   REQUEST_START = 1,
   REQUEST_STOP = 2,
   HOLD_ACTIVE = 3,
-  STABLE_IDLE = 4
+  STABLE_IDLE = 4,
+  REQUEST_RINSE = 5
 };
 
 inline const char *machineRunStateName(MachineRunState state) {

@@ -534,8 +534,8 @@ void p24_preset_bank_size_and_crud_budgets() {
   CHECK(sizeof(ShotPreset) <= 136);
   CHECK(sizeof(ShotPresetBank) <= 1100);
   CHECK(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET);
-  CHECK(sizeof(PersistedSettings) == 1908);
-  CHECK(sizeof(RuntimeConfig) == 248);
+  CHECK(sizeof(PersistedSettings) == 1912);
+  CHECK(sizeof(RuntimeConfig) == 252);
   CHECK(sizeof(SettingsPersistRequest) <= PERSISTED_SETTINGS_NVS_BUDGET + 16);
   CHECK(sizeof(ControlStatusSnapshot) <= 4096);
   CHECK(sizeof(ControlGateSnapshot) <= 32);
@@ -1359,23 +1359,59 @@ void p64_v11_blob_migrates_to_schema_12() {
   CHECK(loaded.runtime.shotReactTimeoutS == 0);
 }
 
+void writeV13SizedSettingsBlob(const PersistedSettings &donor, uint32_t schema) {
+  uint8_t blob[PERSISTED_SETTINGS_V13_SIZE];
+  std::memset(blob, 0, sizeof(blob));
+  PersistedSettingsHeader header{};
+  std::memcpy(&header, &donor, sizeof(header));
+  header.schemaVersion = schema;
+  header.structureSize = PERSISTED_SETTINGS_V13_SIZE;
+  std::memcpy(blob, &header, sizeof(header));
+  std::memcpy(blob + sizeof(header), &donor.runtime, RUNTIME_CONFIG_V13_SIZE);
+  const size_t v13Tail =
+      sizeof(PersistedSettingsHeader) + RUNTIME_CONFIG_V13_SIZE;
+  const size_t currentTail =
+      sizeof(PersistedSettingsHeader) + sizeof(RuntimeConfig);
+  const size_t tailBytes = PERSISTED_SETTINGS_V13_SIZE - v13Tail;
+  std::memcpy(blob + v13Tail,
+              reinterpret_cast<const uint8_t *>(&donor) + currentTail,
+              tailBytes);
+  const size_t checksumOff = PERSISTED_SETTINGS_V13_SIZE - sizeof(uint32_t);
+  const uint32_t checksum = crc32(blob, checksumOff);
+  std::memcpy(blob + checksumOff, &checksum, sizeof(checksum));
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, blob,
+                           sizeof(blob));
+}
+
 void p65_v12_blob_migrates_to_schema_13() {
   resetHostPersistence();
   PersistedSettings donor;
   CHECK(initializeDefaultSettings(donor));
   donor.runtime.assumeIdleWhenScaleConnects = false;
   donor.runtime.shotReactTimeoutS = 0;
-  donor.schemaVersion = CONFIG_SCHEMA_VERSION_V12;
-  donor.checksum = 0;
-  donor.checksum = persistedSettingsChecksum(donor);
-
-  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &donor,
-                           sizeof(donor));
+  writeV13SizedSettingsBlob(donor, CONFIG_SCHEMA_VERSION_V12);
   PersistedSettings loaded;
   CHECK(loadPersistedSettings(loaded));
   CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
   CHECK(loaded.runtime.assumeIdleWhenScaleConnects);
   CHECK(loaded.runtime.shotReactTimeoutS == 0);
+  CHECK(!loaded.runtime.rinseEnabled);
+}
+
+void p66_v13_blob_migrates_to_schema_14() {
+  resetHostPersistence();
+  PersistedSettings donor;
+  CHECK(initializeDefaultSettings(donor));
+  donor.runtime.assumeIdleWhenScaleConnects = false;
+  donor.runtime.shotReactTimeoutS = 7;
+  writeV13SizedSettingsBlob(donor, CONFIG_SCHEMA_VERSION_V13);
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.structureSize == sizeof(PersistedSettings));
+  CHECK(!loaded.runtime.assumeIdleWhenScaleConnects);
+  CHECK(loaded.runtime.shotReactTimeoutS == 7);
+  CHECK(!loaded.runtime.rinseEnabled);
 }
 
 struct TestCase {
@@ -1428,6 +1464,7 @@ const TestCase tests[] = {
     {"P63", p63_flash_io_lock_fails_closed_without_mutex},
     {"P64", p64_v11_blob_migrates_to_schema_12},
     {"P65", p65_v12_blob_migrates_to_schema_13},
+    {"P66", p66_v13_blob_migrates_to_schema_14},
 };
 
 }  // namespace

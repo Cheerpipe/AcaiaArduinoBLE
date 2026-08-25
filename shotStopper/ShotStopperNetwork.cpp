@@ -3986,7 +3986,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"scaleConnectedLed\":%s,"
         "\"buzzerExtendedPulseRate\":\"%s\","
         "\"buzzerSlowExtendedPulseRate\":\"%s\","
-        "\"alertOutputChannel\":\"%s\",\"rinseGestureMs\":%lu,"
+        "\"alertOutputChannel\":\"%s\",\"rinseEnabled\":%s,\"rinseGestureMs\":%lu,"
         "\"rinseDurationMs\":%lu,\"autoRetare\":%s,\"retareWindowMs\":%lu,"
         "\"minimumCupWeightG\":%.1f,\"retareStabilitySamples\":%u,"
         "\"retareStabilityToleranceG\":%.1f,\"retareStabilityMaxGapMs\":%lu,"
@@ -4037,6 +4037,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         extendedPulseRateId(control.config.buzzerExtendedPulseRate),
         extendedPulseRateId(control.config.buzzerSlowExtendedPulseRate),
         alertOutputChannelId(control.config.alertOutputChannel),
+        control.config.rinseEnabled ? "true" : "false",
         static_cast<unsigned long>(control.config.rinseGestureMs),
         static_cast<unsigned long>(control.config.rinseDurationMs),
         control.config.autoRetare ? "true" : "false",
@@ -5540,7 +5541,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   char customNtp[NTP_SERVER_HOST_CAPACITY] = {};
   memcpy(customNtp, candidate.ntpServerCustom, sizeof(customNtp));
   static const char *const fields[] = {
-      "baseRevision", "goalWeightG", "rinseGestureMs", "rinseDurationMs",
+      "baseRevision", "goalWeightG", "rinseEnabled", "rinseGestureMs", "rinseDurationMs",
       "operationalWallMs", "autoTare", "postTareBaselineGraceMs",
       "brewByWeight", "canTareStartTimer",
       "scaleTimerStopExtraDelayMs",       "dripDelayMs", "soundAlertsEnabled",
@@ -5588,6 +5589,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (jsonFieldPresent(root, "goalWeightG") &&
              !jsonUint8(root, "goalWeightG", candidate.goalWeightG)) {
     parseError = "goalWeightG must be an integer from 10 to 200.";
+  } else if (jsonFieldPresent(root, "rinseEnabled") &&
+             !jsonBoolean(root, "rinseEnabled", candidate.rinseEnabled)) {
+    parseError = "rinseEnabled must be a boolean.";
   } else if (jsonFieldPresent(root, "rinseGestureMs") &&
              !jsonUint32(root, "rinseGestureMs", candidate.rinseGestureMs)) {
     parseError = "rinseGestureMs must be an integer (milliseconds).";

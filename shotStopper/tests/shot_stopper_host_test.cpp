@@ -98,6 +98,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   pendingScaleTimerStop = PendingScaleTimerStop{};
   pendingBrewRfRestore = false;
   runtimeConfig = RuntimeConfig{};
+  runtimeConfig.rinseEnabled = true;
   // Host scenarios cover scale-path alerts unless a test sets the channel.
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
@@ -237,6 +238,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   rawActivatorChangedAtMs = 0;
   virtualHoldOn = false;
   machineEndCycle();
+  rinseClear();
   circuitClosed = false;
   relaySafetyTripped = false;
   operationalLimitTripped = false;
@@ -680,6 +682,40 @@ void t04_exact_rinse_boundary_and_duration() {
   CHECK(stopperState == StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(commandCount(ScaleCommandType::STOP_TIMER) == 1);
+}
+
+void t04b_rinse_disabled_short_on_off_is_not_rinse() {
+  resetHarness(false, true);
+  runtimeConfig.rinseEnabled = false;
+  reachReadyFromBoot();
+  const uint32_t rawOnAt = startCycle();
+  CHECK(executeNextScaleCommand());
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
+  CHECK(stopperState != StopperState::RINSE);
+  CHECK(stopperState == StopperState::READY);
+  CHECK(session.endReason == EndReason::ACTIVATOR);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void t04c_rinse_demote_does_not_learn_offset() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  const float originalOffset = runtimeConfig.weightOffsetG;
+  const uint32_t rawOnAt = startCycle();
+  CHECK(executeNextScaleCommand());
+  CHECK(shot.automaticBrew);
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE);
+  CHECK(!shot.automaticBrew);
+  CHECK(!session.calibrationEligible);
+  runLoopAfter(runtimeConfig.rinseDurationMs);
+  CHECK(!session.active);
+  CHECK(!pendingFinalize.pending);
+  currentWeight = static_cast<float>(DEFAULT_GOAL_WEIGHT_G) + 3.0f;
+  currentWeightReceivedAtMs = hostMillis + 1;
+  ++currentWeightSequence;
+  runLoopAfter(runtimeConfig.dripDelayMs);
+  CHECK(runtimeConfig.weightOffsetG == originalOffset);
 }
 
 void t05_release_between_rinse_and_brew_is_short_shot() {
@@ -1678,6 +1714,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
   CHECK(config.operationalWallMs == DEFAULT_OPERATIONAL_WALL_MS);
   CHECK(config.rinseGestureMs == 1000);
+  CHECK(!config.rinseEnabled);
   CHECK(config.minBrewTimeMs == 28000);
   CHECK(config.canTareStartTimer);
   CHECK(config.postTareBaselineGraceMs == DEFAULT_POST_TARE_BASELINE_GRACE_MS);
@@ -6536,6 +6573,26 @@ void s14b_rinse_does_not_overwrite_last_shot() {
   CHECK(fabsf(persistedLastShot.currentWeightG - 36.0f) < 0.001f);
 }
 
+void s14d_web_stop_during_rinse_does_not_overwrite_last_shot() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  persistedLastShot = PersistedLastShot{};
+  persistedLastShot.valid = true;
+  persistedLastShot.cycleId = 42;
+  persistedLastShot.weightValid = true;
+  persistedLastShot.currentWeightG = 36.0f;
+  persistLastShotSnapshot(persistedLastShot);
+  const uint32_t rawOnAt = startCycle();
+  releaseAtPhysicalDuration(rawOnAt, runtimeConfig.rinseGestureMs);
+  CHECK(stopperState == StopperState::RINSE);
+  processWebCommand(webControlCommand(WebCommandType::STOP));
+  CHECK(session.endReason == EndReason::WEB_STOP);
+  CHECK(!session.active);
+  CHECK(persistedLastShot.valid);
+  CHECK(persistedLastShot.cycleId == 42);
+  CHECK(fabsf(persistedLastShot.currentWeightG - 36.0f) < 0.001f);
+}
+
 void s15b_cup_off_after_end_keeps_last_known_actual() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -9281,6 +9338,8 @@ const TestCase testCases[] = {
     {"T02", t02_boot_with_activator_on},
     {"T03", t03_sustained_on_enters_brew_once},
     {"T04", t04_exact_rinse_boundary_and_duration},
+    {"T04B", t04b_rinse_disabled_short_on_off_is_not_rinse},
+    {"T04C", t04c_rinse_demote_does_not_learn_offset},
     {"T05", t05_release_between_rinse_and_brew_is_short_shot},
     {"T06", t06_paddle_off_during_brew},
     {"T07", t07_scale_prediction_requires_release_after_stop},
@@ -9641,6 +9700,7 @@ const TestCase testCases[] = {
     {"S14", s14_last_shot_persists_manual_cycle},
     {"S14c", s14c_last_shot_keeps_no_scale_duration},
     {"S14b", s14b_rinse_does_not_overwrite_last_shot},
+    {"S14d", s14d_web_stop_during_rinse_does_not_overwrite_last_shot},
     {"S15", s15_last_shot_persists_after_drip_when_eligible},
     {"S15b", s15b_cup_off_after_end_keeps_last_known_actual},
     {"S15c", s15c_last_shot_prefers_last_accepted_over_cup_off},

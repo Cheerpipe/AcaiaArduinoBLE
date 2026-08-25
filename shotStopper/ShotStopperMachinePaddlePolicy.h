@@ -24,6 +24,7 @@ bool machineCycleHardMaxArmed = false;
 bool machineCycleSawRelease = false;
 uint32_t machineCycleStartedAtMs = 0;
 uint32_t machineCycleRinseGestureMs = DEFAULT_RINSE_GESTURE_MS;
+uint32_t paddleHoldStartedAtMs = 0;
 
 void machineEndCycle() {
   machineCycleActive = false;
@@ -31,6 +32,7 @@ void machineEndCycle() {
   machineCyclePromotedToNatural = false;
   machineCycleHardMaxArmed = false;
   machineCycleSawRelease = false;
+  rinseActuationActive = false;
 }
 
 void machineBeginCycle(bool automaticBbw) {
@@ -76,15 +78,31 @@ bool machineCyclePromotedToNaturalForTest() {
 
 uint32_t machineLastActivatorEdgeMs() { return rawActivatorChangedAtMs; }
 
-// Early paddle OFF still reports REQUEST_STOP so ShotStopper can apply its
-// rinse-after-X-time rule. After that window, Original/Auto may hide the stop.
+// Early paddle OFF still reports stop (or rinse) so Original/Auto walk-away
+// does not hide the gesture. After that window, Original/Auto may hide stop.
 bool machineReportsStopOnRelease() {
   return !machineHidesPhysicalStop() ||
          (machineCycleActive &&
           elapsedMs(machineCycleStartedAtMs) <= machineCycleRinseGestureMs);
 }
 
+bool paddleHoldIsRinseGesture() {
+  if (!runtimeConfig.rinseEnabled) {
+    return false;
+  }
+  // Active cycle: demote only while still inside the cycle-start window.
+  // A later short ON→OFF (Original promote, Auto walk-away) is stop, not rinse.
+  if (machineCycleActive) {
+    return elapsedMs(machineCycleStartedAtMs) <= machineCycleRinseGestureMs;
+  }
+  return paddleHoldStartedAtMs != 0 &&
+         elapsedMs(paddleHoldStartedAtMs) <= runtimeConfig.rinseGestureMs;
+}
+
 MachineIntention machinePollIntention() {
+  if (activatorTurnedOn) {
+    paddleHoldStartedAtMs = millis();
+  }
   if (machineCycleActive && activatorTurnedOff) {
     machineCycleSawRelease = true;
   }
@@ -104,6 +122,8 @@ MachineIntention machinePollIntention() {
     out.intent = UserIntent::REQUEST_START;
   } else if (activatorTurnedOn && machineCycleActive) {
     out.intent = UserIntent::HOLD_ACTIVE;
+  } else if (activatorTurnedOff && paddleHoldIsRinseGesture()) {
+    out.intent = UserIntent::REQUEST_RINSE;
   } else if (activatorTurnedOff && !swallowStop) {
     out.intent = UserIntent::REQUEST_STOP;
   } else if (out.holdActive) {
@@ -175,4 +195,5 @@ inline void machineApplyWorkflowConfig(RuntimeConfig &dst,
   dst.paddleReturnReminderBeep = src.paddleReturnReminderBeep;
   dst.paddleReturnReminderIntervalMs = src.paddleReturnReminderIntervalMs;
   dst.paddleReturnReminderMaxDurationMs = src.paddleReturnReminderMaxDurationMs;
+  dst.rinseGestureMs = src.rinseGestureMs;
 }

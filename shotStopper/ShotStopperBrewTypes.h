@@ -14,8 +14,9 @@ namespace shotstopper {
 // LAYER: Brew types (stopper workflow + guard contracts)
 // =============================================================================
 // WHAT: StopperState, EndReason, GuardInputs, and brew timing/weight constants.
-//       The stopper FSM decides rinse vs shot vs idle and *requests* circuit
-//       start/stop; it does not drive GPIO or know paddle vs switch. The
+//       The stopper orchestrates brew vs idle and *requests* circuit start/stop;
+//       it does not detect rinse gestures, drive GPIO, or know paddle vs switch.
+//       Machine publishes REQUEST_RINSE; ShotStopperRinse owns duration. The
 //       activator translates GPIO into UserIntent before brew sees it.
 //
 // BOUNDARY: GuardInputs is a neutral snapshot the orchestrator fills once per
@@ -25,8 +26,6 @@ namespace shotstopper {
 constexpr uint32_t DEFAULT_LAST_SHOT_COOLDOWN_MS = 60UL * 60UL * 1000UL;
 constexpr uint32_t MIN_LAST_SHOT_COOLDOWN_MS = 5UL * 60UL * 1000UL;
 constexpr uint32_t MAX_LAST_SHOT_COOLDOWN_MS = 240UL * 60UL * 1000UL;
-constexpr uint32_t DEFAULT_RINSE_GESTURE_MS = 1000;
-constexpr uint32_t DEFAULT_RINSE_DURATION_MS = 4000;
 constexpr uint32_t DEFAULT_RETARE_WINDOW_MS = 4000;
 constexpr uint32_t DEFAULT_BBW_PROTECTION_MS = 12000;
 constexpr uint32_t MIN_BBW_PROTECTION_AFTER_RETARE_MS = 3000;
@@ -99,13 +98,15 @@ enum class ControlSource : uint8_t {
 
 // Snapshot the stopper builds once per loop. Brew/guards never poll machine,
 // scale link, or cup presence themselves — and never see paddle/momentary
-// internals (no PaddleMode, reed, pulse state, or MachineType branches).
+// internals (no PaddleMode, reed, pulse state, MachineType, or rinseGestureMs).
 struct GuardInputs {
   bool holdActive = false;
   bool scaleAvailable = false;
   bool scaleUsable = false;
   CupPresenceState cup = CupPresenceState::ABSENT;
   float currentWeightG = 0.0f;
+  // Orchestrator-composed hold timeout for blocked starts (no-scale / cup).
+  uint32_t blockedHoldTimeoutMs = 0;
 };
 
 inline const char *stopperStateName(StopperState state) {
@@ -258,7 +259,7 @@ inline void pushAutoToManualGuardSample(
 enum class BrewCommand : uint8_t {
   NONE = 0,
   BEGIN_BREW = 1,
-  ENTER_RINSE = 2,
+  // 2 was ENTER_RINSE; rinse is UserIntent::REQUEST_RINSE via the stopper.
   REQUEST_MACHINE_START = 3,
   REQUEST_MACHINE_STOP = 4,
   REQUEST_RETARE = 5,

@@ -23,9 +23,11 @@
 //   ShotStopperMachineMomentary*. Never mix paddle logic into momentary files
 //   or the reverse. Run state for each type is owned solely by that type's
 //   *State* header (PaddleState vs MomentaryOnlyState / MomentaryReedState).
-// - Brew rinse duration and "stop within X ms is a rinse" live in the stopper;
-//   the machine only reports start/stop/hold (paddle may surface early OFF as
-//   STOP so that rule can run). Brew/scale/cup never call actuators here.
+// - Rinse *detection* is machine-owned (gesture → REQUEST_RINSE). Rinse
+//   *duration* lives in ShotStopperRinse. The stopper orchestrates: it does
+//   not classify ON→OFF windows or long-press. machineBeginRinse/EndRinse
+//   latch rinse actuation (not a second rinse FSM). Brew/scale/cup never
+//   call actuators here.
 // - Activator→K1 forwarding permission is a one-way stopper push
 //   (machineSetActivatorDriveAllowed), like preferBleAirtime. Guards never
 //   write it. machineRequestStart/Stop and the relay driver must not consult
@@ -73,6 +75,7 @@ inline void machineSetPreferBleAirtime(bool prefer) {
 // the stopper cleared the bit (no-scale BBW, cup-start, or a future guard).
 bool machineActivatorDriveAllowed = true;
 bool machineActivatorDriveSuppressedThisHold = false;
+bool rinseActuationActive = false;
 
 inline void machineSetActivatorDriveAllowed(bool allowed) {
   machineActivatorDriveAllowed = allowed;
@@ -101,7 +104,7 @@ inline void machineNoteActivatorReleased() {
 
 inline void machineOnActivatorReady() {}
 inline void machineOnBrewOutcome(bool) {}
-inline bool machineSupportsRinse() { return true; }
+inline bool machineSupportsRinse() { return runtimeConfig.rinseEnabled; }
 inline void machineNoteFirmwareStop() {
   if (activatorOn || rawActivatorOn) {
     machineActivatorDriveSuppressedThisHold = true;
@@ -137,9 +140,9 @@ inline void machineNoteSettledWeightCutOff() {}
 inline void machineCancelSettledWeightCutOff() {}
 #endif
 
-inline bool machineSupportsRinse() { return false; }
+inline bool machineSupportsRinse() { return runtimeConfig.rinseEnabled; }
 inline void machineBeginCycle(bool) {}
-inline void machineEndCycle() {}
+inline void machineEndCycle() { rinseActuationActive = false; }
 inline bool machineHidesPhysicalStop() { return false; }
 inline bool machineAllowsAutomationStop() { return true; }
 inline uint32_t machineCloseLimitMs(uint32_t operationalWallMs) {
@@ -160,7 +163,9 @@ inline MachineIntention machinePollIntention() {
   out.turnedOff = activatorTurnedOff;
   out.holdActive = momentaryPhysicalOn || rawActivatorOn;
   out.stablyOff = activatorIsStablyOff();
-  if (activatorTurnedOn) {
+  if (momentaryRinseRequested) {
+    out.intent = UserIntent::REQUEST_RINSE;
+  } else if (activatorTurnedOn) {
     out.intent = UserIntent::REQUEST_START;
   } else if (activatorTurnedOff) {
     out.intent = UserIntent::REQUEST_STOP;
