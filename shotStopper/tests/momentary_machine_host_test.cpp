@@ -1906,6 +1906,29 @@ void t_reed_manual_skips_operational_wall_pulses_at_hard_cap() {
 }
 #endif
 
+#if SHOT_STOPPER_MACHINE_TYPE == 2
+void t_reed_getters_use_sampled_state() {
+  resetMomentaryHarness();
+  hostPinLevel[REED_GPIO] = REED_ACTIVE_LEVEL;
+  machineSampleInput();
+  hostMillis += REED_DEBOUNCE_MS + 1;
+  machineSampleInput();
+  CHECK(reedOn);
+  CHECK(machineIsRunning());
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  hostPinLevel[REED_GPIO] = !REED_ACTIVE_LEVEL;
+  CHECK(reedOn);
+  CHECK(machineIsRunning());
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  serviceMomentaryRunSensors();
+  hostMillis += REED_DEBOUNCE_MS + 1;
+  serviceMomentaryRunSensors();
+  CHECK(!reedOn);
+  CHECK(!machineIsRunning());
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+}
+#endif
+
 void t_logical_wall_trips_existing_flags() {
   resetMomentaryHarness();
   runtimeConfig.operationalWallMs = 2000;
@@ -2019,6 +2042,7 @@ const TestCase kTests[] = {
     {"P48", t_reed_release_mode_stop_assume_starts_on_release},
     {"P49", t_reed_disqualified_press_grace_then_reed_canonical},
     {"P49B", t_reed_does_not_arm_no_flow_idle},
+    {"P70", t_reed_getters_use_sampled_state},
 #endif
     {"P20", t_recovery_hold_mirrors_gpio},
     {"P08", t_logical_wall_trips_existing_flags},

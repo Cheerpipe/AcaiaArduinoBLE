@@ -141,6 +141,51 @@ if (!bleLibrary.includes('readValue(input, MAX_BLE_PACKET_LENGTH)') ||
   throw new Error(
       'Acaia BLE reads must clamp to MAX_BLE_PACKET_LENGTH');
 }
+if (!bleLibrary.includes('BLE.scan(true)') ||
+    bleLibrary.includes('BLE.scan(false)')) {
+  throw new Error(
+      'Idle GAP scan must stay on with withDuplicates=true');
+}
+if (!firmwareCore.includes('scaleWorkerTickDelayMs()') ||
+    !firmwareCore.includes('controlLoopTickDelayMs()') ||
+    !firmwareCore.includes('SCALE_WORKER_NO_SCALE_DELAY_MS') ||
+    !firmwareCore.includes('CONTROL_STATUS_PUBLISH_NO_SCALE_MS') ||
+    !firmwareCore.includes('taskYIELD()') ||
+    (firmwareCore.split('publishBleCompanionStatus(inactiveStatus)').length - 1) !== 1) {
+  throw new Error(
+      'No-scale idle must relax worker/loop/status and skip inactive Companion each tick');
+}
+{
+  const reedState = fs.readFileSync(
+      path.join(sketchDir, 'ShotStopperMachineMomentaryReedState.h'), 'utf8');
+  const getterNames = [
+    ['bool machineAllowsFirmwareStopPulse', 'inline bool machineRunningElapsed'],
+    ['inline bool machineRunningElapsed', 'inline bool machineIsRunning'],
+    ['inline bool machineIsRunning', 'inline uint32_t machineElapsedMs'],
+    ['inline MachineRunState machineRunState', 'inline void machineFillInferenceStatus'],
+  ];
+  for (const [startName, endName] of getterNames) {
+    const start = reedState.indexOf(startName);
+    const end = reedState.indexOf(endName);
+    if (start < 0 || end <= start || reedState.slice(start, end).includes('sampleReed()')) {
+      throw new Error('Reed getters must use the last sampled state, not sampleReed()');
+    }
+  }
+  if (!reedState.includes('void serviceReedAssumeWindow() {\n  sampleReed();') ||
+      !fs.readFileSync(path.join(sketchDir, 'ShotStopperMachine.h'), 'utf8')
+           .includes('sampleReed();')) {
+    throw new Error('Reed must be sampled from input/service, not from getters');
+  }
+}
+{
+  const hwmon = fs.readFileSync(path.join(sketchDir, 'ShotStopperHwmon.h'), 'utf8');
+  if (!hwmon.includes('const HeapCapSnapshot *heap = nullptr') ||
+      !hwmon.includes('heap != nullptr ? *heap : sampleHeapCaps()') ||
+      !firmwareCore.includes('hwmon.sample(intervalMs > 0U ? intervalMs') ||
+      !firmwareCore.includes('&heap)')) {
+    throw new Error('Hwmon must reuse the 5 s HeapCapSnapshot instead of sampling heap twice');
+  }
+}
 if (!bleLibrary.includes('BLE_CONNECT_TIMEOUT_MS') ||
     !bleLibrary.includes('SCALE_CONNECT_ATTEMPTS') ||
     !bleLibrary.includes('ConnectStep::Settle') ||

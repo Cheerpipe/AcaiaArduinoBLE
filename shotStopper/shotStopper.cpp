@@ -113,6 +113,11 @@ constexpr uint32_t SCALE_PACKET_GAP_LOG_MIN_MS = 1000;
 constexpr uint32_t SCALE_DISCOVERY_TICK_MS = 3000;
 constexpr uint32_t SCALE_SCAN_HCI_RESTART_MS = 60000;
 constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;
+constexpr uint32_t SCALE_WORKER_NO_SCALE_DELAY_MS = 10;
+constexpr uint32_t LOOP_NO_SCALE_DELAY_MS = 5;
+constexpr uint32_t CONTROL_STATUS_PUBLISH_MS = 50;
+constexpr uint32_t CONTROL_STATUS_PUBLISH_NO_SCALE_MS = 100;
+constexpr uint32_t BLE_COMPANION_NO_SCALE_PUBLISH_MS = 50;
 constexpr uint32_t SCALE_ATT_TIMEOUT_MS = 1000;
 constexpr size_t SCALE_COMMAND_QUEUE_LENGTH = 12;
 constexpr size_t SCALE_EVENT_QUEUE_LENGTH = 32;
@@ -786,6 +791,7 @@ void copyControlStatus(ControlStatusSnapshot &output) {
   for (uint32_t attempt = 0; attempt < kControlStatusSeqlockTries; ++attempt) {
     const uint32_t s0 = __atomic_load_n(&controlStatusSeq, __ATOMIC_ACQUIRE);
     if ((s0 & 1U) != 0U) {
+      taskYIELD();
       continue;
     }
     output = publishedControlStatus;
@@ -804,6 +810,7 @@ void copyControlGate(ControlGateSnapshot &output) {
   for (uint32_t attempt = 0; attempt < kControlStatusSeqlockTries; ++attempt) {
     const uint32_t s0 = __atomic_load_n(&controlStatusSeq, __ATOMIC_ACQUIRE);
     if ((s0 & 1U) != 0U) {
+      taskYIELD();
       continue;
     }
     output = controlGateOf(publishedControlStatus);
@@ -1117,6 +1124,7 @@ void copyPresetBank(ShotPresetBank *out) {
   for (uint32_t attempt = 0; attempt < kControlStatusSeqlockTries; ++attempt) {
     const uint32_t s0 = __atomic_load_n(&recipeSeq, __ATOMIC_ACQUIRE);
     if ((s0 & 1U) != 0U) {
+      taskYIELD();
       continue;
     }
     *out = publishedPresetBank;
@@ -1135,6 +1143,7 @@ void copyRuntimeConfig(RuntimeConfig *out) {
   for (uint32_t attempt = 0; attempt < kControlStatusSeqlockTries; ++attempt) {
     const uint32_t s0 = __atomic_load_n(&recipeSeq, __ATOMIC_ACQUIRE);
     if ((s0 & 1U) != 0U) {
+      taskYIELD();
       continue;
     }
     *out = publishedRuntimeConfig;
@@ -1226,6 +1235,57 @@ bool scaleLinkAvailable(const ScaleLinkSnapshot &snapshot) {
 
 bool scaleAvailable() {
   return scaleLinkAvailable(getScaleLinkSnapshot());
+}
+
+uint32_t scaleWorkerTickDelayMs() {
+  if (scale.isConnected() || scale.isConnecting()) {
+    return 1;
+  }
+  if (scaleCommandQueue != nullptr &&
+      uxQueueMessagesWaiting(scaleCommandQueue) > 0) {
+    return 1;
+  }
+  return SCALE_WORKER_NO_SCALE_DELAY_MS;
+}
+
+uint32_t controlLoopTickDelayMs() {
+  return scaleAvailable() ? 1 : LOOP_NO_SCALE_DELAY_MS;
+}
+
+uint32_t controlStatusPublishIntervalMs() {
+  return scaleAvailable() ? CONTROL_STATUS_PUBLISH_MS
+                          : CONTROL_STATUS_PUBLISH_NO_SCALE_MS;
+}
+
+bool controlStatusShouldPublish(bool forcePublish, uint32_t lastPublishMs,
+                                uint32_t nowMs) {
+  if (forcePublish || lastPublishMs == 0U) {
+    return true;
+  }
+  return static_cast<uint32_t>(nowMs - lastPublishMs) >=
+         controlStatusPublishIntervalMs();
+}
+
+bool bleCompanionStatusUnchanged(const BleCompanionStatusSnapshot &a,
+                                 const BleCompanionStatusSnapshot &b) {
+  return a.enabled == b.enabled &&
+         a.configuredEnabled == b.configuredEnabled &&
+         a.restartRequired == b.restartRequired &&
+         a.stackReady == b.stackReady && a.advertising == b.advertising &&
+         a.connected == b.connected &&
+         a.protocolVersion == b.protocolVersion && a.apActive == b.apActive &&
+         a.acceptedWrites == b.acceptedWrites &&
+         a.rejectedWrites == b.rejectedWrites && a.lastReject == b.lastReject;
+}
+
+bool bleCompanionStatusShouldPublish(bool scaleLinked, bool changed,
+                                     uint32_t lastPublishMs, uint32_t nowMs) {
+  if (scaleLinked || changed) {
+    return true;
+  }
+  return lastPublishMs == 0U ||
+         static_cast<uint32_t>(nowMs - lastPublishMs) >=
+             BLE_COMPANION_NO_SCALE_PUBLISH_MS;
 }
 
 bool currentWeightIsFresh(uint32_t now = millis()) {
@@ -3665,18 +3725,22 @@ void scaleWorkerTask(void *) {
       BleCompanionRuntimeSnapshot bleSnapshot;
       copyBleCompanionRuntimeSnapshot(bleSnapshot);
       bleCompanion->service(bleSnapshot, millis());
-      publishBleCompanionStatus(bleCompanion->status());
-    } else {
-      BleCompanionRuntimeSnapshot bleSnapshot;
-      copyBleCompanionRuntimeSnapshot(bleSnapshot);
-      BleCompanionStatusSnapshot inactiveStatus;
-      inactiveStatus.stackReady = true;
-      inactiveStatus.apActive = bleSnapshot.apActive;
-      if (bleSnapshot.configuredEnabled) {
-        inactiveStatus.lastReject =
-            BleCompanionRejectReason::ALLOCATION_FAILED;
+      const BleCompanionStatusSnapshot status = bleCompanion->status();
+      static BleCompanionStatusSnapshot lastCompanionStatus = {};
+      static uint32_t lastCompanionPublishMs = 0;
+      static bool haveCompanionStatus = false;
+      const uint32_t companionNowMs = millis();
+      const bool companionChanged =
+          !haveCompanionStatus ||
+          !bleCompanionStatusUnchanged(status, lastCompanionStatus);
+      if (bleCompanionStatusShouldPublish(scale.isConnected(), companionChanged,
+                                          lastCompanionPublishMs,
+                                          companionNowMs)) {
+        publishBleCompanionStatus(status);
+        lastCompanionStatus = status;
+        lastCompanionPublishMs = companionNowMs;
+        haveCompanionStatus = true;
       }
-      publishBleCompanionStatus(inactiveStatus);
     }
 #endif
 
@@ -3731,7 +3795,7 @@ void scaleWorkerTask(void *) {
       scaleWorkerStackMinWords =
           static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
     }
-    vTaskDelay(pdMS_TO_TICKS(1));
+    vTaskDelay(pdMS_TO_TICKS(scaleWorkerTickDelayMs()));
   }
 }
 
@@ -6709,9 +6773,13 @@ void loop() {
     psramLargestFreeBlockBytes = heap.psramLargest;
     bleHostAllocPsramCount = BLEHostAllocPsramCount();
     bleHostAllocFallbackCount = BLEHostAllocFallbackCount();
-#endif
+    hwmonSnapshot = hwmon.sample(intervalMs > 0U ? intervalMs
+                                                 : HEALTH_TELEMETRY_INTERVAL_MS,
+                                 &heap);
+#else
     hwmonSnapshot = hwmon.sample(intervalMs > 0U ? intervalMs
                                                  : HEALTH_TELEMETRY_INTERVAL_MS);
+#endif
     serviceHealthThresholdAlerts(healthIntervalMaxGapMs);
     loopIntervalGapMs = healthIntervalMaxGapMs;
     healthIntervalMaxGapMs = 0;
@@ -6758,8 +6826,8 @@ void loop() {
         publishedControlStatus.safetyGeneration != relaySnap.generation ||
         publishedControlStatus.safetyFault != relaySnap.fault;
     const uint32_t nowMs = millis();
-    if (forcePublish || lastControlStatusPublishMs == 0 ||
-        static_cast<uint32_t>(nowMs - lastControlStatusPublishMs) >= 50U) {
+    if (controlStatusShouldPublish(forcePublish, lastControlStatusPublishMs,
+                                   nowMs)) {
       lastControlStatusPublishMs = nowMs;
       publishControlStatus();
     }
@@ -6774,5 +6842,5 @@ void loop() {
     return;
   }
   serviceSafetyHeartbeat(true);
-  vTaskDelay(pdMS_TO_TICKS(1));
+  vTaskDelay(pdMS_TO_TICKS(controlLoopTickDelayMs()));
 }

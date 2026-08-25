@@ -160,7 +160,6 @@ void serviceReedAssumeWindow() {
 void serviceMomentaryRunSensors() { serviceReedAssumeWindow(); }
 
 bool machineAllowsFirmwareStopPulse() {
-  sampleReed();
   if (momentaryPhysicalOn) {
     return false;
   }
@@ -172,7 +171,6 @@ bool machineAllowsFirmwareStopPulse() {
 }
 
 inline bool machineRunningElapsed(uint32_t &elapsedOut) {
-  sampleReed();
   if (reedAssume == ReedAssume::GRACE_OFF) {
     elapsedOut = 0U;
     return false;
@@ -191,7 +189,6 @@ inline bool machineRunningElapsed(uint32_t &elapsedOut) {
 }
 
 inline bool machineIsRunning() {
-  sampleReed();
   if (reedAssume == ReedAssume::GRACE_OFF) {
     return false;
   }
@@ -210,7 +207,6 @@ inline uint32_t machineElapsedMs() {
 }
 
 inline MachineRunState machineRunState() {
-  sampleReed();
   if ((reedAssume == ReedAssume::ON || reedAssume == ReedAssume::GRACE_ON) &&
       !reedOn) {
     return MachineRunState::ASSUMED_ON;

@@ -28,6 +28,7 @@ using String = std::string;
 using TickType_t = uint32_t;
 using TaskHandle_t = void *;
 using BaseType_t = int;
+using UBaseType_t = unsigned;
 using portMUX_TYPE = int;
 
 #define portMUX_INITIALIZER_UNLOCKED 0
@@ -111,7 +112,10 @@ inline bool setCpuFrequencyMhz(uint32_t mhz) {
 
 inline uint32_t getCpuFrequencyMhz() { return hostCpuFrequencyMhz; }
 
+inline uint32_t hostTaskYieldCalls = 0;
+
 inline void vTaskDelay(TickType_t ticks) { (void)ticks; }
+inline void taskYIELD() { ++hostTaskYieldCalls; }
 inline void portENTER_CRITICAL(portMUX_TYPE *mux) { (void)mux; }
 inline void portEXIT_CRITICAL(portMUX_TYPE *mux) { (void)mux; }
 inline void portENTER_CRITICAL_ISR(portMUX_TYPE *mux) { (void)mux; }
@@ -552,6 +556,13 @@ inline int xQueueOverwrite(QueueHandle_t queue, const void *item) {
   }
   queue->items.clear();
   return xQueueSend(queue, item, 0);
+}
+
+inline UBaseType_t uxQueueMessagesWaiting(QueueHandle_t queue) {
+  if (queue == nullptr) {
+    return 0;
+  }
+  return static_cast<UBaseType_t>(queue->items.size());
 }
 
 inline void vQueueDelete(QueueHandle_t queue) { delete queue; }

@@ -155,7 +155,12 @@ inline void machineNoteFirmwareStop() {
   momentarySkipFirmwareStopPulse = false;
 }
 inline void machineServiceReminders() {}
-inline void machineSampleInput() { updateActivatorInput(); }
+inline void machineSampleInput() {
+#if SHOT_STOPPER_MACHINE_TYPE == 2
+  sampleReed();
+#endif
+  updateActivatorInput();
+}
 
 inline MachineIntention machinePollIntention() {
   MachineIntention out;

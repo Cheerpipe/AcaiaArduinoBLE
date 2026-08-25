@@ -84,6 +84,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   hostTaskWatchdogConfigured = false;
   hostTaskWatchdogSubscriptions = 0;
   hostTaskWatchdogFeeds = 0;
+  hostTaskYieldCalls = 0;
   taskWatchdogRestoreFailed = false;
   hostCpuFrequencySetSucceeds = true;
   EEPROM.beginSucceeds = true;
@@ -3993,6 +3994,71 @@ void d01_idle_scan_stays_enabled_between_ticks() {
   CHECK(scale.startScanCalls == calls);
 }
 
+void d13_idle_delays_relax_without_scale() {
+  resetHarness(false, false);
+  CHECK(!scale.isConnected());
+  CHECK(!scale.isConnecting());
+  CHECK(scaleWorkerTickDelayMs() == SCALE_WORKER_NO_SCALE_DELAY_MS);
+  CHECK(controlLoopTickDelayMs() == LOOP_NO_SCALE_DELAY_MS);
+
+  scale.connecting = true;
+  CHECK(scaleWorkerTickDelayMs() == 1);
+  CHECK(controlLoopTickDelayMs() == LOOP_NO_SCALE_DELAY_MS);
+  scale.connecting = false;
+
+  ScaleCommand command;
+  command.type = ScaleCommandType::TARE_ONLY;
+  CHECK(xQueueSend(scaleCommandQueue, &command, 0) == pdTRUE);
+  CHECK(scaleWorkerTickDelayMs() == 1);
+  CHECK(xQueueReceive(scaleCommandQueue, &command, 0) == pdTRUE);
+  CHECK(scaleWorkerTickDelayMs() == SCALE_WORKER_NO_SCALE_DELAY_MS);
+
+  setScaleConnected(true);
+  markScaleWorkerProgress();
+  CHECK(scaleWorkerTickDelayMs() == 1);
+  CHECK(controlLoopTickDelayMs() == 1);
+}
+
+void d14_control_status_interval_follows_scale() {
+  resetHarness(false, false);
+  CHECK(!scaleAvailable());
+  CHECK(controlStatusPublishIntervalMs() == CONTROL_STATUS_PUBLISH_NO_SCALE_MS);
+  CHECK(!controlStatusShouldPublish(false, 100, 199));
+  CHECK(controlStatusShouldPublish(false, 100, 200));
+  CHECK(controlStatusShouldPublish(true, 100, 101));
+
+  resetHarness(false, true);
+  markScaleWorkerProgress();
+  CHECK(scaleAvailable());
+  CHECK(controlStatusPublishIntervalMs() == CONTROL_STATUS_PUBLISH_MS);
+  CHECK(!controlStatusShouldPublish(false, 100, 149));
+  CHECK(controlStatusShouldPublish(false, 100, 150));
+  CHECK(controlStatusShouldPublish(true, 100, 101));
+
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  publishControlStatus();
+  CHECK(!publishedControlStatus.activeCycle);
+  hostMillis += 10;
+  startCycle();
+  CHECK(publishedControlStatus.activeCycle);
+  CHECK(publishedControlStatus.state == StopperState::BREW ||
+        publishedControlStatus.state == StopperState::MANUAL_NO_SCALE);
+}
+
+void d15_companion_publish_throttles_without_scale() {
+  CHECK(bleCompanionStatusShouldPublish(true, false, 10, 11));
+  CHECK(bleCompanionStatusShouldPublish(false, true, 10, 11));
+  CHECK(!bleCompanionStatusShouldPublish(false, false, 10, 59));
+  CHECK(bleCompanionStatusShouldPublish(false, false, 10, 60));
+  CHECK(bleCompanionStatusShouldPublish(false, false, 0, 1));
+  BleCompanionStatusSnapshot a;
+  BleCompanionStatusSnapshot b;
+  CHECK(bleCompanionStatusUnchanged(a, b));
+  b.advertising = true;
+  CHECK(!bleCompanionStatusUnchanged(a, b));
+}
+
 void d02_first_mode_uses_name_scan() {
   resetHarness(false, false);
   reachReadyFromBoot();
@@ -7552,6 +7618,26 @@ void m08_recipe_copies_match_published_state() {
   CHECK(findShotPreset(afterBank, afterBank.activeId)->goalWeightG == 44);
 }
 
+void m09_seqlock_yields_when_writer_active() {
+  resetHarness(false, true);
+  publishControlStatus();
+  hostTaskYieldCalls = 0;
+  controlStatusSeq = 1;
+  ControlStatusSnapshot status = {};
+  copyControlStatus(status);
+  CHECK(hostTaskYieldCalls == kControlStatusSeqlockTries);
+  CHECK(status.state == publishedControlStatus.state);
+  controlStatusSeq = 0;
+
+  hostTaskYieldCalls = 0;
+  recipeSeq = 1;
+  RuntimeConfig copied = {};
+  copyRuntimeConfig(&copied);
+  CHECK(hostTaskYieldCalls == kControlStatusSeqlockTries);
+  CHECK(copied.goalWeightG == publishedRuntimeConfig.goalWeightG);
+  recipeSeq = 0;
+}
+
 void m12_ble_companion_result_drop_is_counted() {
   resetHarness(false, true);
   BleCompanionResult dummy = {};
@@ -9799,6 +9885,9 @@ const TestCase testCases[] = {
     {"W96", w96_echo_inverted_uses_long_bookend_tones},
     {"W98", w98_buzzer_sequences_start_and_end_with_sound},
     {"D01", d01_idle_scan_stays_enabled_between_ticks},
+    {"D13", d13_idle_delays_relax_without_scale},
+    {"D14", d14_control_status_interval_follows_scale},
+    {"D15", d15_companion_publish_throttles_without_scale},
     {"D02", d02_first_mode_uses_name_scan},
     {"D03", d03_scan_start_failed_uses_backoff},
     {"D04", d04_full_cache_keeps_directed_scan},
@@ -9839,6 +9928,7 @@ const TestCase testCases[] = {
     {"B01", b01_scale_worker_requires_ble_stack},
     {"B02", b02_setup_degrades_without_ble},
     {"M08", m08_recipe_copies_match_published_state},
+    {"M09", m09_seqlock_yields_when_writer_active},
     {"M12", m12_ble_companion_result_drop_is_counted},
     {"S04b", s04b_shot_log_page_slice},
     {"S06", s06_shot_log_local_sec_from_utc},

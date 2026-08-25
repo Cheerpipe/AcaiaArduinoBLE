@@ -61,7 +61,12 @@ class Hwmon {
   }
 #endif
 
+#ifdef ARDUINO
+  HwmonSnapshot sample(uint32_t intervalMs,
+                       const HeapCapSnapshot *heap = nullptr) {
+#else
   HwmonSnapshot sample(uint32_t intervalMs) {
+#endif
     HwmonSnapshot out;
     sampleCpuLoad_(out, intervalMs);
 
@@ -79,9 +84,9 @@ class Hwmon {
     out.ramUsedBytes = out.ramTotalBytes - out.ramFreeBytes;
 #else
     out.cpuMhz = getCpuFrequencyMhz();
-    const HeapCapSnapshot heap = sampleHeapCaps();
-    out.ramFreeBytes = heap.internalFree;
-    out.ramTotalBytes = heap.internalTotal;
+    const HeapCapSnapshot used = heap != nullptr ? *heap : sampleHeapCaps();
+    out.ramFreeBytes = used.internalFree;
+    out.ramTotalBytes = used.internalTotal;
     if (out.ramTotalBytes >= out.ramFreeBytes) {
       out.ramUsedBytes = out.ramTotalBytes - out.ramFreeBytes;
     }
