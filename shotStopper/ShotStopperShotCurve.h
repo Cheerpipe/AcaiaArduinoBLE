@@ -185,6 +185,23 @@ class ShotCurveLog {
 
   bool dirty() const { return dirty_; }
 
+  bool containsShotId(uint32_t id) const {
+    if (id == 0 || store_.header.count == 0) {
+      return false;
+    }
+    size_t index = store_.header.writeIndex;
+    for (size_t n = 0; n < store_.header.count; ++n) {
+      if (index == 0) {
+        index = SHOT_CURVE_CAPACITY;
+      }
+      --index;
+      if (store_.records[index].shotId == id) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool removeById(uint32_t id) {
     if (id == 0 || store_.header.count == 0) {
       return false;

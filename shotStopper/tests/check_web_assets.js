@@ -247,13 +247,13 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 50050) {
+if (htmlBytes > 50800) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 128500) {
+if (jsBytes > 129200) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 178500) {
+if (htmlBytes + jsBytes > 180000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -2340,7 +2340,7 @@ if (!ui.includes('setMutable(!!s.configMutable||!!s.webUiOverrideActive)') ||
     !ui.includes("uiOverridePanel") ||
     !ui.includes("uiOverrideButton") ||
     !ui.includes('UI Override') ||
-    !ui.includes("closest('#adminLockPanel,#uiOverridePanel,#bleCompanionPanel')") ||
+    !ui.includes("closest('#adminLockPanel,#diagnosticLockPanel,#uiOverridePanel,#bleCompanionPanel')") ||
     !ui.includes('function ensureUiOverridePanel(') ||
     !ui.includes('/api/v1/ui/unlock') ||
     !ui.includes('UNSAFE_WEBUI_OVERRIDE') ||
@@ -2629,9 +2629,9 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
         'statusPageOk(admin) must accept a locked payload and validate unlocked network/BLE/NTP/OTA');
   }
   if (!ui.includes(
-          "v==='diagnostic'?!!(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalActivatorOn==='boolean'&&'reedOn' in s&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags&&s.guards&&typeof s.guards.bbwEnabled==='boolean'&&s.guards.noScale&&s.guards.atm&&s.guards.slowExtraction&&s.guards.fastExtraction&&s.guards.accidentalTouch&&s.guards.cupProtection)")) {
+          "v==='diagnostic'?!!(typeof s.adminUnlocked==='boolean'&&(s.adminUnlocked?(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalActivatorOn==='boolean'&&'reedOn' in s&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags&&s.guards&&typeof s.guards.bbwEnabled==='boolean'&&s.guards.noScale&&s.guards.atm&&s.guards.slowExtraction&&s.guards.fastExtraction&&s.guards.accidentalTouch&&s.guards.cupProtection):true))")) {
     throw new Error(
-        'statusPageOk(diagnostic) must validate states, machine I/O, guards, and diagnostic metrics');
+        'statusPageOk(diagnostic) must accept a locked payload and validate unlocked states, machine I/O, guards, and diagnostic metrics');
   }
 }
 if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
@@ -2659,7 +2659,7 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'eventsDropped', 'lastCommand', 'loopIntervalGapMs', 'loopMaxGapMs',
     'machineState', 'physicalActivatorOn', 'reedOn', 'controlSource', 'cupPresence',
     'streamState', 'controlState', 'taskWatchdogReady', 'recoveryRequired',
-    'compileFlags', 'remoteMachineControl'
+    'compileFlags', 'remoteMachineControl', 'complete', 'degraded', 'scaleWorker'
   ]) {
     if (!diagBody.includes(field)) {
       throw new Error('status/diagnostic missing required field: ' + field);
@@ -2727,7 +2727,12 @@ if (!network.includes('ShotStopperDebugExport.h') ||
     !firmware.includes('ShotStopperDebugExport.h') ||
     !ui.includes('/api/v1/debug/export') ||
     !ui.includes('exportDebugDataButton') ||
-    !html.includes('id="exportDebugDataButton"')) {
+    !html.includes('id="exportDebugDataButton"') ||
+    !network.slice(
+        network.indexOf('esp_err_t ShotStopperNetwork::debugExportHandler'),
+        network.indexOf('esp_err_t ShotStopperNetwork::debugExportHandler') +
+            450)
+        .includes('requireAdminUnlock(request)')) {
   throw new Error(
       'Diagnostic must expose guards status and GET /api/v1/debug/export with schema version');
 }
@@ -2758,8 +2763,13 @@ if (logHandlerStart < 0 || logHandlerEnd < 0) {
   throw new Error('Log handler not found');
 }
 const logHandler = network.slice(logHandlerStart, logHandlerEnd);
-if (logHandler.includes('authenticate(request')) {
-  throw new Error('Read-only diagnostic log must not require authentication');
+if (!logHandler.includes('requireAdminUnlock(request)') ||
+    logHandler.includes('authenticate(request')) {
+  throw new Error('Diagnostic log must require admin unlock, not HTTP authenticate()');
+}
+if (logHandler.includes('"message":"%s"') ||
+    !logHandler.includes('sendJsonStringChunk(request, message)')) {
+  throw new Error('Log event messages must be JSON-escaped via sendJsonStringChunk');
 }
 for (const field of forbiddenResponseFields) {
   if (logHandler.includes(field)) {
@@ -3593,6 +3603,37 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
       network.includes('ShotStopperNetwork::loginHandler')) {
     throw new Error('Admin must gate behind a temporary device-password unlock on firmware and UI');
   }
+  if (!html.includes('id="diagnosticLockPanel"') ||
+      !html.includes('id="diagnosticUnlockPassword"') ||
+      !html.includes('id="diagnosticUnlockButton"') ||
+      !html.includes('Unlock diagnostics') ||
+      !html.includes('id="diagnosticControls"') ||
+      !html.includes('id="diagnosticLockButton"') ||
+      !js.includes('diagnosticLockPanel') ||
+      !js.includes('if(!diagnosticUnlocked||logBusy') ||
+      !js.includes('Could not unlock diagnostics.') ||
+      !js.includes("closest('#adminLockPanel,#diagnosticLockPanel")) {
+    throw new Error(
+        'Diagnostic must gate behind the same admin unlock as Admin, locked by default');
+  }
+  if (runtimeJs.includes('row.innerHTML') ||
+      runtimeJs.includes("shotType[0]!=='a'|y<1") ||
+      runtimeJs.includes('pollChain=run.catch(()=>{})') ||
+      !runtimeJs.includes('pollChain=run.catch(console.warn)')) {
+    throw new Error(
+        'Shot history must use DOM textContent, logical OR in stats, and must not swallow poll errors');
+  }
+  {
+    const start = firmwareCore.indexOf('void completeBootRecovery(');
+    const end = firmwareCore.indexOf('void resumePendingBootRecovery(');
+    const body = start >= 0 && end > start ? firmwareCore.slice(start, end) : '';
+    const clearAt = body.indexOf('(void)clearRecoveryIntent()');
+    const holdAt = body.lastIndexOf('holdFailedBootRecovery');
+    if (clearAt < 0 || holdAt < 0 || holdAt > clearAt) {
+      throw new Error(
+          'Successful boot recovery must clear intent without hanging on clear failure');
+    }
+  }
   {
     const factoryFnStart = network.indexOf('ShotStopperNetwork::factoryResetHandler');
     const passwordFnStart = network.indexOf('ShotStopperNetwork::devicePasswordHandler');
@@ -3633,20 +3674,23 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
           'networkHandler must not return PersistedSettings by value on the httpd stack');
     }
   }
-  if ((statusFormat.match(/\\"adminUnlocked\\":%s/g) || []).length < 2) {
-    throw new Error('status/home and status/admin must report adminUnlocked');
+  if ((statusFormat.match(/\\"adminUnlocked\\":%s/g) || []).length < 3) {
+    throw new Error('status/home, status/admin, and status/diagnostic must report adminUnlocked');
   }
   if (!network.includes('page == StatusPage::Admin || page == StatusPage::Home') ||
-      !network.includes('adminUnlocked && page == StatusPage::Admin') ||
+      !network.includes('page == StatusPage::Diagnostic') ||
       !ui.includes("v==='home'?!!(typeof s.adminUnlocked==='boolean'") ||
       !js.includes('function syncAdminSessionUi(unlocked)') ||
       !js.includes('syncAdminSessionUi(admin)') ||
       !js.includes('updateHomeAdminActions(on)')) {
     throw new Error('Home must report and honor adminUnlocked for the Actions panel');
   }
-  if (!network.includes('if (adminUnlocked && page == StatusPage::Admin)') ||
+  if (!network.includes(
+          'page == StatusPage::Admin || page == StatusPage::Diagnostic') ||
+      !network.includes('self.touchAdminUnlock()') ||
       /if \(adminUnlocked\) \{\s*self\.touchAdminUnlock\(\);/.test(network)) {
-    throw new Error('Home status must report adminUnlocked without sliding idle; Admin polls may renew');
+    throw new Error(
+        'Home status must report adminUnlocked without sliding idle; Admin and Diagnostic polls may renew');
   }
   {
     const start = network.indexOf('ShotStopperNetwork::adminLockHandler');

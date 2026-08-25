@@ -482,6 +482,11 @@ ControlStatusSnapshot publishedControlStatus;
 ControlStatusSnapshot stagingControlStatus;
 uint32_t controlStatusSeq = 0;
 constexpr uint32_t kControlStatusSeqlockTries = 64;
+RuntimeConfig publishedRuntimeConfig;
+ShotPresetBank publishedPresetBank;
+uint32_t recipeSeq = 0;
+bool bootDegraded = false;
+uint32_t bleCompanionResultDropped = 0;
 MaintenanceLease maintenanceLease;
 WebCommand maintenanceCancellationCommand;
 bool maintenanceCancellationPending = false;
@@ -815,6 +820,12 @@ void reportTaskWatchdogFault() {
   criticalTaskWatchdogFault = true;
 }
 
+void feedOrTripCurrentTaskWatchdog() {
+  if (!feedCurrentTaskWatchdog()) {
+    reportTaskWatchdogFault();
+  }
+}
+
 void requestSafeRestart() {
   safeRestartRequested = true;
 }
@@ -838,15 +849,25 @@ size_t copyShotCurves(ShotCurveRecord *output, size_t capacity) {
 }
 
 bool deleteShotRecord(uint32_t id) {
-  const bool removedLog = shotLog.removeById(id);
-  (void)shotCurves.removeById(id);
-  return removedLog;
+  const bool hadCurve = shotCurves.containsShotId(id);
+  const bool hadLog = shotLog.containsId(id);
+  if (!hadLog && !hadCurve) {
+    return false;
+  }
+  if (hadCurve && !shotCurves.removeById(id)) {
+    return false;
+  }
+  if (hadLog && !shotLog.removeById(id)) {
+    return false;
+  }
+  return true;
 }
 
 bool clearShotLog() {
-  const bool logCleared = shotLog.clear();
-  (void)shotCurves.clear();
-  return logCleared;
+  if (!shotCurves.clear()) {
+    return false;
+  }
+  return shotLog.clear();
 }
 
 bool clearLastShot() {
@@ -1083,18 +1104,47 @@ RuntimeConfig effectiveRuntimeConfig() {
   return composeEffectiveConfig(runtimeConfig, presetBank);
 }
 
+void publishRecipeState() {
+  __atomic_fetch_add(&recipeSeq, 1U, __ATOMIC_RELAXED);
+  publishedRuntimeConfig = runtimeConfig;
+  publishedPresetBank = presetBank;
+  __atomic_fetch_add(&recipeSeq, 1U, __ATOMIC_RELEASE);
+}
+
 void copyPresetBank(ShotPresetBank *out) {
   if (out == nullptr) {
     return;
   }
-  *out = presetBank;
+  for (uint32_t attempt = 0; attempt < kControlStatusSeqlockTries; ++attempt) {
+    const uint32_t s0 = __atomic_load_n(&recipeSeq, __ATOMIC_ACQUIRE);
+    if ((s0 & 1U) != 0U) {
+      continue;
+    }
+    *out = publishedPresetBank;
+    const uint32_t s1 = __atomic_load_n(&recipeSeq, __ATOMIC_ACQUIRE);
+    if (s0 == s1) {
+      return;
+    }
+  }
+  *out = publishedPresetBank;
 }
 
 void copyRuntimeConfig(RuntimeConfig *out) {
   if (out == nullptr) {
     return;
   }
-  *out = runtimeConfig;
+  for (uint32_t attempt = 0; attempt < kControlStatusSeqlockTries; ++attempt) {
+    const uint32_t s0 = __atomic_load_n(&recipeSeq, __ATOMIC_ACQUIRE);
+    if ((s0 & 1U) != 0U) {
+      continue;
+    }
+    *out = publishedRuntimeConfig;
+    const uint32_t s1 = __atomic_load_n(&recipeSeq, __ATOMIC_ACQUIRE);
+    if (s0 == s1) {
+      return;
+    }
+  }
+  *out = publishedRuntimeConfig;
 }
 
 
@@ -2431,7 +2481,7 @@ void updateWorkerLinkState() {
 void yieldBetweenScaleAttOps() {
   BLE.poll();
   markScaleWorkerProgress();
-  (void)feedCurrentTaskWatchdog();
+  feedOrTripCurrentTaskWatchdog();
 }
 
 void executeScaleStartCommand(const ScaleCommand &command) {
@@ -3333,7 +3383,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
 
   if (scale.isConnecting()) {
     // connect() can block up to BLE_CONNECT_TIMEOUT_MS with no inner WDT feed.
-    (void)feedCurrentTaskWatchdog();
+    feedOrTripCurrentTaskWatchdog();
     const bool connected = scale.pollScan();
     if (connected) {
       connectAttemptSeriesActive = false;
@@ -3354,7 +3404,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
   }
 
   if (scale.isScanning()) {
-    (void)feedCurrentTaskWatchdog();
+    feedOrTripCurrentTaskWatchdog();
     const bool connected = scale.pollScan();
     char seenMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
     char seenName[PREFERRED_SCALE_NAME_CAPACITY] = {};
@@ -3748,11 +3798,11 @@ bool initializeScaleWorker() {
   const uint32_t bleWaitStartMs = millis();
   while (scaleWorkerTaskHandle != nullptr && !bleStackReady &&
          elapsedMs(bleWaitStartMs) < BLE_STACK_READY_WAIT_MS) {
-    (void)feedCurrentTaskWatchdog();
+    feedOrTripCurrentTaskWatchdog();
     delay(20);
   }
 #endif
-  return true;
+  return scaleWorkerTaskHandle != nullptr && bleStackReady;
 }
 
 void processScaleWorkerEvents() {
@@ -4576,6 +4626,7 @@ void commitLiveRuntimeConfig(const RuntimeConfig &composed, int32_t reasonBits) 
 #ifndef SHOT_STOPPER_HOST_TEST
   networkManager.syncLiveRuntime(runtimeConfig, &presetBank);
 #endif
+  publishRecipeState();
 }
 
 #ifndef SHOT_STOPPER_HOST_TEST
@@ -4589,13 +4640,13 @@ void settingsPersistTask(void *parameter) {
     if (xQueueReceive(settingsPersistQueue, &settingsPersistReceive,
                       pdMS_TO_TICKS(SETTINGS_PERSIST_IDLE_WAIT_MS)) !=
         pdTRUE) {
-      (void)feedCurrentTaskWatchdog();
+      feedOrTripCurrentTaskWatchdog();
       continue;
     }
     yieldSettingsNvs();
-    (void)feedCurrentTaskWatchdog();
+    feedOrTripCurrentTaskWatchdog();
     const bool ok = savePersistedSettings(settingsPersistReceive.blob);
-    (void)feedCurrentTaskWatchdog();
+    feedOrTripCurrentTaskWatchdog();
     portENTER_CRITICAL(&settingsPersistMux);
     settingsPersistResultReady = true;
     settingsPersistResultOk = ok;
@@ -5273,7 +5324,15 @@ void reportBleCompanionResult(const BleCompanionRequest &request,
   result.accepted = accepted;
   result.reason = accepted ? BleCompanionRejectReason::NONE : reason;
   if (bleCompanionResultQueue != nullptr) {
-    (void)xQueueSend(bleCompanionResultQueue, &result, 0);
+    if (xQueueSend(bleCompanionResultQueue, &result, 0) != pdTRUE) {
+      ++bleCompanionResultDropped;
+      addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_EVENT_DROPPED,
+                    static_cast<int32_t>(request.type));
+      logEmit(LogLevel::WARNING, DebugCategory::SCALE,
+              DebugCode::SCALE_EVENT_DROPPED,
+              static_cast<int32_t>(request.sequence),
+              static_cast<int32_t>(request.type));
+    }
   }
 }
 
@@ -5628,6 +5687,11 @@ void publishControlStatus() {
   next.cupPresent = cupPresenceState() == CupPresenceState::PRESENT;
   next.configPersistPending = runtimePersistPending;
   next.configPersistFailed = runtimePersistFailed;
+  next.bootComplete = firmwareInitializationComplete;
+  next.bootDegraded = bootDegraded;
+  next.scaleWorkerReady =
+      scaleWorkerTaskHandle != nullptr && bleStackReady;
+  next.bleCompanionResultDropped = bleCompanionResultDropped;
   {
     const BleCompanionStatusSnapshot ble = copyBleCompanionStatus();
     next.bleCompanionEnabled = ble.configuredEnabled;
@@ -6183,9 +6247,13 @@ bool applyBootRecoveryOperation(RecoveryOperation operation) {
 
 void completeBootRecovery(RecoveryOperation operation) {
   if (!saveRecoveryIntent(operation) ||
-      !applyBootRecoveryOperation(operation) || !clearRecoveryIntent()) {
+      !applyBootRecoveryOperation(operation)) {
     holdFailedBootRecovery();
+    return;
   }
+  // Apply already succeeded. A failed clear must not hang here: reboot so the
+  // next boot can re-apply (idempotent) and retry clearing the intent.
+  (void)clearRecoveryIntent();
 
   const BuzzerCue success =
       operation == RecoveryOperation::FACTORY_RESET
@@ -6375,6 +6443,7 @@ void setup() {
   serialLogLevel = serialLogLevelFromRuntime(runtimeConfig);
   ringRetainLogLevel =
       static_cast<LogLevel>(runtimeConfig.ringRetainLogLevel);
+  publishRecipeState();
 
   logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_RESET_REASON,
           static_cast<int32_t>(safetyResetStatus.reasonCode));
@@ -6440,7 +6509,8 @@ void setup() {
                     static_cast<float>(runtimeConfig.goalWeightG)),
                 weightToCentigrams(runtimeConfig.weightOffsetG));
 
-  if (!initializeScaleWorker()) {
+  const bool scaleWorkerOk = initializeScaleWorker();
+  if (!scaleWorkerOk) {
     logEmit(LogLevel::ERROR, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
             BOOT_SUBSYSTEM_SCALE_WORKER, 0);
   } else {
@@ -6450,7 +6520,8 @@ void setup() {
 
   webCommandQueue =
       xQueueCreate(WEB_COMMAND_QUEUE_LENGTH, sizeof(WebCommand));
-  if (webCommandQueue == nullptr) {
+  const bool webQueueOk = webCommandQueue != nullptr;
+  if (!webQueueOk) {
     logEmit(LogLevel::ERROR, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
             BOOT_SUBSYSTEM_WEB_QUEUE, 0);
   } else {
@@ -6476,6 +6547,7 @@ void setup() {
   hwmon.begin();
   hwmonSnapshot = hwmon.sample(1);
   publishControlStatus();
+  bool networkOk = true;
 #ifndef SHOT_STOPPER_HOST_TEST
   // Runs before the network task so the OTA slot pair and this boot's
   // pending-verify state are known the first time the Web UI is served.
@@ -6502,6 +6574,7 @@ void setup() {
     callbacks.copyRuntimeConfig = copyRuntimeConfig;
     callbacks.copyDebugExportExtras = copyDebugExportExtras;
     if (!networkManager.begin(persistedSettings, callbacks)) {
+      networkOk = false;
       logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
               BOOT_SUBSYSTEM_NETWORK, 0);
     } else {
@@ -6509,6 +6582,7 @@ void setup() {
               BOOT_SUBSYSTEM_NETWORK, 1);
     }
   } else if (!settingsLoaded) {
+    networkOk = false;
     logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
             BOOT_SUBSYSTEM_NETWORK, 0);
   }
@@ -6518,8 +6592,16 @@ void setup() {
           DebugCode::BOOT_SUBSYSTEM, BOOT_SUBSYSTEM_PSRAM, psramOk ? 1 : 0);
 #endif
 
-  addDebugEvent(DebugCategory::BOOT, DebugCode::BOOT_READY);
-  firmwareInitializationComplete = true;
+  bootDegraded = !persistenceReady || !scaleWorkerOk || !webQueueOk ||
+                 !networkOk;
+  firmwareInitializationComplete = !bootDegraded;
+  if (firmwareInitializationComplete) {
+    addDebugEvent(DebugCategory::BOOT, DebugCode::BOOT_READY);
+  } else {
+    addDebugEvent(DebugCategory::BOOT, DebugCode::INITIALIZATION_FAILED,
+                  BOOT_SUBSYSTEM_SCALE_WORKER, bootDegraded ? 1 : 0);
+  }
+  publishControlStatus();
   serviceScaleConnectedLed();
 }
 

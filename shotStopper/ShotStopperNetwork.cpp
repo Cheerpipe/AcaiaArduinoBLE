@@ -1551,7 +1551,9 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   if (!brewRfActive) {
     preferStaWifiCoex(true);
   }
-  (void)feedCurrentTaskWatchdog();
+  if (!feedCurrentTaskWatchdog()) {
+    callbacks_.reportTaskWatchdogFault();
+  }
 
   staConnectStartedAtMs_ = millis();
   staReconnectAttemptAtMs_ = staConnectStartedAtMs_;
@@ -3762,8 +3764,8 @@ const char *ShotStopperNetwork::wifiScanStateName(WifiScanState state) {
 
 esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  // Home/settings/diagnostic stay claim-gated only. Admin mutations and the
-  // full admin status body require a temporary device-password unlock.
+  // Home/settings stay claim-gated only. Admin and Diagnostic mutations and
+  // the full privileged status body require a temporary device-password unlock.
   self.requestPendingNetworkConfirm();
 
   const StatusPage page = parseStatusPage(request->uri);
@@ -3784,9 +3786,11 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   const uint32_t webUiOverrideRemainingMs =
       webUiOverrideActive ? self.webUiOverrideRemainingMs(request) : 0;
   bool adminUnlocked = false;
-  if (page == StatusPage::Admin || page == StatusPage::Home) {
+  if (page == StatusPage::Admin || page == StatusPage::Home ||
+      page == StatusPage::Diagnostic) {
     adminUnlocked = self.adminUnlockAllowed(request);
-    if (adminUnlocked && page == StatusPage::Admin) {
+    if (adminUnlocked &&
+        (page == StatusPage::Admin || page == StatusPage::Diagnostic)) {
       self.touchAdminUnlock();
     }
   }
@@ -3924,7 +3928,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<int>(control.config.timezoneOffsetMinutes),
         ntpPresetId(control.config.ntpServerPreset), safeNtpCustom);
   }
-  if (ok && page == StatusPage::Diagnostic) {
+  if (ok && page == StatusPage::Diagnostic && adminUnlocked) {
     ok = statusJsonAppend(
         &used,
         ",\"timezoneOffsetMinutes\":%d,\"serialDebugOutput\":%s",
@@ -4274,6 +4278,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       }
     }
   } else if (ok && page == StatusPage::Diagnostic) {
+    ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s",
+                          adminUnlocked ? "true" : "false");
+    if (ok && adminUnlocked) {
     // Lean diagnostic snapshot: metrics + log controls only (no STA address
     // form fields; those stay on status/admin).
     ok = statusJsonAppend(
@@ -4319,7 +4326,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"},"
         "\"compileFlags\":{\"buzzer\":\"%s\",\"remoteMachineControl\":%s,"
         "\"arch\":\"%s\",\"machineType\":\"%s\",\"stopPulseMs\":%lu,"
-        "\"maxSinglePressMs\":%lu}",
+        "\"maxSinglePressMs\":%lu},"
+        "\"boot\":{\"complete\":%s,\"degraded\":%s,\"scaleWorker\":%s}",
         stopperStateName(control.state),
         machineRunStateName(control.machineRunState),
         control.relayClosed ? "true" : "false",
@@ -4394,7 +4402,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         FW_BOARD_ARCH_STRING,
         compiledMachineTypeId(),
         static_cast<unsigned long>(COMPILED_STOP_PULSE_MS),
-        static_cast<unsigned long>(COMPILED_MAX_SINGLE_PRESS_MS));
+        static_cast<unsigned long>(COMPILED_MAX_SINGLE_PRESS_MS),
+        control.bootComplete ? "true" : "false",
+        control.bootDegraded ? "true" : "false",
+        control.scaleWorkerReady ? "true" : "false");
     if (ok) {
       const bool bbwEnabled = !control.config.timerOnly;
       const bool scaleUsable =
@@ -4460,6 +4471,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
               : "false",
           control.cycleBbwProtectionEnded ? "true" : "false");
     }
+    }
   }
 
   if (ok) {
@@ -4504,6 +4516,9 @@ bool debugExportChunkf(httpd_req_t *request, char *buf, size_t cap,
 
 esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
+  if (!self.requireAdminUnlock(request)) {
+    return ESP_OK;
+  }
   // DEBUG EXPORT MAINTENANCE: extend sections below when adding diagnostically
   // relevant settings / state. Bump DEBUG_EXPORT_SCHEMA_VERSION on material
   // schema changes. Never include secrets.
@@ -4546,14 +4561,18 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            request, buf, cap,
            "\"envelope\":{\"configMutable\":%s,\"liveShot\":%s,"
            "\"configRevision\":%lu,\"ringRetainLogLevel\":\"%s\","
-           "\"serialDebugOutput\":%s},",
+           "\"serialDebugOutput\":%s,\"bootComplete\":%s,\"bootDegraded\":%s,"
+           "\"scaleWorkerReady\":%s},",
            configMutable ? "true" : "false",
            (c.activeCycle || c.machineRunning || c.relayClosed) ? "true"
                                                                 : "false",
            static_cast<unsigned long>(c.config.revision),
            logLevelName(
                static_cast<LogLevel>(c.config.ringRetainLogLevel)),
-           c.config.serialDebugOutput ? "true" : "false");
+           c.config.serialDebugOutput ? "true" : "false",
+           c.bootComplete ? "true" : "false",
+           c.bootDegraded ? "true" : "false",
+           c.scaleWorkerReady ? "true" : "false");
 
   ok = ok &&
        debugExportChunkf(
@@ -5139,9 +5158,11 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  // The bounded diagnostic log is intentionally public like Status. It emits
-  // only fixed enum-derived messages and numeric arguments; credentials and
-  // request payloads are never included.
+  if (!self.requireAdminUnlock(request)) {
+    return ESP_OK;
+  }
+  // Bounded diagnostic log: fixed enum-derived messages and numeric
+  // arguments; credentials and request payloads are never included.
   uint32_t after = 0;
   const size_t queryLength = httpd_req_get_url_query_len(request);
   if (queryLength > 0 && queryLength < 64) {
@@ -5214,13 +5235,24 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
     snprintf(work.jsonItem, NetworkWorkBuf::kJsonItem,
              "%s{\"sequence\":%lu,\"atMs\":%lu,\"wallSec\":%lu,"
              "\"level\":\"%s\",\"category\":\"%s\",\"code\":%u,"
-             "\"message\":\"%s\",\"argument1\":%ld,\"argument2\":%ld}",
+             "\"message\":",
              index == 0 ? "" : ",",
              static_cast<unsigned long>(event.sequence),
              static_cast<unsigned long>(event.atMs),
              static_cast<unsigned long>(event.wallSec),
              logLevelName(event.level), debugCategoryName(event.category),
-             static_cast<unsigned>(event.code), message,
+             static_cast<unsigned>(event.code));
+    if (sendCopiedChunk(request, work.jsonItem, strlen(work.jsonItem)) !=
+        ESP_OK) {
+      self.unlockWorkBuf();
+      return ESP_FAIL;
+    }
+    if (sendJsonStringChunk(request, message) != ESP_OK) {
+      self.unlockWorkBuf();
+      return ESP_FAIL;
+    }
+    snprintf(work.jsonItem, NetworkWorkBuf::kJsonItem,
+             ",\"argument1\":%ld,\"argument2\":%ld}",
              static_cast<long>(event.argument1),
              static_cast<long>(event.argument2));
     if (sendCopiedChunk(request, work.jsonItem, strlen(work.jsonItem)) !=
@@ -5528,6 +5560,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       jsonFieldPresent(root, "timezoneOffsetMinutes") ||
       jsonFieldPresent(root, "ntpServerPreset") ||
       jsonFieldPresent(root, "ntpServerCustom");
+  const bool diagnosticPatch = jsonFieldPresent(root, "serialDebugOutput") ||
+                               jsonFieldPresent(root, "ringRetainLogLevel");
   // Patch: seed live effective config; only present keys overwrite.
   RuntimeConfig candidate = {};
   if (self.callbacks_.copyRuntimeConfig != nullptr) {
@@ -5841,6 +5875,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
                      parseError);
   }
   if (dateTimePatch && !self.requireAdminUnlock(request)) {
+    memset(customNtp, 0, sizeof(customNtp));
+    return ESP_OK;
+  }
+  if (diagnosticPatch && !self.requireAdminUnlock(request)) {
     memset(customNtp, 0, sizeof(customNtp));
     return ESP_OK;
   }

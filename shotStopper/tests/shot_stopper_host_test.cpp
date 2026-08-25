@@ -261,6 +261,8 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   platformClockReady = true;
   persistenceReady = true;
   bleStackReady = true;
+  bootDegraded = false;
+  bleCompanionResultDropped = 0;
   safetyResetStatus = SafetyResetSnapshot{};
   firmwareInitializationComplete = true;
   scaleConnectedLedInitialized = false;
@@ -310,6 +312,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   runtimeConfig = composeEffectiveConfig(runtimeConfig, presetBank);
   runtimeConfig.requireCupToStart = false;
   mutableActiveShotPreset(presetBank).requireCupToStart = false;
+  publishRecipeState();
 }
 
 void verifySafetyInvariants() {
@@ -7440,6 +7443,128 @@ void s04_shot_log_remove_by_id() {
   CHECK(!shotLog.removeById(99999U));
 }
 
+void s04c_delete_shot_record_removes_log_and_curve() {
+  resetHarness(false, true);
+  shotLog.clear();
+  ShotCurveLog::resetHostStorage();
+  shotCurves.load();
+  ShotLogRecord record = {};
+  record.durationDs = 120;
+  CHECK(shotLog.append(record));
+  ShotLogRecord stored[1] = {};
+  CHECK(shotLog.copyNewestFirst(stored, 1) == 1);
+  const uint32_t id = stored[0].id;
+  CHECK(id != 0);
+  ShotCurveRecord curve = emptyShotCurveRecord();
+  curve.shotId = id;
+  curve.intervalS = SHOT_CURVE_INTERVAL_S;
+  CHECK(shotCurves.append(curve));
+  CHECK(shotLog.containsId(id));
+  CHECK(shotCurves.containsShotId(id));
+  CHECK(deleteShotRecord(id));
+  CHECK(!shotLog.containsId(id));
+  CHECK(!shotCurves.containsShotId(id));
+  CHECK(shotLog.count() == 0);
+  CHECK(shotCurves.count() == 0);
+}
+
+void s04d_delete_shot_record_ok_without_curve() {
+  resetHarness(false, true);
+  shotLog.clear();
+  ShotCurveLog::resetHostStorage();
+  shotCurves.load();
+  ShotLogRecord record = {};
+  record.durationDs = 80;
+  CHECK(shotLog.append(record));
+  ShotLogRecord stored[1] = {};
+  CHECK(shotLog.copyNewestFirst(stored, 1) == 1);
+  const uint32_t id = stored[0].id;
+  CHECK(!shotCurves.containsShotId(id));
+  CHECK(deleteShotRecord(id));
+  CHECK(!shotLog.containsId(id));
+  CHECK(shotLog.count() == 0);
+}
+
+void s04e_delete_shot_record_keeps_log_if_curve_remove_fails() {
+  resetHarness(false, true);
+  shotLog.clear();
+  ShotCurveLog::resetHostStorage();
+  shotCurves.load();
+  ShotLogRecord record = {};
+  record.durationDs = 90;
+  CHECK(shotLog.append(record));
+  ShotLogRecord stored[1] = {};
+  CHECK(shotLog.copyNewestFirst(stored, 1) == 1);
+  const uint32_t id = stored[0].id;
+  ShotCurveRecord curve = emptyShotCurveRecord();
+  curve.shotId = id;
+  curve.intervalS = SHOT_CURVE_INTERVAL_S;
+  CHECK(shotCurves.append(curve));
+  g_hostFlashIoMutexAvailable = false;
+  const bool deleted = deleteShotRecord(id);
+  g_hostFlashIoMutexAvailable = true;
+  CHECK(!deleted);
+  CHECK(shotLog.containsId(id));
+  CHECK(shotCurves.containsShotId(id));
+}
+
+void b01_scale_worker_requires_ble_stack() {
+  resetHarness(false, true);
+  bleStackReady = false;
+  CHECK(!initializeScaleWorker());
+  publishControlStatus();
+  CHECK(!publishedControlStatus.scaleWorkerReady);
+  bleStackReady = true;
+  publishControlStatus();
+  CHECK(publishedControlStatus.scaleWorkerReady ==
+        (scaleWorkerTaskHandle != nullptr));
+}
+
+void b02_setup_degrades_without_ble() {
+  resetHarness(false, true);
+  bleStackReady = false;
+  setup();
+  CHECK(bootDegraded);
+  CHECK(!firmwareInitializationComplete);
+  CHECK(publishedControlStatus.bootDegraded);
+  CHECK(!publishedControlStatus.bootComplete);
+  CHECK(!publishedControlStatus.scaleWorkerReady);
+}
+
+void m08_recipe_copies_match_published_state() {
+  resetHarness(false, true);
+  RuntimeConfig copied = {};
+  ShotPresetBank copiedBank = {};
+  copyRuntimeConfig(&copied);
+  copyPresetBank(&copiedBank);
+  CHECK(copied.goalWeightG == runtimeConfig.goalWeightG);
+  CHECK(copiedBank.activeId == presetBank.activeId);
+  runtimeConfig.goalWeightG = 44;
+  mutableActiveShotPreset(presetBank).goalWeightG = 44;
+  commitLiveRuntimeConfig(runtimeConfig, RUNTIME_PERSIST_REASON_USER);
+  RuntimeConfig after = {};
+  ShotPresetBank afterBank = {};
+  copyRuntimeConfig(&after);
+  copyPresetBank(&afterBank);
+  CHECK(after.goalWeightG == 44);
+  CHECK(afterBank.activeId == presetBank.activeId);
+  CHECK(findShotPreset(afterBank, afterBank.activeId) != nullptr);
+  CHECK(findShotPreset(afterBank, afterBank.activeId)->goalWeightG == 44);
+}
+
+void m12_ble_companion_result_drop_is_counted() {
+  resetHarness(false, true);
+  BleCompanionResult dummy = {};
+  while (xQueueSend(bleCompanionResultQueue, &dummy, 0) == pdTRUE) {
+  }
+  const uint32_t before = bleCompanionResultDropped;
+  BleCompanionRequest request;
+  request.sequence = 42;
+  request.type = BleCompanionRequestType::SET_GOAL_WEIGHT;
+  reportBleCompanionResult(request, true, BleCompanionRejectReason::NONE);
+  CHECK(bleCompanionResultDropped == before + 1);
+}
+
 void s04b_shot_log_page_slice() {
   size_t start = 99;
   size_t pageCount = 99;
@@ -9708,6 +9833,13 @@ const TestCase testCases[] = {
     {"S16b", s16b_factory_reset_hides_last_shot_on_status},
     {"S18", s18_last_shot_keeps_no_scale_guard_from_cycle},
     {"S04", s04_shot_log_remove_by_id},
+    {"S04c", s04c_delete_shot_record_removes_log_and_curve},
+    {"S04d", s04d_delete_shot_record_ok_without_curve},
+    {"S04e", s04e_delete_shot_record_keeps_log_if_curve_remove_fails},
+    {"B01", b01_scale_worker_requires_ble_stack},
+    {"B02", b02_setup_degrades_without_ble},
+    {"M08", m08_recipe_copies_match_published_state},
+    {"M12", m12_ble_companion_result_drop_is_counted},
     {"S04b", s04b_shot_log_page_slice},
     {"S06", s06_shot_log_local_sec_from_utc},
     {"S07", s07_shot_log_stores_fixed_wall_time},

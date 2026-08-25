@@ -1910,6 +1910,10 @@ struct ControlStatusSnapshot {
   bool cupPresent = false;
   bool configPersistPending = false;
   bool configPersistFailed = false;
+  bool bootComplete = false;
+  bool bootDegraded = false;
+  bool scaleWorkerReady = false;
+  uint32_t bleCompanionResultDropped = 0;
   bool bleCompanionEnabled = true;
   bool bleCompanionActive = false;
   bool bleCompanionRestartRequired = false;
