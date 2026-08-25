@@ -1619,7 +1619,11 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes('cpuLoadValid') ||
       !ui.includes('cpuMhz') ||
       !ui.includes("w.cpuMhz+' MHz'") ||
-      !ui.includes('0–2') ||
+      !ui.includes('w.cpu0Busy') ||
+      !ui.includes('w.cpu1Busy') ||
+      !ui.includes("t+' ('+a.toFixed(2)+' + '+b.toFixed(2)+')'") ||
+      !ui.includes("split(w.cpuLoad5s,w.cpu0Busy,w.cpu1Busy)") ||
+      !ui.includes('0–2 (cpu0 + cpu1)') ||
       !network.includes('tempPeakC') ||
       !network.includes('ramTotalBytes') ||
       !network.includes('\\"uptimeMs\\"') ||
