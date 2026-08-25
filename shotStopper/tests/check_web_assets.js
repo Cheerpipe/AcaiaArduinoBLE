@@ -64,6 +64,8 @@ const bleCompanion = fs.readFileSync(
   path.join(sketchDir, 'ShotStopperBleCompanion.h'), 'utf8');
 const taskProfiler = fs.readFileSync(
   path.join(sketchDir, 'ShotStopperTaskProfiler.h'), 'utf8');
+const sdkconfigDefaults = fs.readFileSync(
+  path.resolve(sketchDir, '..', 'idf', 'sdkconfig.defaults'), 'utf8');
 const flashIoScratch = fs.readFileSync(
   path.join(sketchDir, 'ShotStopperFlashIoScratch.h'), 'utf8');
 if (!bleCompanion.includes('BLECharacteristic::writeValue') ||
@@ -79,6 +81,62 @@ if (!taskProfiler.includes('allocExternalOrInternal(sizeof(ActiveWorkspace))') |
     /\bfree\(next\)/.test(taskProfiler)) {
   throw new Error(
       'TaskProfiler workspace must use allocExternalOrInternal/heapCapsFree, not calloc/free');
+}
+if (taskProfiler.includes('task.xCoreID') ||
+    !taskProfiler.includes('xTaskGetCoreID(task.xHandle)')) {
+  throw new Error(
+      'TaskProfiler must read core pin via xTaskGetCoreID, not TaskStatus_t.xCoreID');
+}
+if (!sdkconfigDefaults.includes('CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y') ||
+    !sdkconfigDefaults.includes('CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y')) {
+  throw new Error(
+      'sdkconfig.defaults must enable run-time stats and vTaskList core IDs');
+}
+if (!taskProfiler.includes('void copySnapshot(TaskProfilerSnapshot &out) const') ||
+    !taskProfiler.includes('taskYIELD()') ||
+    !taskProfiler.includes('__atomic_load_n(&seq_') ||
+    !taskProfiler.includes('beginSnapshotWrite_()')) {
+  throw new Error(
+      'TaskProfiler snapshot copies must use a seqlock; uxTaskGetSystemState must not run under it');
+}
+if (!firmwareCore.includes('#include "ShotStopperTaskProfiler.h"') ||
+    !firmwareCore.includes('TaskProfiler taskProfiler') ||
+    !firmwareCore.includes('taskProfiler.service(millis())') ||
+    !firmwareCore.includes('void copyTaskProfiler(TaskProfilerSnapshot &output)') ||
+    !firmwareCore.includes('taskProfiler.copySnapshot(output)') ||
+    !firmwareCore.includes('WebCommandType::TASK_PROFILER_START') ||
+    !firmwareCore.includes('WebCommandType::TASK_PROFILER_STOP') ||
+    !firmwareCore.includes('callbacks.copyTaskProfiler = copyTaskProfiler') ||
+    (firmwareCore.match(/taskProfiler\.start\(/g) || []).length !== 1) {
+  throw new Error(
+      'TaskProfiler must be wired as opt-in Diagnostic telemetry with copyTaskProfiler');
+}
+{
+  const setupBody = firmwareCore.slice(
+      firmwareCore.indexOf('void setup()'), firmwareCore.indexOf('void loop()'));
+  const publishBody = firmwareCore.slice(
+      firmwareCore.indexOf('void publishControlStatus()'),
+      firmwareCore.indexOf('void resetSerialCliState()'));
+  if (setupBody.includes('taskProfiler.start') ||
+      publishBody.includes('taskProfiler') ||
+      publishBody.includes('TaskProfiler')) {
+    throw new Error(
+        'Task profiler must not auto-start on boot and must not ride ControlStatusSnapshot');
+  }
+}
+if (!network.includes('copyTaskProfiler') ||
+    !network.includes('statusJsonAppendTaskProfiler') ||
+    !network.includes('\\"tasks\\"') ||
+    !network.includes('\\"currentTotalCpuPct\\"') ||
+    !network.includes('\\"unreportedCurrentCpuPct\\"') ||
+    !network.includes('/api/v1/diagnostic/profiler') ||
+    !network.includes('taskProfilerHandler') ||
+    !network.includes('static constexpr size_t kStatusJson = 12288') ||
+    !networkHeader.includes('void (*copyTaskProfiler)(TaskProfilerSnapshot &out)') ||
+    !fs.readFileSync(path.join(sketchDir, 'ShotStopperDebugExport.h'), 'utf8')
+        .includes('DEBUG_EXPORT_SCHEMA_VERSION = 3')) {
+  throw new Error(
+      'Diagnostic status, POST /api/v1/diagnostic/profiler, and debug export must expose tasks');
 }
 const psram = fs.readFileSync(path.join(sketchDir, 'ShotStopperPsram.h'), 'utf8');
 if (!psram.includes('#define SHOT_STOPPER_PSRAM_BSS EXT_RAM_BSS_ATTR') ||
@@ -292,13 +350,13 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 50800) {
+if (htmlBytes > 51600) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 129200) {
+if (jsBytes > 131500) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 180000) {
+if (htmlBytes + jsBytes > 183500) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -1645,6 +1703,16 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes('id="hRamT"') ||
       !ui.includes('id="hRamU"') ||
       !ui.includes('id="hRamF"') ||
+      !ui.includes('id="hTaskState"') ||
+      !ui.includes('id="hTaskElapsed"') ||
+      !ui.includes('id="taskProfilerStartButton"') ||
+      !ui.includes('id="taskProfilerStopButton"') ||
+      !ui.includes('id="taskTable"') ||
+      !ui.includes('id="taskTableBody"') ||
+      !ui.includes('id="taskTableHint"') ||
+      !ui.includes('function applyTaskProfiler(') ||
+      !ui.includes('/api/v1/diagnostic/profiler') ||
+      !ui.includes('100% = 1 core busy (sum can exceed 100)') ||
       !ui.includes('id="hHeapMin"') ||
       !ui.includes('id="hHeapLargest"') ||
       !ui.includes('id="hPsramT"') ||
@@ -1709,6 +1777,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('<legend>WiFi</legend>') ||
       !diagHtml.includes('<legend>AP</legend>') ||
       !diagHtml.includes('<legend>CPU') ||
+      !diagHtml.includes('<legend>Tasks') ||
       !diagHtml.includes('<legend>RAM</legend>') ||
       !diagHtml.includes('<legend>HEAP</legend>') ||
       !diagHtml.includes('<legend>Scale</legend>') ||
@@ -1774,7 +1843,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       diagHtml.indexOf('<legend>Machine I/O</legend>') > diagHtml.indexOf('<legend>WiFi</legend>') ||
       diagHtml.indexOf('<legend>WiFi</legend>') > diagHtml.indexOf('<legend>AP</legend>') ||
       diagHtml.indexOf('<legend>AP</legend>') > diagHtml.indexOf('<legend>CPU') ||
-      diagHtml.indexOf('<legend>CPU') > diagHtml.indexOf('<legend>RAM</legend>') ||
+      diagHtml.indexOf('<legend>CPU') > diagHtml.indexOf('<legend>Tasks') ||
+      diagHtml.indexOf('<legend>Tasks') > diagHtml.indexOf('<legend>RAM</legend>') ||
       diagHtml.indexOf('<legend>RAM</legend>') > diagHtml.indexOf('<legend>HEAP</legend>') ||
       diagHtml.indexOf('<legend>HEAP</legend>') > diagHtml.indexOf('<legend>Scale</legend>') ||
       diagHtml.indexOf('<legend>Scale</legend>') > diagHtml.indexOf('<legend>MISC</legend>') ||
@@ -1800,7 +1870,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       css.includes('#diagnosticsPanel .metric,#statusPanel .metric,#scalePanel .metric,.shotCard > *{') ||
       css.includes('diagGroup')) {
     throw new Error(
-        'Diagnostics must be a non-collapsible fieldset at the top of Diagnostic, above Log, with States/Guards/Machine I/O/WiFi/AP/CPU/RAM/HEAP/Scale/MISC sections and one value per label');
+        'Diagnostics must be a non-collapsible fieldset at the top of Diagnostic, above Log, with States/Guards/Machine I/O/WiFi/AP/CPU/Tasks/RAM/HEAP/Scale/MISC sections and one value per label');
   }
 }
 if (!ui.includes('id="shotTable"') ||
@@ -2312,6 +2382,7 @@ const expected = new Map([
   ['POST /api/v1/device/password', 'ownedApiHandler'],
   ['POST /api/v1/admin/unlock', 'ownedApiHandler'],
   ['POST /api/v1/admin/lock', 'ownedApiHandler'],
+  ['POST /api/v1/diagnostic/profiler', 'ownedApiHandler'],
   // OTA authenticates with the device password instead of the exclusive
   // WebUI claim, so a command line client can update firmware without stealing
   // control from an open browser window.
@@ -2696,9 +2767,9 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
         'statusPageOk(admin) must accept a locked payload and validate unlocked network/BLE/NTP/OTA');
   }
   if (!ui.includes(
-          "v==='diagnostic'?!!(typeof s.adminUnlocked==='boolean'&&(s.adminUnlocked?(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalActivatorOn==='boolean'&&'reedOn' in s&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags&&s.guards&&typeof s.guards.bbwEnabled==='boolean'&&s.guards.noScale&&s.guards.atm&&s.guards.slowExtraction&&s.guards.fastExtraction&&s.guards.accidentalTouch&&s.guards.cupProtection):true))")) {
+          "v==='diagnostic'?!!(typeof s.adminUnlocked==='boolean'&&(s.adminUnlocked?(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalActivatorOn==='boolean'&&'reedOn' in s&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags&&s.guards&&typeof s.guards.bbwEnabled==='boolean'&&s.guards.noScale&&s.guards.atm&&s.guards.slowExtraction&&s.guards.fastExtraction&&s.guards.accidentalTouch&&s.guards.cupProtection&&s.tasks&&typeof s.tasks.state==='string'):true))")) {
     throw new Error(
-        'statusPageOk(diagnostic) must accept a locked payload and validate unlocked states, machine I/O, guards, and diagnostic metrics');
+        'statusPageOk(diagnostic) must accept a locked payload and validate unlocked states, machine I/O, guards, diagnostic metrics, and task profiler');
   }
 }
 if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
@@ -3172,8 +3243,8 @@ if (generated.settingsGzip.length > 4096) {
 if (generated.cssGzip.length > 6144) {
   throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
 }
-if (generated.combined > 51200) {
-  throw new Error('Combined Web UI gzip exceeds the 50 KiB flash budget');
+if (generated.combined > 52224) {
+  throw new Error('Combined Web UI gzip exceeds the 51 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
@@ -3713,6 +3784,7 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
       ['device-password', passwordFnStart],
       ['restart', restartFnStart],
       ['ble-compat', bleFnStart],
+      ['task-profiler', network.indexOf('ShotStopperNetwork::taskProfilerHandler')],
       ['time-sync', timeFnStart],
       ['wifi-scan-start', network.indexOf('ShotStopperNetwork::wifiScanStartHandler')],
       ['wifi-scan-status', network.indexOf('ShotStopperNetwork::wifiScanStatusHandler')],

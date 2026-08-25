@@ -79,6 +79,7 @@
 #include "ShotStopperTime.h"
 #include "ShotStopperWatchdog.h"
 #include "ShotStopperHwmon.h"
+#include "ShotStopperTaskProfiler.h"
 #include "ShotStopperPsram.h"
 #ifndef SHOT_STOPPER_HOST_TEST
 #include "ShotStopperJsonArena.h"
@@ -546,6 +547,7 @@ bool healthStackAlertLatched = false;
 bool healthLoopGapAlertLatched = false;
 Hwmon hwmon;
 HwmonSnapshot hwmonSnapshot = {};
+TaskProfiler taskProfiler;
 bool platformClockReady = false;
 bool persistenceReady = false;
 bool bleStackReady = false;
@@ -785,6 +787,10 @@ size_t copyDebugEvents(uint32_t afterSequence, DebugEvent *output,
     after = event.sequence;
   }
   return copied;
+}
+
+void copyTaskProfiler(TaskProfilerSnapshot &output) {
+  taskProfiler.copySnapshot(output);
 }
 
 void copyControlStatus(ControlStatusSnapshot &output) {
@@ -5363,6 +5369,16 @@ void processWebCommand(const WebCommand &command) {
       reportControlCommandResult(command, CommandResultState::PERSISTED);
       return;
     }
+
+    case WebCommandType::TASK_PROFILER_START:
+      (void)taskProfiler.start(millis());
+      reportControlCommandResult(command, CommandResultState::APPLIED);
+      return;
+
+    case WebCommandType::TASK_PROFILER_STOP:
+      (void)taskProfiler.stop(millis());
+      reportControlCommandResult(command, CommandResultState::APPLIED);
+      return;
   }
 }
 
@@ -6634,6 +6650,7 @@ void setup() {
     callbacks.copyPresetBank = copyPresetBank;
     callbacks.copyRuntimeConfig = copyRuntimeConfig;
     callbacks.copyDebugExportExtras = copyDebugExportExtras;
+    callbacks.copyTaskProfiler = copyTaskProfiler;
     if (!networkManager.begin(persistedSettings, callbacks)) {
       networkOk = false;
       logEmit(LogLevel::WARNING, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
@@ -6806,6 +6823,7 @@ void loop() {
   serviceControlCommandResult();
   processBleCompanionRequests();
   processWebCommands();
+  taskProfiler.service(millis());
   serviceControlCommandResult();
   serviceRuntimePersistence();
   serviceShotStorePersistence();

@@ -11,6 +11,7 @@
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/idf_additions.h>
 #endif
 
 namespace shotstopper {
@@ -109,6 +110,7 @@ class TaskProfiler {
     }
     releaseWorkspace_();
     workspace_ = next;
+    beginSnapshotWrite_();
     report_ = TaskProfilerSnapshot{};
     report_.state = TaskProfilerState::RUNNING;
     startedAtMs_ = nowMs;
@@ -120,11 +122,14 @@ class TaskProfiler {
     report_.lastCaptureUs = clampU32_(initialCost);
     report_.maxCaptureUs = report_.lastCaptureUs;
     refreshReport_(nowMs);
+    endSnapshotWrite_();
     return true;
 #else
     (void)nowMs;
+    beginSnapshotWrite_();
     report_.state = TaskProfilerState::FAILED;
     report_.stopReason = TaskProfilerStopReason::CAPTURE_FAILED;
+    endSnapshotWrite_();
     return false;
 #endif
   }
@@ -173,7 +178,37 @@ class TaskProfiler {
   bool running() const { return report_.state == TaskProfilerState::RUNNING; }
   const TaskProfilerSnapshot &snapshot() const { return report_; }
 
+  void copySnapshot(TaskProfilerSnapshot &out) const {
+    constexpr uint32_t kTries = 64;
+    for (uint32_t attempt = 0; attempt < kTries; ++attempt) {
+      const uint32_t s0 = __atomic_load_n(&seq_, __ATOMIC_ACQUIRE);
+      if ((s0 & 1U) != 0U) {
+        taskYIELD();
+        continue;
+      }
+      out = report_;
+      const uint32_t s1 = __atomic_load_n(&seq_, __ATOMIC_ACQUIRE);
+      if (s0 == s1) {
+        return;
+      }
+    }
+    out = report_;
+  }
+
+#if defined(SHOT_STOPPER_HOST_TEST)
+  void resetForHost() {
+    report_ = TaskProfilerSnapshot{};
+    seq_ = 0;
+  }
+#endif
+
  private:
+  void beginSnapshotWrite_() {
+    __atomic_fetch_add(&seq_, 1U, __ATOMIC_RELAXED);
+  }
+  void endSnapshotWrite_() {
+    __atomic_fetch_add(&seq_, 1U, __ATOMIC_RELEASE);
+  }
 #if defined(ARDUINO) && !defined(SHOT_STOPPER_HOST_TEST)
   struct TrackedTask {
     char name[TASK_PROFILER_NAME_CAPACITY] = {};
@@ -197,10 +232,12 @@ class TaskProfiler {
   }
 
   void noteStartFailure_(TaskProfilerStopReason reason) {
+    beginSnapshotWrite_();
     if (report_.state == TaskProfilerState::NEVER) {
       report_.state = TaskProfilerState::FAILED;
       report_.stopReason = reason;
     }
+    endSnapshotWrite_();
   }
 
   static bool idleTaskName_(const char *name) {
@@ -213,12 +250,18 @@ class TaskProfiler {
     return core == 0 || core == 1 ? static_cast<int8_t>(core) : -1;
   }
 
+  // TaskStatus_t only has a core field when FREERTOS_VTASKLIST_INCLUDE_COREID
+  // is on. xTaskGetCoreID is always present on ESP-IDF.
+  static int8_t coreOf_(const TaskStatus_t &task) {
+    return coreFor_(xTaskGetCoreID(task.xHandle));
+  }
+
   static void seedTracked_(TrackedTask &tracked, const TaskStatus_t &task) {
     tracked = TrackedTask{};
     tracked.taskNumber = static_cast<uint32_t>(task.xTaskNumber);
     tracked.previousCounter = static_cast<uint32_t>(task.ulRunTimeCounter);
     tracked.stackMinWords = static_cast<uint32_t>(task.usStackHighWaterMark);
-    tracked.core = coreFor_(task.xCoreID);
+    tracked.core = coreOf_(task);
     if (task.pcTaskName != nullptr) {
       copyCString(tracked.name, sizeof(tracked.name), task.pcTaskName);
     }
@@ -283,11 +326,12 @@ class TaskProfiler {
       if (tracked->stackMinWords == 0 || stackMin < tracked->stackMinWords) {
         tracked->stackMinWords = stackMin;
       }
-      tracked->core = coreFor_(task.xCoreID);
+      tracked->core = coreOf_(task);
     }
     intervalUs_ = intervalUs;
     lastCaptureAtUs_ = captureEndedUs;
     lastCaptureAtMs_ = nowMs;
+    beginSnapshotWrite_();
     ++report_.sampleCount;
     report_.truncated = report_.truncated || truncated;
     report_.lastCaptureUs = clampU32_(
@@ -297,6 +341,7 @@ class TaskProfiler {
       report_.maxCaptureUs = report_.lastCaptureUs;
     }
     refreshReport_(nowMs);
+    endSnapshotWrite_();
   }
 
   void refreshReport_(uint32_t nowMs) {
@@ -389,6 +434,7 @@ class TaskProfiler {
 
   void finish_(TaskProfilerState state, TaskProfilerStopReason reason,
                uint32_t nowMs) {
+    beginSnapshotWrite_();
     refreshReport_(nowMs);
     report_.state = state;
     report_.stopReason = reason;
@@ -397,6 +443,7 @@ class TaskProfiler {
     if (workspace_ != nullptr) {
       refreshReport_(nowMs);
     }
+    endSnapshotWrite_();
     releaseWorkspace_();
   }
 
@@ -418,6 +465,7 @@ class TaskProfiler {
 #endif
 
   TaskProfilerSnapshot report_ = {};
+  uint32_t seq_ = 0;
 };
 
 }  // namespace shotstopper

@@ -137,6 +137,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   serialLogLevel = LogLevel::NONE;
   ringRetainLogLevel = LogLevel::INFO;
   publishedControlStatus = ControlStatusSnapshot{};
+  taskProfiler.resetForHost();
   stagingControlStatus = ControlStatusSnapshot{};
   controlStatusSeq = 0;
   bleCompanionRuntimeSnapshot = BleCompanionRuntimeSnapshot{};
@@ -7849,6 +7850,29 @@ void h02_hwmon_cpu_load_uses_idle_and_ema() {
   CHECK(snap.cpu1Busy >= 0.49f && snap.cpu1Busy <= 0.51f);
 }
 
+void h03_task_profiler_start_stop_updates_snapshot() {
+  resetHarness(false, false);
+  TaskProfilerSnapshot snap;
+  copyTaskProfiler(snap);
+  CHECK(snap.state == TaskProfilerState::NEVER);
+  CHECK(snap.stopReason == TaskProfilerStopReason::NONE);
+  CHECK(snap.rowCount == 0);
+
+  WebCommand start = {};
+  start.type = WebCommandType::TASK_PROFILER_START;
+  processWebCommand(start);
+  copyTaskProfiler(snap);
+  CHECK(snap.state == TaskProfilerState::FAILED);
+  CHECK(snap.stopReason == TaskProfilerStopReason::CAPTURE_FAILED);
+
+  WebCommand stop = {};
+  stop.type = WebCommandType::TASK_PROFILER_STOP;
+  processWebCommand(stop);
+  copyTaskProfiler(snap);
+  CHECK(snap.state == TaskProfilerState::FAILED);
+  CHECK(snap.stopReason == TaskProfilerStopReason::CAPTURE_FAILED);
+}
+
 void r51_auto_to_manual_guard_fires_while_scale_lost() {
   resetHarness(false, true);
   runtimeConfig.autoToManualGuardEnabled = true;
@@ -9939,6 +9963,7 @@ const TestCase testCases[] = {
     {"S19", s19_shot_store_persist_failure_logs_once_until_success},
     {"H01", h01_health_threshold_alerts_fire_once_per_crossing},
     {"H02", h02_hwmon_cpu_load_uses_idle_and_ema},
+    {"H03", h03_task_profiler_start_stop_updates_snapshot},
     {"N01", n01_wall_clock_tracks_utc_from_anchor},
     {"N01b", n01b_wall_clock_survives_millis_wrap},
     {"N02", n02_ntp_hostname_validation},

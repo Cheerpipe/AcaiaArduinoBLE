@@ -88,6 +88,11 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
 #diagnosticsPanel fieldset:first-of-type{margin-top:.25rem}
 #diagnosticsPanel fieldset>legend{grid-column:1/-1}
 #diagnosticsPanel [id$="Raw"]{font-size:.82em;color:var(--mu);font-weight:400}
+#diagnosticsPanel .statusColumn>.btnBar,#taskTableWrap{grid-column:1/-1}
+#taskTableWrap{overflow:auto}
+#taskTable{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:.86rem}
+#taskTable th,#taskTable td{text-align:left;padding:.15rem .35rem;border-bottom:1px solid var(--ln)}
+#taskTable th:nth-child(n+2),#taskTable td:nth-child(n+2){text-align:right}
 .stateReady{color:var(--ok);font-weight:700}
 .stateActive{color:var(--ac);font-weight:700}
 .stateFault{color:var(--dn);font-weight:700}

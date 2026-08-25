@@ -37,7 +37,7 @@ namespace shotstopper {
 WallClock g_wallClock;
 
 struct NetworkWorkBuf {
-  static constexpr size_t kStatusJson = 8192;
+  static constexpr size_t kStatusJson = 12288;
   static constexpr size_t kPresetsJson = 2800;
   static constexpr size_t kHistoryJson = 1400;
   static constexpr size_t kJsonItem = 1800;
@@ -53,6 +53,7 @@ struct NetworkWorkBuf {
   ShotLogRecord shotRecords[SHOT_LOG_CAPACITY]{};
   ShotCurveRecord shotCurves[SHOT_CURVE_CAPACITY]{};
   ControlStatusSnapshot control{};
+  TaskProfilerSnapshot taskProfiler{};
   DebugExportExtras debugExport{};
   ShotPresetBank presetBank{};
   ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY]{};
@@ -752,6 +753,72 @@ bool statusJsonAppend(size_t *used, const char *fmt, ...) {
   }
   *used += static_cast<size_t>(n);
   return true;
+}
+
+bool jsonScratchAppend(char *buf, size_t cap, size_t *used, const char *fmt,
+                       ...) {
+  if (buf == nullptr || used == nullptr || *used >= cap) {
+    return false;
+  }
+  va_list args;
+  va_start(args, fmt);
+  const int n = vsnprintf(buf + *used, cap - *used, fmt, args);
+  va_end(args);
+  if (n < 0 || static_cast<size_t>(n) >= cap - *used) {
+    return false;
+  }
+  *used += static_cast<size_t>(n);
+  return true;
+}
+
+bool formatTaskProfilerObject(char *buf, size_t cap, size_t *used,
+                              const TaskProfilerSnapshot &tasks) {
+  if (!jsonScratchAppend(
+          buf, cap, used,
+          "{\"state\":\"%s\",\"stopReason\":\"%s\","
+          "\"elapsedMs\":%lu,\"remainingMs\":%lu,\"sampleCount\":%lu,"
+          "\"currentTotalCpuPct\":%.1f,\"averageTotalCpuPct\":%.1f,"
+          "\"unreportedCurrentCpuPct\":%.1f,\"unreportedAverageCpuPct\":%.1f,"
+          "\"truncated\":%s,\"lastCaptureUs\":%lu,\"maxCaptureUs\":%lu,"
+          "\"rows\":[",
+          taskProfilerStateName(tasks.state),
+          taskProfilerStopReasonName(tasks.stopReason),
+          static_cast<unsigned long>(tasks.elapsedMs),
+          static_cast<unsigned long>(tasks.remainingMs),
+          static_cast<unsigned long>(tasks.sampleCount),
+          static_cast<double>(tasks.currentTotalCpuPct),
+          static_cast<double>(tasks.averageTotalCpuPct),
+          static_cast<double>(tasks.unreportedCurrentCpuPct),
+          static_cast<double>(tasks.unreportedAverageCpuPct),
+          tasks.truncated ? "true" : "false",
+          static_cast<unsigned long>(tasks.lastCaptureUs),
+          static_cast<unsigned long>(tasks.maxCaptureUs))) {
+    return false;
+  }
+  for (uint8_t i = 0; i < tasks.rowCount; ++i) {
+    char safeName[TASK_PROFILER_NAME_CAPACITY * 2] = {};
+    sanitizeJsonEmbed(tasks.rows[i].name, safeName, sizeof(safeName));
+    if (!jsonScratchAppend(
+            buf, cap, used,
+            "%s{\"name\":\"%s\",\"core\":%d,\"currentCpuPct\":%.1f,"
+            "\"averageCpuPct\":%.1f,\"stackMinWords\":%lu}",
+            i == 0 ? "" : ",", safeName, static_cast<int>(tasks.rows[i].core),
+            static_cast<double>(tasks.rows[i].currentCpuPct),
+            static_cast<double>(tasks.rows[i].averageCpuPct),
+            static_cast<unsigned long>(tasks.rows[i].stackMinWords))) {
+      return false;
+    }
+  }
+  return jsonScratchAppend(buf, cap, used, "]}");
+}
+
+bool statusJsonAppendTaskProfiler(size_t *used,
+                                  const TaskProfilerSnapshot &tasks) {
+  if (!statusJsonAppend(used, ",\"tasks\":")) {
+    return false;
+  }
+  return formatTaskProfilerObject(g_work->statusJson, NetworkWorkBuf::kStatusJson,
+                                  used, tasks);
 }
 
 void buildSlimPresetsJson(const ShotPresetBank &presets) {
@@ -3004,7 +3071,7 @@ bool ShotStopperNetwork::startHttpServer() {
   // makes the last registerHandler fail, which tears down the whole Web UI, so
   // check_web_assets.js fails the build before the margin is gone.
   // Shell + app.js/css/runtime + secondary + settings + 4 HTML partials + APIs.
-  config.max_uri_handlers = 58;
+  config.max_uri_handlers = 60;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
   // the IDF default (1024) is enough most of the time but intermittent
   // long browser headers have returned 431 Request Header Fields Too Large.
@@ -3081,6 +3148,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/admin/unlock", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/admin/lock", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/admin/ble-compat", HTTP_PUT, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/diagnostic/profiler", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/ota", HTTP_GET, otaStatusHandler) &&
       registerHandler(server_, "/api/v1/ota", HTTP_POST, otaUploadHandler) &&
       registerHandler(server_, "/api/v1/ota/flash", HTTP_POST, otaFlashHandler) &&
@@ -3497,6 +3565,7 @@ esp_err_t ShotStopperNetwork::ownedApiHandler(httpd_req_t *request) {
   if (apiUriMatches(request->uri, "/api/v1/admin/unlock")) return adminUnlockHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/admin/lock")) return adminLockHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/admin/ble-compat")) return bleCompatHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/diagnostic/profiler")) return taskProfilerHandler(request);
   return sendError(request, STATUS_NOT_FOUND, "NOT_FOUND", "Unknown API route.");
 }
 
@@ -4479,6 +4548,14 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
               : "false",
           control.cycleBbwProtectionEnded ? "true" : "false");
     }
+    if (ok) {
+      if (self.callbacks_.copyTaskProfiler != nullptr) {
+        self.callbacks_.copyTaskProfiler(self.workBuf_->taskProfiler);
+      } else {
+        self.workBuf_->taskProfiler = TaskProfilerSnapshot{};
+      }
+      ok = statusJsonAppendTaskProfiler(&used, self.workBuf_->taskProfiler);
+    }
     }
   }
 
@@ -5026,6 +5103,21 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            static_cast<unsigned long>(c.hwmon.cpuMhz),
            static_cast<double>(c.hwmon.tempC),
            static_cast<double>(c.hwmon.tempPeakC));
+
+  if (self.callbacks_.copyTaskProfiler != nullptr) {
+    self.callbacks_.copyTaskProfiler(work.taskProfiler);
+  } else {
+    work.taskProfiler = TaskProfilerSnapshot{};
+  }
+  {
+    size_t used = 0;
+    buf[0] = '\0';
+    ok = ok && jsonScratchAppend(buf, cap, &used, "\"tasks\":");
+    ok = ok &&
+         formatTaskProfilerObject(buf, cap, &used, work.taskProfiler);
+    ok = ok && jsonScratchAppend(buf, cap, &used, ",");
+    ok = ok && debugExportChunk(request, buf);
+  }
 
   ok = ok &&
        debugExportChunkf(
@@ -6765,6 +6857,41 @@ esp_err_t ShotStopperNetwork::bleCompatHandler(httpd_req_t *request) {
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "BLE Companion state was not changed.");
+  }
+  return self.sendAccepted(request, command.requestId);
+}
+
+esp_err_t ShotStopperNetwork::taskProfilerHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.requireAdminUnlock(request)) {
+    return ESP_OK;
+  }
+  const esp_err_t bodyStatus =
+      self.lockJsonBody(request, "A JSON request is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
+  }
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
+  bool enabled = false;
+  static const char *const fields[] = {"enabled"};
+  const bool parsed =
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
+      jsonBoolean(root, "enabled", enabled);
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  self.unlockJsonBody();
+  if (!parsed) {
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_PROFILER_CONFIG",
+                     "enabled must be a boolean.");
+  }
+  WebCommand command;
+  command.type = enabled ? WebCommandType::TASK_PROFILER_START
+                         : WebCommandType::TASK_PROFILER_STOP;
+  command.requestId = self.allocateRequestId();
+  if (!self.callbacks_.enqueueWebCommand(command)) {
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
+                     "Task profiler state was not changed.");
   }
   return self.sendAccepted(request, command.requestId);
 }

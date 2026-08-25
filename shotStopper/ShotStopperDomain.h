@@ -1580,6 +1580,8 @@ enum class WebCommandType : uint8_t {
   WEBUI_RESTART,
   BLE_COMPAT_ENABLE,
   BLE_COMPAT_DISABLE,
+  TASK_PROFILER_START,
+  TASK_PROFILER_STOP,
   STATE_OVERRIDE_OFF,
   STATE_OVERRIDE_ON,
   MAINTENANCE_COMPLETE
@@ -1626,6 +1628,8 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::WEBUI_RESTART: return "restart Web UI";
     case WebCommandType::BLE_COMPAT_ENABLE: return "enable BLE Companion";
     case WebCommandType::BLE_COMPAT_DISABLE: return "disable BLE Companion";
+    case WebCommandType::TASK_PROFILER_START: return "start task profiler";
+    case WebCommandType::TASK_PROFILER_STOP: return "stop task profiler";
     case WebCommandType::STATE_OVERRIDE_OFF:
       return "override inferred idle";
     case WebCommandType::STATE_OVERRIDE_ON:
