@@ -12,7 +12,8 @@
 namespace shotstopper {
 
 constexpr uint32_t SHOT_LOG_MAGIC = 0x534C4F47U;  // "SLOG"
-constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 7;
+// Current shot-log schema. V1 is the baseline — no upgrade from prior layouts.
+constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 1;
 constexpr size_t SHOT_LOG_CAPACITY = 120;
 constexpr size_t SHOT_LOG_PAGE_DEFAULT = 10;
 

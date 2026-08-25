@@ -75,34 +75,11 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
     return false;
   }
   const size_t storedLength = preferences.getBytesLength(key);
-  if (storedLength == sizeof(PersistedSettings)) {
-    if (preferences.getBytes(key, &settings, sizeof(settings)) !=
-        sizeof(settings)) {
-      return false;
-    }
-    if (validPersistedSettings(settings)) {
-      return true;
-    }
+  if (storedLength != sizeof(PersistedSettings)) {
     return false;
   }
-  if (storedLength == PERSISTED_SETTINGS_V13_SIZE) {
-    uint8_t v13Raw[PERSISTED_SETTINGS_V13_SIZE];
-    if (preferences.getBytes(key, v13Raw, sizeof(v13Raw)) != sizeof(v13Raw)) {
-      return false;
-    }
-    if (!migratePersistedSettingsFromV13(v13Raw, sizeof(v13Raw), settings)) {
-      return false;
-    }
-    return validPersistedSettings(settings);
-  }
-  if (storedLength != PERSISTED_SETTINGS_V11_SIZE) {
-    return false;
-  }
-  uint8_t v11Raw[PERSISTED_SETTINGS_V11_SIZE];
-  if (preferences.getBytes(key, v11Raw, sizeof(v11Raw)) != sizeof(v11Raw)) {
-    return false;
-  }
-  if (!migratePersistedSettingsFromV11(v11Raw, sizeof(v11Raw), settings)) {
+  if (preferences.getBytes(key, &settings, sizeof(settings)) !=
+      sizeof(settings)) {
     return false;
   }
   return validPersistedSettings(settings);

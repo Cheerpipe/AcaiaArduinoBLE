@@ -1009,7 +1009,7 @@ void p55_network_access_reset_preserves_non_network_settings() {
   CHECK(strcmp(reset.preferredScaleName, "Lunar") == 0);
 }
 
-void p56_decode_shot_log_v2_through_v7() {
+void p56_decode_shot_log_current_schema_only() {
   ShotLogStore current = {};
   resetShotLogStore(current, 4);
   current.header.count = 1;
@@ -1028,117 +1028,14 @@ void p56_decode_shot_log_v2_through_v7() {
   CHECK(decoded.header.schemaVersion == SHOT_LOG_SCHEMA_VERSION);
   CHECK(decoded.records[0].goalWeightG == 36);
 
-  ShotLogStore v6 = current;
-  v6.header.schemaVersion = SHOT_LOG_SCHEMA_VERSION_V6;
-  v6.records[0].actualWeightCg = SHOT_LOG_WEIGHT_MISSING_LEGACY;
-  v6.header.checksum = 0;
-  v6.header.checksum = shotLogChecksumBytes(v6.header);
-  CHECK(validShotLogStoreV6(v6));
+  // Prior schema numbers are rejected — V1 has no upgrade path.
+  ShotLogStore foreign = current;
+  foreign.header.schemaVersion = 2;
+  foreign.header.checksum = 0;
+  foreign.header.checksum = shotLogChecksumBytes(foreign.header);
   decoded = ShotLogStore{};
-  CHECK(decodeShotLogBlob(&v6, sizeof(v6), decoded) ==
-        ShotLogDecodeStatus::MIGRATED);
-  CHECK(decoded.header.schemaVersion == SHOT_LOG_SCHEMA_VERSION);
-  CHECK(decoded.records[0].actualWeightCg == SHOT_LOG_WEIGHT_MISSING);
-
-  ShotLogStoreV5 v5 = {};
-  v5.header.bootId = 5;
-  v5.header.nextRecordId = 2;
-  v5.header.count = 1;
-  v5.header.writeIndex = 1;
-  v5.records[0].id = 1;
-  v5.records[0].bootId = 5;
-  v5.records[0].goalWeightG = 18;
-  v5.records[0].actualWeightCg = SHOT_LOG_WEIGHT_MISSING_LEGACY;
-  v5.header.magic = SHOT_LOG_MAGIC;
-  v5.header.schemaVersion = 5;
-  v5.header.recordSize = sizeof(ShotLogRecordV5);
-  v5.header.checksum = 0;
-  v5.header.checksum = shotLogChecksumBytes(v5.header);
-  decoded = ShotLogStore{};
-  CHECK(decodeShotLogBlob(&v5, sizeof(v5), decoded) ==
-        ShotLogDecodeStatus::MIGRATED);
-  CHECK(decoded.header.schemaVersion == SHOT_LOG_SCHEMA_VERSION);
-  CHECK(decoded.records[0].goalWeightG == 18);
-  CHECK(decoded.records[0].actualWeightCg == SHOT_LOG_WEIGHT_MISSING);
-
-  ShotLogStoreV4 v4 = {};
-  v4.header.bootId = 4;
-  v4.header.nextRecordId = 2;
-  v4.header.count = 1;
-  v4.header.writeIndex = 1;
-  v4.records[0].id = 1;
-  v4.records[0].goalWeightG = 20;
-  v4.records[0].actualWeightCg = 2000;
-  v4.header.magic = SHOT_LOG_MAGIC;
-  v4.header.schemaVersion = 4;
-  v4.header.recordSize = sizeof(ShotLogRecordV4);
-  v4.header.checksum = 0;
-  v4.header.checksum = shotLogChecksumBytes(v4.header);
-  decoded = ShotLogStore{};
-  CHECK(decodeShotLogBlob(&v4, sizeof(v4), decoded) ==
-        ShotLogDecodeStatus::MIGRATED);
-  CHECK(decoded.header.schemaVersion == SHOT_LOG_SCHEMA_VERSION);
-  CHECK(decoded.records[0].goalWeightG == 20);
-
-  ShotLogStoreV3 v3 = {};
-  v3.header.bootId = 3;
-  v3.header.nextRecordId = 2;
-  v3.header.count = 1;
-  v3.header.writeIndex = 1;
-  v3.records[0].id = 1;
-  v3.records[0].goalWeightG = 22;
-  v3.records[0].endedAtUnixSec = 1700000000;
-  finalizeShotLogStoreV3(v3);
-  decoded = ShotLogStore{};
-  CHECK(decodeShotLogBlob(&v3, sizeof(v3), decoded) ==
-        ShotLogDecodeStatus::MIGRATED);
-  CHECK(decoded.header.schemaVersion == SHOT_LOG_SCHEMA_VERSION);
-  CHECK(decoded.records[0].endedAtUnixSec == 1700000000);
-
-  ShotLogStoreV2 v2 = {};
-  v2.header.bootId = 2;
-  v2.header.nextRecordId = 2;
-  v2.header.count = 1;
-  v2.header.writeIndex = 1;
-  v2.records[0].id = 1;
-  v2.records[0].goalWeightG = 24;
-  v2.records[0].actualWeightCg = SHOT_LOG_WEIGHT_MISSING_LEGACY;
-  finalizeShotLogStoreV2(v2);
-  decoded = ShotLogStore{};
-  CHECK(decodeShotLogBlob(&v2, sizeof(v2), decoded) ==
-        ShotLogDecodeStatus::MIGRATED);
-  CHECK(decoded.header.schemaVersion == SHOT_LOG_SCHEMA_VERSION);
-  CHECK(decoded.records[0].goalWeightG == 24);
-  CHECK(decoded.records[0].actualWeightCg == SHOT_LOG_WEIGHT_MISSING);
-}
-
-void p57_load_rewrites_legacy_v5_shot_log_key() {
-  resetHostPersistence();
-  ShotLogStoreV5 v5 = {};
-  v5.header.bootId = 9;
-  v5.header.nextRecordId = 2;
-  v5.header.count = 1;
-  v5.header.writeIndex = 1;
-  v5.records[0].id = 1;
-  v5.records[0].bootId = 9;
-  v5.records[0].goalWeightG = 36;
-  v5.records[0].actualWeightCg = SHOT_LOG_WEIGHT_MISSING_LEGACY;
-  v5.header.magic = SHOT_LOG_MAGIC;
-  v5.header.schemaVersion = 5;
-  v5.header.recordSize = sizeof(ShotLogRecordV5);
-  v5.header.checksum = 0;
-  v5.header.checksum = shotLogChecksumBytes(v5.header);
-  persistence_host::putRaw("shotlog", "records", &v5, sizeof(v5));
-
-  ShotLog log;
-  CHECK(log.load());
-  CHECK(log.count() == 1);
-  ShotLogRecord out[1] = {};
-  CHECK(log.copyNewestFirst(out, 1) == 1);
-  CHECK(out[0].goalWeightG == 36);
-  CHECK(out[0].actualWeightCg == SHOT_LOG_WEIGHT_MISSING);
-  CHECK(persistence_host::records.count("shotlog/active") == 1);
-  CHECK(persistence_host::records.count("shotlog/records") == 0);
+  CHECK(decodeShotLogBlob(&foreign, sizeof(foreign), decoded) ==
+        ShotLogDecodeStatus::INVALID);
 }
 
 void p58_reset_all_durable_stores_and_mid_fail_keeps_settings() {
@@ -1292,12 +1189,12 @@ void p61_shot_curve_dual_slot_round_trip_and_delete() {
   CHECK(reloaded.count() == 0);
 }
 
-void p62_shot_curve_v1_schema_is_rejected() {
+void p62_shot_curve_foreign_schema_is_rejected() {
   ShotCurveStore store;
   resetShotCurveStore(store);
   CHECK(validShotCurveStore(store));
   CHECK(store.header.schemaVersion == SHOT_CURVE_SCHEMA_VERSION);
-  store.header.schemaVersion = 1;
+  store.header.schemaVersion = 2;
   store.header.checksum = 0;
   store.header.checksum = shotCurveChecksum(store);
   CHECK(!validShotCurveStore(store));
@@ -1313,106 +1210,6 @@ void p63_flash_io_lock_fails_closed_without_mutex() {
   unlockFlashIo();
 }
 
-void p64_v11_blob_migrates_to_schema_12() {
-  resetHostPersistence();
-  PersistedSettings donor;
-  CHECK(initializeDefaultSettings(donor));
-  setRuntimeStopPulseMs(donor.runtime, 250);
-  donor.runtime.momentaryStartOnPress = false;
-  donor.runtime.reedConfirmTimeoutHundredMs = 20;
-  std::memset(donor.preferredScaleName, 0, sizeof(donor.preferredScaleName));
-  std::memcpy(donor.preferredScaleName, "Pearl-S", sizeof("Pearl-S"));
-  CHECK(validPreferredScaleName(donor.preferredScaleName));
-
-  uint8_t v11[PERSISTED_SETTINGS_V11_SIZE];
-  std::memset(v11, 0, sizeof(v11));
-  PersistedSettingsHeader header{};
-  std::memcpy(&header, &donor, sizeof(header));
-  header.schemaVersion = CONFIG_SCHEMA_VERSION_V11;
-  header.structureSize = PERSISTED_SETTINGS_V11_SIZE;
-  std::memcpy(v11, &header, sizeof(header));
-  std::memcpy(v11 + sizeof(header), &donor.runtime, RUNTIME_CONFIG_V11_SIZE);
-  const size_t v12Tail =
-      sizeof(PersistedSettingsHeader) + sizeof(RuntimeConfig);
-  const size_t v11Tail =
-      sizeof(PersistedSettingsHeader) + RUNTIME_CONFIG_V11_SIZE;
-  const size_t tailBytes = PERSISTED_SETTINGS_V11_SIZE - v11Tail;
-  std::memcpy(v11 + v11Tail,
-              reinterpret_cast<const uint8_t *>(&donor) + v12Tail, tailBytes);
-  const size_t checksumOff = PERSISTED_SETTINGS_V11_SIZE - sizeof(uint32_t);
-  const uint32_t checksum = crc32(v11, checksumOff);
-  std::memcpy(v11 + checksumOff, &checksum, sizeof(checksum));
-
-  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, v11,
-                           sizeof(v11));
-  PersistedSettings loaded;
-  CHECK(loadPersistedSettings(loaded));
-  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
-  CHECK(loaded.structureSize == sizeof(PersistedSettings));
-  CHECK(loaded.runtime.momentaryStartOnPress);
-  CHECK(loaded.runtime.reedConfirmTimeoutHundredMs == 0);
-  CHECK(runtimeReedConfirmTimeoutMs(loaded.runtime) ==
-        COMPILED_REED_CONFIRM_TIMEOUT_MS);
-  CHECK(runtimeStopPulseMs(loaded.runtime) == 250);
-  CHECK(std::strcmp(loaded.preferredScaleName, "Pearl-S") == 0);
-  CHECK(loaded.runtime.assumeIdleWhenScaleConnects);
-  CHECK(loaded.runtime.shotReactTimeoutS == 0);
-}
-
-void writeV13SizedSettingsBlob(const PersistedSettings &donor, uint32_t schema) {
-  uint8_t blob[PERSISTED_SETTINGS_V13_SIZE];
-  std::memset(blob, 0, sizeof(blob));
-  PersistedSettingsHeader header{};
-  std::memcpy(&header, &donor, sizeof(header));
-  header.schemaVersion = schema;
-  header.structureSize = PERSISTED_SETTINGS_V13_SIZE;
-  std::memcpy(blob, &header, sizeof(header));
-  std::memcpy(blob + sizeof(header), &donor.runtime, RUNTIME_CONFIG_V13_SIZE);
-  const size_t v13Tail =
-      sizeof(PersistedSettingsHeader) + RUNTIME_CONFIG_V13_SIZE;
-  const size_t currentTail =
-      sizeof(PersistedSettingsHeader) + sizeof(RuntimeConfig);
-  const size_t tailBytes = PERSISTED_SETTINGS_V13_SIZE - v13Tail;
-  std::memcpy(blob + v13Tail,
-              reinterpret_cast<const uint8_t *>(&donor) + currentTail,
-              tailBytes);
-  const size_t checksumOff = PERSISTED_SETTINGS_V13_SIZE - sizeof(uint32_t);
-  const uint32_t checksum = crc32(blob, checksumOff);
-  std::memcpy(blob + checksumOff, &checksum, sizeof(checksum));
-  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, blob,
-                           sizeof(blob));
-}
-
-void p65_v12_blob_migrates_to_schema_13() {
-  resetHostPersistence();
-  PersistedSettings donor;
-  CHECK(initializeDefaultSettings(donor));
-  donor.runtime.assumeIdleWhenScaleConnects = false;
-  donor.runtime.shotReactTimeoutS = 0;
-  writeV13SizedSettingsBlob(donor, CONFIG_SCHEMA_VERSION_V12);
-  PersistedSettings loaded;
-  CHECK(loadPersistedSettings(loaded));
-  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
-  CHECK(loaded.runtime.assumeIdleWhenScaleConnects);
-  CHECK(loaded.runtime.shotReactTimeoutS == 0);
-  CHECK(!loaded.runtime.rinseEnabled);
-}
-
-void p66_v13_blob_migrates_to_schema_14() {
-  resetHostPersistence();
-  PersistedSettings donor;
-  CHECK(initializeDefaultSettings(donor));
-  donor.runtime.assumeIdleWhenScaleConnects = false;
-  donor.runtime.shotReactTimeoutS = 7;
-  writeV13SizedSettingsBlob(donor, CONFIG_SCHEMA_VERSION_V13);
-  PersistedSettings loaded;
-  CHECK(loadPersistedSettings(loaded));
-  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
-  CHECK(loaded.structureSize == sizeof(PersistedSettings));
-  CHECK(!loaded.runtime.assumeIdleWhenScaleConnects);
-  CHECK(loaded.runtime.shotReactTimeoutS == 7);
-  CHECK(!loaded.runtime.rinseEnabled);
-}
 
 struct TestCase {
   const char *id;
@@ -1454,17 +1251,13 @@ const TestCase tests[] = {
     {"P53", p53_recovery_boundaries_and_millis_wraparound},
     {"P54", p54_recovery_intent_round_trip_corruption_and_clear},
     {"P55", p55_network_access_reset_preserves_non_network_settings},
-    {"P56", p56_decode_shot_log_v2_through_v7},
-    {"P57", p57_load_rewrites_legacy_v5_shot_log_key},
+    {"P56", p56_decode_shot_log_current_schema_only},
     {"P58", p58_reset_all_durable_stores_and_mid_fail_keeps_settings},
     {"P59", p59_deferred_shot_log_append_writes_only_on_flush},
     {"P60", p60_factory_intent_survives_failed_store_reset},
     {"P61", p61_shot_curve_dual_slot_round_trip_and_delete},
-    {"P62", p62_shot_curve_v1_schema_is_rejected},
+    {"P62", p62_shot_curve_foreign_schema_is_rejected},
     {"P63", p63_flash_io_lock_fails_closed_without_mutex},
-    {"P64", p64_v11_blob_migrates_to_schema_12},
-    {"P65", p65_v12_blob_migrates_to_schema_13},
-    {"P66", p66_v13_blob_migrates_to_schema_14},
 };
 
 }  // namespace

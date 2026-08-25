@@ -14,7 +14,8 @@
 namespace shotstopper {
 
 constexpr uint32_t SHOT_CURVE_MAGIC = 0x53435256U;  // "SCRV"
-constexpr uint16_t SHOT_CURVE_SCHEMA_VERSION = 2;
+// Current shot-curve schema. V1 is the baseline — no upgrade from prior layouts.
+constexpr uint16_t SHOT_CURVE_SCHEMA_VERSION = 1;
 constexpr uint32_t SHOT_CURVE_INTERVAL_MS = 2000;
 constexpr uint8_t SHOT_CURVE_INTERVAL_S = 2;
 // 0 + 30×2 s covers HARD_MAX_CIRCUIT_CLOSED_MS (60 s).

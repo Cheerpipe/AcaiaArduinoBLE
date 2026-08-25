@@ -7,7 +7,7 @@
 
 namespace shotstopper {
 
-// Full-store scratch for load/migrate/compact. Reuses the shared flash I/O
+// Full-store scratch for load/compact. Reuses the shared flash I/O
 // buffer (see ShotStopperFlashIoScratch.h). Caller must hold lockFlashIo().
 inline ShotLogStore &shotLogScratchStore() {
   static_assert(sizeof(ShotLogStore) <= FLASH_IO_SCRATCH_BYTES,

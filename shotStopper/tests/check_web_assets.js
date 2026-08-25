@@ -372,10 +372,10 @@ const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 51650) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 131500) {
+if (jsBytes > 132500) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 183500) {
+if (htmlBytes + jsBytes > 184500) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -2351,6 +2351,19 @@ if (!/<link\s+rel="stylesheet"\s+href="\/app\.css\?v=/.test(shellHtml) &&
 if (!shellHtml.includes('name="color-scheme" content="light dark"')) {
   throw new Error('Web UI must declare color-scheme so Safari form controls follow dark mode');
 }
+if (!shellHtml.includes('class="themeSel"') ||
+    shellHtml.indexOf('class="themeSel"') > shellHtml.indexOf('id="navToggle"') ||
+    shellHtml.indexOf('class="topBar"') > shellHtml.indexOf('class="themeSel"') ||
+    !css.includes('.themeSel{position:absolute') ||
+    !css.includes('html.theme-light{') ||
+    !css.includes('html.theme-dark{') ||
+    !appJsSource.includes("THEME_KEY='ssTh'") ||
+    !appJsSource.includes("THEME_MODES=['auto','dark','light']") ||
+    !appJsSource.includes('localStorage.getItem(THEME_KEY)') ||
+    !appJsSource.includes("classList.toggle('theme-dark'") ||
+    !appJsSource.includes("classList.toggle('theme-light'")) {
+  throw new Error('Web UI must offer a compact Auto/Dark/Light appearance control');
+}
 if (/<link\s+[^>]*href=["']https?:\/\//i.test(shellHtml) ||
     /cdn\.|unpkg\.|jsdelivr\./i.test(shellHtml)) {
   throw new Error('Web UI must not depend on CDN or third-party assets');
@@ -3264,11 +3277,11 @@ if (generated.secondaryGzip.length > 4096) {
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
 }
-if (generated.cssGzip.length > 6144) {
-  throw new Error('Compressed Web CSS exceeds the 6 KiB gzip budget');
+if (generated.cssGzip.length > 6400) {
+  throw new Error('Compressed Web CSS exceeds the 6.25 KiB gzip budget');
 }
-if (generated.combined > 52224) {
-  throw new Error('Combined Web UI gzip exceeds the 51 KiB flash budget');
+if (generated.combined > 52480) {
+  throw new Error('Combined Web UI gzip exceeds the 51.25 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {

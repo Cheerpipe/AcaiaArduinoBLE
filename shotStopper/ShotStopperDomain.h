@@ -54,17 +54,13 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 14;
+// Current persisted settings schema. V1 is the baseline — no upgrade path
+// from any prior on-disk layout. Bump and add a migration when the blob
+// layout changes (see ShotStopperSettingsMigrate.h).
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 1;
 // Rinse clock default. Detection window default is DEFAULT_RINSE_GESTURE_MS
 // (machine-owned, ShotStopperMachineTypes.h).
 constexpr uint32_t DEFAULT_RINSE_DURATION_MS = 4000;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V13 = 13;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V12 = 12;
-constexpr uint32_t CONFIG_SCHEMA_VERSION_V11 = 11;
-constexpr size_t RUNTIME_CONFIG_V13_SIZE = 248;
-constexpr size_t RUNTIME_CONFIG_V11_SIZE = 244;
-constexpr size_t PERSISTED_SETTINGS_V13_SIZE = 1908;
-constexpr size_t PERSISTED_SETTINGS_V11_SIZE = 1904;
 
 constexpr size_t NTP_SERVER_HOST_CAPACITY = 64;
 constexpr uint32_t NTP_RESYNC_INTERVAL_MS = 3600UL * 1000UL;
@@ -512,8 +508,8 @@ enum class LogLevel : uint8_t {
   NONE = 5
 };
 
-// NVS/UI compose of Machine + Scale + Brew settings. Schema version is
-// unchanged; do not split this blob without a migration.
+// NVS/UI compose of Machine + Scale + Brew settings. Baseline schema is V1;
+// do not change this blob layout without bumping CONFIG_SCHEMA_VERSION.
 // New fields: consider debug export (ShotStopperDebugExport.h).
 struct RuntimeConfig {
   uint32_t revision = 1;
@@ -532,7 +528,6 @@ struct RuntimeConfig {
   bool firstDropBeep = true;
   // Remind the user to release the physical paddle after machine circuit has opened.
   bool paddleReturnReminderBeep = true;
-  // Persisted as of schema v4. Schema-v3 records are migrated with alerts on.
   bool soundAlertsMuted = false;
   uint32_t paddleReturnReminderIntervalMs =
       DEFAULT_PADDLE_RETURN_REMINDER_INTERVAL_MS;
@@ -612,19 +607,18 @@ struct RuntimeConfig {
       static_cast<uint8_t>((SHOT_STOPPER_MAX_SINGLE_PRESS_MS + 50) / 100);
   // Wait after shot end before capturing the post-drip weight.
   uint32_t dripDelayMs = DEFAULT_DRIP_DELAY_MS;
-  // Schema 12: start/stop on press (default) vs release. Reed confirm window.
+  // Start/stop on press (default) vs release. Reed confirm window.
   bool momentaryStartOnPress = true;
   uint8_t reedConfirmTimeoutHundredMs = 0;
-  // Schema 13: switch-only inferred-state sync. Fits former RuntimeConfig
-  // padding (offsets 246–247). 0 timeout = compiled 12 s default.
+  // Switch-only inferred-state sync. 0 timeout = compiled 12 s default.
   bool assumeIdleWhenScaleConnects = true;
   uint8_t shotReactTimeoutS = 0;
-  // Schema 14: firmware rinse on/off. Default off for every machine type.
+  // Firmware rinse on/off. Default off for every machine type.
   bool rinseEnabled = false;
 };
 
 static_assert(sizeof(RuntimeConfig) == 252,
-              "RuntimeConfig NVS size changed; add a schema migration");
+              "RuntimeConfig NVS size changed; bump CONFIG_SCHEMA_VERSION");
 static_assert(offsetof(RuntimeConfig, stopPulseTenMs) == 238,
               "RuntimeConfig stopPulseTenMs offset changed");
 static_assert(offsetof(RuntimeConfig, dripDelayMs) == 240,
