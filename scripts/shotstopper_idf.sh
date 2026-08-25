@@ -237,6 +237,14 @@ ss_idf_verify_firmware() {
   fi
   echo "sdkconfig: CONFIG_AUTOSTART_ARDUINO=y"
 
+  if ! grep -q '^CONFIG_COMPILER_OPTIMIZATION_PERF=y$' "$IDF_SDKCONFIG"; then
+    echo "CONFIG_COMPILER_OPTIMIZATION_PERF is not enabled in $IDF_SDKCONFIG." >&2
+    echo "Delete that sdkconfig (or set Optimize for performance in menuconfig) and rebuild." >&2
+    grep 'COMPILER_OPTIMIZATION' "$IDF_SDKCONFIG" >&2 || true
+    exit 1
+  fi
+  echo "sdkconfig: CONFIG_COMPILER_OPTIMIZATION_PERF=y (-O2)"
+
   if [[ ! -f "$IDF_ELF" ]]; then
     echo "$IDF_ELF does not exist." >&2
     exit 1

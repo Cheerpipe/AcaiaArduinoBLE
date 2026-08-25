@@ -659,8 +659,7 @@ void formatDebugEventMessage(const DebugEvent &event, char *message,
                  static_cast<WebCommandType>(event.argument1)));
     return;
   }
-  strncpy(message, debugCodeName(event.code), capacity - 1);
-  message[capacity - 1] = '\0';
+  copyCString(message, capacity, debugCodeName(event.code));
 }
 
 void writeSerialLogLine(const DebugEvent &event) {
@@ -3049,8 +3048,7 @@ void copyPreferredScaleMac(char *out, size_t capacity) {
     return;
   }
   portENTER_CRITICAL(&scalePreferredMacMux);
-  strncpy(out, scalePreferredMac, capacity - 1);
-  out[capacity - 1] = '\0';
+  copyCString(out, capacity, scalePreferredMac);
   portEXIT_CRITICAL(&scalePreferredMacMux);
 }
 
@@ -3059,8 +3057,7 @@ void copyPreferredScaleName(char *out, size_t capacity) {
     return;
   }
   portENTER_CRITICAL(&scalePreferredMacMux);
-  strncpy(out, scalePreferredName, capacity - 1);
-  out[capacity - 1] = '\0';
+  copyCString(out, capacity, scalePreferredName);
   portEXIT_CRITICAL(&scalePreferredMacMux);
 }
 

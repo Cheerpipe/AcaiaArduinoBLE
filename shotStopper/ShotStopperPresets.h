@@ -46,7 +46,7 @@ inline void fillFactorySinglePreset(ShotPreset &preset) {
   preset.bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
   preset.brewByWeight = true;
   preset.isFactory = true;
-  strncpy(preset.name, "Single", SHOT_PRESET_NAME_CAPACITY - 1);
+  copyCString(preset.name, SHOT_PRESET_NAME_CAPACITY, "Single");
   preset.goalWeightG = FACTORY_SINGLE_GOAL_WEIGHT_G;
   preset.maxRecoveryWeightG = FACTORY_SINGLE_MAX_RECOVERY_WEIGHT_G;
   preset.minBrewTimeMs = FACTORY_SINGLE_MIN_BREW_TIME_MS;
@@ -70,7 +70,7 @@ inline void fillFactoryDoublePreset(ShotPreset &preset) {
   fillDoubleFirmwareDefaults(preset);
   preset.id = FACTORY_PRESET_ID_DOUBLE;
   preset.isFactory = true;
-  strncpy(preset.name, "Double", SHOT_PRESET_NAME_CAPACITY - 1);
+  copyCString(preset.name, SHOT_PRESET_NAME_CAPACITY, "Double");
 }
 
 inline void seedDefaultShotPresetBank(ShotPresetBank &bank) {
@@ -412,7 +412,7 @@ inline bool createUntitledShotPreset(ShotPresetBank &bank, uint8_t &outId) {
   fillDoubleFirmwareDefaults(slot);
   slot.id = id;
   slot.isFactory = false;
-  strncpy(slot.name, "Untitled", SHOT_PRESET_NAME_CAPACITY - 1);
+  copyCString(slot.name, SHOT_PRESET_NAME_CAPACITY, "Untitled");
   if (shotPresetNameExists(bank, slot.name, 0)) {
     for (uint8_t n = 2; n < 100; ++n) {
       snprintf(slot.name, SHOT_PRESET_NAME_CAPACITY, "Untitled %u",
@@ -432,8 +432,7 @@ inline void stripCopySuffix(const char *name, char *base, size_t baseCap) {
   if (baseCap == 0) {
     return;
   }
-  strncpy(base, name != nullptr ? name : "", baseCap - 1);
-  base[baseCap - 1] = '\0';
+  copyCString(base, baseCap, name != nullptr ? name : "");
   char *copyToken = strstr(base, " copy");
   if (copyToken == nullptr) {
     return;
@@ -467,22 +466,23 @@ inline bool makeDuplicatePresetName(const ShotPresetBank &bank,
   char base[SHOT_PRESET_NAME_CAPACITY];
   stripCopySuffix(sourceName, base, sizeof(base));
   if (base[0] == '\0') {
-    strncpy(base, "Preset", sizeof(base) - 1);
+    copyCString(base, sizeof(base), "Preset");
+  }
+  // Longest suffix is " copy 99" (8) + NUL. Cap base so snprintf cannot
+  // truncate under GCC -O2 -Wformat-truncation.
+  constexpr size_t kSuffixRoom = 9;
+  if (outCap <= kSuffixRoom) {
+    return false;
+  }
+  const size_t maxBase = outCap - kSuffixRoom;
+  if (strnlen(base, sizeof(base)) > maxBase) {
+    base[maxBase] = '\0';
   }
   for (uint8_t n = 1; n < 100; ++n) {
     if (n == 1) {
       snprintf(outName, outCap, "%s copy", base);
     } else {
       snprintf(outName, outCap, "%s copy %u", base, static_cast<unsigned>(n));
-    }
-    if (strnlen(outName, outCap) >= outCap) {
-      // Truncate base and retry.
-      const size_t maxBase = outCap > 12 ? outCap - 12 : 4;
-      if (strnlen(base, sizeof(base)) > maxBase) {
-        base[maxBase] = '\0';
-        continue;
-      }
-      return false;
     }
     if (!shotPresetNameExists(bank, outName, 0)) {
       return true;
@@ -532,7 +532,7 @@ inline bool renameShotPreset(ShotPresetBank &bank, uint8_t id,
     return false;
   }
   memset(preset->name, 0, sizeof(preset->name));
-  strncpy(preset->name, newName, SHOT_PRESET_NAME_CAPACITY - 1);
+  copyCString(preset->name, SHOT_PRESET_NAME_CAPACITY, newName);
   return true;
 }
 

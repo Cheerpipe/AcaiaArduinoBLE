@@ -25,8 +25,11 @@ inline void copyCString(char *destination, size_t capacity, const char *source) 
     destination[0] = '\0';
     return;
   }
-  strncpy(destination, source, capacity - 1);
-  destination[capacity - 1] = '\0';
+  // Bound the copy and always NUL-terminate. Prefer memcpy over strncpy so
+  // GCC -O2 does not treat intentional truncation as -Wstringop-truncation.
+  const size_t n = strnlen(source, capacity - 1);
+  memcpy(destination, source, n);
+  destination[n] = '\0';
 }
 
 constexpr size_t PREFERRED_SCALE_MAC_CAPACITY = 18;

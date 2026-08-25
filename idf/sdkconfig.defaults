@@ -20,6 +20,12 @@ CONFIG_SHOT_STOPPER_ENABLE_BUZZER=1
 # Start already at 80 so cpu_start and setup agree.
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_80=y
 
+# Prefer -O2 over IDF's default -Og so the same work finishes sooner at 80 MHz
+# (lower CPU duty). Flash is plentiful on n16r8/n8r4; size is not the goal.
+# Existing build-idf/<arch>/sdkconfig keeps the old choice until deleted or
+# menuconfig — defaults only apply when that file is created.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
 # PSRAM heap + BSS in external RAM. Arduino-ESP32 ships this last option off.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_USE_MALLOC=y

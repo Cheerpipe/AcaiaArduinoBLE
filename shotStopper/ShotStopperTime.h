@@ -50,8 +50,7 @@ inline void resolveNtpServerHost(const RuntimeConfig &config,
   candidates[count++] = "pool.ntp.org";
   candidates[count++] = "time.google.com";
   const char *selected = candidates[failoverIndex % count];
-  strncpy(output, selected, NTP_SERVER_HOST_CAPACITY - 1);
-  output[NTP_SERVER_HOST_CAPACITY - 1] = '\0';
+  copyCString(output, NTP_SERVER_HOST_CAPACITY, selected);
 }
 
 inline uint32_t ntpRetryDelayMs(uint8_t /*consecutiveFailures*/) {
@@ -137,8 +136,7 @@ class WallClock {
 #endif
     state_ = TimeSyncState::SYNCING;
     if (server != nullptr) {
-      strncpy(activeServer_, server, sizeof(activeServer_) - 1);
-      activeServer_[sizeof(activeServer_) - 1] = '\0';
+      copyCString(activeServer_, sizeof(activeServer_), server);
     }
     nextRetryAtMs_ = 0;
 #if !defined(SHOT_STOPPER_HOST_TEST) && \
@@ -230,8 +228,7 @@ class WallClock {
     if (nextRetryAtMs_ != 0) {
       output.nextRetryInMs = monotonicRemainingMs(nextRetryAtMs_, monotonicMs);
     }
-    strncpy(output.activeServer, activeServer_, sizeof(output.activeServer) - 1);
-    output.activeServer[sizeof(output.activeServer) - 1] = '\0';
+    copyCString(output.activeServer, sizeof(output.activeServer), activeServer_);
 #if !defined(SHOT_STOPPER_HOST_TEST) && \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
     portEXIT_CRITICAL(&mux_);

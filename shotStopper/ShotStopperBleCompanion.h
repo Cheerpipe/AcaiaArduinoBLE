@@ -389,8 +389,7 @@ class ShotStopperBleCompanion {
         } else {
           BleCompanionRequest request;
           request.type = BleCompanionRequestType::SAVE_WIFI;
-          strncpy(request.ssid, wifiStageSsid_, sizeof(request.ssid) - 1);
-          request.ssid[sizeof(request.ssid) - 1] = '\0';
+          copyCString(request.ssid, sizeof(request.ssid), wifiStageSsid_);
           request.openNetwork = passwordLength == 0;
           if (!request.openNetwork) {
             memcpy(request.password, password, passwordLength);

@@ -2397,9 +2397,8 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
       const bool reusePassword = shouldReuseSavedWifiCredentials(
           command.ssid, command.password, command.openNetwork,
           next.staConfigured, next.staSsid, next.staOpen);
-      strncpy(password, reusePassword ? next.staPassword : command.password,
-              sizeof(password) - 1);
-      password[sizeof(password) - 1] = '\0';
+      copyCString(password, sizeof(password),
+                  reusePassword ? next.staPassword : command.password);
       if (!validWifiSsid(command.ssid) ||
           !validWifiPassword(password, command.openNetwork) ||
           !validStaAddressConfig(command.staIpMode, command.staIp,

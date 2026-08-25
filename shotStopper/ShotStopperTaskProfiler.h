@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "ShotStopperScaleTypes.h"
+
 #if defined(ARDUINO) && !defined(SHOT_STOPPER_HOST_TEST)
 #include "ShotStopperPsram.h"
 
@@ -218,8 +220,7 @@ class TaskProfiler {
     tracked.stackMinWords = static_cast<uint32_t>(task.usStackHighWaterMark);
     tracked.core = coreFor_(task.xCoreID);
     if (task.pcTaskName != nullptr) {
-      strncpy(tracked.name, task.pcTaskName, sizeof(tracked.name) - 1);
-      tracked.name[sizeof(tracked.name) - 1] = '\0';
+      copyCString(tracked.name, sizeof(tracked.name), task.pcTaskName);
     }
     tracked.idle = idleTaskName_(tracked.name);
   }
@@ -323,8 +324,7 @@ class TaskProfiler {
         continue;
       }
       TaskProfilerRow row;
-      strncpy(row.name, tracked.name, sizeof(row.name) - 1);
-      row.name[sizeof(row.name) - 1] = '\0';
+      copyCString(row.name, sizeof(row.name), tracked.name);
       row.taskNumber = tracked.taskNumber;
       row.core = tracked.core;
       row.stackMinWords = tracked.stackMinWords;
