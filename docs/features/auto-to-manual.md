@@ -59,4 +59,4 @@ start, machine circuit opens. If the scale had come back at 20 s with three good
 weight stop would have resumed and the deadline would have been cleared.
 
 Related: [Brew by weight](brew-by-weight.md), [Alerts](../alerts.md)
-(ATM / manual-no-scale triple beeps).
+(ATM / manual-no-scale).

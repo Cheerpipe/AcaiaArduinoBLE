@@ -43,7 +43,7 @@ They are **not** editable from the Web UI.
 | Reed (momentary+reed builds) | **4** | Active **LOW** (internal pull-up; ON = GPIO LOW). Compile `SHOT_STOPPER_MACHINE_TYPE=2`. Override with `-DSHOT_STOPPER_REED_GPIO`. Must stay distinct from activator, relay, LED, buzzer, and safety GPIOs. |
 | Onboard relay coil | **2** | Active **HIGH** (HIGH energizes the coil and closes NO) |
 | Scale-connected LED | **1** | Active HIGH while a BLE scale is connected (switchable in Alerts) |
-| Optional buzzer | **14** | Compile with `SHOT_STOPPER_ENABLE_BUZZER=1` (passive piezo, RTTTL on the same pin) or `=2` (active on/off beep) |
+| Optional buzzer | **14** | Compile with `SHOT_STOPPER_ENABLE_BUZZER=1` (passive piezo, RTTTL). `=0` omits the local buzzer. |
 
 Optional external K2 safety (both pins or neither; no defaults, because they
 depend on a reviewed board):
@@ -90,9 +90,9 @@ heartbeat, and feedback.
 
 ## Local buzzer
 
-Wire between `SHOT_STOPPER_BUZZER_GPIO` (default 14) and GND: marked **+** to
-the GPIO. Identify the part with 3.3 V DC on `+` vs GND: a constant tone is
-**active** (`=2`); a click or silence is **passive** (`=1`). See
+Wire a **passive** piezo between `SHOT_STOPPER_BUZZER_GPIO` (default 14) and
+GND: marked **+** to the GPIO. The firmware drives the pin with PWM (RTTTL
+melodies). `SHOT_STOPPER_ENABLE_BUZZER=0` omits the driver. See
 [Alerts](alerts.md) and [Build environment](BUILD.md).
 
 Related: [Disclaimer](../README.md#disclaimer), [FAQ](FAQ.md).

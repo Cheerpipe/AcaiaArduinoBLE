@@ -523,7 +523,7 @@ Not a C++ enum; latches `noScaleShotGuardArmed` / `Idle`.
 | State (UI) | Meaning |
 | --- | --- |
 | Off | Setting disabled or BBW off. Guard does nothing. |
-| Armed | Next long activator ON is blocked (machine circuit stays open, triple beep). |
+| Armed | Next long activator ON is blocked (machine circuit stays open, local buzzer cue). |
 | Idle | Guard consumed (blocked start, paddle rinse, or finished non-rinse shot). Re-arms on scale connect, boot, or **Last shot cooldown**. |
 
 ### Events

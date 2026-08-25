@@ -5,8 +5,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "ShotStopperBuzzerActive.h"
-#include "ShotStopperBuzzerRtttl.h"
+#include "ShotStopperBuzzerPatterns.h"
 
 namespace shotstopper {
 

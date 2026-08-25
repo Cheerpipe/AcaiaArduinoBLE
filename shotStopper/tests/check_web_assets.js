@@ -48,7 +48,7 @@ const domain = [
 ].join('\n');
 const serialCli = fs.readFileSync(path.join(sketchDir, 'ShotStopperSerialCli.h'), 'utf8');
 const buzzer = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzer.h'), 'utf8');
-const buzzerActive = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzerActive.h'), 'utf8');
+const buzzerPatterns = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzerPatterns.h'), 'utf8');
 const buzzerPassive = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzerPassive.h'), 'utf8');
 const buzzerRtttl = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzerRtttl.h'), 'utf8');
 const alertChannel = fs.readFileSync(path.join(sketchDir, 'ShotStopperAlertChannel.h'), 'utf8');
@@ -281,7 +281,7 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     html.includes('id="ntpServerCustom" type="number"') ||
     !html.includes('id="staSsid" type="text" maxlength="32" autocomplete="off"') ||
     !html.includes('id="ntpServerCustom" type="text" maxlength="63" placeholder="e.g. ntp.example.com" autocomplete="off"') ||
-    !html.includes('> Scale lost<small class="fieldHint">Echo inverted when the scale disconnects') ||
+    !html.includes('> Scale lost<small class="fieldHint">Local buzzer when the scale disconnects') ||
     html.includes('Scale lost (BBW)') ||
     !html.includes('option value="fast" selected') ||
     !html.includes('option value="rapid">Rapid') ||
@@ -502,19 +502,17 @@ if (!ui.includes('bleCompanionEnabled') ||
   throw new Error('BLE Companion Admin controls must be wired end-to-end');
 }
 if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0') ||
-    !domain.includes('BUZZER_ACTIVE_DRIVE = SHOT_STOPPER_ENABLE_BUZZER == 2') ||
-    !domain.includes('SHOT_STOPPER_ENABLE_BUZZER must be 0, 1, or 2') ||
+    !domain.includes('SHOT_STOPPER_ENABLE_BUZZER must be 0 (off) or 1 (passive RTTTL)') ||
     !domain.includes('compiledBuzzerModeId') ||
     !domain.includes('DEFAULT_ALERT_OUTPUT_CHANNEL') ||
     !domain.includes(
         'BUZZER_SUPPORT_ENABLED ? AlertOutputChannel::BUZZER_ONLY') ||
     !domain.includes('static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL)') ||
-    !buzzer.includes('BUZZER_ACTIVE_DRIVE') ||
     !buzzer.includes('requestTone') ||
     !buzzerPassive.includes('ledcAttach') ||
     !buzzerPassive.includes('parseRtttl') ||
-    !buzzerActive.includes('buzzerActiveSetTone') ||
-    !buzzerActive.includes('BUZZER_ECHO_INVERTED_NOTES') ||
+    !buzzerPatterns.includes('BUZZER_ECHO_INVERTED_NOTES') ||
+    buzzerPatterns.includes('buzzerActiveSetTone') ||
     !buzzerRtttl.includes('RTTTL_TARE') ||
     !buzzerRtttl.includes('RTTTL_START_TIMER') ||
     !buzzerRtttl.includes('RTTTL_STOP_TIMER') ||
@@ -524,8 +522,13 @@ if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0')
     !buzzerRtttl.includes('RTTTL_SHOT_END') ||
     !buzzerRtttl.includes('RTTTL_SCALE_CONNECTED') ||
     !buzzerRtttl.includes('RTTTL_NO_CUP') ||
-    !buzzerRtttl.includes('RTTTL_ABNORMAL_FAST') ||
-    !buzzerRtttl.includes('RTTTL_ABNORMAL') ||
+    !buzzerRtttl.includes('RTTTL_EXTENDED_PULSE_SLOW') ||
+    !buzzerRtttl.includes('RTTTL_EXTENDED_PULSE_MEDIUM') ||
+    !buzzerRtttl.includes('RTTTL_EXTENDED_PULSE_FAST') ||
+    !buzzerRtttl.includes('RTTTL_EXTENDED_PULSE_RAPID') ||
+    buzzerRtttl.includes('ShotStopperDomain.h') ||
+    buzzerRtttl.includes('rtttlForExtendedPulseRate') ||
+    buzzerPassive.includes('ShotStopperBuzzerRtttl.h') ||
     !buzzerRtttl.includes('RTTTL_SCALE_LOST') ||
     !buzzerRtttl.includes('RTTTL_GUARD_STOP') ||
     !buzzerRtttl.includes('RTTTL_NO_SCALE') ||
@@ -539,19 +542,23 @@ if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0')
     !alertChannel.includes('AlertKind::CommandFallback') ||
     !alertTone.includes('deriveBuzzerTone') ||
     !alertTone.includes('buzzerCueForAlertEvent') ||
+    !alertTone.includes('rtttlForExtendedPulseRate') ||
+    alertTone.includes('buzzerPatternForCue') ||
     !buzzer.includes('startRtttl') ||
-    !buzzer.includes('!BUZZER_ACTIVE_DRIVE') ||
+    buzzer.includes('BUZZER_ACTIVE_DRIVE') ||
     !buzzer.includes('memcpy(rtttlBuf') ||
+    !buzzer.includes('stopExtendedPulse') ||
     !domain.includes('ECHO_INVERTED') ||
     !firmware.includes('startExtendedPulseTrain') ||
     !firmware.includes('startPulseTrain') ||
     !firmware.includes('stopPulseTrains') ||
     !firmware.includes('serviceExtendedPulseAlert') ||
-    !firmware.includes('buzzerPatternForExtendedPulseRate') ||
+    firmwareCore.includes('rtttlForExtendedPulseRate') ||
+    firmwareCore.includes('BuzzerCue::ABNORMAL') ||
     !domain.includes('DEFAULT_EXTENDED_PULSE_RATE') ||
     !firmware.includes('localBuzzer.request(command.buzzerPattern)') ||
-    !kconfig.includes('1=passive RTTTL, 2=active beep')) {
-  throw new Error('Local buzzer must support compile-time passive (1) and active (2) drives');
+    !kconfig.includes('0=off, 1=passive RTTTL')) {
+  throw new Error('Local buzzer must be compile-time off (0) or passive RTTTL (1)');
 }
 if (ui.includes('authenticatedOnly') ||
     ui.includes("s.setItem('shotStopperToken'") ||
@@ -2883,8 +2890,8 @@ if (!safeBeep.includes('return setBeepLevel(1)') ||
 if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
     !firmware.includes('emitAlert(AlertEvent::SCALE_CONNECTED') ||
     !firmware.includes('emitAlert(AlertEvent::SCALE_LOST') ||
-    !alertTone.includes('BuzzerPattern::ECHO') ||
-    !alertTone.includes('BuzzerPattern::ECHO_INVERTED') ||
+    !alertTone.includes('BuzzerCue::SCALE_CONNECTED') ||
+    !alertTone.includes('BuzzerCue::SCALE_LOST') ||
     !firmware.includes('requestScaleBrewBeep(') ||
     !firmware.includes('cancelScaleBrewBeep(session.id)') ||
     !firmware.includes('onFirstDropsDetected') ||

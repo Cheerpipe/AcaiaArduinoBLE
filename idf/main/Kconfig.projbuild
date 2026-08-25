@@ -22,12 +22,12 @@ menu "Advanced Shot Stopper"
             Command-line -DSHOT_STOPPER_MACHINE_TYPE=… still overrides.
 
     config SHOT_STOPPER_ENABLE_BUZZER
-        int "Buzzer mode (0=off, 1=passive RTTTL, 2=active beep)"
-        range 0 2
-        default 2
+        int "Buzzer mode (0=off, 1=passive RTTTL)"
+        range 0 1
+        default 1
         help
             Maps to the SHOT_STOPPER_ENABLE_BUZZER compile-time macro.
-            0=off, 1=passive piezo (PWM/RTTTL melodies), 2=active buzzer (GPIO on/off).
+            0=off, 1=passive piezo (PWM/RTTTL melodies).
             Command-line -DSHOT_STOPPER_ENABLE_BUZZER=… still overrides.
 
 endmenu

@@ -2,8 +2,7 @@
 
 #include <stdint.h>
 
-// Passive-piezo RTTTL catalog. Edit these strings to change melodies.
-// Order matches operational then recovery cues. Active drive ignores them.
+// Melody catalog only. Rate → string mapping is in ShotStopperAlertTone.h.
 
 namespace shotstopper {
 
@@ -48,11 +47,16 @@ constexpr const char *RTTTL_SCALE_CONNECTED =
     "scale_connected:d=8,o=5,b=150:c,e,g,c6";
 // Arranque bloqueado por taza ausente
 constexpr const char *RTTTL_NO_CUP = "no_cup:d=8,o=4,b=180:g,16p,g";
-// Pulso de shot extendido (Fast)
-constexpr const char *RTTTL_ABNORMAL_FAST =
-    "abnormal_fast:d=32,o=4,b=210:b,16p";
-// Pulso de shot extendido (Slow)
-constexpr const char *RTTTL_ABNORMAL = "abnormal:d=32,o=4,b=150:b,16p";
+// Extended-shot pulses: B4 (same pitch as the former ABNORMAL cues) with
+// on/gap close to the debug 2/3/4/5 Hz trains (20 ms on, b=375 → 32nd=20 ms).
+constexpr const char *RTTTL_EXTENDED_PULSE_SLOW =
+    "abnormal_slow:d=32,o=4,b=375:b,2p,4p";
+constexpr const char *RTTTL_EXTENDED_PULSE_MEDIUM =
+    "abnormal_medium:d=32,o=4,b=375:b,2p";
+constexpr const char *RTTTL_EXTENDED_PULSE_FAST =
+    "abnormal_fast:d=32,o=4,b=375:b,3p,32p";
+constexpr const char *RTTTL_EXTENDED_PULSE_RAPID =
+    "abnormal_rapid:d=32,o=4,b=375:b,4p,32p";
 // Balanza perdida / desconectada
 constexpr const char *RTTTL_SCALE_LOST = "scale_lost:d=8,o=5,b=150:c6,g,e,c";
 // Fin por guarda A→M
@@ -94,9 +98,8 @@ inline const char *rtttlForCue(BuzzerCue cue) {
     case BuzzerCue::NO_CUP:
       return RTTTL_NO_CUP;
     case BuzzerCue::ABNORMAL_FAST:
-      return RTTTL_ABNORMAL_FAST;
     case BuzzerCue::ABNORMAL:
-      return RTTTL_ABNORMAL;
+      break;
     case BuzzerCue::SCALE_LOST:
       return RTTTL_SCALE_LOST;
     case BuzzerCue::GUARD_STOP:
@@ -119,6 +122,11 @@ inline const char *rtttlForCue(BuzzerCue cue) {
 
 inline bool buzzerCueIsLooping(BuzzerCue cue) {
   return cue == BuzzerCue::ABNORMAL_FAST || cue == BuzzerCue::ABNORMAL;
+}
+
+inline bool buzzerCueIsHighPriority(BuzzerCue cue) {
+  return cue == BuzzerCue::NO_SCALE || cue == BuzzerCue::GUARD_STOP ||
+         cue == BuzzerCue::SCALE_CONNECTED || cue == BuzzerCue::SCALE_LOST;
 }
 
 }  // namespace shotstopper

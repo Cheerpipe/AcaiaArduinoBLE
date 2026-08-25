@@ -18,7 +18,7 @@ ON→OFF is still a rinse: machine circuit closes and the guard goes
 **Idle**. Momentary builds have no firmware rinse: while Armed, the switch
 is not forwarded to the relay at all; after Idle, the next press mirrors
 1:1 as a manual no-scale shot (or a machine-native long hold). The
-no-scale triple beep still plays on activator ON (brew or rinse) whenever
+no-scale buzzer cue still plays on activator ON (brew or rinse) whenever
 BBW is on and the scale is missing.
 
 The next start after a blocked shot or an Armed rinse runs as a **manual
@@ -37,7 +37,7 @@ Status shows `Off` / `Armed` / `Idle`.
 ## Example
 
 BBW is on, the Bookoo is still in the drawer. A long paddle or switch ON
-plays the triple beep and leaves machine circuit open. On paddle, a short
+plays the local buzzer cue and leaves machine circuit open. On paddle, a short
 ON→OFF still rinses. After that, the next long start is a manual shot
 without a scale. When the scale connects, the guard re-arms immediately.
 

@@ -130,16 +130,11 @@ static_assert(SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL == 0 ||
 #endif
 
 constexpr bool BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0;
-constexpr bool BUZZER_ACTIVE_DRIVE = SHOT_STOPPER_ENABLE_BUZZER == 2;
 static_assert(SHOT_STOPPER_ENABLE_BUZZER == 0 ||
-                  SHOT_STOPPER_ENABLE_BUZZER == 1 ||
-                  SHOT_STOPPER_ENABLE_BUZZER == 2,
-              "SHOT_STOPPER_ENABLE_BUZZER must be 0, 1, or 2");
+                  SHOT_STOPPER_ENABLE_BUZZER == 1,
+              "SHOT_STOPPER_ENABLE_BUZZER must be 0 (off) or 1 (passive RTTTL)");
 
 inline const char *compiledBuzzerModeId() {
-  if (SHOT_STOPPER_ENABLE_BUZZER == 2) {
-    return "active";
-  }
   if (SHOT_STOPPER_ENABLE_BUZZER == 1) {
     return "passive";
   }
@@ -523,7 +518,7 @@ struct RuntimeConfig {
   uint32_t paddleReturnReminderMaxDurationMs =
       DEFAULT_PADDLE_RETURN_REMINDER_MAX_DURATION_MS;
   uint8_t paddleMode = static_cast<uint8_t>(PaddleMode::NATURAL);
-  // Local buzzer alerts (active when SHOT_STOPPER_ENABLE_BUZZER is 1 or 2).
+  // Local buzzer alerts (active when SHOT_STOPPER_ENABLE_BUZZER is 1).
   bool buzzerScaleLostBeep = true;
   bool buzzerAutoToManualGuardEndBeep = true;
   bool buzzerManualNoScaleBeep = true;

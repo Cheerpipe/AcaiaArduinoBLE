@@ -21,7 +21,7 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 | **The scale disconnected mid-shot. What happens?** | Weight stop pauses; reconnect continues for the whole cycle. If three coherent samples return, BBW resumes. If [A→M](features/auto-to-manual.md) is on, machine circuit may still open on the deadline. If A→M is off, the shot runs until paddle OFF or the 60 s wall. |
 | **I turned Brew by weight off. Why no weight stop?** | Tare and the timer remain. Weight stop, retare, BBW protection, Max BBW time, and offset learning do not. Cut is paddle/switch, the 60 s firmware cap, or remote **Stop**. Fast, Slow, A→M, and No-scale BBW become read-only on Home. |
 | **Home Brew by weight is OFF but Settings is ON.** | Both can be right. **Home** is the live session (Manual) and is what the next shot uses. **Settings → Brew** is the saved recipe and does not flip off when you turn Home off. Turn Home ON to resume weight stop without changing the recipe. |
-| **BBW is on, scale is off, a long paddle does nothing (triple beep, machine circuit open).** | [No-scale BBW](settings/no-scale-bbw.md) (*Avoid BBW shot without scale*, on by default). A long paddle does not close the machine circuit. A short ON→OFF still rinses. The next start is a manual no-scale shot. |
+| **BBW is on, scale is off, a long paddle does nothing (local buzzer cue, machine circuit open).** | [No-scale BBW](settings/no-scale-bbw.md) (*Avoid BBW shot without scale*, on by default). A long paddle does not close the machine circuit. A short ON→OFF still rinses. The next start is a manual no-scale shot. |
 
 ## Network and access
 

@@ -120,17 +120,16 @@ and then remembered in `.shotstopper`.
 `build-idf/<arch>/shotstopper.bin`.
 
 Extra compile defines go in `--flags`. The prompt’s suggested development
-flags enable remote machine control and an active buzzer. Enter accepts them. Examples:
+flags enable remote machine control and a passive buzzer. Enter accepts them. Examples:
 
 ```sh
 ./scripts/build-idf --arch n16r8 \
-  --flags "-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1 -DSHOT_STOPPER_ENABLE_BUZZER=2"
+  --flags "-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1 -DSHOT_STOPPER_ENABLE_BUZZER=1"
 ```
 
 - `SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1` — virtual paddle and remote rinse on the
   Web UI (trusted network only). **Stop** is always available when signed in.
-- `SHOT_STOPPER_ENABLE_BUZZER=1` — passive piezo (PWM). `=2` — active buzzer
-  (GPIO HIGH/LOW). `=0` or omit — no local buzzer.
+- `SHOT_STOPPER_ENABLE_BUZZER=1` — passive piezo (PWM/RTTTL). `=0` or omit — no local buzzer.
 
 N16R8 uses a 16 MB OTA table (about **3 MB** app slot × 2). N8R4 uses the 8 MB
 table (about **3.2 MB** × 2). A 4 MB default table cannot hold this firmware.

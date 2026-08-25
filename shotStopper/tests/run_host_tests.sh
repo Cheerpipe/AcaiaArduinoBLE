@@ -15,7 +15,6 @@ external_safety_sanitized=${TMPDIR:-/tmp}/shot_stopper_external_safety_host_test
 remote_policy_binary=${TMPDIR:-/tmp}/shot_stopper_remote_policy_host_test
 ota_image_binary=${TMPDIR:-/tmp}/shot_stopper_ota_image_host_test
 ota_image_sanitized=${TMPDIR:-/tmp}/shot_stopper_ota_image_host_test_sanitized
-active_buzzer_binary=${TMPDIR:-/tmp}/shot_stopper_host_test_active_buzzer
 firmware_dir="$test_dir/.."
 firmware_file="$firmware_dir/shotStopper.cpp"
 ble_companion_file="$firmware_dir/ShotStopperBleCompanion.h"
@@ -50,7 +49,7 @@ scan_firmware_sources() {
     "$firmware_dir/ShotStopperAlertChannel.h" \
     "$firmware_dir/ShotStopperAlertTone.h" \
     "$firmware_dir/ShotStopperBuzzer.h" \
-    "$firmware_dir/ShotStopperBuzzerActive.h" \
+    "$firmware_dir/ShotStopperBuzzerPatterns.h" \
     "$firmware_dir/ShotStopperBuzzerPassive.h" \
     "$firmware_dir/ShotStopperBuzzerRtttl.h"
 }
@@ -82,13 +81,6 @@ done
 
 ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
   "$sanitized_binary"
-
-"$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
-  -DSHOT_STOPPER_ENABLE_BUZZER=2 \
-  "$test_dir/shot_stopper_host_test.cpp" \
-  -o "$active_buzzer_binary"
-"$active_buzzer_binary"
-echo "Active buzzer drive: enabled"
 
 "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
   "$test_dir/persistence_host_test.cpp" \

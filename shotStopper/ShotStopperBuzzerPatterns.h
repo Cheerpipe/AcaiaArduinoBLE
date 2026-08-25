@@ -153,13 +153,4 @@ inline const BuzzerNote *buzzerSequenceNotes(BuzzerPattern pattern,
   }
 }
 
-inline void buzzerActiveBegin(uint8_t pin) {
-  pinMode(pin, OUTPUT);
-  digitalWrite(pin, LOW);
-}
-
-inline void buzzerActiveSetTone(uint8_t pin, bool on) {
-  digitalWrite(pin, on ? HIGH : LOW);
-}
-
 }  // namespace shotstopper

@@ -10,47 +10,26 @@ namespace shotstopper {
 
 struct BuzzerToneCommand {
   BuzzerCue cue = BuzzerCue::NONE;
-  BuzzerPattern pattern = BuzzerPattern::NONE;
+  uint8_t pulseRate = 0;
   bool looping = false;
   uint32_t durationMs = 0;
   bool valid = false;
 };
 
-inline BuzzerPattern buzzerPatternForCue(BuzzerCue cue) {
-  switch (cue) {
-    case BuzzerCue::TARE:
-    case BuzzerCue::START_TIMER:
-    case BuzzerCue::STOP_TIMER:
-    case BuzzerCue::TARE_START:
-    case BuzzerCue::FIRST_DROP:
-    case BuzzerCue::PADDLE_REMINDER:
-      return BuzzerPattern::SINGLE;
-    case BuzzerCue::SHOT_END:
-      return BuzzerPattern::LONG;
-    case BuzzerCue::SCALE_CONNECTED:
-      return BuzzerPattern::ECHO;
-    case BuzzerCue::NO_CUP:
-      return BuzzerPattern::DOUBLE;
-    case BuzzerCue::ABNORMAL_FAST:
-    case BuzzerCue::ABNORMAL:
-      return BuzzerPattern::PULSE_TRAIN;
-    case BuzzerCue::SCALE_LOST:
-      return BuzzerPattern::ECHO_INVERTED;
-    case BuzzerCue::GUARD_STOP:
-    case BuzzerCue::NO_SCALE:
-      return BuzzerPattern::TRIPLE;
-    case BuzzerCue::RECOVERY_START:
-      return BuzzerPattern::RECOVERY_LONG;
-    case BuzzerCue::NETWORK_RESET_OK:
-      return BuzzerPattern::RECOVERY_NETWORK_OK;
-    case BuzzerCue::FACTORY_RESET_OK:
-      return BuzzerPattern::RECOVERY_FACTORY_OK;
-    case BuzzerCue::RECOVERY_ERROR:
-      return BuzzerPattern::RECOVERY_ERROR;
-    case BuzzerCue::NONE:
+inline const char *rtttlForExtendedPulseRate(uint8_t rate) {
+  switch (static_cast<ExtendedPulseRate>(rate)) {
+    case ExtendedPulseRate::SLOW:
+      return RTTTL_EXTENDED_PULSE_SLOW;
+    case ExtendedPulseRate::MEDIUM:
+      return RTTTL_EXTENDED_PULSE_MEDIUM;
+    case ExtendedPulseRate::FAST:
+      return RTTTL_EXTENDED_PULSE_FAST;
+    case ExtendedPulseRate::RAPID:
+      return RTTTL_EXTENDED_PULSE_RAPID;
+    case ExtendedPulseRate::OFF:
       break;
   }
-  return BuzzerPattern::NONE;
+  return nullptr;
 }
 
 inline BuzzerCue buzzerCueForAlertEvent(AlertEvent event, bool slowExtended) {
@@ -85,8 +64,8 @@ inline BuzzerCue buzzerCueForAlertEvent(AlertEvent event, bool slowExtended) {
   return BuzzerCue::NONE;
 }
 
-// Stage 4: event → active pattern or passive RTTTL cue. Disabled extended
-// pulse yields an invalid command (silent).
+// Stage 4: event → RTTTL cue. Disabled extended pulse yields an invalid
+// command (silent).
 inline BuzzerToneCommand deriveBuzzerTone(AlertEvent event, bool slowExtended,
                                          uint8_t extendedPulseRate,
                                          uint8_t slowExtendedPulseRate) {
@@ -98,26 +77,25 @@ inline BuzzerToneCommand deriveBuzzerTone(AlertEvent event, bool slowExtended,
   if (event == AlertEvent::EXTENDED_PULSE) {
     const uint8_t rate =
         slowExtended ? slowExtendedPulseRate : extendedPulseRate;
-    cmd.pattern = buzzerPatternForExtendedPulseRate(rate);
-    if (cmd.pattern == BuzzerPattern::NONE) {
+    if (rtttlForExtendedPulseRate(rate) == nullptr) {
       cmd.cue = BuzzerCue::NONE;
       return cmd;
     }
+    cmd.pulseRate = rate;
     cmd.looping = true;
     cmd.valid = true;
     return cmd;
   }
-  cmd.pattern = buzzerPatternForCue(cmd.cue);
   cmd.looping = buzzerCueIsLooping(cmd.cue);
-  cmd.valid = cmd.pattern != BuzzerPattern::NONE;
+  cmd.valid = rtttlForCue(cmd.cue) != nullptr;
   return cmd;
 }
 
 inline BuzzerToneCommand deriveRecoveryTone(BuzzerCue cue) {
   BuzzerToneCommand cmd;
   cmd.cue = cue;
-  cmd.pattern = buzzerPatternForCue(cue);
-  cmd.valid = cmd.pattern != BuzzerPattern::NONE;
+  cmd.looping = buzzerCueIsLooping(cue);
+  cmd.valid = rtttlForCue(cue) != nullptr;
   return cmd;
 }
 

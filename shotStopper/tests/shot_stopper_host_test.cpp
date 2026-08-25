@@ -2682,7 +2682,7 @@ void w51_local_buzzer_echo_inverted_on_scale_lost_during_bbw() {
   const uint32_t before = localBuzzer.acceptedRequests;
   setScaleConnected(false);
   CHECK(localBuzzer.acceptedRequests == before + 1);
-  CHECK(localBuzzer.active == BuzzerPattern::ECHO_INVERTED);
+  CHECK(localBuzzer.activeCue == BuzzerCue::SCALE_LOST);
   loop();
   CHECK(session.weightControlState == WeightControlState::SUSPENDED);
   CHECK(localBuzzer.acceptedRequests == before + 1);
@@ -2695,7 +2695,7 @@ void w51b_scale_lost_echo_inverted_when_idle() {
   const uint32_t before = localBuzzer.acceptedRequests;
   setScaleConnected(false);
   CHECK(localBuzzer.acceptedRequests == before + 1);
-  CHECK(localBuzzer.active == BuzzerPattern::ECHO_INVERTED);
+  CHECK(localBuzzer.activeCue == BuzzerCue::SCALE_LOST);
 }
 
 void w51c_scale_lost_silent_when_flag_off() {
@@ -2989,7 +2989,7 @@ void w56_atm_beep_queued_when_scale_lost_after_deadline() {
   setScaleConnected(false);
   loop();
   CHECK(session.endReason == EndReason::AUTO_TO_MANUAL_GUARD);
-  // Scale-lost Echo inverted is preempted by machine circuit completion LONG; ATM TRIPLE
+  // Scale-lost RTTTL is preempted by machine circuit completion; ATM cue
   // queues behind it.
   CHECK(localBuzzer.acceptedRequests == before + 3);
   checkLocalCompletionTone();
@@ -3076,12 +3076,8 @@ void drainLocalBuzzer() {
 }
 
 void checkLocalCompletionTone() {
-  CHECK(localBuzzer.active == BuzzerPattern::LONG);
-#if SHOT_STOPPER_ENABLE_BUZZER == 2
-  CHECK(localBuzzer.onMs == BUZZER_LONG_ON_MS);
-#else
   CHECK(localBuzzer.activeCue == BuzzerCue::SHOT_END);
-#endif
+  CHECK(localBuzzer.rtttlPlayback);
 }
 
 void w59_local_buzzer_plays_short_long_and_double_patterns() {
@@ -3152,9 +3148,13 @@ void w83_web_buzzer_test_pulse_uses_same_train_for_3s() {
 void w84_pulse_train_yields_to_triple() {
   resetHarness(false, false);
   CHECK(startExtendedPulseTrain(0));
-  CHECK(localBuzzer.active == BuzzerPattern::PULSE_4HZ);
+  CHECK(localBuzzer.activeCue == BuzzerCue::ABNORMAL_FAST);
+  CHECK(localBuzzer.activePulseRate ==
+        static_cast<uint8_t>(ExtendedPulseRate::FAST));
+  CHECK(localBuzzer.rtttlPlayback);
   CHECK(localBuzzer.request(BuzzerPattern::TRIPLE));
   CHECK(localBuzzer.active == BuzzerPattern::TRIPLE);
+  CHECK(localBuzzer.activeCue == BuzzerCue::NONE);
   CHECK(!buzzerPatternIsPulseTrain(localBuzzer.pending));
   drainLocalBuzzer();
 }
@@ -3280,20 +3280,20 @@ void w93_scale_connected_echo_on_rising_edge() {
   const uint32_t before = localBuzzer.acceptedRequests;
   setScaleConnected(true);
   CHECK(localBuzzer.acceptedRequests == before + 1);
-  CHECK(localBuzzer.active == BuzzerPattern::ECHO);
-  CHECK(localBuzzer.beepCount == 4);
-#if SHOT_STOPPER_ENABLE_BUZZER == 2
-  CHECK(localBuzzer.onMs == BUZZER_ECHO_NOTES[0].onMs);
-#else
   CHECK(localBuzzer.activeCue == BuzzerCue::SCALE_CONNECTED);
+  CHECK(localBuzzer.rtttlPlayback);
+#if SHOT_STOPPER_ENABLE_BUZZER == 1
+  CHECK(localBuzzer.beepCount ==
+        localBuzzer.cueNoteCount[static_cast<uint8_t>(
+            BuzzerCue::SCALE_CONNECTED)]);
 #endif
   const uint32_t afterConnect = localBuzzer.acceptedRequests;
   setScaleConnected(true);
   CHECK(localBuzzer.acceptedRequests == afterConnect);
   setScaleConnected(false);
   CHECK(localBuzzer.acceptedRequests == afterConnect + 1);
-  CHECK(localBuzzer.active == BuzzerPattern::ECHO_INVERTED ||
-        localBuzzer.pending == BuzzerPattern::ECHO_INVERTED);
+  CHECK(localBuzzer.activeCue == BuzzerCue::SCALE_LOST ||
+        localBuzzer.pendingCue == BuzzerCue::SCALE_LOST);
   for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
     hostMillis += 40;
     hostServiceEspTimer(localBuzzer.phaseTimer);
@@ -3301,7 +3301,7 @@ void w93_scale_connected_echo_on_rising_edge() {
   }
   setScaleConnected(true);
   CHECK(localBuzzer.acceptedRequests == afterConnect + 2);
-  CHECK(localBuzzer.active == BuzzerPattern::ECHO);
+  CHECK(localBuzzer.activeCue == BuzzerCue::SCALE_CONNECTED);
 }
 
 void w94_scale_connected_silent_when_flag_off_or_scale_only() {
@@ -3320,7 +3320,7 @@ void w94_scale_connected_silent_when_flag_off_or_scale_only() {
   const uint32_t beforePriority = localBuzzer.acceptedRequests;
   setScaleConnected(true);
   CHECK(localBuzzer.acceptedRequests == beforePriority + 1);
-  CHECK(localBuzzer.active == BuzzerPattern::ECHO);
+  CHECK(localBuzzer.activeCue == BuzzerCue::SCALE_CONNECTED);
 
   resetHarness(false, false);
   runtimeConfig.alertOutputChannel =
@@ -3829,7 +3829,7 @@ void w81_scale_priority_failed_start_falls_back_after_disconnect() {
   }
   const uint32_t before = localBuzzer.acceptedRequests;
   setScaleConnected(false);
-  // Scale-lost Echo inverted on disconnect, then command fallback SINGLE.
+  // Scale-lost RTTTL on disconnect, then command fallback start cue.
   CHECK(localBuzzer.acceptedRequests == before + 1);
   CHECK(executeNextScaleCommand());
   CHECK(localBuzzer.acceptedRequests == before + 2);
@@ -4273,13 +4273,7 @@ void w62_local_buzzer_drive_matches_compile_flag() {
   CHECK(localBuzzer.ready);
   CHECK(hostPinMode[BUZZER_GPIO] == OUTPUT);
   CHECK(hostPinLevel[BUZZER_GPIO] == LOW);
-#if SHOT_STOPPER_ENABLE_BUZZER == 2
-  CHECK(BUZZER_ACTIVE_DRIVE);
-  CHECK(hostLedcAttachCalls == 0);
-#else
-  CHECK(!BUZZER_ACTIVE_DRIVE);
   CHECK(hostLedcAttachCalls == 1);
-#endif
 }
 
 void w99_rtttl_parser_decodes_notes_and_rests() {
@@ -4299,14 +4293,43 @@ void w99_rtttl_parser_decodes_notes_and_rests() {
   CHECK(notes[0].freqHz >= 1040 && notes[0].freqHz <= 1055);
   for (uint8_t i = 1; i <= static_cast<uint8_t>(BuzzerCue::RECOVERY_ERROR);
        ++i) {
-    CHECK(parseRtttl(rtttlForCue(static_cast<BuzzerCue>(i)), notes, count));
+    const BuzzerCue cue = static_cast<BuzzerCue>(i);
+    const char *rtttl = rtttlForCue(cue);
+    if (rtttl == nullptr) {
+      CHECK(buzzerCueIsLooping(cue));
+      continue;
+    }
+    CHECK(parseRtttl(rtttl, notes, count));
     CHECK(count > 0);
   }
+  CHECK(parseRtttl(RTTTL_EXTENDED_PULSE_SLOW, notes, count));
+  CHECK(count == 3);
+  CHECK(notes[0].freqHz >= 490 && notes[0].freqHz <= 498);
+  CHECK(notes[0].durationMs == 20);
+  CHECK(notes[1].freqHz == 0 && notes[1].durationMs == 320);
+  CHECK(notes[2].freqHz == 0 && notes[2].durationMs == 160);
+  CHECK(parseRtttl(RTTTL_EXTENDED_PULSE_MEDIUM, notes, count));
+  CHECK(count == 2);
+  CHECK(notes[0].durationMs == 20 && notes[1].durationMs == 320);
+  CHECK(parseRtttl(RTTTL_EXTENDED_PULSE_FAST, notes, count));
+  CHECK(count == 3);
+  CHECK(notes[0].durationMs == 20 && notes[1].durationMs == 213);
+  CHECK(notes[2].durationMs == 20);
+  CHECK(parseRtttl(RTTTL_EXTENDED_PULSE_RAPID, notes, count));
+  CHECK(count == 3);
+  CHECK(notes[0].durationMs == 20 && notes[1].durationMs == 160);
+  CHECK(notes[2].durationMs == 20);
+  CHECK(rtttlForExtendedPulseRate(static_cast<uint8_t>(
+            ExtendedPulseRate::OFF)) == nullptr);
+  CHECK(rtttlForExtendedPulseRate(static_cast<uint8_t>(
+            ExtendedPulseRate::FAST)) == RTTTL_EXTENDED_PULSE_FAST);
 #if SHOT_STOPPER_ENABLE_BUZZER == 1
   resetHarness(false, false);
   CHECK(localBuzzer.cueNoteCount[static_cast<uint8_t>(BuzzerCue::TARE)] == 1);
   CHECK(localBuzzer.cueNoteCount[static_cast<uint8_t>(
             BuzzerCue::PADDLE_REMINDER)] == 3);
+  CHECK(localBuzzer.pulseNoteCount[static_cast<uint8_t>(
+            ExtendedPulseRate::FAST)] == 3);
 #endif
 }
 
@@ -4317,15 +4340,10 @@ void w99b_passive_cue_drives_ledc_note_frequency() {
   CHECK(cmd.valid);
   CHECK(cmd.cue == BuzzerCue::TARE);
   CHECK(localBuzzer.requestTone(cmd));
-  CHECK(localBuzzer.active == BuzzerPattern::SINGLE);
   CHECK(localBuzzer.activeCue == BuzzerCue::TARE);
-#if SHOT_STOPPER_ENABLE_BUZZER == 2
-  CHECK(hostLedcAttachCalls == 0);
-  CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
-#else
+  CHECK(localBuzzer.rtttlPlayback);
   CHECK(hostLedcLastFreq >= 780 && hostLedcLastFreq <= 790);
   CHECK(hostPinLevel[BUZZER_GPIO] == HIGH);
-#endif
 }
 
 void w99c_select_alert_sink_preserves_channel_rules() {
@@ -4368,16 +4386,22 @@ void w99c_select_alert_sink_preserves_channel_rules() {
                         ctx) == AlertSink::Buzzer);
   const BuzzerToneCommand tareTone =
       deriveBuzzerTone(AlertEvent::TARE, false, 0, 0);
-  CHECK(tareTone.valid && tareTone.cue == BuzzerCue::TARE &&
-        tareTone.pattern == BuzzerPattern::SINGLE);
+  CHECK(tareTone.valid && tareTone.cue == BuzzerCue::TARE);
   const BuzzerToneCommand endTone =
       deriveBuzzerTone(AlertEvent::COMPLETION_EXTRA, false, 0, 0);
-  CHECK(endTone.valid && endTone.cue == BuzzerCue::SHOT_END &&
-        endTone.pattern == BuzzerPattern::LONG);
+  CHECK(endTone.valid && endTone.cue == BuzzerCue::SHOT_END);
   const BuzzerToneCommand lostTone =
       deriveBuzzerTone(AlertEvent::SCALE_LOST, false, 0, 0);
-  CHECK(lostTone.valid && lostTone.cue == BuzzerCue::SCALE_LOST &&
-        lostTone.pattern == BuzzerPattern::ECHO_INVERTED);
+  CHECK(lostTone.valid && lostTone.cue == BuzzerCue::SCALE_LOST);
+  const BuzzerToneCommand pulseOff =
+      deriveBuzzerTone(AlertEvent::EXTENDED_PULSE, false, 0, 0);
+  CHECK(!pulseOff.valid);
+  const BuzzerToneCommand pulseFast = deriveBuzzerTone(
+      AlertEvent::EXTENDED_PULSE, false,
+      static_cast<uint8_t>(ExtendedPulseRate::FAST), 0);
+  CHECK(pulseFast.valid && pulseFast.cue == BuzzerCue::ABNORMAL_FAST &&
+        pulseFast.pulseRate == static_cast<uint8_t>(ExtendedPulseRate::FAST) &&
+        pulseFast.looping);
 }
 
 void w99d_pending_rtttl_starts_from_preparsed_catalog() {
@@ -4389,10 +4413,8 @@ void w99d_pending_rtttl_starts_from_preparsed_catalog() {
   CHECK(localBuzzer.requestTone(tare));
   CHECK(localBuzzer.activeCue == BuzzerCue::TARE);
   CHECK(localBuzzer.requestTone(end));
-  CHECK(localBuzzer.pending == BuzzerPattern::LONG);
   CHECK(localBuzzer.pendingCue == BuzzerCue::SHOT_END);
-  localBuzzer.stopIf(BuzzerPattern::SINGLE);
-  CHECK(localBuzzer.active == BuzzerPattern::LONG);
+  localBuzzer.stopIfCue(BuzzerCue::TARE);
   CHECK(localBuzzer.activeCue == BuzzerCue::SHOT_END);
 #if SHOT_STOPPER_ENABLE_BUZZER == 1
   CHECK(localBuzzer.rtttlPlayback);
@@ -4406,8 +4428,8 @@ void w99e_recovery_cue_bypasses_mute_via_pipeline() {
   runtimeConfig.soundAlertsMuted = true;
   CHECK(!soundAlertsEnabled());
   playRecoveryCue(BuzzerCue::RECOVERY_START);
-  CHECK(localBuzzer.active == BuzzerPattern::RECOVERY_LONG);
   CHECK(localBuzzer.activeCue == BuzzerCue::RECOVERY_START);
+  CHECK(localBuzzer.rtttlPlayback);
 }
 
 void w39_history_mutation_blocked_while_brew_rf_active() {
@@ -7654,14 +7676,16 @@ void r49_guard_extends_and_stops_at_max_weight() {
   publishWeight(threshold + 0.2f);
   CHECK(session.extractionExtended);
   CHECK(getRelaySafetySnapshot().closed);
-  CHECK(localBuzzer.active == BuzzerPattern::PULSE_4HZ);
+  CHECK(localBuzzer.activeCue == BuzzerCue::ABNORMAL_FAST);
+  CHECK(localBuzzer.activePulseRate ==
+        static_cast<uint8_t>(ExtendedPulseRate::FAST));
   const float maxThreshold = effectiveMaxStopThreshold();
   publishWeight(maxThreshold + 0.1f);
   publishWeight(maxThreshold + 0.2f);
   loop();
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(session.endReason == EndReason::FAST_EXTRACTION_MAX_WEIGHT);
-  CHECK(localBuzzer.active != BuzzerPattern::PULSE_4HZ);
+  CHECK(localBuzzer.activeCue != BuzzerCue::ABNORMAL_FAST);
 }
 
 void r51_extended_pulse_respects_alert_flag_and_scale_only() {
@@ -7681,7 +7705,7 @@ void r51_extended_pulse_respects_alert_flag_and_scale_only() {
   publishWeight(threshold + 0.1f);
   publishWeight(threshold + 0.2f);
   CHECK(session.extractionExtended);
-  CHECK(!buzzerPatternIsPulseTrain(localBuzzer.active));
+  CHECK(!localBuzzer.looping);
 
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -7701,7 +7725,7 @@ void r51_extended_pulse_respects_alert_flag_and_scale_only() {
   publishWeight(scaleOnlyThreshold + 0.1f);
   publishWeight(scaleOnlyThreshold + 0.2f);
   CHECK(session.extractionExtended);
-  CHECK(!buzzerPatternIsPulseTrain(localBuzzer.active));
+  CHECK(!localBuzzer.looping);
 }
 
 void r50_guard_extends_and_stops_at_min_time() {
@@ -7826,7 +7850,9 @@ void r61_slow_guard_extends_and_stops_at_min_weight() {
   CHECK(getRelaySafetySnapshot().closed);
   CHECK(stopperState == StopperState::BREW);
   CHECK(session.endReason == EndReason::NONE);
-  CHECK(localBuzzer.active == BuzzerPattern::PULSE_4HZ);
+  CHECK(localBuzzer.activeCue == BuzzerCue::ABNORMAL);
+  CHECK(localBuzzer.activePulseRate ==
+        static_cast<uint8_t>(ExtendedPulseRate::FAST));
 
   const float minThreshold = effectiveMinStopThreshold();
   publishWeight(minThreshold + 0.1f);
@@ -7856,7 +7882,9 @@ void r61b_slow_extended_pulse_uses_slow_rate_setting() {
   currentWeight = 20.1f;
   reachSessionElapsed(44000);
   CHECK(session.slowExtractionExtended);
-  CHECK(localBuzzer.active == BuzzerPattern::PULSE_5HZ);
+  CHECK(localBuzzer.activeCue == BuzzerCue::ABNORMAL);
+  CHECK(localBuzzer.activePulseRate ==
+        static_cast<uint8_t>(ExtendedPulseRate::RAPID));
 
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -7877,7 +7905,7 @@ void r61b_slow_extended_pulse_uses_slow_rate_setting() {
   currentWeight = 20.1f;
   reachSessionElapsed(44000);
   CHECK(session.slowExtractionExtended);
-  CHECK(!buzzerPatternIsPulseTrain(localBuzzer.active));
+  CHECK(!localBuzzer.looping);
 }
 
 void r61c_extended_pulse_resumes_after_scale_lost_alert() {
@@ -7897,9 +7925,9 @@ void r61c_extended_pulse_resumes_after_scale_lost_alert() {
   publishWeight(threshold + 0.2f);
   CHECK(session.extractionExtended);
   CHECK(session.active);
-  CHECK(localBuzzer.active == BuzzerPattern::PULSE_4HZ);
+  CHECK(localBuzzer.activeCue == BuzzerCue::ABNORMAL_FAST);
   setScaleConnected(false);
-  CHECK(localBuzzer.active == BuzzerPattern::ECHO_INVERTED);
+  CHECK(localBuzzer.activeCue == BuzzerCue::SCALE_LOST);
   for (uint32_t step = 0; step < 80 && localBuzzer.busy(); ++step) {
     hostMillis += 40;
     hostServiceEspTimer(localBuzzer.phaseTimer);
@@ -7909,7 +7937,56 @@ void r61c_extended_pulse_resumes_after_scale_lost_alert() {
   CHECK(session.active);
   CHECK(session.extractionExtended);
   serviceExtendedPulseAlert();
-  CHECK(localBuzzer.active == BuzzerPattern::PULSE_4HZ);
+  CHECK(localBuzzer.activeCue == BuzzerCue::ABNORMAL_FAST);
+}
+
+void r61d_extended_pulse_pending_cleared_when_unwanted() {
+  resetHarness(false, false);
+  const BuzzerToneCommand tare =
+      deriveBuzzerTone(AlertEvent::TARE, false, 0, 0);
+  CHECK(localBuzzer.requestTone(tare));
+  CHECK(localBuzzer.activeCue == BuzzerCue::TARE);
+  CHECK(startExtendedPulseTrain(0));
+  CHECK(localBuzzer.pendingCue == BuzzerCue::ABNORMAL_FAST);
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_ONLY);
+  session.active = true;
+  session.extractionExtended = true;
+  serviceExtendedPulseAlert();
+  CHECK(localBuzzer.pendingCue == BuzzerCue::NONE);
+  CHECK(localBuzzer.activeCue == BuzzerCue::TARE);
+  drainLocalBuzzer();
+  CHECK(!localBuzzer.busy());
+  CHECK(localBuzzer.activeCue == BuzzerCue::NONE);
+
+  resetHarness(false, false);
+  CHECK(localBuzzer.requestTone(tare));
+  CHECK(startExtendedPulseTrain(0));
+  CHECK(localBuzzer.pendingCue == BuzzerCue::ABNORMAL_FAST);
+  runtimeConfig.buzzerExtendedPulseRate =
+      static_cast<uint8_t>(ExtendedPulseRate::OFF);
+  session.active = true;
+  session.extractionExtended = true;
+  serviceExtendedPulseAlert();
+  CHECK(localBuzzer.pendingCue == BuzzerCue::NONE);
+  drainLocalBuzzer();
+  CHECK(!localBuzzer.busy());
+}
+
+void r61e_extended_pulse_restarts_when_rate_setting_changes() {
+  resetHarness(false, false);
+  CHECK(startExtendedPulseTrain(0));
+  CHECK(localBuzzer.activeCue == BuzzerCue::ABNORMAL_FAST);
+  CHECK(localBuzzer.activePulseRate ==
+        static_cast<uint8_t>(ExtendedPulseRate::FAST));
+  runtimeConfig.buzzerExtendedPulseRate =
+      static_cast<uint8_t>(ExtendedPulseRate::RAPID);
+  session.active = true;
+  session.extractionExtended = true;
+  serviceExtendedPulseAlert();
+  CHECK(localBuzzer.activeCue == BuzzerCue::ABNORMAL_FAST);
+  CHECK(localBuzzer.activePulseRate ==
+        static_cast<uint8_t>(ExtendedPulseRate::RAPID));
 }
 
 void r62_fast_extended_is_not_cut_by_slow() {
@@ -9303,6 +9380,8 @@ const TestCase testCases[] = {
     {"R61", r61_slow_guard_extends_and_stops_at_min_weight},
     {"R61b", r61b_slow_extended_pulse_uses_slow_rate_setting},
     {"R61c", r61c_extended_pulse_resumes_after_scale_lost_alert},
+    {"R61d", r61d_extended_pulse_pending_cleared_when_unwanted},
+    {"R61e", r61e_extended_pulse_restarts_when_rate_setting_changes},
     {"R62", r62_fast_extended_is_not_cut_by_slow},
     {"R63", r63_slow_guard_disabled_continues_past_max_time},
     {"R64", r64_slow_guard_min_weight_cut_from_predicted_time},

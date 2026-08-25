@@ -2680,23 +2680,19 @@ bool startPulseTrain(BuzzerPattern pattern, uint32_t durationMs) {
 }
 
 bool startExtendedPulseTrain(uint32_t durationMs) {
-  const uint8_t rate = session.slowExtractionExtended
-                           ? runtimeConfig.buzzerSlowExtendedPulseRate
-                           : runtimeConfig.buzzerExtendedPulseRate;
-  return startPulseTrain(buzzerPatternForExtendedPulseRate(rate), durationMs);
+  BuzzerToneCommand cmd =
+      deriveBuzzerTone(AlertEvent::EXTENDED_PULSE, session.slowExtractionExtended,
+                       runtimeConfig.buzzerExtendedPulseRate,
+                       runtimeConfig.buzzerSlowExtendedPulseRate);
+  if (!cmd.valid) {
+    return false;
+  }
+  cmd.durationMs = durationMs;
+  return playLocalAlertTone(cmd, false);
 }
 
 void stopPulseTrains() {
-  if (localBuzzer.pending != BuzzerPattern::NONE &&
-      (buzzerPatternIsPulseTrain(localBuzzer.pending) ||
-       localBuzzer.pendingCue == BuzzerCue::ABNORMAL_FAST ||
-       localBuzzer.pendingCue == BuzzerCue::ABNORMAL)) {
-    localBuzzer.stopIf(localBuzzer.pending);
-  }
-  if (localBuzzer.active != BuzzerPattern::NONE &&
-      (buzzerPatternIsPulseTrain(localBuzzer.active) || localBuzzer.looping)) {
-    localBuzzer.stopIf(localBuzzer.active);
-  }
+  localBuzzer.stopPulseTrains();
 }
 
 bool queueScaleIndependentAlert(AlertEvent event, uint32_t cycleId) {
@@ -2766,12 +2762,7 @@ bool emitCircuitCycleAlert(AlertEvent event, bool preempt) {
   }
   if (BUZZER_SUPPORT_ENABLED && localBuzzer.ready) {
     if (preempt) {
-      if (localBuzzer.pending != BuzzerPattern::NONE) {
-        localBuzzer.stopIf(localBuzzer.pending);
-      }
-      if (localBuzzer.active != BuzzerPattern::NONE) {
-        localBuzzer.stopIf(localBuzzer.active);
-      }
+      localBuzzer.stopAll();
     }
     const BuzzerToneCommand tone =
         deriveBuzzerTone(event, session.slowExtractionExtended,
@@ -2924,37 +2915,34 @@ void cancelOperationalAlerts() {
   scaleBeepPending = false;
   scaleBeepCycleId = 0;
   portEXIT_CRITICAL(&scaleBeepMux);
-  if (localBuzzer.pending != BuzzerPattern::NONE) {
-    localBuzzer.stopIf(localBuzzer.pending);
-  }
-  if (localBuzzer.active != BuzzerPattern::NONE) {
-    localBuzzer.stopIf(localBuzzer.active);
+  if (localBuzzer.busy()) {
+    localBuzzer.stopAll();
   }
 }
 
 void serviceExtendedPulseAlert() {
-  const uint8_t rate = session.slowExtractionExtended
-                           ? runtimeConfig.buzzerSlowExtendedPulseRate
-                           : runtimeConfig.buzzerExtendedPulseRate;
-  const BuzzerPattern pattern = buzzerPatternForExtendedPulseRate(rate);
+  const BuzzerToneCommand cmd = deriveBuzzerTone(
+      AlertEvent::EXTENDED_PULSE, session.slowExtractionExtended,
+      runtimeConfig.buzzerExtendedPulseRate,
+      runtimeConfig.buzzerSlowExtendedPulseRate);
   const bool want =
       soundAlertsEnabled() && BUZZER_SUPPORT_ENABLED && localBuzzer.ready &&
       session.active &&
       (session.extractionExtended || session.slowExtractionExtended) &&
-      pattern != BuzzerPattern::NONE &&
+      cmd.valid &&
       currentAlertOutputChannel() != AlertOutputChannel::SCALE_ONLY;
   if (!want) {
-    if (buzzerPatternIsPulseTrain(localBuzzer.active) &&
-        localBuzzer.deadlineAtMs == 0) {
-      localBuzzer.stopIf(localBuzzer.active);
-    }
+    localBuzzer.stopExtendedPulse();
     return;
   }
-  if (localBuzzer.active == pattern || localBuzzer.pending == pattern) {
+  if (localBuzzer.playingExtendedPulse(cmd)) {
     return;
   }
   if (localBuzzer.busy()) {
-    return;
+    localBuzzer.stopExtendedPulse();
+    if (localBuzzer.busy()) {
+      return;
+    }
   }
   emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
 }

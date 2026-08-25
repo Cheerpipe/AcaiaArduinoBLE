@@ -317,8 +317,8 @@ void enterFastExtractionExtended(float weightG, uint32_t atMs) {
   addDebugEvent(DebugCategory::SCALE, DebugCode::FAST_EXTRACTION_ENTERED,
                 static_cast<int32_t>(weightG * 100.0f),
                 static_cast<int32_t>(elapsedMs(session.startedAtMs)));
-  if (buzzerPatternForExtendedPulseRate(
-          runtimeConfig.buzzerExtendedPulseRate) != BuzzerPattern::NONE) {
+  if (runtimeConfig.buzzerExtendedPulseRate !=
+      static_cast<uint8_t>(ExtendedPulseRate::OFF)) {
     emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
   }
   calculateExpectedEndTime(activeWeightCutTargetG());
@@ -333,8 +333,8 @@ void enterSlowExtractionExtended(float weightG, uint32_t atMs) {
   addDebugEvent(DebugCategory::SCALE, DebugCode::SLOW_EXTRACTION_ENTERED,
                 static_cast<int32_t>(weightG * 100.0f),
                 static_cast<int32_t>(elapsedMs(session.startedAtMs)));
-  if (buzzerPatternForExtendedPulseRate(
-          runtimeConfig.buzzerSlowExtendedPulseRate) != BuzzerPattern::NONE) {
+  if (runtimeConfig.buzzerSlowExtendedPulseRate !=
+      static_cast<uint8_t>(ExtendedPulseRate::OFF)) {
     emitAlert(AlertEvent::EXTENDED_PULSE, session.id);
   }
   calculateExpectedEndTime(activeWeightCutTargetG());
