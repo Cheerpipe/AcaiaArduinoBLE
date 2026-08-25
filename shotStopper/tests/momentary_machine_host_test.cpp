@@ -99,6 +99,10 @@ void resetMomentaryHarness() {
   currentWeightReceivedAtMs = 0;
   currentWeightSequence = 0;
   currentWeightConnectionGeneration = 0;
+  observedWeight = 0.0f;
+  observedWeightReceivedAtMs = 0;
+  observedWeightSequence = 0;
+  observedWeightConnectionGeneration = 0;
   pendingScaleConnectIdleSync = false;
   scale.connected = true;
   setScaleLinkState(ScaleLinkState::CONNECTED);
@@ -183,6 +187,13 @@ void runLoopAfter(uint32_t deltaMs) {
   hostMillis += deltaMs;
   if (scale.connected) {
     markScaleWorkerProgress();
+    if (currentWeightSequence > 0) {
+      observedWeight = currentWeight;
+      observedWeightReceivedAtMs = currentWeightReceivedAtMs;
+      observedWeightSequence = currentWeightSequence;
+      const uint32_t gen = getScaleLinkSnapshot().connectionGeneration;
+      observedWeightConnectionGeneration = gen != 0 ? gen : 1;
+    }
   }
   hostServiceEspTimer(relaySafetyTimer);
   hostServiceEspTimer(operationalLimitTimer);
@@ -198,6 +209,11 @@ void seedFreshScaleWeight(float weight) {
   } else {
     ++currentWeightSequence;
   }
+  observedWeight = currentWeight;
+  observedWeightReceivedAtMs = currentWeightReceivedAtMs;
+  observedWeightSequence = currentWeightSequence;
+  const uint32_t gen = getScaleLinkSnapshot().connectionGeneration;
+  observedWeightConnectionGeneration = gen != 0 ? gen : 1;
   runLoopAfter(50);
 }
 

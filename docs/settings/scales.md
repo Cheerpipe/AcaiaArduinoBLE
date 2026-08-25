@@ -31,9 +31,11 @@ offset learning, and eligible A→M samples.
 | **Scale volume** | 4 | 1–5 or Disabled | Bookoo/generic: set on connect/reconnect. Applies only in **Scale only** and **Scale priority**. |
 | **AtomHeart Eclair** | informational | — | Uses normal tare/timer commands. No configurable volume, beep, mode, combined command, or documented command sound. In Buzzer only and Scale priority, alerts use the local buzzer; Scale only omits unsupported sounds. |
 
-If the scale disconnects or samples go stale during an automatic extraction,
-weight control is suspended. Recovery needs three coherent samples on the
-current connection. Paddle OFF and time limits remain in force.
+If the scale disconnects or **notifications go silent** during an automatic
+extraction, weight control is suspended. Rejected brew samples (post-tare,
+slew) and a stable accepted weight do not count as a lost scale. Recovery
+needs three coherent samples on the current connection. Paddle OFF and time
+limits remain in force.
 
 ## Example
 

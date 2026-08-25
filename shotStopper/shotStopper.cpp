@@ -1388,7 +1388,7 @@ void suspendWeightControl() {
 bool scaleAutomationUnavailableForSession() {
   const ScaleLinkSnapshot snapshot = getScaleLinkSnapshot();
   return !scaleLinkAvailable(snapshot) ||
-         !currentWeightIsFresh() ||
+         !observedWeightIsFresh() ||
          snapshot.disconnectSequence !=
              session.scaleDisconnectSequenceAtStart;
 }
@@ -1764,7 +1764,7 @@ void observeMachineSenseFromSession() {
     sense.weightG = currentWeight;
     sense.weightSequence = currentWeightSequence;
   }
-  sense.weightFresh = currentWeightIsFresh();
+  sense.weightFresh = observedWeightIsFresh();
   sense.accidentalHold = session.accidentalTouchHolding;
   sense.brewCycleActive = session.active;
   sense.firstDropSeen = session.firstDropMs != 0;
@@ -2543,8 +2543,31 @@ void updateWorkerLinkState() {
                                         : ScaleLinkState::DISCONNECTED);
 }
 
+void publishPendingScaleWeightEvent() {
+  if (!scale.isConnected()) {
+    return;
+  }
+  const bool weightAvailable = scale.newWeightAvailable();
+  if (!scale.isConnected()) {
+    updateWorkerLinkState();
+    setScaleLinkState(ScaleLinkState::DISCONNECTED);
+    return;
+  }
+  if (!weightAvailable) {
+    return;
+  }
+  ScaleEvent event;
+  event.type = ScaleEventType::WEIGHT;
+  event.receivedAtMs = millis();
+  event.weightG = scale.getWeight();
+  publishScaleEvent(event, false);
+}
+
 void yieldBetweenScaleAttOps() {
   BLE.poll();
+  // Harvest notifications that arrived during a blocking ATT write so
+  // observedWeight (A→M / suspend) does not freeze while the link is up.
+  publishPendingScaleWeightEvent();
   markScaleWorkerProgress();
   feedOrTripCurrentTaskWatchdog();
 }
@@ -3089,6 +3112,9 @@ void serviceScaleCompletionBeep() {
 }
 
 void executeScaleCommand(const ScaleCommand &command) {
+  BLE.poll();
+  publishPendingScaleWeightEvent();
+  markScaleWorkerProgress();
   switch (command.type) {
     case ScaleCommandType::START_TIMER_AND_TARE:
       executeScaleStartCommand(command);
@@ -3650,20 +3676,7 @@ void serviceScaleWorkerLink() {
     }
   }
 
-  const bool weightAvailable = scale.newWeightAvailable();
-  if (!scale.isConnected()) {
-    updateWorkerLinkState();
-    setScaleLinkState(ScaleLinkState::DISCONNECTED);
-    return;
-  }
-
-  if (weightAvailable) {
-    ScaleEvent event;
-    event.type = ScaleEventType::WEIGHT;
-    event.receivedAtMs = millis();
-    event.weightG = scale.getWeight();
-    publishScaleEvent(event, false);
-  }
+  publishPendingScaleWeightEvent();
   updateWorkerLinkState();
 }
 

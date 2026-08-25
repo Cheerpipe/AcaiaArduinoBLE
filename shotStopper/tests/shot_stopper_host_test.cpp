@@ -345,6 +345,17 @@ void verifySafetyInvariants() {
   }
 }
 
+void stampHostObservedWeightFresh() {
+  observedWeight = currentWeight;
+  observedWeightReceivedAtMs = hostMillis;
+  if (observedWeightSequence == 0) {
+    observedWeightSequence = currentWeightSequence != 0 ? currentWeightSequence
+                                                        : 1;
+  }
+  const uint32_t gen = getScaleLinkSnapshot().connectionGeneration;
+  observedWeightConnectionGeneration = gen != 0 ? gen : 1;
+}
+
 void runLoopAfter(uint32_t deltaMs) {
   hostMillis += deltaMs;
   if (hostAutoScaleWorkerProgress && scale.connected) {
@@ -353,6 +364,7 @@ void runLoopAfter(uint32_t deltaMs) {
       currentWeightReceivedAtMs = hostMillis;
       ++currentWeightSequence;
       session.receivedFreshWeightInCycle = true;
+      stampHostObservedWeightFresh();
     }
   }
   hostServiceEspTimer(relaySafetyTimer);
@@ -5634,6 +5646,99 @@ void r54_post_tare_baseline_keeps_weight_control() {
   CHECK(session.automaticEnabled);
 }
 
+void r66_post_tare_rejected_stream_does_not_enforce_atm() {
+  resetHarness(false, true);
+  runtimeConfig.autoToManualGuardEnabled = true;
+  reachReadyFromBoot();
+  currentWeight = 236.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  CHECK(executeNextScaleCommand());
+  CHECK(session.awaitingPostTareBaseline);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.autoToManualGuardArmed);
+  CHECK(!session.autoToManualGuardEnforced);
+  hostAutoScaleWorkerProgress = false;
+  for (uint32_t waited = 0; waited <= MAX_AUTOMATION_WEIGHT_AGE_MS + 50U;
+       waited += 100U) {
+    hostMillis += 100U;
+    markScaleWorkerProgress();
+    publishWeight(236.0f);
+    loop();
+    verifySafetyInvariants();
+  }
+  CHECK(session.awaitingPostTareBaseline);
+  CHECK(session.weightControlState == WeightControlState::ACTIVE);
+  CHECK(session.autoToManualGuardArmed);
+  CHECK(!session.autoToManualGuardEnforced);
+  publishWeight(0.0f);
+  CHECK(!session.awaitingPostTareBaseline);
+  CHECK(session.weightControlState == WeightControlState::ACTIVE);
+  CHECK(!session.autoToManualGuardEnforced);
+}
+
+void r67_observed_silence_enforces_atm() {
+  resetHarness(false, true);
+  runtimeConfig.autoToManualGuardEnabled = true;
+  runtimeConfig.autoToManualGuardLimitMode =
+      static_cast<uint8_t>(AutoToManualGuardLimitMode::MANUAL);
+  runtimeConfig.autoToManualGuardManualLimitMs = 20000;
+  reachReadyFromBoot();
+  startCycle();
+  advanceToBrew();
+  CHECK(session.autoToManualGuardArmed);
+  CHECK(!session.autoToManualGuardEnforced);
+  CHECK(session.weightControlState == WeightControlState::ACTIVE);
+  hostAutoScaleWorkerProgress = false;
+  for (uint32_t waited = 0; waited <= MAX_AUTOMATION_WEIGHT_AGE_MS + 50U;
+       waited += 100U) {
+    hostMillis += 100U;
+    markScaleWorkerProgress();
+    loop();
+    verifySafetyInvariants();
+  }
+  CHECK(session.weightControlState == WeightControlState::SUSPENDED);
+  CHECK(session.autoToManualGuardEnforced);
+}
+
+void r68_stable_accepted_weight_does_not_suspend() {
+  resetHarness(false, true);
+  runtimeConfig.autoToManualGuardEnabled = true;
+  reachReadyFromBoot();
+  startCycle();
+  advanceToBrew();
+  CHECK(session.autoToManualGuardArmed);
+  CHECK(!session.autoToManualGuardEnforced);
+  hostAutoScaleWorkerProgress = false;
+  for (uint32_t waited = 0; waited <= MAX_AUTOMATION_WEIGHT_AGE_MS + 50U;
+       waited += 100U) {
+    hostMillis += 100U;
+    markScaleWorkerProgress();
+    publishWeight(20.0f);
+    loop();
+    verifySafetyInvariants();
+  }
+  CHECK(session.weightControlState == WeightControlState::ACTIVE);
+  CHECK(session.autoToManualGuardArmed);
+  CHECK(!session.autoToManualGuardEnforced);
+}
+
+void r69_att_command_harvests_pending_weight() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  currentWeight = 0.0f;
+  currentWeightReceivedAtMs = hostMillis;
+  currentWeightSequence = 1;
+  startCycle();
+  scale.weight = 3.25f;
+  scale.newWeightAvailableValue = true;
+  CHECK(executeNextScaleCommand());
+  processScaleWorkerEvents();
+  CHECK(fabsf(observedWeight - 3.25f) < 0.001f);
+  CHECK(observedWeightIsFresh());
+}
+
 void r44_first_shot_after_reconnect_enters_brew() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -9744,6 +9849,10 @@ const TestCase testCases[] = {
     {"R42", r42_weight_below_automation_min_stays_manual},
     {"R43", r43_post_tare_baseline_accepts_zero_after_pre_tare_weight},
     {"R54", r54_post_tare_baseline_keeps_weight_control},
+    {"R66", r66_post_tare_rejected_stream_does_not_enforce_atm},
+    {"R67", r67_observed_silence_enforces_atm},
+    {"R68", r68_stable_accepted_weight_does_not_suspend},
+    {"R69", r69_att_command_harvests_pending_weight},
     {"R44", r44_first_shot_after_reconnect_enters_brew},
     {"R45", r45_slew_rejection_emits_specific_debug_code},
     {"ST01", st01_cycle_elapsed_follows_circuit_immediately},

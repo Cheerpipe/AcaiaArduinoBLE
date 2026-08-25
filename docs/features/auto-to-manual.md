@@ -12,7 +12,9 @@ not become an over-extracted shot.
 Automatic brew-by-weight shots only. It does **not** apply to shots that
 start as manual (`MANUAL_NO_SCALE`), timer-only (BBW off), or rinses.
 
-When BLE drops or the stream goes stale, weight control pauses. The firmware
+When BLE drops or **notifications stop arriving**, weight control pauses.
+Parsed packets still count as a live stream even if brew rejects them
+(post-tare cup mass, slew) or the grams do not change. The firmware
 keeps trying to reconnect for the **whole** cycle. If the scale returns with
 three coherent samples, weight stop resumes (including Fast or Slow, if
 enabled) and A→M enforcement clears. A later disconnect in the same cycle
