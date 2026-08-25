@@ -21,7 +21,9 @@ The physical paddle always has priority over Web or remote commands.
 ON always starts an extraction (or a rinse if you release inside the gesture
 window). The special “keep machine circuit closed after OFF” rules apply only to
 **automatic brew-by-weight with a usable scale**. Without a scale, or with
-brew by weight off, paddle OFF ends the shot like Natural in every mode.
+brew by weight off, paddle OFF ends the shot like Natural in every mode
+(Auto, Natural, Original), and **Max BBW time does not apply** — only the
+firmware **60 s** circuit cap.
 
 ## How K1 follows the paddle
 

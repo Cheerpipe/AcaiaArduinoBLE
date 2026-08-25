@@ -202,7 +202,7 @@ enum class TimerStopResult : uint8_t {
 
 struct ShotTrajectory {
   uint32_t startMs = 0;
-  float expectedEndS = HARD_MAX_CIRCUIT_CLOSED_MS / 1000.0f;
+  float expectedEndS = DEFAULT_OPERATIONAL_WALL_MS / 1000.0f;
   float weight[MAX_SHOT_DATAPOINTS] = {};
   float timeS[MAX_SHOT_DATAPOINTS] = {};
   size_t datapoints = 0;
@@ -4013,8 +4013,10 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
       session.startedWithScale && !session.config.timerOnly;
   machineSetPreferBleAirtime(automaticBbw);
   machineBeginCycle(automaticBbw);
-  if (!machineRequestStart(
-          machineCloseLimitMs(session.config.operationalWallMs))) {
+  const uint32_t closeLimitMs =
+      automaticBbw ? machineCloseLimitMs(session.config.operationalWallMs)
+                   : HARD_MAX_CIRCUIT_CLOSED_MS;
+  if (!machineRequestStart(closeLimitMs)) {
     session.active = false;
     session.endReason = EndReason::RELAY_SAFETY_FAILURE;
     machineSetPreferBleAirtime(false);
@@ -4388,6 +4390,11 @@ void stateMachineTask() {
     case StopperState::MANUAL_NO_SCALE:
       if (intent.intent == UserIntent::REQUEST_STOP) {
         demoteActiveCycleToRinseOrEnd();
+        return;
+      }
+      if (machineTakeNoFlowIdle()) {
+        finalizeCycle(EndReason::UNCONFIRMED_START,
+                      nextStateForUserHold(intent));
         return;
       }
       return;

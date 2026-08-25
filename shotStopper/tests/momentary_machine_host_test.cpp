@@ -188,6 +188,17 @@ void runLoopAfter(uint32_t deltaMs) {
   loop();
 }
 
+void seedFreshScaleWeight(float weight) {
+  currentWeight = weight;
+  currentWeightReceivedAtMs = hostMillis;
+  if (currentWeightSequence == 0) {
+    currentWeightSequence = 1;
+  } else {
+    ++currentWeightSequence;
+  }
+  runLoopAfter(50);
+}
+
 void setRawPaddle(bool on) {
   hostPinLevel[ACTIVATOR_GPIO] = on ? ACTIVATOR_ACTIVE_LEVEL
                                 : !ACTIVATOR_ACTIVE_LEVEL;
@@ -572,9 +583,7 @@ void t_user_stop_does_not_extra_pulse_when_assumed_on() {
 void t_wall_with_quiet_pan_does_not_auto_pulse() {
   resetMomentaryHarness();
   runtimeConfig.operationalWallMs = 800;
-  currentWeight = 0.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 1;
+  seedFreshScaleWeight(0.0f);
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   CHECK(session.active);
@@ -622,7 +631,7 @@ void t_user_press_wins_over_firmware_pulse() {
 #endif
 
 #if SHOT_STOPPER_MACHINE_TYPE == 2
-void t_reed_boot_on_is_unknown() {
+void t_reed_boot_on_is_confirmed_on() {
   resetMomentaryHarness();
   hostPinLevel[REED_GPIO] = REED_ACTIVE_LEVEL;
   reedRawOn = false;
@@ -631,12 +640,29 @@ void t_reed_boot_on_is_unknown() {
   reedChangedAtMs = millis();
   loop();
   runLoopAfter(REED_DEBOUNCE_MS + 1);
-  CHECK(machineRunState() == MachineRunState::UNKNOWN);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
   CHECK(machineIsRunning());
   momentaryUserStopThisCycle = true;
   const size_t closedBefore = hostRelayClosedWrites;
   CHECK(machineRequestStop());
   CHECK(hostRelayClosedWrites == closedBefore);
+}
+
+void t_reed_safety_trip_follows_reed() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  setRawReed(true);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  relaySafetyState = RelaySafetyState::TRIPPED;
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  CHECK(machineRunState() != MachineRunState::UNKNOWN);
+  relaySafetyState = RelaySafetyState::LOCKOUT;
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  setRawReed(false);
+  relaySafetyState = RelaySafetyState::LOCKOUT;
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  relaySafetyState = RelaySafetyState::TRIPPED;
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
 }
 
 void t_reed_off_wins_over_rising_weight() {
@@ -748,17 +774,6 @@ void holdStableWeight(uint32_t totalMs) {
   for (uint32_t waited = 0; waited < totalMs; waited += 100) {
     dripFreshWeight(held, 100);
   }
-}
-
-void seedFreshScaleWeight(float weight) {
-  currentWeight = weight;
-  currentWeightReceivedAtMs = hostMillis;
-  if (currentWeightSequence == 0) {
-    currentWeightSequence = 1;
-  } else {
-    ++currentWeightSequence;
-  }
-  runLoopAfter(50);
 }
 
 void armLiveScaleTimerOnlyStart(float weight) {
@@ -1409,9 +1424,7 @@ void t_logical_elapsed_after_start_pulse_opens() {
 void t_orphan_wall_does_not_auto_pulse_user_still_mirrors() {
   resetMomentaryHarness();
   runtimeConfig.operationalWallMs = 9000;
-  currentWeight = 0.0f;
-  currentWeightReceivedAtMs = hostMillis;
-  currentWeightSequence = 1;
+  seedFreshScaleWeight(0.0f);
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
@@ -1459,6 +1472,7 @@ void t_small_delta_does_not_confirm_on() {
 void t_confirmed_wall_pulses_once_and_ends_session() {
   resetMomentaryHarness();
   runtimeConfig.operationalWallMs = 2000;
+  seedFreshScaleWeight(0.0f);
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
@@ -1480,7 +1494,7 @@ void t_confirmed_wall_pulses_once_and_ends_session() {
   CHECK(hostRelayClosedWrites == closedAtConfirm + 1);
 }
 
-void t_noscale_wall_pulses_and_next_press_starts() {
+void t_noscale_hard_cap_idles_without_pulse_and_next_press_starts() {
   resetMomentaryHarness();
   runtimeConfig.operationalWallMs = 2000;
   runtimeConfig.avoidBbwShotWithoutScale = false;
@@ -1490,21 +1504,72 @@ void t_noscale_wall_pulses_and_next_press_starts() {
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   CHECK(session.active);
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
   runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
   const size_t closedBeforeWall = hostRelayClosedWrites;
   runLoopAfter(2200);
+  CHECK(session.active);
+  CHECK(hostRelayClosedWrites == closedBeforeWall);
+  while (elapsedMs(momentaryLogicalRunStartedAtMs) < HARD_MAX_CIRCUIT_CLOSED_MS) {
+    runLoopAfter(200);
+  }
+  runLoopAfter(50);
   CHECK(!session.active);
   CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
   CHECK(!momentaryOrphanRun);
   CHECK(!machineIsRunning());
-  CHECK(hostRelayClosedWrites == closedBeforeWall + 1);
-  runLoopAfter(COMPILED_STOP_PULSE_MS + 80);
-  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(hostRelayClosedWrites == closedBeforeWall);
+  CHECK(lastCycle.endReason == EndReason::UNCONFIRMED_START);
   CHECK(stopperState == StopperState::READY);
   CHECK(controlAllowsConfigurationNow());
   shortPress(150);
   CHECK(session.active);
   CHECK(machineIsRunning());
+}
+
+void t_timer_only_confirmed_skips_operational_wall_pulses_at_hard_cap() {
+  resetMomentaryHarness();
+  armLiveScaleTimerOnlyStart(0.0f);
+  runtimeConfig.operationalWallMs = 2000;
+  shortPress(150);
+  runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
+  confirmEspressoFlow();
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
+  CHECK(session.active);
+  CHECK(session.config.timerOnly);
+  const size_t closedAtConfirm = hostRelayClosedWrites;
+  for (int step = 0; step < 14; ++step) {
+    if (!session.active) {
+      break;
+    }
+    dripFreshWeight(currentWeight + 0.45f, 100);
+  }
+  CHECK(session.active);
+  CHECK(hostRelayClosedWrites == closedAtConfirm);
+  while (elapsedMs(momentaryLogicalRunStartedAtMs) < HARD_MAX_CIRCUIT_CLOSED_MS) {
+    dripFreshWeight(currentWeight + 0.45f, 200);
+  }
+  dripFreshWeight(currentWeight + 0.45f, 50);
+  CHECK(!session.active);
+  CHECK(hostRelayClosedWrites == closedAtConfirm + 1);
+  CHECK(lastCycle.endReason == EndReason::GLOBAL_LIMIT);
+}
+
+void t_timer_only_unconfirmed_idles_at_hard_cap_without_pulse() {
+  resetMomentaryHarness();
+  armLiveScaleTimerOnlyStart(0.0f);
+  runtimeConfig.operationalWallMs = 2000;
+  shortPress(150);
+  CHECK(session.active);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(session.config.timerOnly);
+  const size_t closedBefore = hostRelayClosedWrites;
+  dripUntilHardCap(noFlowIdleFlatWeight);
+  CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
+  CHECK(!session.active);
+  CHECK(!machineIsRunning());
+  CHECK(lastCycle.endReason == EndReason::UNCONFIRMED_START);
+  CHECK(hostRelayClosedWrites == closedBefore);
 }
 #endif
 
@@ -1660,6 +1725,7 @@ void t_reed_does_not_arm_no_flow_idle() {
 void t_reed_wall_pulses_once_and_ends_session() {
   resetMomentaryHarness();
   runtimeConfig.operationalWallMs = 2000;
+  seedFreshScaleWeight(0.0f);
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
@@ -1674,11 +1740,41 @@ void t_reed_wall_pulses_once_and_ends_session() {
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(hostRelayClosedWrites == closedBeforeWall + 1);
 }
+
+void t_reed_manual_skips_operational_wall_pulses_at_hard_cap() {
+  resetMomentaryHarness();
+  runtimeConfig.operationalWallMs = 2000;
+  runtimeConfig.avoidBbwShotWithoutScale = false;
+  scale.connected = false;
+  setScaleLinkState(ScaleLinkState::DISCONNECTED);
+  currentWeightSequence = 0;
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  shortPress(150);
+  runLoopAfter(COMPILED_STOP_PULSE_MS + 50);
+  setRawReed(true);
+  CHECK(session.active);
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  const size_t closedBeforeWall = hostRelayClosedWrites;
+  runLoopAfter(2200);
+  CHECK(session.active);
+  CHECK(hostRelayClosedWrites == closedBeforeWall);
+  while (elapsedMs(momentaryLogicalRunStartedAtMs) < HARD_MAX_CIRCUIT_CLOSED_MS) {
+    runLoopAfter(200);
+  }
+  runLoopAfter(50);
+  CHECK(!session.active);
+  CHECK(hostRelayClosedWrites == closedBeforeWall + 1);
+  CHECK(getRelaySafetySnapshot().closed);
+  runLoopAfter(COMPILED_STOP_PULSE_MS + 80);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(hostRelayClosedWrites == closedBeforeWall + 1);
+}
 #endif
 
 void t_logical_wall_trips_existing_flags() {
   resetMomentaryHarness();
   runtimeConfig.operationalWallMs = 2000;
+  seedFreshScaleWeight(0.0f);
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   shortPress(150);
   CHECK(session.active);
@@ -1759,16 +1855,20 @@ const TestCase kTests[] = {
     {"P32", t_brief_stale_demotes_confirmed_not_unknown},
     {"P33", t_small_delta_does_not_confirm_on},
     {"P34", t_confirmed_wall_pulses_once_and_ends_session},
-    {"P51", t_noscale_wall_pulses_and_next_press_starts},
+    {"P51", t_noscale_hard_cap_idles_without_pulse_and_next_press_starts},
+    {"P53", t_timer_only_confirmed_skips_operational_wall_pulses_at_hard_cap},
+    {"P54", t_timer_only_unconfirmed_idles_at_hard_cap_without_pulse},
 #endif
 #if SHOT_STOPPER_MACHINE_TYPE == 2
     {"P06", t_reed_off_blocks_firmware_cut},
     {"P07", t_reed_on_allows_firmware_cut},
-    {"P15", t_reed_boot_on_is_unknown},
+    {"P15", t_reed_boot_on_is_confirmed_on},
+    {"P15B", t_reed_safety_trip_follows_reed},
     {"P16", t_reed_off_wins_over_rising_weight},
     {"P17", t_assumed_on_offers_web_stop},
     {"P19", t_reed_polarity_stop_when_running},
     {"P35", t_reed_wall_pulses_once_and_ends_session},
+    {"P57", t_reed_manual_skips_operational_wall_pulses_at_hard_cap},
     {"P42", t_reed_stays_assumed_on_until_timeout_then_confirms_off},
     {"P43", t_reed_on_during_window_confirms_immediately},
     {"P44", t_reed_stop_assumed_off_until_reed_matches},

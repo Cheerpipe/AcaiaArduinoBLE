@@ -28,10 +28,13 @@ that a blocked start also leaves K1 open.
 | **Button press** | yes | On the debounced press. If the hold then exceeds **Single-press limit**, that edge is undone (not a start/stop). Release does not toggle again. |
 | **Button release** | no | On release, and only if the hold is no longer than **Single-press limit**. A longer hold is mirror-only (for example a machine rinse). |
 
-Without a scale, the stopper does not know if the group is running. Weight
-cuts and extraction guards stay off: mirror only. The **operational time
-wall** is the exception: at the configured max shot time it still sends one
-auto-stop pulse and treats the group as idle, so the next press is Start.
+Without a scale, or with brew by weight off, the stopper does not send
+weight cuts. The 1:1 relay mirror still copies the switch. **Max BBW time
+does not apply.** The firmware **60 s** cap can still pulse a running group:
+on reed builds if the reed is on; on switch-only builds only if the state
+is Confirmed on. Without Confirmed on (including tap-start with no scale),
+firmware does not pulse; the next press is a new Start. Holding the switch
+for 60 s still opens K1 (electrical cap).
 
 Related: [Paddle](paddle.md), [Quick rinse](quick-rinse.md),
 [Hardware](../HARDWARE.md).
@@ -49,9 +52,11 @@ Related: [Paddle](paddle.md), [Quick rinse](quick-rinse.md),
 
 Reed is polled every control loop (`digitalRead` plus 30 ms debounce). A
 stable level is not missed. Outside an assumed window, machine state is
-the reed: off → Confirmed off, on → Confirmed on. Assumed on/off exists
-only for the button → solenoid → reed lag after that start/stop edge, up
-to this timeout. If a press exceeds Single-press limit, that start/stop is
-undone (back to the pre-press view) and the same timeout is a grace window
-before reed is canonical again. Without a reed, firmware just restores the
-pre-press inferred state.
+the reed: off → Confirmed off, on → Confirmed on. That includes boot with
+the reed already on, and K1 tripped or lockout. Firmware auto-cut still
+waits for one stable off this boot so a stuck-ON reed is not pulsed.
+Assumed on/off exists only for the button → solenoid → reed lag after that
+start/stop edge, up to this timeout. If a press exceeds Single-press
+limit, that start/stop is undone (back to the pre-press view) and the same
+timeout is a grace window before reed is canonical again. Without a reed,
+firmware just restores the pre-press inferred state.

@@ -205,7 +205,6 @@ void machineOverrideInferredOn() {
   momentaryInferredState = MachineRunState::CONFIRMED_ON;
   momentaryLogicalRunActive = true;
   momentaryLogicalRunStartedAtMs = millis();
-  momentaryLogicalOperationalLimitMs = runtimeConfig.operationalWallMs;
 }
 
 void machineArmSettledWeightCutOff() { momentarySettledWeightCutArmed = true; }
@@ -385,7 +384,6 @@ void serviceMomentaryRunSensors() {
         if (momentaryLogicalRunStartedAtMs == 0) {
           momentaryLogicalRunStartedAtMs = now;
         }
-        momentaryLogicalOperationalLimitMs = runtimeConfig.operationalWallMs;
       }
     } else if (elapsedMs(momentaryStopAwaitingSinceMs) >= MOMENTARY_STOP_ACK_MS) {
       momentaryStopAwaitingAck = false;
@@ -465,7 +463,6 @@ void serviceMomentaryRunSensors() {
         if (momentaryLogicalRunStartedAtMs == 0) {
           momentaryLogicalRunStartedAtMs = now;
         }
-        momentaryLogicalOperationalLimitMs = runtimeConfig.operationalWallMs;
       }
     }
   } else if (!resample &&

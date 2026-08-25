@@ -3,9 +3,9 @@
 Automatic brew-by-weight (BBW) stops the shot when the scale reaches the
 recipe target, minus a learned drip offset. It is **on by default**.
 
-Turn it off if you want the paddle and time limits only. Tare and the shot
-timer still run; weight stop, cup protection at start, automatic retare, and
-offset learning do not.
+Turn it off if you want the paddle (or switch) and the firmware 60 s cap
+only. Tare and the shot timer still run; weight stop, cup protection at
+start, automatic retare, Max BBW time, and offset learning do not.
 
 ## When it applies
 
@@ -18,8 +18,11 @@ After the start-of-shot protection window ends (see
 moment earlier. The learned offset is capped at 5.0 g and can be reset to a
 baseline from the Web UI.
 
-Every close path is also limited by **Max BBW time** and a firmware hard cap
-of **60 seconds**.
+Automatic brew-by-weight cycles are limited by **Max BBW time** and a
+firmware hard cap of **60 seconds**. Timer-only (BBW off) and manual
+no-scale shots skip Max BBW time; only the 60 s cap applies. That is the
+same in Auto, Natural, and Original, and on paddle, momentary, and reed
+builds.
 
 ## Parameters
 
@@ -29,9 +32,9 @@ noted. **Home → Quick Settings** can toggle brew by weight for the session
 
 | Setting | Default | Range | Effect on the shot |
 | --- | --- | --- | --- |
-| **Brew by weight** | ON | ON / OFF | ON: stop by weight when a scale is usable. OFF: paddle, **Stop**, and time limits only. Fast, Slow, A→M, and No-scale BBW become read-only. |
+| **Brew by weight** | ON | ON / OFF | ON: stop by weight when a scale is usable. OFF: paddle, **Stop**, and the 60 s firmware cap only. Fast, Slow, A→M, Max BBW time, and No-scale BBW become read-only. |
 | **Target (g)** | 36 g | 10–200 g | Goal weight. Stop aims at `target − learned offset`. |
-| **Max BBW time (s)** | 50 s | 5–60 s | Operational time limit for a BBW cycle. Cannot exceed the hard 60 s cap. |
+| **Max BBW time (s)** | 50 s | 5–60 s | Operational time limit for an **automatic BBW** cycle. Ignored on timer-only and no-scale shots. Cannot exceed the hard 60 s cap. |
 | **Baseline offset (g)** | 1.5 g | 0–5 g | Seed used by **Reset learned stop offset to baseline**. Save this before reset. |
 | **Learned stop offset** | starts at 1.5 g | 0–5 g | Subtracted from the target (and from Fast/Slow recovery weights). Updated from post-drip weight after good shots. |
 

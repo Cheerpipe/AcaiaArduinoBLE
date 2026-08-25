@@ -90,19 +90,11 @@ void maybeEmitFirmwareStopPulse() {
 #if SHOT_STOPPER_MACHINE_TYPE == 1
 void endMomentaryLogicalRunForWall() {
   const bool cut = machineAllowsFirmwareStopPulse();
-  const bool noScaleCut =
-      !cut && !momentarySawScale && !machineSense.weightFresh &&
-      !momentaryPhysicalOn;
   latchMomentaryElapsed();
   momentaryLogicalRunActive = false;
   if (cut) {
     maybeEmitFirmwareStopPulse();
     noteMomentaryLogicalStop();
-    return;
-  }
-  if (noScaleCut) {
-    (void)emitFirmwareStopPulse();
-    settleMomentaryInferredOff();
     return;
   }
   if (momentaryInferredState != MachineRunState::CONFIRMED_OFF) {
@@ -117,10 +109,20 @@ void serviceLogicalRunWalls() {
   }
   const uint32_t elapsed = elapsedMs(momentaryLogicalRunStartedAtMs);
   if (elapsed >= HARD_MAX_CIRCUIT_CLOSED_MS) {
-    tripRelaySafety(RelaySafetyFault::HARD_LIMIT, true, false, false);
 #if SHOT_STOPPER_MACHINE_TYPE == 1
-    endMomentaryLogicalRunForWall();
+    if (machineAllowsFirmwareStopPulse()) {
+      tripRelaySafety(RelaySafetyFault::HARD_LIMIT, true, false, false);
+      endMomentaryLogicalRunForWall();
+    } else if (!momentarySawScale && !machineSense.weightFresh) {
+      latchMomentaryElapsed();
+      settleMomentaryInferredOff();
+      momentaryNoFlowIdlePending = true;
+    } else {
+      tripRelaySafety(RelaySafetyFault::HARD_LIMIT, true, false, false);
+      endMomentaryLogicalRunForWall();
+    }
 #else
+    tripRelaySafety(RelaySafetyFault::HARD_LIMIT, true, false, false);
     latchMomentaryElapsed();
     momentaryLogicalRunActive = false;
     if (machineAllowsFirmwareStopPulse()) {

@@ -2035,23 +2035,79 @@ void w10_cycle_configuration_snapshot_is_immutable() {
   CHECK(session.config.firstDropBeep == frozen.firstDropBeep);
 }
 
-void w11_operational_timer_opens_without_control_loop() {
-  resetHarness(false, false);
-  reachReadyFromBoot();
+void configureShortOperationalWallForManual() {
   runtimeConfig.operationalWallMs = 20000;
   runtimeConfig.bbwProtectionMs = 7000;
   runtimeConfig.autoToManualGuardManualLimitMs = 15000;
   runtimeConfig.autoToManualGuardBaselineMs = 15000;
   CHECK(validateRuntimeConfig(runtimeConfig) == ConfigValidationError::NONE);
-  startCycle();
+}
+
+void armTimerOnlySession() {
+  runtimeConfig.timerOnly = true;
+  ShotPreset &preset = mutableActiveShotPreset(presetBank);
+  preset.brewByWeight = false;
+  runtimeConfig = composeEffectiveConfig(runtimeConfig, presetBank);
+}
+
+void assertManualCycleSkipsOperationalWallUntilHardCap(
+    StopperState expectedState) {
+  CHECK(stopperState == expectedState);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(getRelaySafetySnapshot().operationalLimitMs ==
+        HARD_MAX_CIRCUIT_CLOSED_MS);
   hostMillis = circuitClosedAtMs + runtimeConfig.operationalWallMs;
   hostServiceEspTimer(operationalLimitTimer);
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(!getRelaySafetySnapshot().operationalTripped);
+  CHECK(stopperState == expectedState);
+  hostMillis = circuitClosedAtMs + HARD_MAX_CIRCUIT_CLOSED_MS;
+  hostServiceEspTimer(relaySafetyTimer);
   CHECK(!getRelaySafetySnapshot().closed);
-  CHECK(getRelaySafetySnapshot().operationalTripped);
-  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(getRelaySafetySnapshot().tripped);
   loop();
   CHECK(stopperState == StopperState::REQUIRES_OFF);
-  CHECK(session.endReason == EndReason::CONFIGURED_WALL_LIMIT);
+  CHECK(session.endReason == EndReason::GLOBAL_LIMIT);
+}
+
+void w11_operational_timer_opens_without_control_loop() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  configureShortOperationalWallForManual();
+  startCycle();
+  assertManualCycleSkipsOperationalWallUntilHardCap(
+      StopperState::MANUAL_NO_SCALE);
+}
+
+void w11b_timer_only_natural_skips_operational_wall() {
+  resetHarness(false, true);
+  armTimerOnlySession();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::NATURAL);
+  reachReadyFromBoot();
+  configureShortOperationalWallForManual();
+  startCycle();
+  assertManualCycleSkipsOperationalWallUntilHardCap(StopperState::BREW);
+}
+
+void w11c_timer_only_original_skips_operational_wall() {
+  resetHarness(false, true);
+  armTimerOnlySession();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::ORIGINAL);
+  reachReadyFromBoot();
+  configureShortOperationalWallForManual();
+  startCycle();
+  CHECK(!machineCycleHardMaxArmedForTest());
+  assertManualCycleSkipsOperationalWallUntilHardCap(StopperState::BREW);
+}
+
+void w11d_timer_only_auto_skips_operational_wall() {
+  resetHarness(false, true);
+  armTimerOnlySession();
+  runtimeConfig.paddleMode = static_cast<uint8_t>(PaddleMode::AUTO);
+  reachReadyFromBoot();
+  configureShortOperationalWallForManual();
+  startCycle();
+  assertManualCycleSkipsOperationalWallUntilHardCap(StopperState::BREW);
 }
 
 void w12_hard_limit_cannot_be_configured_above_sixty_seconds() {
@@ -9364,6 +9420,9 @@ const TestCase testCases[] = {
     {"W09", w09_valid_config_applies_only_from_ready},
     {"W10", w10_cycle_configuration_snapshot_is_immutable},
     {"W11", w11_operational_timer_opens_without_control_loop},
+    {"W11b", w11b_timer_only_natural_skips_operational_wall},
+    {"W11c", w11c_timer_only_original_skips_operational_wall},
+    {"W11d", w11d_timer_only_auto_skips_operational_wall},
     {"W12", w12_hard_limit_cannot_be_configured_above_sixty_seconds},
     {"W45", w45_bbw_protection_retare_relation_is_validated},
     {"W46", w46_status_reports_uptime_since_boot},

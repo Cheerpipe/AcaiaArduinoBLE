@@ -122,9 +122,9 @@ Source: `ShotStopperBrewTypes.h`, orchestrated in `shotStopper.cpp`.
 | --- | --- |
 | `REQUIRES_OFF` | Cycle over (or start refused after a trip) while the activator is still ON. Machine circuit must stay open until a stable activator OFF. Prevents an immediate re-close. |
 | `READY` | Idle. Waiting for a start gesture. Machine circuit is open. |
-| `BREW` | Shot in progress with weight and/or timer policy. Machine circuit is closed (unless safety already opened it). Includes timer-only BBW-off shots that started with a scale. |
+| `BREW` | Shot in progress with weight and/or timer policy. Machine circuit is closed (unless safety already opened it). Includes timer-only BBW-off shots that started with a scale (Max BBW time not armed; 60 s cap only). |
 | `RINSE` | Timed group-head rinse. Activator edges are ignored until the rinse duration elapses. Not stored in shot history. |
-| `MANUAL_NO_SCALE` | Shot in progress without weight stop (no usable scale at start, or BBW off without treating it as timer-only brew). Ends on activator OFF, rinse demotion, or a time/safety limit. |
+| `MANUAL_NO_SCALE` | Shot in progress without weight stop (no usable scale at start, or BBW off without treating it as timer-only brew). Ends on activator OFF, rinse demotion, or the 60 s firmware cap — not Max BBW time. |
 
 ### Events (inputs)
 
@@ -178,7 +178,7 @@ Source: `ShotStopperSafety.h`, `ShotStopperMachine.h`.
 | `INVALID_LIMIT` | Close requested with a bad operational limit. | Lockout |
 | `TIMER_ARM_FAILED` | Could not start the deadline timers. | Lockout |
 | `HARD_LIMIT` | 60 s cap (`HARD_MAX_CIRCUIT_CLOSED_MS`). ISR-safe. | Trip (not lockout) |
-| `OPERATIONAL_LIMIT` | Configured Max BBW time (default 50 s), or Original-mode wall after paddle release. | Trip |
+| `OPERATIONAL_LIMIT` | Configured Max BBW time (default 50 s) on automatic BBW, or Original-mode wall after paddle release. Not armed on timer-only or no-scale shots. | Trip |
 | `FEEDBACK_STUCK_CLOSED` | Optional echo GPIO already closed before arm. | Lockout |
 | `FEEDBACK_FAILED_TO_CLOSE` | Echo never matched a commanded close. | Lockout |
 | `FEEDBACK_CHANGED_UNEXPECTEDLY` | Echo flipped while closed/open unexpectedly. | Lockout |
@@ -214,7 +214,7 @@ Config lock uses `machineIsRunning()`, which for paddle equals machine circuit c
 | `ASSUMED_ON` | Safety is `ARMING`: close is in flight, echo may not yet match. Reed: configured start edge (press or release), reed still off, within confirm timeout. |
 | `CONFIRMED_ON` | Safety `CLOSED` or `relay.closed`. Reed: reed is on (outside an assumed-off window). |
 | `ASSUMED_OFF` | Reed: configured stop edge (press or release), reed still on, within confirm timeout. Switch-only: quiet START nack (no espresso-like flow before the shot-reaction timeout), or a logical STOP still settling (pan not yet quiet). Momentary-only: cup `REMOVED` while in this state confirms off immediately (no quiet wait). |
-| `UNKNOWN` | Safety TRIPPED/LOCKOUT but the contact still reads closed (should not last). |
+| `UNKNOWN` | Paddle / momentary-only: safety TRIPPED/LOCKOUT but the contact still reads closed (should not last). Reed builds do not use this: K1 trip does not hide the reed. |
 
 ### Command vs pin vs paddle
 
@@ -262,9 +262,9 @@ settles on a quiet pan. Home
 the group is electrically ON with no coffee; they do not pulse. An
 operational wall without `CONFIRMED_ON` and with a scale still leaves an
 orphan run: settings stay locked and a later user Stop may pulse; firmware
-auto-cut does not. Without a scale (never saw fresh weight, switch released)
-the same wall emits one stop pulse and settles to Confirmed off — next press
-is Start.
+auto-cut does not. Max BBW time is not armed on timer-only or no-scale
+shots. At the 60 s hard cap without Confirmed on, firmware settles to
+Confirmed off with no stop pulse so the next press is Start.
 
 On **momentary+reed** builds (`SHOT_STOPPER_MACHINE_TYPE=2`) the reed is
 canonical except for a short assumed window after the configured start/stop
@@ -277,8 +277,8 @@ reed-confirm timeout elapses (default 1 s, setting 0.2–5 s, reed-only),
 confirm the **actual** reed: assumed-on + reed still off → `CONFIRMED_OFF`
 (clear logical run, one-cycle `REQUEST_STOP`, no extra stop pulse);
 assumed-off + reed still on → `CONFIRMED_ON`. Boot with the reed already
-on stays `UNKNOWN` until a stable off. Firmware auto-cut still requires
-canonical reed on.
+on is `CONFIRMED_ON`. K1 `TRIPPED`/`LOCKOUT` does not override the reed.
+Firmware auto-cut still requires a stable reed off earlier this boot.
 
 `machineIsRunning()` is logical run, stop-ack, orphan, `CONFIRMED_ON`, or
 `ASSUMED_ON`. On reed builds it is also true while the reed is on, so
@@ -694,7 +694,7 @@ ran, stored on the session, last-shot blob, and shot log.
 | `SCALE_THRESHOLD` | Weight control `ACTIVE`, target (minus drip offset) confirmed. |
 | `WEIGHT_ANOMALY` | Direct-stop path on a pathological sample. |
 | `GLOBAL_LIMIT` | 60 s hard cap. |
-| `CONFIGURED_WALL_LIMIT` | Max BBW time / operational wall. |
+| `CONFIGURED_WALL_LIMIT` | Max BBW time / operational wall on automatic BBW cycles. Not used for timer-only or no-scale shots. |
 | `SHORT_SHOT` | Reserved/legacy short-shot path. |
 | `RINSE_COMPLETE` | Rinse duration elapsed. |
 | `WEB_STOP` | Authenticated Stop. |

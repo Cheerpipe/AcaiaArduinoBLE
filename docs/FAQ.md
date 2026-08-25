@@ -11,7 +11,7 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 | Question | Answer |
 | --- | --- |
 | **I cannot brew longer than 60 s. Why?** | A firmware **hard cap of 60 s** applies to every path that closes the machine circuit. The Web UI cannot raise it. Separate from **Max BBW time**. See [Brew by weight](features/brew-by-weight.md). |
-| **My shot stops around 50 s (or another value under 60 s).** | Check **Max BBW time** (default **50 s**). [A→M time guard](features/auto-to-manual.md) can also cut if the scale dropped. [Slow extraction guard](features/slow-extraction-guard.md) may decide at **44 s**; that is not a replacement for Max BBW time. |
+| **My shot stops around 50 s (or another value under 60 s).** | Check **Max BBW time** (default **50 s**) on an **automatic BBW** shot. Timer-only / no-scale shots ignore it and run until paddle/switch or the 60 s cap. [A→M time guard](features/auto-to-manual.md) can also cut if the scale dropped. [Slow extraction guard](features/slow-extraction-guard.md) may decide at **44 s**; that is not a replacement for Max BBW time. |
 | **The shot ended off-target and the scale was not stopping the flow.** | Often [A→M time guard](features/auto-to-manual.md) (on by default). If the scale is lost mid-shot, weight stop pauses, reconnect continues, and machine circuit can still open on a deadline from shot start. Status shows `Off` / `Idle` / `Armed` / `A→M · …s`. |
 | **The shot finished 2–4 g over target.** | Expected when [Fast extraction guard](features/fast-extraction-guard.md) is on and the target arrived **too soon**. The shot extends toward max recovery weight or minimum brew time. Turn the guard off if you do not want that. Pulses: [Alerts](alerts.md). |
 | **The shot finished under target (for example 34 g) when it was slow.** | Expected when [Slow extraction guard](features/slow-extraction-guard.md) is on and the target was not reached by max brew time. BBW still wins if you hit target on time. |
@@ -19,7 +19,7 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 | **Can I put the cup down after I start?** | **Yes**, if **Automatic retare** is on (default). Place the cup in the **retare window** (default **4 s**). Any stable load at or above **Minimum cup weight** (default **10 g** — cardboard ~12–20 g or ceramic 150 g) is a cup, not first drop, and can retare. A finger tap is also not first drop. Then **Post-tare grace** (default **2 s**) lets the scale settle before weight is used to stop. See [Tare and retare](features/tare-retare.md), [Tare](settings/tare.md), and [Cup](settings/cup.md). |
 | **Why does it not stop exactly on the target grams?** | A **learned stop offset** (default 1.5 g, max 5 g) compensates for drip after machine circuit opens. History shows `cut_type` and `stop_detail`, not a “prediction” type. See [Brew by weight](features/brew-by-weight.md). |
 | **The scale disconnected mid-shot. What happens?** | Weight stop pauses; reconnect continues for the whole cycle. If three coherent samples return, BBW resumes. If [A→M](features/auto-to-manual.md) is on, machine circuit may still open on the deadline. If A→M is off, the shot runs until paddle OFF or the 60 s wall. |
-| **I turned Brew by weight off. Why no weight stop?** | Tare and the timer remain. Weight stop, retare, BBW protection, and offset learning do not. Cut is paddle, time limit, or remote **Stop**. Fast, Slow, A→M, and No-scale BBW become read-only on Home. |
+| **I turned Brew by weight off. Why no weight stop?** | Tare and the timer remain. Weight stop, retare, BBW protection, Max BBW time, and offset learning do not. Cut is paddle/switch, the 60 s firmware cap, or remote **Stop**. Fast, Slow, A→M, and No-scale BBW become read-only on Home. |
 | **Home Brew by weight is OFF but Settings is ON.** | Both can be right. **Home** is the live session (Manual) and is what the next shot uses. **Settings → Brew** is the saved recipe and does not flip off when you turn Home off. Turn Home ON to resume weight stop without changing the recipe. |
 | **BBW is on, scale is off, a long paddle does nothing (triple beep, machine circuit open).** | [No-scale BBW](settings/no-scale-bbw.md) (*Avoid BBW shot without scale*, on by default). A long paddle does not close the machine circuit. A short ON→OFF still rinses. The next start is a manual no-scale shot. |
 
@@ -66,7 +66,7 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 
 | What you noticed | Where to look |
 | --- | --- |
-| Shot time limit (≤ 60 s) | [Brew by weight](features/brew-by-weight.md) — Max BBW time |
+| Shot time limit (≤ 60 s) | Automatic BBW: [Brew by weight](features/brew-by-weight.md) — Max BBW time. Manual / BBW off: 60 s firmware cap only. |
 | Cut after the scale was lost | [A→M time guard](features/auto-to-manual.md) |
 | A few grams over target, too fast | [Fast extraction guard](features/fast-extraction-guard.md); pulses in [Alerts](alerts.md) |
 | Under target, too slow | [Slow extraction guard](features/slow-extraction-guard.md) |
