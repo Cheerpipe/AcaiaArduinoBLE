@@ -387,6 +387,10 @@ bool EspressoScaleBLE::advanceConnection() {
 bool EspressoScaleBLE::detectAndConfigureScale() {
     for (size_t i = 0; i < scaleProtocolCount(); ++i) {
         const ScaleProtocol *protocol = scaleProtocolAt(i);
+        if (protocol->requireAdvertisedName &&
+            !scaleNameMatchesProtocol(_localName, protocol)) {
+            continue;
+        }
         BLECharacteristic candidate =
             _peripheral.characteristic(protocol->readUuid);
         if (candidate && candidate.canSubscribe()) {

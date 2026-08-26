@@ -5,9 +5,14 @@ Bookoo-specific volume / combined tare. Machine-level, under
 **Settings → Machine and scale → Scales**.
 
 Daily defaults assume a **Bookoo** Themis Mini or Ultra. **Acaia**,
-**Felicita**, and **AtomHeart Eclair** remain supported through the vendored
-EspressoScaleBLE library. Compatibility details:
+**Felicita**, **AtomHeart Eclair**, **Decent**, **DiFluid Microbalance**,
+**MyScale**, **Varia AKU**, **Eureka Precisa** (named GAP), and **WeighMyBru**
+are also supported through the vendored EspressoScaleBLE library. Compatibility
+details:
 [Scale compatibility](../../libraries/EspressoScaleBLE/README.md#scale-compatibility).
+
+Timemore Black Mirror DUO, Timemore Dot, Acaia Umbra, and Eureka units that
+advertise no GAP name are not supported.
 
 ## When it applies
 

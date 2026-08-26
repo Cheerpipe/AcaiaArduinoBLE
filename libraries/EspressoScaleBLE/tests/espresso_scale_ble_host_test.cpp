@@ -107,6 +107,48 @@ ScaleFixture makeScale(scale_type type) {
     return fixture;
 }
 
+ScaleFixture makeNamedScale(const char *name, const char *writeUuid,
+                            const char *readUuid) {
+    ScaleFixture fixture;
+    fixture.peripheral = std::make_shared<FakeBLE::PeripheralState>();
+    fixture.write = std::make_shared<FakeBLE::CharacteristicState>();
+    fixture.read = std::make_shared<FakeBLE::CharacteristicState>();
+    fixture.write->writable = true;
+    fixture.read->writable = false;
+    fixture.read->subscribable = true;
+    fixture.peripheral->localName = name == nullptr ? "" : name;
+    if (std::strcmp(writeUuid, readUuid) == 0) {
+        fixture.read = fixture.write;
+        fixture.read->subscribable = true;
+    }
+    fixture.write->uuid = writeUuid;
+    fixture.read->uuid = readUuid;
+    fixture.peripheral->characteristics[writeUuid] = fixture.write;
+    fixture.peripheral->characteristics[readUuid] = fixture.read;
+    BLE.setAvailable(fixture.peripheral);
+    return fixture;
+}
+
+const ScaleProtocol *protocolById(const char *id) {
+    for (size_t i = 0; i < scaleProtocolCount(); ++i) {
+        const ScaleProtocol *protocol = scaleProtocolAt(i);
+        if (std::strcmp(protocol->id, id) == 0) {
+            return protocol;
+        }
+    }
+    return nullptr;
+}
+
+std::vector<byte> encodeOp(const ScaleProtocol *protocol, ScaleOp op,
+                           uint8_t arg = 0) {
+    byte out[SCALE_MAX_COMMAND_LENGTH] = {};
+    int length = 0;
+    CHECK(protocol != nullptr);
+    CHECK(protocol->encodeCommand(op, arg, out, &length));
+    CHECK(length > 0);
+    return std::vector<byte>(out, out + length);
+}
+
 void resetFake() {
     fakeMillis = 0;
     BLE.reset();
@@ -595,11 +637,13 @@ void testCapabilitiesAndWriteCleanup() {
     CHECK(scaleCommandOk(genericScale.tareStartTimer()));
     CHECK(genericScale.supportsIndependentBeep());
     CHECK(scaleCommandOk(genericScale.beep()));
-    CHECK(generic.write->writes.size() == 2);
-    CHECK(generic.write->writes[0][2] == 0x07);
-    CHECK(generic.write->writes[1][2] == 0x02);
-    CHECK(generic.write->writes[1][4] == 0x01);
-    CHECK(generic.write->writes[1][5] == 0x0a);
+    CHECK(generic.write->writes.size() == 3);
+    CHECK(generic.write->writes[0] ==
+          (std::vector<byte>{0x03, 0x0a, 0x08, 0x00, 0x00, 0x01}));
+    CHECK(generic.write->writes[1][2] == 0x07);
+    CHECK(generic.write->writes[2][2] == 0x02);
+    CHECK(generic.write->writes[2][4] == 0x01);
+    CHECK(generic.write->writes[2][5] == 0x0a);
 
     const size_t beforeLevels = generic.write->writes.size();
     for (uint8_t level = 0; level <= 5; ++level) {
@@ -812,12 +856,21 @@ void testPacketLengthCorpusAndReconnectSoak() {
 }
 
 void testGoldenCommandPayloadsAndFeatures() {
-    CHECK(scaleProtocolCount() == 5);
+    CHECK(scaleProtocolCount() == 11);
     CHECK(std::strcmp(scaleProtocolAt(0)->id, "acaia_legacy") == 0);
     CHECK(std::strcmp(scaleProtocolAt(1)->id, "acaia") == 0);
     CHECK(std::strcmp(scaleProtocolAt(2)->id, "bookoo_generic") == 0);
     CHECK(std::strcmp(scaleProtocolAt(3)->id, "felicita") == 0);
     CHECK(std::strcmp(scaleProtocolAt(4)->id, "atomheart_eclair") == 0);
+    CHECK(std::strcmp(scaleProtocolAt(5)->id, "decent") == 0);
+    CHECK(std::strcmp(scaleProtocolAt(6)->id, "difluid") == 0);
+    CHECK(std::strcmp(scaleProtocolAt(7)->id, "myscale") == 0);
+    CHECK(std::strcmp(scaleProtocolAt(8)->id, "weighmybru") == 0);
+    CHECK(std::strcmp(scaleProtocolAt(9)->id, "varia") == 0);
+    CHECK(std::strcmp(scaleProtocolAt(10)->id, "eureka") == 0);
+    CHECK(!scaleProtocolAt(0)->requireAdvertisedName);
+    CHECK(scaleProtocolAt(9)->requireAdvertisedName);
+    CHECK(scaleProtocolAt(10)->requireAdvertisedName);
     CHECK(scaleNameIsCompatible("CINCO"));
     CHECK(scaleNameIsCompatible("ACAIA"));
     CHECK(scaleNameIsCompatible("PYXIS"));
@@ -827,7 +880,24 @@ void testGoldenCommandPayloadsAndFeatures() {
     CHECK(scaleNameIsCompatible("BOOKOO"));
     CHECK(scaleNameIsCompatible("FELICITA"));
     CHECK(scaleNameIsCompatible("ECLAIR"));
+    CHECK(scaleNameIsCompatible("Decent Scale"));
+    CHECK(scaleNameIsCompatible("EspressiScale"));
+    CHECK(scaleNameIsCompatible("Microbalance Ti"));
+    CHECK(scaleNameIsCompatible("blackcoffee"));
+    CHECK(scaleNameIsCompatible("my_scale"));
+    CHECK(scaleNameIsCompatible("MY_SCALE"));
+    CHECK(scaleNameIsCompatible("WeighMyBru"));
+    CHECK(scaleNameIsCompatible("VARIA AKU"));
+    CHECK(scaleNameIsCompatible("Varia AKU"));
+    CHECK(scaleNameIsCompatible("AKU MINI SCALE"));
+    CHECK(scaleNameIsCompatible("AKU SCALE"));
+    CHECK(scaleNameIsCompatible("CFS-9002"));
+    CHECK(scaleNameIsCompatible("LSJ-001"));
     CHECK(!scaleNameIsCompatible("PHONE"));
+    CHECK(!scaleNameIsCompatible("MbSomething"));
+    CHECK(!scaleNameIsCompatible("black"));
+    CHECK(!scaleNameIsCompatible("Weigh"));
+    CHECK(!scaleNameIsCompatible("AKU"));
 
     resetFake();
     ScaleFixture acaia = makeScale(NEW);
@@ -869,7 +939,9 @@ void testGoldenCommandPayloadsAndFeatures() {
     ScaleFixture generic = makeScale(GENERIC);
     EspressoScaleBLE genericScale(false);
     CHECK(genericScale.init());
-    CHECK(generic.write->writes.empty());
+    CHECK(generic.write->writes.size() == 1);
+    CHECK(generic.write->writes[0] ==
+          (std::vector<byte>{0x03, 0x0a, 0x08, 0x00, 0x00, 0x01}));
     CHECK(genericScale.features().has(ScaleFeatureCombinedTareStart));
     CHECK(genericScale.features().has(ScaleFeatureVolume));
     CHECK(genericScale.features().volumeMax == 5);
@@ -880,15 +952,15 @@ void testGoldenCommandPayloadsAndFeatures() {
     CHECK(scaleCommandOk(genericScale.stopTimer()));
     CHECK(scaleCommandOk(genericScale.resetTimer()));
     CHECK(scaleCommandOk(genericScale.tareStartTimer()));
-    CHECK(generic.write->writes[0] ==
-          (std::vector<byte>{0x03, 0x0a, 0x01, 0x00, 0x00, 0x08}));
     CHECK(generic.write->writes[1] ==
-          (std::vector<byte>{0x03, 0x0a, 0x04, 0x00, 0x00, 0x0a}));
+          (std::vector<byte>{0x03, 0x0a, 0x01, 0x00, 0x00, 0x08}));
     CHECK(generic.write->writes[2] ==
-          (std::vector<byte>{0x03, 0x0a, 0x05, 0x00, 0x00, 0x0d}));
+          (std::vector<byte>{0x03, 0x0a, 0x04, 0x00, 0x00, 0x0a}));
     CHECK(generic.write->writes[3] ==
-          (std::vector<byte>{0x03, 0x0a, 0x06, 0x00, 0x00, 0x0c}));
+          (std::vector<byte>{0x03, 0x0a, 0x05, 0x00, 0x00, 0x0d}));
     CHECK(generic.write->writes[4] ==
+          (std::vector<byte>{0x03, 0x0a, 0x06, 0x00, 0x00, 0x0c}));
+    CHECK(generic.write->writes[5] ==
           (std::vector<byte>{0x03, 0x0a, 0x07, 0x00, 0x00, 0x00}));
 
     resetFake();
@@ -917,6 +989,179 @@ void testGoldenCommandPayloadsAndFeatures() {
     CHECK(!eclairScale.features().has(ScaleFeatureHeartbeat));
 }
 
+void testGaggimateScaleProtocols() {
+    const ScaleProtocol *decent = protocolById("decent");
+    CHECK(encodeOp(decent, ScaleOp::Tare) ==
+          (std::vector<byte>{0x03, 0x0f, 0x00, 0x00, 0x00, 0x01, 0x0d}));
+    CHECK(encodeOp(decent, ScaleOp::Heartbeat) ==
+          (std::vector<byte>{0x03, 0x0a, 0x03, 0xff, 0xff, 0x00, 0x0a}));
+    {
+        byte out[SCALE_MAX_COMMAND_LENGTH] = {};
+        int length = 0;
+        CHECK(!decent->encodeCommand(ScaleOp::StartTimer, 0, out, &length));
+    }
+
+    const ScaleProtocol *difluid = protocolById("difluid");
+    CHECK(encodeOp(difluid, ScaleOp::Tare) ==
+          (std::vector<byte>{0xdf, 0xdf, 0x03, 0x02, 0x01, 0x01, 0xc5}));
+    CHECK(encodeOp(difluid, ScaleOp::Heartbeat) ==
+          (std::vector<byte>{0xdf, 0xdf, 0x03, 0x05, 0x00, 0xc6}));
+
+    const ScaleProtocol *myscale = protocolById("myscale");
+    CHECK(encodeOp(myscale, ScaleOp::Tare).size() == 20);
+    CHECK(encodeOp(myscale, ScaleOp::Tare)[0] == 0xac);
+
+    const ScaleProtocol *weighmybru = protocolById("weighmybru");
+    CHECK(encodeOp(weighmybru, ScaleOp::Tare) ==
+          (std::vector<byte>{0x03, 0x0a, 0x01, 0x01, 0x00, 0x09}));
+
+    const ScaleProtocol *varia = protocolById("varia");
+    CHECK(encodeOp(varia, ScaleOp::Tare) ==
+          (std::vector<byte>{0xfa, 0x82, 0x01, 0x01, 0x82}));
+    CHECK(encodeOp(varia, ScaleOp::StartTimer) ==
+          (std::vector<byte>{0xfa, 0x88, 0x01, 0x01, 0x88}));
+    CHECK(encodeOp(varia, ScaleOp::StopTimer) ==
+          (std::vector<byte>{0xfa, 0x89, 0x01, 0x02, 0x8a}));
+    CHECK(encodeOp(varia, ScaleOp::ResetTimer) ==
+          (std::vector<byte>{0xfa, 0x8a, 0x01, 0x03, 0x88}));
+
+    const ScaleProtocol *eureka = protocolById("eureka");
+    CHECK(encodeOp(eureka, ScaleOp::Tare) ==
+          (std::vector<byte>{0xaa, 0x02, 0x31, 0x31, 0x00, 0x00}));
+    CHECK(encodeOp(eureka, ScaleOp::StartTimer) ==
+          (std::vector<byte>{0xaa, 0x02, 0x33, 0x33, 0x00, 0x00}));
+
+    resetFake();
+    ScaleFixture decentFix =
+        makeNamedScale("Decent Scale", "36f5", "fff4");
+    EspressoScaleBLE decentScale(false);
+    CHECK(decentScale.init());
+    CHECK(std::strcmp(decentScale.connectedProtocolName(), "decent") == 0);
+    CHECK(decentScale.features().has(ScaleFeatureHeartbeat));
+    CHECK(decentScale.features().heartbeatPeriodMs == 5000);
+    CHECK(!decentScale.features().has(ScaleFeatureStartTimer));
+    std::vector<byte> decentWeight{0x03, 0xce, 0x00, 0xc8, 0x00, 0x00, 0x00};
+    decentWeight[6] = static_cast<byte>(
+        0x03 ^ 0xce ^ 0x00 ^ 0xc8 ^ 0x00 ^ 0x00);
+    notify(decentFix, decentWeight);
+    CHECK(decentScale.newWeightAvailable());
+    CHECK(std::fabs(decentScale.getWeight() - 20.0f) < 0.01f);
+
+    resetFake();
+    ScaleFixture difluidFix = makeNamedScale("Microbalance", "aa01", "aa01");
+    EspressoScaleBLE difluidScale(false);
+    CHECK(difluidScale.init());
+    CHECK(std::strcmp(difluidScale.connectedProtocolName(), "difluid") == 0);
+    CHECK(difluidFix.write->writes.size() == 2);
+    CHECK(difluidFix.write->writes[0] ==
+          (std::vector<byte>{0xdf, 0xdf, 0x01, 0x04, 0x01, 0x00, 0xc4}));
+    CHECK(difluidFix.write->writes[1] ==
+          (std::vector<byte>{0xdf, 0xdf, 0x01, 0x00, 0x01, 0x01, 0xc1}));
+    std::vector<byte> difluidWeight(19, 0);
+    difluidWeight[0] = 0xdf;
+    difluidWeight[1] = 0xdf;
+    difluidWeight[2] = 0x03;
+    difluidWeight[3] = 0x00;
+    difluidWeight[4] = 0x0d;
+    difluidWeight[7] = 0x00;
+    difluidWeight[8] = 0xc8;
+    uint16_t sum = 0;
+    for (size_t i = 0; i + 1 < difluidWeight.size(); ++i) {
+        sum = static_cast<uint16_t>(sum + difluidWeight[i]);
+    }
+    difluidWeight[18] = static_cast<byte>(sum & 0xff);
+    notify(difluidFix, difluidWeight);
+    CHECK(difluidScale.newWeightAvailable());
+    CHECK(std::fabs(difluidScale.getWeight() - 20.0f) < 0.01f);
+
+    resetFake();
+    ScaleFixture myscaleFix =
+        makeNamedScale("blackcoffee", "ffb1", "ffb2");
+    EspressoScaleBLE myscaleScale(false);
+    CHECK(myscaleScale.init());
+    CHECK(std::strcmp(myscaleScale.connectedProtocolName(), "myscale") == 0);
+    std::vector<byte> myscaleWeight(15, 0);
+    myscaleWeight[4] = 0x00;
+    myscaleWeight[5] = 0x4e;
+    myscaleWeight[6] = 0x20;
+    notify(myscaleFix, myscaleWeight);
+    CHECK(myscaleScale.newWeightAvailable());
+    CHECK(std::fabs(myscaleScale.getWeight() - 20.0f) < 0.01f);
+
+    resetFake();
+    ScaleFixture wmbFix = makeNamedScale(
+        "WeighMyBru", "6E400003-B5A3-F393-E0A9-E50E24DCCA9E",
+        "6E400002-B5A3-F393-E0A9-E50E24DCCA9E");
+    EspressoScaleBLE wmbScale(false);
+    CHECK(wmbScale.init());
+    CHECK(std::strcmp(wmbScale.connectedProtocolName(), "weighmybru") == 0);
+    CHECK(wmbScale.features().maxPacketSilenceMs == 8000);
+    CHECK(!wmbScale.features().has(ScaleFeatureHeartbeat));
+    std::vector<byte> wmbWeight(20, 0);
+    wmbWeight[0] = 0x03;
+    wmbWeight[1] = 0x0b;
+    wmbWeight[6] = '+';
+    wmbWeight[7] = 0x00;
+    wmbWeight[8] = 0x07;
+    wmbWeight[9] = 0xd0;
+    wmbWeight[19] = 0;
+    for (size_t i = 0; i < 19; ++i) {
+        wmbWeight[19] ^= wmbWeight[i];
+    }
+    notify(wmbFix, wmbWeight);
+    CHECK(wmbScale.newWeightAvailable());
+    CHECK(std::fabs(wmbScale.getWeight() - 20.0f) < 0.01f);
+
+    resetFake();
+    ScaleFixture variaFix = makeNamedScale("VARIA AKU", "fff2", "fff1");
+    EspressoScaleBLE variaScale(false);
+    CHECK(variaScale.init());
+    CHECK(std::strcmp(variaScale.connectedProtocolName(), "varia") == 0);
+    CHECK(variaScale.features().has(ScaleFeatureStartTimer));
+    std::vector<byte> variaWeight{0xfa, 0x01, 0x03, 0x00, 0x07, 0xd0, 0x00};
+    variaWeight[6] = static_cast<byte>(0x01 ^ 0x03 ^ 0x00 ^ 0x07 ^ 0xd0);
+    notify(variaFix, variaWeight);
+    CHECK(variaScale.newWeightAvailable());
+    CHECK(std::fabs(variaScale.getWeight() - 20.0f) < 0.01f);
+
+    resetFake();
+    ScaleFixture eurekaFix = makeNamedScale("CFS-9002", "fff2", "fff1");
+    EspressoScaleBLE eurekaScale(false);
+    CHECK(eurekaScale.init());
+    CHECK(std::strcmp(eurekaScale.connectedProtocolName(), "eureka") == 0);
+    std::vector<byte> eurekaWeight(11, 0);
+    eurekaWeight[7] = 200;
+    eurekaWeight[8] = 0;
+    notify(eurekaFix, eurekaWeight);
+    CHECK(eurekaScale.newWeightAvailable());
+    CHECK(std::fabs(eurekaScale.getWeight() - 20.0f) < 0.01f);
+
+    resetFake();
+    ScaleFixture stolen = makeNamedScale("CFS-9002", "fff2", "fff1");
+    EspressoScaleBLE stolenScale(false);
+    CHECK(stolenScale.init());
+    CHECK(std::strcmp(stolenScale.connectedProtocolName(), "eureka") == 0);
+
+    resetFake();
+    ScaleFixture namelessVaria = makeNamedScale("", "fff2", "fff1");
+    namelessVaria.peripheral->address = "aa:bb:cc:dd:ee:ff";
+    EspressoScaleBLE nameless(false);
+    CHECK(nameless.startScan("AA:BB:CC:DD:EE:FF"));
+    CHECK(!pollUntilConnected(nameless));
+    CHECK(!nameless.isConnected());
+    CHECK(nameless.lastDisconnectReason() ==
+          ScaleDisconnectReason::UNSUPPORTED_SCALE);
+
+    resetFake();
+    ScaleFixture acaiaNoName = makeScale(NEW);
+    acaiaNoName.peripheral->localName.clear();
+    acaiaNoName.peripheral->address = "aa:bb:cc:dd:ee:ff";
+    EspressoScaleBLE acaiaDirected(false);
+    CHECK(acaiaDirected.startScan("AA:BB:CC:DD:EE:FF"));
+    CHECK(pollUntilConnected(acaiaDirected));
+    CHECK(std::strcmp(acaiaDirected.connectedProtocolName(), "acaia") == 0);
+}
+
 } // namespace
 
 int main() {
@@ -943,6 +1188,7 @@ int main() {
     testRejectedPacketsDoNotRefreshAvailability();
     testPacketLengthCorpusAndReconnectSoak();
     testGoldenCommandPayloadsAndFeatures();
+    testGaggimateScaleProtocols();
     std::cout << "EspressoScaleBLE host tests passed: " << checks
               << " checks" << std::endl;
     return 0;

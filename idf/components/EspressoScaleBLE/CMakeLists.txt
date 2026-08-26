@@ -9,6 +9,12 @@ idf_component_register(
     "${ESPRESSO_SCALE_BLE_DIR}/src/protocols/GenericFf11.cpp"
     "${ESPRESSO_SCALE_BLE_DIR}/src/protocols/Felicita.cpp"
     "${ESPRESSO_SCALE_BLE_DIR}/src/protocols/Eclair.cpp"
+    "${ESPRESSO_SCALE_BLE_DIR}/src/protocols/Decent.cpp"
+    "${ESPRESSO_SCALE_BLE_DIR}/src/protocols/Difluid.cpp"
+    "${ESPRESSO_SCALE_BLE_DIR}/src/protocols/Myscale.cpp"
+    "${ESPRESSO_SCALE_BLE_DIR}/src/protocols/WeighMyBru.cpp"
+    "${ESPRESSO_SCALE_BLE_DIR}/src/protocols/Varia.cpp"
+    "${ESPRESSO_SCALE_BLE_DIR}/src/protocols/Eureka.cpp"
   INCLUDE_DIRS "${ESPRESSO_SCALE_BLE_DIR}/src"
   REQUIRES arduino-esp32 ArduinoBLE
 )

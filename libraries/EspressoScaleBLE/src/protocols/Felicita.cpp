@@ -117,5 +117,6 @@ const ScaleProtocol kScaleProtocolFelicita = {
     &parseFelicitaTimer,
     &encodeFelicitaCommand,
     kFelicitaInitWrites,
-    sizeof(kFelicitaInitWrites) / sizeof(kFelicitaInitWrites[0])
+    sizeof(kFelicitaInitWrites) / sizeof(kFelicitaInitWrites[0]),
+    false
 };

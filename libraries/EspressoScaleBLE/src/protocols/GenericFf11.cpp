@@ -12,12 +12,18 @@ static const byte RESET_TIMER_GENERIC[6] =
     {0x03, 0x0a, 0x06, 0x00, 0x00, 0x0c};
 static const byte TARE_START_TIMER_BOOKOO[6] =
     {0x03, 0x0a, 0x07, 0x00, 0x00, 0x00};
+static const byte FLOW_SMOOTHING_OFF[6] =
+    {0x03, 0x0a, 0x08, 0x00, 0x00, 0x01};
 
 static const byte GENERIC_PRODUCT = 0x03;
 static const byte GENERIC_TYPE = 0x0a;
 static const byte GENERIC_BEEP_LEVEL_CMD = 0x02;
 
 static const char *const kGenericPrefixes[] = {"BOOKO"};
+
+static const ScalePayload kGenericInitWrites[] = {
+    {FLOW_SMOOTHING_OFF, static_cast<int>(sizeof(FLOW_SMOOTHING_OFF))}
+};
 
 static const ScaleFeatureSet kGenericFeatures = {
     SCALE_CORE_FEATURES | ScaleFeatureCombinedTareStart |
@@ -123,6 +129,7 @@ const ScaleProtocol kScaleProtocolGenericFf11 = {
     &parseGenericWeight,
     &parseGenericTimer,
     &encodeGenericCommand,
-    0,
-    0
+    kGenericInitWrites,
+    sizeof(kGenericInitWrites) / sizeof(kGenericInitWrites[0]),
+    false
 };

@@ -89,5 +89,6 @@ const ScaleProtocol kScaleProtocolEclair = {
     &parseEclairTimer,
     &encodeEclairCommand,
     0,
-    0
+    0,
+    false
 };

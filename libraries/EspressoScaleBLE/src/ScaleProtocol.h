@@ -30,11 +30,13 @@ struct ScaleProtocol {
     bool (*encodeCommand)(ScaleOp op, uint8_t arg, byte *out, int *length);
     const ScalePayload *initWrites;
     size_t initWriteCount;
+    bool requireAdvertisedName;
 };
 
 const ScaleProtocol *scaleProtocolAt(size_t index);
 size_t scaleProtocolCount();
 bool scaleNameIsCompatible(const char *name);
+bool scaleNameMatchesProtocol(const char *name, const ScaleProtocol *protocol);
 
 bool scaleValidWeight(float weight);
 uint8_t scaleXorBytes(const byte *data, int length);
@@ -50,5 +52,11 @@ extern const ScaleProtocol kScaleProtocolAcaia;
 extern const ScaleProtocol kScaleProtocolGenericFf11;
 extern const ScaleProtocol kScaleProtocolFelicita;
 extern const ScaleProtocol kScaleProtocolEclair;
+extern const ScaleProtocol kScaleProtocolDecent;
+extern const ScaleProtocol kScaleProtocolDifluid;
+extern const ScaleProtocol kScaleProtocolMyscale;
+extern const ScaleProtocol kScaleProtocolWeighMyBru;
+extern const ScaleProtocol kScaleProtocolVaria;
+extern const ScaleProtocol kScaleProtocolEureka;
 
 #endif

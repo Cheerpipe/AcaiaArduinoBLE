@@ -27,6 +27,12 @@ common_flags=(
   "$repo_root/src/protocols/GenericFf11.cpp" \
   "$repo_root/src/protocols/Felicita.cpp" \
   "$repo_root/src/protocols/Eclair.cpp" \
+  "$repo_root/src/protocols/Decent.cpp" \
+  "$repo_root/src/protocols/Difluid.cpp" \
+  "$repo_root/src/protocols/Myscale.cpp" \
+  "$repo_root/src/protocols/WeighMyBru.cpp" \
+  "$repo_root/src/protocols/Varia.cpp" \
+  "$repo_root/src/protocols/Eureka.cpp" \
   "$repo_root/tests/espresso_scale_ble_host_test.cpp" \
   -o "$build_dir/espresso_scale_ble_host_test"
 

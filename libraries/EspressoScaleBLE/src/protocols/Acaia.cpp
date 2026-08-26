@@ -156,7 +156,8 @@ const ScaleProtocol kScaleProtocolAcaiaLegacy = {
     &parseAcaiaOldTimer,
     &encodeAcaiaCommand,
     kAcaiaInitWrites,
-    sizeof(kAcaiaInitWrites) / sizeof(kAcaiaInitWrites[0])
+    sizeof(kAcaiaInitWrites) / sizeof(kAcaiaInitWrites[0]),
+    false
 };
 
 const ScaleProtocol kScaleProtocolAcaia = {
@@ -172,5 +173,6 @@ const ScaleProtocol kScaleProtocolAcaia = {
     &parseAcaiaNewTimer,
     &encodeAcaiaCommand,
     kAcaiaInitWrites,
-    sizeof(kAcaiaInitWrites) / sizeof(kAcaiaInitWrites[0])
+    sizeof(kAcaiaInitWrites) / sizeof(kAcaiaInitWrites[0]),
+    false
 };

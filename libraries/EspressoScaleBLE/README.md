@@ -1,5 +1,5 @@
 # EspressoScaleBLE
-Acaia / Bookoo / Felicita / AtomHeart Eclair Scale Gateway using the ArduinoBLE library for esp32-based devices.
+BLE gateway for espresso scales using the ArduinoBLE library for esp32-based devices.
 
 Maintained by **Felipe Urzúa** (`cheerpipe@gmail.com`) as part of
 [Cheerpipe/AcaiaArduinoBLE](https://github.com/Cheerpipe/AcaiaArduinoBLE).
@@ -19,13 +19,26 @@ The original AcaiaArduinoBLE library was created by Tate Mazer; see
 | Bookoo | Themis Ultra  | ----                 | ----   | Great | Yes | Yes | Yes
 | Felicita | Arc   | ----                       | ----   | ---- | Yes | Yes | Yes
 | AtomHeart | Eclair | ----                      | v2.1.0 | Testing | Yes | Yes | Yes
+| Decent | Scale / EspressiScale | ----              | ----   | Testing | Yes | No | No
+| DiFluid | Microbalance / Ti | ----                 | ----   | Testing | Yes | No | No
+| MyScale | KP2048B | ----                      | ----   | Testing | Yes | No | No
+| Varia | AKU / Mini / Pro | ----                   | ----   | Testing | Yes | Yes | Yes
+| Eureka | Precisa (`CFS-9002`, `LSJ-001`) | named GAP only | ---- | Testing | Yes | Yes | Yes
+| WeighMyBru | ---- | ----                      | ----   | Testing | Yes | No | No
+
+Not supported: Timemore Black Mirror DUO, Timemore Dot, Acaia Umbra, Eureka
+Precisa units that advertise no GAP name (manufacturer-data only). Weight is
+always reported in grams.
+
+Scales without timer or volume bits follow the Eclair-like firmware path:
+tare if present, local buzzer for alerts, no combined tare+start.
 
 
 ## Requirements
 
 This library is intended for Arduino devices compatible with
 [ArduinoBLE](https://www.arduino.cc/reference/en/libraries/arduinoble/).
-Release 4.0.0 is compiled and tested against ArduinoBLE 2.1.0, which is pinned
+Release 4.1.0 is compiled and tested against ArduinoBLE 2.1.0, which is pinned
 in `library.properties` so upgrades cannot silently change the audited BLE
 lifecycle behavior.
 
@@ -199,6 +212,18 @@ You can find a demo on Youtube:
 
 ☑ AtomHeart Eclair
 
+☑ Decent Scale / EspressiScale
+
+☑ DiFluid Microbalance / Ti
+
+☑ MyScale (KP2048B)
+
+☑ Varia AKU / Mini / Pro
+
+☑ Eureka Precisa (named GAP)
+
+☑ WeighMyBru
+
 
 ## Bugs/Missing
 1. Tare command is less reliable than pressing the tare button for pyxis
@@ -219,5 +244,10 @@ Felicita Arc support contributions from baettigp and A-TWJ
 Bookoo contributions from philgood and same31
 
 AtomHeart Eclair protocol information from AtomHeart-Lang
+
+Decent, DiFluid, MyScale, Varia, Eureka, and WeighMyBru protocol knowledge from
+[gaggimate/esp-arduino-ble-scales](https://github.com/gaggimate/esp-arduino-ble-scales)
+by [jniebuhr](https://github.com/jniebuhr) and contributors. Those protocols
+were reimplemented here from that public reference; no source was copied.
 
 lunar 2019 contributions from jniebuhr

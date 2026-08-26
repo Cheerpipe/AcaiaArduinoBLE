@@ -13,7 +13,7 @@
 #ifndef EspressoScaleBLE_h
 #define EspressoScaleBLE_h
 
-#define LIBRARY_VERSION                 "4.0.0"
+#define LIBRARY_VERSION                 "4.1.0"
 #define WRITE_CHAR_OLD_VERSION          "2a80"
 #define READ_CHAR_OLD_VERSION           "2a80"
 #define WRITE_CHAR_NEW_VERSION          "49535343-8841-43f4-a8d4-ecbe34729bb3"

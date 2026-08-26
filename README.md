@@ -11,7 +11,8 @@ own brew switch.
 The controller reads the physical brew switch on a GPIO and drives the
 machine’s brew circuit through an isolated relay. A Bluetooth scale (designed
 first for **Bookoo** Themis Mini / Ultra) supplies the weight. Other compatible
-scales work through the vendored EspressoScaleBLE library.
+scales (Acaia, Felicita, Eclair, Decent, DiFluid, MyScale, Varia, Eureka,
+WeighMyBru) work through the vendored EspressoScaleBLE library.
 
 It was built for the Micra first. It is **not** a certified kit for every
 machine — but the same isolated-relay contract has three compile-time builds

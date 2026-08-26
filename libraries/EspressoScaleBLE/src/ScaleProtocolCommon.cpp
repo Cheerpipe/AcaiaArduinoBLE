@@ -1,9 +1,27 @@
 #include "ScaleProtocol.h"
 
 #include <math.h>
+#include <string.h>
 
 bool scaleValidWeight(float weight) {
     return isfinite(weight) && fabsf(weight) <= SCALE_MAX_WEIGHT_GRAMS;
+}
+
+bool scaleNameMatchesProtocol(const char *name, const ScaleProtocol *protocol) {
+    if (name == 0 || name[0] == '\0' || protocol == 0 ||
+        protocol->namePrefixes == 0) {
+        return false;
+    }
+    for (size_t p = 0; p < protocol->namePrefixCount; ++p) {
+        const char *prefix = protocol->namePrefixes[p];
+        if (prefix == 0 || prefix[0] == '\0') {
+            continue;
+        }
+        if (strncmp(name, prefix, strlen(prefix)) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 uint8_t scaleXorBytes(const byte *data, int length) {
