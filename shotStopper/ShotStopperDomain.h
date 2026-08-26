@@ -1861,6 +1861,8 @@ struct ControlStatusSnapshot {
   uint32_t psramLargestFreeBlockBytes = 0;
   uint32_t bleHostAllocPsramCount = 0;
   uint32_t bleHostAllocFallbackCount = 0;
+  uint32_t bleHostHciRxDropped = 0;
+  uint32_t bleHostHciTxDropped = 0;
   bool workBufExternal = false;
   bool jsonArenaExternal = false;
   uint32_t allocExternalFallbackCount = 0;
@@ -1929,7 +1931,7 @@ struct ControlStatusSnapshot {
   bool bootDegraded = false;
   bool scaleWorkerReady = false;
   uint32_t bleCompanionResultDropped = 0;
-  bool bleCompanionEnabled = true;
+  bool bleCompanionEnabled = false;
   bool bleCompanionActive = false;
   bool bleCompanionRestartRequired = false;
   bool bleCompanionStackReady = false;

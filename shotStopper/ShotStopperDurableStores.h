@@ -71,7 +71,7 @@ inline bool resetAllDurableStores(PersistedSettings &settings,
   const bool lastShotVerified = lastShot.load() && !lastShot.get().valid;
   return loadPersistedSettings(verifiedSettings) &&
          verifyFactorySettings(verifiedSettings) &&
-         loadBleCompanionSettings(verifiedBle) && verifiedBle.enabled == 1 &&
+         loadBleCompanionSettings(verifiedBle) && verifiedBle.enabled == 0 &&
          shotLogVerified && shotCurvesVerified && lastShotVerified;
 }
 

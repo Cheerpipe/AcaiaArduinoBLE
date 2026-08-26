@@ -98,9 +98,13 @@ using namespace shotstopper;
 // ArduinoBLE BLEHostAlloc counters (patches/ArduinoBLE-2.1.0-ble-host-psram).
 extern "C" uint32_t BLEHostAllocPsramCount(void);
 extern "C" uint32_t BLEHostAllocFallbackCount(void);
+extern "C" uint32_t BLEHostHciRxDropped(void);
+extern "C" uint32_t BLEHostHciTxDropped(void);
 #else
 static inline uint32_t BLEHostAllocPsramCount(void) { return 0; }
 static inline uint32_t BLEHostAllocFallbackCount(void) { return 0; }
+static inline uint32_t BLEHostHciRxDropped(void) { return 0; }
+static inline uint32_t BLEHostHciTxDropped(void) { return 0; }
 #endif
 
 // ---------------------------------------------------------------------------
@@ -113,6 +117,9 @@ constexpr uint32_t SCALE_CONNECT_LOG_MS = 10000;
 constexpr uint32_t SCALE_PACKET_GAP_LOG_MIN_MS = 1000;
 constexpr uint32_t SCALE_DISCOVERY_TICK_MS = 3000;
 constexpr uint32_t SCALE_SCAN_HCI_RESTART_MS = 60000;
+constexpr uint32_t SCALE_SCAN_BURST_MS = 3000;
+constexpr uint32_t SCALE_LINK_COEX_BT_MS = 1000;
+constexpr uint32_t BOOKOO_CONNECT_BEEP_DEFER_MS = 750;
 constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;
 constexpr uint32_t SCALE_WORKER_NO_SCALE_DELAY_MS = 10;
 constexpr uint32_t LOOP_NO_SCALE_DELAY_MS = 5;
@@ -160,6 +167,8 @@ static_assert(FLASH_IO_CONTROL_LOCK_TIMEOUT_MS * 20U <
 static_assert(BLE_CONNECT_TIMEOUT_MS + SCALE_ATT_TIMEOUT_MS <
                   TASK_WATCHDOG_TIMEOUT_MS,
               "GAP connect plus one ATT wait must fit under the task watchdog");
+static_assert(BLE_DISCOVER_TIMEOUT_MS < TASK_WATCHDOG_TIMEOUT_MS,
+              "GATT discovery must fit under the task watchdog");
 
 // ---------------------------------------------------------------------------
 // Persistent storage and scale prediction
@@ -551,6 +560,15 @@ uint32_t psramFreeBytes = 0;
 uint32_t psramLargestFreeBlockBytes = 0;
 uint32_t bleHostAllocPsramCount = 0;
 uint32_t bleHostAllocFallbackCount = 0;
+uint32_t bleHostHciRxDropped = 0;
+uint32_t bleHostHciTxDropped = 0;
+bool scanBurstActive = false;
+uint32_t scanBurstUntilMs = 0;
+bool bookooConnectBeepPending = false;
+bool bookooConnectBeepSawWeight = false;
+uint32_t bookooConnectBeepArmedAtMs = 0;
+bool scaleLinkCoexHadLink = false;
+uint32_t scaleLinkCoexUpAtMs = 0;
 bool healthHeapAlertLatched = false;
 bool healthStackAlertLatched = false;
 bool healthLoopGapAlertLatched = false;
@@ -2810,12 +2828,14 @@ void applyBookooConnectBeepPolicy() {
   }
   if (!soundAlertsEnabled()) {
     (void)scale.setBeepLevel(0);
+    yieldBetweenScaleAttOps();
     return;
   }
   const AlertOutputChannel channel = currentAlertOutputChannel();
   if (runtimeConfig.bookooMuteOnBuzzerOnly &&
       channel == AlertOutputChannel::BUZZER_ONLY) {
     (void)scale.setBeepLevel(0);
+    yieldBetweenScaleAttOps();
     return;
   }
   if (runtimeConfig.bookooConnectBeepLevel >= 1 &&
@@ -2823,7 +2843,44 @@ void applyBookooConnectBeepPolicy() {
       (channel == AlertOutputChannel::SCALE_ONLY ||
        channel == AlertOutputChannel::SCALE_PRIORITY)) {
     (void)scale.setBeepLevel(runtimeConfig.bookooConnectBeepLevel);
+    yieldBetweenScaleAttOps();
   }
+}
+
+void cancelBookooConnectBeepPolicy() {
+  bookooConnectBeepPending = false;
+  bookooConnectBeepSawWeight = false;
+  bookooConnectBeepArmedAtMs = 0;
+}
+
+void armBookooConnectBeepPolicy() {
+  if (!scaleIsBookooGeneric() || !scale.supportsIndependentBeep()) {
+    cancelBookooConnectBeepPolicy();
+    return;
+  }
+  bookooConnectBeepPending = true;
+  bookooConnectBeepSawWeight = false;
+  bookooConnectBeepArmedAtMs = millis();
+}
+
+void serviceBookooConnectBeepPolicy(bool sawWeightThisTick) {
+  if (!bookooConnectBeepPending) {
+    return;
+  }
+  if (!scale.isLinkUp()) {
+    cancelBookooConnectBeepPolicy();
+    return;
+  }
+  if (sawWeightThisTick) {
+    bookooConnectBeepSawWeight = true;
+    return;
+  }
+  if (!bookooConnectBeepSawWeight &&
+      elapsedMs(bookooConnectBeepArmedAtMs) < BOOKOO_CONNECT_BEEP_DEFER_MS) {
+    return;
+  }
+  bookooConnectBeepPending = false;
+  applyBookooConnectBeepPolicy();
 }
 
 void requestBookooSilenceIfConfigured() {
@@ -3496,8 +3553,84 @@ bool applyScaleDiscoveryPause() {
     scale.disconnect();
     updateWorkerLinkState();
     setScaleLinkState(ScaleLinkState::DISCONNECTED);
+    cancelBookooConnectBeepPolicy();
   }
   return true;
+}
+
+void resetScaleWorkerRadioStateForHost() {
+  scanBurstActive = false;
+  scanBurstUntilMs = 0;
+  bookooConnectBeepPending = false;
+  bookooConnectBeepSawWeight = false;
+  bookooConnectBeepArmedAtMs = 0;
+  scaleLinkCoexHadLink = false;
+  scaleLinkCoexUpAtMs = 0;
+}
+
+bool startScaleDiscoveryScan(const char *mac, bool forceRestart, bool burst) {
+  if (!scale.startScan(mac, forceRestart, burst)) {
+    return false;
+  }
+  if (burst) {
+    scanBurstActive = true;
+    scanBurstUntilMs = millis() + SCALE_SCAN_BURST_MS;
+  } else {
+    scanBurstActive = false;
+    scanBurstUntilMs = 0;
+  }
+  return true;
+}
+
+void fillCurrentScaleScanFilter(char *macOut, size_t cap, bool &useDirected) {
+  char preferredMac[PREFERRED_SCALE_MAC_CAPACITY];
+  copyPreferredScaleMac(preferredMac, sizeof(preferredMac));
+  const bool hasMac =
+      preferredMac[0] != '\0' && validPreferredScaleMac(preferredMac);
+  useDirected = scale.isDirectedScan() && hasMac;
+  if (useDirected) {
+    copyCString(macOut, cap, preferredMac);
+  } else if (macOut != nullptr && cap > 0) {
+    macOut[0] = '\0';
+  }
+}
+
+void serviceScaleScanDuty(bool sawCompatibleAd) {
+  if (!scale.isScanning() || scale.isConnecting()) {
+    return;
+  }
+  char mac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+  bool useDirected = false;
+  fillCurrentScaleScanFilter(mac, sizeof(mac), useDirected);
+  const char *filter = useDirected ? mac : nullptr;
+  if (sawCompatibleAd) {
+    if (!scanBurstActive) {
+      (void)startScaleDiscoveryScan(filter, true, true);
+    } else {
+      scanBurstUntilMs = millis() + SCALE_SCAN_BURST_MS;
+    }
+    return;
+  }
+  if (scanBurstActive &&
+      static_cast<int32_t>(millis() - scanBurstUntilMs) >= 0) {
+    (void)startScaleDiscoveryScan(filter, true, false);
+  }
+}
+
+void syncScaleRadioCoex() {
+  const bool linked = scale.isLinkUp();
+  const bool connecting = scale.isConnecting();
+  if (linked && !scaleLinkCoexHadLink) {
+    scaleLinkCoexUpAtMs = millis();
+  }
+  if (!linked) {
+    scaleLinkCoexUpAtMs = 0;
+  }
+  scaleLinkCoexHadLink = linked;
+  const bool freshLink =
+      linked && elapsedMs(scaleLinkCoexUpAtMs) < SCALE_LINK_COEX_BT_MS;
+  applyBrewRfPreference(connecting || freshLink ||
+                        getRelaySafetySnapshot().closed);
 }
 
 void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
@@ -3536,7 +3669,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
                    scale.connectedProtocolName());
       updateWorkerLinkState();
       setScaleLinkState(ScaleLinkState::CONNECTED);
-      applyBookooConnectBeepPolicy();
+      armBookooConnectBeepPolicy();
     }
     return;
   }
@@ -3566,13 +3699,14 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
                    scale.connectedProtocolName());
       updateWorkerLinkState();
       setScaleLinkState(ScaleLinkState::CONNECTED);
-      applyBookooConnectBeepPolicy();
+      armBookooConnectBeepPolicy();
       return;
     }
     if (scale.isConnecting()) {
       return;
     }
     if (scale.isScanning()) {
+      serviceScaleScanDuty(sawCompatibleAd);
       if (elapsedMs(lastScanCycleMs) < SCALE_DISCOVERY_TICK_MS) {
         return;
       }
@@ -3600,7 +3734,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       // PREFER: after grace, drop the preferred-only filter and accept any.
       if (cacheMode == ScaleMacCacheMode::PREFER && directed &&
           elapsedMs(scanSessionAtMs) >= SCALE_PREFER_FALLBACK_MS) {
-        if (scale.startScan(nullptr, true)) {
+        if (startScaleDiscoveryScan(nullptr, true, scanBurstActive)) {
           serialTrace(LogLevel::INFO,
                       "Preferred scale not found; falling back to any scale");
           scanLastAdvertAtMs = 0;
@@ -3622,7 +3756,8 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
             elapsedMs(scanSessionAtMs) < SCALE_PREFER_FALLBACK_MS;
         const bool useDirected =
             shouldUseDirectedScaleScan(cacheMode, hasMac, preferWaiting);
-        if (scale.startScan(useDirected ? preferredMac : nullptr, true)) {
+        if (startScaleDiscoveryScan(useDirected ? preferredMac : nullptr, true,
+                                    false)) {
           scanSessionAtMs = lastScanCycleMs;
           scanLastAdvertAtMs = 0;
         }
@@ -3694,7 +3829,8 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     }
     addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_CONNECTING);
   }
-  if (scale.startScan(useDirected ? preferredMac : nullptr)) {
+  if (startScaleDiscoveryScan(useDirected ? preferredMac : nullptr, false,
+                              true)) {
     scanSessionAtMs = lastScanCycleMs;
     scanLastAdvertAtMs = 0;
     return;
@@ -3712,6 +3848,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
 
 void serviceScaleWorkerLink() {
   if (!scale.isLinkUp()) {
+    cancelBookooConnectBeepPolicy();
     updateWorkerLinkState();
     setScaleLinkState(ScaleLinkState::DISCONNECTED);
     return;
@@ -3720,6 +3857,7 @@ void serviceScaleWorkerLink() {
   bool snapshotDirty = false;
   if (scale.heartbeatRequired()) {
     if (!scale.heartbeat()) {
+      cancelBookooConnectBeepPolicy();
       updateWorkerLinkState();
       setScaleLinkState(ScaleLinkState::DISCONNECTED);
       return;
@@ -3727,10 +3865,13 @@ void serviceScaleWorkerLink() {
     snapshotDirty = true;
   }
 
-  if (publishPendingScaleWeightEvent()) {
+  const bool sawWeight = publishPendingScaleWeightEvent();
+  if (sawWeight) {
     snapshotDirty = true;
   }
+  serviceBookooConnectBeepPolicy(sawWeight);
   if (!scale.isLinkUp()) {
+    cancelBookooConnectBeepPolicy();
     updateWorkerLinkState();
     setScaleLinkState(ScaleLinkState::DISCONNECTED);
     return;
@@ -3807,6 +3948,7 @@ void scaleWorkerTask(void *) {
     // and advertising as peripheral during connect() fails on ESP32-S3.
     // setAdvertisingPaused() is a no-op when the pause state is unchanged.
     syncCompanionAdvertisingForScaleLink();
+    syncScaleRadioCoex();
 
 #if !defined(SHOT_STOPPER_HOST_TEST)
     if (bleCompanion != nullptr) {
@@ -3857,6 +3999,7 @@ void scaleWorkerTask(void *) {
         updateWorkerLinkState();
       }
     } else if (getScaleLinkSnapshot().state == ScaleLinkState::CONNECTED) {
+      cancelBookooConnectBeepPolicy();
       updateWorkerLinkState();
       setScaleLinkState(ScaleLinkState::DISCONNECTED);
       lastLinkSnapshotMs = nowMs;
@@ -5774,6 +5917,8 @@ void publishControlStatus() {
   next.psramLargestFreeBlockBytes = psramLargestFreeBlockBytes;
   next.bleHostAllocPsramCount = bleHostAllocPsramCount;
   next.bleHostAllocFallbackCount = bleHostAllocFallbackCount;
+  next.bleHostHciRxDropped = bleHostHciRxDropped;
+  next.bleHostHciTxDropped = bleHostHciTxDropped;
   next.workBufExternal = workBufIsExternal();
 #ifndef SHOT_STOPPER_HOST_TEST
   next.jsonArenaExternal = jsonArenaIsExternal();
@@ -6045,6 +6190,8 @@ void serialCliPrintLiveHealth() {
   dump.psramLargestFreeBlockBytes = psramLargestFreeBlockBytes;
   dump.bleHostAllocPsramCount = bleHostAllocPsramCount;
   dump.bleHostAllocFallbackCount = bleHostAllocFallbackCount;
+  dump.bleHostHciRxDropped = bleHostHciRxDropped;
+  dump.bleHostHciTxDropped = bleHostHciTxDropped;
   dump.workBufExternal = workBufIsExternal();
 #ifndef SHOT_STOPPER_HOST_TEST
   dump.jsonArenaExternal = jsonArenaIsExternal();
@@ -6900,6 +7047,8 @@ void loop() {
     psramLargestFreeBlockBytes = heap.psramLargest;
     bleHostAllocPsramCount = BLEHostAllocPsramCount();
     bleHostAllocFallbackCount = BLEHostAllocFallbackCount();
+    bleHostHciRxDropped = BLEHostHciRxDropped();
+    bleHostHciTxDropped = BLEHostHciTxDropped();
     hwmonSnapshot = hwmon.sample(intervalMs > 0U ? intervalMs
                                                  : HEALTH_TELEMETRY_INTERVAL_MS,
                                  &heap);

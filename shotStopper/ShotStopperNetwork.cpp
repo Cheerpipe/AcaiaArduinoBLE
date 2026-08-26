@@ -182,6 +182,8 @@ const char *scaleDisconnectReasonName(uint8_t reason) {
     case 11: return "PACKET_TIMEOUT";
     case 12: return "INVALID_PACKET_STREAM";
     case 13: return "COMMAND_WRITE_FAILED";
+    case 14: return "SUPERVISION_TIMEOUT";
+    case 15: return "CONNECTION_FAILED_TO_ESTABLISH";
   }
   return "UNKNOWN";
 }
@@ -4386,6 +4388,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"psramSizeBytes\":%lu,\"psramFreeBytes\":%lu,"
         "\"psramLargestFreeBlockBytes\":%lu,"
         "\"bleHostAllocPsram\":%lu,\"bleHostAllocFallback\":%lu,"
+        "\"hciRxDropped\":%lu,\"hciTxDropped\":%lu,"
         "\"workBufExternal\":%s,\"jsonArenaExternal\":%s,"
         "\"allocExternalFallback\":%lu,"
         "\"hwmon\":{\"cpuLoad5s\":%.2f,\"cpuLoad1m\":%.2f,\"cpuLoad5m\":%.2f,"
@@ -4445,6 +4448,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.psramLargestFreeBlockBytes),
         static_cast<unsigned long>(control.bleHostAllocPsramCount),
         static_cast<unsigned long>(control.bleHostAllocFallbackCount),
+        static_cast<unsigned long>(control.bleHostHciRxDropped),
+        static_cast<unsigned long>(control.bleHostHciTxDropped),
         control.workBufExternal ? "true" : "false",
         control.jsonArenaExternal ? "true" : "false",
         static_cast<unsigned long>(control.allocExternalFallbackCount),
@@ -5080,7 +5085,8 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            "\"minimumFreeHeapBytes\":%lu,\"largestFreeHeapBlockBytes\":%lu,"
            "\"psramSizeBytes\":%lu,\"psramFreeBytes\":%lu,"
            "\"psramLargestFreeBlockBytes\":%lu,\"bleHostAllocPsram\":%lu,"
-           "\"bleHostAllocFallback\":%lu,\"workBufExternal\":%s,"
+           "\"bleHostAllocFallback\":%lu,\"hciRxDropped\":%lu,"
+           "\"hciTxDropped\":%lu,\"workBufExternal\":%s,"
            "\"jsonArenaExternal\":%s,\"allocExternalFallback\":%lu,"
            "\"heapAlertLatched\":%s,"
            "\"stackAlertLatched\":%s,\"loopGapAlertLatched\":%s,"
@@ -5099,6 +5105,8 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            static_cast<unsigned long>(c.psramLargestFreeBlockBytes),
            static_cast<unsigned long>(c.bleHostAllocPsramCount),
            static_cast<unsigned long>(c.bleHostAllocFallbackCount),
+           static_cast<unsigned long>(c.bleHostHciRxDropped),
+           static_cast<unsigned long>(c.bleHostHciTxDropped),
            c.workBufExternal ? "true" : "false",
            c.jsonArenaExternal ? "true" : "false",
            static_cast<unsigned long>(c.allocExternalFallbackCount),

@@ -15,9 +15,9 @@
 #include "esp32-hal-alloc-ble-mem.h"
 #endif
 
-#include <math.h>
-#include <new>
-#include <string.h>
+#if defined(ESP32) && !defined(SHOT_STOPPER_HOST_TEST)
+extern "C" uint8_t BLEHostLastHciDisconnectReason(void);
+#endif
 
 namespace {
 
@@ -180,6 +180,7 @@ AcaiaArduinoBLE::AcaiaArduinoBLE(bool debug) :
     _connectStep(ConnectStep::Idle),
     _connectStartedAt(0),
     _connectAttempts(0),
+    _linkDownSince(0),
     _scanMac{},
     _address{},
     _localName{},
@@ -218,7 +219,8 @@ void AcaiaArduinoBLE::stopIdleScan(AcaiaDisconnectReason reason) {
     }
 }
 
-bool AcaiaArduinoBLE::startScan(const char *mac, bool forceRestart) {
+bool AcaiaArduinoBLE::startScan(const char *mac, bool forceRestart,
+                                bool burst) {
     logVersionOnce();
 
     const bool filtered = mac != nullptr && mac[0] != '\0';
@@ -240,6 +242,11 @@ bool AcaiaArduinoBLE::startScan(const char *mac, bool forceRestart) {
     }
 
     BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
+    if (burst) {
+        BLE.setScanParameters(BLE_SCAN_BURST_INTERVAL, BLE_SCAN_BURST_WINDOW);
+    } else {
+        BLE.setScanParameters(BLE_SCAN_IDLE_INTERVAL, BLE_SCAN_IDLE_WINDOW);
+    }
     _seenPending = false;
     _seenMac[0] = '\0';
     _seenName[0] = '\0';
@@ -400,6 +407,9 @@ bool AcaiaArduinoBLE::advanceConnection() {
     switch (_connectStep) {
         case ConnectStep::Settle:
             BLE.poll();
+            if (elapsedSince(_connectStartedAt) < SCALE_CONNECT_SETTLE_MS) {
+                return false;
+            }
             _connectStep = ConnectStep::Connect;
             return false;
 
@@ -429,13 +439,16 @@ bool AcaiaArduinoBLE::advanceConnection() {
             return false;
 
         case ConnectStep::Discover:
+            BLE.setTimeout(BLE_DISCOVER_TIMEOUT_MS);
             if (!_peripheral.discoverAttributes()) {
+                BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
                 if (_debug) {
                     Serial.println("Attribute discovery failed!");
                 }
                 resetConnection(true, AcaiaDisconnectReason::DISCOVERY_FAILED);
                 return false;
             }
+            BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
             if (_debug) {
                 Serial.println("Attributes discovered");
                 Serial.println();
@@ -580,6 +593,7 @@ bool AcaiaArduinoBLE::finishConnectionSuccess() {
     clearConnectingState();
     _connected = true;
     _connectedAt = now;
+    _linkDownSince = 0;
     _lastHeartBeat = now - HEARTBEAT_PERIOD_MS;
     _lastPacket = 0;
     _packetPeriod = 0;
@@ -859,11 +873,19 @@ bool AcaiaArduinoBLE::isConnected() {
     if (!_connected) {
         return false;
     }
-    if (!_hasPeripheral || !_peripheral.connected()) {
-        resetConnection(false, AcaiaDisconnectReason::REMOTE_DISCONNECTED);
-        return false;
+    if (_hasPeripheral && _peripheral.connected()) {
+        _linkDownSince = 0;
+        return true;
     }
-    return true;
+    if (_linkDownSince == 0) {
+        _linkDownSince = static_cast<uint32_t>(millis());
+        return true;
+    }
+    if (elapsedSince(_linkDownSince) < LINK_DOWN_DEBOUNCE_MS) {
+        return true;
+    }
+    resetConnection(false, mapHciDisconnectReason());
+    return false;
 }
 
 bool AcaiaArduinoBLE::isLinkUp() const {
@@ -1259,6 +1281,7 @@ void AcaiaArduinoBLE::resetConnection(bool disconnectPeer,
     clearPeripheral();
 
     _connectedAt = 0;
+    _linkDownSince = 0;
     _lastPacket = 0;
     _lastHeartBeat = 0;
     _packetPeriod = 0;
@@ -1288,6 +1311,19 @@ void AcaiaArduinoBLE::rejectPacket(const char* reason) {
     }
 }
 
+AcaiaDisconnectReason AcaiaArduinoBLE::mapHciDisconnectReason() const {
+#if defined(ESP32) && !defined(SHOT_STOPPER_HOST_TEST)
+    const uint8_t hci = BLEHostLastHciDisconnectReason();
+    if (hci == 0x08) {
+        return AcaiaDisconnectReason::SUPERVISION_TIMEOUT;
+    }
+    if (hci == 0x3E) {
+        return AcaiaDisconnectReason::CONNECTION_FAILED_TO_ESTABLISH;
+    }
+#endif
+    return AcaiaDisconnectReason::REMOTE_DISCONNECTED;
+}
+
 AcaiaDisconnectReason AcaiaArduinoBLE::lastDisconnectReason() const {
     return _lastDisconnectReason;
 }
@@ -1313,6 +1349,10 @@ const char* AcaiaArduinoBLE::lastDisconnectReasonName() const {
             return "invalid packet stream";
         case AcaiaDisconnectReason::COMMAND_WRITE_FAILED:
             return "command write failed";
+        case AcaiaDisconnectReason::SUPERVISION_TIMEOUT:
+            return "supervision timeout";
+        case AcaiaDisconnectReason::CONNECTION_FAILED_TO_ESTABLISH:
+            return "connection failed to be established";
     }
     return "unknown";
 }

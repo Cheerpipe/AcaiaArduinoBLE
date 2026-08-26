@@ -15,7 +15,7 @@ struct BleCompanionPersistedSettings {
   uint16_t version = BLE_COMPANION_SETTINGS_VERSION;
   uint16_t structureSize = sizeof(BleCompanionPersistedSettings);
   uint32_t revision = 0;
-  uint8_t enabled = 1;
+  uint8_t enabled = 0;
   uint8_t reserved[3] = {};
   uint32_t checksum = 0;
 };

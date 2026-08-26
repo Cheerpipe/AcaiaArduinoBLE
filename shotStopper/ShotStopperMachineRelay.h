@@ -215,20 +215,12 @@ RelaySafetySnapshot getRelaySafetySnapshot() {
 
 void applyBrewRfPreference(bool preferBluetooth) {
 #if defined(SHOT_STOPPER_HAS_COEX)
-  // Prefer BLE airtime while an automatic brew needs a fresh weight stream.
-  // Restore balance as soon as machine circuit opens so the Web UI stays responsive.
+  // Prefer BLE airtime while connecting, during the first second of a scale
+  // link, or while an automatic brew needs a fresh weight stream. Idle
+  // discovery stays on BALANCE. Companion pause is owned only by the BLE
+  // worker (ArduinoBLE is not thread-safe).
   (void)esp_coex_preference_set(preferBluetooth ? ESP_COEX_PREFER_BT
                                                 : ESP_COEX_PREFER_BALANCE);
-#else
-  (void)preferBluetooth;
-#endif
-#if !defined(SHOT_STOPPER_HOST_TEST)
-  // Pause on the machine circuit-close path (stopAdvertise is fast). Resume is owned by
-  // the BLE worker via syncCompanionAdvertisingForScaleLink so opening machine circuit
-  // never blocks the control task in BLE.advertise() before the stop beep.
-  if (preferBluetooth && bleCompanion != nullptr) {
-    bleCompanion->setAdvertisingPaused(true);
-  }
 #else
   (void)preferBluetooth;
 #endif

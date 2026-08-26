@@ -18,6 +18,8 @@ constexpr const char *BLE_COMPANION_SERVICE_UUID =
 constexpr uint8_t BLE_COMPANION_PROTOCOL_VERSION = 2;
 constexpr uint32_t BLE_COMPANION_WIFI_STAGE_TIMEOUT_MS = 30000;
 constexpr uint32_t BLE_COMPANION_REQUEST_TIMEOUT_MS = 10000;
+// 0x0200 * 0.625 ms = 320 ms. Idle advertise does not need the ~100 ms default.
+constexpr uint16_t BLE_COMPANION_ADV_INTERVAL = 0x0200;
 
 enum class BleCompanionRequestType : uint8_t {
   SET_BREW_BY_WEIGHT,
@@ -86,7 +88,7 @@ struct BleCompanionRuntimeSnapshot {
   // `enabled` is immutable for a boot: it says whether the GATT profile was
   // constructed. `configuredEnabled` is the persisted next-boot setting.
   bool enabled = false;
-  bool configuredEnabled = true;
+  bool configuredEnabled = false;
   bool configurationAllowed = false;
   bool brewByWeight = true;
   uint8_t goalWeightG = DEFAULT_GOAL_WEIGHT_G;
@@ -103,7 +105,7 @@ struct BleCompanionRuntimeSnapshot {
 
 struct BleCompanionStatusSnapshot {
   bool enabled = false;
-  bool configuredEnabled = true;
+  bool configuredEnabled = false;
   bool restartRequired = false;
   bool stackReady = false;
   bool advertising = false;
@@ -192,6 +194,7 @@ class ShotStopperBleCompanion {
     status_.enabled = true;
     BLE.setLocalName(BLE_COMPANION_LOCAL_NAME);
     BLE.setDeviceName(BLE_COMPANION_LOCAL_NAME);
+    BLE.setAdvertisingInterval(BLE_COMPANION_ADV_INTERVAL);
     BLE.setAdvertisedService(service_);
     service_.addCharacteristic(enabled_);
     service_.addCharacteristic(weightValue_);
@@ -289,6 +292,7 @@ class ShotStopperBleCompanion {
     }
     advertisingPaused_ = false;
     if (!status_.advertising) {
+      BLE.setAdvertisingInterval(BLE_COMPANION_ADV_INTERVAL);
       status_.advertising = BLE.advertise() != 0;
     }
   }

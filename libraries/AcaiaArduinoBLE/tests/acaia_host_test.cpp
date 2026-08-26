@@ -27,6 +27,8 @@ static_assert(!std::is_copy_assignable<AcaiaArduinoBLE>::value,
               "AcaiaArduinoBLE must not use BLECharacteristic assignment");
 static_assert(BLE_CONNECT_TIMEOUT_MS + BLE_OPERATION_TIMEOUT_MS < 5000UL,
               "GAP connect plus one ATT wait must remain under a 5 s TWDT");
+static_assert(BLE_DISCOVER_TIMEOUT_MS < 5000UL,
+              "GATT discovery must remain under a 5 s TWDT");
 
 #define CHECK(condition)                                                       \
     do {                                                                       \
@@ -37,6 +39,15 @@ static_assert(BLE_CONNECT_TIMEOUT_MS + BLE_OPERATION_TIMEOUT_MS < 5000UL,
             std::exit(1);                                                      \
         }                                                                      \
     } while (false)
+
+bool pollUntilConnected(AcaiaArduinoBLE &scale, int maxSteps = 40) {
+    bool connected = false;
+    for (int i = 0; i < maxSteps && !connected; ++i) {
+        fakeMillis += 20;
+        connected = scale.pollScan();
+    }
+    return connected;
+}
 
 struct ScaleFixture {
     std::shared_ptr<FakeBLE::PeripheralState> peripheral;
@@ -181,6 +192,8 @@ void testNonBlockingScanDoesNotRestartOrResetIdle() {
     CHECK(scale.isScanning());
     CHECK(BLE.scanCalls == 1);
     CHECK(BLE.lastWithDuplicates);
+    CHECK(BLE.lastScanInterval == BLE_SCAN_IDLE_INTERVAL);
+    CHECK(BLE.lastScanWindow == BLE_SCAN_IDLE_WINDOW);
     CHECK(BLE.stopScanCalls == 0);
 
     CHECK(scale.startScan());
@@ -205,16 +218,30 @@ void testNonBlockingScanDoesNotRestartOrResetIdle() {
     CHECK(BLE.stopScanCalls == 1);
 }
 
+void testBurstScanParametersAndDiscoverTimeoutRestored() {
+    resetFake();
+    AcaiaArduinoBLE scale(false);
+    CHECK(scale.startScan(nullptr, false, true));
+    CHECK(BLE.lastScanInterval == BLE_SCAN_BURST_INTERVAL);
+    CHECK(BLE.lastScanWindow == BLE_SCAN_BURST_WINDOW);
+    CHECK(scale.startScan(nullptr, true, false));
+    CHECK(BLE.lastScanInterval == BLE_SCAN_IDLE_INTERVAL);
+    CHECK(BLE.lastScanWindow == BLE_SCAN_IDLE_WINDOW);
+
+    resetFake();
+    ScaleFixture fixture = makeScale(NEW);
+    AcaiaArduinoBLE connected(false);
+    CHECK(connected.startScan());
+    CHECK(pollUntilConnected(connected));
+    CHECK(BLE.timeoutMs == BLE_OPERATION_TIMEOUT_MS);
+}
+
 void testNonBlockingScanConnectsWithoutInit() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
     AcaiaArduinoBLE scale(false);
     CHECK(scale.startScan());
-    bool connected = false;
-    for (int i = 0; i < 16 && !connected; ++i) {
-        connected = scale.pollScan();
-    }
-    CHECK(connected);
+    CHECK(pollUntilConnected(scale));
     CHECK(scale.isConnected());
     CHECK(!scale.isScanning());
     CHECK(!scale.isConnecting());
@@ -233,11 +260,7 @@ void testConnectFilterUsesNameScan() {
     CHECK(BLE.scanCalls == 1);
     CHECK(BLE.scanForAddressCalls == 0);
     CHECK(BLE.lastWithDuplicates);
-    bool connected = false;
-    for (int i = 0; i < 16 && !connected; ++i) {
-        connected = scale.pollScan();
-    }
-    CHECK(connected);
+    CHECK(pollUntilConnected(scale));
     CHECK(scale.isConnected());
     CHECK(!scale.isDirectedScan());
     CHECK(strcmp(scale.address(), "AA:BB:CC:DD:EE:FF") == 0);
@@ -271,11 +294,7 @@ void testConnectFilterConnectsWithoutLocalName() {
     fixture.peripheral->localName.clear();
     AcaiaArduinoBLE scale(false);
     CHECK(scale.startScan("AA:BB:CC:DD:EE:FF"));
-    bool connected = false;
-    for (int i = 0; i < 16 && !connected; ++i) {
-        connected = scale.pollScan();
-    }
-    CHECK(connected);
+    CHECK(pollUntilConnected(scale));
     CHECK(scale.isConnected());
     CHECK(strcmp(scale.address(), "aa:bb:cc:dd:ee:ff") == 0);
 }
@@ -352,11 +371,7 @@ void testConnectRetriesThenSucceeds() {
     fixture.peripheral->connectFailRemaining = SCALE_CONNECT_ATTEMPTS - 1;
     AcaiaArduinoBLE scale(false);
     CHECK(scale.startScan());
-    bool connected = false;
-    for (int i = 0; i < 24 && !connected; ++i) {
-        connected = scale.pollScan();
-    }
-    CHECK(connected);
+    CHECK(pollUntilConnected(scale, 40));
     CHECK(scale.isConnected());
     CHECK(scale.isLinkUp());
     CHECK(fixture.peripheral->connectCalls == SCALE_CONNECT_ATTEMPTS);
@@ -370,11 +385,7 @@ void testConnectFailedOnlyAfterRetries() {
     fixture.peripheral->connectResult = false;
     AcaiaArduinoBLE scale(false);
     CHECK(scale.startScan());
-    bool connected = false;
-    for (int i = 0; i < 24 && !connected; ++i) {
-        connected = scale.pollScan();
-    }
-    CHECK(!connected);
+    CHECK(!pollUntilConnected(scale, 40));
     CHECK(!scale.isConnected());
     CHECK(!scale.isConnecting());
     CHECK(fixture.peripheral->connectCalls == SCALE_CONNECT_ATTEMPTS);
@@ -552,11 +563,7 @@ void testDirectedEclairDiscoveryWithoutName() {
     fixture.peripheral->localName.clear();
     AcaiaArduinoBLE scale(false);
     CHECK(scale.startScan("AA:BB:CC:DD:EE:FF"));
-    bool connected = false;
-    for (int i = 0; i < 16 && !connected; ++i) {
-        connected = scale.pollScan();
-    }
-    CHECK(connected);
+    CHECK(pollUntilConnected(scale));
     CHECK(scale.isConnected());
     CHECK(std::strcmp(scale.connectedProtocolName(), "atomheart_eclair") == 0);
 }
@@ -735,6 +742,8 @@ void testRemoteDisconnectAndReconnectTelemetry() {
     AcaiaArduinoBLE scale(false);
     CHECK(scale.init());
     first.peripheral->connected = false;
+    CHECK(scale.isConnected());
+    fakeMillis += LINK_DOWN_DEBOUNCE_MS;
     CHECK(!scale.isConnected());
     CHECK(scale.lastDisconnectReason() ==
           AcaiaDisconnectReason::REMOTE_DISCONNECTED);
@@ -795,6 +804,8 @@ void testPacketLengthCorpusAndReconnectSoak() {
         ScaleFixture cycle = makeScale(OLD);
         CHECK(reconnecting.init());
         cycle.peripheral->connected = false;
+        CHECK(reconnecting.isConnected());
+        fakeMillis += LINK_DOWN_DEBOUNCE_MS;
         CHECK(!reconnecting.isConnected());
     }
     CHECK(reconnecting.reconnectCount() == 9999);
@@ -805,6 +816,7 @@ void testPacketLengthCorpusAndReconnectSoak() {
 int main() {
     testScanDiagnostics();
     testNonBlockingScanDoesNotRestartOrResetIdle();
+    testBurstScanParametersAndDiscoverTimeoutRestored();
     testNonBlockingScanConnectsWithoutInit();
     testConnectFilterUsesNameScan();
     testConnectFilterConnectsWithoutLocalName();

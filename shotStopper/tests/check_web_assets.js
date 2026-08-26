@@ -292,9 +292,16 @@ if (!firmwareCore.includes('companionAdvertisingShouldPause') ||
     !firmwareCore.includes('BLE.poll(tickDelayMs)') ||
     firmwareCore.includes('vTaskDelay(pdMS_TO_TICKS(scaleWorkerTickDelayMs()))') ||
     (firmwareCore.split('syncCompanionAdvertisingForScaleLink();').length - 1) < 3 ||
-    !bleCompanion.includes('advertisingPaused_ && !status_.connected')) {
+    !bleCompanion.includes('advertisingPaused_ && !status_.connected') ||
+    !bleCompanion.includes('BLE_COMPANION_ADV_INTERVAL') ||
+    !bleCompanion.includes('setAdvertisingInterval(BLE_COMPANION_ADV_INTERVAL)')) {
   throw new Error(
       'Companion advertising must pause while connecting or scale-linked; worker must block on HCI');
+}
+if (/setScaleLinkState\(ScaleLinkState::CONNECTED\);\s*applyBookooConnectBeepPolicy/.test(
+        firmwareCore)) {
+  throw new Error(
+      'Bookoo connect volume must be deferred off the GATT success path');
 }
 if (!network.includes('\\"lastDisconnectReasonName\\":\\"%s\\"},') ||
     !network.includes('\\"macCachePauseRemainingMs\\":%lu,')) {
@@ -1785,6 +1792,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !network.includes('\\"psramLargestFreeBlockBytes\\"') ||
       !network.includes('\\"bleHostAllocPsram\\"') ||
       !network.includes('\\"bleHostAllocFallback\\"') ||
+      !network.includes('\\"hciRxDropped\\"') ||
+      !network.includes('\\"hciTxDropped\\"') ||
       !network.includes('\\"workBufExternal\\"') ||
       !network.includes('\\"jsonArenaExternal\\"') ||
       !network.includes('\\"allocExternalFallback\\"') ||
@@ -2837,6 +2846,7 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'freeHeapBytes', 'minimumFreeHeapBytes', 'largestFreeHeapBlockBytes',
     'psramSizeBytes', 'psramFreeBytes', 'psramLargestFreeBlockBytes',
     'bleHostAllocPsram', 'bleHostAllocFallback',
+    'hciRxDropped', 'hciTxDropped',
     'workBufExternal', 'jsonArenaExternal', 'allocExternalFallback',
     'resetReasonCode', 'packetGaps', 'rejectedPackets', 'reconnects',
     'eventsDropped', 'recoveredStaleCount', 'recoveredStaleMs',
@@ -3159,6 +3169,8 @@ if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
     !firmware.includes('scale.supportsTareStartTimer()') ||
     !firmware.includes('alertOutputChannel') ||
     !firmware.includes('applyBookooConnectBeepPolicy') ||
+    !firmware.includes('armBookooConnectBeepPolicy') ||
+    !firmware.includes('serviceBookooConnectBeepPolicy') ||
     !firmware.includes('requestBookooSilenceIfConfigured') ||
     !firmware.includes('emitCommandAlert') ||
     !firmware.includes('emitImmediateCommandAlertIfBuzzer') ||

@@ -39,6 +39,9 @@ using portMUX_TYPE = int;
 #ifndef BLE_CONNECT_TIMEOUT_MS
 #define BLE_CONNECT_TIMEOUT_MS 2000UL
 #endif
+#ifndef BLE_DISCOVER_TIMEOUT_MS
+#define BLE_DISCOVER_TIMEOUT_MS 3000UL
+#endif
 
 inline uint32_t hostMillis = 0;
 inline std::array<int, 64> hostPinLevel = {};
@@ -218,6 +221,11 @@ class HostBLE {
   void poll() {}
   void poll(unsigned long timeout) { (void)timeout; }
   void setTimeout(unsigned long timeout) { configuredTimeoutMs = timeout; }
+  void setScanParameters(uint16_t interval, uint16_t window) {
+    (void)interval;
+    (void)window;
+  }
+  void setAdvertisingInterval(uint16_t interval) { (void)interval; }
 
   bool beginSucceeds = true;
   unsigned long configuredTimeoutMs = 0;
@@ -242,7 +250,9 @@ enum class AcaiaDisconnectReason : uint8_t {
   FIRST_PACKET_TIMEOUT,
   PACKET_TIMEOUT,
   INVALID_PACKET_STREAM,
-  COMMAND_WRITE_FAILED
+  COMMAND_WRITE_FAILED,
+  SUPERVISION_TIMEOUT,
+  CONNECTION_FAILED_TO_ESTABLISH
 };
 
 class AcaiaArduinoBLE {
@@ -254,8 +264,10 @@ class AcaiaArduinoBLE {
     scanning = false;
     return connected;
   }
-  bool startScan(const char *mac = nullptr, bool forceRestart = false) {
+  bool startScan(const char *mac = nullptr, bool forceRestart = false,
+                 bool burst = false) {
     lastForceRestart = forceRestart;
+    lastBurst = burst;
     const bool directed = mac != nullptr && mac[0] != '\0';
     if (scanning && !connected) {
       const bool sameFilter =
@@ -455,6 +467,7 @@ class AcaiaArduinoBLE {
   bool pollScanConnects = false;
   int pollScanStepsToConnect = 1;
   bool lastForceRestart = false;
+  bool lastBurst = false;
   size_t startScanCalls = 0;
   char lastStartScanMac[ACAIA_MAC_CAPACITY] = {};
   char seenMac[ACAIA_MAC_CAPACITY] = {};

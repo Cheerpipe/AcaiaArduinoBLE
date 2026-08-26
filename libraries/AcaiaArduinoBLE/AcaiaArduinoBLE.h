@@ -34,6 +34,13 @@
 // cannot panic scale_worker. Failed attempts return to the caller so the
 // worker can feed the watchdog between retries.
 #define BLE_CONNECT_TIMEOUT_MS            2000UL
+#define BLE_DISCOVER_TIMEOUT_MS           3000UL
+#define SCALE_CONNECT_SETTLE_MS           120UL
+#define LINK_DOWN_DEBOUNCE_MS             120UL
+#define BLE_SCAN_IDLE_INTERVAL            0x00F0
+#define BLE_SCAN_IDLE_WINDOW              0x0030
+#define BLE_SCAN_BURST_INTERVAL           0x0060
+#define BLE_SCAN_BURST_WINDOW             0x0030
 #define SCALE_CONNECT_ATTEMPTS           3U
 #define SCALE_CONNECT_BUDGET_MS         10000UL
 #define MAX_SUPPORTED_WEIGHT_GRAMS      10000.0f
@@ -66,7 +73,9 @@ enum class AcaiaDisconnectReason : uint8_t {
     FIRST_PACKET_TIMEOUT,
     PACKET_TIMEOUT,
     INVALID_PACKET_STREAM,
-    COMMAND_WRITE_FAILED
+    COMMAND_WRITE_FAILED,
+    SUPERVISION_TIMEOUT,
+    CONNECTION_FAILED_TO_ESTABLISH
 };
 
 class AcaiaArduinoBLE {
@@ -93,7 +102,8 @@ class AcaiaArduinoBLE {
         // mac non-empty: still name-scan all advertisements, but only GATT-
         // connect when the address matches (other compatible scales are
         // reported via takeSeenAdvertisement without connecting).
-        bool startScan(const char *mac = nullptr, bool forceRestart = false);
+        bool startScan(const char *mac = nullptr, bool forceRestart = false,
+                       bool burst = false);
         // Poll an active scan or advance an in-progress GATT connect by one
         // ATT step. Idle scans stay enabled until a match, filter change, or
         // init()'s SCALE_SCAN_TIMEOUT_MS. Returns true only when fully
@@ -199,6 +209,7 @@ class AcaiaArduinoBLE {
         void resetConnection(bool disconnectPeer,
                              AcaiaDisconnectReason reason);
         void rejectPacket(const char* reason);
+        AcaiaDisconnectReason mapHciDisconnectReason() const;
 
         // Debug functions.
         void exploreService(BLEService service);
@@ -242,6 +253,7 @@ class AcaiaArduinoBLE {
         ConnectStep         _connectStep;
         uint32_t            _connectStartedAt;
         uint8_t             _connectAttempts;
+        uint32_t            _linkDownSince;
         char                _scanMac[ACAIA_MAC_CAPACITY];
         char                _address[ACAIA_MAC_CAPACITY];
         char                _localName[ACAIA_NAME_CAPACITY];

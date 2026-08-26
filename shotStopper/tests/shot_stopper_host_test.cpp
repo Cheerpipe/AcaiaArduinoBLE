@@ -180,6 +180,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scaleWorkerTaskHandle = nullptr;
   scale = AcaiaArduinoBLE(DEBUG);
   scale.connected = scaleConnected;
+  resetScaleWorkerRadioStateForHost();
   scalePreferredMac[0] = '\0';
   scalePreferredName[0] = '\0';
   scalePreferredMacDirty = false;
@@ -3725,6 +3726,37 @@ void w75_bookoo_discovery_connect_applies_beep_policy() {
   uint32_t scanLastAdvertAtMs = 0;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
+  CHECK(scale.commandLog.empty());
+
+  hostMillis += BOOKOO_CONNECT_BEEP_DEFER_MS - 1;
+  serviceScaleWorkerLink();
+  CHECK(scale.commandLog.empty());
+  hostMillis += 1;
+  serviceScaleWorkerLink();
+  CHECK(scale.commandLog.size() == 1);
+  CHECK(scale.commandLog[0] == "setBeepLevel:0");
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  runtimeConfig.bookooMuteOnBuzzerOnly = true;
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  scale.scanning = true;
+  scale.connected = true;
+  scale.commandLog.clear();
+  lastScanCycleMs = 0;
+  lastConnectLogMs = 0;
+  connectRetryMs = 1000;
+  connectAttemptSeriesActive = false;
+  scanSessionAtMs = 0;
+  scanLastAdvertAtMs = 0;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
+  CHECK(scale.commandLog.empty());
+  scale.newWeightAvailableValue = true;
+  serviceScaleWorkerLink();
+  CHECK(scale.commandLog.empty());
+  serviceScaleWorkerLink();
   CHECK(scale.commandLog.size() == 1);
   CHECK(scale.commandLog[0] == "setBeepLevel:0");
 }
@@ -4169,6 +4201,7 @@ void d05_hci_watchdog_force_restarts_same_filter() {
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.startScanCalls == 1);
   CHECK(!scale.lastForceRestart);
+  CHECK(scale.lastBurst);
   const size_t callsBeforeRestart = scale.startScanCalls;
   size_t ticks = 0;
   while (scale.startScanCalls == callsBeforeRestart) {
@@ -4182,7 +4215,24 @@ void d05_hci_watchdog_force_restarts_same_filter() {
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
   CHECK(scale.lastForceRestart);
+  CHECK(!scale.lastBurst);
   CHECK(scale.startScanCalls == 2);
+
+  const size_t callsAfterBurst = scale.startScanCalls;
+  ticks = 0;
+  while (scale.startScanCalls == callsAfterBurst) {
+    hostMillis += SCALE_DISCOVERY_TICK_MS;
+    serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                                connectRetryMs, connectAttemptSeriesActive,
+                                scanSessionAtMs, scanLastAdvertAtMs);
+    ++ticks;
+    CHECK(ticks < 40);
+  }
+  CHECK(scale.scanning);
+  CHECK(scale.directedScan);
+  CHECK(scale.lastForceRestart);
+  CHECK(!scale.lastBurst);
+  CHECK(scale.startScanCalls == 3);
 }
 
 void d06_forget_pauses_discovery_for_30s() {
@@ -7622,6 +7672,8 @@ void sc15_status_printers_use_dump_views() {
   CHECK(serialTxContains("psramLargest=0"));
   CHECK(serialTxContains("bleHostAllocPsram=0"));
   CHECK(serialTxContains("bleHostAllocFallback=0"));
+  CHECK(serialTxContains("hciRxDropped=0"));
+  CHECK(serialTxContains("hciTxDropped=0"));
   CHECK(serialTxContains("workBufExternal=false"));
   CHECK(serialTxContains("jsonArenaExternal=false"));
   CHECK(serialTxContains("allocExternalFallback=0"));

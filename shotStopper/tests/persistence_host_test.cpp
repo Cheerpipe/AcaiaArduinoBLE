@@ -812,34 +812,34 @@ void p16b_usb_set_wifi_commits_confirmed_lkg() {
 void p48_ble_companion_defaults_and_dual_slot_round_trip() {
   resetHostPersistence();
   BleCompanionPersistedSettings settings;
-  CHECK(settings.enabled == 1);
+  CHECK(settings.enabled == 0);
   CHECK(saveBleCompanionSettings(settings));
   CHECK(settings.revision == 1);
-  settings.enabled = 0;
+  settings.enabled = 1;
   CHECK(saveBleCompanionSettings(settings));
   CHECK(settings.revision == 2);
   BleCompanionPersistedSettings loaded;
   CHECK(loadBleCompanionSettings(loaded));
-  CHECK(loaded.enabled == 0);
+  CHECK(loaded.enabled == 1);
   CHECK(loaded.revision == 2);
   CHECK(validBleCompanionSettings(loaded));
 }
 
-void p49_ble_companion_corruption_falls_back_and_reset_enables() {
+void p49_ble_companion_corruption_falls_back_and_reset_stays_off() {
   resetHostPersistence();
   BleCompanionPersistedSettings settings;
   CHECK(saveBleCompanionSettings(settings));
-  settings.enabled = 0;
+  settings.enabled = 1;
   CHECK(saveBleCompanionSettings(settings));
   CHECK(persistence_host::corrupt(SETTINGS_NAMESPACE, BLE_COMPANION_SLOT_B,
                                   offsetof(BleCompanionPersistedSettings,
                                            checksum)));
   BleCompanionPersistedSettings loaded;
   CHECK(loadBleCompanionSettings(loaded));
-  CHECK(loaded.enabled == 1);
+  CHECK(loaded.enabled == 0);
   CHECK(loaded.revision == 1);
   CHECK(resetBleCompanionSettings(loaded));
-  CHECK(loaded.enabled == 1);
+  CHECK(loaded.enabled == 0);
 }
 
 RecoveryGestureResult recoveryEdge(RecoveryGestureRecognizer &recognizer,
@@ -1080,7 +1080,7 @@ void p58_reset_all_durable_stores_and_mid_fail_keeps_settings() {
   CHECK(log.count() == 0);
   CHECK(curves.count() == 0);
   CHECK(!lastShot.get().valid);
-  CHECK(ble.enabled == 1);
+  CHECK(ble.enabled == 0);
 
   settings.runtime.goalWeightG = 40;
   finalizePersistedSettings(settings);
@@ -1244,7 +1244,7 @@ const TestCase tests[] = {
     {"P19", p19_shot_log_weight_sentinel_allows_int16_max},
     {"P29", p29_last_shot_persists_and_clears},
     {"P48", p48_ble_companion_defaults_and_dual_slot_round_trip},
-    {"P49", p49_ble_companion_corruption_falls_back_and_reset_enables},
+    {"P49", p49_ble_companion_corruption_falls_back_and_reset_stays_off},
     {"P50", p50_recovery_three_cycles_confirm_network_reset},
     {"P51", p51_recovery_five_cycles_upgrade_factory_candidate},
     {"P52", p52_recovery_rejects_four_slow_and_late_confirmation},

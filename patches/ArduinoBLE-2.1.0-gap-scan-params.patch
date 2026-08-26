@@ -1,0 +1,112 @@
+--- a/src/utility/GAP.h
++++ b/src/utility/GAP.h
+@@ -41,6 +41,7 @@
+   virtual BLEDevice available();
+ 
+   virtual void setAdvertisingInterval(uint16_t advertisingInterval);
++  virtual void setScanParameters(uint16_t interval, uint16_t window);
+   virtual void setConnectable(bool connectable);
+ 
+   virtual void setEventHandler(BLEDeviceEvent event, BLEDeviceEventHandler eventHandler);
+@@ -59,6 +60,8 @@
+   bool _scanning;
+ 
+   uint16_t _advertisingInterval;
++  uint16_t _scanInterval;
++  uint16_t _scanWindow;
+   bool _connectable;
+ 
+   BLEDeviceEventHandler _discoverEventHandler;
+--- a/src/utility/GAP.cpp
++++ b/src/utility/GAP.cpp
+@@ -37,6 +37,8 @@
+   _advertising(false),
+   _scanning(false),
+   _advertisingInterval(160),
++  _scanInterval(0x00F0),
++  _scanWindow(0x0030),
+   _connectable(true),
+   _discoverEventHandler(NULL)
+ {
+@@ -91,14 +93,14 @@
+ {
+   HCI.leSetScanEnable(false, true);
+ 
+-  // active scan, 20 ms scan interval (N * 0.625), 20 ms scan window (N * 0.625), public own address type, no filter
++  // Active scan. Interval/window are 0.625 ms units (default idle 150/30 ms).
+   /*
+     Warning (from BLUETOOTH SPECIFICATION 5.x):
+     - scan interval: mandatory range from 0x0012 to 0x1000; only even values are valid
+     - scan window: mandatory range from 0x0011 to 0x1000
+     - The scan window can only be less than or equal to the scan interval
+   */
+-  if (HCI.leSetScanParameters(0x01, 0x0020, 0x0020, 0x00, 0x00) != 0) {
++  if (HCI.leSetScanParameters(0x01, _scanInterval, _scanWindow, 0x00, 0x00) != 0) {
+     return false;
+   }
+ 
+@@ -182,6 +184,18 @@
+ void GAPClass::setAdvertisingInterval(uint16_t advertisingInterval)
+ {
+   _advertisingInterval = advertisingInterval;
++}
++
++void GAPClass::setScanParameters(uint16_t interval, uint16_t window)
++{
++  if (interval < 0x0012 || interval > 0x1000 || (interval & 1U) != 0) {
++    return;
++  }
++  if (window < 0x0011 || window > 0x1000 || window > interval) {
++    return;
++  }
++  _scanInterval = interval;
++  _scanWindow = window;
+ }
+ 
+ void GAPClass::setConnectable(bool connectable)
+--- a/src/local/BLELocalDevice.h
++++ b/src/local/BLELocalDevice.h
+@@ -76,6 +76,7 @@
+   virtual BLEDevice available();
+ 
+   virtual void setAdvertisingInterval(uint16_t advertisingInterval);
++  virtual void setScanParameters(uint16_t interval, uint16_t window);
+   virtual void setConnectionInterval(uint16_t minimumConnectionInterval, uint16_t maximumConnectionInterval);
+   virtual void setSupervisionTimeout(uint16_t supervisionTimeout);
+   virtual void setConnectable(bool connectable); 
+--- a/src/local/BLELocalDevice.cpp
++++ b/src/local/BLELocalDevice.cpp
+@@ -400,6 +400,11 @@
+   GAP.setAdvertisingInterval(advertisingInterval);
+ }
+ 
++void BLELocalDevice::setScanParameters(uint16_t interval, uint16_t window)
++{
++  GAP.setScanParameters(interval, window);
++}
++
+ void BLELocalDevice::setConnectionInterval(uint16_t minimumConnectionInterval, uint16_t maximumConnectionInterval)
+ {
+   L2CAPSignaling.setConnectionInterval(minimumConnectionInterval, maximumConnectionInterval);
+--- a/src/utility/HCI.cpp
++++ b/src/utility/HCI.cpp
+@@ -26,6 +26,11 @@
+ #include "bitDescriptions.h"
+ // #define _BLE_TRACE_
+ 
++static uint8_t g_lastHciDisconnectReason = 0;
++
++extern "C" uint8_t BLEHostLastHciDisconnectReason(void) {
++  return g_lastHciDisconnectReason;
++}
+ 
+ #define HCI_COMMAND_PKT   0x01
+ #define HCI_ACLDATA_PKT   0x02
+@@ -890,6 +895,7 @@
+       uint8_t reason;
+     } *disconnComplete = (DisconnComplete*)&pdata[sizeof(HCIEventHdr)];
+ 
++    g_lastHciDisconnectReason = disconnComplete->reason;
+     ATT.removeConnection(disconnComplete->handle, disconnComplete->reason);
+     L2CAPSignaling.removeConnection(disconnComplete->handle, disconnComplete->reason);
+ 

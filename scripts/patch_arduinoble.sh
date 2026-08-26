@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Patch ArduinoBLE 2.1.0 for Shot Stopper:
-#  1) Keep GAP scan at stock active 20/20 ms (revert leftover 40/20 or 100/30)
+#  1) Idle GAP scan 150/30 ms (0x00F0/0x0030); burst via setScanParameters
 #  2) OOM-safe discovery (malloc + placement new; no abort on bad_alloc)
 #  3) BLE host objects in PSRAM (GAP/ATT/GATT/local values; VHCI stream buffers untouched)
-#  4) Bound ESP32 VHCI / HCI ACL / ATT indication waits (no indefinite blocks)
-#  5) Check BT controller init/enable, 4 KiB bleTask stack, idempotent end()
+#  4) Bound ATT indication / ACL credit waits (no indefinite blocks)
+#  5) VHCI: 4 KiB RX/TX streams, non-blocking RX, TX without PDU drop, 4 KiB bleTask
 #  6) Block BLE.poll(timeout) on VHCI RX instead of busy-spinning
 set -euo pipefail
 
@@ -14,6 +14,8 @@ psram_patch="$script_dir/../patches/ArduinoBLE-2.1.0-ble-host-psram.patch"
 hci_patch="$script_dir/../patches/ArduinoBLE-2.1.0-hci-bounded-waits.patch"
 vhci_init_patch="$script_dir/../patches/ArduinoBLE-2.1.0-vhci-controller-init.patch"
 hci_wait_patch="$script_dir/../patches/ArduinoBLE-2.1.0-hci-blocking-wait.patch"
+hci_nodrop_patch="$script_dir/../patches/ArduinoBLE-2.1.0-hci-nodrop.patch"
+gap_scan_patch="$script_dir/../patches/ArduinoBLE-2.1.0-gap-scan-params.patch"
 
 candidates=()
 if [[ -n "${ARDUINO_BLE_HOME:-}" ]]; then
@@ -61,13 +63,18 @@ apply_psram=0
 apply_hci=0
 apply_vhci_init=0
 apply_hci_wait=0
+apply_hci_nodrop=0
+apply_gap_scan=0
 
-if grep -q 'leSetScanParameters(0x01, 0x0020, 0x0020' "$gap"; then
+if grep -q '_scanInterval(0x00F0)' "$gap"; then
   restore_scan=0
+elif grep -q 'leSetScanParameters(0x01, 0x0020, 0x0020' "$gap"; then
+  apply_gap_scan=1
 elif grep -qE 'leSetScanParameters\(0x01, 0x0040, 0x0020|leSetScanParameters\(0x0[01], 0x00A0, 0x0030' "$gap"; then
   restore_scan=1
+  apply_gap_scan=1
 else
-  echo "ArduinoBLE GAP scan params are not stock 20/20 or a known leftover 40/20 / 100/30 variant: $gap" >&2
+  echo "ArduinoBLE GAP scan params are not idle 150/30, stock 20/20, or a known leftover: $gap" >&2
   exit 1
 fi
 
@@ -95,10 +102,19 @@ if [[ -f "$vhci" ]] && grep -q 'HCI_VHCI_TASK_STACK' "$vhci" && \
   apply_hci_wait=1
 fi
 
+if [[ -f "$vhci" ]] && ! grep -q 'HCI_VHCI_STREAM_BYTES' "$vhci"; then
+  apply_hci_nodrop=1
+fi
+
+if [[ -f "$gap" ]] && ! grep -q 'setScanParameters' "$gap"; then
+  apply_gap_scan=1
+fi
+
 if [[ "$restore_scan" -eq 0 && "$apply_oom" -eq 0 && "$apply_psram" -eq 0 && \
       "$apply_hci" -eq 0 && "$apply_vhci_init" -eq 0 && \
-      "$apply_hci_wait" -eq 0 ]]; then
-  echo "ArduinoBLE already patched (GAP scan stock 20/20 + OOM-safe + host PSRAM + HCI waits + VHCI init + blocking HCI wait): $target"
+      "$apply_hci_wait" -eq 0 && "$apply_hci_nodrop" -eq 0 && \
+      "$apply_gap_scan" -eq 0 ]]; then
+  echo "ArduinoBLE already patched (idle scan 150/30 + OOM-safe + host PSRAM + HCI no-drop + VHCI init + blocking HCI wait): $target"
   exit 0
 fi
 
@@ -121,23 +137,11 @@ for src, dst in replacements:
     if src in text:
         text = text.replace(src, dst, 1)
         break
-comment_replacements = (
-    ("// Active scan, 40 ms interval / 20 ms window (N * 0.625). Duty 50%. Active is\n"
-     "  // required: scale names usually live in SCAN_RSP, and ArduinoBLE only reports\n"
-     "  // a device as discovered after type 0x03/0x04.",
-     "// active scan, 20 ms scan interval (N * 0.625), 20 ms scan window (N * 0.625), public own address type, no filter"),
-    ("// Active scan, 40 ms interval / 20 ms window (N * 0.625). Duty 50%. Active is required:",
-     "// active scan, 20 ms scan interval (N * 0.625), 20 ms scan window (N * 0.625), public own address type, no filter"),
-)
-for src, dst in comment_replacements:
-    if src in text:
-        text = text.replace(src, dst, 1)
-        break
 if text == old:
     raise SystemExit("ArduinoBLE GAP scan params were not a known leftover 40/20 or 100/30 variant")
 path.write_text(text)
 PY
-  echo "Restored ArduinoBLE GAP scan to stock active 20/20: $target"
+  echo "Normalized leftover ArduinoBLE GAP scan params toward stock 20/20 (gap-scan-params applies next): $target"
 fi
 
 if [[ "$apply_oom" -eq 1 ]]; then
@@ -236,4 +240,40 @@ if [[ "$apply_hci_wait" -eq 1 ]]; then
   fi
   patch -p1 -d "$target" < "$hci_wait_patch"
   echo "Patched ArduinoBLE HCI blocking wait: $target"
+fi
+
+if [[ "$apply_hci_nodrop" -eq 1 ]]; then
+  if [[ ! -f "$hci_nodrop_patch" ]]; then
+    echo "Missing HCI no-drop patch: $hci_nodrop_patch" >&2
+    exit 1
+  fi
+  if ! command -v patch >/dev/null 2>&1; then
+    echo "patch(1) is required to apply $hci_nodrop_patch" >&2
+    exit 1
+  fi
+  if ! patch -p1 --dry-run -d "$target" < "$hci_nodrop_patch" >/dev/null 2>&1; then
+    echo "HCI no-drop patch does not apply cleanly to: $target" >&2
+    echo "Install stock ArduinoBLE@2.1.0, apply bounded-waits + VHCI init + blocking-wait, then retry." >&2
+    exit 1
+  fi
+  patch -p1 -d "$target" < "$hci_nodrop_patch"
+  echo "Patched ArduinoBLE HCI no-drop VHCI: $target"
+fi
+
+if [[ "$apply_gap_scan" -eq 1 ]]; then
+  if [[ ! -f "$gap_scan_patch" ]]; then
+    echo "Missing GAP scan-params patch: $gap_scan_patch" >&2
+    exit 1
+  fi
+  if ! command -v patch >/dev/null 2>&1; then
+    echo "patch(1) is required to apply $gap_scan_patch" >&2
+    exit 1
+  fi
+  if ! patch -p1 --dry-run -d "$target" < "$gap_scan_patch" >/dev/null 2>&1; then
+    echo "GAP scan-params patch does not apply cleanly to: $target" >&2
+    echo "Install stock ArduinoBLE@2.1.0, apply prior patches, then retry." >&2
+    exit 1
+  fi
+  patch -p1 -d "$target" < "$gap_scan_patch"
+  echo "Patched ArduinoBLE idle GAP scan 150/30 + setScanParameters: $target"
 fi

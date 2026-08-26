@@ -579,6 +579,8 @@ struct SerialCliHealthDump {
   uint32_t psramLargestFreeBlockBytes = 0;
   uint32_t bleHostAllocPsramCount = 0;
   uint32_t bleHostAllocFallbackCount = 0;
+  uint32_t bleHostHciRxDropped = 0;
+  uint32_t bleHostHciTxDropped = 0;
   bool workBufExternal = false;
   bool jsonArenaExternal = false;
   uint32_t allocExternalFallbackCount = 0;
@@ -787,6 +789,10 @@ inline void serialCliPrintHealth(const SerialCliHealthDump &dump) {
   Serial.println(static_cast<unsigned long>(dump.bleHostAllocPsramCount));
   Serial.print("bleHostAllocFallback=");
   Serial.println(static_cast<unsigned long>(dump.bleHostAllocFallbackCount));
+  Serial.print("hciRxDropped=");
+  Serial.println(static_cast<unsigned long>(dump.bleHostHciRxDropped));
+  Serial.print("hciTxDropped=");
+  Serial.println(static_cast<unsigned long>(dump.bleHostHciTxDropped));
   Serial.print("workBufExternal=");
   Serial.println(dump.workBufExternal ? "true" : "false");
   Serial.print("jsonArenaExternal=");

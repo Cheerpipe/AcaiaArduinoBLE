@@ -224,6 +224,10 @@ public:
         delivered_ = true;
         return BLEDevice(availableState);
     }
+    void setScanParameters(uint16_t interval, uint16_t window) {
+        lastScanInterval = interval;
+        lastScanWindow = window;
+    }
     void poll() {}
     void poll(unsigned long timeout) { (void)timeout; }
     void setTimeout(unsigned long timeout) {
@@ -252,6 +256,8 @@ public:
         FakeBLE::currentTimeoutMs = 0;
         lastScanAddress.clear();
         lastWithDuplicates = false;
+        lastScanInterval = 0;
+        lastScanWindow = 0;
         availableState.reset();
     }
 
@@ -262,6 +268,8 @@ public:
     unsigned long timeoutMs = 0;
     std::string lastScanAddress;
     bool lastWithDuplicates = false;
+    uint16_t lastScanInterval = 0;
+    uint16_t lastScanWindow = 0;
     std::shared_ptr<FakeBLE::PeripheralState> availableState;
 
 private:
