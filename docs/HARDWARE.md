@@ -40,7 +40,7 @@ They are **not** editable from the Web UI.
 | Function | GPIO | Level |
 | --- | ---: | --- |
 | Activator (to GND) | **21** | Active **LOW** (internal pull-up; ON = GPIO LOW). Paddle or switch, depending on machine type. |
-| Reed (momentary+reed builds) | **4** | Active **LOW** (internal pull-up; ON = GPIO LOW). Compile `SHOT_STOPPER_MACHINE_TYPE=2`. Override with `-DSHOT_STOPPER_REED_GPIO`. Must stay distinct from activator, relay, LED, buzzer, and safety GPIOs. |
+| Reed (momentary+reed builds) | **13** | Active **LOW** (internal pull-up; ON = GPIO LOW). Compile `SHOT_STOPPER_MACHINE_TYPE=2`. Override with `-DSHOT_STOPPER_REED_GPIO`. Must stay distinct from activator, relay, LED, buzzer, and safety GPIOs. |
 | Onboard relay coil | **2** | Active **HIGH** (HIGH energizes the coil and closes NO) |
 | Scale-connected LED | **1** | Active HIGH while a BLE scale is connected (switchable in Alerts) |
 | Optional buzzer | **14** | Compile with `SHOT_STOPPER_ENABLE_BUZZER=1` (passive piezo, RTTTL). `=0` omits the local buzzer. |
