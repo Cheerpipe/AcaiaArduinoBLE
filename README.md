@@ -388,6 +388,10 @@ The vendored library also credits:
 - Felicita Arc: baettigp, A-TWJ
 - Bookoo: philgood, same31
 - AtomHeart Eclair: [AtomHeart-Lang](https://github.com/AtomHeart-Lang)
+- Decent, DiFluid, MyScale, Varia, Eureka, WeighMyBru: protocol knowledge from
+  [gaggimate/esp-arduino-ble-scales](https://github.com/gaggimate/esp-arduino-ble-scales)
+  ([jniebuhr](https://github.com/jniebuhr) et al.), reimplemented here without
+  copying source
 - Lunar 2019: jniebuhr
 
 See the [library acknowledgement](libraries/EspressoScaleBLE/README.md#acknowledgement).
