@@ -67,16 +67,16 @@ bool slowExtractionGuardSession() {
          !session.config.timerOnly && session.startedWithScale;
 }
 
-bool minBrewTimeReached() {
+bool minBbwBrewTimeReached() {
   uint32_t elapsedMsValue = 0U;
   return machineRunningElapsed(elapsedMsValue) &&
-         elapsedMsValue >= session.config.minBrewTimeMs;
+         elapsedMsValue >= session.config.minBbwBrewTimeMs;
 }
 
-bool maxBrewTimeReached() {
+bool maxBbwBrewTimeReached() {
   uint32_t elapsedMsValue = 0U;
   return machineRunningElapsed(elapsedMsValue) &&
-         elapsedMsValue >= session.config.maxBrewTimeMs;
+         elapsedMsValue >= session.config.maxBbwBrewTimeMs;
 }
 
 bool targetWeightReached(float weight) {
@@ -413,7 +413,7 @@ void considerDirectStopSample(float weight, uint32_t receivedAtMs,
   }
 
   if (overThreshold && fastExtractionGuardSession() &&
-      (!minBrewTimeReached() || session.extractionExtended)) {
+      (!minBbwBrewTimeReached() || session.extractionExtended)) {
     enterFastExtractionExtended(weight, receivedAtMs);
     resetDirectStopConfirmation();
     return;
@@ -572,7 +572,7 @@ bool automaticScaleStopDue() {
   }
 
   if (session.extractionExtended && fastExtractionGuardSession()) {
-    if (minBrewTimeReached() &&
+    if (minBbwBrewTimeReached() &&
         targetWeightReached(session.lastAcceptedWeightG)) {
       session.directStopPending = true;
       session.directStopReason = EndReason::FAST_EXTRACTION_MIN_TIME;
@@ -585,7 +585,7 @@ bool automaticScaleStopDue() {
   }
 
   if (slowExtractionGuardSession() && !session.extractionExtended &&
-      !session.slowExtractionExtended && maxBrewTimeReached() &&
+      !session.slowExtractionExtended && maxBbwBrewTimeReached() &&
       !targetWeightReached(session.lastAcceptedWeightG)) {
     if (minRecoveryWeightReached(session.lastAcceptedWeightG)) {
       session.directStopPending = true;
@@ -615,7 +615,7 @@ bool automaticScaleStopDue() {
     return false;
   }
 
-  if (fastExtractionGuardSession() && !minBrewTimeReached() &&
+  if (fastExtractionGuardSession() && !minBbwBrewTimeReached() &&
       !session.extractionExtended) {
     enterFastExtractionExtended(session.lastAcceptedWeightG, millis());
     return false;

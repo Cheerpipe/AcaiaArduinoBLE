@@ -19,10 +19,10 @@ inline void fillDoubleFirmwareDefaults(ShotPreset &preset) {
   preset.weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
   preset.fastExtractionGuardEnabled = true;
   preset.maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
-  preset.minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
+  preset.minBbwBrewTimeMs = DEFAULT_MIN_BBW_BREW_TIME_MS;
   preset.slowExtractionGuardEnabled = true;
   preset.minRecoveryWeightG = DEFAULT_MIN_RECOVERY_WEIGHT_G;
-  preset.maxBrewTimeMs = DEFAULT_MAX_BREW_TIME_MS;
+  preset.maxBbwBrewTimeMs = DEFAULT_MAX_BBW_BREW_TIME_MS;
   preset.autoToManualGuardEnabled = true;
   preset.autoToManualGuardLimitMode =
       static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
@@ -49,9 +49,9 @@ inline void fillFactorySinglePreset(ShotPreset &preset) {
   copyCString(preset.name, SHOT_PRESET_NAME_CAPACITY, "Single");
   preset.goalWeightG = FACTORY_SINGLE_GOAL_WEIGHT_G;
   preset.maxRecoveryWeightG = FACTORY_SINGLE_MAX_RECOVERY_WEIGHT_G;
-  preset.minBrewTimeMs = FACTORY_SINGLE_MIN_BREW_TIME_MS;
+  preset.minBbwBrewTimeMs = FACTORY_SINGLE_MIN_BBW_BREW_TIME_MS;
   preset.minRecoveryWeightG = FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G;
-  preset.maxBrewTimeMs = FACTORY_SINGLE_MAX_BREW_TIME_MS;
+  preset.maxBbwBrewTimeMs = FACTORY_SINGLE_MAX_BBW_BREW_TIME_MS;
   preset.weightOffsetBaselineG = FACTORY_SINGLE_WEIGHT_OFFSET_G;
   preset.weightOffsetG = FACTORY_SINGLE_WEIGHT_OFFSET_G;
   // Business rule: Single preset defaults keep both extraction guards enabled.
@@ -149,10 +149,10 @@ inline bool validateShotPresetRecipe(const ShotPreset &preset,
   probe.operationalWallMs = preset.operationalWallMs;
   probe.fastExtractionGuardEnabled = preset.fastExtractionGuardEnabled;
   probe.maxRecoveryWeightG = preset.maxRecoveryWeightG;
-  probe.minBrewTimeMs = preset.minBrewTimeMs;
+  probe.minBbwBrewTimeMs = preset.minBbwBrewTimeMs;
   probe.slowExtractionGuardEnabled = preset.slowExtractionGuardEnabled;
   probe.minRecoveryWeightG = preset.minRecoveryWeightG;
-  probe.maxBrewTimeMs = preset.maxBrewTimeMs;
+  probe.maxBbwBrewTimeMs = preset.maxBbwBrewTimeMs;
   probe.autoToManualGuardEnabled = preset.autoToManualGuardEnabled;
   probe.autoToManualGuardLimitMode = preset.autoToManualGuardLimitMode;
   probe.autoToManualGuardManualLimitMs = preset.autoToManualGuardManualLimitMs;
@@ -226,10 +226,10 @@ inline void ensureShotPresetBank(ShotPresetBank &bank,
         preset.operationalWallMs > HARD_MAX_CIRCUIT_CLOSED_MS) {
       preset.operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
     }
-    if (preset.minBrewTimeMs >= preset.operationalWallMs) {
-      preset.minBrewTimeMs = preset.operationalWallMs > 1000
+    if (preset.minBbwBrewTimeMs >= preset.operationalWallMs) {
+      preset.minBbwBrewTimeMs = preset.operationalWallMs > 1000
                                  ? preset.operationalWallMs - 1000
-                                 : DEFAULT_MIN_BREW_TIME_MS;
+                                 : DEFAULT_MIN_BBW_BREW_TIME_MS;
     }
     if (machineAutoRetare &&
         preset.bbwProtectionMs <
@@ -240,8 +240,8 @@ inline void ensureShotPresetBank(ShotPresetBank &bank,
     if (preset.bbwProtectionMs > preset.operationalWallMs) {
       preset.bbwProtectionMs = preset.operationalWallMs;
     }
-    if (preset.minBrewTimeMs < preset.bbwProtectionMs) {
-      preset.minBrewTimeMs = preset.bbwProtectionMs;
+    if (preset.minBbwBrewTimeMs < preset.bbwProtectionMs) {
+      preset.minBbwBrewTimeMs = preset.bbwProtectionMs;
     }
     if (!isfinite(preset.weightOffsetBaselineG) ||
         preset.weightOffsetBaselineG < 0.0f ||
@@ -280,14 +280,14 @@ inline void ensureShotPresetBank(ShotPresetBank &bank,
       probe.operationalWallMs = preset.operationalWallMs;
       probe.bbwProtectionMs = preset.bbwProtectionMs;
       probe.fastExtractionGuardEnabled = preset.fastExtractionGuardEnabled;
-      probe.minBrewTimeMs = preset.minBrewTimeMs;
+      probe.minBbwBrewTimeMs = preset.minBbwBrewTimeMs;
       probe.slowExtractionGuardEnabled = true;
       probe.minRecoveryWeightG = preset.minRecoveryWeightG;
-      probe.maxBrewTimeMs = preset.maxBrewTimeMs;
+      probe.maxBbwBrewTimeMs = preset.maxBbwBrewTimeMs;
       repairSlowExtractionGuard(probe);
       preset.slowExtractionGuardEnabled = probe.slowExtractionGuardEnabled;
       preset.minRecoveryWeightG = probe.minRecoveryWeightG;
-      preset.maxBrewTimeMs = probe.maxBrewTimeMs;
+      preset.maxBbwBrewTimeMs = probe.maxBbwBrewTimeMs;
       if (preset.slowExtractionGuardEnabled &&
           !validateShotPresetRecipe(preset, machineRetareWindowMs,
                                     machineAutoRetare)) {
@@ -337,10 +337,10 @@ inline void applyShotPresetToConfig(const ShotPreset &preset,
   config.operationalWallMs = preset.operationalWallMs;
   config.fastExtractionGuardEnabled = preset.fastExtractionGuardEnabled;
   config.maxRecoveryWeightG = preset.maxRecoveryWeightG;
-  config.minBrewTimeMs = preset.minBrewTimeMs;
+  config.minBbwBrewTimeMs = preset.minBbwBrewTimeMs;
   config.slowExtractionGuardEnabled = preset.slowExtractionGuardEnabled;
   config.minRecoveryWeightG = preset.minRecoveryWeightG;
-  config.maxBrewTimeMs = preset.maxBrewTimeMs;
+  config.maxBbwBrewTimeMs = preset.maxBbwBrewTimeMs;
   config.autoToManualGuardEnabled = preset.autoToManualGuardEnabled;
   config.autoToManualGuardLimitMode = preset.autoToManualGuardLimitMode;
   config.autoToManualGuardManualLimitMs = preset.autoToManualGuardManualLimitMs;
@@ -371,10 +371,10 @@ inline void copyUserRecipeFromConfig(const RuntimeConfig &config,
   // Do not overwrite learned weightOffsetG or A→M samples here.
   preset.fastExtractionGuardEnabled = config.fastExtractionGuardEnabled;
   preset.maxRecoveryWeightG = config.maxRecoveryWeightG;
-  preset.minBrewTimeMs = config.minBrewTimeMs;
+  preset.minBbwBrewTimeMs = config.minBbwBrewTimeMs;
   preset.slowExtractionGuardEnabled = config.slowExtractionGuardEnabled;
   preset.minRecoveryWeightG = config.minRecoveryWeightG;
-  preset.maxBrewTimeMs = config.maxBrewTimeMs;
+  preset.maxBbwBrewTimeMs = config.maxBbwBrewTimeMs;
   preset.autoToManualGuardEnabled = config.autoToManualGuardEnabled;
   preset.autoToManualGuardLimitMode = config.autoToManualGuardLimitMode;
   preset.autoToManualGuardManualLimitMs = config.autoToManualGuardManualLimitMs;
@@ -597,10 +597,10 @@ inline void migrateRecipeFromRuntimeToBank(const RuntimeConfig &runtime,
   dbl->weightOffsetG = runtime.weightOffsetG;
   dbl->fastExtractionGuardEnabled = runtime.fastExtractionGuardEnabled;
   dbl->maxRecoveryWeightG = runtime.maxRecoveryWeightG;
-  dbl->minBrewTimeMs = runtime.minBrewTimeMs;
+  dbl->minBbwBrewTimeMs = runtime.minBbwBrewTimeMs;
   dbl->slowExtractionGuardEnabled = runtime.slowExtractionGuardEnabled;
   dbl->minRecoveryWeightG = runtime.minRecoveryWeightG;
-  dbl->maxBrewTimeMs = runtime.maxBrewTimeMs;
+  dbl->maxBbwBrewTimeMs = runtime.maxBbwBrewTimeMs;
   dbl->autoToManualGuardEnabled = runtime.autoToManualGuardEnabled;
   dbl->autoToManualGuardLimitMode = runtime.autoToManualGuardLimitMode;
   dbl->autoToManualGuardManualLimitMs = runtime.autoToManualGuardManualLimitMs;

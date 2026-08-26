@@ -48,11 +48,11 @@ void p01_defaults_are_valid() {
   CHECK(settings.runtime.fastExtractionGuardEnabled);
   CHECK(std::fabs(settings.runtime.maxRecoveryWeightG -
                   DEFAULT_MAX_RECOVERY_WEIGHT_G) < 0.001f);
-  CHECK(settings.runtime.minBrewTimeMs == DEFAULT_MIN_BREW_TIME_MS);
+  CHECK(settings.runtime.minBbwBrewTimeMs == DEFAULT_MIN_BBW_BREW_TIME_MS);
   CHECK(settings.runtime.slowExtractionGuardEnabled);
   CHECK(std::fabs(settings.runtime.minRecoveryWeightG -
                   DEFAULT_MIN_RECOVERY_WEIGHT_G) < 0.001f);
-  CHECK(settings.runtime.maxBrewTimeMs == DEFAULT_MAX_BREW_TIME_MS);
+  CHECK(settings.runtime.maxBbwBrewTimeMs == DEFAULT_MAX_BBW_BREW_TIME_MS);
   CHECK(settings.runtime.autoToManualGuardEnabled);
   CHECK(settings.runtime.autoToManualGuardLimitMode ==
         static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO));
@@ -343,7 +343,7 @@ void p09_fast_extraction_guard_validation() {
   RuntimeConfig config = {};
   config.goalWeightG = 36;
   config.maxRecoveryWeightG = 42.5f;
-  config.minBrewTimeMs = 26000;
+  config.minBbwBrewTimeMs = 26000;
   config.fastExtractionGuardEnabled = true;
   config.bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
   config.operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
@@ -355,7 +355,7 @@ void p09_fast_extraction_guard_validation() {
   config = {};
   config.goalWeightG = 36;
   config.minRecoveryWeightG = 30.0f;
-  config.maxBrewTimeMs = 44000;
+  config.maxBbwBrewTimeMs = 44000;
   config.slowExtractionGuardEnabled = true;
   config.bbwProtectionMs = DEFAULT_BBW_PROTECTION_MS;
   config.operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
@@ -366,8 +366,8 @@ void p09_fast_extraction_guard_validation() {
   config.minRecoveryWeightG = 30.0f;
   config.fastExtractionGuardEnabled = true;
   config.maxRecoveryWeightG = 42.5f;
-  config.minBrewTimeMs = 28000;
-  config.maxBrewTimeMs = 28000;
+  config.minBbwBrewTimeMs = 28000;
+  config.maxBbwBrewTimeMs = 28000;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::SLOW_EXTRACTION_GUARD_RELATION);
 }
@@ -549,7 +549,7 @@ void p24_preset_bank_size_and_crud_budgets() {
   CHECK(bank.presets[0].slowExtractionGuardEnabled);
   CHECK(std::fabs(bank.presets[0].minRecoveryWeightG -
                   DEFAULT_MIN_RECOVERY_WEIGHT_G) < 0.001f);
-  CHECK(bank.presets[0].maxBrewTimeMs == DEFAULT_MAX_BREW_TIME_MS);
+  CHECK(bank.presets[0].maxBbwBrewTimeMs == DEFAULT_MAX_BBW_BREW_TIME_MS);
   CHECK(bank.presets[0].cupProtectionEnabled);
   CHECK(bank.presets[0].stopIfCupRemoved);
   CHECK(!bank.presets[0].requireCupToStart);
@@ -560,10 +560,10 @@ void p24_preset_bank_size_and_crud_budgets() {
                   DEFAULT_CUP_REMOVED_WEIGHT_G) < 0.001f);
   CHECK(bank.presets[1].fastExtractionGuardEnabled);
   CHECK(bank.presets[1].slowExtractionGuardEnabled);
-  CHECK(bank.presets[1].minBrewTimeMs == FACTORY_SINGLE_MIN_BREW_TIME_MS);
+  CHECK(bank.presets[1].minBbwBrewTimeMs == FACTORY_SINGLE_MIN_BBW_BREW_TIME_MS);
   CHECK(std::fabs(bank.presets[1].minRecoveryWeightG -
                   FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G) < 0.001f);
-  CHECK(bank.presets[1].maxBrewTimeMs == FACTORY_SINGLE_MAX_BREW_TIME_MS);
+  CHECK(bank.presets[1].maxBbwBrewTimeMs == FACTORY_SINGLE_MAX_BBW_BREW_TIME_MS);
 
   {
     ShotPreset recipe{};

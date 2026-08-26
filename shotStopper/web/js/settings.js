@@ -32,7 +32,7 @@ export function init(){
   $('operationalWallS').addEventListener('input',R.updateConfigGroups);
   document.querySelectorAll('#workflowPanel input,#workflowPanel select').forEach(el=>{
     if(el.id==='preferredScaleSelect')return;
-    const brewIds=['brewByWeight','goalWeightG','operationalWallS','bbwProtectionS','weightOffsetBaselineG','cupProtectionEnabled','stopIfCupRemoved','requireCupToStart','fastExtractionGuardEnabled','avoidAccidentalTouchEnabled','maxRecoveryWeightG','minBrewTimeS','slowExtractionGuardEnabled','minRecoveryWeightG','maxBrewTimeS','autoToManualGuardEnabled','autoToManualGuardLimitMode','autoToManualGuardManualLimitS','autoToManualGuardBaselineS'];
+    const brewIds=['brewByWeight','goalWeightG','operationalWallS','bbwProtectionS','weightOffsetBaselineG','cupProtectionEnabled','stopIfCupRemoved','requireCupToStart','fastExtractionGuardEnabled','avoidAccidentalTouchEnabled','maxRecoveryWeightG','minBbwBrewTimeS','slowExtractionGuardEnabled','minRecoveryWeightG','maxBbwBrewTimeS','autoToManualGuardEnabled','autoToManualGuardLimitMode','autoToManualGuardManualLimitS','autoToManualGuardBaselineS'];
     const fn=()=>brewIds.includes(el.id)?R.markBrewDirty():R.markConfigDirty();
     el.addEventListener('input',fn);el.addEventListener('change',fn);
   });

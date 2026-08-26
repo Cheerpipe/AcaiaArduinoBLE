@@ -290,7 +290,7 @@ struct ShotLogRecord {
   // Placed in the former v5 padding byte so sizeof stays 48 (no NVS growth).
   uint8_t actualWeightSource;
   int16_t maxRecoveryWeightCg;
-  uint16_t minBrewTimeDs;
+  uint16_t minBbwBrewTimeDs;
   uint16_t targetReachedEarlyDs;
 };
 

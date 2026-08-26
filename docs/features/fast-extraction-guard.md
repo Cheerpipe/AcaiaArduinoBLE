@@ -4,7 +4,7 @@ Optional brew-by-weight enhancement, **on by default**. It covers shots that
 reach the target **too quickly** — often channeling or a grind that is too
 coarse — where stopping immediately would yield a thin cup.
 
-You still set a target weight. The guard adds a minimum brew time and a
+You still set a target weight. The guard adds a min BBW brew time and a
 maximum recovery weight.
 
 ## When it applies
@@ -26,7 +26,7 @@ Active preset, **Settings → Brew**. The ON/OFF switch is also on
 | Setting | Default | Range / notes | Effect on the shot |
 | --- | --- | --- | --- |
 | **Enable** | ON | ON / OFF | Master switch for the extended-shot recovery. |
-| **Minimum brew time (s)** | 28 s | Must be less than Slow’s max brew time when both are on | Normal BBW will not cut before this time. |
+| **Min BBW brew time (s)** | 28 s | Must be less than Slow’s max BBW brew time when both are on | Normal BBW will not cut before this time. |
 | **Max recovery weight (g)** | 42.5 g | Same weight-cut tool as BBW | Ceiling if the shot must continue past the target. |
 
 When Fast is also on with Slow, factory Double uses a normal BBW window
@@ -36,10 +36,10 @@ between **28 s** and **44 s**.
 
 1. **Normal stop** — the scale reaches the target at or after the minimum brew
    time → machine circuit opens at the target (`normal_target`).
-2. **Too fast** — the target arrives *before* the minimum brew time → the
+2. **Too fast** — the target arrives *before* the min BBW brew time → the
    shot enters **extended** mode until either:
    - **Max recovery weight** (`extended_max_weight`), or
-   - **Minimum brew time** is reached *and* the scale is still at least at
+   - **Min BBW brew time** is reached *and* the scale is still at least at
      target (`extended_min_time`).
 
 ## Example

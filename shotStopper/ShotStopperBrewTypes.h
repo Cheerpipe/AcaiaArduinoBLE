@@ -54,15 +54,15 @@ constexpr uint8_t DEFAULT_GOAL_WEIGHT_G = 36;
 constexpr float DEFAULT_MAX_RECOVERY_WEIGHT_G = 42.5f;
 constexpr float MIN_MAX_RECOVERY_WEIGHT_G = 10.0f;
 constexpr float MAX_MAX_RECOVERY_WEIGHT_G = 200.0f;
-constexpr uint32_t DEFAULT_MIN_BREW_TIME_MS = 28000;
-constexpr uint32_t MIN_MIN_BREW_TIME_MS = 5000;
-constexpr uint32_t MAX_MIN_BREW_TIME_MS = 55000;
+constexpr uint32_t DEFAULT_MIN_BBW_BREW_TIME_MS = 28000;
+constexpr uint32_t MIN_MIN_BBW_BREW_TIME_MS = 5000;
+constexpr uint32_t MAX_MIN_BBW_BREW_TIME_MS = 55000;
 constexpr float DEFAULT_MIN_RECOVERY_WEIGHT_G = 34.0f;
 constexpr float MIN_MIN_RECOVERY_WEIGHT_G = 10.0f;
 constexpr float MAX_MIN_RECOVERY_WEIGHT_G = 200.0f;
-constexpr uint32_t DEFAULT_MAX_BREW_TIME_MS = 44000;
-constexpr uint32_t MIN_MAX_BREW_TIME_MS = 5000;
-constexpr uint32_t MAX_MAX_BREW_TIME_MS = 55000;
+constexpr uint32_t DEFAULT_MAX_BBW_BREW_TIME_MS = 44000;
+constexpr uint32_t MIN_MAX_BBW_BREW_TIME_MS = 5000;
+constexpr uint32_t MAX_MAX_BBW_BREW_TIME_MS = 55000;
 // Extra delay after the scale timer catches up to machine circuit time (whole seconds)
 // before sending STOP_TIMER. 0 stops in that same instant.
 constexpr uint32_t DEFAULT_SCALE_TIMER_STOP_EXTRA_DELAY_MS = 0;

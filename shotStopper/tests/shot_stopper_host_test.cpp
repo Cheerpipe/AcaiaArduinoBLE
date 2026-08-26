@@ -1739,7 +1739,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.operationalWallMs == DEFAULT_OPERATIONAL_WALL_MS);
   CHECK(config.rinseGestureMs == 1000);
   CHECK(!config.rinseEnabled);
-  CHECK(config.minBrewTimeMs == 28000);
+  CHECK(config.minBbwBrewTimeMs == 28000);
   CHECK(config.canTareStartTimer);
   CHECK(config.postTareBaselineGraceMs == DEFAULT_POST_TARE_BASELINE_GRACE_MS);
   CHECK(config.scaleTimerStopExtraDelayMs ==
@@ -1772,7 +1772,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(config.slowExtractionGuardEnabled);
   CHECK(fabsf(config.minRecoveryWeightG - DEFAULT_MIN_RECOVERY_WEIGHT_G) <
         0.001f);
-  CHECK(config.maxBrewTimeMs == DEFAULT_MAX_BREW_TIME_MS);
+  CHECK(config.maxBbwBrewTimeMs == DEFAULT_MAX_BBW_BREW_TIME_MS);
   CHECK(config.avoidBbwShotWithoutScale);
   CHECK(config.cupProtectionEnabled);
   CHECK(config.stopIfCupRemoved);
@@ -1824,7 +1824,7 @@ void w02_each_runtime_field_is_validated() {
   config = RuntimeConfig{};
   config.fastExtractionGuardEnabled = true;
   config.slowExtractionGuardEnabled = true;
-  config.maxBrewTimeMs = config.minBrewTimeMs;
+  config.maxBbwBrewTimeMs = config.minBbwBrewTimeMs;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::SLOW_EXTRACTION_GUARD_RELATION);
 }
@@ -8223,7 +8223,7 @@ void r49_guard_extends_and_stops_at_max_weight() {
   reachReadyFromBoot();
   runtimeConfig.fastExtractionGuardEnabled = true;
   runtimeConfig.maxRecoveryWeightG = 42.5f;
-  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.minBbwBrewTimeMs = 26000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8253,7 +8253,7 @@ void r51_extended_pulse_respects_alert_flag_and_scale_only() {
   runtimeConfig.buzzerExtendedPulseRate =
       static_cast<uint8_t>(ExtendedPulseRate::OFF);
   runtimeConfig.maxRecoveryWeightG = 42.5f;
-  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.minBbwBrewTimeMs = 26000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8273,7 +8273,7 @@ void r51_extended_pulse_respects_alert_flag_and_scale_only() {
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::SCALE_ONLY);
   runtimeConfig.maxRecoveryWeightG = 42.5f;
-  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.minBbwBrewTimeMs = 26000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8291,7 +8291,7 @@ void r50_guard_extends_and_stops_at_min_time() {
   reachReadyFromBoot();
   runtimeConfig.fastExtractionGuardEnabled = true;
   runtimeConfig.maxRecoveryWeightG = 42.5f;
-  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.minBbwBrewTimeMs = 26000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8313,7 +8313,7 @@ void r56_guard_inhibits_bbw_weight_cut_before_min_time() {
   reachReadyFromBoot();
   runtimeConfig.fastExtractionGuardEnabled = true;
   runtimeConfig.maxRecoveryWeightG = 42.5f;
-  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.minBbwBrewTimeMs = 26000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8332,7 +8332,7 @@ void r57_guard_max_weight_cut_from_predicted_time() {
   reachReadyFromBoot();
   runtimeConfig.fastExtractionGuardEnabled = true;
   runtimeConfig.maxRecoveryWeightG = 42.5f;
-  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.minBbwBrewTimeMs = 26000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8354,7 +8354,7 @@ void r59_slow_guard_on_time_bbw_is_scale_threshold() {
   reachReadyFromBoot();
   runtimeConfig.slowExtractionGuardEnabled = true;
   runtimeConfig.minRecoveryWeightG = 30.0f;
-  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.maxBbwBrewTimeMs = 44000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8374,7 +8374,7 @@ void r60_slow_guard_cuts_at_max_time_when_above_floor() {
   reachReadyFromBoot();
   runtimeConfig.slowExtractionGuardEnabled = true;
   runtimeConfig.minRecoveryWeightG = 30.0f;
-  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.maxBbwBrewTimeMs = 44000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8394,7 +8394,7 @@ void r61_slow_guard_extends_and_stops_at_min_weight() {
   reachReadyFromBoot();
   runtimeConfig.slowExtractionGuardEnabled = true;
   runtimeConfig.minRecoveryWeightG = 30.0f;
-  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.maxBbwBrewTimeMs = 44000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8429,7 +8429,7 @@ void r61b_slow_extended_pulse_uses_slow_rate_setting() {
   runtimeConfig.buzzerSlowExtendedPulseRate =
       static_cast<uint8_t>(ExtendedPulseRate::RAPID);
   runtimeConfig.minRecoveryWeightG = 30.0f;
-  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.maxBbwBrewTimeMs = 44000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8452,7 +8452,7 @@ void r61b_slow_extended_pulse_uses_slow_rate_setting() {
   runtimeConfig.buzzerSlowExtendedPulseRate =
       static_cast<uint8_t>(ExtendedPulseRate::OFF);
   runtimeConfig.minRecoveryWeightG = 30.0f;
-  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.maxBbwBrewTimeMs = 44000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8472,7 +8472,7 @@ void r61c_extended_pulse_resumes_after_scale_lost_alert() {
   runtimeConfig.fastExtractionGuardEnabled = true;
   runtimeConfig.autoToManualGuardEnabled = false;
   runtimeConfig.maxRecoveryWeightG = 42.5f;
-  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.minBbwBrewTimeMs = 26000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8553,9 +8553,9 @@ void r62_fast_extended_is_not_cut_by_slow() {
   runtimeConfig.fastExtractionGuardEnabled = true;
   runtimeConfig.slowExtractionGuardEnabled = true;
   runtimeConfig.maxRecoveryWeightG = 42.5f;
-  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.minBbwBrewTimeMs = 26000;
   runtimeConfig.minRecoveryWeightG = 30.0f;
-  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.maxBbwBrewTimeMs = 44000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8611,7 +8611,7 @@ void r64_slow_guard_min_weight_cut_from_predicted_time() {
   reachReadyFromBoot();
   runtimeConfig.slowExtractionGuardEnabled = true;
   runtimeConfig.minRecoveryWeightG = 30.0f;
-  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.maxBbwBrewTimeMs = 44000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8905,15 +8905,15 @@ void at04_smooth_approach_cuts_on_two_samples() {
   CHECK(session.endReason == EndReason::SCALE_THRESHOLD);
 }
 
-void at05_spike_before_min_brew_time_does_not_enter_fast_extended() {
+void at05_spike_before_min_bbw_brew_time_does_not_enter_fast_extended() {
   resetHarness(false, true);
   reachReadyFromBoot();
   enableAccidentalTouchForTest();
   runtimeConfig.fastExtractionGuardEnabled = true;
-  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.minBbwBrewTimeMs = 26000;
   runtimeConfig.goalWeightG = 36;
   mutableActiveShotPreset(presetBank).fastExtractionGuardEnabled = true;
-  mutableActiveShotPreset(presetBank).minBrewTimeMs = 26000;
+  mutableActiveShotPreset(presetBank).minBbwBrewTimeMs = 26000;
   mutableActiveShotPreset(presetBank).goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -8933,7 +8933,7 @@ void at06_fast_extended_spike_does_not_cut_until_sustained() {
   runtimeConfig.avoidAccidentalTouchEnabled = false;
   runtimeConfig.fastExtractionGuardEnabled = true;
   runtimeConfig.maxRecoveryWeightG = 42.5f;
-  runtimeConfig.minBrewTimeMs = 26000;
+  runtimeConfig.minBbwBrewTimeMs = 26000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -9036,7 +9036,7 @@ void at10_holding_does_not_block_slow_extended_at_max_time() {
   enableAccidentalTouchForTest();
   runtimeConfig.slowExtractionGuardEnabled = true;
   runtimeConfig.minRecoveryWeightG = 30.0f;
-  runtimeConfig.maxBrewTimeMs = 44000;
+  runtimeConfig.maxBbwBrewTimeMs = 44000;
   runtimeConfig.goalWeightG = 36;
   startCycle();
   advanceToBrew();
@@ -9950,7 +9950,7 @@ const TestCase testCases[] = {
     {"AT02", at02_early_spike_skips_control_trajectory},
     {"AT03", at03_late_spike_does_not_cut_then_recovers},
     {"AT04", at04_smooth_approach_cuts_on_two_samples},
-    {"AT05", at05_spike_before_min_brew_time_does_not_enter_fast_extended},
+    {"AT05", at05_spike_before_min_bbw_brew_time_does_not_enter_fast_extended},
     {"AT06", at06_fast_extended_spike_does_not_cut_until_sustained},
     {"AT07", at07_feature_off_matches_legacy_threshold_cut},
     {"AT08", at08_retare_and_cup_remove_still_work_with_touch_guard},

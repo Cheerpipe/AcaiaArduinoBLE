@@ -145,7 +145,7 @@ protection**, **Automatic retare**, **Cup**, and **Tare**. See
 ### Fast extraction guard
 
 If the target weight arrives too soon (often a coarse grind or channeling),
-the shot can continue toward a recovery weight or a minimum brew time instead
+the shot can continue toward a recovery weight or a min BBW brew time instead
 of stopping thin. On by default. See
 [Fast extraction guard](docs/features/fast-extraction-guard.md).
 

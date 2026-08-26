@@ -16,7 +16,7 @@ target stop. Fast extended and Slow extended cannot both own the same shot.
 Elapsed time is measured from cycle start (machine circuit close). The learned stop
 offset applies to the min recovery threshold (`min recovery − offset`).
 
-Max brew time is a **decision point**, not a replacement for Max BBW time or
+Max BBW brew time is a **decision point**, not a replacement for Max BBW time or
 the hard 60 s cap.
 
 ## Parameters
@@ -27,21 +27,21 @@ Active preset, **Settings → Brew**. The ON/OFF switch is also on
 | Setting | Default | Range / notes | Effect on the shot |
 | --- | --- | --- | --- |
 | **Enable** | ON | ON / OFF | Master switch for the slow-shot recovery. |
-| **Max brew time (s)** | 44 s | Must be greater than Fast’s min brew time when both are on | Latest time to wait for the normal BBW target. |
-| **Min recovery weight (g)** | 34 g (Double and Single factory) | Same weight-cut tool as BBW | Floor if the shot must continue past max brew time. |
+| **Max BBW brew time (s)** | 44 s | Must be greater than Fast’s min BBW brew time when both are on | Latest time to wait for the normal BBW target. |
+| **Min recovery weight (g)** | 34 g (Double and Single factory) | Same weight-cut tool as BBW | Floor if the shot must continue past max BBW brew time. |
 
 ## How it works
 
-1. **Normal stop** — the scale reaches the target at or before max brew time
+1. **Normal stop** — the scale reaches the target at or before max BBW brew time
    → machine circuit opens at the target (`normal_target`). Slow does not fire.
-2. **Too slow** — max brew time is reached *without* the target:
+2. **Too slow** — max BBW brew time is reached *without* the target:
    - Already at or above **min recovery** → cut now (`slow_max_time`).
    - Still below that floor → **extended** until min recovery
      (`slow_min_weight`) or until the machine circuit / Max BBW time wall.
 
 ## Example
 
-Target 36 g, max brew time 44 s, min recovery 34 g. At 44 s the cup is only
+Target 36 g, max BBW brew time 44 s, min recovery 34 g. At 44 s the cup is only
 at 20 g. If it were already over 34 g, the shot would cut there. Under the
 floor, it may continue toward 34 g instead of waiting for 36 g or 60 s.
 

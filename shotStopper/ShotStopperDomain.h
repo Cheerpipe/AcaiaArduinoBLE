@@ -565,10 +565,10 @@ struct RuntimeConfig {
   char ntpServerCustom[NTP_SERVER_HOST_CAPACITY] = {};
   bool fastExtractionGuardEnabled = true;
   float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
-  uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
+  uint32_t minBbwBrewTimeMs = DEFAULT_MIN_BBW_BREW_TIME_MS;
   bool slowExtractionGuardEnabled = true;
   float minRecoveryWeightG = DEFAULT_MIN_RECOVERY_WEIGHT_G;
-  uint32_t maxBrewTimeMs = DEFAULT_MAX_BREW_TIME_MS;
+  uint32_t maxBbwBrewTimeMs = DEFAULT_MAX_BBW_BREW_TIME_MS;
   bool autoToManualGuardEnabled = true;
   uint8_t autoToManualGuardLimitMode =
       static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
@@ -745,10 +745,10 @@ struct CycleConfigSnapshot {
   uint32_t operationalWallMs = DEFAULT_OPERATIONAL_WALL_MS;
   bool fastExtractionGuardEnabled = true;
   float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
-  uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
+  uint32_t minBbwBrewTimeMs = DEFAULT_MIN_BBW_BREW_TIME_MS;
   bool slowExtractionGuardEnabled = true;
   float minRecoveryWeightG = DEFAULT_MIN_RECOVERY_WEIGHT_G;
-  uint32_t maxBrewTimeMs = DEFAULT_MAX_BREW_TIME_MS;
+  uint32_t maxBbwBrewTimeMs = DEFAULT_MAX_BBW_BREW_TIME_MS;
   bool autoToManualGuardEnabled = true;
   uint8_t autoToManualGuardLimitMode =
       static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
@@ -799,10 +799,10 @@ inline CycleConfigSnapshot snapshotConfig(const RuntimeConfig &config) {
   snapshot.operationalWallMs = config.operationalWallMs;
   snapshot.fastExtractionGuardEnabled = config.fastExtractionGuardEnabled;
   snapshot.maxRecoveryWeightG = config.maxRecoveryWeightG;
-  snapshot.minBrewTimeMs = config.minBrewTimeMs;
+  snapshot.minBbwBrewTimeMs = config.minBbwBrewTimeMs;
   snapshot.slowExtractionGuardEnabled = config.slowExtractionGuardEnabled;
   snapshot.minRecoveryWeightG = config.minRecoveryWeightG;
-  snapshot.maxBrewTimeMs = config.maxBrewTimeMs;
+  snapshot.maxBbwBrewTimeMs = config.maxBbwBrewTimeMs;
   snapshot.autoToManualGuardEnabled = config.autoToManualGuardEnabled;
   snapshot.autoToManualGuardLimitMode = config.autoToManualGuardLimitMode;
   snapshot.autoToManualGuardManualLimitMs =
@@ -844,10 +844,10 @@ enum class ConfigValidationError : uint8_t {
   NTP_SERVER_PRESET,
   NTP_SERVER_CUSTOM,
   MAX_RECOVERY_WEIGHT,
-  MIN_BREW_TIME,
+  MIN_BBW_BREW_TIME,
   FAST_EXTRACTION_GUARD_RELATION,
   MIN_RECOVERY_WEIGHT,
-  MAX_BREW_TIME,
+  MAX_BBW_BREW_TIME,
   SLOW_EXTRACTION_GUARD_RELATION,
   AUTO_TO_MANUAL_GUARD_MODE,
   AUTO_TO_MANUAL_GUARD_MANUAL_LIMIT,
@@ -877,9 +877,9 @@ constexpr uint8_t FACTORY_PRESET_ID_DOUBLE = 2;
 constexpr float FACTORY_SINGLE_WEIGHT_OFFSET_G = 0.5f;
 constexpr uint8_t FACTORY_SINGLE_GOAL_WEIGHT_G = 18;
 constexpr float FACTORY_SINGLE_MAX_RECOVERY_WEIGHT_G = 20.0f;
-constexpr uint32_t FACTORY_SINGLE_MIN_BREW_TIME_MS = 28000;
+constexpr uint32_t FACTORY_SINGLE_MIN_BBW_BREW_TIME_MS = 28000;
 constexpr float FACTORY_SINGLE_MIN_RECOVERY_WEIGHT_G = 16.0f;
-constexpr uint32_t FACTORY_SINGLE_MAX_BREW_TIME_MS = 44000;
+constexpr uint32_t FACTORY_SINGLE_MAX_BBW_BREW_TIME_MS = 44000;
 
 inline void repairSlowExtractionGuard(RuntimeConfig &runtime) {
   if (!runtime.slowExtractionGuardEnabled) {
@@ -898,20 +898,20 @@ inline void repairSlowExtractionGuard(RuntimeConfig &runtime) {
       runtime.slowExtractionGuardEnabled = false;
     }
   }
-  if (runtime.maxBrewTimeMs >= runtime.operationalWallMs) {
-    runtime.maxBrewTimeMs = runtime.operationalWallMs > 1000
+  if (runtime.maxBbwBrewTimeMs >= runtime.operationalWallMs) {
+    runtime.maxBbwBrewTimeMs = runtime.operationalWallMs > 1000
                                 ? runtime.operationalWallMs - 1000
-                                : DEFAULT_MAX_BREW_TIME_MS;
+                                : DEFAULT_MAX_BBW_BREW_TIME_MS;
   }
-  if (runtime.maxBrewTimeMs < runtime.bbwProtectionMs) {
-    runtime.maxBrewTimeMs = runtime.bbwProtectionMs;
+  if (runtime.maxBbwBrewTimeMs < runtime.bbwProtectionMs) {
+    runtime.maxBbwBrewTimeMs = runtime.bbwProtectionMs;
   }
   if (runtime.fastExtractionGuardEnabled &&
-      runtime.maxBrewTimeMs <= runtime.minBrewTimeMs) {
-    const uint32_t repaired = runtime.minBrewTimeMs + 1000;
+      runtime.maxBbwBrewTimeMs <= runtime.minBbwBrewTimeMs) {
+    const uint32_t repaired = runtime.minBbwBrewTimeMs + 1000;
     if (repaired < runtime.operationalWallMs &&
-        repaired <= MAX_MAX_BREW_TIME_MS) {
-      runtime.maxBrewTimeMs = repaired;
+        repaired <= MAX_MAX_BBW_BREW_TIME_MS) {
+      runtime.maxBbwBrewTimeMs = repaired;
     } else {
       runtime.slowExtractionGuardEnabled = false;
     }
@@ -921,12 +921,12 @@ inline void repairSlowExtractionGuard(RuntimeConfig &runtime) {
        runtime.minRecoveryWeightG < MIN_MIN_RECOVERY_WEIGHT_G ||
        runtime.minRecoveryWeightG > MAX_MIN_RECOVERY_WEIGHT_G ||
        runtime.minRecoveryWeightG >= static_cast<float>(runtime.goalWeightG) ||
-       runtime.maxBrewTimeMs < MIN_MAX_BREW_TIME_MS ||
-       runtime.maxBrewTimeMs > MAX_MAX_BREW_TIME_MS ||
-       runtime.maxBrewTimeMs >= runtime.operationalWallMs ||
-       runtime.maxBrewTimeMs < runtime.bbwProtectionMs ||
+       runtime.maxBbwBrewTimeMs < MIN_MAX_BBW_BREW_TIME_MS ||
+       runtime.maxBbwBrewTimeMs > MAX_MAX_BBW_BREW_TIME_MS ||
+       runtime.maxBbwBrewTimeMs >= runtime.operationalWallMs ||
+       runtime.maxBbwBrewTimeMs < runtime.bbwProtectionMs ||
        (runtime.fastExtractionGuardEnabled &&
-        runtime.maxBrewTimeMs <= runtime.minBrewTimeMs))) {
+        runtime.maxBbwBrewTimeMs <= runtime.minBbwBrewTimeMs))) {
     runtime.slowExtractionGuardEnabled = false;
   }
 }
@@ -956,10 +956,10 @@ struct ShotPreset {
   float weightOffsetG = DEFAULT_WEIGHT_OFFSET_G;
   bool fastExtractionGuardEnabled = true;
   float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
-  uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
+  uint32_t minBbwBrewTimeMs = DEFAULT_MIN_BBW_BREW_TIME_MS;
   bool slowExtractionGuardEnabled = true;
   float minRecoveryWeightG = DEFAULT_MIN_RECOVERY_WEIGHT_G;
-  uint32_t maxBrewTimeMs = DEFAULT_MAX_BREW_TIME_MS;
+  uint32_t maxBbwBrewTimeMs = DEFAULT_MAX_BBW_BREW_TIME_MS;
   bool autoToManualGuardEnabled = true;
   uint8_t autoToManualGuardLimitMode =
       static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
@@ -1202,13 +1202,13 @@ inline ConfigValidationError validateRuntimeConfig(
         config.maxRecoveryWeightG > MAX_MAX_RECOVERY_WEIGHT_G) {
       return ConfigValidationError::MAX_RECOVERY_WEIGHT;
     }
-    if (config.minBrewTimeMs < MIN_MIN_BREW_TIME_MS ||
-        config.minBrewTimeMs > MAX_MIN_BREW_TIME_MS) {
-      return ConfigValidationError::MIN_BREW_TIME;
+    if (config.minBbwBrewTimeMs < MIN_MIN_BBW_BREW_TIME_MS ||
+        config.minBbwBrewTimeMs > MAX_MIN_BBW_BREW_TIME_MS) {
+      return ConfigValidationError::MIN_BBW_BREW_TIME;
     }
     if (config.maxRecoveryWeightG <= static_cast<float>(config.goalWeightG) ||
-        config.minBrewTimeMs >= config.operationalWallMs ||
-        config.minBrewTimeMs < config.bbwProtectionMs) {
+        config.minBbwBrewTimeMs >= config.operationalWallMs ||
+        config.minBbwBrewTimeMs < config.bbwProtectionMs) {
       return ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION;
     }
   }
@@ -1218,15 +1218,15 @@ inline ConfigValidationError validateRuntimeConfig(
         config.minRecoveryWeightG > MAX_MIN_RECOVERY_WEIGHT_G) {
       return ConfigValidationError::MIN_RECOVERY_WEIGHT;
     }
-    if (config.maxBrewTimeMs < MIN_MAX_BREW_TIME_MS ||
-        config.maxBrewTimeMs > MAX_MAX_BREW_TIME_MS) {
-      return ConfigValidationError::MAX_BREW_TIME;
+    if (config.maxBbwBrewTimeMs < MIN_MAX_BBW_BREW_TIME_MS ||
+        config.maxBbwBrewTimeMs > MAX_MAX_BBW_BREW_TIME_MS) {
+      return ConfigValidationError::MAX_BBW_BREW_TIME;
     }
     if (config.minRecoveryWeightG >= static_cast<float>(config.goalWeightG) ||
-        config.maxBrewTimeMs >= config.operationalWallMs ||
-        config.maxBrewTimeMs < config.bbwProtectionMs ||
+        config.maxBbwBrewTimeMs >= config.operationalWallMs ||
+        config.maxBbwBrewTimeMs < config.bbwProtectionMs ||
         (config.fastExtractionGuardEnabled &&
-         config.maxBrewTimeMs <= config.minBrewTimeMs)) {
+         config.maxBbwBrewTimeMs <= config.minBbwBrewTimeMs)) {
       return ConfigValidationError::SLOW_EXTRACTION_GUARD_RELATION;
     }
   }
@@ -1277,14 +1277,14 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "ntpServerCustom";
     case ConfigValidationError::MAX_RECOVERY_WEIGHT:
       return "maxRecoveryWeightG";
-    case ConfigValidationError::MIN_BREW_TIME:
-      return "minBrewTimeMs";
+    case ConfigValidationError::MIN_BBW_BREW_TIME:
+      return "minBbwBrewTimeMs";
     case ConfigValidationError::FAST_EXTRACTION_GUARD_RELATION:
       return "fastExtractionGuardRelation";
     case ConfigValidationError::MIN_RECOVERY_WEIGHT:
       return "minRecoveryWeightG";
-    case ConfigValidationError::MAX_BREW_TIME:
-      return "maxBrewTimeMs";
+    case ConfigValidationError::MAX_BBW_BREW_TIME:
+      return "maxBbwBrewTimeMs";
     case ConfigValidationError::SLOW_EXTRACTION_GUARD_RELATION:
       return "slowExtractionGuardRelation";
     case ConfigValidationError::AUTO_TO_MANUAL_GUARD_MODE:
@@ -1791,7 +1791,7 @@ struct PersistedLastShot {
   bool autoToManualGuardEnforced = false;
   bool autoToManualGuardArmed = false;
   uint32_t autoToManualGuardRemainingMs = 0;
-  uint32_t minBrewTimeRemainingMs = 0;
+  uint32_t minBbwBrewTimeRemainingMs = 0;
   bool noScaleShotGuardEnabled = false;
   bool noScaleShotGuardArmed = false;
   char scaleProtocol[20] = "none";
@@ -1897,7 +1897,7 @@ struct ControlStatusSnapshot {
   bool cycleSlowExtractionExtended = false;
   bool cycleTargetReachedEarly = false;
   float cycleActiveStopWeightG = 0.0f;
-  uint32_t cycleMinBrewTimeRemainingMs = 0;
+  uint32_t cycleMinBbwBrewTimeRemainingMs = 0;
   bool cycleAutoToManualGuardArmed = false;
   bool cycleAutoToManualGuardEnforced = false;
   uint32_t cycleAutoToManualGuardRemainingMs = 0;
@@ -2575,11 +2575,11 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::FAST_EXTRACTION_STOP_MAX:
       return "fast extraction guard stopped at max weight";
     case DebugCode::FAST_EXTRACTION_STOP_MIN_TIME:
-      return "fast extraction guard stopped at min brew time";
+      return "fast extraction guard stopped at min BBW brew time";
     case DebugCode::SLOW_EXTRACTION_ENTERED:
       return "slow extraction guard extended shot";
     case DebugCode::SLOW_EXTRACTION_STOP_MAX_TIME:
-      return "slow extraction guard stopped at max brew time";
+      return "slow extraction guard stopped at max BBW brew time";
     case DebugCode::SLOW_EXTRACTION_STOP_MIN_WEIGHT:
       return "slow extraction guard stopped at min weight";
     case DebugCode::ACCIDENTAL_TOUCH_HOLD:

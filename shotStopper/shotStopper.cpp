@@ -329,7 +329,7 @@ struct PendingShotFinalize {
   bool targetReachedEarly = false;
   uint16_t targetReachedEarlyDs = SHOT_LOG_METRIC_MISSING;
   float maxRecoveryWeightG = DEFAULT_MAX_RECOVERY_WEIGHT_G;
-  uint32_t minBrewTimeMs = DEFAULT_MIN_BREW_TIME_MS;
+  uint32_t minBbwBrewTimeMs = DEFAULT_MIN_BBW_BREW_TIME_MS;
   bool lastKnownWeightValid = false;
   float lastKnownWeightG = 0.0f;
   uint8_t activePresetId = 0;
@@ -985,10 +985,10 @@ void persistLastShotFromFinalize(const PendingShotFinalize &snapshot,
               snapshot.scaleProtocol);
   last.scaleProtocol[sizeof(last.scaleProtocol) - 1] = '\0';
   if (last.extractionExtended) {
-    last.minBrewTimeRemainingMs =
-        last.durationMs >= snapshot.minBrewTimeMs
+    last.minBbwBrewTimeRemainingMs =
+        last.durationMs >= snapshot.minBbwBrewTimeMs
             ? 0U
-            : snapshot.minBrewTimeMs - last.durationMs;
+            : snapshot.minBbwBrewTimeMs - last.durationMs;
   }
   persistLastShotSnapshot(last);
   lastShotCurve = snapshot.curve;
@@ -1054,10 +1054,10 @@ void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
             : session.autoToManualGuardDeadlineAtMs - nowMs;
   }
   if (last.extractionExtended) {
-    last.minBrewTimeRemainingMs =
-        durationMs >= session.config.minBrewTimeMs
+    last.minBbwBrewTimeRemainingMs =
+        durationMs >= session.config.minBbwBrewTimeMs
             ? 0U
-            : session.config.minBrewTimeMs - durationMs;
+            : session.config.minBbwBrewTimeMs - durationMs;
   }
   copyCString(last.scaleProtocol, sizeof(last.scaleProtocol),
               scaleProtocolName);
@@ -2173,7 +2173,7 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
   pendingFinalize.slowExtractionExtended = session.slowExtractionExtended;
   pendingFinalize.targetReachedEarly = session.targetReachedEarly;
   pendingFinalize.maxRecoveryWeightG = session.config.maxRecoveryWeightG;
-  pendingFinalize.minBrewTimeMs = session.config.minBrewTimeMs;
+  pendingFinalize.minBbwBrewTimeMs = session.config.minBbwBrewTimeMs;
   if (session.targetReachedAtMs != 0 &&
       static_cast<int32_t>(session.targetReachedAtMs - shotAnchorMs) >= 0) {
     pendingFinalize.targetReachedEarlyDs = static_cast<uint16_t>(
@@ -2258,11 +2258,11 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
   if (snapshot.extractionGuardEnabled) {
     record.maxRecoveryWeightCg =
         shotLogWeightToCentigrams(snapshot.maxRecoveryWeightG);
-    record.minBrewTimeDs =
-        static_cast<uint16_t>(snapshot.minBrewTimeMs / 100U);
+    record.minBbwBrewTimeDs =
+        static_cast<uint16_t>(snapshot.minBbwBrewTimeMs / 100U);
   } else {
     record.maxRecoveryWeightCg = SHOT_LOG_WEIGHT_MISSING;
-    record.minBrewTimeDs = SHOT_LOG_METRIC_MISSING;
+    record.minBbwBrewTimeDs = SHOT_LOG_METRIC_MISSING;
   }
   record.targetReachedEarlyDs = snapshot.targetReachedEarlyDs;
   record.actualWeightSource = static_cast<uint8_t>(weightSource);
@@ -5991,17 +5991,17 @@ void publishControlStatus() {
     if (next.cycleExtractionExtended) {
       next.cycleActiveStopWeightG = session.config.maxRecoveryWeightG;
       const uint32_t elapsed = next.cycleElapsedMs;
-      next.cycleMinBrewTimeRemainingMs =
-          elapsed >= session.config.minBrewTimeMs
+      next.cycleMinBbwBrewTimeRemainingMs =
+          elapsed >= session.config.minBbwBrewTimeMs
               ? 0U
-              : session.config.minBrewTimeMs - elapsed;
+              : session.config.minBbwBrewTimeMs - elapsed;
     } else if (next.cycleSlowExtractionExtended) {
       next.cycleActiveStopWeightG = session.config.minRecoveryWeightG;
-      next.cycleMinBrewTimeRemainingMs = 0;
+      next.cycleMinBbwBrewTimeRemainingMs = 0;
     } else {
       next.cycleActiveStopWeightG =
           static_cast<float>(session.config.goalWeightG);
-      next.cycleMinBrewTimeRemainingMs = 0;
+      next.cycleMinBbwBrewTimeRemainingMs = 0;
     }
     next.cycleAutoToManualGuardArmed = session.autoToManualGuardArmed;
     next.cycleAutoToManualGuardEnforced = session.autoToManualGuardEnforced;

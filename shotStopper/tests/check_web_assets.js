@@ -506,10 +506,10 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('"fastExtractionGuardEnabled"') ||
     !network.includes('"avoidAccidentalTouchEnabled"') ||
     !network.includes('"maxRecoveryWeightG"') ||
-    !network.includes('"minBrewTimeMs"') ||
+    !network.includes('"minBbwBrewTimeMs"') ||
     !network.includes('"slowExtractionGuardEnabled"') ||
     !network.includes('"minRecoveryWeightG"') ||
-    !network.includes('"maxBrewTimeMs"') ||
+    !network.includes('"maxBbwBrewTimeMs"') ||
     !network.includes('\\"extractionExtended\\"') ||
     !network.includes('\\"stopDetail\\"') ||
     !network.includes('"paddleReturnReminderIntervalMs"') ||
@@ -530,11 +530,11 @@ if (!network.includes('"firstDropBeep"') ||
     !ui.includes('id="fastExtractionGuardEnabled"') ||
     !ui.includes('id="avoidAccidentalTouchEnabled"') ||
     !ui.includes('id="maxRecoveryWeightG"') ||
-    !ui.includes('id="minBrewTimeS"') ||
+    !ui.includes('id="minBbwBrewTimeS"') ||
     !ui.includes('Fast extraction guard') ||
     !ui.includes('id="slowExtractionGuardEnabled"') ||
     !ui.includes('id="minRecoveryWeightG"') ||
-    !ui.includes('id="maxBrewTimeS"') ||
+    !ui.includes('id="maxBbwBrewTimeS"') ||
     !ui.includes('Slow extraction guard') ||
     !ui.includes('id="retareWindowS"') ||
     !ui.includes('id="minimumCupWeightG"') ||
@@ -3481,8 +3481,8 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
     fastExtractionGuardEnabled: true,
     slowExtractionGuardEnabled: true,
     operationalWallMs: 50000,
-    minBrewTimeMs: 28000,
-    maxBrewTimeMs: 44000,
+    minBbwBrewTimeMs: 28000,
+    maxBbwBrewTimeMs: 44000,
     goalWeightG: 36,
     minRecoveryWeightG: 34,
     maxRecoveryWeightG: 42.5,

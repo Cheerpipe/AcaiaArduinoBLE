@@ -713,8 +713,8 @@ ran, stored on the session, last-shot blob, and shot log.
 | `WEB_HEARTBEAT_TIMEOUT` | Remote hold lost (when remote machine control is enabled). |
 | `RELAY_SAFETY_FAILURE` | Arm failed or safety tripped. |
 | `FAST_EXTRACTION_MAX_WEIGHT` | Fast guard: recovery weight. |
-| `FAST_EXTRACTION_MIN_TIME` | Fast guard: min brew time reached after an early target. |
-| `SLOW_EXTRACTION_MAX_TIME` | Slow guard: max brew time with enough mass. |
+| `FAST_EXTRACTION_MIN_TIME` | Fast guard: min BBW brew time reached after an early target. |
+| `SLOW_EXTRACTION_MAX_TIME` | Slow guard: max BBW brew time with enough mass. |
 | `SLOW_EXTRACTION_MIN_WEIGHT` | Slow guard: floor weight after extend. |
 | `AUTO_TO_MANUAL_GUARD` | Notifications silent or link lost; A→M deadline from shot start. |
 | `CUP_REMOVED` | Cup presence `REMOVED` with stop-if-removed on. |
