@@ -19,9 +19,9 @@ const versionPath = path.join(repoRoot, 'shotStopper', 'ShotStopperVersion.h');
 const outputPath =
     path.join(repoRoot, 'shotStopper', 'ShotStopperWebAssetsGzip.h');
 
-const VIEW_NAMES = ['home', 'history', 'diagnostic', 'settings', 'admin'];
-const LAZY_PARTIALS = ['history', 'diagnostic', 'settings', 'admin'];
-const SECONDARY_VIEWS = ['history', 'diagnostic', 'admin'];
+const VIEW_NAMES = ['home', 'stats', 'diagnostic', 'settings', 'admin'];
+const LAZY_PARTIALS = ['stats', 'diagnostic', 'settings', 'admin'];
+const SECONDARY_VIEWS = ['stats', 'diagnostic', 'admin'];
 
 function extractHtml(source) {
   const match = source.match(/R"HTML\(([\s\S]*?)\)HTML"/);

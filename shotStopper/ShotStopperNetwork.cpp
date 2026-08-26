@@ -3096,7 +3096,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/diagnostic", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/log", HTTP_GET, rootHandler) &&
-      registerHandler(server_, "/history", HTTP_GET, rootHandler) &&
+      registerHandler(server_, "/stats", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/admin", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/settings", HTTP_GET, rootHandler) &&
       registerHandler(server_, "/app.js", HTTP_GET, jsHandler) &&
@@ -3104,8 +3104,8 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/js/runtime.js", HTTP_GET, runtimeJsHandler) &&
       registerHandler(server_, "/js/secondary.js", HTTP_GET,
                       secondaryJsHandler) &&
-      registerHandler(server_, "/partials/history.html", HTTP_GET,
-                      partialHistoryHandler) &&
+      registerHandler(server_, "/partials/stats.html", HTTP_GET,
+                      partialStatsHandler) &&
       registerHandler(server_, "/partials/diagnostic.html", HTTP_GET,
                       partialDiagnosticHandler) &&
       registerHandler(server_, "/partials/settings.html", HTTP_GET,
@@ -3695,10 +3695,10 @@ esp_err_t ShotStopperNetwork::secondaryJsHandler(httpd_req_t *request) {
                             SHOT_STOPPER_WEB_SECONDARY_GZIP_LEN);
 }
 
-esp_err_t ShotStopperNetwork::partialHistoryHandler(httpd_req_t *request) {
+esp_err_t ShotStopperNetwork::partialStatsHandler(httpd_req_t *request) {
   return serveImmutableGzip(request, "text/html; charset=utf-8",
-                            SHOT_STOPPER_WEB_PARTIAL_HISTORY_GZIP,
-                            SHOT_STOPPER_WEB_PARTIAL_HISTORY_GZIP_LEN);
+                            SHOT_STOPPER_WEB_PARTIAL_STATS_GZIP,
+                            SHOT_STOPPER_WEB_PARTIAL_STATS_GZIP_LEN);
 }
 
 esp_err_t ShotStopperNetwork::partialDiagnosticHandler(httpd_req_t *request) {

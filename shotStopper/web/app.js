@@ -14,7 +14,7 @@ const htmlCache = new Map();
 const jsMods = new Map();
 const htmlLoaded = new Set(['home']);
 const viewLoads = new Map();
-const SECONDARY = new Set(['history', 'diagnostic', 'admin']);
+const SECONDARY = new Set(['stats', 'diagnostic', 'admin']);
 
 let secondaryViews = null;
 let logTimer = 0;
@@ -25,7 +25,7 @@ let activeView = '';
 const ROUTES = {
   '/': 'home',
   '/settings': 'settings',
-  '/history': 'history',
+  '/stats': 'stats',
   '/admin': 'admin',
   '/diagnostic': 'diagnostic',
   '/log': 'diagnostic',
@@ -123,8 +123,8 @@ function startView(name) {
       if (!document.hidden) R.refreshLog();
     }, 4e3);
   }
-  if (name === 'history') {
-    const mod = jsMods.get('history');
+  if (name === 'stats') {
+    const mod = jsMods.get('stats');
     if (mod && mod.activate) mod.activate();
     R.loadShots();
     shotsTimer = setInterval(() => {

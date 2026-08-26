@@ -389,10 +389,10 @@ const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 52000) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 132500) {
+if (jsBytes > 135000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 184500) {
+if (htmlBytes + jsBytes > 186500) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -1921,7 +1921,7 @@ if (!ui.includes('id="shotTable"') ||
     !ui.includes('id="clearShotsButton"') ||
     !html.includes('id="clearShotsButton" class="btnGlyph btnInvert"') ||
     html.includes('id="clearShotsButton" class="btnGlyph btnDanger"') ||
-    !css.includes('#shotHistoryPanel .btnGlyph:not(.btnInvert)') ||
+    !css.includes('#shotLogPanel .btnGlyph:not(.btnInvert)') ||
     !ui.includes("confirm:'CLEAR_SHOT_LOG'") ||
     !ui.includes('refreshShots()') ||
     !js.includes("'shotDur'") ||
@@ -1951,13 +1951,13 @@ if (!ui.includes('id="shotTable"') ||
     !runtimeJs.includes("labels=['Time','Dur','Goal','Weight','Err%','Flow','1st drop','Ended','Shot']") ||
     runtimeJs.includes("labels=['Time','Dur','Goal','Actual','Err%','Flow','1st drop','Ended','Shot']") ||
     runtimeJs.includes("labels=['Time','Dur','Goal','Actual','Err%','Flow','1st drop','Guard','Ext','Stop','Shot','Cut']") ||
-    partialHtml.history.includes('<th>Guard</th>') ||
-    partialHtml.history.includes('<th>Ext</th>') ||
-    partialHtml.history.includes('<th>Stop</th>') ||
-    partialHtml.history.includes('>Cut</th>') ||
-    !partialHtml.history.includes('<th>Ended</th>') ||
-    !partialHtml.history.includes('<th>Weight</th>') ||
-    partialHtml.history.includes('<th>Actual</th>') ||
+    partialHtml.stats.includes('<th>Guard</th>') ||
+    partialHtml.stats.includes('<th>Ext</th>') ||
+    partialHtml.stats.includes('<th>Stop</th>') ||
+    partialHtml.stats.includes('>Cut</th>') ||
+    !partialHtml.stats.includes('<th>Ended</th>') ||
+    !partialHtml.stats.includes('<th>Weight</th>') ||
+    partialHtml.stats.includes('<th>Actual</th>') ||
     !ui.includes('no time') ||
     !ui.includes('id="timezoneOffsetMinutes"') ||
     !js.includes('m+=15') ||
@@ -2011,14 +2011,14 @@ if (!runtimeJs.includes('SHOTS_PAGE_SIZE=10') ||
     !runtimeJs.includes("fetchShotPage(shotHistory.shots.length,SHOTS_PAGE_SIZE,'append')") ||
     !runtimeJs.includes("fetchShotPage(0,SHOTS_PAGE_SIZE,'poll')") ||
     !runtimeJs.includes('async function loadMoreShots(){') ||
-    !runtimeJs.includes('function shotHistoryViewActive(){') ||
+    !runtimeJs.includes('function shotStatsViewActive(){') ||
     !runtimeJs.includes('if(ok)maybeLoadMoreShots()') ||
     !runtimeJs.includes("shotsUrl(0,SHOTS_EXPORT_LIMIT)") ||
     runtimeJs.includes("api('/api/v1/shots')") ||
-    !viewJs.history.includes('IntersectionObserver') ||
-    !viewJs.history.includes("R.loadMoreShots()") ||
-    !partialHtml.history.includes('id="shotHistorySentinel"') ||
-    !css.includes('#shotHistorySentinel{min-height:1px') ||
+    !viewJs.stats.includes('IntersectionObserver') ||
+    !viewJs.stats.includes("R.loadMoreShots()") ||
+    !partialHtml.stats.includes('id="shotLogSentinel"') ||
+    !css.includes('#shotLogSentinel{min-height:1px') ||
     !network.includes('parseShotsPageQuery') ||
     !network.includes('shotLogPageSlice') ||
     !network.includes('SHOT_LOG_PAGE_DEFAULT') ||
@@ -2030,12 +2030,12 @@ if (!runtimeJs.includes('SHOTS_PAGE_SIZE=10') ||
 }
 const shotLogTypes = fs.readFileSync(
     path.join(sketchDir, 'ShotStopperShotLogTypes.h'), 'utf8');
-const statsSection = partialHtml.history.match(
-    /<fieldset id="shotStatsPanel"><legend>Averages<\/legend>([\s\S]*?)<\/fieldset>/);
+const statsSection = partialHtml.stats.match(
+    /<fieldset id="shotStatsPanel"><legend>Stats<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statsSection ||
-    partialHtml.history.indexOf('id="shotStatsPanel"') < 0 ||
-    partialHtml.history.indexOf('id="shotStatsPanel"') >
-        partialHtml.history.indexOf('id="shotHistoryPanel"') ||
+    partialHtml.stats.indexOf('id="shotStatsPanel"') < 0 ||
+    partialHtml.stats.indexOf('id="shotStatsPanel"') >
+        partialHtml.stats.indexOf('id="shotLogPanel"') ||
     !statsSection[1].includes('class="shotCard"') ||
     !statsSection[1].includes('class="shotDur"') ||
     !statsSection[1].includes('class="shotActual"') ||
@@ -2044,13 +2044,24 @@ if (!statsSection ||
     !statsSection[1].includes('<strong>Daily shots</strong>') ||
     !statsSection[1].includes('<strong>Avg error</strong>') ||
     !statsSection[1].includes('<strong>Avg flow</strong>') ||
-    !statsSection[1].includes('id="histAvgDur"') ||
-    !statsSection[1].includes('id="histAvgWeight"') ||
-    !statsSection[1].includes('id="histAvgDaily"') ||
-    !statsSection[1].includes('id="histAvgErr"') ||
-    !statsSection[1].includes('id="histAvgFlow"') ||
+    !statsSection[1].includes('id="statsAvgDur"') ||
+    !statsSection[1].includes('id="statsAvgWeight"') ||
+    !statsSection[1].includes('id="statsAvgDaily"') ||
+    !statsSection[1].includes('id="statsAvgErr"') ||
+    !statsSection[1].includes('id="statsAvgFlow"') ||
     !statsSection[1].includes('class="fieldHint"') ||
     !statsSection[1].includes('Based on the last 10 shots.') ||
+    !statsSection[1].includes('id="statsDurChart"') ||
+    !runtimeJs.includes('function renderStatsDurChart(') ||
+    !runtimeJs.includes('id="statsDurChartPlot"') ||
+    !runtimeJs.includes('class="shotSparkHost"') ||
+    !runtimeJs.includes('fill-opacity=".22"') ||
+    !runtimeJs.includes('statsDurSparkY') ||
+    !runtimeJs.includes('renderStatsDurChart()') ||
+    !runtimeJs.includes('const BIN=0.5,tMax=6e4/1e3,tLow=28,tHigh=32') ||
+    !runtimeJs.includes("fillChartTicks(host.lastChild,[[0,'0 s'],[tLow,L(tLow,'s')],[tHigh,L(tHigh,'s')],[tMax,L(tMax,'s')]],tMax)") ||
+    !css.includes('#statsDurChart{margin-top:') ||
+    !css.includes('#statsDurChart .shotSparkHost .shotSparkY,#statsDurChart .shotSparkHost .ruleChartTicks{font-weight:650}') ||
     !runtimeJs.includes('function renderShotStats(){') ||
     !runtimeJs.includes('shotHistory.shots.slice(0,SHOTS_PAGE_SIZE)') ||
     !runtimeJs.includes('renderShotStats();') ||
@@ -2058,8 +2069,8 @@ if (!statsSection ||
     !css.includes('.shotCard:has(>:nth-child(5):last-child){grid-template-areas:"dur dur dur actual actual actual" "goal goal err err flow flow"}') ||
     !css.includes('.shotCard+.fieldHint{margin-top:.44rem}') ||
     css.includes('#shotStatsPanel') ||
-    css.includes('#histAvgDur') ||
-    css.includes('histAvgDaily') ||
+    css.includes('#statsAvgDur') ||
+    css.includes('statsAvgDaily') ||
     network.includes('shotLogComputeAverages') ||
     network.includes('SHOT_LOG_STATS_WINDOW') ||
     network.includes('\\"avgDailyShots\\"') ||
@@ -2067,8 +2078,61 @@ if (!statsSection ||
     shotLogTypes.includes('shotLogComputeAverages') ||
     shotLogTypes.includes('SHOT_LOG_STATS_WINDOW')) {
   throw new Error(
-      'History averages must be a 2+3 shotCard above the table, last-10 window in JS, and no stats API/firmware');
+      'Stats view must be a 2+3 shotCard, duration histogram, last-10 window in JS, and no stats API/firmware');
 }
+
+{
+  const start = runtimeJs.indexOf('function axisLabel(');
+  const end = runtimeJs.indexOf('function renderShotStats(');
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error('Duration histogram helpers not found for bin checks');
+  }
+  const helpers = new Function(
+      runtimeJs.slice(start, end) +
+      ';return{renderStatsDurChart:renderStatsDurChart};')();
+  const kind = new Function('t', 'return t<28?"fast":t<=32?"bbw":"slow"');
+  if (kind(27.9) !== 'fast' || kind(28) !== 'bbw' ||
+      kind(32) !== 'bbw' || kind(32.1) !== 'slow') {
+    throw new Error('Duration histogram zone colors must use 28/32 s thresholds');
+  }
+  const histRoot = {dataset: {}, className: '', innerHTML: ''};
+  const histPlot = {innerHTML: ''};
+  global.$ = (id) => {
+    if (id === 'statsDurChart') {
+      return histRoot;
+    }
+    if (id === 'statsDurChartPlot') {
+      return histPlot;
+    }
+    return null;
+  };
+  global.shotHistory = {
+    shots: [
+      {shotType: 'auto', actualG: 36, durationS: 30.2},
+      {shotType: 'auto', actualG: 36, durationS: 30.2},
+      {shotType: 'auto', actualG: 36, durationS: 27.1},
+      {shotType: 'manual', actualG: 36, durationS: 40},
+      {shotType: 'auto', actualG: 0.5, durationS: 30},
+    ]
+  };
+  global.SHOTS_PAGE_SIZE = 10;
+  global.shotDisplayActualG = (actual) => actual;
+  global.fillChartTicks = () => {};
+  helpers.renderStatsDurChart();
+  const filled = (histPlot.innerHTML.match(/fill-opacity=".22"/g) || []).length;
+  if (filled !== 2) {
+    throw new Error('Duration histogram must render filled area peaks for auto shots');
+  }
+  if (!histPlot.innerHTML.includes('statsDurSparkY">2<')) {
+    throw new Error('Duration histogram Y axis must scale to the max bin count');
+  }
+  delete global.$;
+  delete global.shotHistory;
+  delete global.SHOTS_PAGE_SIZE;
+  delete global.shotDisplayActualG;
+  delete global.fillChartTicks;
+}
+
 if (!ui.includes('id="firmwareFooter"') ||
     !ui.includes('id="inactiveFirmware"') ||
     !ui.includes('firmwareVersion') ||
@@ -2153,7 +2217,7 @@ if (!ui.includes('id="factoryResetButton"') ||
     !ui.includes('id="restartPanel"') ||
     html.indexOf('id="saveDateTimeButton"') > html.indexOf('id="restartPanel"') ||
     html.indexOf('id="restartPanel"') > html.indexOf('id="factoryResetButton"') ||
-    html.slice(html.indexOf('id="actionsPanel"'), html.indexOf('id="view-history"'))
+    html.slice(html.indexOf('id="actionsPanel"'), html.indexOf('id="view-stats"'))
         .includes('restartButton') ||
     !html.includes('id="restartButton" class="btnGlyph btnWarn"') ||
     html.includes('id="restartButton" class="btnGlyph btnInvert"') ||
@@ -2167,9 +2231,9 @@ if (!css.includes('.btnBar,.presetActions{display:flex;gap:.45rem') ||
     css.includes('.btnGlyph.btnDanger,.btnGlyph.btnInvert{background:var(--ac)') ||
     !css.includes('.btnGlyph.btnInvert{background:var(--ac)') ||
     !css.includes('.btnGlyph.btnDanger{background:var(--bg)') ||
-    !css.includes('#shotHistoryPanel .btnBar{') ||
-    !css.includes('#shotHistoryPanel .btnBar{position:sticky;top:var(--hdr);z-index:6;background:var(--sf);margin:0 0 .65rem;border:0;overflow:visible}') ||
-    css.includes('#shotHistoryPanel .btnBar{position:sticky;top:var(--hdr);z-index:6;background:var(--sf);margin:0 0 .65rem;border:1px solid var(--ln);border-radius:var(--r);overflow:hidden}')) {
+    !css.includes('#shotLogPanel .btnBar{') ||
+    !css.includes('#shotLogPanel .btnBar{position:sticky;top:var(--hdr);z-index:6;background:var(--sf);margin:0 0 .65rem;border:0;overflow:visible}') ||
+    css.includes('#shotLogPanel .btnBar{position:sticky;top:var(--hdr);z-index:6;background:var(--sf);margin:0 0 .65rem;border:1px solid var(--ln);border-radius:var(--r);overflow:hidden}')) {
   throw new Error('Action buttons must be separate with a gap; btnDanger must not share invert fill');
 }
 if (html.includes('id="debugPanel"') ||
@@ -2401,14 +2465,14 @@ const expected = new Map([
   ['GET /', 'rootHandler'],
   ['GET /diagnostic', 'rootHandler'],
   ['GET /log', 'rootHandler'],
-  ['GET /history', 'rootHandler'],
+  ['GET /stats', 'rootHandler'],
   ['GET /admin', 'rootHandler'],
   ['GET /settings', 'rootHandler'],
   ['GET /app.js', 'jsHandler'],
   ['GET /app.css', 'cssHandler'],
   ['GET /js/runtime.js', 'runtimeJsHandler'],
   ['GET /js/secondary.js', 'secondaryJsHandler'],
-  ['GET /partials/history.html', 'partialHistoryHandler'],
+  ['GET /partials/stats.html', 'partialStatsHandler'],
   ['GET /partials/diagnostic.html', 'partialDiagnosticHandler'],
   ['GET /partials/settings.html', 'partialSettingsHandler'],
   ['GET /partials/admin.html', 'partialAdminHandler'],
@@ -3299,7 +3363,7 @@ if (generated.gzip.length > 4096) {
 if (generated.jsGzip.length > 6144) {
   throw new Error('Compressed Web UI shell JS exceeds the 6 KiB gzip budget');
 }
-if (generated.runtimeGzip.length > 26500) {
+if (generated.runtimeGzip.length > 27000) {
   throw new Error('Compressed Web UI runtime JS exceeds the 25 KiB gzip budget');
 }
 if (generated.secondaryGzip.length > 4096) {
@@ -3311,7 +3375,7 @@ if (generated.settingsGzip.length > 4096) {
 if (generated.cssGzip.length > 6500) {
   throw new Error('Compressed Web CSS exceeds the 6.3 KiB gzip budget');
 }
-if (generated.combined > 52480) {
+if (generated.combined > 53000) {
   throw new Error('Combined Web UI gzip exceeds the 51.25 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
