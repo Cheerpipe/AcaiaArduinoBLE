@@ -1,6 +1,10 @@
-# AcaiaArduinoBLE
+# EspressoScaleBLE
 Acaia / Bookoo / Felicita / AtomHeart Eclair Scale Gateway using the ArduinoBLE library for esp32-based devices.
-This is an Arduino Library which can be found in the Arduino IDE Library Manager.
+
+Maintained by **Felipe Urzúa** (`cheerpipe@gmail.com`) as part of
+[Cheerpipe/AcaiaArduinoBLE](https://github.com/Cheerpipe/AcaiaArduinoBLE).
+The original AcaiaArduinoBLE library was created by Tate Mazer; see
+[Acknowledgement](#acknowledgement).
 
 ## Scale Compatibility
 
@@ -21,7 +25,7 @@ This is an Arduino Library which can be found in the Arduino IDE Library Manager
 
 This library is intended for Arduino devices compatible with
 [ArduinoBLE](https://www.arduino.cc/reference/en/libraries/arduinoble/).
-Release 3.5.0 is compiled and tested against ArduinoBLE 2.1.0, which is pinned
+Release 4.0.0 is compiled and tested against ArduinoBLE 2.1.0, which is pinned
 in `library.properties` so upgrades cannot silently change the audited BLE
 lifecycle behavior.
 
@@ -88,7 +92,7 @@ keeps that scan enabled until a match or filter change; `startScan()` /
 Migrating to ESP-IDF NimBLE is out of scope: this library stays on the pinned
 ArduinoBLE lifecycle.
 
-`AcaiaArduinoBLE` is a single-owner object: create it, call it, and destroy it
+`EspressoScaleBLE` is a single-owner object: create it, call it, and destroy it
 from one task only. It is intentionally non-copyable and is not thread-safe.
 Call `disconnect()` before transferring BLE ownership to another component.
 
@@ -107,7 +111,7 @@ like `beepWithoutStateChange()` and succeeds only on Bookoo/generic scales.
 Run the host lifecycle/parser suite with:
 
 ```sh
-./libraries/AcaiaArduinoBLE/tests/run_host_tests.sh
+./libraries/EspressoScaleBLE/tests/run_host_tests.sh
 ```
 
 When compiling the bundled example from a checkout, include the repository as
@@ -115,21 +119,16 @@ a library explicitly:
 
 ```sh
 arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashMode=qio,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc --warnings all \
-  --library libraries/AcaiaArduinoBLE shotStopper
+  --library libraries/EspressoScaleBLE shotStopper
 ```
 
 ## Printed Circuit Board
-![shotStopperV3 screenshot](https://github.com/user-attachments/assets/a09fe8fb-3705-44c0-88a2-07c61d67b8f6)
+The host application in this repository is Advanced Shot Stopper
+([Cheerpipe/AcaiaArduinoBLE](https://github.com/Cheerpipe/AcaiaArduinoBLE)).
+Hardware guidance is in the [main README](../../README.md) and [docs/](../../docs/).
+This fork provides firmware and guidelines; it is not a commercial kit.
 
-The repository's main `shotStopper` firmware uses the ShotStopper PCB to make it simple to control your espresso machine using the scale. It is now the host application, rather than an Arduino library example.
-
-A kit can also be ordered by visiting [tatemazer.com](https://tatemazer.com/store)
-
-If you choose to build your own from scratch, v2.0 is recommended as it requires only through-hole components
-
-Join the discord for updates and support: https://discord.gg/NMXb5VYtre
-
-[![Video showing developmnent of the shotStopper](https://img.youtube.com/vi/434hrQDGtxo/0.jpg)](https://youtu.be/434hrQDGtxo)
+The original Shot Stopper PCB and kit were designed by Tate Mazer.
 
 ## Espresso Machine Compatibility
 
@@ -206,6 +205,11 @@ You can find a demo on Youtube:
 2. Only supports grams.
 
 # Acknowledgement
+This library is maintained by Felipe Urzúa
+([Cheerpipe/AcaiaArduinoBLE](https://github.com/Cheerpipe/AcaiaArduinoBLE)).
+It derives from [tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/AcaiaArduinoBLE)
+by Tate Mazer.
+
 This is largely a basic port of the  [LunarGateway](https://github.com/frowin/LunarGateway/) library written for the ESP32.
 
 In addition to some minor notes from [pyacaia](https://github.com/lucapinello/pyacaia) library written for raspberryPI.

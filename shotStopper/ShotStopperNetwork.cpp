@@ -165,7 +165,7 @@ constexpr uint32_t NETWORK_MANAGER_TASK_STACK_SIZE = 10240;
 constexpr uint32_t HTTP_SERVER_TASK_STACK_SIZE = 8192;
 
 const char *scaleDisconnectReasonName(uint8_t reason) {
-  // Mirrors AcaiaDisconnectReason without coupling the network task to the
+  // Mirrors ScaleDisconnectReason without coupling the network task to the
   // single-owner BLE implementation.
   switch (reason) {
     case 0: return "NONE";

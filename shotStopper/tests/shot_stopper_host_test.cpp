@@ -178,7 +178,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   weightStreamState = WeightStreamState::NO_SAMPLE;
   nextCycleId = 1;
   scaleWorkerTaskHandle = nullptr;
-  scale = AcaiaArduinoBLE(DEBUG);
+  scale = EspressoScaleBLE(DEBUG);
   scale.connected = scaleConnected;
   resetScaleWorkerRadioStateForHost();
   scalePreferredMac[0] = '\0';
@@ -204,6 +204,8 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scaleTimerValid = false;
   scaleTimerMs = 0;
   scaleTimerAgeMs = 0;
+  scaleLinkFeatures = scaleFeatureSetNone();
+  copyCString(scaleProtocolName, sizeof(scaleProtocolName), "none");
   scaleWorkerProgressAtMs = hostMillis;
   scaleEventsDropped = 0;
   scaleWorkerStackMinWords = 0;
@@ -237,8 +239,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scaleCompletionBeepPending = false;
   scaleCompletionBeepScheduled = false;
   hostAutoScaleWorkerProgress = true;
-  setScaleLinkState(scaleConnected ? ScaleLinkState::CONNECTED
-                                   : ScaleLinkState::DISCONNECTED);
+  updateWorkerLinkState();
 
   rawActivatorOn = false;
   activatorOn = false;
@@ -394,8 +395,7 @@ void setRawPaddle(bool on) {
 
 void setScaleConnected(bool connected) {
   scale.connected = connected;
-  setScaleLinkState(connected ? ScaleLinkState::CONNECTED
-                              : ScaleLinkState::DISCONNECTED);
+  updateWorkerLinkState();
 }
 
 void publishWeight(float weight, uint32_t receivedAtMs = UINT32_MAX,
@@ -2499,6 +2499,7 @@ void w31_unsupported_scale_never_uses_tare_as_a_beep() {
   CHECK(executeNextScaleCommand());
   establishPostTareBaseline();
   scale.independentBeepSupported = false;
+  updateWorkerLinkState();
   advanceToBrew();
   CHECK(stopperState == StopperState::BREW);
   simulateFirstDrops();
@@ -3566,8 +3567,11 @@ void w68_web_bookoo_debug_rejected_when_disconnected() {
 void w69_web_bookoo_debug_rejected_when_not_generic() {
   resetHarness(false, true);
   reachReadyFromBoot();
-  std::strncpy(scale.connectedProtocol, "acaia_new",
+  std::strncpy(scale.connectedProtocol, "acaia",
                sizeof(scale.connectedProtocol) - 1);
+  scale.independentBeepSupported = false;
+  scale.tareStartTimerSupported = false;
+  updateWorkerLinkState();
   WebCommand command = webControlCommand(WebCommandType::BOOKOO_DEBUG);
   command.bookooDebugAction = BookooDebugAction::TARE;
   processWebCommand(command);
@@ -3611,8 +3615,10 @@ void w72_bookoo_connect_skips_disabled_volume_and_non_bookoo() {
   CHECK(scale.commandLog.empty());
 
   runtimeConfig.bookooConnectBeepLevel = 4;
-  std::strncpy(scale.connectedProtocol, "acaia_new",
+  std::strncpy(scale.connectedProtocol, "acaia",
                sizeof(scale.connectedProtocol) - 1);
+  scale.independentBeepSupported = false;
+  updateWorkerLinkState();
   applyBookooConnectBeepPolicy();
   CHECK(scale.commandLog.empty());
 }
@@ -3934,6 +3940,7 @@ void configureEclairCapabilities() {
   scale.tareStartTimerSupported = false;
   scale.independentBeepSupported = false;
   scale.commandFeedbackSupported = false;
+  updateWorkerLinkState();
 }
 
 void w94_eclair_scale_priority_uses_local_alerts() {

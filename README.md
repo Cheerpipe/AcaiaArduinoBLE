@@ -11,7 +11,7 @@ own brew switch.
 The controller reads the physical brew switch on a GPIO and drives the
 machine’s brew circuit through an isolated relay. A Bluetooth scale (designed
 first for **Bookoo** Themis Mini / Ultra) supplies the weight. Other compatible
-scales work through the vendored AcaiaArduinoBLE library.
+scales work through the vendored EspressoScaleBLE library.
 
 It was built for the Micra first. It is **not** a certified kit for every
 machine — but the same isolated-relay contract has three compile-time builds
@@ -297,7 +297,7 @@ claim the Web UI to save your home Wi-Fi. Step-by-step notes are in
 
 - [Manual test plan](docs/MANUAL_TEST_PLAN.md)
 - [Firmware state machines](docs/STATE_MACHINES.md)
-- [Local AcaiaArduinoBLE library](libraries/AcaiaArduinoBLE/README.md)
+- [Local EspressoScaleBLE library](libraries/EspressoScaleBLE/README.md)
 
 ## Disclaimer
 
@@ -363,7 +363,11 @@ Portions derive from [tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/Ac
 
 ## Credits
 
-Advanced Shot Stopper would not exist without
+Advanced Shot Stopper is maintained by **Felipe Urzúa**
+(`cheerpipe@gmail.com`) —
+[Cheerpipe/AcaiaArduinoBLE](https://github.com/Cheerpipe/AcaiaArduinoBLE).
+
+It would not exist without
 **[tatemazer](https://github.com/tatemazer)** and
 [tatemazer/AcaiaArduinoBLE](https://github.com/tatemazer/AcaiaArduinoBLE).
 That project proved BLE brew-by-weight stop, shared the core scale protocol
@@ -385,7 +389,7 @@ The vendored library also credits:
 - AtomHeart Eclair: [AtomHeart-Lang](https://github.com/AtomHeart-Lang)
 - Lunar 2019: jniebuhr
 
-See the [library acknowledgement](libraries/AcaiaArduinoBLE/README.md#acknowledgement).
+See the [library acknowledgement](libraries/EspressoScaleBLE/README.md#acknowledgement).
 
 Runtime and tooling:
 

@@ -95,7 +95,8 @@ cppcheck \
   --project="$compile_commands" \
   --suppressions-list="$SUPPRESSIONS_FILE" \
   --file-filter='build/*/sketch/*.cpp' \
-  --file-filter='libraries/AcaiaArduinoBLE/*.cpp' \
+  --file-filter='libraries/EspressoScaleBLE/src/*.cpp' \
+  --file-filter='libraries/EspressoScaleBLE/src/protocols/*.cpp' \
   --file-filter='shotStopper/*.cpp' \
   --enable=warning,performance,portability \
   --inconclusive \

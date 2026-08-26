@@ -159,6 +159,11 @@ for removed_symbol in REEDSWITCH REED_IN BUTTON_STATE_ARRAY_LENGTH; do
   fi
 done
 
+if grep -n 'strcmp([^)]*bookoo_generic' "$firmware_file" >/dev/null; then
+  echo "Firmware must not branch on scale protocol names (bookoo_generic)" >&2
+  exit 1
+fi
+
 echo "Legacy Micra-incompatible paths: absent"
 
 for machine_gpio_leak in 'readRawActivatorOn(' 'pinMode(RELAY_GPIO' \

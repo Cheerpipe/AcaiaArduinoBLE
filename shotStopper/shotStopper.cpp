@@ -30,14 +30,15 @@
     per loop, builds GuardInputs, pushes MachineSense and activator-drive
     permission, and applies scale/cup effects. Guards never call machine.
 
-  Released under the GNU Affero General Public License v3.0.
+  Author: Felipe Urzúa <cheerpipe@gmail.com>
   https://github.com/Cheerpipe/AcaiaArduinoBLE
+  Released under the GNU Affero General Public License v3.0.
 */
 
 #if defined(SHOT_STOPPER_HOST_TEST)
 #include "tests/shot_stopper_host_stubs.h"
 #else
-#include <AcaiaArduinoBLE.h>
+#include <EspressoScaleBLE.h>
 #include <EEPROM.h>
 #include <driver/gpio.h>
 #include <esp_heap_caps.h>
@@ -379,7 +380,7 @@ struct MaintenanceLease {
 // BLE, application state and input state
 // ---------------------------------------------------------------------------
 
-AcaiaArduinoBLE scale(DEBUG);
+EspressoScaleBLE scale(DEBUG);
 #if !defined(SHOT_STOPPER_HOST_TEST)
 ShotStopperBleCompanion *bleCompanion = nullptr;
 BleCompanionPersistedSettings bleCompanionPersistedSettings;
@@ -475,6 +476,7 @@ bool scaleTimerValid = false;
 uint32_t scaleTimerMs = 0;
 uint32_t scaleTimerAgeMs = 0;
 char scaleProtocolName[20] = "none";
+ScaleFeatureSet scaleLinkFeatures = {};
 char scalePreferredMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
 char scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY] = {};
 ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY] = {};
@@ -641,6 +643,7 @@ struct ScaleLinkSnapshot {
   uint32_t timerMs;
   uint32_t timerAgeMs;
   char protocolName[20];
+  ScaleFeatureSet features;
 };
 
 bool scaleConnectedLedInitialized = false;
@@ -1206,6 +1209,7 @@ ScaleLinkSnapshot getScaleLinkSnapshot() {
   snapshot.timerMs = scaleTimerMs;
   snapshot.timerAgeMs = scaleTimerAgeMs;
   memcpy(snapshot.protocolName, scaleProtocolName, sizeof(snapshot.protocolName));
+  snapshot.features = scaleLinkFeatures;
   portEXIT_CRITICAL(&scaleLinkMux);
   return snapshot;
 }
@@ -1233,6 +1237,7 @@ void setScaleLinkState(ScaleLinkState state) {
     scaleTimerValid = false;
     scaleTimerMs = 0;
     scaleTimerAgeMs = 0;
+    scaleLinkFeatures = scaleFeatureSetNone();
   }
   portEXIT_CRITICAL(&scaleLinkMux);
   if (previous != state) {
@@ -1660,7 +1665,8 @@ bool requestRemoteTimerStart() {
   command.cycleId = session.id;
   command.autoTare = session.config.autoTare;
   command.canTareStartTimer = session.config.canTareStartTimer;
-  command.commandFeedbackExpected = scale.supportsCommandFeedback();
+  command.commandFeedbackExpected =
+      getScaleLinkSnapshot().features.has(ScaleFeatureCommandAudibleFeedback);
   session.timerStartCommandQueued = enqueueScaleCommand(command);
   session.remoteTimerMayBeRunning = session.timerStartCommandQueued;
   return session.timerStartCommandQueued;
@@ -1674,7 +1680,8 @@ bool requestRemoteRetare() {
   command.type = ScaleCommandType::TARE_ONLY;
   command.cycleId = session.id;
   command.autoTare = true;
-  command.commandFeedbackExpected = scale.supportsCommandFeedback();
+  command.commandFeedbackExpected =
+      getScaleLinkSnapshot().features.has(ScaleFeatureCommandAudibleFeedback);
   return enqueueScaleCommand(command);
 }
 
@@ -1689,7 +1696,8 @@ bool tryQueueRemoteTimerStop() {
   ScaleCommand command;
   command.type = ScaleCommandType::STOP_TIMER;
   command.cycleId = session.id;
-  command.commandFeedbackExpected = scale.supportsCommandFeedback();
+  command.commandFeedbackExpected =
+      getScaleLinkSnapshot().features.has(ScaleFeatureCommandAudibleFeedback);
   ++session.stopTimerAttempts;
   session.stopTimerLastAttemptMs = millis();
   if (!enqueueScaleCommand(command)) {
@@ -2598,6 +2606,8 @@ void updateWorkerLinkState() {
       static_cast<uint8_t>(scale.lastDisconnectReason());
   copyCString(scaleProtocolName, sizeof(scaleProtocolName),
               scale.connectedProtocolName());
+  scaleLinkFeatures = scale.isLinkUp() ? scale.features()
+                                       : scaleFeatureSetNone();
   scaleTimerValid = timerValid;
   scaleTimerMs = timerMs;
   scaleTimerAgeMs = timerAgeMs;
@@ -2644,23 +2654,27 @@ void executeScaleStartCommand(const ScaleCommand &command) {
 
   if (scale.isConnected()) {
     if (command.canTareStartTimer && command.autoTare &&
-        scale.supportsTareStartTimer()) {
+        scale.features().has(ScaleFeatureCombinedTareStart)) {
       event.commandAttempted = true;
       event.usedCombinedTareStart = true;
-      event.writeSucceeded = scale.tareStartTimer();
+      event.writeSucceeded = scaleCommandOk(scale.tareStartTimer());
       yieldBetweenScaleAttOps();
     }
     if (!event.writeSucceeded) {
       event.usedCombinedTareStart = false;
-      const bool resetSucceeded = scale.resetTimer();
-      yieldBetweenScaleAttOps();
-      if (resetSucceeded) {
-        event.commandAttempted = true;
-        event.writeSucceeded = scale.startTimer();
+      bool resetSucceeded = true;
+      if (scale.features().has(ScaleFeatureResetTimer)) {
+        resetSucceeded = scaleCommandOk(scale.resetTimer());
         yieldBetweenScaleAttOps();
       }
-      if (event.writeSucceeded && command.autoTare) {
-        scale.tare();
+      if (resetSucceeded && scale.features().has(ScaleFeatureStartTimer)) {
+        event.commandAttempted = true;
+        event.writeSucceeded = scaleCommandOk(scale.startTimer());
+        yieldBetweenScaleAttOps();
+      }
+      if (event.writeSucceeded && command.autoTare &&
+          scale.features().has(ScaleFeatureTare)) {
+        (void)scale.tare();
         yieldBetweenScaleAttOps();
       }
     }
@@ -2680,7 +2694,7 @@ void executeScaleStopCommand(const ScaleCommand &command) {
     // A failed start write may only mean its ATT response was lost. Attempting
     // STOP on the existing connection is harmless and covers that case.
     event.commandAttempted = true;
-    event.writeSucceeded = scale.stopTimer();
+    event.writeSucceeded = scaleCommandOk(scale.stopTimer());
     yieldBetweenScaleAttOps();
   }
 
@@ -2696,7 +2710,7 @@ void executeScaleTareCommand(const ScaleCommand &command) {
 
   if (scale.isConnected()) {
     event.commandAttempted = true;
-    event.writeSucceeded = scale.tare();
+    event.writeSucceeded = scaleCommandOk(scale.tare());
     yieldBetweenScaleAttOps();
   }
 
@@ -2712,23 +2726,24 @@ void executeScaleBeepCommand(DebugCode successCode, DebugCode failureCode,
     addDebugEvent(DebugCategory::SCALE, failureCode);
     return;
   }
-  if (!scale.supportsIndependentBeep()) {
+  if (!scale.features().has(ScaleFeatureIndependentBeep)) {
     addDebugEvent(DebugCategory::SCALE, unsupportedCode);
     return;
   }
-  const bool succeeded = scale.beepWithoutStateChange();
+  const bool succeeded = scaleCommandOk(scale.beepWithoutStateChange());
   yieldBetweenScaleAttOps();
   addDebugEvent(DebugCategory::SCALE, succeeded ? successCode : failureCode);
   updateWorkerLinkState();
 }
 
-bool scaleIsBookooGeneric() {
-  return scale.isConnected() &&
-         strcmp(scale.connectedProtocolName(), "bookoo_generic") == 0;
+bool scaleHasVolumeControl() {
+  return scale.isConnected() && scale.features().has(ScaleFeatureVolume);
 }
 
 bool enqueueScaleDebugCommand(BookooDebugAction action, uint8_t beepLevel) {
-  if (!scaleIsBookooGeneric()) {
+  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+  if (link.state != ScaleLinkState::CONNECTED ||
+      !link.features.has(ScaleFeatureVolume)) {
     return false;
   }
   if (action == BookooDebugAction::VOLUME && beepLevel > BOOKOO_BEEP_LEVEL_MAX) {
@@ -2767,41 +2782,41 @@ void executeScaleDebugCommand(BookooDebugAction action, uint8_t beepLevel) {
     addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_DEBUG_FAILED);
     return;
   }
-  if (!scaleIsBookooGeneric()) {
+  if (!scaleHasVolumeControl()) {
     addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_DEBUG_UNSUPPORTED);
     return;
   }
   bool succeeded = false;
   switch (action) {
     case BookooDebugAction::START:
-      succeeded = scale.startTimer();
+      succeeded = scaleCommandOk(scale.startTimer());
       break;
     case BookooDebugAction::STOP:
-      succeeded = scale.stopTimer();
+      succeeded = scaleCommandOk(scale.stopTimer());
       break;
     case BookooDebugAction::TARE:
-      succeeded = scale.tare();
+      succeeded = scaleCommandOk(scale.tare());
       break;
     case BookooDebugAction::COMBINED:
-      if (!scale.supportsTareStartTimer()) {
+      if (!scale.features().has(ScaleFeatureCombinedTareStart)) {
         addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_DEBUG_UNSUPPORTED);
         return;
       }
-      succeeded = scale.tareStartTimer();
+      succeeded = scaleCommandOk(scale.tareStartTimer());
       break;
     case BookooDebugAction::BEEP:
-      if (!scale.supportsIndependentBeep()) {
+      if (!scale.features().has(ScaleFeatureIndependentBeep)) {
         addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_DEBUG_UNSUPPORTED);
         return;
       }
-      succeeded = scale.beepWithoutStateChange();
+      succeeded = scaleCommandOk(scale.beepWithoutStateChange());
       break;
     case BookooDebugAction::VOLUME:
-      if (!scale.supportsIndependentBeep()) {
+      if (!scale.features().has(ScaleFeatureVolume)) {
         addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_DEBUG_UNSUPPORTED);
         return;
       }
-      succeeded = scale.setBeepLevel(beepLevel);
+      succeeded = scaleCommandOk(scale.setBeepLevel(beepLevel));
       break;
   }
   yieldBetweenScaleAttOps();
@@ -2823,7 +2838,8 @@ AlertOutputChannel currentAlertOutputChannel() {
 bool soundAlertsEnabled() { return !runtimeConfig.soundAlertsMuted; }
 
 void applyBookooConnectBeepPolicy() {
-  if (!scaleIsBookooGeneric() || !scale.supportsIndependentBeep()) {
+  if (!scaleHasVolumeControl() ||
+      !scale.features().has(ScaleFeatureIndependentBeep)) {
     return;
   }
   if (!soundAlertsEnabled()) {
@@ -2854,7 +2870,8 @@ void cancelBookooConnectBeepPolicy() {
 }
 
 void armBookooConnectBeepPolicy() {
-  if (!scaleIsBookooGeneric() || !scale.supportsIndependentBeep()) {
+  if (!scaleHasVolumeControl() ||
+      !scale.features().has(ScaleFeatureIndependentBeep)) {
     cancelBookooConnectBeepPolicy();
     return;
   }
@@ -2912,8 +2929,11 @@ AlertChannelContext currentAlertChannelContext() {
   ctx.buzzerSupportEnabled = BUZZER_SUPPORT_ENABLED;
   ctx.buzzerReady = BUZZER_SUPPORT_ENABLED && localBuzzer.ready;
   ctx.scaleAvailable = scaleAvailable();
-  ctx.scaleSupportsIndependentBeep = scale.supportsIndependentBeep();
-  ctx.scaleSupportsCommandFeedback = scale.supportsCommandFeedback();
+  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+  ctx.scaleSupportsIndependentBeep =
+      link.features.has(ScaleFeatureIndependentBeep);
+  ctx.scaleSupportsCommandFeedback =
+      link.features.has(ScaleFeatureCommandAudibleFeedback);
   return ctx;
 }
 
@@ -2952,7 +2972,8 @@ void stopPulseTrains() {
 }
 
 bool queueScaleIndependentAlert(AlertEvent event, uint32_t cycleId) {
-  if (!scaleAvailable() || !scale.supportsIndependentBeep()) {
+  if (!scaleAvailable() ||
+      !getScaleLinkSnapshot().features.has(ScaleFeatureIndependentBeep)) {
     return false;
   }
   switch (event) {
@@ -3766,7 +3787,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     }
 
     lastScanCycleMs = millis();
-    const AcaiaDisconnectReason reason = scale.lastDisconnectReason();
+    const ScaleDisconnectReason reason = scale.lastDisconnectReason();
     const bool finishedDirectedAttempt =
         (cacheMode == ScaleMacCacheMode::ONLY ||
          cacheMode == ScaleMacCacheMode::PREFER) &&
@@ -3778,10 +3799,10 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
                    scale.lastDisconnectReasonName());
     }
 
-    if (reason == AcaiaDisconnectReason::SCAN_START_FAILED ||
-        reason == AcaiaDisconnectReason::PACKET_TIMEOUT ||
-        reason == AcaiaDisconnectReason::FIRST_PACKET_TIMEOUT ||
-        reason == AcaiaDisconnectReason::CONNECT_FAILED) {
+    if (reason == ScaleDisconnectReason::SCAN_START_FAILED ||
+        reason == ScaleDisconnectReason::PACKET_TIMEOUT ||
+        reason == ScaleDisconnectReason::FIRST_PACKET_TIMEOUT ||
+        reason == ScaleDisconnectReason::CONNECT_FAILED) {
       connectRetryMs = nextScaleConnectRetryMs(connectRetryMs);
     } else {
       connectRetryMs = SCALE_CONNECT_RETRY_MS;
@@ -3856,7 +3877,7 @@ void serviceScaleWorkerLink() {
 
   bool snapshotDirty = false;
   if (scale.heartbeatRequired()) {
-    if (!scale.heartbeat()) {
+    if (!scaleCommandOk(scale.heartbeat())) {
       cancelBookooConnectBeepPolicy();
       updateWorkerLinkState();
       setScaleLinkState(ScaleLinkState::DISCONNECTED);

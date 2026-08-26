@@ -56,10 +56,20 @@ const alertChannel = fs.readFileSync(path.join(sketchDir, 'ShotStopperAlertChann
 const alertTone = fs.readFileSync(path.join(sketchDir, 'ShotStopperAlertTone.h'), 'utf8');
 const kconfig = fs.readFileSync(
   path.resolve(sketchDir, '..', 'idf', 'main', 'Kconfig.projbuild'), 'utf8');
-const bleLibrary = fs.readFileSync(
-  path.resolve(sketchDir, '..', 'libraries', 'AcaiaArduinoBLE', 'AcaiaArduinoBLE.cpp'),
-  'utf8'
-);
+const bleSrcDir = path.resolve(sketchDir, '..', 'libraries', 'EspressoScaleBLE', 'src');
+function readTree(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).map((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      return readTree(full);
+    }
+    if (/\.(cpp|h)$/.test(entry.name)) {
+      return fs.readFileSync(full, 'utf8');
+    }
+    return '';
+  }).join('\n');
+}
+const bleLibrary = readTree(bleSrcDir);
 const bleCompanion = fs.readFileSync(
   path.join(sketchDir, 'ShotStopperBleCompanion.h'), 'utf8');
 const taskProfiler = fs.readFileSync(
@@ -257,8 +267,8 @@ if (/#define\s+BLE_CONNECT_TIMEOUT_MS\s+4000UL/.test(bleLibrary)) {
       'GAP connect timeout must stay under the 5 s task watchdog (not 4 s)');
 }
 {
-  const pollScanStart = bleLibrary.indexOf('bool AcaiaArduinoBLE::pollScan()');
-  const pollScanEnd = bleLibrary.indexOf('bool AcaiaArduinoBLE::beginConnection', pollScanStart);
+  const pollScanStart = bleLibrary.indexOf('bool EspressoScaleBLE::pollScan()');
+  const pollScanEnd = bleLibrary.indexOf('bool EspressoScaleBLE::beginConnection', pollScanStart);
   const pollScan = pollScanStart >= 0 && pollScanEnd > pollScanStart
       ? bleLibrary.slice(pollScanStart, pollScanEnd)
       : '';
@@ -272,10 +282,10 @@ if (/#define\s+BLE_CONNECT_TIMEOUT_MS\s+4000UL/.test(bleLibrary)) {
   }
 }
 {
-  const nwStart = bleLibrary.indexOf('bool AcaiaArduinoBLE::newWeightAvailable()');
-  const nwEnd = bleLibrary.indexOf('bool AcaiaArduinoBLE::supportedPacketLength', nwStart);
+  const nwStart = bleLibrary.indexOf('bool EspressoScaleBLE::newWeightAvailable()');
+  const nwEnd = bleLibrary.indexOf('bool EspressoScaleBLE::supportedPacketLength', nwStart);
   const nw = nwStart >= 0 && nwEnd > nwStart ? bleLibrary.slice(nwStart, nwEnd) : '';
-  if (!bleLibrary.includes('bool AcaiaArduinoBLE::isLinkUp()') ||
+  if (!bleLibrary.includes('bool EspressoScaleBLE::isLinkUp()') ||
       !nw.includes('if (!_connected)') ||
       nw.includes('isConnected()')) {
     throw new Error(
@@ -2330,13 +2340,13 @@ if (!firmwareCore.includes('command.commitConfirmed = true') ||
   }
 }
 {
-  const oldParseStart = bleLibrary.indexOf('AcaiaArduinoBLE::parseAcaiaOldPacket');
-  const oldParseEnd = bleLibrary.indexOf('AcaiaArduinoBLE::parseGenericPacket', oldParseStart);
+  const oldParseStart = bleLibrary.indexOf('parseAcaiaOldWeight');
+  const oldParseEnd = bleLibrary.indexOf('parseAcaiaOldTimer', oldParseStart);
   const oldParse = oldParseStart >= 0 && oldParseEnd > oldParseStart
       ? bleLibrary.slice(oldParseStart, oldParseEnd)
       : '';
   if (!oldParse.includes('length == 14') ||
-      !oldParse.includes('validAcaiaChecksum')) {
+      !oldParse.includes('scaleValidAcaiaChecksum')) {
     throw new Error('OLD 14-byte Acaia frames must validate checksum');
   }
 }
@@ -3137,15 +3147,15 @@ if (network.includes('\\"passwordChangeRequired\\"') ||
   throw new Error('Factory password change gate must remain removed from status/UI/API');
 }
 
-const safeBeepStart = bleLibrary.indexOf('bool AcaiaArduinoBLE::beepWithoutStateChange()');
-const safeBeepEnd = bleLibrary.indexOf('bool AcaiaArduinoBLE::heartbeat()', safeBeepStart);
+const safeBeepStart = bleLibrary.indexOf('EspressoScaleBLE::beepWithoutStateChange()');
+const safeBeepEnd = bleLibrary.indexOf('EspressoScaleBLE::setBeepLevel(', safeBeepStart);
 if (safeBeepStart < 0 || safeBeepEnd < 0) {
   throw new Error('State-safe BLE beep implementation not found');
 }
 const safeBeep = bleLibrary.slice(safeBeepStart, safeBeepEnd);
 if (!safeBeep.includes('return setBeepLevel(1)') ||
-    !safeBeep.includes('GENERIC_BEEP_LEVEL_CMD') ||
-    !safeBeep.includes('fillGenericCommand') ||
+    !bleLibrary.includes('GENERIC_BEEP_LEVEL_CMD') ||
+    !bleLibrary.includes('fillGenericCommand') ||
     safeBeep.includes('BEEP_LEVEL_1_BOOKOO') ||
     safeBeep.includes('TARE_ACAIA') || safeBeep.includes('TARE_GENERIC') ||
     safeBeep.includes('_connected = false')) {
@@ -3166,7 +3176,7 @@ if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
     !firmware.includes('stepFirstFlow') ||
     !firmware.includes('accidentalTouchHolding') ||
     !firmware.includes('retareWindowOpen') ||
-    !firmware.includes('scale.supportsTareStartTimer()') ||
+    !firmware.includes('ScaleFeatureCombinedTareStart') ||
     !firmware.includes('alertOutputChannel') ||
     !firmware.includes('applyBookooConnectBeepPolicy') ||
     !firmware.includes('armBookooConnectBeepPolicy') ||

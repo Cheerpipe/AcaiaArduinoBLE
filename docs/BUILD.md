@@ -21,8 +21,8 @@ You need:
 The development board in [Hardware](HARDWARE.md) is an N16R8 module. Use
 `--arch n16r8` unless you know you have N8R4.
 
-Do not install AcaiaArduinoBLE from Library Manager. The audited copy is in
-`libraries/AcaiaArduinoBLE`.
+Do not install EspressoScaleBLE from Library Manager. The audited copy is in
+`libraries/EspressoScaleBLE`.
 
 ## 1. Clone the repository
 
@@ -171,7 +171,7 @@ and stay on **115200**. Press RST on the board after opening the monitor.
 
 ```sh
 npm install
-./libraries/AcaiaArduinoBLE/tests/run_host_tests.sh
+./libraries/EspressoScaleBLE/tests/run_host_tests.sh
 ./shotStopper/tests/run_host_tests.sh
 node ./shotStopper/tests/check_web_assets.js
 node ./shotStopper/tests/check_firmware_size.js build-idf/n16r8/shotstopper.bin

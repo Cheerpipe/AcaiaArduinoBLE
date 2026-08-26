@@ -11,7 +11,7 @@ idf_component_register(
     "${SHOT_STOPPER_DIR}"
   REQUIRES
     arduino-esp32
-    AcaiaArduinoBLE
+    EspressoScaleBLE
   PRIV_REQUIRES
     json
     nvs_flash

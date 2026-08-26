@@ -34,7 +34,7 @@ using portMUX_TYPE = int;
 #define portMUX_INITIALIZER_UNLOCKED 0
 #define pdMS_TO_TICKS(ms) (ms)
 
-// Match libraries/AcaiaArduinoBLE/AcaiaArduinoBLE.h so shotStopper.cpp can
+// Match libraries/EspressoScaleBLE/src/EspressoScaleBLE.h so shotStopper.cpp can
 // static_assert GAP connect vs the 5 s task watchdog in host builds.
 #ifndef BLE_CONNECT_TIMEOUT_MS
 #define BLE_CONNECT_TIMEOUT_MS 2000UL
@@ -42,6 +42,8 @@ using portMUX_TYPE = int;
 #ifndef BLE_DISCOVER_TIMEOUT_MS
 #define BLE_DISCOVER_TIMEOUT_MS 3000UL
 #endif
+
+#include "../../libraries/EspressoScaleBLE/src/ScaleFeatures.h"
 
 inline uint32_t hostMillis = 0;
 inline std::array<int, 64> hostPinLevel = {};
@@ -233,10 +235,12 @@ class HostBLE {
 
 inline HostBLE BLE;
 
-constexpr size_t ACAIA_MAC_CAPACITY = 18;
-constexpr size_t ACAIA_NAME_CAPACITY = 32;
+constexpr size_t SCALE_MAC_CAPACITY = 18;
+constexpr size_t SCALE_NAME_CAPACITY = 32;
+constexpr size_t ACAIA_MAC_CAPACITY = SCALE_MAC_CAPACITY;
+constexpr size_t ACAIA_NAME_CAPACITY = SCALE_NAME_CAPACITY;
 
-enum class AcaiaDisconnectReason : uint8_t {
+enum class ScaleDisconnectReason : uint8_t {
   NONE,
   USER_REQUEST,
   SCAN_START_FAILED,
@@ -255,9 +259,23 @@ enum class AcaiaDisconnectReason : uint8_t {
   CONNECTION_FAILED_TO_ESTABLISH
 };
 
-class AcaiaArduinoBLE {
+using AcaiaDisconnectReason = ScaleDisconnectReason;
+
+inline ScaleFeatureSet hostGenericScaleFeatures() {
+  ScaleFeatureSet features = scaleFeatureSetNone();
+  features.flags = ScaleFeatureWeight | ScaleFeatureTare |
+                   ScaleFeatureStartTimer | ScaleFeatureStopTimer |
+                   ScaleFeatureResetTimer | ScaleFeatureCombinedTareStart |
+                   ScaleFeatureIndependentBeep | ScaleFeatureVolume |
+                   ScaleFeatureCommandAudibleFeedback;
+  features.volumeMax = 5;
+  features.maxPacketSilenceMs = 8000;
+  return features;
+}
+
+class EspressoScaleBLE {
  public:
-  explicit AcaiaArduinoBLE(bool debug) { (void)debug; }
+  explicit EspressoScaleBLE(bool debug) { (void)debug; }
 
   bool init(const char *mac = nullptr) {
     (void)mac;
@@ -291,7 +309,7 @@ class AcaiaArduinoBLE {
     if (!startScanSucceeds) {
       scanning = false;
       directedScan = false;
-      disconnectReason = AcaiaDisconnectReason::SCAN_START_FAILED;
+      disconnectReason = ScaleDisconnectReason::SCAN_START_FAILED;
       return false;
     }
     if (connected) {
@@ -326,7 +344,6 @@ class AcaiaArduinoBLE {
       connecting = true;
       scanning = false;
       directedScan = false;
-      // Match firmware stepped connect: first poll begins, later poll finishes.
       if (pollScanStepsToConnect <= 1) {
         connected = true;
         connecting = false;
@@ -362,59 +379,71 @@ class AcaiaArduinoBLE {
   const char *localName() const {
     return connected ? connectedLocalName : "";
   }
-  bool tare() {
+  ScaleCommandResult tare() {
     commandLog.push_back("tare");
     ++tareCalls;
     return runCommand(tareSucceeds);
   }
-  bool startTimer() {
+  ScaleCommandResult startTimer() {
     commandLog.push_back("startTimer");
     ++startTimerCalls;
     return runCommand(startTimerSucceeds);
   }
-  bool stopTimer() {
+  ScaleCommandResult stopTimer() {
     commandLog.push_back("stopTimer");
     ++stopTimerCalls;
     return runCommand(stopTimerSucceeds);
   }
-  bool resetTimer() {
+  ScaleCommandResult resetTimer() {
     commandLog.push_back("resetTimer");
     ++resetTimerCalls;
     return runCommand(resetTimerSucceeds);
   }
-  bool tareStartTimer() {
+  ScaleCommandResult tareStartTimer() {
     commandLog.push_back("tareStartTimer");
     ++tareStartTimerCalls;
     if (!connected) {
-      return false;
+      return ScaleCommandResult::NotConnected;
+    }
+    if (!features().has(ScaleFeatureCombinedTareStart)) {
+      return ScaleCommandResult::Unsupported;
     }
     if (!tareStartTimerSucceeds) {
-      return false;
+      return ScaleCommandResult::WriteFailed;
     }
     return runCommand(true);
   }
   bool supportsTareStartTimer() const {
-    return connected && tareStartTimerSupported;
+    return features().has(ScaleFeatureCombinedTareStart);
   }
   bool supportsIndependentBeep() const {
-    return connected && independentBeepSupported;
+    return features().has(ScaleFeatureIndependentBeep);
   }
   bool supportsCommandFeedback() const {
-    return connected && commandFeedbackSupported;
+    return features().has(ScaleFeatureCommandAudibleFeedback);
   }
-  bool beepWithoutStateChange() {
+  ScaleCommandResult beepWithoutStateChange() {
     commandLog.push_back("beepWithoutStateChange");
     ++beepCalls;
-    return connected && independentBeepSupported && beepSucceeds;
+    if (!features().has(ScaleFeatureIndependentBeep)) {
+      return ScaleCommandResult::Unsupported;
+    }
+    return runCommand(beepSucceeds);
   }
-  bool setBeepLevel(uint8_t level) {
+  ScaleCommandResult setBeepLevel(uint8_t level) {
     commandLog.push_back(std::string("setBeepLevel:") + std::to_string(level));
     lastBeepLevel = level;
     ++setBeepLevelCalls;
-    return connected && independentBeepSupported && beepSucceeds &&
-           level <= 5;
+    if (!features().has(ScaleFeatureVolume) &&
+        !features().has(ScaleFeatureIndependentBeep)) {
+      return ScaleCommandResult::Unsupported;
+    }
+    if (level > features().volumeMax) {
+      return ScaleCommandResult::InvalidArgument;
+    }
+    return runCommand(beepSucceeds);
   }
-  bool heartbeat() {
+  ScaleCommandResult heartbeat() {
     commandLog.push_back("heartbeat");
     ++heartbeatCalls;
     return runCommand(heartbeatSucceeds);
@@ -441,17 +470,34 @@ class AcaiaArduinoBLE {
     }
     return available;
   }
+  ScaleFeatureSet features() const {
+    if (!connected) {
+      return scaleFeatureSetNone();
+    }
+    ScaleFeatureSet next = connectedFeatures;
+    if (!tareStartTimerSupported) {
+      next.flags &= ~static_cast<uint32_t>(ScaleFeatureCombinedTareStart);
+    }
+    if (!independentBeepSupported) {
+      next.flags &= ~static_cast<uint32_t>(ScaleFeatureIndependentBeep);
+      next.flags &= ~static_cast<uint32_t>(ScaleFeatureVolume);
+    }
+    if (!commandFeedbackSupported) {
+      next.flags &= ~static_cast<uint32_t>(ScaleFeatureCommandAudibleFeedback);
+    }
+    return next;
+  }
   const char* connectedProtocolName() const {
     return connected ? connectedProtocol : "none";
   }
-  AcaiaDisconnectReason lastDisconnectReason() const {
+  ScaleDisconnectReason lastDisconnectReason() const {
     return disconnectReason;
   }
   const char* lastDisconnectReasonName() const {
     switch (disconnectReason) {
-      case AcaiaDisconnectReason::NONE: return "none";
-      case AcaiaDisconnectReason::SCAN_START_FAILED: return "scan start failed";
-      case AcaiaDisconnectReason::SCAN_TIMEOUT: return "scan timeout";
+      case ScaleDisconnectReason::NONE: return "none";
+      case ScaleDisconnectReason::SCAN_START_FAILED: return "scan start failed";
+      case ScaleDisconnectReason::SCAN_TIMEOUT: return "scan timeout";
       default: return "unknown";
     }
   }
@@ -475,6 +521,7 @@ class AcaiaArduinoBLE {
   char connectedAddress[ACAIA_MAC_CAPACITY] = "01:02:03:04:05:06";
   char connectedLocalName[ACAIA_NAME_CAPACITY] = "BOOKOO";
   char connectedProtocol[20] = "bookoo_generic";
+  ScaleFeatureSet connectedFeatures = hostGenericScaleFeatures();
   bool tareSucceeds = true;
   bool startTimerSucceeds = true;
   bool stopTimerSucceeds = true;
@@ -492,7 +539,7 @@ class AcaiaArduinoBLE {
   bool timerValid = false;
   uint32_t timerMs = 0;
   uint32_t timerAgeMs = 0;
-  AcaiaDisconnectReason disconnectReason = AcaiaDisconnectReason::NONE;
+  ScaleDisconnectReason disconnectReason = ScaleDisconnectReason::NONE;
   uint32_t rejectedPackets = 0;
   uint32_t reconnects = 0;
   size_t tareCalls = 0;
@@ -508,14 +555,18 @@ class AcaiaArduinoBLE {
   std::vector<std::string> commandLog;
 
  private:
-  bool runCommand(bool succeeds) {
+  ScaleCommandResult runCommand(bool succeeds) {
     if (!connected || !succeeds) {
       connected = false;
-      return false;
+      return succeeds ? ScaleCommandResult::NotConnected
+                      : ScaleCommandResult::WriteFailed;
     }
-    return true;
+    return ScaleCommandResult::Ok;
   }
 };
+
+using AcaiaArduinoBLE = EspressoScaleBLE;
+
 
 struct HostQueue {
   HostQueue(size_t capacityValue, size_t itemSizeValue)

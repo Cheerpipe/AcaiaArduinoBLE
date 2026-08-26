@@ -6,8 +6,8 @@ Bookoo-specific volume / combined tare. Machine-level, under
 
 Daily defaults assume a **Bookoo** Themis Mini or Ultra. **Acaia**,
 **Felicita**, and **AtomHeart Eclair** remain supported through the vendored
-AcaiaArduinoBLE library. Compatibility details:
-[Scale compatibility](../../libraries/AcaiaArduinoBLE/README.md#scale-compatibility).
+EspressoScaleBLE library. Compatibility details:
+[Scale compatibility](../../libraries/EspressoScaleBLE/README.md#scale-compatibility).
 
 ## When it applies
 

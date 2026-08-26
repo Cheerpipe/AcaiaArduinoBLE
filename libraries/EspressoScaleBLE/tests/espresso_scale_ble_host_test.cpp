@@ -1,4 +1,4 @@
-#include "AcaiaArduinoBLE.h"
+#include "EspressoScaleBLE.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -21,10 +21,10 @@ namespace {
 
 int checks = 0;
 
-static_assert(!std::is_copy_constructible<AcaiaArduinoBLE>::value,
-              "AcaiaArduinoBLE must remain a single owner");
-static_assert(!std::is_copy_assignable<AcaiaArduinoBLE>::value,
-              "AcaiaArduinoBLE must not use BLECharacteristic assignment");
+static_assert(!std::is_copy_constructible<EspressoScaleBLE>::value,
+              "EspressoScaleBLE must remain a single owner");
+static_assert(!std::is_copy_assignable<EspressoScaleBLE>::value,
+              "EspressoScaleBLE must not use BLECharacteristic assignment");
 static_assert(BLE_CONNECT_TIMEOUT_MS + BLE_OPERATION_TIMEOUT_MS < 5000UL,
               "GAP connect plus one ATT wait must remain under a 5 s TWDT");
 static_assert(BLE_DISCOVER_TIMEOUT_MS < 5000UL,
@@ -40,7 +40,7 @@ static_assert(BLE_DISCOVER_TIMEOUT_MS < 5000UL,
         }                                                                      \
     } while (false)
 
-bool pollUntilConnected(AcaiaArduinoBLE &scale, int maxSteps = 40) {
+bool pollUntilConnected(EspressoScaleBLE &scale, int maxSteps = 40) {
     bool connected = false;
     for (int i = 0; i < maxSteps && !connected; ++i) {
         fakeMillis += 20;
@@ -170,24 +170,24 @@ std::vector<byte> eclairPacket(int32_t milligrams, uint32_t timerMs) {
 void testScanDiagnostics() {
     resetFake();
     BLE.scanResult = false;
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(!scale.init());
     CHECK(BLE.timeoutMs == BLE_OPERATION_TIMEOUT_MS);
     CHECK(scale.lastDisconnectReason() ==
-          AcaiaDisconnectReason::SCAN_START_FAILED);
+          ScaleDisconnectReason::SCAN_START_FAILED);
 
     resetFake();
-    AcaiaArduinoBLE timeoutScale(false);
+    EspressoScaleBLE timeoutScale(false);
     CHECK(!timeoutScale.init());
     CHECK(fakeMillis >= SCALE_SCAN_TIMEOUT_MS);
     CHECK(timeoutScale.lastDisconnectReason() ==
-          AcaiaDisconnectReason::SCAN_TIMEOUT);
+          ScaleDisconnectReason::SCAN_TIMEOUT);
     CHECK(BLE.stopScanCalls == 1);
 }
 
 void testNonBlockingScanDoesNotRestartOrResetIdle() {
     resetFake();
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.startScan());
     CHECK(scale.isScanning());
     CHECK(BLE.scanCalls == 1);
@@ -220,7 +220,7 @@ void testNonBlockingScanDoesNotRestartOrResetIdle() {
 
 void testBurstScanParametersAndDiscoverTimeoutRestored() {
     resetFake();
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.startScan(nullptr, false, true));
     CHECK(BLE.lastScanInterval == BLE_SCAN_BURST_INTERVAL);
     CHECK(BLE.lastScanWindow == BLE_SCAN_BURST_WINDOW);
@@ -230,7 +230,7 @@ void testBurstScanParametersAndDiscoverTimeoutRestored() {
 
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
-    AcaiaArduinoBLE connected(false);
+    EspressoScaleBLE connected(false);
     CHECK(connected.startScan());
     CHECK(pollUntilConnected(connected));
     CHECK(BLE.timeoutMs == BLE_OPERATION_TIMEOUT_MS);
@@ -239,7 +239,7 @@ void testBurstScanParametersAndDiscoverTimeoutRestored() {
 void testNonBlockingScanConnectsWithoutInit() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.startScan());
     CHECK(pollUntilConnected(scale));
     CHECK(scale.isConnected());
@@ -254,7 +254,7 @@ void testConnectFilterUsesNameScan() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
     fixture.peripheral->address = "AA:BB:CC:DD:EE:FF";
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.startScan("AA:BB:CC:DD:EE:FF"));
     CHECK(scale.isDirectedScan());
     CHECK(BLE.scanCalls == 1);
@@ -269,7 +269,7 @@ void testConnectFilterUsesNameScan() {
     fixture = makeScale(NEW);
     fixture.peripheral->address = "11:22:33:44:55:66";
     fixture.peripheral->localName = "PYXIS";
-    AcaiaArduinoBLE mismatch(false);
+    EspressoScaleBLE mismatch(false);
     CHECK(mismatch.startScan("AA:BB:CC:DD:EE:FF"));
     CHECK(!mismatch.pollScan());
     CHECK(mismatch.isScanning());
@@ -292,7 +292,7 @@ void testConnectFilterConnectsWithoutLocalName() {
     ScaleFixture fixture = makeScale(NEW);
     fixture.peripheral->address = "aa:bb:cc:dd:ee:ff";
     fixture.peripheral->localName.clear();
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.startScan("AA:BB:CC:DD:EE:FF"));
     CHECK(pollUntilConnected(scale));
     CHECK(scale.isConnected());
@@ -303,7 +303,7 @@ void testNameScanIgnoresEmptyLocalName() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
     fixture.peripheral->localName.clear();
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.startScan());
     CHECK(!scale.pollScan());
     CHECK(scale.isScanning());
@@ -312,7 +312,7 @@ void testNameScanIgnoresEmptyLocalName() {
 
 void testStartScanRestartsOnFilterChange() {
     resetFake();
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.startScan("AA:BB:CC:DD:EE:FF"));
     CHECK(BLE.scanCalls == 1);
     CHECK(BLE.scanForAddressCalls == 0);
@@ -328,48 +328,48 @@ void testCleanupOnInitializationFailures() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
     fixture.peripheral->connectResult = false;
-    AcaiaArduinoBLE connectFailure(false);
+    EspressoScaleBLE connectFailure(false);
     CHECK(!connectFailure.init());
     CHECK(connectFailure.lastDisconnectReason() ==
-          AcaiaDisconnectReason::CONNECT_FAILED);
+          ScaleDisconnectReason::CONNECT_FAILED);
     CHECK(fixture.peripheral->connectCalls == SCALE_CONNECT_ATTEMPTS);
 
     resetFake();
     fixture = makeScale(NEW);
     fixture.peripheral->discoveryResult = false;
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(!scale.init());
     CHECK(!fixture.peripheral->connected);
     CHECK(fixture.peripheral->disconnectCalls == 1);
     CHECK(scale.lastDisconnectReason() ==
-          AcaiaDisconnectReason::DISCOVERY_FAILED);
+          ScaleDisconnectReason::DISCOVERY_FAILED);
 
     resetFake();
     fixture = makeScale(NEW);
     fixture.read->subscribeResult = false;
-    AcaiaArduinoBLE subscribeFailure(false);
+    EspressoScaleBLE subscribeFailure(false);
     CHECK(!subscribeFailure.init());
     CHECK(!fixture.peripheral->connected);
     CHECK(fixture.peripheral->disconnectCalls == 1);
     CHECK(subscribeFailure.lastDisconnectReason() ==
-          AcaiaDisconnectReason::SUBSCRIBE_FAILED);
+          ScaleDisconnectReason::SUBSCRIBE_FAILED);
 
     resetFake();
     fixture = makeScale(NEW);
     fixture.write->writeResult = false;
-    AcaiaArduinoBLE writeFailure(false);
+    EspressoScaleBLE writeFailure(false);
     CHECK(!writeFailure.init());
     CHECK(!fixture.peripheral->connected);
     CHECK(fixture.peripheral->disconnectCalls == 1);
     CHECK(writeFailure.lastDisconnectReason() ==
-          AcaiaDisconnectReason::INITIALIZATION_WRITE_FAILED);
+          ScaleDisconnectReason::INITIALIZATION_WRITE_FAILED);
 }
 
 void testConnectRetriesThenSucceeds() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
     fixture.peripheral->connectFailRemaining = SCALE_CONNECT_ATTEMPTS - 1;
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.startScan());
     CHECK(pollUntilConnected(scale, 40));
     CHECK(scale.isConnected());
@@ -383,21 +383,21 @@ void testConnectFailedOnlyAfterRetries() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
     fixture.peripheral->connectResult = false;
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.startScan());
     CHECK(!pollUntilConnected(scale, 40));
     CHECK(!scale.isConnected());
     CHECK(!scale.isConnecting());
     CHECK(fixture.peripheral->connectCalls == SCALE_CONNECT_ATTEMPTS);
     CHECK(scale.lastDisconnectReason() ==
-          AcaiaDisconnectReason::CONNECT_FAILED);
+          ScaleDisconnectReason::CONNECT_FAILED);
     CHECK(BLE.timeoutMs == BLE_OPERATION_TIMEOUT_MS);
 }
 
 void testFirstPacketAndSteadyStateTimeouts() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.init());
     uint32_t connectedAt = fakeMillis;
     fakeMillis = connectedAt + FIRST_PACKET_TIMEOUT_MS - 1;
@@ -407,12 +407,12 @@ void testFirstPacketAndSteadyStateTimeouts() {
     CHECK(!scale.newWeightAvailable());
     CHECK(!scale.isConnected());
     CHECK(scale.lastDisconnectReason() ==
-          AcaiaDisconnectReason::FIRST_PACKET_TIMEOUT);
+          ScaleDisconnectReason::FIRST_PACKET_TIMEOUT);
     CHECK(fixture.peripheral->disconnectCalls == 1);
 
     resetFake();
     fixture = makeScale(NEW);
-    AcaiaArduinoBLE steadyScale(false);
+    EspressoScaleBLE steadyScale(false);
     CHECK(steadyScale.init());
     notify(fixture, acaiaNewWeight(123.4f));
     CHECK(steadyScale.newWeightAvailable());
@@ -425,11 +425,11 @@ void testFirstPacketAndSteadyStateTimeouts() {
     fakeMillis = lastPacketAt + MAX_PACKET_PERIOD_MS;
     CHECK(!steadyScale.newWeightAvailable());
     CHECK(steadyScale.lastDisconnectReason() ==
-          AcaiaDisconnectReason::PACKET_TIMEOUT);
+          ScaleDisconnectReason::PACKET_TIMEOUT);
 
     resetFake();
     ScaleFixture genericFixture = makeScale(GENERIC);
-    AcaiaArduinoBLE genericScale(false);
+    EspressoScaleBLE genericScale(false);
     CHECK(genericScale.init());
     std::vector<byte> genericPacket(20, 0);
     genericPacket[0] = 0x03;
@@ -448,13 +448,13 @@ void testFirstPacketAndSteadyStateTimeouts() {
     fakeMillis = genericPacketAt + GENERIC_MAX_PACKET_PERIOD_MS;
     CHECK(!genericScale.newWeightAvailable());
     CHECK(genericScale.lastDisconnectReason() ==
-          AcaiaDisconnectReason::PACKET_TIMEOUT);
+          ScaleDisconnectReason::PACKET_TIMEOUT);
 }
 
 void testAcaiaValidationAndDebugBounds() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
-    AcaiaArduinoBLE scale(true);
+    EspressoScaleBLE scale(true);
     CHECK(scale.init());
 
     // A 17-byte packet used to print 17 bytes from a 13-byte stack buffer.
@@ -489,7 +489,7 @@ void testAcaiaValidationAndDebugBounds() {
 void testFelicitaAsciiValidation() {
     resetFake();
     ScaleFixture fixture = makeScale(FELICITA);
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.init());
 
     std::vector<byte> packet(18, 0);
@@ -511,7 +511,7 @@ void testFelicitaAsciiValidation() {
 void testEclairProtocol() {
     resetFake();
     ScaleFixture fixture = makeScale(ECLAIR);
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.init());
     CHECK(std::strcmp(scale.connectedProtocolName(), "atomheart_eclair") == 0);
     CHECK(fixture.write->writes.empty());
@@ -519,14 +519,14 @@ void testEclairProtocol() {
     CHECK(!scale.supportsTareStartTimer());
     CHECK(!scale.supportsIndependentBeep());
     CHECK(!scale.supportsCommandFeedback());
-    CHECK(!scale.tareStartTimer());
-    CHECK(!scale.beepWithoutStateChange());
-    CHECK(!scale.setBeepLevel(0));
+    CHECK(!scaleCommandOk(scale.tareStartTimer()));
+    CHECK(!scaleCommandOk(scale.beepWithoutStateChange()));
+    CHECK(!scaleCommandOk(scale.setBeepLevel(0)));
 
-    CHECK(scale.tare());
-    CHECK(scale.startTimer());
-    CHECK(scale.stopTimer());
-    CHECK(scale.resetTimer());
+    CHECK(scaleCommandOk(scale.tare()));
+    CHECK(scaleCommandOk(scale.startTimer()));
+    CHECK(scaleCommandOk(scale.stopTimer()));
+    CHECK(scaleCommandOk(scale.resetTimer()));
     CHECK(fixture.write->writes.size() == 4);
     CHECK(fixture.write->writes[0] == std::vector<byte>({0x54, 0x01, 0x01}));
     CHECK(fixture.write->writes[1] == std::vector<byte>({0x53, 0x01, 0x01}));
@@ -561,7 +561,7 @@ void testDirectedEclairDiscoveryWithoutName() {
     ScaleFixture fixture = makeScale(ECLAIR);
     fixture.peripheral->address = "aa:bb:cc:dd:ee:ff";
     fixture.peripheral->localName.clear();
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.startScan("AA:BB:CC:DD:EE:FF"));
     CHECK(pollUntilConnected(scale));
     CHECK(scale.isConnected());
@@ -571,30 +571,30 @@ void testDirectedEclairDiscoveryWithoutName() {
 void testCapabilitiesAndWriteCleanup() {
     resetFake();
     ScaleFixture acaia = makeScale(NEW);
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.init());
     CHECK(scale.heartbeatRequired());
     const size_t initializationWrites = acaia.write->writes.size();
-    CHECK(!scale.tareStartTimer());
-    CHECK(!scale.beep());
-    CHECK(!scale.setBeepLevel(0));
+    CHECK(!scaleCommandOk(scale.tareStartTimer()));
+    CHECK(!scaleCommandOk(scale.beep()));
+    CHECK(!scaleCommandOk(scale.setBeepLevel(0)));
     CHECK(acaia.write->writes.size() == initializationWrites);
 
     acaia.write->writeResult = false;
-    CHECK(!scale.tare());
+    CHECK(!scaleCommandOk(scale.tare()));
     CHECK(!scale.isConnected());
     CHECK(!acaia.peripheral->connected);
     CHECK(scale.lastDisconnectReason() ==
-          AcaiaDisconnectReason::COMMAND_WRITE_FAILED);
+          ScaleDisconnectReason::COMMAND_WRITE_FAILED);
 
     resetFake();
     ScaleFixture generic = makeScale(GENERIC);
-    AcaiaArduinoBLE genericScale(false);
+    EspressoScaleBLE genericScale(false);
     CHECK(genericScale.init());
     CHECK(genericScale.supportsTareStartTimer());
-    CHECK(genericScale.tareStartTimer());
+    CHECK(scaleCommandOk(genericScale.tareStartTimer()));
     CHECK(genericScale.supportsIndependentBeep());
-    CHECK(genericScale.beep());
+    CHECK(scaleCommandOk(genericScale.beep()));
     CHECK(generic.write->writes.size() == 2);
     CHECK(generic.write->writes[0][2] == 0x07);
     CHECK(generic.write->writes[1][2] == 0x02);
@@ -603,7 +603,7 @@ void testCapabilitiesAndWriteCleanup() {
 
     const size_t beforeLevels = generic.write->writes.size();
     for (uint8_t level = 0; level <= 5; ++level) {
-        CHECK(genericScale.setBeepLevel(level));
+        CHECK(scaleCommandOk(genericScale.setBeepLevel(level)));
         const std::vector<byte> &packet =
             generic.write->writes[beforeLevels + level];
         CHECK(packet.size() == 6);
@@ -614,18 +614,18 @@ void testCapabilitiesAndWriteCleanup() {
         CHECK(packet[4] == level);
         CHECK(packet[5] == static_cast<byte>(0x03 ^ 0x0a ^ 0x02 ^ 0x00 ^ level));
     }
-    CHECK(genericScale.beepWithoutStateChange());
+    CHECK(scaleCommandOk(genericScale.beepWithoutStateChange()));
     const std::vector<byte> &beepPacket = generic.write->writes.back();
     CHECK(beepPacket == generic.write->writes[beforeLevels + 1]);
     const size_t afterValid = generic.write->writes.size();
-    CHECK(!genericScale.setBeepLevel(6));
+    CHECK(!scaleCommandOk(genericScale.setBeepLevel(6)));
     CHECK(generic.write->writes.size() == afterValid);
 }
 
 void testOldAndGenericPacketValidation() {
     resetFake();
     ScaleFixture old = makeScale(OLD);
-    AcaiaArduinoBLE oldScale(false);
+    EspressoScaleBLE oldScale(false);
     CHECK(oldScale.init());
     std::vector<byte> oldPacket(10, 0);
     oldPacket[2] = 0xd2;
@@ -653,7 +653,7 @@ void testOldAndGenericPacketValidation() {
 
     resetFake();
     ScaleFixture generic = makeScale(GENERIC);
-    AcaiaArduinoBLE genericScale(false);
+    EspressoScaleBLE genericScale(false);
     CHECK(genericScale.init());
     std::vector<byte> genericPacket(20, 0);
     genericPacket[0] = 0x03;
@@ -691,7 +691,7 @@ std::vector<byte> acaiaNewTimer(byte minutes, byte seconds, byte tenths,
 void testScaleTimerParsing() {
     resetFake();
     ScaleFixture acaia = makeScale(NEW);
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.init());
     notify(acaia, acaiaNewWeight(18.5f));
     CHECK(scale.newWeightAvailable());
@@ -717,7 +717,7 @@ void testScaleTimerParsing() {
 
     resetFake();
     ScaleFixture felicita = makeScale(FELICITA);
-    AcaiaArduinoBLE felicitaScale(false);
+    EspressoScaleBLE felicitaScale(false);
     CHECK(felicitaScale.init());
     std::vector<byte> packet(18, 0);
     packet[2] = '+';
@@ -739,14 +739,14 @@ void testScaleTimerParsing() {
 void testRemoteDisconnectAndReconnectTelemetry() {
     resetFake();
     ScaleFixture first = makeScale(OLD);
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.init());
     first.peripheral->connected = false;
     CHECK(scale.isConnected());
     fakeMillis += LINK_DOWN_DEBOUNCE_MS;
     CHECK(!scale.isConnected());
     CHECK(scale.lastDisconnectReason() ==
-          AcaiaDisconnectReason::REMOTE_DISCONNECTED);
+          ScaleDisconnectReason::REMOTE_DISCONNECTED);
 
     ScaleFixture second = makeScale(OLD);
     CHECK(scale.init());
@@ -754,13 +754,13 @@ void testRemoteDisconnectAndReconnectTelemetry() {
     scale.disconnect();
     CHECK(!second.peripheral->connected);
     CHECK(scale.lastDisconnectReason() ==
-          AcaiaDisconnectReason::USER_REQUEST);
+          ScaleDisconnectReason::USER_REQUEST);
 }
 
 void testRejectedPacketsDoNotRefreshAvailability() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.init());
     notify(fixture, acaiaNewWeight(10.0f));
     CHECK(scale.newWeightAvailable());
@@ -776,13 +776,13 @@ void testRejectedPacketsDoNotRefreshAvailability() {
     fakeMillis = lastPacketAt + MAX_PACKET_PERIOD_MS;
     CHECK(!scale.newWeightAvailable());
     CHECK(scale.lastDisconnectReason() ==
-          AcaiaDisconnectReason::PACKET_TIMEOUT);
+          ScaleDisconnectReason::PACKET_TIMEOUT);
 }
 
 void testPacketLengthCorpusAndReconnectSoak() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
-    AcaiaArduinoBLE scale(false);
+    EspressoScaleBLE scale(false);
     CHECK(scale.init());
     for (int length = 0; length <= 64; ++length) {
         if (!scale.isConnected()) {
@@ -796,10 +796,10 @@ void testPacketLengthCorpusAndReconnectSoak() {
     CHECK(scale.rejectedPacketCount() == 65);
     CHECK(scale.reconnectCount() > 0);
     CHECK(scale.lastDisconnectReason() ==
-          AcaiaDisconnectReason::INVALID_PACKET_STREAM);
+          ScaleDisconnectReason::INVALID_PACKET_STREAM);
 
     resetFake();
-    AcaiaArduinoBLE reconnecting(false);
+    EspressoScaleBLE reconnecting(false);
     for (int i = 0; i < 10000; ++i) {
         ScaleFixture cycle = makeScale(OLD);
         CHECK(reconnecting.init());
@@ -809,6 +809,112 @@ void testPacketLengthCorpusAndReconnectSoak() {
         CHECK(!reconnecting.isConnected());
     }
     CHECK(reconnecting.reconnectCount() == 9999);
+}
+
+void testGoldenCommandPayloadsAndFeatures() {
+    CHECK(scaleProtocolCount() == 5);
+    CHECK(std::strcmp(scaleProtocolAt(0)->id, "acaia_legacy") == 0);
+    CHECK(std::strcmp(scaleProtocolAt(1)->id, "acaia") == 0);
+    CHECK(std::strcmp(scaleProtocolAt(2)->id, "bookoo_generic") == 0);
+    CHECK(std::strcmp(scaleProtocolAt(3)->id, "felicita") == 0);
+    CHECK(std::strcmp(scaleProtocolAt(4)->id, "atomheart_eclair") == 0);
+    CHECK(scaleNameIsCompatible("CINCO"));
+    CHECK(scaleNameIsCompatible("ACAIA"));
+    CHECK(scaleNameIsCompatible("PYXIS"));
+    CHECK(scaleNameIsCompatible("LUNAR"));
+    CHECK(scaleNameIsCompatible("PEARL"));
+    CHECK(scaleNameIsCompatible("PROCH"));
+    CHECK(scaleNameIsCompatible("BOOKOO"));
+    CHECK(scaleNameIsCompatible("FELICITA"));
+    CHECK(scaleNameIsCompatible("ECLAIR"));
+    CHECK(!scaleNameIsCompatible("PHONE"));
+
+    resetFake();
+    ScaleFixture acaia = makeScale(NEW);
+    EspressoScaleBLE acaiaScale(false);
+    CHECK(acaiaScale.init());
+    CHECK(acaiaScale.features().has(ScaleFeatureWeight));
+    CHECK(acaiaScale.features().has(ScaleFeatureTare));
+    CHECK(acaiaScale.features().has(ScaleFeatureHeartbeat));
+    CHECK(acaiaScale.features().has(ScaleFeatureCommandAudibleFeedback));
+    CHECK(!acaiaScale.features().has(ScaleFeatureVolume));
+    CHECK(!acaiaScale.features().has(ScaleFeatureCombinedTareStart));
+    CHECK(acaia.write->writes.size() == 2);
+    CHECK(acaia.write->writes[0] ==
+          (std::vector<byte>{0xef, 0xdd, 0x0b, 0x30, 0x31, 0x32, 0x33, 0x34,
+                             0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x31, 0x32,
+                             0x33, 0x34, 0x9a, 0x6d}));
+    CHECK(acaia.write->writes[1] ==
+          (std::vector<byte>{0xef, 0xdd, 0x0c, 0x09, 0x00, 0x01, 0x01, 0x02,
+                             0x02, 0x05, 0x03, 0x04, 0x15, 0x06}));
+    CHECK(scaleCommandOk(acaiaScale.tare()));
+    CHECK(scaleCommandOk(acaiaScale.startTimer()));
+    CHECK(scaleCommandOk(acaiaScale.stopTimer()));
+    CHECK(scaleCommandOk(acaiaScale.resetTimer()));
+    CHECK(scaleCommandOk(acaiaScale.heartbeat()));
+    CHECK(acaia.write->writes[2] ==
+          (std::vector<byte>{0xef, 0xdd, 0x04, 0x00, 0x00, 0x00}));
+    CHECK(acaia.write->writes[3] ==
+          (std::vector<byte>{0xef, 0xdd, 0x0d, 0x00, 0x00, 0x00, 0x00}));
+    CHECK(acaia.write->writes[4] ==
+          (std::vector<byte>{0xef, 0xdd, 0x0d, 0x00, 0x02, 0x00, 0x02}));
+    CHECK(acaia.write->writes[5] ==
+          (std::vector<byte>{0xef, 0xdd, 0x0d, 0x00, 0x01, 0x00, 0x01}));
+    CHECK(acaia.write->writes[6] ==
+          (std::vector<byte>{0xef, 0xdd, 0x00, 0x02, 0x00, 0x02, 0x00}));
+    acaiaScale.disconnect();
+    CHECK(acaiaScale.features().flags == 0);
+
+    resetFake();
+    ScaleFixture generic = makeScale(GENERIC);
+    EspressoScaleBLE genericScale(false);
+    CHECK(genericScale.init());
+    CHECK(generic.write->writes.empty());
+    CHECK(genericScale.features().has(ScaleFeatureCombinedTareStart));
+    CHECK(genericScale.features().has(ScaleFeatureVolume));
+    CHECK(genericScale.features().volumeMax == 5);
+    CHECK(genericScale.features().maxPacketSilenceMs ==
+          GENERIC_MAX_PACKET_PERIOD_MS);
+    CHECK(scaleCommandOk(genericScale.tare()));
+    CHECK(scaleCommandOk(genericScale.startTimer()));
+    CHECK(scaleCommandOk(genericScale.stopTimer()));
+    CHECK(scaleCommandOk(genericScale.resetTimer()));
+    CHECK(scaleCommandOk(genericScale.tareStartTimer()));
+    CHECK(generic.write->writes[0] ==
+          (std::vector<byte>{0x03, 0x0a, 0x01, 0x00, 0x00, 0x08}));
+    CHECK(generic.write->writes[1] ==
+          (std::vector<byte>{0x03, 0x0a, 0x04, 0x00, 0x00, 0x0a}));
+    CHECK(generic.write->writes[2] ==
+          (std::vector<byte>{0x03, 0x0a, 0x05, 0x00, 0x00, 0x0d}));
+    CHECK(generic.write->writes[3] ==
+          (std::vector<byte>{0x03, 0x0a, 0x06, 0x00, 0x00, 0x0c}));
+    CHECK(generic.write->writes[4] ==
+          (std::vector<byte>{0x03, 0x0a, 0x07, 0x00, 0x00, 0x00}));
+
+    resetFake();
+    ScaleFixture felicita = makeScale(FELICITA);
+    EspressoScaleBLE felicitaScale(false);
+    CHECK(felicitaScale.init());
+    CHECK(felicita.write->writes.size() == 1);
+    CHECK(felicita.write->writes[0] == (std::vector<byte>{0x32}));
+    CHECK(felicitaScale.features().has(ScaleFeatureCommandAudibleFeedback));
+    CHECK(!felicitaScale.features().has(ScaleFeatureVolume));
+    CHECK(scaleCommandOk(felicitaScale.tare()));
+    CHECK(scaleCommandOk(felicitaScale.startTimer()));
+    CHECK(scaleCommandOk(felicitaScale.stopTimer()));
+    CHECK(scaleCommandOk(felicitaScale.resetTimer()));
+    CHECK(felicita.write->writes[1] == (std::vector<byte>{0x54}));
+    CHECK(felicita.write->writes[2] == (std::vector<byte>{0x52}));
+    CHECK(felicita.write->writes[3] == (std::vector<byte>{0x53}));
+    CHECK(felicita.write->writes[4] == (std::vector<byte>{0x43}));
+
+    resetFake();
+    ScaleFixture eclair = makeScale(ECLAIR);
+    EspressoScaleBLE eclairScale(false);
+    CHECK(eclairScale.init());
+    CHECK(eclair.write->writes.empty());
+    CHECK(!eclairScale.features().has(ScaleFeatureCommandAudibleFeedback));
+    CHECK(!eclairScale.features().has(ScaleFeatureHeartbeat));
 }
 
 } // namespace
@@ -836,7 +942,8 @@ int main() {
     testRemoteDisconnectAndReconnectTelemetry();
     testRejectedPacketsDoNotRefreshAvailability();
     testPacketLengthCorpusAndReconnectSoak();
-    std::cout << "AcaiaArduinoBLE host tests passed: " << checks
+    testGoldenCommandPayloadsAndFeatures();
+    std::cout << "EspressoScaleBLE host tests passed: " << checks
               << " checks" << std::endl;
     return 0;
 }

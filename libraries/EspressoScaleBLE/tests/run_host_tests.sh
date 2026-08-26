@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+build_dir="${TMPDIR:-/tmp}/espresso-scale-ble-host-tests"
+mkdir -p "$build_dir"
+
+compiler="${CXX:-c++}"
+common_flags=(
+    -std=c++11
+    -Wall
+    -Wextra
+    -Werror
+    -Wdeprecated-copy
+    -pedantic
+    -I"$repo_root/tests/stubs"
+    -I"$repo_root/src"
+)
+
+"$compiler" "${common_flags[@]}" \
+  -fsanitize=address,undefined \
+  -fno-omit-frame-pointer \
+  "$repo_root/src/EspressoScaleBLE.cpp" \
+  "$repo_root/src/ScaleProtocolCommon.cpp" \
+  "$repo_root/src/protocols/Registry.cpp" \
+  "$repo_root/src/protocols/Acaia.cpp" \
+  "$repo_root/src/protocols/GenericFf11.cpp" \
+  "$repo_root/src/protocols/Felicita.cpp" \
+  "$repo_root/src/protocols/Eclair.cpp" \
+  "$repo_root/tests/espresso_scale_ble_host_test.cpp" \
+  -o "$build_dir/espresso_scale_ble_host_test"
+
+ASAN_OPTIONS=detect_leaks=0 "$build_dir/espresso_scale_ble_host_test"

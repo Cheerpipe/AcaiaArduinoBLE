@@ -105,7 +105,7 @@ void resetMomentaryHarness() {
   observedWeightConnectionGeneration = 0;
   pendingScaleConnectIdleSync = false;
   scale.connected = true;
-  setScaleLinkState(ScaleLinkState::CONNECTED);
+  updateWorkerLinkState();
 
   scaleCommandQueue =
       xQueueCreate(SCALE_COMMAND_QUEUE_LENGTH, sizeof(ScaleCommand));
