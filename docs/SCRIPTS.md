@@ -19,6 +19,12 @@ from:
 3. The `.shotstopper` file at the repository root
 4. An interactive prompt (Enter accepts the value in brackets)
 
+If `--port` is missing, or the saved/CLI path is not a present device node,
+flash and monitor scripts prompt like OTA does for the device password: they
+list detected USB-CDC ports (`/dev/cu.usbmodem*` on macOS, `/dev/ttyACM*` on
+Linux), suggest the first match, and accept Enter or a typed path. The chosen
+port is saved to `.shotstopper`.
+
 After a successful run, non-secret values are saved, so the next command can
 be just `./scripts/bfm-idf`. The **device password is never stored or
 suggested** — pass `--password` / `-t` or `SHOTSTOPPER_DEVICE_PASSWORD`

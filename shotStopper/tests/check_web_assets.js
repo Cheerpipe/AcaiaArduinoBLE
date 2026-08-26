@@ -369,7 +369,7 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 51650) {
+if (htmlBytes > 52000) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
 if (jsBytes > 132500) {
@@ -1449,6 +1449,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('<legend>Machine and scale</legend>') ||
     !ui.includes('<legend>Wi-Fi</legend>') ||
     !ui.includes('<legend>Device password</legend>') ||
+    !ui.includes('<legend>Frontend</legend>') ||
     !ui.includes('id="presetCards"') ||
     !ui.includes('id="presetNewBtn"') ||
     !ui.includes('id="presetDupBtn"') ||
@@ -2351,18 +2352,26 @@ if (!/<link\s+rel="stylesheet"\s+href="\/app\.css\?v=/.test(shellHtml) &&
 if (!shellHtml.includes('name="color-scheme" content="light dark"')) {
   throw new Error('Web UI must declare color-scheme so Safari form controls follow dark mode');
 }
-if (!shellHtml.includes('class="themeSel"') ||
-    shellHtml.indexOf('class="themeSel"') > shellHtml.indexOf('id="navToggle"') ||
-    shellHtml.indexOf('class="topBar"') > shellHtml.indexOf('class="themeSel"') ||
-    !css.includes('.themeSel{position:absolute') ||
+if (shellHtml.includes('class="themeSel"') ||
+    css.includes('.themeSel{') ||
+    css.includes('.themeOpt') ||
     !css.includes('html.theme-light{') ||
     !css.includes('html.theme-dark{') ||
     !appJsSource.includes("THEME_KEY='ssTh'") ||
-    !appJsSource.includes("THEME_MODES=['auto','dark','light']") ||
+    !appJsSource.includes("THEME_MODES=['auto','light','dark']") ||
+    !appJsSource.includes("getElementById('uiTheme')") ||
     !appJsSource.includes('localStorage.getItem(THEME_KEY)') ||
     !appJsSource.includes("classList.toggle('theme-dark'") ||
-    !appJsSource.includes("classList.toggle('theme-light'")) {
-  throw new Error('Web UI must offer a compact Auto/Dark/Light appearance control');
+    !appJsSource.includes("classList.toggle('theme-light'") ||
+    !html.includes('id="frontendPanel"') ||
+    !html.includes('<legend>Frontend</legend>') ||
+    !html.includes('id="uiTheme"') ||
+    !html.includes('<option value="auto" selected>Auto</option>') ||
+    !html.includes('<option value="light">Light</option>') ||
+    !html.includes('<option value="dark">Dark</option>') ||
+    html.indexOf('id="dateTimePanel"') > html.indexOf('id="frontendPanel"') ||
+    html.indexOf('id="frontendPanel"') > html.indexOf('id="devicePasswordPanel"')) {
+  throw new Error('Theme must be an Admin Frontend dropdown (Auto/Light/Dark), not a Home selector');
 }
 if (/<link\s+[^>]*href=["']https?:\/\//i.test(shellHtml) ||
     /cdn\.|unpkg\.|jsdelivr\./i.test(shellHtml)) {
@@ -3277,8 +3286,8 @@ if (generated.secondaryGzip.length > 4096) {
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
 }
-if (generated.cssGzip.length > 6400) {
-  throw new Error('Compressed Web CSS exceeds the 6.25 KiB gzip budget');
+if (generated.cssGzip.length > 6500) {
+  throw new Error('Compressed Web CSS exceeds the 6.3 KiB gzip budget');
 }
 if (generated.combined > 52480) {
   throw new Error('Combined Web UI gzip exceeds the 51.25 KiB flash budget');

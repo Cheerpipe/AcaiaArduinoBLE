@@ -33,6 +33,10 @@ export function init(){
   $('otaDiscardButton').onclick=R.otaDiscard;
   $('factoryResetButton').onclick=()=>{if(confirm('Restore all factory settings? This erases Wi-Fi, config, calibration, history, and the device password, then restarts. This cannot be undone.'))R.command('/api/v1/factory-reset',{confirm:'ERASE_ALL_SETTINGS'})};
   R.populateTimezoneOptions();
+  const themeSel=$('uiTheme');
+  if(themeSel){
+    try{const v=localStorage.getItem('ssTh');themeSel.value=['auto','light','dark'].includes(v)?v:'auto'}catch(_){themeSel.value='auto'}
+  }
 
   
   // networkAddressLoaded reset on save/forget handled below

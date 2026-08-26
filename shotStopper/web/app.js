@@ -2,12 +2,12 @@
 
 import * as R from '/js/runtime.js?v=__FW_ASSET_TAG__';
 
-const THEME_KEY='ssTh',THEME_MODES=['auto','dark','light'];
+const THEME_KEY='ssTh',THEME_MODES=['auto','light','dark'];
 function themeMode(){try{const v=localStorage.getItem(THEME_KEY);return THEME_MODES.includes(v)?v:'auto'}catch(_){return'auto'}}
-function paintTheme(m){const h=document.documentElement,c=m==='auto'?'light dark':m,b=document.querySelector('.themeSel'),t=m[0].toUpperCase()+m.slice(1);h.classList.toggle('theme-dark',m==='dark');h.classList.toggle('theme-light',m==='light');h.style.colorScheme=c;const e=document.querySelector('meta[name="color-scheme"]');if(e)e.content=c;if(b){b.textContent=t[0];b.title=t+' — tap to change';b.setAttribute('aria-label','Appearance: '+t)}}
-function setTheme(m){try{localStorage.setItem(THEME_KEY,m)}catch(_){}paintTheme(m)}
+function paintTheme(m){const h=document.documentElement,c=m==='auto'?'light dark':m;h.classList.toggle('theme-dark',m==='dark');h.classList.toggle('theme-light',m==='light');h.style.colorScheme=c;const e=document.querySelector('meta[name="color-scheme"]');if(e)e.content=c;const s=document.getElementById('uiTheme');if(s)s.value=m}
+function setTheme(m){if(!THEME_MODES.includes(m))m='auto';try{localStorage.setItem(THEME_KEY,m)}catch(_){}paintTheme(m)}
 paintTheme(themeMode());
-{const b=document.querySelector('.themeSel');if(b){b.type='button';b.onclick=()=>setTheme(THEME_MODES[(THEME_MODES.indexOf(themeMode())+1)%3])}}
+document.addEventListener('change',e=>{if(e.target&&e.target.id==='uiTheme')setTheme(e.target.value)});
 
 const assetQuery = new URL(import.meta.url).search;
 const htmlCache = new Map();

@@ -9,6 +9,9 @@
 #   4. an interactive prompt for the keys the command requires
 #      (Enter accepts the suggestion shown in brackets)
 #
+# A required serial port whose device node is missing is treated like an
+# unset key: the scripts prompt and suggest the first live USB-CDC path.
+#
 # After a successful resolve the values used are merged into .shotstopper.
 # The device password is never loaded, suggested, or persisted (use env/CLI
 # each run).
@@ -74,6 +77,16 @@ ss_put() {
   ss_origin_set "$1" "$3"
 }
 
+ss_cli_forget() {
+  ss_set "$1" ""
+  ss_origin_set "$1" ""
+}
+
+# True when the path is a present device node (not merely a non-empty string).
+ss_port_exists() {
+  [[ -n "$1" && -e "$1" ]]
+}
+
 ss_cli_reset() {
   local key
   for key in $SS_CLI_KEYS; do
@@ -111,6 +124,8 @@ Named parameters (long and short):
 No script silently fills in missing values. Each parameter comes from the flag,
 its environment variable, the .shotstopper file at the repository root, or a
 prompt. At the prompt, Enter accepts the suggested value in brackets.
+A missing or non-existent --port is prompted like the device password, with the
+first detected USB-CDC device suggested.
 After resolving parameters, the values used are saved to .shotstopper
 (the device password is never saved or suggested).
 EOF
@@ -327,6 +342,30 @@ ss_prompt_text() {
 ss_prompt_suggestion() {
   local key="$1" current detected arch_s
   ss_is_secret "$key" && return 0
+
+  # Port prompts always prefer a live USB-CDC device over a stale saved path.
+  if [[ "$key" == "port" ]]; then
+    if declare -f shotstopper_detect_ports >/dev/null 2>&1; then
+      detected="$(shotstopper_detect_ports | { IFS= read -r first || true; printf '%s' "${first:-}"; })"
+      if [[ -n "$detected" ]]; then
+        printf '%s' "$detected"
+        return 0
+      fi
+    fi
+    current="$(ss_get port)"
+    if ss_port_exists "$current"; then
+      printf '%s' "$current"
+      return 0
+    fi
+    current="$(ss_cli_store_value port 2>/dev/null || true)"
+    if ss_port_exists "$current"; then
+      printf '%s' "$current"
+      return 0
+    fi
+    printf '%s' '/dev/cu.usbmodem2101'
+    return 0
+  fi
+
   current="$(ss_get "$key")"
   if [[ -n "$current" ]]; then
     printf '%s' "$current"
@@ -338,16 +377,6 @@ ss_prompt_suggestion() {
     return 0
   fi
   case "$key" in
-    port)
-      if declare -f shotstopper_detect_ports >/dev/null 2>&1; then
-        detected="$(shotstopper_detect_ports | { IFS= read -r first || true; printf '%s' "${first:-}"; })"
-        if [[ -n "$detected" ]]; then
-          printf '%s' "$detected"
-          return 0
-        fi
-      fi
-      printf '%s' '/dev/cu.usbmodem2101'
-      ;;
     arch) printf 'n16r8' ;;
     speed) printf '115200' ;;
     host) printf '192.168.4.1' ;;
@@ -374,8 +403,9 @@ ss_prompt_hint() {
         detected="$(shotstopper_detect_ports | tr '\n' ' ')" || detected=""
         if [[ -n "$detected" ]]; then
           printf 'Detected USB ports: %s\n' "${detected% }" > /dev/tty
+          printf 'Press Enter to use the suggested port, or type another path.\n' > /dev/tty
         else
-          printf 'No /dev/cu.usbmodem<number> device detected.\n' > /dev/tty
+          printf 'No USB CDC device detected (/dev/cu.usbmodem* or /dev/ttyACM*).\n' > /dev/tty
         fi
       fi
       ;;
@@ -436,7 +466,17 @@ ss_validate_key() {
           ;;
       esac
       ;;
-    port|password|build_dir|output_dir)
+    port)
+      if [[ -z "$value" ]]; then
+        ss_cli_die "Parameter --port cannot be empty."
+        return 1
+      fi
+      if ! ss_port_exists "$value"; then
+        ss_cli_die "Serial port $value does not exist."
+        return 1
+      fi
+      ;;
+    password|build_dir|output_dir)
       if [[ -z "$value" ]]; then
         ss_cli_die "Parameter --$(printf '%s' "$key" | tr '_' '-') cannot be empty."
         return 1
@@ -454,13 +494,30 @@ ss_validate_key() {
 # ss_cli_resolve "<required keys>" ["<optional keys to ask once>"]
 # Loads env + store, prints the summary, prompts for what is missing and
 # validates the result. Fails with exit code 2 when it cannot prompt.
+#
+# A required --port whose device node is missing (stale .shotstopper entry,
+# vanished USB path, or a bad CLI/env value) is forgotten and prompted the
+# same way as an unset password: suggest the first live USB-CDC port, accept
+# Enter, then persist the chosen path.
 ss_cli_resolve() {
   local required="$1" optional="${2:-}"
   local wanted="$required $optional"
-  local key missing=""
+  local key missing="" port_val
 
   ss_cli_apply_env
   ss_cli_load_store
+
+  # Drop unusable ports before the missing-key scan so flash/monitor prompt
+  # early instead of failing after a long build.
+  if [[ " $required " == *" port "* ]] && ss_is_set port; then
+    port_val="$(ss_get port)"
+    if ! ss_port_exists "$port_val"; then
+      if [[ -n "$port_val" ]]; then
+        printf 'Serial port %s does not exist.\n' "$port_val" >&2
+      fi
+      ss_cli_forget port
+    fi
+  fi
 
   for key in $required; do
     ss_is_set "$key" || missing="$missing $key"
@@ -499,6 +556,9 @@ ss_cli_resolve() {
         *' host '*)
           printf 'The IP appears under Admin/Diagnostic in the Web UI; on SoftAP it is 192.168.4.1.\n' >&2
           ;;
+        *' port '*)
+          printf 'Plug in the ESP32-S3 over USB and pass --port /dev/cu.usbmodem… (macOS) or /dev/ttyACM… (Linux).\n' >&2
+          ;;
       esac
       return 2
     fi
@@ -512,7 +572,18 @@ ss_cli_resolve() {
 
   for key in $wanted; do
     ss_is_set "$key" || continue
-    ss_validate_key "$key" || return 2
+    while ! ss_validate_key "$key"; do
+      # Wrong path typed at the prompt: ask again instead of aborting the run.
+      if [[ "$key" == "port" ]] && ss_can_prompt; then
+        ss_cli_forget port
+        ss_prompt_one port || {
+          printf 'Input interrupted.\n' >&2
+          return 2
+        }
+        continue
+      fi
+      return 2
+    done
   done
   ss_cli_save
   return 0

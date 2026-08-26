@@ -29,13 +29,20 @@ Classic ESP32 and Nano ESP32 are no longer supported.
 EOF
 }
 
-# Prints every /dev/cu.usbmodem<digits> device, one per line, in glob order.
-# Used only to enrich the interactive prompt; it never selects a port.
+# Prints ESP32 USB-CDC serial devices, one per line, in glob order.
+# macOS: /dev/cu.usbmodem<digits>  Linux: /dev/ttyACM<digits>
+# Used to suggest a port at the interactive prompt; it never auto-selects.
 shotstopper_detect_ports() {
   local p found=1
   for p in /dev/cu.usbmodem[0-9]*; do
     [[ -e "$p" ]] || continue
     [[ "$p" =~ ^/dev/cu\.usbmodem[0-9]+$ ]] || continue
+    printf '%s\n' "$p"
+    found=0
+  done
+  for p in /dev/ttyACM[0-9]*; do
+    [[ -e "$p" ]] || continue
+    [[ "$p" =~ ^/dev/ttyACM[0-9]+$ ]] || continue
     printf '%s\n' "$p"
     found=0
   done
