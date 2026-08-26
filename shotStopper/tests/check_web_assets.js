@@ -2734,14 +2734,14 @@ if (!ui.includes('async function loadStatus(){') ||
       ui.includes("name === 'home' || name === 'settings' || name === 'admin' ||") ||
       ui.includes("name === 'diagnostic'")) ||
     ui.includes("name==='presets'") ||
-    !(ui.includes("name==='history'") || ui.includes("name === 'history'")) ||
+    !(ui.includes("name==='stats'") || ui.includes("name === 'stats'")) ||
     !ui.includes('renderRoute(location.pathname)') ||
     !ui.includes('ensureView') ||
     ui.includes('Promise.all([loadShots(),loadLog()])')) {
   throw new Error('Web UI must lazy-load status/shots/log per active SPA view; background polls stay gated');
 }
 if (!ui.includes('id="view-home"') ||
-    !ui.includes('id="view-history"') ||
+    !ui.includes('id="view-stats"') ||
     !ui.includes('id="view-settings"') ||
     ui.includes('id="view-presets"') ||
     !ui.includes('id="view-admin"') ||
@@ -2754,7 +2754,7 @@ if (!ui.includes('id="view-home"') ||
     ui.includes('data-route="/debug"') ||
     !ui.includes('data-route="/diagnostic"') ||
     !ui.includes('history.pushState')) {
-  throw new Error('Web UI must expose Home/History/Admin/Diagnostic/Settings routes as an SPA');
+  throw new Error('Web UI must expose Home/Stats/Admin/Diagnostic/Settings routes as an SPA');
 }
 const maxHandlersMatch = network.match(/max_uri_handlers\s*=\s*(\d+)/);
 if (!maxHandlersMatch) {
