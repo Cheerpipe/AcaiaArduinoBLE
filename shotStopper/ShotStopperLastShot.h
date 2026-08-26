@@ -7,8 +7,8 @@
 namespace shotstopper {
 
 constexpr uint32_t LAST_SHOT_MAGIC = 0x4C534854U;  // "LSHT"
-// Current last-shot schema. V1 is the baseline — no upgrade from prior layouts.
-constexpr uint16_t LAST_SHOT_SCHEMA_VERSION = 1;
+// Current last-shot schema. Unrecognized blobs decode as empty (no upgrade).
+constexpr uint16_t LAST_SHOT_SCHEMA_VERSION = 2;
 
 struct LastShotBlob {
   uint32_t magic = LAST_SHOT_MAGIC;

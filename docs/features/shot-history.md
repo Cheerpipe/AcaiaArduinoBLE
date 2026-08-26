@@ -13,9 +13,12 @@ timer-only brews, and cycles without a scale are **not** stored.
 Typical fields include local time (from the configured timezone offset),
 duration, goal and actual weight, error, average flow, first-drop time,
 whether Fast/Slow guards ran or extended the shot, `shot_type`, `cut_type`
-(`auto`, `manual`, `limit`), and `stop_detail` (for example
+(`auto`, `manual`, `limit`), `stop_detail` (for example
 `normal_target`, `paddle`, `web_stop`, `wall_limit`, `hard_limit`,
-`extended_max_weight`, `cup_removed`).
+`extended_max_weight`, `cup_removed`), and a manual `rating` from 0
+(unrated) to 5. Rate a finished shot from Home (Last/Current shot) or from
+a history card by tapping a star; tapping the current star again clears the
+score.
 
 The log holds up to **120** shots. The following are never stored:
 

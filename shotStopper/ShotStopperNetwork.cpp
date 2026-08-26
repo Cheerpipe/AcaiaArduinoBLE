@@ -3131,6 +3131,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/shots", HTTP_GET, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/shots/clear", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/shots/delete", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/shots/rate", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/last-shot/clear", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/time/sync", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/config", HTTP_POST, ownedApiHandler) &&
@@ -3546,6 +3547,7 @@ esp_err_t ShotStopperNetwork::ownedApiHandler(httpd_req_t *request) {
   if (apiUriMatches(request->uri, "/api/v1/shots")) return shotsHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/shots/clear")) return shotsClearHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/shots/delete")) return shotsDeleteHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/shots/rate")) return shotsRateHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/last-shot/clear")) return lastShotClearHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/time/sync")) return timeSyncHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/config")) return configHandler(request);
@@ -4203,7 +4205,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"autoToManualGuardEnforced\":%s,"
         "\"autoToManualGuardRemainingMs\":%lu,"
         "\"noScaleShotGuardEnabled\":%s,"
-        "\"noScaleShotGuardArmed\":%s,\"endReason\":\"%s\"},"
+        "\"noScaleShotGuardArmed\":%s,\"endReason\":\"%s\","
+        "\"rating\":%u,\"shotLogId\":%lu},"
         "\"noScaleShotGuard\":{\"enabled\":%s,\"armed\":%s},"
         "\"cupPresence\":{\"state\":\"%s\",\"present\":%s}",
         stopperStateName(control.state), stateLabel(control.state),
@@ -4262,6 +4265,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.lastShot.noScaleShotGuardEnabled ? "true" : "false",
         control.lastShot.noScaleShotGuardArmed ? "true" : "false",
         endReasonName(control.lastShot.endReason),
+        static_cast<unsigned>(control.lastShot.rating),
+        static_cast<unsigned long>(control.lastShot.shotLogId),
         control.noScaleShotGuardEnabled ? "true" : "false",
         control.noScaleShotGuardArmed ? "true" : "false",
         cupPresenceStateName(control.cupPresenceState),
@@ -5487,7 +5492,7 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
              "\"slowExtractionGuardEnabled\":%s,\"slowExtractionExtended\":%s,"
              "\"stopDetail\":\"%s\",\"maxRecoveryWeightG\":%s,"
              "\"minBbwBrewTimeS\":%s,\"targetReachedEarlyS\":%s,"
-             "\"actualWeightSource\":\"%s\",%s}",
+             "\"actualWeightSource\":\"%s\",\"rating\":%u,%s}",
              index == start ? "" : ",",
              static_cast<unsigned long>(record.id),
              static_cast<unsigned long>(record.bootId),
@@ -5514,6 +5519,7 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
              maxRecovery, minBbwBrewTime, targetEarly,
              actualWeightSourceName(
                  static_cast<ActualWeightSource>(record.actualWeightSource)),
+             static_cast<unsigned>(shotLogRating(record.extractionGuardEnabled)),
              curveJson);
     if (sendCopiedChunk(request, work.jsonItem, strlen(work.jsonItem)) !=
         ESP_OK) {
@@ -5642,6 +5648,59 @@ esp_err_t ShotStopperNetwork::shotsDeleteHandler(httpd_req_t *request) {
                      "The requested shot record was not found.");
   }
   return sendJson(request, STATUS_OK, "{\"deleted\":true}");
+}
+
+esp_err_t ShotStopperNetwork::shotsRateHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  const ControlGateSnapshot status = self.controlGate();
+  if (!self.historyMutationAllowed(request, status)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "Stop the cycle, switch the physical activator OFF, and wait for Ready before rating shots.");
+  }
+
+  const esp_err_t bodyStatus = self.lockJsonBody(
+      request, "A bounded JSON request is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
+  }
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
+  static const char *const fields[] = {"id", "lastShot", "rating"};
+  uint8_t rating = 0;
+  uint32_t shotId = 0;
+  bool lastShot = false;
+  const bool hasId = jsonFieldPresent(root, "id");
+  const bool hasLastShot = jsonFieldPresent(root, "lastShot");
+  const bool parsed =
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 3) &&
+      jsonUint8(root, "rating", rating) && rating <= SHOT_LOG_RATING_MAX &&
+      hasId != hasLastShot &&
+      (!hasId || (jsonUint32(root, "id", shotId) && shotId != 0)) &&
+      (!hasLastShot || (jsonBoolean(root, "lastShot", lastShot) && lastShot));
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  self.unlockJsonBody();
+  if (!parsed) {
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_FIELD",
+                     "A rating 0-5 and either a shot id or lastShot is required.");
+  }
+
+  if (hasLastShot) {
+    if (self.callbacks_.rateLastShot == nullptr ||
+        !self.callbacks_.rateLastShot(rating)) {
+      return sendError(request, STATUS_NOT_FOUND, "LAST_SHOT_NOT_FOUND",
+                       "There is no last shot to rate.");
+    }
+  } else if (self.callbacks_.rateShotRecord == nullptr ||
+             !self.callbacks_.rateShotRecord(shotId, rating)) {
+    return sendError(request, STATUS_NOT_FOUND, "SHOT_NOT_FOUND",
+                     "The requested shot record was not found.");
+  }
+  char json[48] = {};
+  snprintf(json, sizeof(json), "{\"rated\":true,\"rating\":%u}",
+           static_cast<unsigned>(rating));
+  return sendJson(request, STATUS_OK, json);
 }
 
 esp_err_t ShotStopperNetwork::timeSyncHandler(httpd_req_t *request) {

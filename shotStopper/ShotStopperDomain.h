@@ -1795,6 +1795,8 @@ struct PersistedLastShot {
   bool noScaleShotGuardEnabled = false;
   bool noScaleShotGuardArmed = false;
   char scaleProtocol[20] = "none";
+  uint8_t rating = 0;
+  uint32_t shotLogId = 0;
 };
 
 struct ControlStatusSnapshot {

@@ -124,7 +124,7 @@ html.momentaryMachine .paddleOnly,html:not(.reedMachine) .reedOnly,html:not(.mom
 .shotTrack #shotBar{left:0;background:var(--ok)}
 .shotTrack #shotBarFast{background:#d97706}
 #shotBarTicks{margin:.15rem .1rem .55rem}
-.shotCard{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"dur dur dur actual actual actual" "goal goal flow flow drop drop" "err err shot shot ended ended";gap:.5rem .4rem;align-items:start;margin:.45rem 0 .15rem}
+.shotCard{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"dur dur dur actual actual actual" "goal goal flow flow drop drop" "err err shot shot ended ended" "rate rate rate rate rate rate";gap:.5rem .4rem;align-items:start;margin:.45rem 0 .15rem}
 .shotCard .shotDur{grid-area:dur}
 .shotCard .shotActual{grid-area:actual}
 .shotCard > :nth-child(3){grid-area:goal}
@@ -133,6 +133,7 @@ html.momentaryMachine .paddleOnly,html:not(.reedMachine) .reedOnly,html:not(.mom
 .shotCard > :nth-child(6){grid-area:drop}
 .shotCard > :nth-child(7){grid-area:ended}
 .shotCard > :nth-child(8){grid-area:shot}
+.shotCard .shotRate{grid-area:rate}
 .shotCard:has(>:nth-child(5):last-child){grid-template-areas:"dur dur dur actual actual actual" "goal goal err err flow flow"}
 #log{width:100%;height:12rem;font-family:monospace;white-space:pre;overflow:auto;box-sizing:border-box;border:1px solid var(--ln);border-radius:.5rem;background:var(--sf);color:var(--fg)}
 small{display:block;color:var(--mu)}
@@ -213,7 +214,7 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 #shotTable{width:100%;border-collapse:collapse;font-size:.82rem}
 #shotTable thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 #shotTable,#shotTable tbody{display:block}
-#shotTable tr{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"dur dur dur actual actual actual" "time time time time time time" "goal goal flow flow drop drop" "err err shot shot ended ended" "spark spark spark spark spark spark";gap:.5rem .4rem;align-items:start;position:relative;background:var(--sf);border:1px solid var(--ln);border-radius:var(--r);padding:.8rem 2.4rem .8rem .85rem;margin:0 0 .65rem}
+#shotTable tr{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"dur dur dur actual actual actual" "time time time time time time" "goal goal flow flow drop drop" "err err shot shot ended ended" "rate rate rate rate rate rate" "spark spark spark spark spark spark";gap:.5rem .4rem;align-items:start;position:relative;background:var(--sf);border:1px solid var(--ln);border-radius:var(--r);padding:.8rem 2.4rem .8rem .85rem;margin:0 0 .65rem}
 #shotTable th,#shotTable td{border:0;padding:0;text-align:left;white-space:normal;overflow-wrap:anywhere}
 #shotTable td{display:flex;flex-direction:column;gap:.08rem;min-width:0;font-weight:650}
 #shotTable td::before{content:attr(data-label);font-size:.62rem;font-weight:600;color:var(--mu);letter-spacing:.02em;text-transform:uppercase}
@@ -226,6 +227,7 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 #shotTable td:nth-child(7){grid-area:drop}
 #shotTable td:nth-child(8){grid-area:ended}
 #shotTable td:nth-child(9){grid-area:shot}
+#shotTable td.shotRateCell{grid-area:rate}
 #shotTable td:first-child{font-size:.8rem;font-weight:600;color:var(--mu);align-self:center}
 #shotTable td:first-child::before{content:none}
 #shotTable .shotDel,#shotPanel .shotDel{position:absolute;top:.15rem;right:.15rem;z-index:1;align-items:center;justify-content:center}
@@ -244,11 +246,22 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 .shotSparkY:after{content:"0 g"}
 .statsDurSparkY:after{content:"0"}
 .shotSparkHost[hidden],#shotTable td.shotSparkCell[hidden]{display:none}
-#shotTable tr.noSpark{grid-template-areas:"dur dur dur actual actual actual" "time time time time time time" "goal goal flow flow drop drop" "err err shot shot ended ended"}
+#shotTable tr.noSpark{grid-template-areas:"dur dur dur actual actual actual" "time time time time time time" "goal goal flow flow drop drop" "err err shot shot ended ended" "rate rate rate rate rate rate"}
 .shotSpark{grid-area:plot;display:block;width:100%;height:100%;color:var(--ok);overflow:visible}
 .shotSparkHost .ruleChartTicks,#shotTable td.shotSparkCell .ruleChartTicks{grid-area:x}
 .shotSparkCell{min-height:3.55rem}
 .shotSparkCell::before{content:none}
+.shotCard .shotRate > div,.shotRateCell .starRate{color:inherit}
+.starRate{display:flex;align-items:center;justify-content:flex-start;gap:0;width:max-content;margin:.05rem 0 0}
+.starRate button{margin:0;padding:.42rem 0;border:0;background:transparent;color:var(--ln);cursor:pointer;min-width:0;width:1.35rem;min-height:2.2rem;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center}
+.starRate button+button{margin-left:-.18rem}
+.starRate button.on{color:var(--ac)}
+.starRate button:disabled{cursor:not-allowed;opacity:.45}
+.starRate button:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+.starRate svg{width:1.35rem;height:1.35rem;display:block;fill:currentColor}
+#shotTable .shotRateCell .starRate button{min-width:0;width:1.35rem;min-height:2.2rem;padding:.42rem 0;border:0;background:transparent;color:var(--ln);box-shadow:none;flex:0 0 auto}
+#shotTable .shotRateCell .starRate button.on{color:var(--ac)}
+#shotTable .shotRateCell .starRate button .g{display:none}
 #shotTable .btnGlyph,#shotPanel .btnGlyph{border:0;border-radius:.4rem;border-left:0;min-height:2.35rem;min-width:2.35rem;padding:0;flex:0 0 auto;background:transparent;color:var(--dx);box-shadow:none}
 #shotTable .btnGlyph.btnDanger,#shotPanel .btnGlyph.btnDanger{border:0;box-shadow:none;background:transparent;color:var(--dx)}
 #shotTable .btnGlyph .g{display:inline-flex;width:1.25rem;height:1.25rem;font-size:1.45rem}

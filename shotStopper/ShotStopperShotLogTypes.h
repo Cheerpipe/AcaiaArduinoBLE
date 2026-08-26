@@ -93,6 +93,11 @@ constexpr uint8_t SHOT_LOG_FAST_GUARD_BIT = 0x01;
 constexpr uint8_t SHOT_LOG_SLOW_GUARD_BIT = 0x02;
 constexpr uint8_t SHOT_LOG_FAST_EXTENDED_BIT = 0x01;
 constexpr uint8_t SHOT_LOG_SLOW_EXTENDED_BIT = 0x02;
+// User rating 0–5 packed into unused bits of extractionGuardEnabled so the
+// 48-byte NVS record does not grow. Bits 0–1 remain Fast/Slow guard flags.
+constexpr uint8_t SHOT_LOG_RATING_SHIFT = 2;
+constexpr uint8_t SHOT_LOG_RATING_MASK = 0x1C;
+constexpr uint8_t SHOT_LOG_RATING_MAX = 5;
 
 inline uint8_t shotLogPackGuardFlags(bool fastEnabled, bool slowEnabled) {
   return static_cast<uint8_t>((fastEnabled ? SHOT_LOG_FAST_GUARD_BIT : 0) |
@@ -118,6 +123,19 @@ inline bool shotLogFastExtended(uint8_t flags) {
 
 inline bool shotLogSlowExtended(uint8_t flags) {
   return (flags & SHOT_LOG_SLOW_EXTENDED_BIT) != 0;
+}
+
+inline uint8_t shotLogRating(uint8_t flags) {
+  return static_cast<uint8_t>((flags & SHOT_LOG_RATING_MASK) >>
+                              SHOT_LOG_RATING_SHIFT);
+}
+
+inline uint8_t shotLogPackRating(uint8_t flags, uint8_t rating) {
+  if (rating > SHOT_LOG_RATING_MAX) {
+    rating = SHOT_LOG_RATING_MAX;
+  }
+  return static_cast<uint8_t>((flags & static_cast<uint8_t>(~SHOT_LOG_RATING_MASK)) |
+                              (rating << SHOT_LOG_RATING_SHIFT));
 }
 
 inline const char *shotLogStopDetailName(ShotLogStopDetail detail) {
@@ -284,6 +302,7 @@ struct ShotLogRecord {
   uint16_t avgFlowCgS;
   uint8_t shotType;
   uint8_t cutType;
+  // Bits 0–1: Fast/Slow guard enabled. Bits 2–4: user rating 0–5.
   uint8_t extractionGuardEnabled;
   uint8_t extractionExtended;
   uint8_t stopDetail;

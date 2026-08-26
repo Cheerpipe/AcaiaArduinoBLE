@@ -141,6 +141,8 @@ struct NetworkBridgeCallbacks {
   size_t (*copyShotRecords)(ShotLogRecord *output, size_t capacity) = nullptr;
   size_t (*copyShotCurves)(ShotCurveRecord *output, size_t capacity) = nullptr;
   bool (*deleteShotRecord)(uint32_t id) = nullptr;
+  bool (*rateShotRecord)(uint32_t id, uint8_t rating) = nullptr;
+  bool (*rateLastShot)(uint8_t rating) = nullptr;
   bool (*clearShotLog)() = nullptr;
   bool (*clearLastShot)() = nullptr;
   bool (*resetAllDurableStores)(PersistedSettings &settings) = nullptr;
@@ -362,6 +364,7 @@ class ShotStopperNetwork {
   static esp_err_t shotsHandler(httpd_req_t *request);
   static esp_err_t shotsClearHandler(httpd_req_t *request);
   static esp_err_t shotsDeleteHandler(httpd_req_t *request);
+  static esp_err_t shotsRateHandler(httpd_req_t *request);
   static esp_err_t lastShotClearHandler(httpd_req_t *request);
   static esp_err_t timeSyncHandler(httpd_req_t *request);
   static esp_err_t configHandler(httpd_req_t *request);

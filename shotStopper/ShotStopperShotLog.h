@@ -255,6 +255,34 @@ class ShotLog {
 
   bool dirty() const { return dirty_; }
 
+  bool updateRating(uint32_t id, uint8_t rating) {
+    if (id == 0 || rating > SHOT_LOG_RATING_MAX || store_.header.count == 0) {
+      return false;
+    }
+    size_t index = store_.header.writeIndex;
+    bool found = false;
+    for (size_t n = 0; n < store_.header.count; ++n) {
+      if (index == 0) {
+        index = SHOT_LOG_CAPACITY;
+      }
+      --index;
+      if (store_.records[index].id == id) {
+        store_.records[index].extractionGuardEnabled = shotLogPackRating(
+            store_.records[index].extractionGuardEnabled, rating);
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      return false;
+    }
+    if (save()) {
+      return true;
+    }
+    load();
+    return false;
+  }
+
   bool containsId(uint32_t id) const {
     if (id == 0 || store_.header.count == 0) {
       return false;

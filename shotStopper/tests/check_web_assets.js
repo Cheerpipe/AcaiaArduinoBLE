@@ -386,13 +386,13 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 52000) {
+if (htmlBytes > 52200) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 135000) {
+if (jsBytes > 137000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 186500) {
+if (htmlBytes + jsBytes > 188500) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -894,7 +894,7 @@ if (!ui.includes('id="shotPanel"') ||
     css.includes('#statusPanel .metric::before,#scalePanel .metric::before,.shotCard > *::before{') ||
     css.includes('font-size:1rem;font-weight:700;color:var(--mu)') ||
     !css.includes('.shotCard .shotDur > div,.shotCard .shotActual > div') ||
-    !css.includes('grid-template-areas:"dur dur dur actual actual actual" "goal goal flow flow drop drop" "err err shot shot ended ended"') ||
+    !css.includes('grid-template-areas:"dur dur dur actual actual actual" "goal goal flow flow drop drop" "err err shot shot ended ended" "rate rate rate rate rate rate"') ||
     !ui.includes('id="shotElapsed"') ||
     !ui.includes('id="shotFirstDrop"') ||
     !ui.includes('id="shotCurrentWeight"') ||
@@ -1683,7 +1683,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
         'return resetAllDurableStoresForNetwork(persistedSettings)') ||
     !network.includes('historyMutationAllowed') ||
     !network.includes('controlAllowsHistoryMutation') ||
-    (network.match(/historyMutationAllowed/g) || []).length < 4 ||
+    (network.match(/historyMutationAllowed/g) || []).length < 5 ||
     ui.includes('id="view-presets"') ||
     ui.includes('data-route="/presets"') ||
     ui.includes('id="presetsPageCards"') ||
@@ -1927,8 +1927,8 @@ if (!ui.includes('id="shotTable"') ||
     !js.includes("'shotDur'") ||
     !js.includes("'shotActual'") ||
     !css.includes('#shotTable .shotDur,#shotTable .shotActual') ||
-    !css.includes('grid-template-areas:"dur dur dur actual actual actual" "time time time time time time" "goal goal flow flow drop drop" "err err shot shot ended ended" "spark spark spark spark spark spark"') ||
-    !css.includes('#shotTable tr.noSpark{grid-template-areas:"dur dur dur actual actual actual" "time time time time time time" "goal goal flow flow drop drop" "err err shot shot ended ended"}') ||
+    !css.includes('grid-template-areas:"dur dur dur actual actual actual" "time time time time time time" "goal goal flow flow drop drop" "err err shot shot ended ended" "rate rate rate rate rate rate" "spark spark spark spark spark spark"') ||
+    !css.includes('#shotTable tr.noSpark{grid-template-areas:"dur dur dur actual actual actual" "time time time time time time" "goal goal flow flow drop drop" "err err shot shot ended ended" "rate rate rate rate rate rate"}') ||
     css.includes('grid-area:guard') ||
     css.includes('grid-area:ext') ||
     css.includes('grid-area:stop') ||
@@ -1968,6 +1968,35 @@ if (!ui.includes('id="shotTable"') ||
     !network.includes('endedAtLocalSec') ||
     !network.includes('SHOT_LOG_CLEAR_NOT_CONFIRMED')) {
   throw new Error('Shot history UI/API must expose table, CSV export, clear confirmation, and timezone setting');
+}
+if (!ui.includes('id="shotRating"') ||
+    !partialHtml.home.includes('id="shotRating"') ||
+    !partialHtml.home.includes('<strong>Rate</strong>') ||
+    !partialHtml.stats.includes('<th>Rate</th>') ||
+    !runtimeJs.includes('function fillStarRate(') ||
+    !runtimeJs.includes("viewBox=\"0 0 24 24\"") ||
+    runtimeJs.includes('star.jpg') ||
+    runtimeJs.includes('star.png') ||
+    !runtimeJs.includes("className='shotRateCell'") ||
+    !runtimeJs.includes("dataset.label='Rate'") ||
+    !runtimeJs.includes('function postShotRating(') ||
+    !runtimeJs.includes('{lastShot:true,rating:n}') ||
+    !runtimeJs.includes('{id,rating:n}') ||
+    !runtimeJs.includes("'rating','ended_at_ms'") ||
+    !css.includes('.starRate{') ||
+    !css.includes('.starRate button.on{color:var(--ac)}') ||
+    !css.includes('.shotCard .shotRate{grid-area:rate}') ||
+    !css.includes('#shotTable td.shotRateCell{grid-area:rate}') ||
+    !network.includes('shotsRateHandler') ||
+    !network.includes('LAST_SHOT_NOT_FOUND') ||
+    !network.includes('\\"rating\\":%u') ||
+    !network.includes('\\"shotLogId\\":%lu') ||
+    !lastShotIo.includes('LAST_SHOT_SCHEMA_VERSION = 2') ||
+    !shotLogIo.includes('updateRating') ||
+    !firmwareCore.includes('rateLastShot') ||
+    !firmwareCore.includes('rateShotRecord') ||
+    !firmwareCore.includes('applyLastShotManualFields')) {
+  throw new Error('Shot rating must be SVG stars on last shot and history, persisted on the device');
 }
 if (!js.includes('function commandOkMessage(') ||
     !js.includes('function commandFailMessage(') ||
@@ -2502,6 +2531,7 @@ const expected = new Map([
   ['GET /api/v1/shots', 'ownedApiHandler'],
   ['POST /api/v1/shots/clear', 'ownedApiHandler'],
   ['POST /api/v1/shots/delete', 'ownedApiHandler'],
+  ['POST /api/v1/shots/rate', 'ownedApiHandler'],
   ['POST /api/v1/last-shot/clear', 'ownedApiHandler'],
   ['POST /api/v1/time/sync', 'ownedApiHandler'],
   ['POST /api/v1/network', 'ownedApiHandler'],
@@ -3363,8 +3393,8 @@ if (generated.gzip.length > 4096) {
 if (generated.jsGzip.length > 6144) {
   throw new Error('Compressed Web UI shell JS exceeds the 6 KiB gzip budget');
 }
-if (generated.runtimeGzip.length > 27000) {
-  throw new Error('Compressed Web UI runtime JS exceeds the 25 KiB gzip budget');
+if (generated.runtimeGzip.length > 28000) {
+  throw new Error('Compressed Web UI runtime JS exceeds the 27.3 KiB gzip budget');
 }
 if (generated.secondaryGzip.length > 4096) {
   throw new Error('Compressed secondary view JS exceeds the 4 KiB gzip budget');
@@ -3375,8 +3405,8 @@ if (generated.settingsGzip.length > 4096) {
 if (generated.cssGzip.length > 6500) {
   throw new Error('Compressed Web CSS exceeds the 6.3 KiB gzip budget');
 }
-if (generated.combined > 53000) {
-  throw new Error('Combined Web UI gzip exceeds the 51.25 KiB flash budget');
+if (generated.combined > 54000) {
+  throw new Error('Combined Web UI gzip exceeds the 52.7 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
@@ -3527,6 +3557,7 @@ if (logHandlerStart < 0 || shotsHandlerStart < 0 || wifiScanStatusStart < 0 ||
 if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())return;scanBusy=true') ||
     !js.includes("withCommandGate(async()=>{try{await api('/api/v1/shots/clear'") ||
     !js.includes("withCommandGate(async()=>{try{await api('/api/v1/shots/delete'") ||
+    !js.includes("await api('/api/v1/shots/rate'") ||
     js.includes("withCommandGate(async()=>{try{await api('/api/v1/logout'")) {
   throw new Error('Wi-Fi scan and shot clear/delete must use poll/command gates without login');
 }

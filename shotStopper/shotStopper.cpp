@@ -944,6 +944,52 @@ void persistLastShotSnapshot(const PersistedLastShot &snapshot) {
   lastShotNvsDirty = true;
 }
 
+void applyLastShotManualFields(PersistedLastShot &last) {
+  if (persistedLastShot.valid && persistedLastShot.cycleId == last.cycleId) {
+    last.rating = persistedLastShot.rating;
+    last.shotLogId = persistedLastShot.shotLogId;
+  }
+}
+
+bool persistLastShotRating(uint8_t rating) {
+  if (!persistedLastShot.valid || rating > SHOT_LOG_RATING_MAX) {
+    return false;
+  }
+  persistedLastShot.rating = rating;
+  lastShotStore.adopt(persistedLastShot);
+  if (lastShotStore.save()) {
+    lastShotNvsDirty = false;
+    return true;
+  }
+  lastShotNvsDirty = true;
+  return false;
+}
+
+bool rateShotRecord(uint32_t id, uint8_t rating) {
+  if (id == 0 || rating > SHOT_LOG_RATING_MAX) {
+    return false;
+  }
+  if (!shotLog.updateRating(id, rating)) {
+    return false;
+  }
+  if (persistedLastShot.valid && persistedLastShot.shotLogId == id) {
+    (void)persistLastShotRating(rating);
+  }
+  return true;
+}
+
+bool rateLastShot(uint8_t rating) {
+  if (rating > SHOT_LOG_RATING_MAX || !persistedLastShot.valid) {
+    return false;
+  }
+  if (persistedLastShot.shotLogId != 0 &&
+      shotLog.containsId(persistedLastShot.shotLogId) &&
+      !shotLog.updateRating(persistedLastShot.shotLogId, rating)) {
+    return false;
+  }
+  return persistLastShotRating(rating);
+}
+
 void persistLastShotFromFinalize(const PendingShotFinalize &snapshot,
                                  float finalWeightG, bool finalWeightValid) {
   PersistedLastShot last = {};
@@ -990,6 +1036,7 @@ void persistLastShotFromFinalize(const PendingShotFinalize &snapshot,
             ? 0U
             : snapshot.minBbwBrewTimeMs - last.durationMs;
   }
+  applyLastShotManualFields(last);
   persistLastShotSnapshot(last);
   lastShotCurve = snapshot.curve;
 }
@@ -1062,6 +1109,7 @@ void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
   copyCString(last.scaleProtocol, sizeof(last.scaleProtocol),
               scaleProtocolName);
   last.scaleProtocol[sizeof(last.scaleProtocol) - 1] = '\0';
+  applyLastShotManualFields(last);
   persistLastShotSnapshot(last);
   lastShotCurve = shotCurveSampler.snapshot();
 }
@@ -2250,6 +2298,10 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
       shotLogCutFromEndReason(snapshot.endReason));
   record.extractionGuardEnabled = shotLogPackGuardFlags(
       snapshot.extractionGuardEnabled, snapshot.slowExtractionGuardEnabled);
+  if (persistedLastShot.valid && persistedLastShot.cycleId == snapshot.cycleId) {
+    record.extractionGuardEnabled = shotLogPackRating(
+        record.extractionGuardEnabled, persistedLastShot.rating);
+  }
   record.extractionExtended = shotLogPackExtendedFlags(
       snapshot.extractionExtended, snapshot.slowExtractionExtended);
   record.stopDetail = static_cast<uint8_t>(shotLogStopDetailFromEndReason(
@@ -2300,6 +2352,11 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
                   static_cast<int32_t>(blobBytes),
                   static_cast<int32_t>(shotLog.count()));
     return;
+  }
+  if (persistedLastShot.valid && persistedLastShot.cycleId == snapshot.cycleId) {
+    persistedLastShot.shotLogId = newId;
+    lastShotStore.adopt(persistedLastShot);
+    lastShotNvsDirty = true;
   }
   if (snapshot.curve.count > 0) {
     ShotCurveRecord curve = snapshot.curve;
@@ -6919,6 +6976,8 @@ void setup() {
     callbacks.copyShotRecords = copyShotRecords;
     callbacks.copyShotCurves = copyShotCurves;
     callbacks.deleteShotRecord = deleteShotRecord;
+    callbacks.rateShotRecord = rateShotRecord;
+    callbacks.rateLastShot = rateLastShot;
     callbacks.clearShotLog = clearShotLog;
     callbacks.clearLastShot = clearLastShot;
     callbacks.resetAllDurableStores = resetAllDurableStoresForNetwork;

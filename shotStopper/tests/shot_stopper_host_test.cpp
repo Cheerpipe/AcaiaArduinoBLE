@@ -7990,6 +7990,102 @@ void s11_shot_log_record_stays_fixed_size() {
   CHECK(sizeof(ShotLogRecord) == 48);
 }
 
+void s12_shot_rating_pack_preserves_guards() {
+  const uint8_t flags = shotLogPackGuardFlags(true, true);
+  CHECK(shotLogFastGuardEnabled(flags));
+  CHECK(shotLogSlowGuardEnabled(flags));
+  CHECK(shotLogRating(flags) == 0);
+  const uint8_t rated = shotLogPackRating(flags, 4);
+  CHECK(shotLogFastGuardEnabled(rated));
+  CHECK(shotLogSlowGuardEnabled(rated));
+  CHECK(shotLogRating(rated) == 4);
+  CHECK(shotLogPackRating(rated, 0) == flags);
+  CHECK(shotLogRating(shotLogPackRating(flags, 9)) == 5);
+}
+
+void s12b_shot_log_update_rating() {
+  resetHarness(false, true);
+  shotLog.clear();
+  ShotLogRecord record = {};
+  record.durationDs = 120;
+  record.extractionGuardEnabled = shotLogPackGuardFlags(true, false);
+  CHECK(shotLog.append(record));
+  ShotLogRecord stored[1] = {};
+  CHECK(shotLog.copyNewestFirst(stored, 1) == 1);
+  CHECK(shotLog.updateRating(stored[0].id, 3));
+  CHECK(shotLog.copyNewestFirst(stored, 1) == 1);
+  CHECK(shotLogRating(stored[0].extractionGuardEnabled) == 3);
+  CHECK(shotLogFastGuardEnabled(stored[0].extractionGuardEnabled));
+  CHECK(!shotLogSlowGuardEnabled(stored[0].extractionGuardEnabled));
+  CHECK(!shotLog.updateRating(stored[0].id, 6));
+  CHECK(!shotLog.updateRating(99999U, 1));
+}
+
+void s12c_last_shot_rating_survives_finalize_and_commit() {
+  resetHarness(false, true);
+  shotLog.clear();
+  persistedLastShot = PersistedLastShot{};
+  persistedLastShot.valid = true;
+  persistedLastShot.cycleId = 7;
+  persistedLastShot.rating = 4;
+  persistLastShotSnapshot(persistedLastShot);
+
+  PendingShotFinalize snapshot = {};
+  snapshot.cycleId = 7;
+  snapshot.durationDs = 300;
+  snapshot.goalWeightG = 36;
+  snapshot.startedWithScale = true;
+  snapshot.automaticBrew = true;
+  snapshot.finalState = StopperState::READY;
+  snapshot.endReason = EndReason::SCALE_THRESHOLD;
+  snapshot.bootId = shotLog.bootId();
+  snapshot.logEligible = true;
+  snapshot.firstDropDs = 50;
+
+  commitPendingShotLog(snapshot, 36.1f, true, ActualWeightSource::POST_DRIP);
+  ShotLogRecord stored[1] = {};
+  CHECK(shotLog.copyNewestFirst(stored, 1) == 1);
+  CHECK(shotLogRating(stored[0].extractionGuardEnabled) == 4);
+  CHECK(persistedLastShot.shotLogId == stored[0].id);
+
+  persistLastShotFromFinalize(snapshot, 36.1f, true);
+  CHECK(persistedLastShot.valid);
+  CHECK(persistedLastShot.rating == 4);
+  CHECK(persistedLastShot.shotLogId == stored[0].id);
+  CHECK(persistedLastShot.cycleId == 7);
+  CHECK(fabsf(persistedLastShot.currentWeightG - 36.1f) < 0.001f);
+}
+
+void s12d_rate_last_shot_and_history() {
+  resetHarness(false, true);
+  shotLog.clear();
+  persistedLastShot = PersistedLastShot{};
+  CHECK(!rateLastShot(3));
+  persistedLastShot.valid = true;
+  persistedLastShot.cycleId = 1;
+  persistLastShotSnapshot(persistedLastShot);
+  CHECK(rateLastShot(3));
+  CHECK(persistedLastShot.rating == 3);
+  CHECK(rateLastShot(0));
+  CHECK(persistedLastShot.rating == 0);
+
+  ShotLogRecord record = {};
+  record.durationDs = 120;
+  CHECK(shotLog.append(record));
+  ShotLogRecord stored[1] = {};
+  CHECK(shotLog.copyNewestFirst(stored, 1) == 1);
+  persistedLastShot.shotLogId = stored[0].id;
+  persistLastShotSnapshot(persistedLastShot);
+  CHECK(rateLastShot(5));
+  CHECK(persistedLastShot.rating == 5);
+  CHECK(shotLog.copyNewestFirst(stored, 1) == 1);
+  CHECK(shotLogRating(stored[0].extractionGuardEnabled) == 5);
+  CHECK(rateShotRecord(stored[0].id, 2));
+  CHECK(persistedLastShot.rating == 2);
+  CHECK(shotLog.copyNewestFirst(stored, 1) == 1);
+  CHECK(shotLogRating(stored[0].extractionGuardEnabled) == 2);
+}
+
 void s13_persist_debug_messages_identify_origin() {
   char message[128] = {};
   DebugEvent shotLogEvent = {};
@@ -10230,6 +10326,10 @@ const TestCase testCases[] = {
     {"S07", s07_shot_log_stores_fixed_wall_time},
     {"S08", s08_shot_log_without_sync_has_no_wall_time},
     {"S11", s11_shot_log_record_stays_fixed_size},
+    {"S12", s12_shot_rating_pack_preserves_guards},
+    {"S12b", s12b_shot_log_update_rating},
+    {"S12c", s12c_last_shot_rating_survives_finalize_and_commit},
+    {"S12d", s12d_rate_last_shot_and_history},
     {"S13", s13_persist_debug_messages_identify_origin},
     {"S19", s19_shot_store_persist_failure_logs_once_until_success},
     {"H01", h01_health_threshold_alerts_fire_once_per_crossing},

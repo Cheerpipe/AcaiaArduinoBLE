@@ -290,6 +290,8 @@ void p29_last_shot_persists_and_clears() {
   shot.shotType = static_cast<uint8_t>(LastShotType::AUTO);
   shot.noScaleShotGuardEnabled = true;
   shot.noScaleShotGuardArmed = true;
+  shot.rating = 4;
+  shot.shotLogId = 9;
   strcpy(shot.scaleProtocol, "acaia");
   CHECK(store.persist(shot));
   CHECK(persistence_host::records.count("lastshot/record") == 1);
@@ -302,6 +304,8 @@ void p29_last_shot_persists_and_clears() {
   CHECK(fabs(reloaded.get().currentWeightG - 36.2f) < 0.001f);
   CHECK(reloaded.get().noScaleShotGuardEnabled);
   CHECK(reloaded.get().noScaleShotGuardArmed);
+  CHECK(reloaded.get().rating == 4);
+  CHECK(reloaded.get().shotLogId == 9);
   CHECK(strcmp(reloaded.get().scaleProtocol, "acaia") == 0);
 
   CHECK(reloaded.clear());
