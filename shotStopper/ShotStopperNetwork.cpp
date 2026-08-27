@@ -1863,7 +1863,10 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
   }
 
   const bool brewRf = brewRfActive();
-  if (brewRf && status.staState == StaState::CONNECTING) {
+  // Abort an in-flight scan/associate only. A STA that already has an IP
+  // must promote to CONNECTED: associated traffic can coexist under PREFER_BT.
+  if (brewRf && status.staState == StaState::CONNECTING &&
+      WiFi.status() != WL_CONNECTED) {
     preferStaWifiCoex(false);
     WiFi.disconnect(false, false);
     portENTER_CRITICAL(&dataMux_);

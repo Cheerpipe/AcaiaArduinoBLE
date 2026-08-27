@@ -98,6 +98,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   pendingFinalize = PendingShotFinalize{};
   pendingScaleTimerStop = PendingScaleTimerStop{};
   pendingBrewRfRestore = false;
+  rfCoexLastAppliedValid = false;
   setRfCoexClaim(RfCoexClaim::BLE, false);
   setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, false);
   runtimeConfig = RuntimeConfig{};
@@ -7156,6 +7157,9 @@ void rf01_coex_winner_prefers_ble_then_wifi() {
   CHECK(currentRfCoexPreference() == RfCoexPreference::BT);
   setRfCoexClaim(RfCoexClaim::BLE, false);
   CHECK(currentRfCoexPreference() == RfCoexPreference::WIFI);
+  setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, false);
+  CHECK(currentRfCoexPreference() == RfCoexPreference::BALANCE);
+  setRfCoexClaim(RfCoexClaim::BLE, false);
   setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, false);
   CHECK(currentRfCoexPreference() == RfCoexPreference::BALANCE);
 }

@@ -39,12 +39,17 @@ inline RfCoexPreference rfCoexWinner(bool bleHeld, bool wifiAssociateHeld) {
 
 inline portMUX_TYPE rfCoexMux = portMUX_INITIALIZER_UNLOCKED;
 inline uint8_t rfCoexClaims = 0;
+inline RfCoexPreference rfCoexLastApplied = RfCoexPreference::BALANCE;
+inline bool rfCoexLastAppliedValid = false;
 
-inline void applyRfCoexClaimsLocked() {
+inline RfCoexPreference rfCoexWinnerFromClaims(uint8_t claims) {
+  return rfCoexWinner(
+      (claims & static_cast<uint8_t>(RfCoexClaim::BLE)) != 0,
+      (claims & static_cast<uint8_t>(RfCoexClaim::WIFI_ASSOCIATE)) != 0);
+}
+
+inline void applyRfCoexPreference(RfCoexPreference winner) {
 #if defined(SHOT_STOPPER_RF_COEX_HAS_IDF)
-  const RfCoexPreference winner = rfCoexWinner(
-      (rfCoexClaims & static_cast<uint8_t>(RfCoexClaim::BLE)) != 0,
-      (rfCoexClaims & static_cast<uint8_t>(RfCoexClaim::WIFI_ASSOCIATE)) != 0);
   switch (winner) {
     case RfCoexPreference::BT:
       (void)esp_coex_preference_set(ESP_COEX_PREFER_BT);
@@ -57,8 +62,37 @@ inline void applyRfCoexClaimsLocked() {
       break;
   }
 #else
-  (void)rfCoexClaims;
+  (void)winner;
 #endif
+}
+
+// IDF coex must not run inside portENTER_CRITICAL. Publish outside the mux
+// and retry if another core changed claims during the call.
+inline void publishRfCoexPreference() {
+  for (;;) {
+    RfCoexPreference current;
+    portENTER_CRITICAL(&rfCoexMux);
+    current = rfCoexWinnerFromClaims(rfCoexClaims);
+    const bool skip =
+        rfCoexLastAppliedValid && rfCoexLastApplied == current;
+    portEXIT_CRITICAL(&rfCoexMux);
+    if (skip) {
+      return;
+    }
+    applyRfCoexPreference(current);
+    bool settled = false;
+    portENTER_CRITICAL(&rfCoexMux);
+    const RfCoexPreference again = rfCoexWinnerFromClaims(rfCoexClaims);
+    settled = again == current;
+    if (settled) {
+      rfCoexLastApplied = current;
+      rfCoexLastAppliedValid = true;
+    }
+    portEXIT_CRITICAL(&rfCoexMux);
+    if (settled) {
+      return;
+    }
+  }
 }
 
 inline void setRfCoexClaim(RfCoexClaim claim, bool held) {
@@ -70,17 +104,15 @@ inline void setRfCoexClaim(RfCoexClaim claim, bool held) {
     rfCoexClaims = static_cast<uint8_t>(
         rfCoexClaims & static_cast<uint8_t>(~static_cast<uint8_t>(claim)));
   }
-  applyRfCoexClaimsLocked();
   portEXIT_CRITICAL(&rfCoexMux);
+  publishRfCoexPreference();
 }
 
 inline RfCoexPreference currentRfCoexPreference() {
   portENTER_CRITICAL(&rfCoexMux);
   const uint8_t claims = rfCoexClaims;
   portEXIT_CRITICAL(&rfCoexMux);
-  return rfCoexWinner(
-      (claims & static_cast<uint8_t>(RfCoexClaim::BLE)) != 0,
-      (claims & static_cast<uint8_t>(RfCoexClaim::WIFI_ASSOCIATE)) != 0);
+  return rfCoexWinnerFromClaims(claims);
 }
 
 }  // namespace shotstopper
