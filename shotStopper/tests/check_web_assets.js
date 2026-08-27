@@ -2851,6 +2851,20 @@ if (!ui.includes('async function loadStatus(){') ||
     ui.includes('Promise.all([loadShots(),loadLog()])')) {
   throw new Error('Web UI must lazy-load status/shots/log per active SPA view; background polls stay gated');
 }
+{
+  const statsStart = (() => {
+    const i = appJsSource.indexOf("name === 'stats'");
+    if (i < 0) return '';
+    const j = appJsSource.indexOf('}', i);
+    return j > i ? appJsSource.slice(i, j) : '';
+  })();
+  if (!statsStart.includes('R.loadStatus()') || !statsStart.includes('R.loadShots()') ||
+      !runtimeJs.includes("was!==canEdit&&activeView==='stats'") ||
+      !runtimeJs.includes("fillStarRate(rateHost,r.rating||0,!controlsMutable,")) {
+    throw new Error(
+        'Stats must loadStatus for controlsMutable, and re-render rating stars when mutable flips');
+  }
+}
 if (!ui.includes('id="view-home"') ||
     !ui.includes('id="view-stats"') ||
     !ui.includes('id="view-settings"') ||

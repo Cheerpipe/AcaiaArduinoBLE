@@ -126,6 +126,9 @@ function startView(name) {
   if (name === 'stats') {
     const mod = jsMods.get('stats');
     if (mod && mod.activate) mod.activate();
+    // Status unlocks controlsMutable (rating stars, delete, export). Without
+    // this, a cold /stats load leaves stars disabled until another view polls.
+    R.loadStatus();
     R.loadShots();
     shotsTimer = setInterval(() => {
       if (!document.hidden) R.refreshShots();
