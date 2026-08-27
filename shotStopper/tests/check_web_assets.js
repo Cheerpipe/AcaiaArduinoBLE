@@ -662,7 +662,8 @@ if (html.indexOf('<summary>Brew by Weight</summary>') >
   throw new Error('Cup protection master must precede Stop if cup is removed and Require cup to start; Home mirrors the master after accidental touch');
 }
 
-if (!ui.includes('bleCompanionEnabled') ||
+if (ui.includes('bleCompanionEnabled" type="checkbox" role="switch" checked>') ||
+    !ui.includes('bleCompanionEnabled') ||
     !ui.includes('/api/v1/admin/ble-compat') ||
     !ui.includes("method:'PUT'") ||
     !ui.includes('active this boot') ||

@@ -5256,10 +5256,6 @@ void completeMaintenanceLease(const WebCommand &result) {
     }
     requestBookooSilenceIfConfigured();
   }
-  if (result.succeeded &&
-      maintenanceLease.command.type == WebCommandType::FACTORY_RESET) {
-    (void)persistBleCompanionEnabled(true);
-  }
   if (!result.succeeded &&
       maintenanceLease.command.type == WebCommandType::PERSIST_RUNTIME &&
       maintenanceLease.id == runtimePersistRequestId) {
