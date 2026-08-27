@@ -25,7 +25,7 @@ export function init(){
     el.addEventListener('input',fn);el.addEventListener('change',fn);
   });
   $('syncTimeButton').onclick=()=>R.command('/api/v1/time/sync');
-  $('saveNetworkButton').onclick=()=>{const err=R.validateNetworkClient();if(err){R.showFieldError(err.id,err.msg);return}R.clearFieldErrors();const payload=R.networkSavePayload(),sleepOnly=!!payload._noReconnectWait,staticMode=$('staIpMode').value==='static';if(!sleepOnly&&!confirm(staticMode?'Save static IP and restart? Open the new IP if this page does not return.':'Save Wi-Fi and restart?'))return;R.command('/api/v1/network',payload).finally(()=>{$('staPassword').value='';R.resetNetworkAddressLoaded()})};
+  $('saveNetworkButton').onclick=()=>{const err=R.validateNetworkClient();if(err){R.showFieldError(err.id,err.msg);return}R.clearFieldErrors();const payload=R.networkSavePayload(),sleepOnly=!!payload._noReconnectWait,staticMode=$('staIpMode').value==='static';if(!sleepOnly&&!confirm(staticMode?'Save static IP and restart? Open the new IP if this page does not return.':'Save Wi-Fi and restart?'))return;R.command('/api/v1/network',payload).finally(()=>{$('staPassword').value='';if(!sleepOnly)R.resetNetworkAddressLoaded()})};
   $('forgetNetworkButton').onclick=()=>{if(confirm('Forget the STA network and restart?'))R.command('/api/v1/network',{action:'forget'}).finally(()=>R.resetNetworkAddressLoaded())};
   $('changeDevicePasswordButton').onclick=()=>{const err=R.validateDevicePasswordClient();if(err){R.showFieldError(err.id,err.msg);return}R.clearFieldErrors();R.command('/api/v1/device/password',{newPassword:$('newDevicePassword').value}).finally(()=>{['newDevicePassword','confirmDevicePassword'].forEach(id=>$(id).value='')})};
   $('otaVerifyButton').onclick=R.otaUpload;

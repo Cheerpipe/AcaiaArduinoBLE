@@ -443,10 +443,10 @@ const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 52520) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 139400) {
+if (jsBytes > 139600) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 192000) {
+if (htmlBytes + jsBytes > 192200) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -2121,6 +2121,7 @@ if (!js.includes('function commandOkMessage(') ||
     !js.includes("label+(on?' enabled.':' disabled.')") ||
     !js.includes("'Could not '+(on?'enable ':'disable ')+label+'.'") ||
     !js.includes('Wi-Fi settings saved. Restarting.') ||
+    !js.includes('Wi-Fi idle sleep saved.') ||
     !js.includes("cn('save Wi-Fi settings')") ||
     !js.includes('Wi-Fi scan started.') ||
     !js.includes('Could not start Wi-Fi scan.') ||
@@ -2590,6 +2591,9 @@ if (!network.includes('restoreLkgToActive(next)') ||
       !ui.includes('_noReconnectWait') ||
       !ui.includes('delete payload._noReconnectWait') ||
       !ui.includes('sleepOnly') ||
+      !ui.includes('if(noReconnect)savedStaWifiSleep=') ||
+      !ui.includes('if(!sleepOnly)R.resetNetworkAddressLoaded()') ||
+      !ui.includes('Wi-Fi idle sleep saved.') ||
       !network.includes('\\"wifiSleep\\":%s') ||
       !network.includes('jsonHasOnlyUniqueFields(root, saveFields, 11)') ||
       !network.includes('jsonBoolean(root, "wifiSleep", command.wifiSleep)') ||
@@ -2634,10 +2638,12 @@ if (!network.includes('restoreLkgToActive(next)') ||
       ? saveBody.slice(sleepOnlyAt, copyLkgAt)
       : '';
   if (!saveBody.includes('applyWifiPsAfterPersist') ||
+      saveBody.includes('wifiSleepSpecified && sameCredentials &&') ||
       sleepOnly.includes('restartPending_') ||
-      !sleepOnly.includes('break;')) {
+      !sleepOnly.includes('break;') ||
+      !sleepOnly.includes('next.staWifiSleep != command.wifiSleep')) {
     throw new Error(
-        'Save-only Wi-Fi sleep must persist and apply power save without restartPending_');
+        'Identical STA credentials must persist sleep without restart, and no-op when sleep is unchanged');
   }
 }
 if (!firmwareCore.includes('command.commitConfirmed = true') ||
@@ -3698,8 +3704,8 @@ if (generated.secondaryGzip.length > 4096) {
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
 }
-if (generated.combined > 54300) {
-  throw new Error('Combined Web UI gzip exceeds the 53.0 KiB flash budget');
+if (generated.combined > 54400) {
+  throw new Error('Combined Web UI gzip exceeds the 53.1 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {

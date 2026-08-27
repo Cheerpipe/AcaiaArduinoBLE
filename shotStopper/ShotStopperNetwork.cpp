@@ -2578,12 +2578,15 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
                  sizeof(next.staGateway)) == 0 &&
           memcmp(next.staDns1, command.staDns1, sizeof(next.staDns1)) == 0 &&
           memcmp(next.staDns2, command.staDns2, sizeof(next.staDns2)) == 0;
-      if (command.wifiSleepSpecified && sameCredentials &&
-          next.staWifiSleep != command.wifiSleep) {
+      // Specified sleep + identical STA: persist sleep if it changed,
+      // otherwise no-op. Never restart (second Save must not go PENDING).
+      if (command.wifiSleepSpecified && sameCredentials) {
         memset(password, 0, sizeof(password));
-        next.staWifiSleep = command.wifiSleep;
-        persist = true;
-        applyWifiPsAfterPersist = true;
+        if (next.staWifiSleep != command.wifiSleep) {
+          next.staWifiSleep = command.wifiSleep;
+          persist = true;
+          applyWifiPsAfterPersist = true;
+        }
         break;
       }
       if (!command.commitConfirmed && next.staConfigured &&
