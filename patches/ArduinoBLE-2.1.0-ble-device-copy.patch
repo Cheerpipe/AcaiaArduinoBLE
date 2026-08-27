@@ -1,0 +1,79 @@
+diff -ruN a/src/BLEDevice.cpp b/src/BLEDevice.cpp
+--- a/src/BLEDevice.cpp
++++ b/src/BLEDevice.cpp
+@@ -82,9 +82,60 @@
+   return result;
+ }
+ 
++size_t BLEDevice::copyAddress(char* buffer, size_t capacity) const
++{
++  if (buffer == NULL || capacity == 0) {
++    return 0;
++  }
++
++  int n = snprintf(buffer, capacity, "%02x:%02x:%02x:%02x:%02x:%02x",
++                   _address[5], _address[4], _address[3], _address[2],
++                   _address[1], _address[0]);
++  if (n < 0) {
++    buffer[0] = '\0';
++    return 0;
++  }
++  if ((size_t)n >= capacity) {
++    return capacity - 1;
++  }
++  return (size_t)n;
++}
++
++size_t BLEDevice::copyLocalName(char* buffer, size_t capacity) const
++{
++  if (buffer == NULL || capacity == 0) {
++    return 0;
++  }
++  buffer[0] = '\0';
++
++  for (int i = 0; i < _eirDataLength;) {
++    int eirLength = _eirData[i++];
++    int eirType = _eirData[i++];
++
++    if (eirType == 0x08 || eirType == 0x09) {
++      int nameLen = eirLength - 1;
++      if (nameLen < 0) {
++        return 0;
++      }
++      size_t copyLen = (size_t)nameLen;
++      if (copyLen >= capacity) {
++        copyLen = capacity - 1;
++      }
++      memcpy(buffer, &_eirData[i], copyLen);
++      buffer[copyLen] = '\0';
++      return copyLen;
++    }
++
++    i += (eirLength - 1);
++  }
++
++  return 0;
++}
++
+ bool BLEDevice::hasLocalName() const
+ {
+-  return (localName().length() > 0);
++  char name[32];
++  return copyLocalName(name, sizeof(name)) > 0;
+ }
+ 
+ bool BLEDevice::hasAdvertisedServiceUuid() const
+diff -ruN a/src/BLEDevice.h b/src/BLEDevice.h
+--- a/src/BLEDevice.h
++++ b/src/BLEDevice.h
+@@ -48,6 +48,10 @@
+   virtual bool disconnect();
+ 
+   virtual String address() const;
++  // C-string copies. Scan/connect must not allocate Arduino String on every
++  // advertisement: address()/localName() return String by value.
++  size_t copyAddress(char* buffer, size_t capacity) const;
++  size_t copyLocalName(char* buffer, size_t capacity) const;
+ 
+   bool hasLocalName() const;
+     

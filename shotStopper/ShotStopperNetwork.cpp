@@ -92,9 +92,12 @@ void formatWifiMac(const uint8_t mac[6], char *output, size_t outputCapacity) {
            mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
-void parseShotsPageQuery(httpd_req_t *request, size_t &offset, size_t &limit) {
+void parseShotsPageQuery(httpd_req_t *request, size_t &offset, size_t &limit,
+                         ShotLogSort &sort, ShotLogSortDir &dir) {
   offset = 0;
   limit = SHOT_LOG_PAGE_DEFAULT;
+  sort = ShotLogSort::Date;
+  dir = ShotLogSortDir::Desc;
   if (request == nullptr) {
     return;
   }
@@ -120,6 +123,14 @@ void parseShotsPageQuery(httpd_req_t *request, size_t &offset, size_t &limit) {
     if (end != value && *end == '\0') {
       limit = shotLogClampPageLimit(static_cast<size_t>(parsed));
     }
+  }
+  memset(value, 0, sizeof(value));
+  if (httpd_query_key_value(query, "sort", value, sizeof(value)) == ESP_OK) {
+    sort = shotLogSortFromName(value);
+  }
+  memset(value, 0, sizeof(value));
+  if (httpd_query_key_value(query, "dir", value, sizeof(value)) == ESP_OK) {
+    dir = shotLogSortDirFromName(value);
   }
 }
 
@@ -1596,6 +1607,9 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   }
   // Drop any UI scan so association owns the radio.
   abortWifiScan(now, false);
+  // Drop a stale STA association so 10 s retries do not accumulate IDF/DHCP
+  // state. wifioff=false, eraseap=false: driver and SoftAP stay up (BLE coex).
+  WiFi.disconnect(false, false);
   portENTER_CRITICAL(&dataMux_);
   status_.staState = StaState::CONNECTING;
   status_.staIp[0] = '\0';
@@ -5394,7 +5408,9 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   size_t offset = 0;
   size_t limit = SHOT_LOG_PAGE_DEFAULT;
-  parseShotsPageQuery(request, offset, limit);
+  ShotLogSort sort = ShotLogSort::Date;
+  ShotLogSortDir dir = ShotLogSortDir::Desc;
+  parseShotsPageQuery(request, offset, limit, sort, dir);
   if (!self.lockWorkBuf()) {
     return self.workBufBusy(request);
   }
@@ -5408,6 +5424,7 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
       self.callbacks_.copyShotCurves != nullptr
           ? self.callbacks_.copyShotCurves(work.shotCurves, SHOT_CURVE_CAPACITY)
           : 0;
+  shotLogSortRecords(work.shotRecords, count, sort, dir);
   size_t start = 0;
   size_t pageCount = 0;
   const bool hasMore =

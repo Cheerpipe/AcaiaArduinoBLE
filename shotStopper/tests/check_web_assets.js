@@ -254,6 +254,12 @@ if (!firmwareCore.includes('scaleWorkerTickDelayMs()') ||
     throw new Error('Hwmon must reuse the 5 s HeapCapSnapshot instead of sampling heap twice');
   }
 }
+if (!domain.includes('HEALTH_HEAP_LOW_RESTART_MS') ||
+    !firmwareCore.includes('DebugCode::HEALTH_HEAP_RESTART') ||
+    !firmwareCore.includes('controlAllowsConfigurationNow() && !circuitClosed')) {
+  throw new Error(
+      'Sustained heap-low must request a safe restart only from Ready with the circuit open');
+}
 if (!bleLibrary.includes('BLE_CONNECT_TIMEOUT_MS') ||
     !bleLibrary.includes('SCALE_CONNECT_ATTEMPTS') ||
     !bleLibrary.includes('ConnectStep::Settle') ||
@@ -275,11 +281,37 @@ if (/#define\s+BLE_CONNECT_TIMEOUT_MS\s+4000UL/.test(bleLibrary)) {
   if (!pollScan.includes('char mac[ACAIA_MAC_CAPACITY]') ||
       !pollScan.includes('char name[ACAIA_NAME_CAPACITY]') ||
       !pollScan.includes('isScaleName(name)') ||
-      (pollScan.match(/peripheral\.address\(\)/g) || []).length > 1 ||
-      (pollScan.match(/peripheral\.localName\(\)/g) || []).length > 1) {
+      !pollScan.includes('copyAddress') ||
+      !pollScan.includes('copyLocalName') ||
+      pollScan.includes('peripheral.address()') ||
+      pollScan.includes('peripheral.localName()') ||
+      pollScan.includes('advertisedServiceUuid()')) {
     throw new Error(
-        'pollScan must capture MAC/name once into C buffers and reuse them');
+        'pollScan must copy MAC/name into C buffers without Arduino String');
   }
+}
+{
+  const rememberStart = bleLibrary.indexOf(
+      'void EspressoScaleBLE::rememberPeripheral');
+  const rememberEnd = bleLibrary.indexOf(
+      'void EspressoScaleBLE::clearPeripheral', rememberStart);
+  const remember = rememberStart >= 0 && rememberEnd > rememberStart
+      ? bleLibrary.slice(rememberStart, rememberEnd)
+      : '';
+  if (!remember.includes('copyAddress') ||
+      !remember.includes('copyLocalName') ||
+      remember.includes('String address') ||
+      remember.includes('String localName') ||
+      remember.includes('.address()') ||
+      remember.includes('.localName()')) {
+    throw new Error(
+        'rememberPeripheral must copy address/name without Arduino String');
+  }
+}
+if (bleLibrary.includes(
+        'resetConnection(false, ScaleDisconnectReason::CONNECT_FAILED)')) {
+  throw new Error(
+      'GAP connect exhaustion must disconnect the peer (resetConnection(true))');
 }
 {
   const nwStart = bleLibrary.indexOf('bool EspressoScaleBLE::newWeightAvailable()');
@@ -389,10 +421,10 @@ const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 52200) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 137000) {
+if (jsBytes > 138500) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 188500) {
+if (htmlBytes + jsBytes > 191000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -2042,7 +2074,7 @@ if (!runtimeJs.includes('SHOTS_PAGE_SIZE=10') ||
     !runtimeJs.includes('async function loadMoreShots(){') ||
     !runtimeJs.includes('function shotStatsViewActive(){') ||
     !runtimeJs.includes('if(ok)maybeLoadMoreShots()') ||
-    !runtimeJs.includes("shotsUrl(0,SHOTS_EXPORT_LIMIT)") ||
+    !runtimeJs.includes("shotsUrl(0,SHOTS_EXPORT_LIMIT") ||
     runtimeJs.includes("api('/api/v1/shots')") ||
     !viewJs.stats.includes('IntersectionObserver') ||
     !viewJs.stats.includes("R.loadMoreShots()") ||
@@ -2050,6 +2082,7 @@ if (!runtimeJs.includes('SHOTS_PAGE_SIZE=10') ||
     !css.includes('#shotLogSentinel{min-height:1px') ||
     !network.includes('parseShotsPageQuery') ||
     !network.includes('shotLogPageSlice') ||
+    !network.includes('shotLogSortRecords') ||
     !network.includes('SHOT_LOG_PAGE_DEFAULT') ||
     !network.includes('\\"hasMore\\":%s') ||
     !network.includes('\\"total\\":%u') ||
@@ -2059,6 +2092,47 @@ if (!runtimeJs.includes('SHOTS_PAGE_SIZE=10') ||
 }
 const shotLogTypes = fs.readFileSync(
     path.join(sketchDir, 'ShotStopperShotLogTypes.h'), 'utf8');
+if (!partialHtml.stats.includes('id="shotSort"') ||
+    !partialHtml.stats.includes('class="shotSort"') ||
+    !partialHtml.stats.includes('aria-label="Sort history"') ||
+    !css.includes('.shotSort{') ||
+    !css.includes('.shotSort button[aria-pressed="true"]') ||
+    !runtimeJs.includes('function setShotSort(') ||
+    !runtimeJs.includes('function toggleShotSortDir(') ||
+    !runtimeJs.includes('function syncShotSortButtons(') ||
+    !runtimeJs.includes("shotsUrl(offset,limit,sort,dir)") ||
+    !runtimeJs.includes("'date','desc'") ||
+    !runtimeJs.includes("shotSort==='rating'") ||
+    !runtimeJs.includes('shotStatsWindow') ||
+    !runtimeJs.includes('Highest rating') ||
+    !runtimeJs.includes('Oldest first') ||
+    !runtimeJs.includes('Lowest rating') ||
+    !viewJs.stats.includes('id="sortDateButton"') ||
+    !viewJs.stats.includes('id="sortRatingButton"') ||
+    !viewJs.stats.includes('id="sortDirButton"') ||
+    !viewJs.stats.includes('Newest first') ||
+    !viewJs.stats.includes("R.setShotSort('date')") ||
+    !viewJs.stats.includes("R.setShotSort('rating')") ||
+    !viewJs.stats.includes('R.toggleShotSortDir()') ||
+    !viewJs.stats.includes('R.syncShotSortButtons()') ||
+    !shotLogTypes.includes('shotLogSortRecords') ||
+    !shotLogTypes.includes('ShotLogSort::Rating') ||
+    !network.includes('shotLogSortFromName') ||
+    !network.includes('query, "sort"') ||
+    !network.includes('query, "dir"') ||
+    !css.includes('button{-webkit-appearance:none;appearance:none}') ||
+    !css.includes('#shotLogPanel .btnGlyph:not(.btnInvert){background:var(--bg)') ||
+    !css.includes('.shotSort{display:flex;border:1px solid var(--ln);border-radius:.5rem;overflow:hidden;background:var(--bg)}') ||
+    !css.includes('.shotSort button{') ||
+    !css.includes('.shotSort button{margin:0;border:0;border-right:1px solid var(--ln);background:transparent;color:var(--ac);font:inherit;font-size:.86rem;font-weight:600') ||
+    css.includes('.shotSort button{margin:0;border:0;border-right:1px solid var(--ln);background:none') ||
+    css.includes('#shotLogPanel .btnGlyph:not(.btnInvert){background:transparent') ||
+    css.includes('#message,.configSaveBar,#shotLogPanel .btnBar{background:var(--bg)}') ||
+    css.includes('#message,.configSaveBar{background:var(--bg)}') ||
+    css.includes('html.theme-dark #message,html.theme-dark .configSaveBar,html.theme-dark #shotLogPanel .btnBar{background:var(--bg)}') ||
+    css.includes('html.theme-dark #message,html.theme-dark .configSaveBar{background:var(--bg)}')) {
+  throw new Error('Shot history must sort by date or rating with unrated last and keep stats on newest shots');
+}
 const statsSection = partialHtml.stats.match(
     /<fieldset id="shotStatsPanel"><legend>Stats<\/legend>([\s\S]*?)<\/fieldset>/);
 if (!statsSection ||
@@ -2144,6 +2218,7 @@ if (!statsSection ||
       {shotType: 'auto', actualG: 0.5, durationS: 30},
     ]
   };
+  global.shotStatsWindow = [];
   global.SHOTS_PAGE_SIZE = 10;
   global.shotDisplayActualG = (actual) => actual;
   global.fillChartTicks = () => {};
@@ -2157,6 +2232,7 @@ if (!statsSection ||
   }
   delete global.$;
   delete global.shotHistory;
+  delete global.shotStatsWindow;
   delete global.SHOTS_PAGE_SIZE;
   delete global.shotDisplayActualG;
   delete global.fillChartTicks;
@@ -3097,6 +3173,20 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
   throw new Error(
       'Network must use STA-first boot, SoftAP when unassociated, WIFI_AP_STA while retrying STA, pause retries during Wi-Fi scan, and associate via IDF all-channel RSSI sort (no incomplete BSSID lock)');
 }
+{
+  const beginStaStart = network.indexOf(
+      'void ShotStopperNetwork::beginStationConnect');
+  const beginStaEnd = network.indexOf(
+      'void ShotStopperNetwork::startStation', beginStaStart);
+  const beginSta = beginStaStart >= 0 && beginStaEnd > beginStaStart
+      ? network.slice(beginStaStart, beginStaEnd)
+      : '';
+  if (!beginSta.includes('WiFi.disconnect(false, false)') ||
+      beginSta.includes('WIFI_OFF')) {
+    throw new Error(
+        'beginStationConnect must disconnect STA before reassociate without WIFI_OFF');
+  }
+}
 if (!domain.includes('selectBestStaAp') ||
     !domain.includes('StaApScanEntry')) {
   throw new Error('Strongest-AP selection helpers must live in Domain for host tests');
@@ -3393,6 +3483,9 @@ if (generated.gzip.length > 4096) {
 if (generated.jsGzip.length > 6144) {
   throw new Error('Compressed Web UI shell JS exceeds the 6 KiB gzip budget');
 }
+if (generated.cssGzip.length > 6500) {
+  throw new Error('Compressed Web CSS exceeds the 6.3 KiB gzip budget');
+}
 if (generated.runtimeGzip.length > 28000) {
   throw new Error('Compressed Web UI runtime JS exceeds the 27.3 KiB gzip budget');
 }
@@ -3401,9 +3494,6 @@ if (generated.secondaryGzip.length > 4096) {
 }
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
-}
-if (generated.cssGzip.length > 6500) {
-  throw new Error('Compressed Web CSS exceeds the 6.3 KiB gzip budget');
 }
 if (generated.combined > 54000) {
   throw new Error('Combined Web UI gzip exceeds the 52.7 KiB flash budget');

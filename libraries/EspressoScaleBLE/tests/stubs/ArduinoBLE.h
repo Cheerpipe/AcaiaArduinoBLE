@@ -170,6 +170,24 @@ public:
     String localName() const {
         return String(state_ ? state_->localName : "");
     }
+    size_t copyAddress(char* buffer, size_t capacity) const {
+        if (buffer == nullptr || capacity == 0) {
+            return 0;
+        }
+        const char* src = state_ ? state_->address.c_str() : "";
+        strncpy(buffer, src, capacity - 1);
+        buffer[capacity - 1] = '\0';
+        return strlen(buffer);
+    }
+    size_t copyLocalName(char* buffer, size_t capacity) const {
+        if (buffer == nullptr || capacity == 0) {
+            return 0;
+        }
+        const char* src = state_ ? state_->localName.c_str() : "";
+        strncpy(buffer, src, capacity - 1);
+        buffer[capacity - 1] = '\0';
+        return strlen(buffer);
+    }
     String advertisedServiceUuid() const { return String(""); }
     String deviceName() const { return localName(); }
     int appearance() const { return 0; }

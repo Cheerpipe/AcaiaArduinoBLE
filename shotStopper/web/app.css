@@ -72,6 +72,7 @@ legend{font-weight:700;padding:0 .3rem;color:var(--ac)}
 legend .hint{font-weight:400;font-size:.75rem;color:var(--mu)}
 label{display:block;margin:.55rem 0}
 input,select,button{font:inherit;padding:.45rem .5rem;line-height:1.2}
+button{-webkit-appearance:none;appearance:none}
 input[type=number],input[type=text],input[type=password],select{display:block;width:100%;max-width:100%;box-sizing:border-box;height:2.5rem;min-height:2.5rem;margin-top:.35rem;border:1px solid var(--ln);border-radius:.4rem;background:var(--bg);color:var(--fg)}
 input[type=file]{display:block;margin-top:.35rem}
 input[type=text],input[type=password]{-webkit-appearance:none;appearance:none}
@@ -209,6 +210,10 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 
 #shotLogPanel .btnBar{position:sticky;top:var(--hdr);z-index:6;background:var(--sf);margin:0 0 .65rem;border:0;overflow:visible}
 #shotLogPanel .btnGlyph:not(.btnInvert){background:var(--bg);color:var(--ac);border-color:var(--ln)}
+.shotSort{display:flex;border:1px solid var(--ln);border-radius:.5rem;overflow:hidden;background:var(--bg)}
+.shotSort button{margin:0;border:0;border-right:1px solid var(--ln);background:transparent;color:var(--ac);font:inherit;font-size:.86rem;font-weight:600;min-height:var(--tap);padding:.45rem .6rem;cursor:pointer}
+.shotSort button:last-child{border:0}
+.shotSort button[aria-pressed="true"]{background:var(--ac);color:var(--on)}
 #shotTableWrap{overflow:visible;max-height:none;margin:.5rem 0}
 #shotLogSentinel{min-height:1px;padding:.35rem 0 .8rem;text-align:center;color:var(--mu);font-size:.8rem}
 #shotTable{width:100%;border-collapse:collapse;font-size:.82rem}
@@ -318,10 +323,10 @@ menu.btnBar{padding:0;margin:.75rem 0 0}
 
 @media(prefers-color-scheme:dark){
 html,input,select,textarea{color-scheme:dark}
-#message,.configSaveBar,#shotLogPanel .btnBar{background:var(--bg)}
+#message{background:var(--bg)}
 }
 html.theme-light{color-scheme:light}
 html.theme-dark{--bg:#1a1612;--sf:#2a241e;--fg:#f3efe9;--mu:#b5a99a;--ln:#3d342c;--ac:#c45c38;--on:#f6f3ef;--ok:#1a9a3c;--dn:#c45c38;--wn:#f2b35a;--me:#3a1515;--mo:#14301c;--mw:#3a2a10;--pa:#3a2a10;--dx:#f07167;--ah:0 -6px 18px rgba(0,0,0,.4)}
 html.theme-light input,html.theme-light select,html.theme-light textarea{color-scheme:light}
 html.theme-dark,html.theme-dark input,html.theme-dark select,html.theme-dark textarea{color-scheme:dark}
-html.theme-dark #message,html.theme-dark .configSaveBar,html.theme-dark #shotLogPanel .btnBar{background:var(--bg)}
+html.theme-dark #message{background:var(--bg)}

@@ -375,6 +375,7 @@ void testCleanupOnInitializationFailures() {
     CHECK(connectFailure.lastDisconnectReason() ==
           ScaleDisconnectReason::CONNECT_FAILED);
     CHECK(fixture.peripheral->connectCalls == SCALE_CONNECT_ATTEMPTS);
+    CHECK(fixture.peripheral->disconnectCalls == 1);
 
     resetFake();
     fixture = makeScale(NEW);
@@ -434,6 +435,7 @@ void testConnectFailedOnlyAfterRetries() {
     CHECK(scale.lastDisconnectReason() ==
           ScaleDisconnectReason::CONNECT_FAILED);
     CHECK(BLE.timeoutMs == BLE_OPERATION_TIMEOUT_MS);
+    CHECK(fixture.peripheral->disconnectCalls == 1);
 }
 
 void testFirstPacketAndSteadyStateTimeouts() {

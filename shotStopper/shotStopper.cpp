@@ -572,6 +572,8 @@ uint32_t bookooConnectBeepArmedAtMs = 0;
 bool scaleLinkCoexHadLink = false;
 uint32_t scaleLinkCoexUpAtMs = 0;
 bool healthHeapAlertLatched = false;
+bool healthHeapRestartLatched = false;
+uint32_t healthHeapLowSinceMs = 0;
 bool healthStackAlertLatched = false;
 bool healthLoopGapAlertLatched = false;
 Hwmon hwmon;
@@ -7031,13 +7033,27 @@ void serviceHealthThresholdAlerts(uint32_t intervalMaxGapMs) {
       (freeHeapBytes >= HEALTH_HEAP_FREE_CLEAR_BYTES &&
        (largestFreeHeapBlockBytes == 0 ||
         largestFreeHeapBlockBytes >= HEALTH_HEAP_LARGEST_CLEAR_BYTES));
-  if (heapLow && !healthHeapAlertLatched) {
-    healthHeapAlertLatched = true;
-    addDebugEvent(DebugCategory::SYSTEM, DebugCode::HEALTH_HEAP_LOW,
-                  static_cast<int32_t>(freeHeapBytes),
-                  static_cast<int32_t>(largestFreeHeapBlockBytes));
+  if (heapLow) {
+    if (!healthHeapAlertLatched) {
+      healthHeapAlertLatched = true;
+      healthHeapLowSinceMs = millis();
+      addDebugEvent(DebugCategory::SYSTEM, DebugCode::HEALTH_HEAP_LOW,
+                    static_cast<int32_t>(freeHeapBytes),
+                    static_cast<int32_t>(largestFreeHeapBlockBytes));
+    }
+    if (!healthHeapRestartLatched && healthHeapLowSinceMs != 0 &&
+        elapsedMs(healthHeapLowSinceMs) >= HEALTH_HEAP_LOW_RESTART_MS &&
+        controlAllowsConfigurationNow() && !circuitClosed) {
+      healthHeapRestartLatched = true;
+      addDebugEvent(DebugCategory::SYSTEM, DebugCode::HEALTH_HEAP_RESTART,
+                    static_cast<int32_t>(freeHeapBytes),
+                    static_cast<int32_t>(largestFreeHeapBlockBytes));
+      safeRestartRequested = true;
+    }
   } else if (heapClear) {
     healthHeapAlertLatched = false;
+    healthHeapRestartLatched = false;
+    healthHeapLowSinceMs = 0;
   }
 
   uint32_t worstStackWords = UINT32_MAX;

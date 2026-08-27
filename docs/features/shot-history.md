@@ -41,13 +41,17 @@ live `shotCurve` on the status API is in-memory only for the home UI.
 Open the shot history table to browse rows, delete one entry, clear the
 whole log, or export CSV. Clearing requires an explicit confirm.
 
-The table loads **10 shots at a time** as you scroll (newest first). The
-20 s poll refreshes only the first page so new shots appear at the top
-without re-downloading the whole log. Export CSV fetches the full log in
-one request.
+Sort the list by **Date** or **Rating**, ascending or descending. Date
+defaults to newest first. Rating puts unrated shots (0 stars) at the end
+in both directions; equal scores keep newer shots first. The table loads
+**10 shots at a time** as you scroll. The 20 s poll refreshes only the
+first page of the current sort so new shots appear without re-downloading
+the whole log. Export CSV fetches the full log newest-first in one
+request, independent of the on-screen sort.
 
 History averages (duration, weight, error, flow) use only **auto** shots
-with actual weight at least 1 g from the last 10 stored entries.
+with actual weight at least 1 g from the last 10 stored entries, even
+when the list is sorted by rating or oldest-first.
 
 USB: `CLEAR_SHOTS` (see [USB serial CLI](../SERIAL_CLI.md)).
 

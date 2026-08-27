@@ -2134,6 +2134,7 @@ enum class DebugCode : uint8_t {
   SYSTEM_LOG_OVERRUN,
   DEVICE_PASSWORD_RESET,
   HEALTH_HEAP_LOW,
+  HEALTH_HEAP_RESTART,
   HEALTH_STACK_LOW,
   HEALTH_LOOP_GAP,
   OTA_UPLOAD_STARTED,
@@ -2146,12 +2147,15 @@ enum class DebugCode : uint8_t {
   RELAY_GPIO_DESYNC
 };
 
-// Health telemetry thresholds (observability only; never act on machine circuit).
+// Health telemetry thresholds. Never close or open the machine circuit from
+// these samples. Sustained internal-heap pressure may request a safe restart
+// only from Ready with the circuit open (see HEALTH_HEAP_LOW_RESTART_MS).
 // Clear values are higher than alert values for hysteresis / rising-edge only.
 constexpr uint32_t HEALTH_HEAP_FREE_ALERT_BYTES = 49152;   // 48 KiB
 constexpr uint32_t HEALTH_HEAP_FREE_CLEAR_BYTES = 65536;   // 64 KiB
 constexpr uint32_t HEALTH_HEAP_LARGEST_ALERT_BYTES = 16384; // 16 KiB
 constexpr uint32_t HEALTH_HEAP_LARGEST_CLEAR_BYTES = 24576; // 24 KiB
+constexpr uint32_t HEALTH_HEAP_LOW_RESTART_MS = 5UL * 60UL * 1000UL;
 constexpr uint32_t HEALTH_STACK_MIN_ALERT_WORDS = 256;      // 1 KiB remaining
 constexpr uint32_t HEALTH_STACK_MIN_CLEAR_WORDS = 384;
 constexpr uint32_t HEALTH_LOOP_GAP_ALERT_MS = 200;
@@ -2388,6 +2392,7 @@ inline LogLevel debugCodeDefaultLevel(DebugCode code) {
     case DebugCode::SYSTEM_LOG_OVERRUN:
     case DebugCode::FIRST_DROP_DURING_RETARE:
     case DebugCode::HEALTH_HEAP_LOW:
+    case DebugCode::HEALTH_HEAP_RESTART:
     case DebugCode::HEALTH_STACK_LOW:
     case DebugCode::HEALTH_LOOP_GAP:
     case DebugCode::OTA_UPLOAD_REJECTED:
@@ -2621,6 +2626,7 @@ inline const char *debugCodeName(DebugCode code) {
     case DebugCode::RINSE_CLASSIFIED: return "rinse classified";
     case DebugCode::SYSTEM_LOG_OVERRUN: return "diagnostic log overrun";
     case DebugCode::HEALTH_HEAP_LOW: return "health heap low";
+    case DebugCode::HEALTH_HEAP_RESTART: return "health heap restart";
     case DebugCode::HEALTH_STACK_LOW: return "health stack low";
     case DebugCode::HEALTH_LOOP_GAP: return "health loop gap high";
     case DebugCode::OTA_UPLOAD_STARTED: return "OTA upload started";
@@ -2830,6 +2836,12 @@ inline bool formatLifecycleDebugMessage(const DebugEvent &event, char *message,
     case DebugCode::HEALTH_HEAP_LOW:
       snprintf(message, capacity,
                "health heap low free=%ld largest=%ld",
+               static_cast<long>(event.argument1),
+               static_cast<long>(event.argument2));
+      return true;
+    case DebugCode::HEALTH_HEAP_RESTART:
+      snprintf(message, capacity,
+               "health heap restart free=%ld largest=%ld",
                static_cast<long>(event.argument1),
                static_cast<long>(event.argument2));
       return true;

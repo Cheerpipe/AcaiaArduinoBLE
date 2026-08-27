@@ -217,6 +217,8 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   loopIntervalGapMs = 0;
   healthIntervalMaxGapMs = 0;
   healthHeapAlertLatched = false;
+  healthHeapRestartLatched = false;
+  healthHeapLowSinceMs = 0;
   healthStackAlertLatched = false;
   healthLoopGapAlertLatched = false;
   scaleCriticalEvent = ScaleEvent{};
@@ -7946,6 +7948,73 @@ void s04b_shot_log_page_slice() {
   CHECK(SHOT_LOG_PAGE_DEFAULT == 10);
 }
 
+void s04f_shot_log_sort_date_and_rating() {
+  CHECK(shotLogSortFromName("rating") == ShotLogSort::Rating);
+  CHECK(shotLogSortFromName("date") == ShotLogSort::Date);
+  CHECK(shotLogSortFromName(nullptr) == ShotLogSort::Date);
+  CHECK(shotLogSortFromName("nope") == ShotLogSort::Date);
+  CHECK(shotLogSortDirFromName("asc") == ShotLogSortDir::Asc);
+  CHECK(shotLogSortDirFromName("desc") == ShotLogSortDir::Desc);
+  CHECK(shotLogSortDirFromName(nullptr) == ShotLogSortDir::Desc);
+
+  ShotLogRecord recs[5] = {};
+  recs[0].id = 5;
+  recs[0].extractionGuardEnabled = shotLogPackRating(0, 3);
+  recs[1].id = 4;
+  recs[1].extractionGuardEnabled = shotLogPackRating(0, 5);
+  recs[2].id = 3;
+  recs[2].extractionGuardEnabled = shotLogPackRating(0, 0);
+  recs[3].id = 2;
+  recs[3].extractionGuardEnabled = shotLogPackRating(0, 5);
+  recs[4].id = 1;
+  recs[4].extractionGuardEnabled = shotLogPackRating(0, 1);
+
+  ShotLogRecord dateDesc[5];
+  memcpy(dateDesc, recs, sizeof(recs));
+  shotLogSortRecords(dateDesc, 5, ShotLogSort::Date, ShotLogSortDir::Desc);
+  CHECK(dateDesc[0].id == 5);
+  CHECK(dateDesc[4].id == 1);
+
+  ShotLogRecord dateAsc[5];
+  memcpy(dateAsc, recs, sizeof(recs));
+  shotLogSortRecords(dateAsc, 5, ShotLogSort::Date, ShotLogSortDir::Asc);
+  CHECK(dateAsc[0].id == 1);
+  CHECK(dateAsc[4].id == 5);
+
+  ShotLogRecord ratingDesc[5];
+  memcpy(ratingDesc, recs, sizeof(recs));
+  shotLogSortRecords(ratingDesc, 5, ShotLogSort::Rating, ShotLogSortDir::Desc);
+  CHECK(ratingDesc[0].id == 4);
+  CHECK(shotLogRating(ratingDesc[0].extractionGuardEnabled) == 5);
+  CHECK(ratingDesc[1].id == 2);
+  CHECK(shotLogRating(ratingDesc[1].extractionGuardEnabled) == 5);
+  CHECK(ratingDesc[2].id == 5);
+  CHECK(shotLogRating(ratingDesc[2].extractionGuardEnabled) == 3);
+  CHECK(ratingDesc[3].id == 1);
+  CHECK(shotLogRating(ratingDesc[3].extractionGuardEnabled) == 1);
+  CHECK(ratingDesc[4].id == 3);
+  CHECK(shotLogRating(ratingDesc[4].extractionGuardEnabled) == 0);
+
+  ShotLogRecord ratingAsc[5];
+  memcpy(ratingAsc, recs, sizeof(recs));
+  shotLogSortRecords(ratingAsc, 5, ShotLogSort::Rating, ShotLogSortDir::Asc);
+  CHECK(ratingAsc[0].id == 1);
+  CHECK(shotLogRating(ratingAsc[0].extractionGuardEnabled) == 1);
+  CHECK(ratingAsc[1].id == 5);
+  CHECK(shotLogRating(ratingAsc[1].extractionGuardEnabled) == 3);
+  CHECK(ratingAsc[2].id == 4);
+  CHECK(shotLogRating(ratingAsc[2].extractionGuardEnabled) == 5);
+  CHECK(ratingAsc[3].id == 2);
+  CHECK(shotLogRating(ratingAsc[3].extractionGuardEnabled) == 5);
+  CHECK(ratingAsc[4].id == 3);
+  CHECK(shotLogRating(ratingAsc[4].extractionGuardEnabled) == 0);
+
+  shotLogSortRecords(nullptr, 5, ShotLogSort::Rating, ShotLogSortDir::Desc);
+  shotLogSortRecords(recs, 0, ShotLogSort::Rating, ShotLogSortDir::Desc);
+  shotLogSortRecords(recs, 1, ShotLogSort::Rating, ShotLogSortDir::Desc);
+  CHECK(recs[0].id == 5);
+}
+
 void s06_shot_log_local_sec_from_utc() {
   CHECK(shotLogLocalSecFromUtc(1'700'000'000U, -240) ==
         1'700'000'000U - 14400U);
@@ -8177,6 +8246,82 @@ void h01_health_threshold_alerts_fire_once_per_crossing() {
   CHECK(!debugEventExists(DebugCode::HEALTH_LOOP_GAP));
   serviceHealthThresholdAlerts(HEALTH_LOOP_GAP_CLEAR_MS);
   CHECK(!healthLoopGapAlertLatched);
+}
+
+void h01b_health_heap_low_restarts_only_when_ready_and_sustained() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  freeHeapBytes = HEALTH_HEAP_FREE_ALERT_BYTES - 1;
+  largestFreeHeapBlockBytes = HEALTH_HEAP_LARGEST_ALERT_BYTES - 1;
+  loopStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  scaleWorkerStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  serviceHealthThresholdAlerts(0);
+  CHECK(healthHeapAlertLatched);
+  CHECK(!safeRestartRequested);
+  CHECK(!debugEventExists(DebugCode::HEALTH_HEAP_RESTART));
+
+  hostMillis += HEALTH_HEAP_LOW_RESTART_MS - 1;
+  serviceHealthThresholdAlerts(0);
+  CHECK(!safeRestartRequested);
+
+  hostMillis += 1;
+  serviceHealthThresholdAlerts(0);
+  CHECK(safeRestartRequested);
+  CHECK(debugEventExists(DebugCode::HEALTH_HEAP_RESTART,
+                         static_cast<int32_t>(freeHeapBytes),
+                         static_cast<int32_t>(largestFreeHeapBlockBytes)));
+  CHECK(healthHeapRestartLatched);
+
+  safeRestartRequested = false;
+  debugLog.clear();
+  serviceHealthThresholdAlerts(0);
+  CHECK(!debugEventExists(DebugCode::HEALTH_HEAP_RESTART));
+  CHECK(!safeRestartRequested);
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  freeHeapBytes = HEALTH_HEAP_FREE_ALERT_BYTES - 1;
+  largestFreeHeapBlockBytes = HEALTH_HEAP_LARGEST_ALERT_BYTES - 1;
+  loopStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  scaleWorkerStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  serviceHealthThresholdAlerts(0);
+  hostMillis += HEALTH_HEAP_LOW_RESTART_MS / 2;
+  serviceHealthThresholdAlerts(0);
+  freeHeapBytes = HEALTH_HEAP_FREE_CLEAR_BYTES;
+  largestFreeHeapBlockBytes = HEALTH_HEAP_LARGEST_CLEAR_BYTES;
+  serviceHealthThresholdAlerts(0);
+  CHECK(!healthHeapAlertLatched);
+  hostMillis += HEALTH_HEAP_LOW_RESTART_MS;
+  serviceHealthThresholdAlerts(0);
+  CHECK(!safeRestartRequested);
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  (void)startCycle();
+  CHECK(session.active);
+  freeHeapBytes = HEALTH_HEAP_FREE_ALERT_BYTES - 1;
+  largestFreeHeapBlockBytes = HEALTH_HEAP_LARGEST_ALERT_BYTES - 1;
+  loopStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  scaleWorkerStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  serviceHealthThresholdAlerts(0);
+  hostMillis += HEALTH_HEAP_LOW_RESTART_MS;
+  serviceHealthThresholdAlerts(0);
+  CHECK(healthHeapAlertLatched);
+  CHECK(!safeRestartRequested);
+  CHECK(!debugEventExists(DebugCode::HEALTH_HEAP_RESTART));
+
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  maintenanceLease.active = true;
+  freeHeapBytes = HEALTH_HEAP_FREE_ALERT_BYTES - 1;
+  largestFreeHeapBlockBytes = HEALTH_HEAP_LARGEST_ALERT_BYTES - 1;
+  loopStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  scaleWorkerStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  serviceHealthThresholdAlerts(0);
+  hostMillis += HEALTH_HEAP_LOW_RESTART_MS;
+  serviceHealthThresholdAlerts(0);
+  CHECK(!safeRestartRequested);
+  CHECK(!debugEventExists(DebugCode::HEALTH_HEAP_RESTART));
 }
 
 void h02_hwmon_cpu_load_uses_idle_and_ema() {
@@ -10322,6 +10467,7 @@ const TestCase testCases[] = {
     {"M09", m09_seqlock_yields_when_writer_active},
     {"M12", m12_ble_companion_result_drop_is_counted},
     {"S04b", s04b_shot_log_page_slice},
+    {"S04f", s04f_shot_log_sort_date_and_rating},
     {"S06", s06_shot_log_local_sec_from_utc},
     {"S07", s07_shot_log_stores_fixed_wall_time},
     {"S08", s08_shot_log_without_sync_has_no_wall_time},
@@ -10333,6 +10479,7 @@ const TestCase testCases[] = {
     {"S13", s13_persist_debug_messages_identify_origin},
     {"S19", s19_shot_store_persist_failure_logs_once_until_success},
     {"H01", h01_health_threshold_alerts_fire_once_per_crossing},
+    {"H01b", h01b_health_heap_low_restarts_only_when_ready_and_sustained},
     {"H02", h02_hwmon_cpu_load_uses_idle_and_ema},
     {"H03", h03_task_profiler_start_stop_updates_snapshot},
     {"N01", n01_wall_clock_tracks_utc_from_anchor},

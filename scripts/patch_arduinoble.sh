@@ -6,6 +6,8 @@
 #  4) Bound ATT indication / ACL credit waits (no indefinite blocks)
 #  5) VHCI: 4 KiB RX/TX streams, non-blocking RX, TX without PDU drop, 4 KiB bleTask
 #  6) Block BLE.poll(timeout) on VHCI RX instead of busy-spinning
+#  7) BLEDevice copyAddress/copyLocalName (no Arduino String on the scan path)
+#  8) Fixed 32-slot GAP BLEDevice pool in PSRAM BSS (no malloc per advert)
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,6 +18,8 @@ vhci_init_patch="$script_dir/../patches/ArduinoBLE-2.1.0-vhci-controller-init.pa
 hci_wait_patch="$script_dir/../patches/ArduinoBLE-2.1.0-hci-blocking-wait.patch"
 hci_nodrop_patch="$script_dir/../patches/ArduinoBLE-2.1.0-hci-nodrop.patch"
 gap_scan_patch="$script_dir/../patches/ArduinoBLE-2.1.0-gap-scan-params.patch"
+copy_patch="$script_dir/../patches/ArduinoBLE-2.1.0-ble-device-copy.patch"
+pool_patch="$script_dir/../patches/ArduinoBLE-2.1.0-gap-device-pool.patch"
 
 candidates=()
 if [[ -n "${ARDUINO_BLE_HOME:-}" ]]; then
@@ -55,6 +59,7 @@ fi
 gap="$target/src/utility/GAP.cpp"
 list="$target/src/utility/BLELinkedList.h"
 host_alloc_h="$target/src/utility/BLEHostAlloc.h"
+device_h="$target/src/BLEDevice.h"
 vhci="$target/src/utility/HCIVirtualTransport.cpp"
 
 restore_scan=0
@@ -65,6 +70,8 @@ apply_vhci_init=0
 apply_hci_wait=0
 apply_hci_nodrop=0
 apply_gap_scan=0
+apply_copy=0
+apply_pool=0
 
 if grep -q '_scanInterval(0x00F0)' "$gap"; then
   restore_scan=0
@@ -78,13 +85,16 @@ else
   exit 1
 fi
 
-# OOM-safe discover may still use malloc, or already be upgraded to BLEHostAlloc.
-if ! grep -qE 'malloc\(sizeof\(BLEDevice\)\)|BLEHostAlloc\(sizeof\(BLEDevice\)\)' "$gap" || \
+# OOM-safe discover may still use malloc, or already be upgraded to BLEHostAlloc
+# or the fixed GAP device pool.
+if ! grep -qE 'malloc\(sizeof\(BLEDevice\)\)|BLEHostAlloc\(sizeof\(BLEDevice\)\)|gapAllocDevice' "$gap" || \
    ! grep -qE 'malloc\(sizeof\(BLELinkedListNode|BLEHostAlloc\(sizeof\(BLELinkedListNode' "$list"; then
   apply_oom=1
 fi
 
-if [[ ! -f "$host_alloc_h" ]] || ! grep -q 'BLEHostAlloc(sizeof(BLEDevice))' "$gap"; then
+if [[ ! -f "$host_alloc_h" ]] || \
+   { ! grep -q 'BLEHostAlloc(sizeof(BLEDevice))' "$gap" && \
+     ! grep -q 'gapAllocDevice' "$gap"; }; then
   apply_psram=1
 fi
 
@@ -110,11 +120,21 @@ if [[ -f "$gap" ]] && ! grep -q 'setScanParameters' "$gap"; then
   apply_gap_scan=1
 fi
 
+if [[ -f "$device_h" ]] && ! grep -q 'copyAddress' "$device_h"; then
+  apply_copy=1
+fi
+
+if [[ -f "$gap" ]] && grep -q 'BLEHostFree(device)' "$gap" && \
+   ! grep -q 'gapAllocDevice' "$gap"; then
+  apply_pool=1
+fi
+
 if [[ "$restore_scan" -eq 0 && "$apply_oom" -eq 0 && "$apply_psram" -eq 0 && \
       "$apply_hci" -eq 0 && "$apply_vhci_init" -eq 0 && \
       "$apply_hci_wait" -eq 0 && "$apply_hci_nodrop" -eq 0 && \
-      "$apply_gap_scan" -eq 0 ]]; then
-  echo "ArduinoBLE already patched (idle scan 150/30 + OOM-safe + host PSRAM + HCI no-drop + VHCI init + blocking HCI wait): $target"
+      "$apply_gap_scan" -eq 0 && "$apply_copy" -eq 0 && \
+      "$apply_pool" -eq 0 ]]; then
+  echo "ArduinoBLE already patched (idle scan 150/30 + OOM-safe + host PSRAM + HCI no-drop + VHCI init + blocking HCI wait + copyAddress + GAP device pool): $target"
   exit 0
 fi
 
@@ -178,6 +198,10 @@ if [[ "$apply_psram" -eq 1 ]]; then
   fi
   patch -p1 -d "$target" < "$psram_patch"
   echo "Patched ArduinoBLE BLE host PSRAM allocator: $target"
+  if [[ -f "$gap" ]] && grep -q 'BLEHostFree(device)' "$gap" && \
+     ! grep -q 'gapAllocDevice' "$gap"; then
+    apply_pool=1
+  fi
 fi
 
 if [[ "$apply_hci" -eq 1 ]]; then
@@ -276,4 +300,40 @@ if [[ "$apply_gap_scan" -eq 1 ]]; then
   fi
   patch -p1 -d "$target" < "$gap_scan_patch"
   echo "Patched ArduinoBLE idle GAP scan 150/30 + setScanParameters: $target"
+fi
+
+if [[ "$apply_copy" -eq 1 ]]; then
+  if [[ ! -f "$copy_patch" ]]; then
+    echo "Missing BLEDevice copy patch: $copy_patch" >&2
+    exit 1
+  fi
+  if ! command -v patch >/dev/null 2>&1; then
+    echo "patch(1) is required to apply $copy_patch" >&2
+    exit 1
+  fi
+  if ! patch -p1 --dry-run -d "$target" < "$copy_patch" >/dev/null 2>&1; then
+    echo "BLEDevice copyAddress patch does not apply cleanly to: $target" >&2
+    echo "Install stock ArduinoBLE@2.1.0, apply prior patches, then retry." >&2
+    exit 1
+  fi
+  patch -p1 -d "$target" < "$copy_patch"
+  echo "Patched ArduinoBLE BLEDevice copyAddress/copyLocalName: $target"
+fi
+
+if [[ "$apply_pool" -eq 1 ]]; then
+  if [[ ! -f "$pool_patch" ]]; then
+    echo "Missing GAP device-pool patch: $pool_patch" >&2
+    exit 1
+  fi
+  if ! command -v patch >/dev/null 2>&1; then
+    echo "patch(1) is required to apply $pool_patch" >&2
+    exit 1
+  fi
+  if ! patch -p1 --dry-run -d "$target" < "$pool_patch" >/dev/null 2>&1; then
+    echo "GAP device-pool patch does not apply cleanly to: $target" >&2
+    echo "Install stock ArduinoBLE@2.1.0, apply host PSRAM, then retry." >&2
+    exit 1
+  fi
+  patch -p1 -d "$target" < "$pool_patch"
+  echo "Patched ArduinoBLE GAP BLEDevice pool: $target"
 fi

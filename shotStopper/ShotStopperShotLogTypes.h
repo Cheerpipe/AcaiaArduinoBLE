@@ -17,6 +17,23 @@ constexpr uint16_t SHOT_LOG_SCHEMA_VERSION = 1;
 constexpr size_t SHOT_LOG_CAPACITY = 120;
 constexpr size_t SHOT_LOG_PAGE_DEFAULT = 10;
 
+enum class ShotLogSort : uint8_t { Date = 0, Rating = 1 };
+enum class ShotLogSortDir : uint8_t { Desc = 0, Asc = 1 };
+
+inline ShotLogSort shotLogSortFromName(const char *name) {
+  if (name != nullptr && strcmp(name, "rating") == 0) {
+    return ShotLogSort::Rating;
+  }
+  return ShotLogSort::Date;
+}
+
+inline ShotLogSortDir shotLogSortDirFromName(const char *name) {
+  if (name != nullptr && strcmp(name, "asc") == 0) {
+    return ShotLogSortDir::Asc;
+  }
+  return ShotLogSortDir::Desc;
+}
+
 inline size_t shotLogClampPageLimit(size_t limit) {
   if (limit < 1U) {
     return 1U;
@@ -315,6 +332,67 @@ struct ShotLogRecord {
 
 static_assert(sizeof(ShotLogRecord) == 48,
               "ShotLogRecord must stay 48 bytes for NVS headroom");
+
+// Input must be newest-first (copyNewestFirst). Date+desc is a no-op.
+inline void shotLogReverseRecords(ShotLogRecord *records, size_t count) {
+  if (records == nullptr || count < 2U) {
+    return;
+  }
+  size_t i = 0;
+  size_t j = count - 1U;
+  while (i < j) {
+    const ShotLogRecord tmp = records[i];
+    records[i] = records[j];
+    records[j] = tmp;
+    ++i;
+    --j;
+  }
+}
+
+inline int shotLogCompareRatingOrder(const ShotLogRecord &left,
+                                     const ShotLogRecord &right,
+                                     ShotLogSortDir dir) {
+  const uint8_t leftRating = shotLogRating(left.extractionGuardEnabled);
+  const uint8_t rightRating = shotLogRating(right.extractionGuardEnabled);
+  const bool leftUnrated = leftRating == 0;
+  const bool rightUnrated = rightRating == 0;
+  if (leftUnrated != rightUnrated) {
+    return leftUnrated ? 1 : -1;
+  }
+  if (leftRating != rightRating) {
+    if (dir == ShotLogSortDir::Desc) {
+      return leftRating > rightRating ? -1 : 1;
+    }
+    return leftRating < rightRating ? -1 : 1;
+  }
+  if (left.id != right.id) {
+    return left.id > right.id ? -1 : 1;
+  }
+  return 0;
+}
+
+inline void shotLogSortRecords(ShotLogRecord *records, size_t count,
+                               ShotLogSort sort, ShotLogSortDir dir) {
+  if (records == nullptr || count < 2U) {
+    return;
+  }
+  if (sort != ShotLogSort::Rating) {
+    if (dir == ShotLogSortDir::Asc) {
+      shotLogReverseRecords(records, count);
+    }
+    return;
+  }
+  for (size_t i = 1; i < count; ++i) {
+    const ShotLogRecord key = records[i];
+    size_t j = i;
+    while (j > 0 &&
+           shotLogCompareRatingOrder(records[j - 1U], key, dir) > 0) {
+      records[j] = records[j - 1U];
+      --j;
+    }
+    records[j] = key;
+  }
+}
 
 struct ShotLogHeader {
   uint32_t magic;

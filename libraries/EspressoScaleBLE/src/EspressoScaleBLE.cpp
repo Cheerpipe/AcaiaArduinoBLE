@@ -222,17 +222,15 @@ bool EspressoScaleBLE::pollScan() {
     if (peripheral) {
         char mac[ACAIA_MAC_CAPACITY] = {};
         char name[ACAIA_NAME_CAPACITY] = {};
-        strncpy(mac, peripheral.address().c_str(), sizeof(mac) - 1);
-        strncpy(name, peripheral.localName().c_str(), sizeof(name) - 1);
+        peripheral.copyAddress(mac, sizeof(mac));
+        peripheral.copyLocalName(name, sizeof(name));
 
         if (_debug) {
             Serial.print("Found ");
             Serial.print(mac);
             Serial.print(" '");
             Serial.print(name);
-            Serial.print("' ");
-            Serial.print(peripheral.advertisedServiceUuid());
-            Serial.println();
+            Serial.println("'");
         }
 
         const bool filtered = _scanMac[0] != '\0';
@@ -309,7 +307,7 @@ bool EspressoScaleBLE::advanceConnection() {
                     return false;
                 }
                 BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
-                resetConnection(false, ScaleDisconnectReason::CONNECT_FAILED);
+                resetConnection(true, ScaleDisconnectReason::CONNECT_FAILED);
                 return false;
             }
             BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
@@ -845,16 +843,8 @@ void EspressoScaleBLE::rememberPeripheral(const BLEDevice& peripheral) {
     _peripheral.~BLEDevice();
     new (&_peripheral) BLEDevice(peripheral);
     _hasPeripheral = true;
-    {
-        const String address = peripheral.address();
-        strncpy(_address, address.c_str(), sizeof(_address) - 1);
-        _address[sizeof(_address) - 1] = '\0';
-    }
-    {
-        const String localName = peripheral.localName();
-        strncpy(_localName, localName.c_str(), sizeof(_localName) - 1);
-        _localName[sizeof(_localName) - 1] = '\0';
-    }
+    peripheral.copyAddress(_address, sizeof(_address));
+    peripheral.copyLocalName(_localName, sizeof(_localName));
 }
 
 void EspressoScaleBLE::clearPeripheral() {
