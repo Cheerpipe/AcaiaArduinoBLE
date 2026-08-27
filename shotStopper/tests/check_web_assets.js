@@ -453,7 +453,7 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     html.includes('id="ntpServerCustom" type="number"') ||
     !html.includes('id="staSsid" type="text" maxlength="32" autocomplete="off"') ||
     !html.includes('id="ntpServerCustom" type="text" maxlength="63" placeholder="e.g. ntp.example.com" autocomplete="off"') ||
-    !html.includes('> Scale lost<small class="fieldHint">Local buzzer when the scale disconnects') ||
+    !html.includes('> Scale lost<small class="fieldHint">Beeps when the scale disconnects') ||
     html.includes('Scale lost (BBW)') ||
     !html.includes('option value="fast" selected') ||
     !html.includes('option value="rapid">Rapid') ||
@@ -477,15 +477,15 @@ if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
     !html.includes('class="buzzerOpt scaleIncapableOpt"><input id="buzzerScaleConnectedBeep"') ||
     html.includes('buzzerOnlyOpt') ||
     !html.includes('option value="4" selected') ||
-    !ui.includes('when Buzzer only is saved') ||
-    !html.includes('Volume on connect/reconnect. <strong>Scale only or Scale priority.</strong>') ||
+    !html.includes('keep the scale silent on connect') ||
+    !html.includes('How loud the scale is when it connects. Used when sounds play on the scale (<strong>Scale only or Scale priority</strong>).') ||
     !html.includes('<strong>Requires automatic tare.</strong>') ||
-    !html.includes('when this option is enabled. <strong>Buzzer only.</strong>')) {
+    !html.includes('Applies when <strong>Buzzer only</strong> is selected.')) {
   throw new Error('Web UI must show paddle state, scale beep options, and buzzer alerts');
 }
 if (!ui.includes('id="operationalWallS" type="number" min="5" max="60"') ||
     !ui.includes('Max BBW time (s)') ||
-    !ui.includes('hard-caps at 60 s') ||
+    !ui.includes('Longest an automatic brew-by-weight shot may run') ||
     !ui.includes('sToMs(') ||
     !ui.includes('rinseGestureMs:sToMs') ||
     !network.includes('Max BBW time must be from 5 to 60 s.')) {
@@ -644,7 +644,7 @@ if (html.indexOf('<summary>Brew by Weight</summary>') >
     html.includes('id="requireCupToStart" type="checkbox" checked') ||
     !ui.includes('Enable cup protection') ||
     !ui.includes('cupProtectOpt') ||
-    !ui.includes('place the cup after connect so presence can be detected.') ||
+    !ui.includes('place the cup after connect so it can be detected.') ||
     !ui.includes('id="homeCupProtectionEnabled"') ||
     html.indexOf('id="homeAvoidAccidentalTouchEnabled"') >
         html.indexOf('id="homeCupProtectionEnabled"') ||
@@ -969,8 +969,9 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !ui.includes('id="autoToManualGuardLimitMode"') ||
     !ui.includes('id="autoToManualGuardBaselineS"') ||
     !ui.includes('id="scaleTimerStopExtraDelayMs"') ||
-    !html.includes('Added after the scale timer catches up to circuit whole seconds') ||
+    !html.includes('Extra wait so the scale timer can catch up to whole seconds when the shot ends') ||
     html.includes('Added after measured scale start lag') ||
+    html.includes('Added after the scale timer catches up to circuit whole seconds') ||
     !ui.includes('id="dripDelayS" type="number" min="0" max="10" step="0.1"') ||
     !ui.includes('id="autoToManualGuardManualLimitS"') ||
     !ui.includes('id="autoToManualGuardTrendS"') ||
@@ -1103,9 +1104,10 @@ if (!html.includes('<summary>Paddle</summary>') ||
     !html.includes('like a normal brew switch') ||
     !html.includes('original Tater Mazer Shot Stopper') ||
     !html.includes('move the paddle ON during the shot') ||
-    !html.includes('Do not press the scale') ||
-    !html.includes('auto-natural') ||
-    !html.includes('auto-original') ||
+    !html.includes('Prefer not to press the scale') ||
+    !html.includes('Always finishes by weight') ||
+    !html.includes('behaves like Natural') ||
+    !html.includes('behaves like Original') ||
     !ui.includes("paddleMode:['auto','natural','original']") ||
     !ui.includes("if($('paddleMode'))$('paddleMode').value=") ||
     !network.includes('"paddleMode"') ||
@@ -1207,10 +1209,10 @@ if (!html.includes('<summary>Switch</summary>') ||
     !html.includes('Reed confirm timeout') ||
     !html.includes('Button press') ||
     !html.includes('Button release') ||
-    !html.includes('when the reed confirm window starts') ||
+    !html.includes('Whether a shot starts and stops when you press the button or when you release it') ||
     !html.includes(
-        'how long Assumed may disagree with the reed') ||
-    !html.includes('Starts on press/release, not relay mirror') ||
+        'how long to wait for the machine\'s on/off sensor to agree') ||
+    !html.includes('it trusts the sensor') ||
     !html.includes('undone if the hold exceeds this limit') ||
     html.includes('<summary>Momentary</summary>') ||
     html.indexOf('<summary>Paddle</summary>') >
@@ -1220,7 +1222,7 @@ if (!html.includes('<summary>Switch</summary>') ||
     html.indexOf('id="stopPulseMs"') >
         html.indexOf('<summary>No-scale BBW</summary>') ||
     !html.includes(
-        'mimic a single button press when it needs to stop the brew automatically') ||
+        'when the stopper needs to stop the machine for you') ||
     !ui.includes('stopPulseMs:number(') ||
     !ui.includes("if($('stopPulseMs'))$('stopPulseMs').value=") ||
     !ui.includes("'Auto-stop pulse'") ||
@@ -1241,10 +1243,10 @@ if (!html.includes('<summary>Switch</summary>') ||
     ui.includes('id="overrideBrewingButton"') ||
     ui.includes("d.classList.contains('momentaryMachine')&&!d.classList.contains('reedMachine')") ||
     !html.includes('Assume idle when the scale connects') ||
-    !html.includes('On connect with no brew, mark idle. No pulse.') ||
+    !html.includes('treat the machine as idle') ||
     !html.includes('Shot reaction timeout') ||
     !html.includes(
-        'quiet pan to Assumed off in this many s. No pulse; late flow confirms ON.') ||
+        'if the scale stays quiet this long, assume the machine did not start') ||
     !html.includes('Override idle') ||
     !html.includes('Override brewing') ||
     !css.includes('html.reedMachine .switchOnly') ||
@@ -1318,6 +1320,7 @@ if (!html.includes('class="cfgGroup paddleOnly"><summary>Paddle</summary>') ||
     !html.includes('Lets you flush the group with a long press from idle') ||
     !html.includes('How long to hold the switch from idle before a rinse starts') ||
     !html.includes('How long water runs through the group after a rinse starts') ||
+    !html.includes('a long press is left to the machine') ||
     !html.includes('id="rinseButton" class="btnGlyph" title="Start rinse"') ||
     html.includes('id="rinseButton" class="btnGlyph paddleOnly"') ||
     !ui.includes('s.config.rinseEnabled===true') ||
@@ -1365,7 +1368,7 @@ if (!ui.includes('id="learnedOffsetG"') ||
     html.indexOf('id="weightOffsetBaselineG"') >
         html.indexOf('id="resetCalibrationButton"') ||
     !ui.includes('Reset learned stop offset to baseline') ||
-    !ui.includes('Seed for Reset learned stop offset') ||
+    !ui.includes('Value the learned stop offset returns to when you reset it') ||
     !network.includes('weightOffsetBaselineG') ||
     !ui.includes('weightOffsetBaselineG')) {
   throw new Error('Learned stop offset baseline must be wired like A→M baseline reset');
@@ -1439,13 +1442,13 @@ if (!html.includes('<summary>Cup</summary>') ||
         html.indexOf('<summary>Bookoo</summary>') ||
     html.indexOf('<strong>Requires automatic tare.</strong>') >
         html.indexOf('<summary>Acaia</summary>') ||
-    html.indexOf('when this option is enabled. <strong>Buzzer only.</strong>') <
+    html.indexOf('Applies when <strong>Buzzer only</strong> is selected.') <
         html.indexOf('<summary>Bookoo</summary>') ||
-    html.indexOf('when this option is enabled. <strong>Buzzer only.</strong>') >
+    html.indexOf('Applies when <strong>Buzzer only</strong> is selected.') >
         html.indexOf('<summary>Acaia</summary>') ||
-    html.indexOf('<strong>Scale only or Scale priority.</strong>') <
+    html.indexOf('<strong>Scale only or Scale priority</strong>') <
         html.indexOf('<summary>Bookoo</summary>') ||
-    html.indexOf('<strong>Scale only or Scale priority.</strong>') >
+    html.indexOf('<strong>Scale only or Scale priority</strong>') >
         html.indexOf('<summary>Acaia</summary>') ||
     html.indexOf('<summary>Acaia</summary>') <
         html.indexOf('<summary>Bookoo</summary>') ||
@@ -1473,14 +1476,15 @@ if (!html.includes('id="postTareBaselineGraceS" type="number" min="0.5" max="10"
 if (!ui.includes("rangeCheck('dripDelayS',0,10,'Drip delay',{unit:'s'})") ||
     !ui.includes("dripDelayMs:sToMs('dripDelayS')") ||
     !ui.includes("$('dripDelayS').value=String((c.dripDelayMs??3000)/1000)") ||
-    !ui.includes('Wait after the shot ends before capturing the final post-drip weight for history and offset learning.') ||
+    !ui.includes('Wait after the shot ends so drips finish before saving the final weight for history and stop-offset learning.') ||
     !network.includes('\\"dripDelayMs\\":%lu') ||
     !network.includes('Drip delay must be from 0 to 10 s.') ||
     !network.includes('candidate.dripDelayMs')) {
   throw new Error('Drip delay must be wired through Settings, status/settings, and config validation');
 }
 if (!html.includes('<summary>AtomHeart Eclair</summary>') ||
-    !html.includes('Eclair does not expose configurable volume, beep, mode, or combined tare-and-start commands.') ||
+    !html.includes('Eclair uses the normal tare and timer') ||
+    !html.includes('It has no volume, beep, mode, or combined tare-and-start options') ||
     html.indexOf('<summary>AtomHeart Eclair</summary>') <
         html.indexOf('<summary>Felicita</summary>') ||
     html.indexOf('<summary>AtomHeart Eclair</summary>') >
@@ -1603,7 +1607,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
     ui.includes('id="cupPresentWeightG"') ||
     html.includes('id="cupPresentWeightG"') ||
     html.includes('id="requireCupToStart" type="checkbox" checked') ||
-    !ui.includes('place the cup after connect so presence can be detected.') ||
+    !ui.includes('place the cup after connect so it can be detected.') ||
     !ui.includes('id="homeCupProtectionEnabled"') ||
     html.indexOf('<summary>Slow extraction guard</summary>') < 0 ||
     html.indexOf('<summary>A→M time guard</summary>') < 0 ||
