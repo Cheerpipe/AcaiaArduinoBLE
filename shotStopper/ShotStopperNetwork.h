@@ -292,9 +292,10 @@ class ShotStopperNetwork {
   bool startNetwork();
   void startStation(const PersistedSettings &settings, uint32_t now);
   void applyStationAddressConfig(const PersistedSettings &settings);
-  void beginStationConnect(const PersistedSettings &settings, uint32_t now);
+  bool beginStationConnect(const PersistedSettings &settings, uint32_t now);
   void clearStaLinkMetrics();
   void preferStaWifiCoex(bool enable);
+  bool brewRfActive() const;
   bool ensureAccessPoint(uint32_t now, bool force = false);
   void stopSoftApKeepStation();
   void stopSoftApLeaveHttp();

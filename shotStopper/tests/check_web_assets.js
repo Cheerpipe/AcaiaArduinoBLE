@@ -14,6 +14,7 @@ const firmware = [
   firmwareCore,
   fs.readFileSync(path.join(sketchDir, 'ShotStopperHardware.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachine.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperRfCoex.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineRelay.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachineActivatorSample.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachinePaddleInput.h'), 'utf8'),
@@ -339,6 +340,25 @@ if (!firmwareCore.includes('companionAdvertisingShouldPause') ||
     !bleCompanion.includes('setAdvertisingInterval(BLE_COMPANION_ADV_INTERVAL)')) {
   throw new Error(
       'Companion advertising must pause while connecting or scale-linked; worker must block on HCI');
+}
+if (firmwareCore.includes('SCALE_LINK_COEX_BT_MS') ||
+    firmwareCore.includes('scaleLinkCoexHadLink') ||
+    !firmwareCore.includes('scale.isConnecting() || scale.isLinkUp()') ||
+    !firmware.includes('setRfCoexClaim(RfCoexClaim::BLE') ||
+    !firmware.includes('rfCoexWinner')) {
+  throw new Error(
+      'RF coex must prefer BT for the whole GATT link via a shared claim resolver, not a 1s window');
+}
+{
+  const restoreStart = firmwareCore.indexOf('void servicePendingBrewRfRestore()');
+  const restoreEnd = firmwareCore.indexOf('\nvoid ', restoreStart + 1);
+  const restore = restoreStart >= 0 && restoreEnd > restoreStart
+      ? firmwareCore.slice(restoreStart, restoreEnd)
+      : '';
+  if (restore.includes('applyBrewRfPreference(false)')) {
+    throw new Error(
+        'servicePendingBrewRfRestore must not force BALANCE; syncScaleRadioCoex owns the BLE claim');
+  }
 }
 if (/setScaleLinkState\(ScaleLinkState::CONNECTED\);\s*applyBookooConnectBeepPolicy/.test(
         firmwareCore)) {
@@ -3229,6 +3249,12 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
     !network.includes('setSortMethod') ||
     !network.includes('all-channel RSSI sort') ||
     !network.includes('preferStaWifiCoex') ||
+    !network.includes('setRfCoexClaim') ||
+    !network.includes('brewRfActive()') ||
+    !network.includes('associate deferred; brew RF active') ||
+    !network.includes('associate aborted; brew RF active') ||
+    !network.includes('STA reconnect deferred; brew RF active') ||
+    network.includes('esp_coex_preference_set') ||
     network.includes('findBestStaCandidate') ||
     !network.includes('stopSoftApKeepStation') ||
     !network.includes('wifiScanInProgress') ||
@@ -3238,16 +3264,27 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
 }
 {
   const beginStaStart = network.indexOf(
-      'void ShotStopperNetwork::beginStationConnect');
+      'bool ShotStopperNetwork::beginStationConnect');
   const beginStaEnd = network.indexOf(
       'void ShotStopperNetwork::startStation', beginStaStart);
   const beginSta = beginStaStart >= 0 && beginStaEnd > beginStaStart
       ? network.slice(beginStaStart, beginStaEnd)
       : '';
   if (!beginSta.includes('WiFi.disconnect(false, false)') ||
+      !beginSta.includes('brewRfActive()') ||
       beginSta.includes('WIFI_OFF')) {
     throw new Error(
-        'beginStationConnect must disconnect STA before reassociate without WIFI_OFF');
+        'beginStationConnect must disconnect STA before reassociate without WIFI_OFF and defer while brew RF is active');
+  }
+}
+{
+  const ntpArmStart = network.indexOf('bool ShotStopperNetwork::ntpMayArm');
+  const ntpArmEnd = network.indexOf('void ShotStopperNetwork::armNtp', ntpArmStart);
+  const ntpArm = ntpArmStart >= 0 && ntpArmEnd > ntpArmStart
+      ? network.slice(ntpArmStart, ntpArmEnd)
+      : '';
+  if (!ntpArm.includes('brewRfActive()')) {
+    throw new Error('ntpMayArm must not start SNTP while brew RF is active');
   }
 }
 if (!domain.includes('selectBestStaAp') ||

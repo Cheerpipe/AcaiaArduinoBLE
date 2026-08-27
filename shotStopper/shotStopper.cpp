@@ -51,10 +51,6 @@
 #include "ShotStopperPersistence.h"
 #include "ShotStopperDurableStores.h"
 #include "ShotStopperRecovery.h"
-#if __has_include(<esp_coexist.h>)
-#include <esp_coexist.h>
-#define SHOT_STOPPER_HAS_COEX 1
-#endif
 #endif
 
 #include "ShotStopperDomain.h"
@@ -119,7 +115,6 @@ constexpr uint32_t SCALE_PACKET_GAP_LOG_MIN_MS = 1000;
 constexpr uint32_t SCALE_DISCOVERY_TICK_MS = 3000;
 constexpr uint32_t SCALE_SCAN_HCI_RESTART_MS = 60000;
 constexpr uint32_t SCALE_SCAN_BURST_MS = 3000;
-constexpr uint32_t SCALE_LINK_COEX_BT_MS = 1000;
 constexpr uint32_t BOOKOO_CONNECT_BEEP_DEFER_MS = 750;
 constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;
 constexpr uint32_t SCALE_WORKER_NO_SCALE_DELAY_MS = 10;
@@ -569,8 +564,6 @@ uint32_t scanBurstUntilMs = 0;
 bool bookooConnectBeepPending = false;
 bool bookooConnectBeepSawWeight = false;
 uint32_t bookooConnectBeepArmedAtMs = 0;
-bool scaleLinkCoexHadLink = false;
-uint32_t scaleLinkCoexUpAtMs = 0;
 bool healthHeapAlertLatched = false;
 bool healthHeapRestartLatched = false;
 uint32_t healthHeapLowSinceMs = 0;
@@ -1697,7 +1690,6 @@ void servicePendingBrewRfRestore() {
     return;
   }
   pendingBrewRfRestore = false;
-  applyBrewRfPreference(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -3644,8 +3636,6 @@ void resetScaleWorkerRadioStateForHost() {
   bookooConnectBeepPending = false;
   bookooConnectBeepSawWeight = false;
   bookooConnectBeepArmedAtMs = 0;
-  scaleLinkCoexHadLink = false;
-  scaleLinkCoexUpAtMs = 0;
 }
 
 bool startScaleDiscoveryScan(const char *mac, bool forceRestart, bool burst) {
@@ -3698,18 +3688,7 @@ void serviceScaleScanDuty(bool sawCompatibleAd) {
 }
 
 void syncScaleRadioCoex() {
-  const bool linked = scale.isLinkUp();
-  const bool connecting = scale.isConnecting();
-  if (linked && !scaleLinkCoexHadLink) {
-    scaleLinkCoexUpAtMs = millis();
-  }
-  if (!linked) {
-    scaleLinkCoexUpAtMs = 0;
-  }
-  scaleLinkCoexHadLink = linked;
-  const bool freshLink =
-      linked && elapsedMs(scaleLinkCoexUpAtMs) < SCALE_LINK_COEX_BT_MS;
-  applyBrewRfPreference(connecting || freshLink ||
+  applyBrewRfPreference(scale.isConnecting() || scale.isLinkUp() ||
                         getRelaySafetySnapshot().closed);
 }
 
@@ -4502,8 +4481,8 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   stopPulseTrains();
   cancelScaleBrewBeep(session.id);
   cancelScaleCompletionBeep();
-  // GPIO first, then the machine circuit-open cue. BLE advertising resume is not on this
-  // path (BLE worker + servicePendingBrewRfRestore after the buzzer starts).
+  // GPIO first, then the machine circuit-open cue. BLE advertising resume is
+  // owned by the BLE worker (companion pause + syncScaleRadioCoex).
   if (brewWeightCutSettlesMachineOff(reason)) {
     machineArmSettledWeightCutOff();
   } else {

@@ -98,6 +98,8 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   pendingFinalize = PendingShotFinalize{};
   pendingScaleTimerStop = PendingScaleTimerStop{};
   pendingBrewRfRestore = false;
+  setRfCoexClaim(RfCoexClaim::BLE, false);
+  setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, false);
   runtimeConfig = RuntimeConfig{};
   runtimeConfig.rinseEnabled = true;
   // Host scenarios cover scale-path alerts unless a test sets the channel.
@@ -7139,6 +7141,25 @@ void n03_unsynced_retry_is_fifteen_seconds() {
   CHECK(ntpRetryDelayMs(5) == NTP_UNSYNCED_RETRY_MS);
 }
 
+void rf01_coex_winner_prefers_ble_then_wifi() {
+  CHECK(rfCoexWinner(true, true) == RfCoexPreference::BT);
+  CHECK(rfCoexWinner(true, false) == RfCoexPreference::BT);
+  CHECK(rfCoexWinner(false, true) == RfCoexPreference::WIFI);
+  CHECK(rfCoexWinner(false, false) == RfCoexPreference::BALANCE);
+
+  setRfCoexClaim(RfCoexClaim::BLE, false);
+  setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, false);
+  CHECK(currentRfCoexPreference() == RfCoexPreference::BALANCE);
+  setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, true);
+  CHECK(currentRfCoexPreference() == RfCoexPreference::WIFI);
+  setRfCoexClaim(RfCoexClaim::BLE, true);
+  CHECK(currentRfCoexPreference() == RfCoexPreference::BT);
+  setRfCoexClaim(RfCoexClaim::BLE, false);
+  CHECK(currentRfCoexPreference() == RfCoexPreference::WIFI);
+  setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, false);
+  CHECK(currentRfCoexPreference() == RfCoexPreference::BALANCE);
+}
+
 void n04_brew_start_requests_ntp_when_unsynced() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -10509,6 +10530,7 @@ const TestCase testCases[] = {
     {"N01b", n01b_wall_clock_survives_millis_wrap},
     {"N02", n02_ntp_hostname_validation},
     {"N03", n03_unsynced_retry_is_fifteen_seconds},
+    {"RF01", rf01_coex_winner_prefers_ble_then_wifi},
     {"N04", n04_brew_start_requests_ntp_when_unsynced},
     {"N05", n05_rinse_start_requests_ntp_when_unsynced},
     {"N06", n06_synced_clock_skips_activity_ntp_request},

@@ -2,6 +2,7 @@
 
 #include "ShotStopperHardware.h"
 #include "ShotStopperMachineTypes.h"
+#include "ShotStopperRfCoex.h"
 #include "ShotStopperSafety.h"
 
 // K1 electrical driver and independent deadline/feedback safety.
@@ -214,16 +215,10 @@ RelaySafetySnapshot getRelaySafetySnapshot() {
 }
 
 void applyBrewRfPreference(bool preferBluetooth) {
-#if defined(SHOT_STOPPER_HAS_COEX)
-  // Prefer BLE airtime while connecting, during the first second of a scale
-  // link, or while an automatic brew needs a fresh weight stream. Idle
-  // discovery stays on BALANCE. Companion pause is owned only by the BLE
-  // worker (ArduinoBLE is not thread-safe).
-  (void)esp_coex_preference_set(preferBluetooth ? ESP_COEX_PREFER_BT
-                                                : ESP_COEX_PREFER_BALANCE);
-#else
-  (void)preferBluetooth;
-#endif
+  // BLE claim only. The shared resolver keeps PREFER_BT if the scale worker
+  // still holds the claim (GATT up / connecting / circuit closed). Releasing
+  // here must not force BALANCE over a live WIFI_ASSOCIATE claim.
+  setRfCoexClaim(RfCoexClaim::BLE, preferBluetooth);
 }
 
 bool relayOutputIsClosed() {
@@ -367,6 +362,7 @@ bool setMachineCircuitClosed(bool closed,
     addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_CLOSED,
                   static_cast<int32_t>(operationalLimitMs));
     pendingBrewRfRestore = false;
+    applyBrewRfPreference(true);
     return true;
   }
 
@@ -393,7 +389,8 @@ bool setMachineCircuitClosed(bool closed,
   feedbackTransitionStampPending = false;
   portEXIT_CRITICAL(&relayMux);
   stopRelayDeadlineTimers();
-  // Coex restore runs after the machine circuit-open beep (servicePendingBrewRfRestore).
+  // BLE claim is recomputed on the scale worker (connecting / GATT / closed).
+  // Do not force BALANCE here: a live scale link must keep PREFER_BT.
   pendingBrewRfRestore = true;
   if (wasClosed) {
     addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_OPENED);

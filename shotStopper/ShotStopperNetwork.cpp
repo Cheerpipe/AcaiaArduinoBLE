@@ -19,10 +19,7 @@
 #include <esp_sntp.h>
 #include <esp_wifi.h>
 #include <esp_system.h>
-#if __has_include(<esp_coexist.h>)
-#include <esp_coexist.h>
-#define SHOT_STOPPER_NETWORK_HAS_COEX 1
-#endif
+#include "ShotStopperRfCoex.h"
 #include <math.h>
 #include <new>
 #include <stdarg.h>
@@ -1581,24 +1578,29 @@ void ShotStopperNetwork::clearStaLinkMetrics() {
 }
 
 void ShotStopperNetwork::preferStaWifiCoex(bool enable) {
-#if defined(SHOT_STOPPER_NETWORK_HAS_COEX)
   if (enable) {
-    (void)esp_coex_preference_set(ESP_COEX_PREFER_WIFI);
+    setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, true);
     staWifiCoexPreferred_ = true;
     return;
   }
   if (staWifiCoexPreferred_) {
-    (void)esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
+    setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, false);
     staWifiCoexPreferred_ = false;
   }
-#else
-  (void)enable;
-  staWifiCoexPreferred_ = false;
-#endif
 }
 
-void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
+bool ShotStopperNetwork::brewRfActive() const {
+  const ControlGateSnapshot control = controlGate();
+  return control.activeCycle || control.relayClosed;
+}
+
+bool ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
                                              uint32_t now) {
+  if (brewRfActive()) {
+    preferStaWifiCoex(false);
+    lifecycleLog("WiFi STA associate deferred; brew RF active");
+    return false;
+  }
   const bool apActive = snapshot().apActive;
   if (apActive) {
     WiFi.mode(WIFI_AP_STA);
@@ -1630,12 +1632,7 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   // Let the IDF connect path scan every channel and sort by RSSI.
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
-  const ControlGateSnapshot control = controlGate();
-  const bool brewRfActive = control.activeCycle || control.relayClosed;
-  // Do not override brew BT preference with WIFI while circuit/automation is live.
-  if (!brewRfActive) {
-    preferStaWifiCoex(true);
-  }
+  preferStaWifiCoex(true);
   if (!feedCurrentTaskWatchdog()) {
     callbacks_.reportTaskWatchdogFault();
   }
@@ -1648,11 +1645,13 @@ void ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   // can disconnect while the start handler runs (ESP_ERR_WIFI_STOP_STATE 12308).
   if (!WiFi.STA.begin(false)) {
     lifecycleLog("WiFi STA enable failed");
-    return;
+    preferStaWifiCoex(false);
+    return false;
   }
   applyStationAddressConfig(settings);
   (void)WiFi.STA.connect(settings.staSsid,
                          settings.staOpen ? nullptr : settings.staPassword);
+  return true;
 }
 
 void ShotStopperNetwork::startStation(const PersistedSettings &settings,
@@ -1677,7 +1676,13 @@ void ShotStopperNetwork::startStation(const PersistedSettings &settings,
   status_.confirmRemainingMs = 0;
   portEXIT_CRITICAL(&dataMux_);
   publishConfiguredAddressStatus();
-  beginStationConnect(settings, now);
+  if (!beginStationConnect(settings, now)) {
+    portENTER_CRITICAL(&dataMux_);
+    if (status_.staState == StaState::CONNECTING) {
+      status_.staState = StaState::DISCONNECTED;
+    }
+    portEXIT_CRITICAL(&dataMux_);
+  }
 }
 
 void ShotStopperNetwork::stopSoftAp(bool stopHttp) {
@@ -1857,6 +1862,17 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
     return;
   }
 
+  const bool brewRf = brewRfActive();
+  if (brewRf && status.staState == StaState::CONNECTING) {
+    preferStaWifiCoex(false);
+    WiFi.disconnect(false, false);
+    portENTER_CRITICAL(&dataMux_);
+    status_.staState = StaState::DISCONNECTED;
+    portEXIT_CRITICAL(&dataMux_);
+    lifecycleLog("WiFi STA associate aborted; brew RF active");
+    return;
+  }
+
   if (status.staState == StaState::CONNECTED) {
     if (WiFi.status() != WL_CONNECTED) {
       preferStaWifiCoex(false);
@@ -1876,10 +1892,12 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       staConnectStartedAtMs_ = now;
       staReconnectAttemptAtMs_ = now;
       lifecycleLog("WiFi STA disconnected; retrying STA (no SoftAP after prior connect)");
-      if (!staReconnectHeld_ && !wifiScanInProgress()) {
+      if (!staReconnectHeld_ && !wifiScanInProgress() && !brewRf) {
         beginStationConnect(settingsCopy(), now);
       } else if (staReconnectHeld_) {
         lifecycleLog("STA reconnect held; skipping retry");
+      } else if (brewRf) {
+        lifecycleLog("STA reconnect deferred; brew RF active");
       }
       return;
     }
@@ -2057,10 +2075,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
   // SoftAP after STA bootstrap window while still DISCONNECTED/FAILED (e.g.
   // scan delayed the reconnect begin). Never after a prior CONNECTED session.
   // Also skip while brew RF is active so SoftAP raise cannot steal airtime.
-  const ControlGateSnapshot softApControl = controlGate();
-  const bool brewRfActive =
-      softApControl.activeCycle || softApControl.relayClosed;
-  if (!staEverConnected_ && !status.apActive && !brewRfActive &&
+  if (!staEverConnected_ && !status.apActive && !brewRf &&
       (status.staState == StaState::DISCONNECTED ||
        status.staState == StaState::FAILED) &&
       static_cast<uint32_t>(millis() - staConnectStartedAtMs_) >=
@@ -2107,7 +2122,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
 
   if ((status.staState == StaState::DISCONNECTED ||
        status.staState == StaState::FAILED) &&
-      !staReconnectHeld_ && !wifiScanInProgress() &&
+      !staReconnectHeld_ && !wifiScanInProgress() && !brewRf &&
       static_cast<uint32_t>(now - staReconnectAttemptAtMs_) >=
           STA_RECONNECT_INTERVAL_MS) {
     beginStationConnect(settingsCopy(), now);
@@ -2670,7 +2685,11 @@ bool ShotStopperNetwork::handleCliWifiAction(const WebCommand &command,
         return true;
       }
       staReconnectHeld_ = false;
-      beginStationConnect(settings, now);
+      if (!beginStationConnect(settings, now)) {
+        actionLog("WIFI_CONNECT deferred; brew RF active");
+        printActionSnapshot("WIFI_CONNECT", false);
+        return true;
+      }
       actionLog("WIFI_CONNECT associating saved STA");
       printActionSnapshot("WIFI_CONNECT", true);
       return true;
@@ -2708,7 +2727,11 @@ bool ShotStopperNetwork::handleCliWifiAction(const WebCommand &command,
       status_.staIp[0] = '\0';
       clearStaLinkMetrics();
       portEXIT_CRITICAL(&dataMux_);
-      beginStationConnect(settings, now);
+      if (!beginStationConnect(settings, now)) {
+        actionLog("WIFI_RESTART deferred; brew RF active");
+        printActionSnapshot("WIFI_RESTART", false);
+        return true;
+      }
       actionLog("WIFI_RESTART reconnecting saved STA");
       printActionSnapshot("WIFI_RESTART", true);
       return true;
@@ -2966,6 +2989,9 @@ void ShotStopperNetwork::stopNtp() {
 
 bool ShotStopperNetwork::ntpMayArm(uint32_t now, bool staConnected) const {
   if (!staConnected || server_ == nullptr) {
+    return false;
+  }
+  if (brewRfActive()) {
     return false;
   }
   if (staNtpEligibleAtMs_ != 0 &&
