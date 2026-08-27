@@ -1293,6 +1293,7 @@ void ShotStopperNetwork::service() {
     confirmPendingNetwork("public WebUI request");
   }
   serviceStaState(now);
+  applyWifiPowerSave();
   serviceWifiScan(now);
 
   const NetworkStatusSnapshot networkSnapshot = snapshot();
@@ -1393,6 +1394,7 @@ void ShotStopperNetwork::publishConfiguredAddressStatus() {
   }
   portENTER_CRITICAL(&dataMux_);
   status_.staOpen = settings.staConfigured && settings.staOpen;
+  status_.staWifiSleep = settings.staWifiSleep;
   status_.staIpMode = settings.staIpMode;
   status_.staConfigState = settings.staConfigState;
   memset(status_.staSsid, 0, sizeof(status_.staSsid));
@@ -1594,6 +1596,51 @@ bool ShotStopperNetwork::brewRfActive() const {
   return control.activeCycle || control.relayClosed;
 }
 
+void ShotStopperNetwork::syncScaleLinkRf(bool connectingOrUp) {
+  scaleConnectingOrUp_.store(connectingOrUp, std::memory_order_relaxed);
+}
+
+void ShotStopperNetwork::applyWifiPowerSave() {
+  const wifi_mode_t mode = WiFi.getMode();
+  if (mode == WIFI_OFF) {
+    lastAppliedWifiPsValid_ = false;
+    return;
+  }
+  bool idleSleepAllowed = false;
+  bool apActive = false;
+  bool staAssociated = false;
+  portENTER_CRITICAL(&dataMux_);
+  idleSleepAllowed = settings_.staWifiSleep;
+  apActive = status_.apActive;
+  staAssociated = status_.staState == StaState::CONNECTED;
+  portEXIT_CRITICAL(&dataMux_);
+  const bool scaleConnectingOrUp =
+      scaleConnectingOrUp_.load(std::memory_order_relaxed);
+  const WifiPowerSaveMode desired = desiredWifiPowerSave(
+      idleSleepAllowed, apActive, scaleConnectingOrUp, staAssociated);
+  const wifi_ps_type_t desiredPs = desired == WifiPowerSaveMode::MIN_MODEM
+                                       ? WIFI_PS_MIN_MODEM
+                                       : WIFI_PS_NONE;
+  wifi_ps_type_t current = WIFI_PS_NONE;
+  if (esp_wifi_get_ps(&current) == ESP_OK && lastAppliedWifiPsValid_ &&
+      current == desiredPs && lastAppliedWifiPs_ == desiredPs) {
+    return;
+  }
+  if (!WiFi.setSleep(desiredPs)) {
+    lastAppliedWifiPsValid_ = false;
+    lifecycleLog("WiFi power save set failed");
+    return;
+  }
+  wifi_ps_type_t verified = WIFI_PS_NONE;
+  if (esp_wifi_get_ps(&verified) != ESP_OK || verified != desiredPs) {
+    lastAppliedWifiPsValid_ = false;
+    lifecycleLog("WiFi power save verify mismatch");
+    return;
+  }
+  lastAppliedWifiPs_ = desiredPs;
+  lastAppliedWifiPsValid_ = true;
+}
+
 bool ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
                                              uint32_t now) {
   if (brewRfActive()) {
@@ -1648,6 +1695,7 @@ bool ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
     preferStaWifiCoex(false);
     return false;
   }
+  applyWifiPowerSave();
   applyStationAddressConfig(settings);
   (void)WiFi.STA.connect(settings.staSsid,
                          settings.staOpen ? nullptr : settings.staPassword);
@@ -1706,6 +1754,7 @@ void ShotStopperNetwork::stopSoftAp(bool stopHttp) {
   log(DebugCategory::NETWORK, DebugCode::AP_STOPPED);
   lifecycleLog(stopHttp ? "WiFi SoftAP stopped; HTTP stopped"
                         : "WiFi SoftAP stopped; HTTP kept");
+  applyWifiPowerSave();
 }
 
 void ShotStopperNetwork::stopSoftApKeepStation() {
@@ -1825,8 +1874,10 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
     status_.apActive = false;
     status_.networkActive = false;
     portEXIT_CRITICAL(&dataMux_);
+    applyWifiPowerSave();
     return false;
   }
+  applyWifiPowerSave();
   return true;
 }
 
@@ -1873,6 +1924,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
     status_.staState = StaState::DISCONNECTED;
     portEXIT_CRITICAL(&dataMux_);
     lifecycleLog("WiFi STA associate aborted; brew RF active");
+    applyWifiPowerSave();
     return;
   }
 
@@ -1895,6 +1947,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       staConnectStartedAtMs_ = now;
       staReconnectAttemptAtMs_ = now;
       lifecycleLog("WiFi STA disconnected; retrying STA (no SoftAP after prior connect)");
+      applyWifiPowerSave();
       if (!staReconnectHeld_ && !wifiScanInProgress() && !brewRf) {
         beginStationConnect(settingsCopy(), now);
       } else if (staReconnectHeld_) {
@@ -1994,6 +2047,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
         static_cast<uint8_t>(StaConfigState::PENDING)) {
       armPendingConfirmWindow(now);
     }
+    applyWifiPowerSave();
     return;
   }
 
@@ -2478,6 +2532,7 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
   PersistedSettings next = settingsCopy();
   bool persist = false;
   bool factoryReset = false;
+  bool applyWifiPsAfterPersist = false;
   switch (command.type) {
     case WebCommandType::PERSIST_RUNTIME:
       if (command.persistPresets && callbacks_.copyPresetBank != nullptr) {
@@ -2511,6 +2566,26 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
         log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
         return false;
       }
+      const bool sameCredentials =
+          next.staConfigured && reusePassword &&
+          strcmp(next.staSsid, command.ssid) == 0 &&
+          next.staOpen == command.openNetwork &&
+          next.staIpMode == command.staIpMode &&
+          memcmp(next.staIp, command.staIp, sizeof(next.staIp)) == 0 &&
+          memcmp(next.staNetmask, command.staNetmask,
+                 sizeof(next.staNetmask)) == 0 &&
+          memcmp(next.staGateway, command.staGateway,
+                 sizeof(next.staGateway)) == 0 &&
+          memcmp(next.staDns1, command.staDns1, sizeof(next.staDns1)) == 0 &&
+          memcmp(next.staDns2, command.staDns2, sizeof(next.staDns2)) == 0;
+      if (command.wifiSleepSpecified && sameCredentials &&
+          next.staWifiSleep != command.wifiSleep) {
+        memset(password, 0, sizeof(password));
+        next.staWifiSleep = command.wifiSleep;
+        persist = true;
+        applyWifiPsAfterPersist = true;
+        break;
+      }
       if (!command.commitConfirmed && next.staConfigured &&
           next.staConfigState ==
               static_cast<uint8_t>(StaConfigState::CONFIRMED)) {
@@ -2518,6 +2593,9 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
       }
       next.staConfigured = true;
       next.staOpen = command.openNetwork;
+      if (command.wifiSleepSpecified) {
+        next.staWifiSleep = command.wifiSleep;
+      }
       memset(next.staSsid, 0, sizeof(next.staSsid));
       memset(next.staPassword, 0, sizeof(next.staPassword));
       copyCString(next.staSsid, sizeof(next.staSsid), command.ssid);
@@ -2646,6 +2724,9 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
 
   if (restartPending_ || apRestartPending_) {
     restartRequestedAtMs_ = millis();
+  }
+  if (applyWifiPsAfterPersist) {
+    applyWifiPowerSave();
   }
   return true;
 }
@@ -2925,6 +3006,26 @@ void ShotStopperNetwork::refreshExtendedStatus(uint32_t now) {
   const bool staConnected = wifiStatus == WL_CONNECTED;
   const uint8_t wifiMode = static_cast<uint8_t>(WiFi.getMode());
   const uint8_t channel = static_cast<uint8_t>(WiFi.channel());
+  WifiPsLive wifiPs = WifiPsLive::UNKNOWN;
+  if (wifiMode != static_cast<uint8_t>(WIFI_OFF)) {
+    wifi_ps_type_t ps = WIFI_PS_NONE;
+    if (esp_wifi_get_ps(&ps) == ESP_OK) {
+      switch (ps) {
+        case WIFI_PS_NONE:
+          wifiPs = WifiPsLive::NONE;
+          break;
+        case WIFI_PS_MIN_MODEM:
+          wifiPs = WifiPsLive::MIN_MODEM;
+          break;
+        case WIFI_PS_MAX_MODEM:
+          wifiPs = WifiPsLive::MAX_MODEM;
+          break;
+        default:
+          wifiPs = WifiPsLive::UNKNOWN;
+          break;
+      }
+    }
+  }
   char staMac[18] = {};
   char staBssid[18] = {};
   char apMac[18] = {};
@@ -2948,6 +3049,8 @@ void ShotStopperNetwork::refreshExtendedStatus(uint32_t now) {
   status_.httpActive = httpActive;
   status_.wifiMode = wifiMode;
   status_.channel = channel;
+  status_.wifiPs = wifiPs;
+  status_.wifiCoex = snapshotRfCoexPreference();
   status_.wifiStatus = static_cast<int32_t>(wifiStatus);
   status_.staReconnectHeld = staReconnectHeld_;
   status_.apStartHeld = apStartHeld_;
@@ -4364,7 +4467,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       ok = statusJsonAppend(
           &used,
           ",\"network\":{\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
-          "\"wifiConfigured\":%s,\"ssid\":\"%s\",\"open\":%s,"
+          "\"wifiConfigured\":%s,\"ssid\":\"%s\",\"open\":%s,\"wifiSleep\":%s,"
           "\"staState\":\"%s\",\"channel\":%s,\"staIp\":\"%s\",\"ipMode\":\"%s\","
           "\"configState\":\"%s\",\"confirmRemainingMs\":%lu,"
           "\"rssi\":%s,\"signalQualityPct\":%s,"
@@ -4379,7 +4482,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
           network.apActive ? "true" : "false", network.apIp,
           static_cast<unsigned>(network.apClients),
           network.wifiConfigured ? "true" : "false", safeStaSsid,
-          network.staOpen ? "true" : "false", staStateName(network.staState),
+          network.staOpen ? "true" : "false",
+          network.staWifiSleep ? "true" : "false", staStateName(network.staState),
           staChannelJson, network.staIp, staIpModeName(network.staIpMode),
           staConfigStateName(network.staConfigState),
           static_cast<unsigned long>(network.confirmRemainingMs), staRssiJson,
@@ -4422,7 +4526,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"cupPresence\":{\"state\":\"%s\",\"present\":%s},"
         "\"network\":{\"apActive\":%s,\"apIp\":\"%s\",\"apClients\":%u,"
         "\"wifiConfigured\":%s,\"ssid\":\"%s\","
-        "\"staState\":\"%s\",\"channel\":%s,\"staIp\":\"%s\",\"ipMode\":\"%s\","
+        "\"staState\":\"%s\",\"wifiPs\":\"%s\",\"wifiCoex\":\"%s\",\"channel\":%s,\"staIp\":\"%s\",\"ipMode\":\"%s\","
         "\"configState\":\"%s\",\"confirmRemainingMs\":%lu,"
         "\"rssi\":%s,\"signalQualityPct\":%s},"
         "\"time\":{\"state\":\"%s\",\"utcSec\":%lu,\"lastSyncAgeMs\":%lu,"
@@ -4473,7 +4577,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         network.apActive ? "true" : "false", network.apIp,
         static_cast<unsigned>(network.apClients),
         network.wifiConfigured ? "true" : "false", safeStaSsid,
-        staStateName(network.staState), staChannelJson, network.staIp,
+        staStateName(network.staState), wifiPsLiveName(network.wifiPs),
+        rfCoexPreferenceName(network.wifiCoex),
+        staChannelJson, network.staIp,
         staIpModeName(network.staIpMode),
         staConfigStateName(network.staConfigState),
         static_cast<unsigned long>(network.confirmRemainingMs), staRssiJson,
@@ -6638,7 +6744,7 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
   static const char *const forgetFields[] = {"action"};
   static const char *const confirmFields[] = {"action"};
   static const char *const saveFields[] = {
-      "action", "ssid",     "password", "open",  "ipMode",
+      "action", "ssid",     "password", "open",  "wifiSleep", "ipMode",
       "ip",     "netmask",  "gateway",  "dns1",  "dns2"};
   const char *networkError = nullptr;
   bool parsed = root != nullptr &&
@@ -6718,15 +6824,16 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
         cJSON_GetObjectItemCaseSensitive(root, "dns1") != nullptr;
     const bool hasDns2 =
         cJSON_GetObjectItemCaseSensitive(root, "dns2") != nullptr;
-    if (!jsonHasOnlyUniqueFields(root, saveFields, 10) ||
+    if (!jsonHasOnlyUniqueFields(root, saveFields, 11) ||
         !jsonString(root, "ssid", command.ssid, sizeof(command.ssid), false) ||
         !jsonString(root, "password", command.password,
                     sizeof(command.password), true) ||
         !jsonBoolean(root, "open", command.openNetwork) ||
+        !jsonBoolean(root, "wifiSleep", command.wifiSleep) ||
         !jsonString(root, "ipMode", ipMode, sizeof(ipMode), false)) {
       parsed = false;
       networkError =
-          "Save request requires action, ssid, password, open, and ipMode.";
+          "Save request requires action, ssid, password, open, wifiSleep, and ipMode.";
     } else if (strcmp(ipMode, "dhcp") == 0) {
       command.staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
       if (hasIp || hasNetmask || hasGateway || hasDns1 || hasDns2) {
@@ -6756,6 +6863,9 @@ esp_err_t ShotStopperNetwork::networkHandler(httpd_req_t *request) {
     } else {
       parsed = false;
       networkError = "ipMode must be \"dhcp\" or \"static\".";
+    }
+    if (parsed) {
+      command.wifiSleepSpecified = true;
     }
     if (parsed && !validWifiSsid(command.ssid)) {
       parsed = false;

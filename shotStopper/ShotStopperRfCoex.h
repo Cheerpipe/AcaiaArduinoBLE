@@ -48,6 +48,29 @@ inline RfCoexPreference rfCoexWinnerFromClaims(uint8_t claims) {
       (claims & static_cast<uint8_t>(RfCoexClaim::WIFI_ASSOCIATE)) != 0);
 }
 
+inline const char *rfCoexPreferenceName(RfCoexPreference preference) {
+  switch (preference) {
+    case RfCoexPreference::BT:
+      return "BT";
+    case RfCoexPreference::WIFI:
+      return "WIFI";
+    case RfCoexPreference::BALANCE:
+      return "BALANCE";
+  }
+  return "UNKNOWN";
+}
+
+// Last value published to IDF, or the claim winner if nothing has been applied
+// yet. There is no IDF getter for the live preference.
+inline RfCoexPreference snapshotRfCoexPreference() {
+  portENTER_CRITICAL(&rfCoexMux);
+  const RfCoexPreference out =
+      rfCoexLastAppliedValid ? rfCoexLastApplied
+                             : rfCoexWinnerFromClaims(rfCoexClaims);
+  portEXIT_CRITICAL(&rfCoexMux);
+  return out;
+}
+
 inline void applyRfCoexPreference(RfCoexPreference winner) {
 #if defined(SHOT_STOPPER_RF_COEX_HAS_IDF)
   switch (winner) {

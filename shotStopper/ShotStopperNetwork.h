@@ -10,8 +10,11 @@
 
 #include <WiFi.h>
 #include <esp_http_server.h>
+#include "ShotStopperRfCoex.h"
 
 #include "ShotStopperTaskProfiler.h"
+
+#include <atomic>
 
 struct timeval;
 
@@ -65,6 +68,9 @@ struct NetworkStatusSnapshot {
   bool apActive = false;
   bool wifiConfigured = false;
   bool staOpen = false;
+  bool staWifiSleep = false;
+  WifiPsLive wifiPs = WifiPsLive::UNKNOWN;
+  RfCoexPreference wifiCoex = RfCoexPreference::BALANCE;
   bool staLinkMetricsValid = false;
   uint8_t apClients = 0;
   StaState staState = StaState::NOT_CONFIGURED;
@@ -170,6 +176,7 @@ class ShotStopperNetwork {
   void requestNtpSyncIfNeeded();
   void syncPreferredScaleMac(const char *mac);
   void syncPreferredScale(const char *mac, const char *name);
+  void syncScaleLinkRf(bool connectingOrUp);
   void syncLiveRuntime(const RuntimeConfig &runtime,
                        const ShotPresetBank *presets);
   void syncDurableStorageRevision(uint32_t storageRevision);
@@ -249,6 +256,9 @@ class ShotStopperNetwork {
   bool apKeepRequested_ = false;
   bool httpStartHeld_ = false;
   bool staWifiCoexPreferred_ = false;
+  std::atomic<bool> scaleConnectingOrUp_{false};
+  wifi_ps_type_t lastAppliedWifiPs_{WIFI_PS_NONE};
+  bool lastAppliedWifiPsValid_{false};
   bool otaRestartPending_ = false;
   bool otaRollbackRestartPending_ = false;
   uint32_t otaRestartRequestedAtMs_ = 0;
@@ -293,6 +303,7 @@ class ShotStopperNetwork {
   void startStation(const PersistedSettings &settings, uint32_t now);
   void applyStationAddressConfig(const PersistedSettings &settings);
   bool beginStationConnect(const PersistedSettings &settings, uint32_t now);
+  void applyWifiPowerSave();
   void clearStaLinkMetrics();
   void preferStaWifiCoex(bool enable);
   bool brewRfActive() const;

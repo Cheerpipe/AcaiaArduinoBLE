@@ -88,6 +88,8 @@ inline void clearStaNetwork(PersistedSettings &settings) {
   memset(settings.staPassword, 0, sizeof(settings.staPassword));
   clearStaAddressFields(settings);
   clearLkgNetwork(settings);
+  // staWifiSleep is a device preference, not an STA credential. Forget /
+  // LKG restore must not clear it.
 }
 
 inline void copyActiveStaToLkg(PersistedSettings &settings) {

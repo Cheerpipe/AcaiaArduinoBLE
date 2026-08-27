@@ -3690,6 +3690,9 @@ void serviceScaleScanDuty(bool sawCompatibleAd) {
 void syncScaleRadioCoex() {
   applyBrewRfPreference(scale.isConnecting() || scale.isLinkUp() ||
                         getRelaySafetySnapshot().closed);
+#if !defined(SHOT_STOPPER_HOST_TEST)
+  networkManager.syncScaleLinkRf(scale.isConnecting() || scale.isLinkUp());
+#endif
 }
 
 void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,

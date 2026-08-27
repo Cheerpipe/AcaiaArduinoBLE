@@ -440,13 +440,13 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 52200) {
+if (htmlBytes > 52520) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 138500) {
+if (jsBytes > 139400) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 191000) {
+if (htmlBytes + jsBytes > 192000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -1749,7 +1749,9 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes('id="clearLastShotButton"') ||
     html.indexOf('id="shotPanel"') > html.indexOf('id="clearLastShotButton"') ||
     (html.includes('id="clearLastShotButton"') &&
-     html.includes('<span class="t">Clear</span>')) ||
+     html.slice(html.indexOf('id="clearLastShotButton"'),
+                html.indexOf('</button>', html.indexOf('id="clearLastShotButton"')) + 9)
+         .includes('<span class="t">Clear</span>')) ||
     !css.includes('#shotPanel{position:relative;padding-right:3.4rem') ||
     !css.includes('#shotPanel .btnGlyph{min-height:2.85rem') ||
     html.includes('id="lastCycle"') ||
@@ -1825,6 +1827,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes('id="hCpu5m"') ||
       !ui.includes('id="hCpuMhz"') ||
       !ui.includes('id="hWifiState"') ||
+      !ui.includes('id="hWifiPs"') ||
+      !ui.includes('id="hWifiCoex"') ||
       !ui.includes('id="hSsid"') ||
       !ui.includes('id="hWifiChannel"') ||
       !ui.includes('id="hWifiIp"') ||
@@ -1994,7 +1998,9 @@ if (!ui.includes('<legend>Brew</legend>') ||
       diagHtml.indexOf('<legend>RAM</legend>') > diagHtml.indexOf('<legend>HEAP</legend>') ||
       diagHtml.indexOf('<legend>HEAP</legend>') > diagHtml.indexOf('<legend>Scale</legend>') ||
       diagHtml.indexOf('<legend>Scale</legend>') > diagHtml.indexOf('<legend>MISC</legend>') ||
-      diagHtml.indexOf('id="hWifiState"') > diagHtml.indexOf('id="hSsid"') ||
+      diagHtml.indexOf('id="hWifiState"') > diagHtml.indexOf('id="hWifiPs"') ||
+      diagHtml.indexOf('id="hWifiPs"') > diagHtml.indexOf('id="hWifiCoex"') ||
+      diagHtml.indexOf('id="hWifiCoex"') > diagHtml.indexOf('id="hSsid"') ||
       diagHtml.indexOf('id="hCpu5s"') > diagHtml.indexOf('id="hCpuMhz"') ||
       diagHtml.indexOf('id="hCpuMhz"') > diagHtml.indexOf('id="hTemp"') ||
       diagHtml.indexOf('id="hRamF"') > diagHtml.indexOf('id="hHeapMin"') ||
@@ -2537,9 +2543,13 @@ if (!ui.includes('id="staIpMode"') ||
     !ui.includes("$('networkStatus').textContent=formatNetworkStatus(s.network)") ||
     !ui.includes("t('hSsid',n.ssid)") ||
     !ui.includes("t('hWifiState',n.staState)") ||
+    !ui.includes("t('hWifiPs',n.wifiPs)") ||
+    !ui.includes("t('hWifiCoex',n.wifiCoex)") ||
     !ui.includes("$('apStatus').textContent='AP: '+(s.network.apActive?'active':'inactive')") ||
     !ui.includes("t('hApState',n.apActive?'active':'inactive')") ||
     !html.includes('<legend>WiFi</legend>') ||
+    !html.includes('<strong>Sleep</strong><div id="hWifiPs">') ||
+    !html.includes('<strong>Coex</strong><div id="hWifiCoex">') ||
     !html.includes('<strong>SSID</strong><div id="hSsid">') ||
     !html.includes('<legend>AP</legend>') ||
     !network.includes('WiFi.config(') ||
@@ -2565,6 +2575,70 @@ if (!ui.includes('id="staIpMode"') ||
 if (!network.includes('restoreLkgToActive(next)') ||
     !network.includes('startStation(settings, now)')) {
   throw new Error('STA confirm timeout must reassociate last-known-good before SoftAP fallback');
+}
+{
+  if (!html.includes('id="staWifiSleep"') ||
+      !html.includes('Wi-Fi sleep when idle') ||
+      !html.includes('Saves power when no scale is linked') ||
+      !html.includes('Stays off while connecting or connected') ||
+      !html.includes('May slow scale discovery') ||
+      !ui.includes("wifiSleep:$('staWifiSleep').checked") ||
+      !ui.includes("savedStaWifiSleep=!!n.wifiSleep") ||
+      !ui.includes("if($('staWifiSleep'))$('staWifiSleep').checked=savedStaWifiSleep") ||
+      !ui.includes("if(n.wifiSleep)t+=' — idle sleep allowed'") ||
+      !ui.includes('function networkSaveIsSleepOnly(') ||
+      !ui.includes('_noReconnectWait') ||
+      !ui.includes('delete payload._noReconnectWait') ||
+      !ui.includes('sleepOnly') ||
+      !network.includes('\\"wifiSleep\\":%s') ||
+      !network.includes('jsonHasOnlyUniqueFields(root, saveFields, 11)') ||
+      !network.includes('jsonBoolean(root, "wifiSleep", command.wifiSleep)') ||
+      !network.includes('command.wifiSleepSpecified = true') ||
+      !network.includes('void ShotStopperNetwork::applyWifiPowerSave()') ||
+      !network.includes('WIFI_PS_NONE') ||
+      !network.includes('WIFI_PS_MIN_MODEM') ||
+      /WiFi\.setSleep\(\s*WIFI_PS_MAX_MODEM\s*\)/.test(network) ||
+      !network.includes('syncScaleLinkRf') ||
+      !firmwareCore.includes('networkManager.syncScaleLinkRf') ||
+      !domainCore.includes('desiredWifiPowerSave') ||
+      !domainCore.includes('scaleConnectingOrUp') ||
+      !domainCore.includes('staAssociated')) {
+    throw new Error(
+        'Wi-Fi sleep when idle must be wired in Admin UI, /network save, status, and power-save helper');
+  }
+  const applyStart = network.indexOf('void ShotStopperNetwork::applyWifiPowerSave()');
+  const applyEnd = network.indexOf(
+      'bool ShotStopperNetwork::beginStationConnect', applyStart);
+  const applyBody = applyStart >= 0 && applyEnd > applyStart
+      ? network.slice(applyStart, applyEnd)
+      : '';
+  if (!applyBody.includes('desiredWifiPowerSave') ||
+      !applyBody.includes('WIFI_PS_NONE') ||
+      !applyBody.includes('WIFI_PS_MIN_MODEM') ||
+      !applyBody.includes('WiFi.setSleep(desiredPs)') ||
+      !applyBody.includes('esp_wifi_get_ps') ||
+      !applyBody.includes('mode == WIFI_OFF') ||
+      applyBody.includes('WIFI_PS_MAX_MODEM') ||
+      /WiFi\.mode\(\s*WIFI_OFF\s*\)/.test(applyBody)) {
+    throw new Error(
+        'applyWifiPowerSave must set NONE/MIN_MODEM via setSleep+get_ps, skip if driver off, and never WIFI_OFF/MAX_MODEM');
+  }
+  const saveStart = network.indexOf('case WebCommandType::SAVE_NETWORK:');
+  const saveEnd = network.indexOf('case WebCommandType::FORGET_NETWORK', saveStart);
+  const saveBody = saveStart >= 0 && saveEnd > saveStart
+      ? network.slice(saveStart, saveEnd)
+      : '';
+  const sleepOnlyAt = saveBody.indexOf('wifiSleepSpecified && sameCredentials');
+  const copyLkgAt = saveBody.indexOf('copyActiveStaToLkg');
+  const sleepOnly = sleepOnlyAt >= 0 && copyLkgAt > sleepOnlyAt
+      ? saveBody.slice(sleepOnlyAt, copyLkgAt)
+      : '';
+  if (!saveBody.includes('applyWifiPsAfterPersist') ||
+      sleepOnly.includes('restartPending_') ||
+      !sleepOnly.includes('break;')) {
+    throw new Error(
+        'Save-only Wi-Fi sleep must persist and apply power save without restartPending_');
+  }
 }
 if (!firmwareCore.includes('command.commitConfirmed = true') ||
     !network.includes('finalizeSavedStaCredentials(next, command.commitConfirmed)')) {
@@ -3047,6 +3121,7 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
                                         adminMarker));
   for (const field of [
     'apActive', 'apIp', 'apClients', 'wifiConfigured', 'ssid', 'open',
+    'wifiSleep',
     'staState', 'staIp', 'ipMode', 'configState', 'confirmRemainingMs', 'rssi',
     'signalQualityPct', 'configuredIp', 'configuredNetmask', 'configuredGateway',
     'configuredDns1', 'configuredDns2'
@@ -3105,7 +3180,7 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
       leanMarker, statusFormat.indexOf('if (ok) {', leanMarker));
   for (const field of [
     'apActive', 'apIp', 'apClients', 'wifiConfigured', 'ssid', 'staState',
-    'channel', 'staIp', 'ipMode', 'configState', 'confirmRemainingMs', 'rssi',
+    'wifiPs', 'wifiCoex', 'channel', 'staIp', 'ipMode', 'configState', 'confirmRemainingMs', 'rssi',
     'signalQualityPct', 'utcSec', 'lastSyncAgeMs', 'nextRetryInMs',
     'activeServer', 'maintenance', 'persistPending', 'uptimeMs', 'hwmon',
     'freeHeapBytes', 'minimumFreeHeapBytes', 'largestFreeHeapBlockBytes',
@@ -3160,6 +3235,23 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
   // "open" appears only on Admin network object, not Diagnostic lean body.
   if (/\\"open\\"/.test(diagBody)) {
     throw new Error('status/diagnostic must not include Admin-only network open flag');
+  }
+  if (diagBody.includes('wifiSleep') || diagBody.includes('staWifiSleep')) {
+    throw new Error('status/diagnostic must report live wifiPs, not wifiSleep config');
+  }
+  if (!diagBody.includes('\\"wifiPs\\":\\"%s\\"') ||
+      !diagBody.includes('wifiPsLiveName(network.wifiPs)') ||
+      !network.includes('status_.wifiPs = wifiPs') ||
+      !network.includes('esp_wifi_get_ps(&ps)') ||
+      !domainCore.includes('wifiPsLiveName')) {
+    throw new Error('status/diagnostic must include live wifiPs from the driver');
+  }
+  if (!diagBody.includes('\\"wifiCoex\\":\\"%s\\"') ||
+      !diagBody.includes('rfCoexPreferenceName(network.wifiCoex)') ||
+      !network.includes('status_.wifiCoex = snapshotRfCoexPreference()') ||
+      !firmware.includes('rfCoexPreferenceName') ||
+      !firmware.includes('snapshotRfCoexPreference')) {
+    throw new Error('status/diagnostic must include live BT/Wi-Fi coex preference');
   }
   if (diagBody.includes('ntpServerPreset') ||
       diagBody.includes('ntpServerCustom') ||
@@ -3606,8 +3698,8 @@ if (generated.secondaryGzip.length > 4096) {
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
 }
-if (generated.combined > 54000) {
-  throw new Error('Combined Web UI gzip exceeds the 52.7 KiB flash budget');
+if (generated.combined > 54300) {
+  throw new Error('Combined Web UI gzip exceeds the 53.0 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {

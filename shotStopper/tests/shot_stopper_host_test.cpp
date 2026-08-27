@@ -7147,6 +7147,9 @@ void rf01_coex_winner_prefers_ble_then_wifi() {
   CHECK(rfCoexWinner(true, false) == RfCoexPreference::BT);
   CHECK(rfCoexWinner(false, true) == RfCoexPreference::WIFI);
   CHECK(rfCoexWinner(false, false) == RfCoexPreference::BALANCE);
+  CHECK(strcmp(rfCoexPreferenceName(RfCoexPreference::BT), "BT") == 0);
+  CHECK(strcmp(rfCoexPreferenceName(RfCoexPreference::WIFI), "WIFI") == 0);
+  CHECK(strcmp(rfCoexPreferenceName(RfCoexPreference::BALANCE), "BALANCE") == 0);
 
   setRfCoexClaim(RfCoexClaim::BLE, false);
   setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, false);
@@ -7162,6 +7165,7 @@ void rf01_coex_winner_prefers_ble_then_wifi() {
   setRfCoexClaim(RfCoexClaim::BLE, false);
   setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, false);
   CHECK(currentRfCoexPreference() == RfCoexPreference::BALANCE);
+  CHECK(snapshotRfCoexPreference() == RfCoexPreference::BALANCE);
 }
 
 void n04_brew_start_requests_ntp_when_unsynced() {

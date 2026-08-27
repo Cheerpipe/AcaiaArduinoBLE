@@ -45,6 +45,7 @@ void p01_defaults_are_valid() {
   CHECK(settings.staConfigState ==
         static_cast<uint8_t>(StaConfigState::CONFIRMED));
   CHECK(!settings.lkgValid);
+  CHECK(!settings.staWifiSleep);
   CHECK(settings.runtime.fastExtractionGuardEnabled);
   CHECK(std::fabs(settings.runtime.maxRecoveryWeightG -
                   DEFAULT_MAX_RECOVERY_WEIGHT_G) < 0.001f);
@@ -334,6 +335,7 @@ void p08_factory_reset_rebuilds_defaults() {
   CHECK(savePersistedSettings(settings));
   CHECK(resetPersistedSettingsToFactory(settings));
   CHECK(settings.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(!settings.staWifiSleep);
   CHECK(settings.runtime.goalWeightG == DEFAULT_GOAL_WEIGHT_G);
   CHECK(settings.runtime.fastExtractionGuardEnabled);
   CHECK(settings.runtime.autoToManualGuardEnabled);
@@ -544,6 +546,54 @@ void p47_rejects_non_current_schema_blob() {
                            sizeof(settings));
   PersistedSettings loaded;
   CHECK(!loadPersistedSettings(loaded));
+}
+
+void p47b_migrates_v1_blob_wifi_sleep_defaults_off() {
+  resetHostPersistence();
+  PersistedSettings current;
+  CHECK(initializeDefaultSettings(current));
+  current.staConfigured = true;
+  current.staOpen = false;
+  current.staWifiSleep = true;
+  strcpy(current.staSsid, "CafeLAN");
+  strcpy(current.staPassword, "CafePass1");
+  finalizePersistedSettings(current);
+
+  PersistedSettingsV1 v1{};
+  memcpy(&v1, &current, offsetof(PersistedSettingsV1, staSsid));
+  memcpy(&v1.staSsid, &current.staSsid,
+         offsetof(PersistedSettings, checksum) -
+             offsetof(PersistedSettings, staSsid));
+  v1.schemaVersion = 1;
+  v1.structureSize = sizeof(PersistedSettingsV1);
+  v1.checksum = 0;
+  v1.checksum = persistedSettingsV1Checksum(v1);
+
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &v1,
+                           sizeof(v1));
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.structureSize == sizeof(PersistedSettings));
+  CHECK(!loaded.staWifiSleep);
+  CHECK(loaded.staConfigured);
+  CHECK(strcmp(loaded.staSsid, "CafeLAN") == 0);
+  CHECK(strcmp(loaded.staPassword, "CafePass1") == 0);
+}
+
+void p47c_desired_wifi_power_save_policy() {
+  using M = WifiPowerSaveMode;
+  CHECK(desiredWifiPowerSave(false, false, false, true) == M::NONE);
+  CHECK(desiredWifiPowerSave(false, true, true, false) == M::NONE);
+  CHECK(desiredWifiPowerSave(true, false, false, true) == M::MIN_MODEM);
+  CHECK(desiredWifiPowerSave(true, true, false, true) == M::NONE);
+  CHECK(desiredWifiPowerSave(true, false, true, true) == M::NONE);
+  CHECK(desiredWifiPowerSave(true, false, false, false) == M::NONE);
+  CHECK(desiredWifiPowerSave(true, true, true, true) == M::NONE);
+  CHECK(strcmp(wifiPsLiveName(WifiPsLive::NONE), "NONE") == 0);
+  CHECK(strcmp(wifiPsLiveName(WifiPsLive::MIN_MODEM), "MIN_MODEM") == 0);
+  CHECK(strcmp(wifiPsLiveName(WifiPsLive::MAX_MODEM), "MAX_MODEM") == 0);
+  CHECK(strcmp(wifiPsLiveName(WifiPsLive::UNKNOWN), "UNKNOWN") == 0);
 }
 
 void p46_ring_retain_log_level_persists_round_trip() {
@@ -1046,6 +1096,7 @@ void p55_network_access_reset_preserves_non_network_settings() {
   strcpy(settings.preferredScaleName, "Lunar");
   settings.staConfigured = true;
   settings.staOpen = false;
+  settings.staWifiSleep = true;
   strcpy(settings.staSsid, "CafeLAN");
   strcpy(settings.staPassword, "CafePass1");
   settings.staIpMode = static_cast<uint8_t>(StaIpMode::STATIC);
@@ -1077,6 +1128,7 @@ void p55_network_access_reset_preserves_non_network_settings() {
   CHECK(resetPersistedNetworkAccess(reset));
   CHECK(!reset.staConfigured);
   CHECK(!reset.lkgValid);
+  CHECK(reset.staWifiSleep);
   CHECK(reset.staIpMode == static_cast<uint8_t>(StaIpMode::DHCP));
   CHECK(passwordIsFactoryDefault(reset));
   CHECK(reset.runtime.goalWeightG == 41);
@@ -1308,6 +1360,8 @@ const TestCase tests[] = {
     {"P10", p10_auto_to_manual_guard_trend_and_validation},
     {"P12", p12_shot_log_persists_compact_blob},
     {"P47", p47_rejects_non_current_schema_blob},
+    {"P47B", p47b_migrates_v1_blob_wifi_sleep_defaults_off},
+    {"P47C", p47c_desired_wifi_power_save_policy},
     {"P46", p46_ring_retain_log_level_persists_round_trip},
     {"P43", p43_scale_history_upsert_and_lru},
     {"P44", p44_scale_history_canonicalizes_mac_case},

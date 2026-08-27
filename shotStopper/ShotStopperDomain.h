@@ -54,10 +54,11 @@
 namespace shotstopper {
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-// Current persisted settings schema. V1 is the baseline — no upgrade path
-// from any prior on-disk layout. Bump and add a migration when the blob
-// layout changes (see ShotStopperSettingsMigrate.h).
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 1;
+// Current persisted settings schema. V1 is the 1912-byte baseline (padding
+// after staOpen). V2 names that byte staWifiSleep without growing the blob.
+// Bump and add a migration when the blob layout changes
+// (see ShotStopperSettingsMigrate.h).
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 2;
 // Rinse clock default. Detection window default is DEFAULT_RINSE_GESTURE_MS
 // (machine-owned, ShotStopperMachineTypes.h).
 constexpr uint32_t DEFAULT_RINSE_DURATION_MS = 4000;
@@ -1372,6 +1373,42 @@ inline bool shouldReuseSavedWifiCredentials(const char *ssid,
          strcmp(ssid, savedSsid) == 0 && openNetwork == savedOpen;
 }
 
+// Host-testable Wi-Fi modem-sleep policy. Device maps NONE/MIN_MODEM onto
+// WIFI_PS_NONE / WIFI_PS_MIN_MODEM. Never MAX_MODEM or WIFI_OFF.
+enum class WifiPowerSaveMode : uint8_t { NONE = 0, MIN_MODEM = 1 };
+
+inline WifiPowerSaveMode desiredWifiPowerSave(bool idleSleepAllowed,
+                                              bool apActive,
+                                              bool scaleConnectingOrUp,
+                                              bool staAssociated) {
+  if (!idleSleepAllowed || apActive || scaleConnectingOrUp || !staAssociated) {
+    return WifiPowerSaveMode::NONE;
+  }
+  return WifiPowerSaveMode::MIN_MODEM;
+}
+
+// Live STA power-save reported by the driver (diagnostic). May be MAX_MODEM
+// if IDF restored it; applyWifiPowerSave never requests that.
+enum class WifiPsLive : uint8_t {
+  UNKNOWN = 0,
+  NONE = 1,
+  MIN_MODEM = 2,
+  MAX_MODEM = 3
+};
+
+inline const char *wifiPsLiveName(WifiPsLive ps) {
+  switch (ps) {
+    case WifiPsLive::NONE:
+      return "NONE";
+    case WifiPsLive::MIN_MODEM:
+      return "MIN_MODEM";
+    case WifiPsLive::MAX_MODEM:
+      return "MAX_MODEM";
+    default:
+      return "UNKNOWN";
+  }
+}
+
 // One scanned BSS for strongest-AP selection (same SSID, many BSSIDs).
 struct StaApScanEntry {
   const char *ssid = nullptr;
@@ -1690,6 +1727,10 @@ struct WebCommand {
   char ssid[WIFI_SSID_CAPACITY] = {};
   char password[WIFI_PASSWORD_CAPACITY] = {};
   bool openNetwork = false;
+  // Admin "Wi-Fi sleep when idle". USB/BLE leave wifiSleepSpecified false so
+  // SET_WIFI does not clobber the persisted flag.
+  bool wifiSleep = false;
+  bool wifiSleepSpecified = false;
   // USB SET_WIFI only. Web UI / BLE Companion keep the HTTP confirm window.
   bool commitConfirmed = false;
   uint8_t staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);

@@ -77,14 +77,24 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
     return false;
   }
   const size_t storedLength = preferences.getBytesLength(key);
-  if (storedLength != sizeof(PersistedSettings)) {
-    return false;
+  if (storedLength == sizeof(PersistedSettings)) {
+    if (preferences.getBytes(key, &settings, sizeof(settings)) !=
+        sizeof(settings)) {
+      return false;
+    }
+    if (validPersistedSettings(settings)) {
+      return true;
+    }
   }
-  if (preferences.getBytes(key, &settings, sizeof(settings)) !=
-      sizeof(settings)) {
-    return false;
+  if (storedLength == sizeof(PersistedSettingsV1)) {
+    PersistedSettingsV1 v1{};
+    if (preferences.getBytes(key, &v1, sizeof(v1)) != sizeof(v1)) {
+      return false;
+    }
+    return migratePersistedSettingsFromV1(v1, settings) &&
+           validPersistedSettings(settings);
   }
-  return validPersistedSettings(settings);
+  return false;
 }
 
 inline bool lockSettingsNvs() { return lockFlashIo(); }

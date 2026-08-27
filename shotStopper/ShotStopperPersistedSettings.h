@@ -20,6 +20,7 @@ struct PersistedSettings {
   ShotPresetBank presets = {};
   bool staConfigured = false;
   bool staOpen = false;
+  bool staWifiSleep = false;
   char staSsid[WIFI_SSID_CAPACITY] = {};
   char staPassword[WIFI_PASSWORD_CAPACITY] = {};
   uint8_t staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
