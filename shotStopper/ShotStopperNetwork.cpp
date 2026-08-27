@@ -7378,32 +7378,28 @@ void ShotStopperNetwork::serviceOtaRollback(uint32_t now) {
   }
 
   ShotStopperOta &ota = ShotStopperOta::instance();
-  if (ota.runningImageRejected() || ota.runningImageConfirmed() || ota.busy()) {
+  const bool alreadySettled =
+      ota.runningImageRejected() || ota.runningImageConfirmed() || ota.busy();
+  // Assume a previous slot exists until the deadline forces a real check.
+  // Passing false here would KEEP_RUNNING at 180 s without asking IDF.
+  const OtaPendingVerifyAction action = decideOtaPendingVerify(
+      ota.bootPendingVerify(), alreadySettled,
+      startupComplete_ && server_ != nullptr, now, OTA_CONFIRM_MIN_UPTIME_MS,
+      OTA_CONFIRM_DEADLINE_MS, true);
+  if (action == OtaPendingVerifyAction::NONE ||
+      action == OtaPendingVerifyAction::WAIT) {
     return;
   }
-  if (!ota.bootPendingVerify()) {
-    return;
-  }
-  // A listening HTTP server is the proof this build works: the boot sequence,
-  // the control task, Wi-Fi and the web stack all came up, so the machine can
-  // still be reached and updated again over the air. An image already marked
-  // invalid must never be flipped back, which is why the rejected_ check sits
-  // above.
-  if (startupComplete_ && server_ != nullptr &&
-      now >= OTA_CONFIRM_MIN_UPTIME_MS) {
+  if (action == OtaPendingVerifyAction::CONFIRM) {
     if (ota.confirmRunningImage()) {
       log(DebugCategory::NETWORK, DebugCode::OTA_IMAGE_CONFIRMED);
       actionLog("ota: running image confirmed");
     }
     return;
   }
-  if (now < OTA_CONFIRM_DEADLINE_MS) {
-    return;
-  }
   if (!ota.rejectRunningImage()) {
     // No other slot holds a bootable application. Restarting would leave the
-    // machine with nothing to run, so keep this image and make it permanent:
-    // it is demonstrably able to brew, it just cannot serve its Web UI.
+    // machine with nothing to run, so keep this image and make it permanent.
     ota.confirmRunningImage();
     log(DebugCategory::NETWORK, DebugCode::OTA_ROLLBACK_FAILED);
     actionLog("ota: rollback impossible; keeping the running image");

@@ -189,8 +189,9 @@ class ShotStopperNetwork {
   // A freshly committed OTA image proves itself by serving its Web UI. Confirm
   // no earlier than this so a crash during startup still rolls back...
   static constexpr uint32_t OTA_CONFIRM_MIN_UPTIME_MS = 15000;
-  // ...and give up if HTTP never comes up, which would otherwise strand the
-  // machine on firmware that can no longer be updated over the air.
+  // ...and give up if HTTP never comes up. A bootable previous slot is then
+  // marked invalid so the bootloader can roll back; if no previous slot is
+  // bootable the running image is confirmed so the machine still has firmware.
   static constexpr uint32_t OTA_CONFIRM_DEADLINE_MS = 180000;
   static constexpr uint8_t OTA_RECEIVE_ATTEMPTS = 3;
   static constexpr uint32_t OTA_RESTART_GIVE_UP_MS = 300000;

@@ -37,8 +37,9 @@ inline bool resetPersistedNetworkAccess(PersistedSettings &settings) {
   return true;
 }
 
-// Independent stores first, settings next (clears the shared namespace), BLE
-// last. Every store is verified before success. Idempotent.
+// Independent stores first, settings next (overwrite dual-slot settings
+// without clearing the shared NVS namespace), BLE companion last. Every store
+// is verified before success. Idempotent.
 // Orchestrator last-shot UI snapshot (`persistedLastShot`) is not this
 // store: callers that publish status must drop it after this returns true.
 inline bool resetAllDurableStores(PersistedSettings &settings,

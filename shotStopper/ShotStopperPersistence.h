@@ -7,6 +7,8 @@
 #include "ShotStopperPreferences.h"
 #include "ShotStopperSettingsMigrate.h"
 
+#include <stdint.h>
+
 #if !defined(SHOT_STOPPER_HOST_TEST) &&                                        \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
 #include <esp_task_wdt.h>
@@ -243,29 +245,46 @@ inline bool resetPersistedSettingsToFactory(PersistedSettings &settings) {
   if (!lockSettingsNvs()) {
     return false;
   }
-  PersistedSettings &first = persistedSettingsScratch(0);
-  first = PersistedSettings{};
-  if (!initializeDefaultSettings(first)) {
-    unlockSettingsNvs();
-    return false;
-  }
-  first.storageRevision = 1;
-  finalizePersistedSettings(first);
-  PersistedSettings &second = persistedSettingsScratch(1);
-  second = first;
-  second.storageRevision = 2;
-  finalizePersistedSettings(second);
-
   Preferences preferences;
   if (!preferences.begin(SETTINGS_NAMESPACE, false)) {
     unlockSettingsNvs();
     return false;
   }
-  if (!preferences.clear()) {
+
+  uint32_t existingMax = 0;
+  PersistedSettings &probe = persistedSettingsScratch(0);
+  probe = PersistedSettings{};
+  if (readSettingsSlot(preferences, SETTINGS_SLOT_A, probe) &&
+      probe.storageRevision > existingMax) {
+    existingMax = probe.storageRevision;
+  }
+  probe = PersistedSettings{};
+  if (readSettingsSlot(preferences, SETTINGS_SLOT_B, probe) &&
+      probe.storageRevision > existingMax) {
+    existingMax = probe.storageRevision;
+  }
+  if (durableStorageRevisionValid() &&
+      durableStorageRevision() > existingMax) {
+    existingMax = durableStorageRevision();
+  }
+  if (existingMax > UINT32_MAX - 2U) {
+    existingMax = UINT32_MAX - 2U;
+  }
+
+  PersistedSettings &first = persistedSettingsScratch(0);
+  first = PersistedSettings{};
+  if (!initializeDefaultSettings(first)) {
     preferences.end();
     unlockSettingsNvs();
     return false;
   }
+  first.storageRevision = existingMax + 1U;
+  finalizePersistedSettings(first);
+  PersistedSettings &second = persistedSettingsScratch(1);
+  second = first;
+  second.storageRevision = existingMax + 2U;
+  finalizePersistedSettings(second);
+
   yieldSettingsNvs();
   feedSettingsNvsWatchdog();
   const bool firstSaved =
@@ -276,7 +295,6 @@ inline bool resetPersistedSettingsToFactory(PersistedSettings &settings) {
   const bool secondSaved =
       preferences.putBytes(SETTINGS_SLOT_B, &second, sizeof(second)) ==
       sizeof(second);
-  // Reuse the two slots for read-back verify (NVS already holds both blobs).
   first = PersistedSettings{};
   const bool firstVerified =
       firstSaved && readSettingsSlot(preferences, SETTINGS_SLOT_A, first);

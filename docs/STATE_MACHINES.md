@@ -662,7 +662,7 @@ Source: `ShotStopperOta.h`. Product notes: [OTA](features/ota.md).
 | `IDLE` | Ready for an upload (after the running image has confirmed itself). |
 | `RECEIVING` | Bytes streaming into the spare slot. |
 | `STAGED` | Image passed header, identity, arch, and SHA-256. Waiting for the operator to flash. |
-| `COMMITTED` | Boot partition switched; restart pending. Next boot is `PENDING_VERIFY` until HTTP proves the Web UI. |
+| `COMMITTED` | Boot partition switched; restart pending. Next boot is `PENDING_VERIFY` until HTTP proves the Web UI, or until the 180 s deadline (rollback if a previous slot is bootable; otherwise the running image is kept). |
 
 `OtaResult` values (`BUSY`, `PENDING_VERIFY`, `DOWNGRADE`, …) are
 **command outcomes**, not states. A second upload while the new image

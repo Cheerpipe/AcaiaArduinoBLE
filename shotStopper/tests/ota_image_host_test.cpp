@@ -1,5 +1,6 @@
 #define SHOT_STOPPER_HOST_TEST
 
+#include "../ShotStopperOta.h"
 #include "../ShotStopperOtaImage.h"
 
 #include <cstdlib>
@@ -13,8 +14,13 @@ namespace {
 using shotstopper::OtaImageHeaderResult;
 using shotstopper::OtaImageTag;
 using shotstopper::OtaImageTagScanner;
+using shotstopper::OtaPendingVerifyAction;
+using shotstopper::decideOtaPendingVerify;
 using shotstopper::parseOtaImageTagBody;
 using shotstopper::validateOtaImageHeader;
+
+constexpr uint32_t kConfirmMinMs = 15000;
+constexpr uint32_t kConfirmDeadlineMs = 180000;
 
 int failures = 0;
 
@@ -307,6 +313,51 @@ void testScannerFindsTagAfterUnparseableCandidate() {
   CHECK(std::string(tag.arch) == "n8r4");
 }
 
+void testPendingVerifyKeepRunningWhenRollbackImpossible() {
+  CHECK(decideOtaPendingVerify(true, false, false, kConfirmDeadlineMs,
+                               kConfirmMinMs, kConfirmDeadlineMs, false) ==
+        OtaPendingVerifyAction::KEEP_RUNNING);
+}
+
+void testPendingVerifyRejectWhenRollbackPossible() {
+  CHECK(decideOtaPendingVerify(true, false, false, kConfirmDeadlineMs,
+                               kConfirmMinMs, kConfirmDeadlineMs, true) ==
+        OtaPendingVerifyAction::REJECT);
+}
+
+void testPendingVerifyConfirmAfterHttpUptime() {
+  CHECK(decideOtaPendingVerify(true, false, true, kConfirmMinMs, kConfirmMinMs,
+                               kConfirmDeadlineMs, true) ==
+        OtaPendingVerifyAction::CONFIRM);
+}
+
+void testPendingVerifyWaitsWithoutHttp() {
+  CHECK(decideOtaPendingVerify(true, false, false, kConfirmMinMs, kConfirmMinMs,
+                               kConfirmDeadlineMs, true) ==
+        OtaPendingVerifyAction::WAIT);
+}
+
+void testPendingVerifyWaitsBeforeConfirmUptime() {
+  CHECK(decideOtaPendingVerify(true, false, true, kConfirmMinMs - 1,
+                               kConfirmMinMs, kConfirmDeadlineMs, true) ==
+        OtaPendingVerifyAction::WAIT);
+}
+
+void testPendingVerifyNoneWhenSettledOrNotPending() {
+  CHECK(decideOtaPendingVerify(true, true, true, kConfirmMinMs, kConfirmMinMs,
+                               kConfirmDeadlineMs, true) ==
+        OtaPendingVerifyAction::NONE);
+  CHECK(decideOtaPendingVerify(false, false, true, kConfirmMinMs, kConfirmMinMs,
+                               kConfirmDeadlineMs, true) ==
+        OtaPendingVerifyAction::NONE);
+}
+
+void testPendingVerifyHttpReadyAfterDeadlineStillConfirms() {
+  CHECK(decideOtaPendingVerify(true, false, true, kConfirmDeadlineMs,
+                               kConfirmMinMs, kConfirmDeadlineMs, false) ==
+        OtaPendingVerifyAction::CONFIRM);
+}
+
 }  // namespace
 
 int main() {
@@ -327,6 +378,13 @@ int main() {
   testScannerReportsNothingWithoutTag();
   testScannerIgnoresOversizedCandidate();
   testScannerFindsTagAfterUnparseableCandidate();
+  testPendingVerifyKeepRunningWhenRollbackImpossible();
+  testPendingVerifyRejectWhenRollbackPossible();
+  testPendingVerifyConfirmAfterHttpUptime();
+  testPendingVerifyWaitsWithoutHttp();
+  testPendingVerifyWaitsBeforeConfirmUptime();
+  testPendingVerifyNoneWhenSettledOrNotPending();
+  testPendingVerifyHttpReadyAfterDeadlineStillConfirms();
 
   if (failures != 0) {
     std::cerr << "ota image host test failures: " << failures << "\n";

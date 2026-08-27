@@ -341,6 +341,77 @@ void p08_factory_reset_rebuilds_defaults() {
   CHECK(settings.preferredScaleName[0] == '\0');
   CHECK(settings.runtime.scaleMacCacheMode ==
         static_cast<uint8_t>(ScaleMacCacheMode::FIRST));
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(verifyFactorySettings(loaded));
+  CHECK(loaded.runtime.goalWeightG == DEFAULT_GOAL_WEIGHT_G);
+}
+
+void p64_factory_settings_overwrite_does_not_clear_ble_namespace() {
+  resetHostPersistence();
+  PersistedSettings settings;
+  CHECK(initializeDefaultSettings(settings));
+  settings.runtime.goalWeightG = 63;
+  settings.runtime.maxRecoveryWeightG = 70.0f;
+  finalizePersistedSettings(settings);
+  CHECK(savePersistedSettings(settings));
+  BleCompanionPersistedSettings ble;
+  ble.enabled = 1;
+  CHECK(saveBleCompanionSettings(ble));
+  CHECK(persistence_host::records.count("shotstopper/bleCfgA") +
+            persistence_host::records.count("shotstopper/bleCfgB") >=
+        1);
+  CHECK(resetPersistedSettingsToFactory(settings));
+  CHECK(verifyFactorySettings(settings));
+  CHECK(persistence_host::records.count("shotstopper/bleCfgA") +
+            persistence_host::records.count("shotstopper/bleCfgB") >=
+        1);
+  BleCompanionPersistedSettings reloadedBle;
+  CHECK(loadBleCompanionSettings(reloadedBle));
+  CHECK(reloadedBle.enabled == 1);
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(verifyFactorySettings(loaded));
+}
+
+void p65_factory_settings_survives_second_slot_write_fail() {
+  resetHostPersistence();
+  PersistedSettings settings;
+  CHECK(initializeDefaultSettings(settings));
+  settings.runtime.goalWeightG = 63;
+  settings.runtime.maxRecoveryWeightG = 70.0f;
+  finalizePersistedSettings(settings);
+  CHECK(savePersistedSettings(settings));
+  persistence_host::failNextWriteForKey = SETTINGS_SLOT_B;
+  CHECK(resetPersistedSettingsToFactory(settings));
+  CHECK(verifyFactorySettings(settings));
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(verifyFactorySettings(loaded));
+  CHECK(loaded.runtime.goalWeightG == DEFAULT_GOAL_WEIGHT_G);
+}
+
+void p66_shot_log_keeps_history_when_active_pointer_write_fails() {
+  resetHostPersistence();
+  ShotLog log;
+  CHECK(log.load());
+  ShotLogRecord record = {};
+  record.durationDs = 250;
+  record.goalWeightG = 36;
+  record.actualWeightCg = 3600;
+  CHECK(log.append(record));
+  CHECK(log.count() == 1);
+
+  persistence_host::failNextWriteForKey = "active";
+  ShotLogRecord second = {};
+  second.durationDs = 260;
+  second.goalWeightG = 36;
+  CHECK(!log.append(second));
+  CHECK(log.count() == 1);
+
+  ShotLog reloaded;
+  CHECK(reloaded.load());
+  CHECK(reloaded.count() == 1);
 }
 
 void p09_fast_extraction_guard_validation() {
@@ -1230,6 +1301,9 @@ const TestCase tests[] = {
     {"P05", p05_password_change_updates_hash},
     {"P07", p07_invalid_schema_uses_factory_on_missing_slots},
     {"P08", p08_factory_reset_rebuilds_defaults},
+    {"P64", p64_factory_settings_overwrite_does_not_clear_ble_namespace},
+    {"P65", p65_factory_settings_survives_second_slot_write_fail},
+    {"P66", p66_shot_log_keeps_history_when_active_pointer_write_fails},
     {"P09", p09_fast_extraction_guard_validation},
     {"P10", p10_auto_to_manual_guard_trend_and_validation},
     {"P12", p12_shot_log_persists_compact_blob},

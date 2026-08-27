@@ -4111,9 +4111,17 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
     throw new Error('Locked admin status must omit Wi-Fi/BLE/OTA bodies until unlocked');
   }
   if (!network.includes('serviceOtaRollback(now)') ||
+      !network.includes('decideOtaPendingVerify(') ||
+      !otaHeader.includes('decideOtaPendingVerify') ||
+      !otaHeader.includes('KEEP_RUNNING') ||
       !networkHeader.includes('OTA_CONFIRM_MIN_UPTIME_MS') ||
       !networkHeader.includes('OTA_CONFIRM_DEADLINE_MS')) {
-    throw new Error('Network service must confirm or roll back a pending OTA image');
+    throw new Error(
+        'Network service must confirm, roll back, or KEEP_RUNNING a pending OTA image');
+  }
+  if (!network.includes('rollback impossible; keeping the running image')) {
+    throw new Error(
+        'OTA must keep the running image when rollback is impossible');
   }
   for (const code of [
     'OTA_UPLOAD_STARTED', 'OTA_IMAGE_STAGED', 'OTA_UPLOAD_REJECTED',

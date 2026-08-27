@@ -16,10 +16,22 @@ your network.
 
 ## Safety behavior
 
-Updates use a dual slot. After reboot, the new image must successfully
-serve the Web UI before it is confirmed. If it fails, the bootloader
-rolls back to the previous slot—no USB required. A second OTA while
-verification is still pending is refused (`PENDING_VERIFY`).
+Updates use a dual slot. After reboot, the new image boots as
+`PENDING_VERIFY` and is confirmed only after the Web UI has been
+serving for at least 15 s (HTTP up is the proof — not brew or BLE).
+A second OTA while verification is still pending is refused
+(`PENDING_VERIFY`).
+
+If HTTP never comes up, the controller waits up to 180 s, then:
+
+- **Previous slot bootable:** the running image is marked invalid and
+  the bootloader rolls back on restart — no USB required.
+- **No bootable previous slot:** the running image is confirmed so the
+  machine is not left without an application. Recover over USB; see
+  [Emergency recovery](../EMERGENCY_RECOVERY.md).
+
+Machine circuit stays open during the update. Wi-Fi credentials, presets, calibration,
+and shot history are left unchanged on a successful flash.
 
 Machine circuit stays open during the update. Wi-Fi credentials, presets, calibration,
 and shot history are left unchanged on a successful flash.

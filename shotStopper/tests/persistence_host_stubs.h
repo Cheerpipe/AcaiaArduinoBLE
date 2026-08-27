@@ -13,6 +13,7 @@ namespace persistence_host {
 
 inline std::map<std::string, std::vector<uint8_t>> records;
 inline bool failNextWrite = false;
+inline std::string failNextWriteForKey;
 inline bool corruptNextWrite = false;
 inline uint32_t randomState = 0x13579BDFU;
 
@@ -24,6 +25,7 @@ inline std::string storageKey(const char *nameSpace, const char *key) {
 inline void reset() {
   records.clear();
   failNextWrite = false;
+  failNextWriteForKey.clear();
   corruptNextWrite = false;
   randomState = 0x13579BDFU;
 }
@@ -91,6 +93,11 @@ class Preferences {
     if (!active_ || readOnly_ || input == nullptr ||
         persistence_host::failNextWrite) {
       persistence_host::failNextWrite = false;
+      return 0;
+    }
+    if (key != nullptr && !persistence_host::failNextWriteForKey.empty() &&
+        persistence_host::failNextWriteForKey == key) {
+      persistence_host::failNextWriteForKey.clear();
       return 0;
     }
     persistence_host::putRaw(nameSpace_.c_str(), key, input, length);
