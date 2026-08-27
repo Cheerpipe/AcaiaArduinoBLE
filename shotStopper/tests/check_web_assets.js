@@ -345,7 +345,9 @@ if (firmwareCore.includes('SCALE_LINK_COEX_BT_MS') ||
     firmwareCore.includes('scaleLinkCoexHadLink') ||
     !firmwareCore.includes('scale.isConnecting() || scale.isLinkUp()') ||
     !firmware.includes('setRfCoexClaim(RfCoexClaim::BLE') ||
-    !firmware.includes('rfCoexWinner')) {
+    !firmware.includes('rfCoexWinner') ||
+    !firmware.includes('publishRfCoexPreference') ||
+    !firmware.includes('applyRfCoexPreference')) {
   throw new Error(
       'RF coex must prefer BT for the whole GATT link via a shared claim resolver, not a 1s window');
 }
@@ -3275,6 +3277,15 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
       beginSta.includes('WIFI_OFF')) {
     throw new Error(
         'beginStationConnect must disconnect STA before reassociate without WIFI_OFF and defer while brew RF is active');
+  }
+}
+{
+  const abortAt = network.indexOf('associate aborted; brew RF active');
+  const abortSlice = abortAt >= 0 ? network.slice(Math.max(0, abortAt - 500), abortAt) : '';
+  if (!abortSlice.includes('staState == StaState::CONNECTING') ||
+      !abortSlice.includes('WiFi.status() != WL_CONNECTED')) {
+    throw new Error(
+        'STA associate abort during brew must skip a radio that already has an IP');
   }
 }
 {
