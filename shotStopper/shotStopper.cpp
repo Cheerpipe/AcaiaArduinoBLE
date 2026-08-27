@@ -4382,7 +4382,7 @@ void resetSessionForNewCycle(ControlSource source) {
 
 void maybeRequestNtpSyncOnActivity();
 bool beginRinseCycle(ControlSource source);
-void enterRinse();
+bool enterRinse();
 
 void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   refreshLoopGuardsFromLastIntention();
@@ -4620,8 +4620,22 @@ bool beginRinseCycle(ControlSource source) {
   return true;
 }
 
-void enterRinse() {
-  (void)machineBeginRinse(session.config.operationalWallMs);
+bool enterRinse() {
+  if (!machineBeginRinse(session.config.operationalWallMs)) {
+    // Do not machineEndRinse(): that would double-pulse on momentary.
+    // BREW/MANUAL already get machineRequestStop + machineEndCycle here.
+    if (stopperState == StopperState::BREW ||
+        stopperState == StopperState::MANUAL_NO_SCALE) {
+      finalizeCycle(EndReason::RELAY_SAFETY_FAILURE,
+                    StopperState::REQUIRES_OFF);
+    } else {
+      session.active = false;
+      session.endReason = EndReason::RELAY_SAFETY_FAILURE;
+      machineEndCycle();
+      transitionTo(StopperState::REQUIRES_OFF);
+    }
+    return false;
+  }
   session.rinseStartedAtMs = rinseBegin(session.config.rinseDurationMs);
   session.automaticEnabled = false;
   shot.automaticBrew = false;
@@ -4633,6 +4647,7 @@ void enterRinse() {
   addDebugEvent(DebugCategory::STATE, DebugCode::RINSE_CLASSIFIED);
   transitionTo(StopperState::RINSE);
   maybeRequestNtpSyncOnActivity();
+  return true;
 }
 
 void enterBrewOrManualFromStart() {
@@ -4760,7 +4775,7 @@ void stateMachineTask() {
         if (!beginRinseCycle(ControlSource::PHYSICAL)) {
           return;
         }
-        enterRinse();
+        (void)enterRinse();
       }
       return;
 
@@ -4773,7 +4788,7 @@ void stateMachineTask() {
 
     case StopperState::BREW:
       if (intent.intent == UserIntent::REQUEST_RINSE && machineSupportsRinse()) {
-        enterRinse();
+        (void)enterRinse();
         return;
       }
       if (intent.intent == UserIntent::REQUEST_STOP) {
@@ -4831,7 +4846,7 @@ void stateMachineTask() {
 
     case StopperState::MANUAL_NO_SCALE:
       if (intent.intent == UserIntent::REQUEST_RINSE && machineSupportsRinse()) {
-        enterRinse();
+        (void)enterRinse();
         return;
       }
       if (intent.intent == UserIntent::REQUEST_STOP) {
@@ -4874,7 +4889,7 @@ void beginWebRinse() {
   if (!beginRinseCycle(ControlSource::WEB)) {
     return;
   }
-  enterRinse();
+  (void)enterRinse();
 }
 
 bool forwardAcceptedNetworkCommand(const WebCommand &command) {

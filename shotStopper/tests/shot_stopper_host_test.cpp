@@ -744,6 +744,28 @@ void t04c_rinse_demote_does_not_learn_offset() {
   CHECK(runtimeConfig.weightOffsetG == originalOffset);
 }
 
+void t29_rinse_demote_begin_fail_does_not_enter_rinse() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  const uint32_t rawOnAt = startCycle();
+  CHECK(executeNextScaleCommand());
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(getRelaySafetySnapshot().closed);
+  const uint32_t rawOffAt = rawOnAt + runtimeConfig.rinseGestureMs;
+  CHECK(hostMillis <= rawOffAt);
+  runLoopAfter(rawOffAt - hostMillis);
+  CHECK(stopperState == StopperState::BREW);
+  CHECK(setMachineCircuitClosed(false));
+  hostGptimerArmSucceeds = false;
+  setRawPaddle(false);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+  CHECK(stopperState == StopperState::REQUIRES_OFF);
+  CHECK(session.endReason == EndReason::RELAY_SAFETY_FAILURE);
+  CHECK(stopperState != StopperState::RINSE);
+  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(!rinseActuationActive);
+}
+
 void t05_release_between_rinse_and_brew_is_short_shot() {
   resetHarness(false, true);
   reachReadyFromBoot();
@@ -10082,6 +10104,7 @@ const TestCase testCases[] = {
     {"T04", t04_exact_rinse_boundary_and_duration},
     {"T04B", t04b_rinse_disabled_short_on_off_is_not_rinse},
     {"T04C", t04c_rinse_demote_does_not_learn_offset},
+    {"T29", t29_rinse_demote_begin_fail_does_not_enter_rinse},
     {"T05", t05_release_between_rinse_and_brew_is_short_shot},
     {"T06", t06_paddle_off_during_brew},
     {"T07", t07_scale_prediction_requires_release_after_stop},
