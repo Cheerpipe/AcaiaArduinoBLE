@@ -52,12 +52,14 @@ depend on a reviewed board):
 - `SHOT_STOPPER_CIRCUIT_FEEDBACK_GPIO`
 - `SHOT_STOPPER_CIRCUIT_FEEDBACK_CLOSED_LEVEL` (optional; default LOW)
 
-Compile example:
+Compile example (GPIO overrides). Add
+`-DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1` only for an explicit
+opt-in remote-control development build; default firmware leaves start/rinse
+on the physical activator:
 
 ```sh
 ./scripts/build-idf --arch n16r8 \
-  --flags "-DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1 \
--DSHOT_STOPPER_SAFETY_HEARTBEAT_GPIO=16 -DSHOT_STOPPER_CIRCUIT_FEEDBACK_GPIO=17"
+  --flags "-DSHOT_STOPPER_SAFETY_HEARTBEAT_GPIO=16 -DSHOT_STOPPER_CIRCUIT_FEEDBACK_GPIO=17"
 ```
 
 To use a different paddle, relay, LED, or buzzer pin, edit

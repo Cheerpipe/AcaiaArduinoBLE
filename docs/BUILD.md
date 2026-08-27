@@ -119,8 +119,21 @@ and then remembered in `.shotstopper`.
 `node ./scripts/gen_web_ui.js`. Output is
 `build-idf/<arch>/shotstopper.bin`.
 
-Extra compile defines go in `--flags`. The prompt’s suggested development
-flags enable remote machine control and a passive buzzer. Enter accepts them. Examples:
+Extra compile defines go in `--flags`. The prompt’s suggested flags enable a
+passive buzzer only. Remote machine control is **opt-in** and off by default
+(`SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=0` or the flag omitted). Enter
+accepts the suggested flags. An existing `build-idf/<arch>/sdkconfig` that
+already has remote control on keeps that choice until you delete the tree or
+change it in menuconfig.
+
+Examples:
+
+```sh
+./scripts/build-idf --arch n16r8 \
+  --flags "-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_BUZZER=1"
+```
+
+Opt-in remote start/rinse (trusted network only):
 
 ```sh
 ./scripts/build-idf --arch n16r8 \
@@ -128,7 +141,8 @@ flags enable remote machine control and a passive buzzer. Enter accepts them. Ex
 ```
 
 - `SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1` — virtual paddle and remote rinse on the
-  Web UI (trusted network only). **Stop** is always available when signed in.
+  Web UI (trusted network only). Omit or `=0` — only the physical activator can
+  close the machine circuit. **Stop** is always available when signed in.
 - `SHOT_STOPPER_ENABLE_BUZZER=1` — passive piezo (PWM/RTTTL). `=0` or omit — no local buzzer.
 
 N16R8 uses a 16 MB OTA table (about **3 MB** app slot × 2). N8R4 uses the 8 MB

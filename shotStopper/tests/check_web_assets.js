@@ -749,6 +749,50 @@ if (!domainCore.includes('#ifndef SHOT_STOPPER_DEVELOPMENT') ||
   throw new Error(
       'SHOT_STOPPER_DEVELOPMENT must default off, bypass adminUnlockAllowed when on, and unlock Web UI');
 }
+{
+  const remoteKconfig = kconfig.slice(
+      kconfig.indexOf('config SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL'),
+      kconfig.indexOf('config SHOT_STOPPER_MACHINE_TYPE'));
+  const cli = fs.readFileSync(
+      path.resolve(sketchDir, '..', 'scripts', 'shotstopper_cli.sh'), 'utf8');
+  const defaultFlags = cli.match(/SS_CLI_DEFAULT_FLAGS='([^']*)'/);
+  const paddleHandler = network.slice(
+      network.indexOf('esp_err_t ShotStopperNetwork::paddleHandler'),
+      network.indexOf('esp_err_t ShotStopperNetwork::rinseHandler'));
+  const rinseHandler = network.slice(
+      network.indexOf('esp_err_t ShotStopperNetwork::rinseHandler'),
+      network.indexOf('esp_err_t ShotStopperNetwork::stopHandler'));
+  const remoteOn = firmwareCore.slice(
+      firmwareCore.indexOf('case WebCommandType::REMOTE_ON:'),
+      firmwareCore.indexOf('case WebCommandType::RINSE:'));
+  const webRinse = firmwareCore.slice(
+      firmwareCore.indexOf('case WebCommandType::RINSE:'),
+      firmwareCore.indexOf('case WebCommandType::APPLY_CONFIG:'));
+  const lockdownTest = fs.readFileSync(
+      path.join(sketchDir, 'tests', 'remote_lockdown_host_test.cpp'), 'utf8');
+  const hostTests = fs.readFileSync(
+      path.join(sketchDir, 'tests', 'run_host_tests.sh'), 'utf8');
+  if (remoteKconfig.length < 80 ||
+      !remoteKconfig.includes('default n') ||
+      /\bdefault y\b/.test(remoteKconfig) ||
+      sdkconfigDefaults.includes(
+          'CONFIG_SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=y') ||
+      !defaultFlags ||
+      defaultFlags[1].includes('SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1') ||
+      !paddleHandler.includes('on && !REMOTE_MACHINE_CONTROL_ENABLED') ||
+      !paddleHandler.includes('REMOTE_CONTROL_DISABLED') ||
+      !rinseHandler.includes('!REMOTE_MACHINE_CONTROL_ENABLED') ||
+      !rinseHandler.includes('REMOTE_CONTROL_DISABLED') ||
+      !remoteOn.includes('!REMOTE_MACHINE_CONTROL_ENABLED') ||
+      !webRinse.includes('!REMOTE_MACHINE_CONTROL_ENABLED') ||
+      !lockdownTest.includes('#define SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL 0') ||
+      !lockdownTest.includes('WebCommandType::REMOTE_ON') ||
+      !lockdownTest.includes('WebCommandType::RINSE') ||
+      !hostTests.includes('remote_lockdown_host_test.cpp')) {
+    throw new Error(
+        'Remote machine control must stay opt-in (Kconfig/sdkconfig/CLI default off) with HTTP and processWebCommand guards');
+  }
+}
 if (ui.includes('authenticatedOnly') ||
     ui.includes("s.setItem('shotStopperToken'") ||
     ui.includes('pageNav authenticatedOnly') ||

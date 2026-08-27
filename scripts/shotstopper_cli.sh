@@ -22,7 +22,7 @@
 SS_CLI_KEYS="port arch speed host password flags build_dir output_dir"
 SS_CLI_SECRET_KEYS="password"
 # Extra compiler flags offered when the prompt for --flags is answered with Enter.
-SS_CLI_DEFAULT_FLAGS='-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1 -DSHOT_STOPPER_ENABLE_BUZZER=1'
+SS_CLI_DEFAULT_FLAGS='-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_BUZZER=1'
 # Per-run path overrides. Persisting them would let a stale build_dir silently
 # point an analysis at the wrong architecture, so they never touch the store.
 SS_CLI_TRANSIENT_KEYS="build_dir output_dir"

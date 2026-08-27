@@ -2,11 +2,14 @@ menu "Advanced Shot Stopper"
 
     config SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL
         bool "Enable remote machine control"
-        default y
+        default n
         help
-            When enabled, compiles the remote start/stop path for the
-            intercepted machine circuit
-            (SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1). The legacy
+            Security opt-in. When disabled (the default) or compiled with
+            SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=0, firmware rejects
+            remote start and rinse over HTTP/API; only the physical activator
+            can close the machine circuit. Stop remains available.
+            Enable with this Kconfig or
+            -DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=1. The legacy
             -DSHOT_STOPPER_ENABLE_REMOTE_CN9 alias still maps onto this flag.
             Command-line -DSHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL=… still
             overrides.

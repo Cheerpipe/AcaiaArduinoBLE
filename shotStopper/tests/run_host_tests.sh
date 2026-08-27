@@ -13,6 +13,7 @@ persistence_sanitized=${TMPDIR:-/tmp}/shot_stopper_persistence_host_test_sanitiz
 external_safety_binary=${TMPDIR:-/tmp}/shot_stopper_external_safety_host_test
 external_safety_sanitized=${TMPDIR:-/tmp}/shot_stopper_external_safety_host_test_sanitized
 remote_policy_binary=${TMPDIR:-/tmp}/shot_stopper_remote_policy_host_test
+remote_lockdown_binary=${TMPDIR:-/tmp}/shot_stopper_remote_lockdown_host_test
 ota_image_binary=${TMPDIR:-/tmp}/shot_stopper_ota_image_host_test
 ota_image_sanitized=${TMPDIR:-/tmp}/shot_stopper_ota_image_host_test_sanitized
 firmware_dir="$test_dir/.."
@@ -112,6 +113,19 @@ ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
   -o "$remote_policy_binary"
 "$remote_policy_binary"
 echo "Remote machine control policy: disabled by default"
+
+"$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+  "$test_dir/remote_lockdown_host_test.cpp" \
+  -o "$remote_lockdown_binary"
+"$remote_lockdown_binary"
+echo "Remote machine control lockdown: web start/rinse rejected"
+
+"$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+  -fno-omit-frame-pointer -fsanitize=address,undefined \
+  "$test_dir/remote_lockdown_host_test.cpp" \
+  -o "${remote_lockdown_binary}_sanitized"
+ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  "${remote_lockdown_binary}_sanitized"
 
 "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
   "$test_dir/ota_image_host_test.cpp" \
