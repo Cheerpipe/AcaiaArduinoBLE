@@ -10,8 +10,12 @@ const asset = fs.readFileSync(path.join(sketchDir, 'ShotStopperWebAssets.h'), 'u
 const network = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.cpp'), 'utf8');
 const networkHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.h'), 'utf8');
 const firmwareCore = fs.readFileSync(path.join(sketchDir, 'shotStopper.cpp'), 'utf8');
+const scaleWorker = fs.readFileSync(path.join(sketchDir, 'ShotStopperScaleWorker.cpp'), 'utf8');
 const firmware = [
   firmwareCore,
+  scaleWorker,
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperScaleWorker.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperScaleLink.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperHardware.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperMachine.h'), 'utf8'),
   fs.readFileSync(path.join(sketchDir, 'ShotStopperRfCoex.h'), 'utf8'),
@@ -298,17 +302,17 @@ if (!bleLibrary.includes('BLE.scan(true)') ||
   throw new Error(
       'Idle GAP scan must stay on with withDuplicates=true');
 }
-if (!firmwareCore.includes('scaleWorkerTickDelayMs()') ||
-    !firmwareCore.includes('controlLoopTickDelayMs()') ||
-    !firmwareCore.includes('SCALE_WORKER_NO_SCALE_DELAY_MS') ||
-    !firmwareCore.includes('SCALE_STREAM_GAP_MS') ||
+if (!firmware.includes('scaleWorkerTickDelayMs()') ||
+    !firmware.includes('controlLoopTickDelayMs()') ||
+    !firmware.includes('SCALE_WORKER_NO_SCALE_DELAY_MS') ||
+    !firmware.includes('SCALE_STREAM_GAP_MS') ||
     !firmwareCore.includes('void refreshControlStatus()') ||
     !firmwareCore.includes('void serviceControlStatusPublish()') ||
     !firmwareCore.includes('void publishControlGate()') ||
     !firmwareCore.includes('taskYIELD()') ||
     firmwareCore.includes('CONTROL_STATUS_PUBLISH_MS') ||
     firmwareCore.includes('CONTROL_STATUS_PUBLISH_NO_SCALE_MS') ||
-    (firmwareCore.split('publishBleCompanionStatus(inactiveStatus)').length - 1) !== 1) {
+    (firmware.split('publishBleCompanionStatus(inactiveStatus)').length - 1) !== 1) {
   throw new Error(
       'No-scale idle must relax worker/loop; status snapshot is GET-driven, not 50 ms');
 }
@@ -428,25 +432,25 @@ if (bleLibrary.includes(
         'Acaia newWeightAvailable must use the local link flag, not a live GAP isConnected()');
   }
 }
-if (firmwareCore.includes('if (scaleLinked || changed)')) {
+if (firmware.includes('if (scaleLinked || changed)')) {
   throw new Error(
       'Companion status publish must not force every tick while the scale is linked');
 }
-if (!firmwareCore.includes('companionAdvertisingShouldPause') ||
-    !firmwareCore.includes('syncCompanionAdvertisingForScaleLink') ||
-    !firmwareCore.includes('scale.isConnecting()') ||
-    !firmwareCore.includes('BLE.poll(tickDelayMs)') ||
-    firmwareCore.includes('vTaskDelay(pdMS_TO_TICKS(scaleWorkerTickDelayMs()))') ||
-    (firmwareCore.split('syncCompanionAdvertisingForScaleLink();').length - 1) < 3 ||
+if (!firmware.includes('companionAdvertisingShouldPause') ||
+    !firmware.includes('syncCompanionAdvertisingForScaleLink') ||
+    !firmware.includes('scale.isConnecting()') ||
+    !firmware.includes('BLE.poll(tickDelayMs)') ||
+    firmware.includes('vTaskDelay(pdMS_TO_TICKS(scaleWorkerTickDelayMs()))') ||
+    (firmware.split('syncCompanionAdvertisingForScaleLink();').length - 1) < 3 ||
     !bleCompanion.includes('advertisingPaused_ && !status_.connected') ||
     !bleCompanion.includes('BLE_COMPANION_ADV_INTERVAL') ||
     !bleCompanion.includes('setAdvertisingInterval(BLE_COMPANION_ADV_INTERVAL)')) {
   throw new Error(
       'Companion advertising must pause while connecting or scale-linked; worker must block on HCI');
 }
-if (firmwareCore.includes('SCALE_LINK_COEX_BT_MS') ||
-    firmwareCore.includes('scaleLinkCoexHadLink') ||
-    !firmwareCore.includes('scale.isConnecting() || scale.isLinkUp()') ||
+if (firmware.includes('SCALE_LINK_COEX_BT_MS') ||
+    firmware.includes('scaleLinkCoexHadLink') ||
+    !firmware.includes('scale.isConnecting() || scale.isLinkUp()') ||
     !firmware.includes('setRfCoexClaim(RfCoexClaim::BLE') ||
     !firmware.includes('rfCoexWinner') ||
     !firmware.includes('publishRfCoexPreference') ||
@@ -1890,7 +1894,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !firmwareCore.includes('shotLogPersistFailLatched') ||
     !firmwareCore.includes('shotStorePersistRetryAtMs') ||
     !firmwareCore.includes('SHOT_STORE_PERSIST_RETRY_MS') ||
-    !firmwareCore.includes('noteScaleHistory(seenMac, seenName, false)') ||
+    !firmware.includes('noteScaleHistory(seenMac, seenName, false)') ||
     !firmwareCore.includes('constexpr uint32_t kTryLockMs = 0') ||
     wallClock.includes('monotonicMs >= anchorMonotonicMs_') ||
     !wallClock.includes('monotonicElapsedMs(monotonicMs, anchorMonotonicMs_)') ||
@@ -2720,7 +2724,7 @@ if (!network.includes('restoreLkgToActive(next)') ||
       !network.includes('WIFI_PS_MIN_MODEM') ||
       /WiFi\.setSleep\(\s*WIFI_PS_MAX_MODEM\s*\)/.test(network) ||
       !network.includes('syncScaleLinkRf') ||
-      !firmwareCore.includes('networkManager.syncScaleLinkRf') ||
+      !firmware.includes('networkManager.syncScaleLinkRf') ||
       !domainCore.includes('desiredWifiPowerSave') ||
       !domainCore.includes('scaleConnectingOrUp') ||
       !domainCore.includes('staAssociated') ||
@@ -3704,10 +3708,10 @@ if (!firmware.includes('emitAlert(AlertEvent::FIRST_DROP') ||
   throw new Error('Best-effort beep must stay outside the critical BLE command queue');
 }
 
-const emitCommandImplStart = firmware.indexOf(
+const emitCommandImplStart = firmwareCore.indexOf(
     '// BLE-result fallback only');
-const emitCommandImplEnd = firmware.indexOf(
-    'void requestScaleBrewBeep(uint32_t cycleId) {', emitCommandImplStart);
+const emitCommandImplEnd = firmwareCore.indexOf(
+    'void requestCompletionAlert()', emitCommandImplStart);
 const emitCommandImpl = emitCommandImplStart < 0 || emitCommandImplEnd < 0
     ? ''
     : firmware.slice(emitCommandImplStart, emitCommandImplEnd);
@@ -3743,7 +3747,7 @@ if (firmware.includes('maybeCaptureScaleStartLag') ||
     firmware.includes('setAdvertisingPaused(preferBluetooth)') ||
     !firmware.includes('remoteTimerStartSettled') ||
     !firmware.includes(
-        'command.type == ScaleCommandType::STOP_TIMER &&\n      session.remoteTimerStartSettled')) {
+        'enqueueScaleCommand(command, session.remoteTimerStartSettled)')) {
   throw new Error('Scale timer stop must catch up live, wait for start, and not BLE.advertise() on machine circuit open');
 }
 

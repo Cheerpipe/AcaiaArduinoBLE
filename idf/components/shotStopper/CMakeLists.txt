@@ -5,6 +5,7 @@ set(SHOT_STOPPER_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../shotStopper")
 idf_component_register(
   SRCS
     "${SHOT_STOPPER_DIR}/shotStopper.cpp"
+    "${SHOT_STOPPER_DIR}/ShotStopperScaleWorker.cpp"
     "${SHOT_STOPPER_DIR}/ShotStopperNetwork.cpp"
     "${SHOT_STOPPER_DIR}/ShotStopperOta.cpp"
   INCLUDE_DIRS

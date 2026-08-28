@@ -42,6 +42,9 @@ scan_firmware_sources() {
     "$firmware_dir/ShotStopperMachineMomentaryOnlyState.h" \
     "$firmware_dir/ShotStopperMachineTypes.h" \
     "$firmware_dir/ShotStopperScaleSense.h" \
+    "$firmware_dir/ShotStopperScaleWorker.h" \
+    "$firmware_dir/ShotStopperScaleWorker.cpp" \
+    "$firmware_dir/ShotStopperScaleLink.h" \
     "$firmware_dir/ShotStopperCupPresence.h" \
     "$firmware_dir/ShotStopperScaleTypes.h" \
     "$firmware_dir/ShotStopperBrew.h" \

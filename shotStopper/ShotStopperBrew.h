@@ -87,7 +87,6 @@ bool minRecoveryWeightReached(float weight) {
   return weight >= effectiveMinStopThreshold();
 }
 
-void requestScaleBrewBeep(uint32_t cycleId);
 void enterBrewOrManualFromStart();
 void calculateExpectedEndTime(float cutTargetG);
 
