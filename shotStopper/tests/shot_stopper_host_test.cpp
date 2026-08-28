@@ -148,6 +148,8 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   bleCompanionStatusSnapshot.enabled = true;
   bleCompanionStatusSnapshot.configuredEnabled = true;
   maintenanceLease = MaintenanceLease{};
+  plannedRestartHeld = false;
+  pendingPlannedRestart = WebCommand{};
   maintenanceCancellationCommand = WebCommand{};
   maintenanceCancellationPending = false;
   controlResultCommand = WebCommand{};
@@ -2319,17 +2321,52 @@ void w19_web_start_is_rejected_outside_ready() {
   CHECK(!getRelaySafetySnapshot().closed);
 }
 
-void w20_restart_is_rejected_while_active() {
+void w20_restart_waits_while_active() {
   resetHarness(false, false);
   reachReadyFromBoot();
   startCycle();
   const RelaySafetySnapshot before = getRelaySafetySnapshot();
   WebCommand restart;
   restart.type = WebCommandType::RESTART;
+  restart.unsafeWebUiOverride = true;
   processWebCommand(restart);
   CHECK(session.active);
+  CHECK(plannedRestartHeld);
+  CHECK(!maintenanceLease.active);
   CHECK(getRelaySafetySnapshot().closed == before.closed);
   CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+
+  const uint32_t elapsed = elapsedMs(session.startedAtMs);
+  if (elapsed <= runtimeConfig.rinseGestureMs) {
+    runLoopAfter(runtimeConfig.rinseGestureMs - elapsed + 1);
+  }
+  CHECK(session.active);
+  CHECK(plannedRestartHeld);
+  setRawPaddle(false);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+  CHECK(!session.active);
+  runLoopAfter(MAINTENANCE_LEASE_SETTLE_MS + 1);
+  CHECK(!plannedRestartHeld);
+  CHECK(maintenanceLease.active ||
+        hostLastForwardedNetworkCommand.type == WebCommandType::RESTART);
+}
+
+void w20b_planned_esp_restart_waits_for_shot() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(session.active);
+  CHECK(getRelaySafetySnapshot().closed);
+  safeRestartRequested = true;
+  loop();
+  CHECK(session.active);
+  CHECK(safeRestartRequested);
+  CHECK(getRelaySafetySnapshot().closed);
+
+  criticalTaskWatchdogFault = true;
+  loop();
+  CHECK(!safeRestartRequested);
+  CHECK(!getRelaySafetySnapshot().closed);
 }
 
 void w21_network_change_is_rejected_while_active() {
@@ -4838,6 +4875,7 @@ void r23_maintenance_is_canceled_fail_open_by_physical_paddle() {
   setRawPaddle(true);
   CHECK(!maintenanceLease.active);
   CHECK(!maintenanceCancellationPending);
+  CHECK(plannedRestartHeld);
   CHECK(stopperState == StopperState::REQUIRES_OFF);
   CHECK(!getRelaySafetySnapshot().closed);
 }
@@ -7817,14 +7855,16 @@ void sc11_reboot_queues_restart_when_ready() {
   CHECK(hostLastForwardedNetworkCommand.type == WebCommandType::RESTART);
 }
 
-void sc12_reboot_rejected_while_active() {
+void sc12_reboot_waits_while_active() {
   resetHarness(false, false);
   reachReadyFromBoot();
   startCycle();
   feedSerial("REBOOT\n");
-  CHECK(serialTxContains("ERR not ready"));
+  CHECK(serialTxContains("OK queued REBOOT"));
   CHECK(session.active);
   CHECK(getRelaySafetySnapshot().closed);
+  CHECK(plannedRestartHeld);
+  CHECK(!maintenanceLease.active);
 }
 
 void sc13_debug_full_and_off_during_cycle() {
@@ -10597,7 +10637,8 @@ const TestCase testCases[] = {
     {"W17", w17_web_session_stop_is_a_safe_stop},
     {"W18", w18_web_stop_can_end_a_physical_brew_only_by_opening},
     {"W19", w19_web_start_is_rejected_outside_ready},
-    {"W20", w20_restart_is_rejected_while_active},
+    {"W20", w20_restart_waits_while_active},
+    {"W20b", w20b_planned_esp_restart_waits_for_shot},
     {"W21", w21_network_change_is_rejected_while_active},
     {"W22", w22_timer_only_disables_predictive_stop},
     {"W23", w23_combined_tare_command_uses_cycle_snapshot},
@@ -10792,7 +10833,7 @@ const TestCase testCases[] = {
     {"SC09", sc09_serial_debug_toggles_without_ready},
     {"SC10", sc10_help_prints_one_line_per_command},
     {"SC11", sc11_reboot_queues_restart_when_ready},
-    {"SC12", sc12_reboot_rejected_while_active},
+    {"SC12", sc12_reboot_waits_while_active},
     {"SC13", sc13_debug_full_and_off_during_cycle},
     {"SC14", sc14_network_actions_queue_without_ready},
     {"SC15", sc15_status_printers_use_dump_views},

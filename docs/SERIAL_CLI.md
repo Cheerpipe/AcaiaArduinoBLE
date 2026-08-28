@@ -92,7 +92,7 @@ reboot. Automatic SoftAP from boot is still torn down when STA comes up.
 
 | Command | Parameters | Effect |
 | --- | --- | --- |
-| `REBOOT` | none | Restarts firmware (safety gate) |
+| `REBOOT` | none | Restarts firmware after any current shot finishes |
 | `FACTORY_RESET` | none | Wipes Wi-Fi, settings, calibration, and shots; device password `ineedacoffee`; restarts (safety gate) |
 | `SET_DEVICE_PASSWORD` | `<password>` | Sets the device password (8–63 chars, not `ineedacoffee`). SoftAP WPA2, Admin unlock, and OTA use it. Does not require the current device password. Safety gate |
 | `RESET_DEVICE_PASSWORD` | none | Restores device password `ineedacoffee`. STA unchanged. Safety gate |

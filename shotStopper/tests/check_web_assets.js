@@ -4408,6 +4408,84 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
   if ((otaHandlers.match(/authorizeOtaRequest\(request\)/g) || []).length !== 4) {
     throw new Error('Every OTA route must authenticate the request');
   }
+  if (ota.includes('OTA_SAFETY_CHECK_INTERVAL_BYTES') ||
+      !/while \(received < contentLength\) \{\s*\n\s*\/\/ Shot always wins[\s\S]{0,400}?if \(!io\.stillSafe\(io\.context\)\) \{/
+          .test(ota)) {
+    throw new Error(
+        'OTA must abort on every chunk when the paddle moves, not on a byte interval');
+  }
+  if (!network.includes('otaTransferStillSafe') ||
+      !/bool ShotStopperNetwork::otaTransferStillSafe[\s\S]{0,400}?controlAllowsConfiguration/
+          .test(network)) {
+    throw new Error(
+        'OTA stillSafe must keep controlAllowsConfiguration so a paddle pull aborts the transfer');
+  }
+  const restartHandler = network.slice(
+      network.indexOf('ShotStopperNetwork::restartHandler'),
+      network.indexOf('ShotStopperNetwork::factoryResetHandler'));
+  if (restartHandler.includes('unsafeWebUiOverride') ||
+      restartHandler.includes('webUiConfigurationAllowed') ||
+      restartHandler.includes('CONFIG_LOCKED_DURING_ACTIVE_CYCLE')) {
+    throw new Error(
+        'Admin restart must queue during a shot and must not use the unsafe override to cut it');
+  }
+  if (!firmwareCore.includes('holdOrBeginPlannedRestart') ||
+      !firmwareCore.includes('plannedRestartHeld') ||
+      !firmwareCore.includes('servicePendingPlannedRestart')) {
+    throw new Error(
+        'Planned restart must be held until idle instead of machineRequestStop on an active shot');
+  }
+  {
+    const rebootCase = firmwareCore.slice(
+        firmwareCore.indexOf('case SerialCliVerb::REBOOT:'),
+        firmwareCore.indexOf('case SerialCliVerb::UNKNOWN:'));
+    if (!rebootCase.includes('serialCliQueueCommand') ||
+        rebootCase.includes('serialCliQueueIfSafe')) {
+      throw new Error(
+          'Serial REBOOT must queue during a shot and wait, not reject as not-ready');
+    }
+  }
+  if (!firmwareCore.includes('const bool faultRestart') ||
+      !firmwareCore.includes(
+          '!session.active && !getRelaySafetySnapshot().closed')) {
+    throw new Error(
+        'Planned ESP.restart must wait for an open circuit; only fault restarts cut a shot');
+  }
+  {
+    const rollback = network.slice(
+        network.indexOf('void ShotStopperNetwork::serviceOtaRollback'));
+    if (!rollback.includes('control.activeCycle || control.relayClosed') ||
+        !rollback.includes('!control.activeCycle && !control.relayClosed')) {
+      throw new Error(
+          'OTA confirm/rollback must not write otadata while a shot is pouring');
+    }
+  }
+  if (!html.includes('Paddle during upload cancels it') ||
+      !html.includes('Restarts after any shot')) {
+    throw new Error(
+        'Web UI must say the paddle aborts OTA and that restart waits for the shot');
+  }
+  if (!runtimeJs.includes("Flashed. Restart waits until the shot ends.") ||
+      runtimeJs.includes('Locked while the machine is busy') ||
+      !runtimeJs.includes('Waiting for idle (') ||
+      !runtimeJs.includes("'Restart after the shot.'")) {
+    throw new Error(
+        'OTA status must wait for the shot, not claim the machine is locked');
+  }
+  {
+    const applyOta = runtimeJs.slice(
+        runtimeJs.indexOf('function applyOtaStatus'),
+        runtimeJs.indexOf('function otaSend'));
+    if (applyOta.includes('stopButton') || applyOta.includes('rinseButton') ||
+        applyOta.includes('paddleButton') || applyOta.includes('startButton')) {
+      throw new Error('OTA busy must not disable Start or Rinse');
+    }
+  }
+  if (!network.includes(
+          'The paddle moved or a shot started during the upload')) {
+    throw new Error(
+        'SAFETY_LOST must tell the operator the paddle aborted the upload');
+  }
   if (!network.includes('devicePasswordsMatch(password, expected)')) {
     throw new Error(
       'OTA authentication must compare the device password in constant time');

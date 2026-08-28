@@ -126,8 +126,8 @@ struct OtaStreamIo {
   // Returns the number of bytes read, 0 if the peer closed early, or a
   // negative value on a transport error.
   int (*read)(void *context, uint8_t *buffer, size_t capacity) = nullptr;
-  // Polled during the transfer. Returning false aborts immediately; used to
-  // stop an update the moment the machine stops being safe to update.
+  // Polled on every chunk. Returning false aborts immediately: a shot (or
+  // even just the paddle) always wins over an in-flight firmware transfer.
   bool (*stillSafe)(void *context) = nullptr;
   void (*progress)(void *context, uint32_t received, uint32_t expected) =
       nullptr;

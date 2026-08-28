@@ -413,6 +413,10 @@ uint32_t bleCompanionResultDropped = 0;
 MaintenanceLease maintenanceLease;
 WebCommand maintenanceCancellationCommand;
 bool maintenanceCancellationPending = false;
+// Planned ESP.restart (OTA flash, Admin, CLI) waits here while a shot is
+// running. The paddle is never blocked; the restart proceeds once idle.
+bool plannedRestartHeld = false;
+WebCommand pendingPlannedRestart = {};
 WebCommand controlResultCommand;
 bool controlResultPending = false;
 #ifdef SHOT_STOPPER_HOST_TEST
@@ -476,6 +480,9 @@ bool firmwareInitializationComplete = false;
 bool beginMaintenanceLease(const WebCommand &networkCommand,
                            bool applyRuntimeOnSuccess);
 void completeMaintenanceLease(const WebCommand &result);
+void rejectWebCommand(const WebCommand &command);
+void holdOrBeginPlannedRestart(const WebCommand &command);
+void servicePendingPlannedRestart();
 void queueRuntimePersist(int32_t reasonBits);
 void commitLiveRuntimeConfig(const RuntimeConfig &composed, int32_t reasonBits);
 
@@ -3271,19 +3278,27 @@ void stateMachineTask() {
     }
     if (intent.holdActive) {
       if (!maintenanceLease.forwarded) {
-        addDebugEvent(DebugCategory::SECURITY,
-                      DebugCode::MAINTENANCE_CANCELED,
-                      static_cast<int32_t>(maintenanceLease.id));
-        maintenanceCancellationCommand = WebCommand{};
-        maintenanceCancellationCommand.type =
-            WebCommandType::MAINTENANCE_COMPLETE;
-        maintenanceCancellationCommand.requestId =
-            maintenanceLease.command.requestId;
-        maintenanceCancellationCommand.succeeded = false;
-        maintenanceCancellationCommand.resultState =
-            CommandResultState::CANCELED;
-        maintenanceCancellationPending = true;
-        maintenanceLease = MaintenanceLease{};
+        if (maintenanceLease.command.type == WebCommandType::RESTART) {
+          // Shot wins: keep the planned restart and let the paddle proceed.
+          // Do not report CANCELED — the reboot still happens after idle.
+          pendingPlannedRestart = maintenanceLease.command;
+          plannedRestartHeld = true;
+          maintenanceLease = MaintenanceLease{};
+        } else {
+          addDebugEvent(DebugCategory::SECURITY,
+                        DebugCode::MAINTENANCE_CANCELED,
+                        static_cast<int32_t>(maintenanceLease.id));
+          maintenanceCancellationCommand = WebCommand{};
+          maintenanceCancellationCommand.type =
+              WebCommandType::MAINTENANCE_COMPLETE;
+          maintenanceCancellationCommand.requestId =
+              maintenanceLease.command.requestId;
+          maintenanceCancellationCommand.succeeded = false;
+          maintenanceCancellationCommand.resultState =
+              CommandResultState::CANCELED;
+          maintenanceCancellationPending = true;
+          maintenanceLease = MaintenanceLease{};
+        }
       }
       transitionTo(StopperState::REQUIRES_OFF);
     }
@@ -3483,6 +3498,12 @@ bool beginMaintenanceLease(const WebCommand &networkCommand,
   if (!controlAllowsConfigurationNow() && !networkCommand.unsafeWebUiOverride) {
     return false;
   }
+  // A planned restart must never cut a shot. Override cannot change that.
+  if (networkCommand.type == WebCommandType::RESTART &&
+      (session.active || getRelaySafetySnapshot().closed ||
+       machineLastIntention().holdActive)) {
+    return false;
+  }
   machineRequestStop();
   maintenanceLease = MaintenanceLease{};
   maintenanceLease.active = true;
@@ -3503,6 +3524,40 @@ bool beginMaintenanceLease(const WebCommand &networkCommand,
 
 bool webCommandAllowsUnsafeConfiguration(const WebCommand &command) {
   return controlAllowsConfigurationNow() || command.unsafeWebUiOverride;
+}
+
+void holdOrBeginPlannedRestart(const WebCommand &command) {
+  WebCommand restart = command;
+  restart.type = WebCommandType::RESTART;
+  restart.unsafeWebUiOverride = false;
+  if (!controlAllowsConfigurationNow() ||
+      session.active || getRelaySafetySnapshot().closed ||
+      machineLastIntention().holdActive) {
+    pendingPlannedRestart = restart;
+    plannedRestartHeld = true;
+    return;
+  }
+  plannedRestartHeld = false;
+  pendingPlannedRestart = WebCommand{};
+  if (!beginMaintenanceLease(restart, false)) {
+    rejectWebCommand(restart);
+  }
+}
+
+void servicePendingPlannedRestart() {
+  if (!plannedRestartHeld || maintenanceLease.active) {
+    return;
+  }
+  if (!controlAllowsConfigurationNow() || session.active ||
+      getRelaySafetySnapshot().closed || machineLastIntention().holdActive) {
+    return;
+  }
+  const WebCommand restart = pendingPlannedRestart;
+  plannedRestartHeld = false;
+  pendingPlannedRestart = WebCommand{};
+  if (!beginMaintenanceLease(restart, false)) {
+    rejectWebCommand(restart);
+  }
 }
 
 void serviceMaintenanceLease() {
@@ -4132,11 +4187,14 @@ void processWebCommand(const WebCommand &command) {
       return;
     }
 
+    case WebCommandType::RESTART:
+      holdOrBeginPlannedRestart(command);
+      return;
+
     case WebCommandType::SAVE_NETWORK:
     case WebCommandType::FORGET_NETWORK:
     case WebCommandType::CHANGE_DEVICE_PASSWORD:
     case WebCommandType::RESET_DEVICE_PASSWORD:
-    case WebCommandType::RESTART:
     case WebCommandType::RESET_NETWORK_AP:
     case WebCommandType::FACTORY_RESET:
       if (!webCommandAllowsUnsafeConfiguration(command)) {
@@ -5091,7 +5149,7 @@ void dispatchSerialCliRequest(SerialCliRequest &request) {
     case SerialCliVerb::REBOOT: {
       WebCommand command;
       command.type = WebCommandType::RESTART;
-      serialCliQueueIfSafe(command, request.verb);
+      serialCliQueueCommand(command, request.verb);
       return;
     }
     case SerialCliVerb::UNKNOWN:
@@ -5768,14 +5826,21 @@ void loop() {
     safeRestartRequested = true;
   }
   if (safeRestartRequested) {
-    machineRequestStop();
-    serviceSafetyHeartbeat(false);
+    const bool faultRestart =
+        criticalTaskWatchdogFault || taskWatchdogRestoreFailed;
+    if (faultRestart ||
+        (!session.active && !getRelaySafetySnapshot().closed)) {
+      machineRequestStop();
+      serviceSafetyHeartbeat(false);
 #ifndef SHOT_STOPPER_HOST_TEST
-    ESP.restart();
+      ESP.restart();
 #else
-    safeRestartRequested = false;
+      safeRestartRequested = false;
 #endif
-    return;
+      return;
+    }
+    // Planned restart waits for the shot. Fault paths above still open K1
+    // and reset immediately so a hung firmware cannot keep the group on.
   }
   if (elapsedMs(healthTelemetryAtMs) >= HEALTH_TELEMETRY_INTERVAL_MS) {
     const uint32_t intervalMs = elapsedMs(healthTelemetryAtMs);
@@ -5832,6 +5897,7 @@ void loop() {
   serviceShotStorePersistence();
   servicePreferredScaleMacPersistence();
   serviceMaintenanceLease();
+  servicePendingPlannedRestart();
   serviceControlStatusPublish();
   publishBleCompanionRuntimeSnapshot();
   serviceScaleConnectedLed();

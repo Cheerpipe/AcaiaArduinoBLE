@@ -16,6 +16,13 @@ your network.
 
 ## Safety behavior
 
+The shot always has priority. The paddle is never blocked by an update.
+
+- **No upload or flash during a shot.** Starting an update while the machine is pouring is refused (`CONFIG_LOCKED_DURING_ACTIVE_CYCLE`) so Wi-Fi does not compete with the scale.
+- **Paddle during transfer aborts the upload** (`SAFETY_LOST`). The spare slot is discarded; the running firmware is untouched. A verified staged image is kept if you pull a shot *after* verify — flash waits until idle.
+- **No planned restart during a shot.** Flash, Admin Restart, and serial `REBOOT` wait until the pour ends and the circuit is open. They do not open the relay to make way for the reset.
+- Confirming or rolling back a `PENDING_VERIFY` image writes otadata (flash cache off). That write is deferred while a shot is pouring or GATT is up.
+
 Updates use a dual slot. After reboot, the new image boots as
 `PENDING_VERIFY` and is confirmed only after the Web UI has been
 serving for at least 15 s (HTTP up is the proof — not brew or BLE).
@@ -25,16 +32,17 @@ A second OTA while verification is still pending is refused
 If HTTP never comes up, the controller waits up to 180 s, then:
 
 - **Previous slot bootable:** the running image is marked invalid and
-  the bootloader rolls back on restart — no USB required.
+  the bootloader rolls back on restart — no USB required. That restart
+  still waits if a shot is in progress.
 - **No bootable previous slot:** the running image is confirmed so the
   machine is not left without an application. Recover over USB; see
   [Emergency recovery](../EMERGENCY_RECOVERY.md).
 
-Machine circuit stays open during the update. Wi-Fi credentials, presets, calibration,
-and shot history are left unchanged on a successful flash.
+Watchdog and panic still open the circuit and reset immediately: a hung
+firmware cannot wait for the shot to finish.
 
-Machine circuit stays open during the update. Wi-Fi credentials, presets, calibration,
-and shot history are left unchanged on a successful flash.
+Wi-Fi credentials, presets, calibration, and shot history are left
+unchanged on a successful flash.
 
 ## How to run
 

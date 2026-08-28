@@ -40,8 +40,8 @@ struct OtaChunkBuffer {
 // A real image is well over a megabyte; anything this small is not one.
 constexpr uint32_t OTA_MIN_IMAGE_BYTES = 65536;
 
-// How often the machine-safety gate is re-evaluated mid-transfer.
-constexpr uint32_t OTA_SAFETY_CHECK_INTERVAL_BYTES = 65536;
+// Progress logs every 256 KiB. Safety is checked on every chunk so a paddle
+// pull aborts the transfer immediately instead of after 64 KiB of Wi-Fi.
 constexpr uint32_t OTA_PROGRESS_INTERVAL_BYTES = 262144;
 
 constexpr size_t OTA_TAG_REREAD_BYTES =
@@ -182,11 +182,17 @@ OtaResult ShotStopperOta::stage(uint32_t contentLength, bool allowDowngrade,
   esp_ota_handle_t handle = 0;
   bool handleOpen = false;
   uint32_t received = 0;
-  uint32_t nextSafetyCheck = OTA_SAFETY_CHECK_INTERVAL_BYTES;
   uint32_t nextProgress = OTA_PROGRESS_INTERVAL_BYTES;
   OtaResult failure = OtaResult::OK;
 
   while (received < contentLength) {
+    // Shot always wins: abort as soon as the paddle moves, a cycle starts, or
+    // K1 closes. Do not wait for a byte interval — Wi-Fi would already be
+    // competing with the scale.
+    if (!io.stillSafe(io.context)) {
+      failure = OtaResult::SAFETY_LOST;
+      break;
+    }
     const uint32_t remaining = contentLength - received;
     size_t want = chunkBytes;
     if (remaining < want) {
@@ -268,13 +274,6 @@ OtaResult ShotStopperOta::stage(uint32_t contentLength, bool allowDowngrade,
       }
     }
 
-    if (received >= nextSafetyCheck) {
-      nextSafetyCheck = received + OTA_SAFETY_CHECK_INTERVAL_BYTES;
-      if (!io.stillSafe(io.context)) {
-        failure = OtaResult::SAFETY_LOST;
-        break;
-      }
-    }
     if (io.progress != nullptr && received >= nextProgress) {
       nextProgress = received + OTA_PROGRESS_INTERVAL_BYTES;
       io.progress(io.context, received, contentLength);

@@ -6701,16 +6701,12 @@ esp_err_t ShotStopperNetwork::restartHandler(httpd_req_t *request) {
   if (!self.requireAdminUnlock(request)) {
     return ESP_OK;
   }
-  ControlGateSnapshot status = self.controlGate();
-  if (!self.webUiConfigurationAllowed(request, status)) {
-    return sendError(request, STATUS_CONFLICT,
-                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
-                     "Stop the cycle and wait for Ready before restarting.");
-  }
+  // Shot always wins. Queue the restart even mid-cycle; the control task
+  // holds it until idle instead of opening K1 to make way for the reset.
+  // Override must not cut a pour.
   WebCommand command;
   command.type = WebCommandType::RESTART;
   command.requestId = self.allocateRequestId();
-  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control queue is full.");
@@ -7256,8 +7252,8 @@ const char *otaResultMessage(OtaResult result) {
     case OtaResult::VERIFY_FAILED:
       return "The uploaded image failed its checksum. Nothing was flashed.";
     case OtaResult::SAFETY_LOST:
-      return "The machine started a cycle during the upload, so the update was "
-             "cancelled.";
+      return "The paddle moved or a shot started during the upload, so the "
+             "update was cancelled. The verified image was not kept.";
     case OtaResult::NOTHING_STAGED:
       return "Upload and verify a firmware image first.";
     case OtaResult::COMMIT_FAILED:
@@ -7536,8 +7532,8 @@ esp_err_t ShotStopperNetwork::otaFlashHandler(httpd_req_t *request) {
   self.log(DebugCategory::NETWORK, DebugCode::OTA_FLASH_COMMITTED,
            static_cast<int32_t>(staged.packed));
 
-  // The restart runs through the ordinary maintenance lease, which opens the machine circuit
-  // and waits for the machine to be idle before the reset.
+  // The restart runs through the ordinary maintenance lease after the shot
+  // (if any) ends. The control task will not open K1 to make way for it.
   WebCommand command;
   command.type = WebCommandType::RESTART;
   command.requestId = self.allocateRequestId();
@@ -7579,15 +7575,22 @@ void ShotStopperNetwork::serviceOtaRollback(uint32_t now) {
       ota.runningImageRejected() || ota.runningImageConfirmed() || ota.busy();
   // Assume a previous slot exists until the deadline forces a real check.
   // Passing false here would KEEP_RUNNING at 180 s without asking IDF.
-  // Otadata writes disable flash cache; wait until GATT is idle.
+  // Otadata writes disable flash cache and drop BLE. Wait while GATT is up
+  // or a shot is pouring — the scale stream must not die mid-shot.
+  const ControlGateSnapshot control = controlGate();
   const bool flashWriteSafe =
-      !scaleConnectingOrUp_.load(std::memory_order_relaxed);
+      !scaleConnectingOrUp_.load(std::memory_order_relaxed) &&
+      !control.activeCycle && !control.relayClosed;
   const OtaPendingVerifyAction action = decideOtaPendingVerify(
       ota.bootPendingVerify(), alreadySettled,
       startupComplete_ && server_ != nullptr, now, OTA_CONFIRM_MIN_UPTIME_MS,
       OTA_CONFIRM_DEADLINE_MS, true, flashWriteSafe);
   if (action == OtaPendingVerifyAction::NONE ||
       action == OtaPendingVerifyAction::WAIT) {
+    return;
+  }
+  // Deadline still asks to settle, but a live shot always defers the write.
+  if (control.activeCycle || control.relayClosed) {
     return;
   }
   if (action == OtaPendingVerifyAction::CONFIRM) {
