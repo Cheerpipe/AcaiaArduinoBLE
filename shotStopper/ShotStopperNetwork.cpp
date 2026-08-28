@@ -59,10 +59,8 @@ struct NetworkWorkBuf {
   WifiScanSnapshot wifiScan{};
 };
 
-// Wi-Fi scan fetch + published snapshot. Network task / httpd only; not BLE.
-// Match the published snapshot capacity — larger fetches were discarded.
-constexpr uint16_t kWifiScanFetchMax = MAX_WIFI_SCAN_RESULTS;
-static wifi_ap_record_t *g_wifiApRecords = nullptr;
+// Wi-Fi scan snapshots. Network task / httpd only; not BLE.
+// AP records come from Arduino's SCAN_DONE cache (getScanInfoByIndex).
 static SHOT_STOPPER_PSRAM_BSS WifiScanSnapshot g_wifiScan;
 static SHOT_STOPPER_PSRAM_BSS WifiScanSnapshot g_wifiScanWorking;
 static SHOT_STOPPER_PSRAM_BSS PersistedSettings g_networkSettings;
@@ -961,17 +959,6 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
     workBuf_ = nullptr;
     noteWorkBufExternal(false);
   };
-  g_wifiApRecords = static_cast<wifi_ap_record_t *>(
-      allocExternal(sizeof(wifi_ap_record_t) * kWifiScanFetchMax));
-  if (g_wifiApRecords == nullptr) {
-    destroyWorkBuf();
-    vSemaphoreDelete(statusResponseMux_);
-    statusResponseMux_ = nullptr;
-    vQueueDelete(acceptedCommandQueue_);
-    acceptedCommandQueue_ = nullptr;
-    return false;
-  }
-  memset(g_wifiApRecords, 0, sizeof(wifi_ap_record_t) * kWifiScanFetchMax);
   memset(&g_wifiScan, 0, sizeof(g_wifiScan));
   memset(&g_wifiScanWorking, 0, sizeof(g_wifiScanWorking));
   static_assert(REQUEST_BODY_CAPACITY == 2048,
@@ -991,8 +978,6 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
                               0) != pdPASS) {
     instance_ = nullptr;
     g_work = nullptr;
-    heapCapsFree(g_wifiApRecords);
-    g_wifiApRecords = nullptr;
     destroyWorkBuf();
     vSemaphoreDelete(statusResponseMux_);
     statusResponseMux_ = nullptr;
@@ -2365,23 +2350,17 @@ void ShotStopperNetwork::finishWifiScan(int16_t resultCount, uint32_t now) {
   }
 
   completed.state = WifiScanState::READY;
-  uint16_t apCount = static_cast<uint16_t>(resultCount);
-  if (apCount > kWifiScanFetchMax) {
-    apCount = kWifiScanFetchMax;
-  }
-  if (g_wifiApRecords == nullptr ||
-      esp_wifi_scan_get_ap_records(&apCount, g_wifiApRecords) != ESP_OK) {
-    completed.state = WifiScanState::FAILED;
-    WiFi.scanDelete();
-    portENTER_CRITICAL(&dataMux_);
-    g_wifiScan = completed;
-    portEXIT_CRITICAL(&dataMux_);
-    log(DebugCategory::NETWORK, DebugCode::WIFI_SCAN_ERROR, -2);
-    return;
-  }
-  for (uint16_t index = 0;
-       index < apCount && completed.count < MAX_WIFI_SCAN_RESULTS; ++index) {
-    const wifi_ap_record_t &ap = g_wifiApRecords[index];
+  // Arduino's SCAN_DONE handler already copied the IDF AP list into
+  // WiFiScanClass::_scanResult. A second IDF fetch returns 0 APs.
+  for (int16_t index = 0;
+       index < resultCount && completed.count < MAX_WIFI_SCAN_RESULTS;
+       ++index) {
+    const wifi_ap_record_t *apPtr = static_cast<const wifi_ap_record_t *>(
+        WiFi.getScanInfoByIndex(index));
+    if (apPtr == nullptr) {
+      continue;
+    }
+    const wifi_ap_record_t &ap = *apPtr;
     const size_t length =
         strnlen(reinterpret_cast<const char *>(ap.ssid), sizeof(ap.ssid));
     if (length == 0 || length >= WIFI_SSID_CAPACITY) {

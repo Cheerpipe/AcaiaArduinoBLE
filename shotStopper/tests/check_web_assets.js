@@ -3672,9 +3672,11 @@ if (!serialCli.includes('workBufExternal=') ||
 if (!network.includes('WiFi.scanNetworks(true, false, false, 120)') ||
     !network.includes('esp_wifi_scan_stop()') ||
     !network.includes('abortWifiScan') ||
-    !network.includes('WIFI_SCAN_TIMEOUT_MS')) {
+    !network.includes('WIFI_SCAN_TIMEOUT_MS') ||
+    !network.includes('WiFi.getScanInfoByIndex(') ||
+    network.includes('esp_wifi_scan_get_ap_records')) {
   throw new Error(
-      'WiFi scan must be asynchronous, cancelable, abortable on mode change, and time-bounded');
+      'WiFi scan must be asynchronous, cancelable, abortable on mode change, time-bounded, and read Arduino SCAN_DONE results (not a second IDF AP fetch)');
 }
 if (network.includes('recycleHttpServer') ||
     network.includes('noteHttpServeResult') ||
@@ -4000,8 +4002,6 @@ if (!network.includes('sendCopiedBody(request, SHOT_STOPPER_WEB_UI_GZIP') ||
     !network.includes('HTTP_DRAM_BOUNCE_BYTES') ||
     !network.includes('g_httpSendBounce') ||
     !network.includes('allocExternal(sizeof(NetworkWorkBuf))') ||
-    !network.includes(
-        'allocExternal(sizeof(wifi_ap_record_t) * kWifiScanFetchMax)') ||
     !psram.includes('inline void *allocExternal(size_t bytes)') ||
     !jsonArena.includes('jsonArenaIsExternal()') ||
     !jsonArena.includes('allocExternal(JSON_ARENA_CAPACITY)') ||
