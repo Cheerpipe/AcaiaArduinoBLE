@@ -199,9 +199,12 @@ if (sdkconfigDefaults.includes('CONFIG_BT_LE_SLEEP_ENABLE=y') ||
   if (!firmware.includes('USB_CONSOLE_GPIO') ||
       !firmware.includes('SHOT_STOPPER_USB_CONSOLE_GPIO 4') ||
       !firmwareCore.includes('usbConsoleJumperPresent()') ||
+      !firmwareCore.includes('UsbSerialEnableSource::JTAG') ||
+      !firmwareCore.includes('UsbSerialEnableSource::IO4') ||
+      !firmwareCore.includes('Serial.begin(SERIAL_BAUD)') ||
+      !firmwareCore.includes('usbSerialEnableSource = UsbSerialEnableSource::JTAG') ||
       !firmwareCore.includes(
-          'if (SHOT_STOPPER_ENABLE_JTAG == 1 || usbConsoleJumperPresent())') ||
-      !firmwareCore.includes('Serial.begin(SERIAL_BAUD)')) {
+          'usbSerialEnableSource = UsbSerialEnableSource::IO4')) {
     throw new Error(
         'USB CDC must start for ENABLE_JTAG=1 or when the GPIO4 jumper is held at boot');
   }
@@ -605,13 +608,13 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 52520) {
+if (htmlBytes > 52750) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 140500) {
+if (jsBytes > 141000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 193100) {
+if (htmlBytes + jsBytes > 193800) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -991,6 +994,9 @@ if (!domainCore.includes('#ifndef SHOT_STOPPER_ENABLE_JTAG') ||
     !domainCore.includes(
         'SHOT_STOPPER_ENABLE_JTAG must be 0 (off) or 1 (USB Serial/JTAG)') ||
     !domainCore.includes('CONFIG_SHOT_STOPPER_ENABLE_JTAG') ||
+    !domainCore.includes('enum class UsbSerialEnableSource') ||
+    !domainCore.includes('usbSerialStateId') ||
+    !domainCore.includes('usbConsoleIo4StateId') ||
     !kconfig.includes('config SHOT_STOPPER_ENABLE_JTAG') ||
     !kconfig.includes('USB Serial/JTAG (0=off, 1=on at boot)') ||
     !kconfig.includes('omitting the flag leaves JTAG off')) {
@@ -2152,6 +2158,9 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('<legend>States</legend>') ||
       !diagHtml.includes('<legend>Guards</legend>') ||
       !diagHtml.includes('<legend>Machine I/O</legend>') ||
+      !diagHtml.includes('<legend>Serial</legend>') ||
+      !diagHtml.includes('id="dSerialIo4"') ||
+      !diagHtml.includes('id="dSerialState"') ||
       !diagHtml.includes('<legend>WiFi</legend>') ||
       !diagHtml.includes('<legend>AP</legend>') ||
       !diagHtml.includes('<legend>CPU') ||
@@ -2222,7 +2231,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       diagHtml.indexOf('id="diagnosticsPanel"') > diagHtml.indexOf('id="logPanel"') ||
       diagHtml.indexOf('<legend>States</legend>') > diagHtml.indexOf('<legend>Guards</legend>') ||
       diagHtml.indexOf('<legend>Guards</legend>') > diagHtml.indexOf('<legend>Machine I/O</legend>') ||
-      diagHtml.indexOf('<legend>Machine I/O</legend>') > diagHtml.indexOf('<legend>WiFi</legend>') ||
+      diagHtml.indexOf('<legend>Machine I/O</legend>') > diagHtml.indexOf('<legend>Serial</legend>') ||
+      diagHtml.indexOf('<legend>Serial</legend>') > diagHtml.indexOf('<legend>WiFi</legend>') ||
       diagHtml.indexOf('<legend>WiFi</legend>') > diagHtml.indexOf('<legend>AP</legend>') ||
       diagHtml.indexOf('<legend>AP</legend>') > diagHtml.indexOf('<legend>CPU') ||
       diagHtml.indexOf('<legend>CPU') > diagHtml.indexOf('<legend>Tasks') ||
@@ -2254,7 +2264,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       css.includes('#diagnosticsPanel .metric,#statusPanel .metric,#scalePanel .metric,.shotCard > *{') ||
       css.includes('diagGroup')) {
     throw new Error(
-        'Diagnostics must be a non-collapsible fieldset at the top of Diagnostic, above Log, with States/Guards/Machine I/O/WiFi/AP/CPU/Tasks/RAM/HEAP/Scale/MISC sections and one value per label');
+        'Diagnostics must be a non-collapsible fieldset at the top of Diagnostic, above Log, with States/Guards/Machine I/O/Serial/WiFi/AP/CPU/Tasks/RAM/HEAP/Scale/MISC sections and one value per label');
   }
 }
 if (!ui.includes('id="shotTable"') ||
@@ -3407,7 +3417,7 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
         'statusPageOk(admin) must accept a locked payload and validate unlocked network/BLE/NTP/OTA');
   }
   if (!ui.includes(
-          "v==='diagnostic'?!!(typeof s.adminUnlocked==='boolean'&&(s.adminUnlocked?(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalActivatorOn==='boolean'&&'reedOn' in s&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags&&s.guards&&typeof s.guards.bbwEnabled==='boolean'&&s.guards.noScale&&s.guards.atm&&s.guards.slowExtraction&&s.guards.fastExtraction&&s.guards.accidentalTouch&&s.guards.cupProtection&&s.tasks&&typeof s.tasks.state==='string'):true))")) {
+          "v==='diagnostic'?!!(typeof s.adminUnlocked==='boolean'&&(s.adminUnlocked?(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalActivatorOn==='boolean'&&'reedOn' in s&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags&&s.serial&&typeof s.serial.io4==='string'&&typeof s.serial.state==='string'&&s.guards&&typeof s.guards.bbwEnabled==='boolean'&&s.guards.noScale&&s.guards.atm&&s.guards.slowExtraction&&s.guards.fastExtraction&&s.guards.accidentalTouch&&s.guards.cupProtection&&s.tasks&&typeof s.tasks.state==='string'):true))")) {
     throw new Error(
         'statusPageOk(diagnostic) must accept a locked payload and validate unlocked states, machine I/O, guards, diagnostic metrics, and task profiler');
   }
@@ -3440,11 +3450,17 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'machineState', 'physicalActivatorOn', 'reedOn', 'controlSource', 'cupPresence',
     'streamState', 'controlState', 'taskWatchdogReady', 'recoveryRequired',
     'compileFlags', 'remoteMachineControl', 'complete', 'degraded', 'scaleWorker',
-    'development'
+    'development', 'serial', 'io4'
   ]) {
     if (!diagBody.includes(field)) {
       throw new Error('status/diagnostic missing required field: ' + field);
     }
+  }
+  if (!diagBody.includes('\\"serial\\":{\\"io4\\":\\"%s\\",\\"state\\":\\"%s\\"}') ||
+      !network.includes('usbConsoleIo4StateId') ||
+      !network.includes('usbSerialStateId')) {
+    throw new Error(
+        'status/diagnostic must report live IO4 and latched USB serial enable source');
   }
   // Transversal fields used by Diagnostic (footer + log controls + mutability)
   if (!statusFormat.includes('\\"bootId\\":%lu') ||
@@ -3458,10 +3474,15 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
       !ui.includes('dBz') ||
       !ui.includes('dCircuit') ||
       !ui.includes('dArch') ||
+      !ui.includes('dSerialIo4') ||
+      !ui.includes('dSerialState') ||
+      !ui.includes("enabled_jtag:'Enabled (compile flag)'") ||
+      !ui.includes("enabled_io4:'Enabled (IO04)'") ||
       !ui.includes('Compile flags') ||
       !ui.includes('s.compileFlags') ||
       !html.includes('paddleOnly') ||
       !html.includes('id="dMt"') ||
+      !html.includes('<legend>Serial</legend>') ||
       !css.includes('html.momentaryMachine .paddleOnly') ||
       !css.includes('.momentaryOnly') ||
       !ui.includes('function applyMachineTypeUi(')) {
@@ -3956,8 +3977,8 @@ if (generated.jsGzip.length > 6144) {
 if (generated.cssGzip.length > 6500) {
   throw new Error('Compressed Web CSS exceeds the 6.3 KiB gzip budget');
 }
-if (generated.runtimeGzip.length > 28100) {
-  throw new Error('Compressed Web UI runtime JS exceeds the 27.4 KiB gzip budget');
+if (generated.runtimeGzip.length > 28300) {
+  throw new Error('Compressed Web UI runtime JS exceeds the 27.6 KiB gzip budget');
 }
 if (generated.secondaryGzip.length > 4096) {
   throw new Error('Compressed secondary view JS exceeds the 4 KiB gzip budget');
@@ -3965,8 +3986,8 @@ if (generated.secondaryGzip.length > 4096) {
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
 }
-if (generated.combined > 54600) {
-  throw new Error('Combined Web UI gzip exceeds the 53.3 KiB flash budget');
+if (generated.combined > 54800) {
+  throw new Error('Combined Web UI gzip exceeds the 53.5 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {

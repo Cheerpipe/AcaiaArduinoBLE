@@ -4647,6 +4647,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"compileFlags\":{\"buzzer\":\"%s\",\"remoteMachineControl\":%s,"
         "\"arch\":\"%s\",\"machineType\":\"%s\",\"stopPulseMs\":%lu,"
         "\"maxSinglePressMs\":%lu,\"development\":%s},"
+        "\"serial\":{\"io4\":\"%s\",\"state\":\"%s\"},"
         "\"boot\":{\"complete\":%s,\"degraded\":%s,\"scaleWorker\":%s}",
         stopperStateName(control.state),
         machineRunStateName(control.machineRunState),
@@ -4730,6 +4731,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(COMPILED_STOP_PULSE_MS),
         static_cast<unsigned long>(COMPILED_MAX_SINGLE_PRESS_MS),
         DEVELOPMENT_BUILD ? "true" : "false",
+        usbConsoleIo4StateId(control.usbConsoleIo4Closed),
+        usbSerialStateId(control.usbSerialEnableSource),
         control.bootComplete ? "true" : "false",
         control.bootDegraded ? "true" : "false",
         control.scaleWorkerReady ? "true" : "false");

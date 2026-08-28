@@ -66,6 +66,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
 
   hostMillis = 0;
   bootStartedAtMs = 0;
+  usbSerialEnableSource = UsbSerialEnableSource::DISABLED;
   hostPinLevel.fill(HIGH);
   hostPinMode.fill(0);
   hostTrackedRelayPin = RELAY_GPIO;
@@ -8163,6 +8164,10 @@ void b03_jtag_build_starts_serial_without_jumper() {
   CHECK(!usbConsoleJumperPresent());
   setup();
   CHECK(Serial.beginCalls == 1);
+  CHECK(usbSerialEnableSource == UsbSerialEnableSource::JTAG);
+  CHECK(publishedControlStatus.usbSerialEnableSource ==
+        UsbSerialEnableSource::JTAG);
+  CHECK(!publishedControlStatus.usbConsoleIo4Closed);
 }
 #else
 void b03_usb_console_stays_off_without_jumper() {
@@ -8171,6 +8176,10 @@ void b03_usb_console_stays_off_without_jumper() {
   CHECK(hostPinMode[USB_CONSOLE_GPIO] == INPUT_PULLUP);
   setup();
   CHECK(Serial.beginCalls == 0);
+  CHECK(usbSerialEnableSource == UsbSerialEnableSource::DISABLED);
+  CHECK(publishedControlStatus.usbSerialEnableSource ==
+        UsbSerialEnableSource::DISABLED);
+  CHECK(!publishedControlStatus.usbConsoleIo4Closed);
 }
 #endif
 
@@ -8180,6 +8189,14 @@ void b04_usb_console_starts_when_jumper_held() {
   CHECK(usbConsoleJumperPresent());
   setup();
   CHECK(Serial.beginCalls == 1);
+#if SHOT_STOPPER_ENABLE_JTAG == 1
+  CHECK(usbSerialEnableSource == UsbSerialEnableSource::JTAG);
+#else
+  CHECK(usbSerialEnableSource == UsbSerialEnableSource::IO4);
+#endif
+  CHECK(publishedControlStatus.usbConsoleIo4Closed);
+  CHECK(publishedControlStatus.usbSerialEnableSource ==
+        usbSerialEnableSource);
 }
 
 void m08_recipe_copies_match_published_state() {

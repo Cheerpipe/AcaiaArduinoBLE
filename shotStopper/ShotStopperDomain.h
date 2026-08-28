@@ -172,6 +172,29 @@ constexpr bool JTAG_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_JTAG == 1;
 static_assert(SHOT_STOPPER_ENABLE_JTAG == 0 || SHOT_STOPPER_ENABLE_JTAG == 1,
               "SHOT_STOPPER_ENABLE_JTAG must be 0 (off) or 1 (USB Serial/JTAG)");
 
+// Why USB CDC/Serial.begin ran at boot (latch). Live IO4 is separate.
+enum class UsbSerialEnableSource : uint8_t {
+  DISABLED = 0,
+  JTAG = 1,
+  IO4 = 2,
+};
+
+inline const char *usbSerialStateId(UsbSerialEnableSource source) {
+  switch (source) {
+  case UsbSerialEnableSource::JTAG:
+    return "enabled_jtag";
+  case UsbSerialEnableSource::IO4:
+    return "enabled_io4";
+  case UsbSerialEnableSource::DISABLED:
+  default:
+    return "disabled";
+  }
+}
+
+inline const char *usbConsoleIo4StateId(bool closed) {
+  return closed ? "closed" : "open";
+}
+
 #ifndef SHOT_STOPPER_MACHINE_TYPE
 #define SHOT_STOPPER_MACHINE_TYPE 0
 #endif
@@ -1998,6 +2021,8 @@ struct ControlStatusSnapshot {
   bool bootComplete = false;
   bool bootDegraded = false;
   bool scaleWorkerReady = false;
+  bool usbConsoleIo4Closed = false;
+  UsbSerialEnableSource usbSerialEnableSource = UsbSerialEnableSource::DISABLED;
   uint32_t bleCompanionResultDropped = 0;
   bool bleCompanionEnabled = false;
   bool bleCompanionActive = false;

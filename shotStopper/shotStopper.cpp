@@ -526,6 +526,9 @@ uint32_t safetyHeartbeatToggledAtMs = 0;
 volatile bool safeRestartRequested = false;
 uint32_t bootStartedAtMs = 0;
 SafetyResetSnapshot safetyResetStatus;
+UsbSerialEnableSource usbSerialEnableSource = UsbSerialEnableSource::DISABLED;
+
+bool usbConsoleJumperPresent();
 
 bool scaleConnectedLedInitialized = false;
 bool lastScaleConnectedLedOn = false;
@@ -4775,6 +4778,8 @@ void publishControlStatus() {
   next.bootDegraded = bootDegraded;
   next.scaleWorkerReady =
       scaleWorkerTaskHandle != nullptr && bleStackReady;
+  next.usbConsoleIo4Closed = usbConsoleJumperPresent();
+  next.usbSerialEnableSource = usbSerialEnableSource;
   next.bleCompanionResultDropped = bleCompanionResultDropped;
   {
     const BleCompanionStatusSnapshot ble = copyBleCompanionStatus();
@@ -5491,7 +5496,12 @@ void setup() {
 
   // Default builds keep USB Serial/JTAG off until GPIO4 is jumpered to GND.
   // -DSHOT_STOPPER_ENABLE_JTAG=1 starts CDC at boot (OpenOCD + CLI, no jumper).
-  if (SHOT_STOPPER_ENABLE_JTAG == 1 || usbConsoleJumperPresent()) {
+  // Latch the enable source for Diagnostic; live IO4 is re-read each status.
+  if (SHOT_STOPPER_ENABLE_JTAG == 1) {
+    usbSerialEnableSource = UsbSerialEnableSource::JTAG;
+    Serial.begin(SERIAL_BAUD);
+  } else if (usbConsoleJumperPresent()) {
+    usbSerialEnableSource = UsbSerialEnableSource::IO4;
     Serial.begin(SERIAL_BAUD);
   }
 
