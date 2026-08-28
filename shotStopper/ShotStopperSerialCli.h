@@ -3,6 +3,7 @@
 #include "ShotStopperDomain.h"
 #include "ShotStopperPersistedNetwork.h"
 #include "ShotStopperTime.h"
+#include "ShotStopperUsbConsole.h"
 
 namespace shotstopper {
 

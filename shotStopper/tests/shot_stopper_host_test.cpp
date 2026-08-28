@@ -66,7 +66,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
 
   hostMillis = 0;
   bootStartedAtMs = 0;
-  usbSerialEnableSource = UsbSerialEnableSource::DISABLED;
+  usbSerialEnableSource = UsbSerialEnableSource::OFF;
   hostPinLevel.fill(HIGH);
   hostPinMode.fill(0);
   hostTrackedRelayPin = RELAY_GPIO;
@@ -8176,9 +8176,9 @@ void b03_usb_console_stays_off_without_jumper() {
   CHECK(hostPinMode[USB_CONSOLE_GPIO] == INPUT_PULLUP);
   setup();
   CHECK(Serial.beginCalls == 0);
-  CHECK(usbSerialEnableSource == UsbSerialEnableSource::DISABLED);
+  CHECK(usbSerialEnableSource == UsbSerialEnableSource::OFF);
   CHECK(publishedControlStatus.usbSerialEnableSource ==
-        UsbSerialEnableSource::DISABLED);
+        UsbSerialEnableSource::OFF);
   CHECK(!publishedControlStatus.usbConsoleIo4Closed);
 }
 #endif

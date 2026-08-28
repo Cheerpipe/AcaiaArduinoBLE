@@ -65,6 +65,9 @@
 #include "ShotStopperAlertTone.h"
 #include "ShotStopperPresets.h"
 #include "ShotStopperSerialCli.h"
+#if defined(SHOT_STOPPER_USB_CONSOLE_OWN_HWCDC)
+HWCDC shotStopperUsbConsole;
+#endif
 #include "ShotStopperVersion.h"
 #include "ShotStopperHardwareTimer.h"
 #include "ShotStopperResetGuard.h"
@@ -526,7 +529,7 @@ uint32_t safetyHeartbeatToggledAtMs = 0;
 volatile bool safeRestartRequested = false;
 uint32_t bootStartedAtMs = 0;
 SafetyResetSnapshot safetyResetStatus;
-UsbSerialEnableSource usbSerialEnableSource = UsbSerialEnableSource::DISABLED;
+UsbSerialEnableSource usbSerialEnableSource = UsbSerialEnableSource::OFF;
 
 bool usbConsoleJumperPresent();
 
@@ -5495,6 +5498,7 @@ void setup() {
 #endif
 
   // Default builds keep USB Serial/JTAG off until GPIO4 is jumpered to GND.
+  // Serial is HWCDC (native USB), not UART0 — see ShotStopperUsbConsole.h.
   // -DSHOT_STOPPER_ENABLE_JTAG=1 starts CDC at boot (OpenOCD + CLI, no jumper).
   // Latch the enable source for Diagnostic; live IO4 is re-read each status.
   if (SHOT_STOPPER_ENABLE_JTAG == 1) {

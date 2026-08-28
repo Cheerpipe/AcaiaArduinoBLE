@@ -209,6 +209,17 @@ if (sdkconfigDefaults.includes('CONFIG_BT_LE_SLEEP_ENABLE=y') ||
     throw new Error(
         'USB CDC must start for ENABLE_JTAG=1 or when the GPIO4 jumper is held at boot');
   }
+  const usbConsole = fs.readFileSync(
+      path.join(sketchDir, 'ShotStopperUsbConsole.h'), 'utf8');
+  const serialCli = fs.readFileSync(
+      path.join(sketchDir, 'ShotStopperSerialCli.h'), 'utf8');
+  if (!serialCli.includes('#include "ShotStopperUsbConsole.h"') ||
+      !usbConsole.includes('SHOT_STOPPER_USB_CONSOLE_OWN_HWCDC') ||
+      !usbConsole.includes('#define Serial ::shotStopperUsbConsole') ||
+      !firmwareCore.includes('HWCDC shotStopperUsbConsole')) {
+    throw new Error(
+        'GPIO4 jumper must start USB Serial/JTAG HWCDC, not UART0 Serial0');
+  }
   const buildIdf = fs.readFileSync(
       path.resolve(sketchDir, '..', 'scripts', 'build-idf'), 'utf8');
   const idfHelpers = fs.readFileSync(
@@ -996,8 +1007,11 @@ if (!domainCore.includes('#ifndef SHOT_STOPPER_ENABLE_JTAG') ||
         'SHOT_STOPPER_ENABLE_JTAG must be 0 (off) or 1 (USB Serial/JTAG)') ||
     !domainCore.includes('CONFIG_SHOT_STOPPER_ENABLE_JTAG') ||
     !domainCore.includes('enum class UsbSerialEnableSource') ||
+    !domainCore.includes('OFF = 0') ||
     !domainCore.includes('COMPILE_FLAG = 1') ||
     !domainCore.includes('JUMPER = 2') ||
+    domainCore.includes('DISABLED = 0') ||
+    domainCore.includes('UsbSerialEnableSource::DISABLED') ||
     domainCore.includes('JTAG = 1') ||
     domainCore.includes('IO4 = 2') ||
     !domainCore.includes('usbSerialStateId') ||

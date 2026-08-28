@@ -50,7 +50,7 @@ menu "Advanced Shot Stopper"
         help
             Maps to the SHOT_STOPPER_ENABLE_JTAG compile-time macro.
             0 (default) keeps the IDF USB Serial/JTAG console off so the
-            PHY stays down until the GPIO4 jumper calls Serial.begin.
+            PHY stays down until the GPIO4 jumper starts HWCDC.
             1 turns USB Serial/JTAG on at boot for OpenOCD and CDC without
             the jumper. Flash firmware built with
             -DSHOT_STOPPER_ENABLE_JTAG=1; omitting the flag leaves JTAG off.

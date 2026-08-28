@@ -4,8 +4,9 @@ cmake_minimum_required(VERSION 3.16)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Board-parity defines (Arduino FQBN: PSRAM + Hardware CDC). CDC stays off
-# until setup() sees the USB console jumper (GPIO4–GND) and calls Serial.begin,
-# unless SHOT_STOPPER_EXTRA_FLAGS includes -DSHOT_STOPPER_ENABLE_JTAG=1.
+# until setup() sees the USB console jumper (GPIO4–GND) and calls Serial.begin
+# on HWCDC (ShotStopperUsbConsole.h), unless SHOT_STOPPER_EXTRA_FLAGS includes
+# -DSHOT_STOPPER_ENABLE_JTAG=1 (ARDUINO_USB_CDC_ON_BOOT=1 + IDF console).
 # Product options (remote machine control, buzzer, machine type, JTAG) live in
 # main/Kconfig.projbuild and sdkconfig.defaults; SHOT_STOPPER_EXTRA_FLAGS may
 # still pass -D overrides. idf.py does not reconfigure when only an env var
