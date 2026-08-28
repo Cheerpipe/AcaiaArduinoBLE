@@ -40,8 +40,8 @@ constexpr const char *RTTTL_TARE_START = "tare_start:d=16,o=5,b=220:g,c6";
 constexpr const char *RTTTL_FIRST_DROP = "first_drop:d=32,o=6,b=240:c,e";
 // Recordatorio paddle-off
 constexpr const char *RTTTL_PADDLE_OFF = "paddle_off:d=16,o=5,b=180:g,16p,g";
-// Extra de fin de shot
-constexpr const char *RTTTL_SHOT_END = "shot_end:d=8,o=5,b=220:g,16c6";
+// Extra de fin de shot (descendente: inverso de tare_start g→c6)
+constexpr const char *RTTTL_SHOT_END = "shot_end:d=16,o=5,b=220:c6,g";
 // Balanza conectada
 constexpr const char *RTTTL_SCALE_CONNECTED =
     "scale_connected:d=8,o=5,b=150:c,e,g,c6";
