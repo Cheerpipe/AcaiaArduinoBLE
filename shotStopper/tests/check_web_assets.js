@@ -2257,17 +2257,17 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('id="ntpLastSync"') ||
       !diagHtml.includes('id="ntpServer"') ||
       diagHtml.indexOf('id="diagnosticsPanel"') > diagHtml.indexOf('id="logPanel"') ||
-      diagHtml.indexOf('<legend>States</legend>') > diagHtml.indexOf('<legend>Guards</legend>') ||
-      diagHtml.indexOf('<legend>Guards</legend>') > diagHtml.indexOf('<legend>Machine I/O</legend>') ||
-      diagHtml.indexOf('<legend>Machine I/O</legend>') > diagHtml.indexOf('<legend>Serial</legend>') ||
-      diagHtml.indexOf('<legend>Serial</legend>') > diagHtml.indexOf('<legend>WiFi</legend>') ||
+      diagHtml.indexOf('<legend>States</legend>') > diagHtml.indexOf('<legend>Machine I/O</legend>') ||
+      diagHtml.indexOf('<legend>Machine I/O</legend>') > diagHtml.indexOf('<legend>Scale</legend>') ||
+      diagHtml.indexOf('<legend>Scale</legend>') > diagHtml.indexOf('<legend>Guards</legend>') ||
+      diagHtml.indexOf('<legend>Guards</legend>') > diagHtml.indexOf('<legend>WiFi</legend>') ||
       diagHtml.indexOf('<legend>WiFi</legend>') > diagHtml.indexOf('<legend>AP</legend>') ||
-      diagHtml.indexOf('<legend>AP</legend>') > diagHtml.indexOf('<legend>CPU') ||
+      diagHtml.indexOf('<legend>AP</legend>') > diagHtml.indexOf('<legend>Serial</legend>') ||
+      diagHtml.indexOf('<legend>Serial</legend>') > diagHtml.indexOf('<legend>CPU') ||
       diagHtml.indexOf('<legend>CPU') > diagHtml.indexOf('<legend>Tasks') ||
       diagHtml.indexOf('<legend>Tasks') > diagHtml.indexOf('<legend>RAM</legend>') ||
       diagHtml.indexOf('<legend>RAM</legend>') > diagHtml.indexOf('<legend>HEAP</legend>') ||
-      diagHtml.indexOf('<legend>HEAP</legend>') > diagHtml.indexOf('<legend>Scale</legend>') ||
-      diagHtml.indexOf('<legend>Scale</legend>') > diagHtml.indexOf('<legend>MISC</legend>') ||
+      diagHtml.indexOf('<legend>HEAP</legend>') > diagHtml.indexOf('<legend>MISC</legend>') ||
       diagHtml.indexOf('id="hWifiState"') > diagHtml.indexOf('id="hWifiPs"') ||
       diagHtml.indexOf('id="hWifiPs"') > diagHtml.indexOf('id="hWifiCoex"') ||
       diagHtml.indexOf('id="hWifiCoex"') > diagHtml.indexOf('id="hSsid"') ||
@@ -2292,7 +2292,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       css.includes('#diagnosticsPanel .metric,#statusPanel .metric,#scalePanel .metric,.shotCard > *{') ||
       css.includes('diagGroup')) {
     throw new Error(
-        'Diagnostics must be a non-collapsible fieldset at the top of Diagnostic, above Log, with States/Guards/Machine I/O/Serial/WiFi/AP/CPU/Tasks/RAM/HEAP/Scale/MISC sections and one value per label');
+        'Diagnostics must be a non-collapsible fieldset at the top of Diagnostic, above Log, with States/Machine I/O/Scale/Guards/WiFi/AP/Serial/CPU/Tasks/RAM/HEAP/MISC sections and one value per label');
   }
 }
 if (!ui.includes('id="shotTable"') ||
