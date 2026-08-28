@@ -2290,7 +2290,7 @@ void pendingShotFinalizeTask() {
     return;
   }
 
-  const PendingShotFinalize snapshot = pendingFinalize;
+  PendingShotFinalize snapshot = pendingFinalize;
   pendingFinalize.pending = false;
 
   float finalWeightG = 0.0f;
@@ -2324,6 +2324,13 @@ void pendingShotFinalizeTask() {
     weightSource = ActualWeightSource::LAST_KNOWN;
     logWeightValid = true;
     logWeightG = snapshot.lastKnownWeightG;
+  }
+
+  // Drip delay determines the settled final weight, not extra shot time. The
+  // curve was snapshotted when the relay opened, so revise that same endpoint
+  // instead of leaving a false flat tail or appending drip-delay samples.
+  if (logWeightValid) {
+    (void)settleShotCurveEndWeight(snapshot.curve, logWeightG);
   }
 
   const bool persistEligible =

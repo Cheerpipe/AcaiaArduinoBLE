@@ -312,6 +312,31 @@ struct ShotCurveSampler {
   }
 };
 
+// The settled weight is observed during drip delay, but the shot duration is
+// defined by the machine circuit opening. Put that settled value at the
+// already-captured end vertex instead of extending the curve through drip
+// delay. When the end lands exactly on the compact grid, keep that grid point
+// consistent with the event vertex too.
+inline bool settleShotCurveEndWeight(ShotCurveRecord &curve, float weight) {
+  if (!shotCurveEventPresent(curve.ended) || !isfinite(weight)) {
+    return false;
+  }
+  const int16_t cg = shotLogWeightToCentigrams(weight);
+  if (shotLogWeightIsMissing(cg)) {
+    return false;
+  }
+  curve.ended.weightCg = cg;
+
+  const uint16_t intervalDs = static_cast<uint16_t>(curve.intervalS) * 10U;
+  if (intervalDs != 0U && curve.ended.atDs % intervalDs == 0U) {
+    const size_t index = curve.ended.atDs / intervalDs;
+    if (index < curve.count && index < SHOT_CURVE_MAX_POINTS) {
+      curve.weightCg[index] = cg;
+    }
+  }
+  return true;
+}
+
 inline bool formatShotCurveMetricS(char *out, size_t capacity, const char *key,
                                    uint16_t ds) {
   if (out == nullptr || capacity < 8 || key == nullptr) {

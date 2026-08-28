@@ -33,8 +33,11 @@ written to history, not used in averages, and not used for learned stop
 offset or A→M samples.
 
 Curve samples and the history record are written **once** when the cycle
-closes (after the configured drip delay), not during an active brew. The
-live `shotCurve` on the status API is in-memory only for the home UI.
+closes (after the configured drip delay), not during an active brew. Shot
+duration and the curve time axis end when the machine circuit opens. The
+settled post-drip weight replaces the curve's endpoint at that same end time;
+the drip-delay interval is not appended to the graph. The live `shotCurve` on
+the status API is in-memory only for the home UI.
 
 ## In the Web UI
 
