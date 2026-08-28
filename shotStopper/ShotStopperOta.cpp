@@ -6,6 +6,7 @@
 
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
+#include <esp_wifi.h>
 #include <string.h>
 
 namespace shotstopper {
@@ -143,6 +144,16 @@ OtaResult ShotStopperOta::stage(uint32_t contentLength, bool allowDowngrade,
     return OtaResult::TOO_LARGE;
   }
 
+  busy_ = true;
+  state_ = OtaState::RECEIVING;
+  stagedValid_ = false;
+  stagedTag_ = OtaImageTag{};
+  receivedBytes_ = 0;
+  expectedBytes_ = contentLength;
+  // Idle modem sleep mid-transfer drops the TCP session while this task is
+  // blocked on flash writes; keep STA awake until finishFailure() clears busy_.
+  (void)esp_wifi_set_ps(WIFI_PS_NONE);
+
   const esp_partition_t *target =
       static_cast<const esp_partition_t *>(targetPartition_);
   if (target == nullptr) {
@@ -151,17 +162,13 @@ OtaResult ShotStopperOta::stage(uint32_t contentLength, bool allowDowngrade,
 
   OtaChunkBuffer chunk(OTA_CHUNK_BYTES);
   if (!chunk.ok()) {
+    busy_ = false;
+    state_ = OtaState::IDLE;
+    expectedBytes_ = 0;
     return OtaResult::NO_MEMORY;
   }
   size_t chunkBytes = OTA_CHUNK_BYTES;
   uint8_t *const buffer = chunk.bytes;
-
-  busy_ = true;
-  state_ = OtaState::RECEIVING;
-  stagedValid_ = false;
-  stagedTag_ = OtaImageTag{};
-  receivedBytes_ = 0;
-  expectedBytes_ = contentLength;
 
   // Flash erase plus the closing SHA-256 pass exceed the normal watchdog
   // budget; restored by the destructor on every exit path below.

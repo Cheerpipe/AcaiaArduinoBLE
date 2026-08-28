@@ -1616,8 +1616,9 @@ void ShotStopperNetwork::applyWifiPowerSave() {
   portEXIT_CRITICAL(&dataMux_);
   const bool scaleConnectingOrUp =
       scaleConnectingOrUp_.load(std::memory_order_relaxed);
+  const bool otaBusy = ShotStopperOta::instance().busy();
   const WifiPowerSaveMode desired = desiredWifiPowerSave(
-      idleSleepAllowed, apActive, scaleConnectingOrUp, staAssociated);
+      idleSleepAllowed, apActive, scaleConnectingOrUp, staAssociated, otaBusy);
   const wifi_ps_type_t desiredPs = desired == WifiPowerSaveMode::MIN_MODEM
                                        ? WIFI_PS_MIN_MODEM
                                        : WIFI_PS_NONE;

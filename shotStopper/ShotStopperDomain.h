@@ -1393,8 +1393,10 @@ enum class WifiPowerSaveMode : uint8_t { NONE = 0, MIN_MODEM = 1 };
 inline WifiPowerSaveMode desiredWifiPowerSave(bool idleSleepAllowed,
                                               bool apActive,
                                               bool scaleConnectingOrUp,
-                                              bool staAssociated) {
-  if (!idleSleepAllowed || apActive || scaleConnectingOrUp || !staAssociated) {
+                                              bool staAssociated,
+                                              bool otaBusy) {
+  if (!idleSleepAllowed || apActive || scaleConnectingOrUp || !staAssociated ||
+      otaBusy) {
     return WifiPowerSaveMode::NONE;
   }
   return WifiPowerSaveMode::MIN_MODEM;

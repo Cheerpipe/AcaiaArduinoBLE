@@ -2700,7 +2700,8 @@ if (!network.includes('restoreLkgToActive(next)') ||
       !firmwareCore.includes('networkManager.syncScaleLinkRf') ||
       !domainCore.includes('desiredWifiPowerSave') ||
       !domainCore.includes('scaleConnectingOrUp') ||
-      !domainCore.includes('staAssociated')) {
+      !domainCore.includes('staAssociated') ||
+      !domainCore.includes('otaBusy')) {
     throw new Error(
         'Wi-Fi sleep when idle must be wired in Admin UI, /network save, status, and power-save helper');
   }
@@ -2711,6 +2712,7 @@ if (!network.includes('restoreLkgToActive(next)') ||
       ? network.slice(applyStart, applyEnd)
       : '';
   if (!applyBody.includes('desiredWifiPowerSave') ||
+      !applyBody.includes('ShotStopperOta::instance().busy()') ||
       !applyBody.includes('WIFI_PS_NONE') ||
       !applyBody.includes('WIFI_PS_MIN_MODEM') ||
       !applyBody.includes('WiFi.setSleep(desiredPs)') ||
