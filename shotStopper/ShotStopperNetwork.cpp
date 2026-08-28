@@ -7555,10 +7555,13 @@ void ShotStopperNetwork::serviceOtaRollback(uint32_t now) {
       ota.runningImageRejected() || ota.runningImageConfirmed() || ota.busy();
   // Assume a previous slot exists until the deadline forces a real check.
   // Passing false here would KEEP_RUNNING at 180 s without asking IDF.
+  // Otadata writes disable flash cache; wait until GATT is idle.
+  const bool flashWriteSafe =
+      !scaleConnectingOrUp_.load(std::memory_order_relaxed);
   const OtaPendingVerifyAction action = decideOtaPendingVerify(
       ota.bootPendingVerify(), alreadySettled,
       startupComplete_ && server_ != nullptr, now, OTA_CONFIRM_MIN_UPTIME_MS,
-      OTA_CONFIRM_DEADLINE_MS, true);
+      OTA_CONFIRM_DEADLINE_MS, true, flashWriteSafe);
   if (action == OtaPendingVerifyAction::NONE ||
       action == OtaPendingVerifyAction::WAIT) {
     return;

@@ -358,6 +358,18 @@ void testPendingVerifyHttpReadyAfterDeadlineStillConfirms() {
         OtaPendingVerifyAction::CONFIRM);
 }
 
+void testPendingVerifyDefersConfirmWhileFlashUnsafe() {
+  CHECK(decideOtaPendingVerify(true, false, true, kConfirmMinMs, kConfirmMinMs,
+                               kConfirmDeadlineMs, true, false) ==
+        OtaPendingVerifyAction::WAIT);
+}
+
+void testPendingVerifyConfirmsAtDeadlineEvenIfFlashUnsafe() {
+  CHECK(decideOtaPendingVerify(true, false, true, kConfirmDeadlineMs,
+                               kConfirmMinMs, kConfirmDeadlineMs, true, false) ==
+        OtaPendingVerifyAction::CONFIRM);
+}
+
 }  // namespace
 
 int main() {
@@ -385,6 +397,8 @@ int main() {
   testPendingVerifyWaitsBeforeConfirmUptime();
   testPendingVerifyNoneWhenSettledOrNotPending();
   testPendingVerifyHttpReadyAfterDeadlineStillConfirms();
+  testPendingVerifyDefersConfirmWhileFlashUnsafe();
+  testPendingVerifyConfirmsAtDeadlineEvenIfFlashUnsafe();
 
   if (failures != 0) {
     std::cerr << "ota image host test failures: " << failures << "\n";

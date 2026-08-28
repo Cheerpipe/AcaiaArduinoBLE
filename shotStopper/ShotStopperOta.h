@@ -11,7 +11,8 @@
 //    the whole image passed header, identity and SHA-256 checks.
 //  * A committed image boots as ESP_OTA_IMG_PENDING_VERIFY. It becomes
 //    permanent once the new firmware proves it can serve its Web UI (HTTP up
-//    for the confirm uptime). A firmware that crashes, hangs or cannot bring
+//    for the confirm uptime) and the scale radio is idle so the otadata write
+//    does not drop GATT. A firmware that crashes, hangs or cannot bring
 //    up HTTP is rolled back to the previous slot by the bootloader — except
 //    when no other slot is bootable, in which case this image is confirmed so
 //    the machine is not left without an application. USB recovery remains.
@@ -76,6 +77,9 @@ enum class OtaResult : uint8_t {
 
 // PENDING_VERIFY policy. Pure: no I/O, no heap. `rollbackPossible` is ignored
 // until the confirm deadline with HTTP still down.
+// `flashWriteSafe` is false while a scale GATT session is connecting or
+// linked: esp_ota_mark_app_valid disables flash cache and drops BLE. At the
+// deadline the image must still settle, even if that costs the radio.
 enum class OtaPendingVerifyAction : uint8_t {
   NONE = 0,     // not pending, already settled, or busy
   WAIT,         // still inside the confirm window
@@ -87,11 +91,14 @@ enum class OtaPendingVerifyAction : uint8_t {
 inline OtaPendingVerifyAction decideOtaPendingVerify(
     bool pendingVerify, bool alreadySettled, bool httpReady, uint32_t uptimeMs,
     uint32_t confirmMinUptimeMs, uint32_t confirmDeadlineMs,
-    bool rollbackPossible) {
+    bool rollbackPossible, bool flashWriteSafe = true) {
   if (alreadySettled || !pendingVerify) {
     return OtaPendingVerifyAction::NONE;
   }
   if (httpReady && uptimeMs >= confirmMinUptimeMs) {
+    if (!flashWriteSafe && uptimeMs < confirmDeadlineMs) {
+      return OtaPendingVerifyAction::WAIT;
+    }
     return OtaPendingVerifyAction::CONFIRM;
   }
   if (uptimeMs < confirmDeadlineMs) {

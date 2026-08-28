@@ -4550,12 +4550,16 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
   }
   if (!network.includes('serviceOtaRollback(now)') ||
       !network.includes('decideOtaPendingVerify(') ||
+      !network.includes('flashWriteSafe') ||
+      !network.includes(
+          '!scaleConnectingOrUp_.load(std::memory_order_relaxed)') ||
       !otaHeader.includes('decideOtaPendingVerify') ||
+      !otaHeader.includes('bool flashWriteSafe = true') ||
       !otaHeader.includes('KEEP_RUNNING') ||
       !networkHeader.includes('OTA_CONFIRM_MIN_UPTIME_MS') ||
       !networkHeader.includes('OTA_CONFIRM_DEADLINE_MS')) {
     throw new Error(
-        'Network service must confirm, roll back, or KEEP_RUNNING a pending OTA image');
+        'Network service must confirm, roll back, or KEEP_RUNNING a pending OTA image without writing otadata during GATT');
   }
   if (!network.includes('rollback impossible; keeping the running image')) {
     throw new Error(
