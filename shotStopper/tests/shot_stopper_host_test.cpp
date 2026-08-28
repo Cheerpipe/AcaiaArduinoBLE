@@ -189,6 +189,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scaleDiscoveryPausedUntilMs = 0;
   scalePreferredDirectedResetGeneration = 0;
   scaleLinkState = ScaleLinkState::DISCONNECTED;
+  scaleConnecting = false;
   scaleDisconnectSequence = 0;
   scaleConnectionGeneration = 0;
   scalePacketSequence = 0;
@@ -283,6 +284,8 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   firmwareInitializationComplete = true;
   scaleConnectedLedInitialized = false;
   lastScaleConnectedLedOn = false;
+  lastScaleConnectedLedPattern = ScaleConnectedLedPattern::OFF;
+  lastScaleConnectedLedToggleAtMs = 0;
 
   scaleCommandQueue =
       xQueueCreate(SCALE_COMMAND_QUEUE_LENGTH, sizeof(ScaleCommand));
@@ -6560,8 +6563,35 @@ void w38_scale_connected_led_tracks_link_and_setting() {
   initializeScaleConnectedLed();
   CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == LOW);
   CHECK(runtimeConfig.scaleConnectedLed);
+  CHECK(!getScaleLinkSnapshot().connecting);
+
+  scale.connecting = true;
+  updateWorkerLinkState();
+  CHECK(getScaleLinkSnapshot().connecting);
+  CHECK(getScaleLinkSnapshot().state == ScaleLinkState::DISCONNECTED);
+  serviceScaleConnectedLed();
+  CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == HIGH);
+  hostMillis += SCALE_LED_FAST_BLINK_MS;
+  serviceScaleConnectedLed();
+  CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == LOW);
+  hostMillis += SCALE_LED_FAST_BLINK_MS;
+  serviceScaleConnectedLed();
+  CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == HIGH);
+
+  runtimeConfig.scaleConnectedLed = false;
+  serviceScaleConnectedLed();
+  CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == LOW);
+  runtimeConfig.scaleConnectedLed = true;
+  scale.connecting = false;
+  updateWorkerLinkState();
+  CHECK(!getScaleLinkSnapshot().connecting);
+  serviceScaleConnectedLed();
+  CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == LOW);
 
   setScaleConnected(true);
+  serviceScaleConnectedLed();
+  CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == HIGH);
+  hostMillis += SCALE_LED_FAST_BLINK_MS;
   serviceScaleConnectedLed();
   CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == HIGH);
 
@@ -6570,6 +6600,16 @@ void w38_scale_connected_led_tracks_link_and_setting() {
   CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == LOW);
 
   setScaleConnected(true);
+  publishWeight(12.0f);
+  serviceScaleConnectedLed();
+  CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == HIGH);
+  hostMillis += MAX_AUTOMATION_WEIGHT_AGE_MS + 100;
+  serviceScaleConnectedLed();
+  CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == HIGH);
+  hostMillis += SCALE_LED_SLOW_BLINK_MS;
+  serviceScaleConnectedLed();
+  CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == LOW);
+  hostMillis += SCALE_LED_SLOW_BLINK_MS;
   serviceScaleConnectedLed();
   CHECK(hostPinLevel.at(SCALE_CONNECTED_LED_GPIO) == HIGH);
 

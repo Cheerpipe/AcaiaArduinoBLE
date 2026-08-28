@@ -61,6 +61,7 @@ struct ScaleEvent {
 
 struct ScaleLinkSnapshot {
   ScaleLinkState state;
+  bool connecting;
   uint32_t disconnectSequence;
   uint32_t connectionGeneration;
   uint32_t packetSequence;

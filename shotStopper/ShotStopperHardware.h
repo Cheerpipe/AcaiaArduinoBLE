@@ -34,6 +34,9 @@ constexpr uint8_t RELAY_GPIO = 2;
 
 constexpr uint8_t SCALE_CONNECTED_LED_GPIO =
     SHOT_STOPPER_SCALE_CONNECTED_LED_GPIO;
+// Fast blink while GATT connecting (5 Hz); slow blink while weight is stale (1 Hz).
+constexpr uint32_t SCALE_LED_FAST_BLINK_MS = 100;
+constexpr uint32_t SCALE_LED_SLOW_BLINK_MS = 500;
 constexpr uint8_t BUZZER_GPIO = SHOT_STOPPER_BUZZER_GPIO;
 constexpr uint8_t USB_CONSOLE_GPIO = SHOT_STOPPER_USB_CONSOLE_GPIO;
 // Dupont IO4 to a GND pad (never the EN column). Sampled once at boot.

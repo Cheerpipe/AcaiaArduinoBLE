@@ -80,6 +80,7 @@ portMUX_TYPE scaleCriticalEventMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE scaleWeightEventMux = portMUX_INITIALIZER_UNLOCKED;
 
 ScaleLinkState scaleLinkState = ScaleLinkState::DISCONNECTED;
+bool scaleConnecting = false;
 bool pendingScaleConnectIdleSync = false;
 uint32_t scaleDisconnectSequence = 0;
 uint32_t scaleConnectionGeneration = 0;
@@ -212,6 +213,7 @@ ScaleLinkSnapshot getScaleLinkSnapshot() {
   ScaleLinkSnapshot snapshot = {};
   portENTER_CRITICAL(&scaleLinkMux);
   snapshot.state = scaleLinkState;
+  snapshot.connecting = scaleConnecting;
   snapshot.disconnectSequence = scaleDisconnectSequence;
   snapshot.connectionGeneration = scaleConnectionGeneration;
   snapshot.packetSequence = scalePacketSequence;
@@ -248,6 +250,9 @@ void setScaleLinkState(ScaleLinkState state) {
     pendingScaleConnectIdleSync = true;
   }
   scaleLinkState = state;
+  if (state == ScaleLinkState::CONNECTED) {
+    scaleConnecting = false;
+  }
   scaleWorkerProgressAtMs = progressAtMs;
   if (state != ScaleLinkState::CONNECTED) {
     scaleTimerValid = false;
@@ -401,7 +406,9 @@ void updateWorkerLinkState() {
   const bool timerValid = scale.hasTimer();
   const uint32_t timerMs = timerValid ? scale.getTimerMs() : 0;
   const uint32_t timerAgeMs = timerValid ? scale.lastTimerAgeMs() : 0;
+  const bool connecting = scale.isConnecting() && !scale.isLinkUp();
   portENTER_CRITICAL(&scaleLinkMux);
+  scaleConnecting = connecting;
   scaleRejectedPackets = scale.rejectedPacketCount();
   scaleReconnects = scale.reconnectCount();
   scaleLastDisconnectReason =
@@ -1074,6 +1081,7 @@ bool applyScaleDiscoveryPause() {
 }
 
 void resetScaleWorkerRadioStateForHost() {
+  scaleConnecting = false;
   scaleScanAppliedInterval = 0;
   scaleScanAppliedWindow = 0;
   scaleHuntRfUntilMs = 0;
@@ -1187,6 +1195,8 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       updateWorkerLinkState();
       setScaleLinkState(ScaleLinkState::CONNECTED);
       armBookooConnectBeepPolicy();
+    } else {
+      updateWorkerLinkState();
     }
     return;
   }
@@ -1219,6 +1229,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       return;
     }
     if (scale.isConnecting()) {
+      updateWorkerLinkState();
       return;
     }
     if (scale.isScanning()) {

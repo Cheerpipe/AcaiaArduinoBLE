@@ -522,6 +522,15 @@ SafetyResetSnapshot safetyResetStatus;
 
 bool scaleConnectedLedInitialized = false;
 bool lastScaleConnectedLedOn = false;
+enum class ScaleConnectedLedPattern : uint8_t {
+  OFF,
+  SOLID,
+  FAST_BLINK,
+  SLOW_BLINK
+};
+ScaleConnectedLedPattern lastScaleConnectedLedPattern =
+    ScaleConnectedLedPattern::OFF;
+uint32_t lastScaleConnectedLedToggleAtMs = 0;
 
 // ---------------------------------------------------------------------------
 // Utility helpers
@@ -1427,17 +1436,69 @@ void initializeScaleConnectedLed() {
   pinMode(SCALE_CONNECTED_LED_GPIO, OUTPUT);
   digitalWrite(SCALE_CONNECTED_LED_GPIO, LOW);
   lastScaleConnectedLedOn = false;
+  lastScaleConnectedLedPattern = ScaleConnectedLedPattern::OFF;
+  lastScaleConnectedLedToggleAtMs = 0;
   scaleConnectedLedInitialized = true;
 }
 
+ScaleConnectedLedPattern desiredScaleConnectedLedPattern() {
+  if (!runtimeConfig.scaleConnectedLed) {
+    return ScaleConnectedLedPattern::OFF;
+  }
+  const ScaleLinkSnapshot snapshot = getScaleLinkSnapshot();
+  if (snapshot.state == ScaleLinkState::CONNECTED) {
+    if (observedWeightStreamStateAt(millis()) == WeightStreamState::STALE) {
+      return ScaleConnectedLedPattern::SLOW_BLINK;
+    }
+    return ScaleConnectedLedPattern::SOLID;
+  }
+  if (snapshot.connecting) {
+    return ScaleConnectedLedPattern::FAST_BLINK;
+  }
+  return ScaleConnectedLedPattern::OFF;
+}
+
 void serviceScaleConnectedLed() {
-  const bool on = runtimeConfig.scaleConnectedLed &&
-                  getScaleLinkSnapshot().state == ScaleLinkState::CONNECTED;
-  if (scaleConnectedLedInitialized && on == lastScaleConnectedLedOn) {
+  const ScaleConnectedLedPattern pattern = desiredScaleConnectedLedPattern();
+  const uint32_t now = millis();
+  bool on = false;
+  uint32_t periodMs = 0;
+  switch (pattern) {
+    case ScaleConnectedLedPattern::SOLID:
+      on = true;
+      break;
+    case ScaleConnectedLedPattern::FAST_BLINK:
+      periodMs = SCALE_LED_FAST_BLINK_MS;
+      break;
+    case ScaleConnectedLedPattern::SLOW_BLINK:
+      periodMs = SCALE_LED_SLOW_BLINK_MS;
+      break;
+    case ScaleConnectedLedPattern::OFF:
+    default:
+      on = false;
+      break;
+  }
+
+  if (periodMs != 0) {
+    if (!scaleConnectedLedInitialized ||
+        pattern != lastScaleConnectedLedPattern) {
+      on = true;
+      lastScaleConnectedLedToggleAtMs = now;
+    } else if (elapsedMs(lastScaleConnectedLedToggleAtMs) >= periodMs) {
+      on = !lastScaleConnectedLedOn;
+      lastScaleConnectedLedToggleAtMs = now;
+    } else {
+      on = lastScaleConnectedLedOn;
+    }
+  }
+
+  if (scaleConnectedLedInitialized && on == lastScaleConnectedLedOn &&
+      pattern == lastScaleConnectedLedPattern) {
     return;
   }
   digitalWrite(SCALE_CONNECTED_LED_GPIO, on ? HIGH : LOW);
   lastScaleConnectedLedOn = on;
+  lastScaleConnectedLedPattern = pattern;
   scaleConnectedLedInitialized = true;
 }
 

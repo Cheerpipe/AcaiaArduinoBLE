@@ -553,7 +553,8 @@ struct RuntimeConfig {
   bool buzzerAutoToManualGuardEndBeep = true;
   bool buzzerManualNoScaleBeep = true;
   bool buzzerScaleConnectedBeep = true;
-  // Onboard GPIO LED HIGH while a BLE scale is connected (machine/alerts).
+  // Onboard GPIO LED: solid when a BLE scale is connected, fast blink while
+  // connecting, slow blink while the weight stream is stale.
   bool scaleConnectedLed = true;
   uint8_t buzzerExtendedPulseRate =
       static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE);

@@ -849,6 +849,11 @@ if (ui.includes('bleCompanionEnabled" type="checkbox" role="switch" checked>') |
     !ui.includes('bleCompanionEnabled') ||
     !ui.includes('<legend>Bluetooth</legend>') ||
     !ui.includes('id="bleScanIntensity"') ||
+    !ui.includes('Detection intensity') ||
+    ui.includes('Aggressive 100%') ||
+    ui.includes('Normal 50%') ||
+    ui.includes('Light 25%') ||
+    !ui.includes('How aggressively the stopper looks for a scale') ||
     !ui.includes("scanIntensity:wanted") ||
     !ui.includes('/api/v1/admin/ble-compat') ||
     !ui.includes("method:'PUT'") ||
