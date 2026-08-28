@@ -922,6 +922,7 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
                                const NetworkBridgeCallbacks &callbacks) {
   if (instance_ != nullptr || callbacks.copyControlStatus == nullptr ||
       callbacks.copyControlGate == nullptr ||
+      callbacks.refreshControlStatus == nullptr ||
       callbacks.enqueueWebCommand == nullptr ||
       callbacks.copyDebugEvents == nullptr ||
       callbacks.reportTaskWatchdogFault == nullptr ||
@@ -1350,6 +1351,17 @@ ControlGateSnapshot ShotStopperNetwork::controlGate() const {
     callbacks_.copyControlGate(gate);
   }
   return gate;
+}
+
+bool ShotStopperNetwork::lockWorkBufForStatus() {
+  if (callbacks_.refreshControlStatus != nullptr) {
+    callbacks_.refreshControlStatus();
+  }
+  return lockWorkBuf();
+}
+
+void ShotStopperNetwork::loadControlStatus(ControlStatusSnapshot &control) {
+  callbacks_.copyControlStatus(control);
 }
 
 bool ShotStopperNetwork::startNetwork() {
@@ -4004,12 +4016,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   }
 
   // JSON / snapshot work lives in one PSRAM (or internal fallback) blob.
-  if (!self.lockWorkBuf()) {
+  if (!self.lockWorkBufForStatus()) {
     return self.workBufBusy(request);
   }
 
   ControlStatusSnapshot &control = self.workBuf_->control;
-  self.callbacks_.copyControlStatus(control);
+  self.loadControlStatus(control);
   const bool configMutable = controlAllowsConfiguration(control);
   const bool webUiOverrideActive = self.webUiOverrideAllowed(request);
   const uint32_t webUiOverrideRemainingMs =
@@ -4775,11 +4787,11 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
   // DEBUG EXPORT MAINTENANCE: extend sections below when adding diagnostically
   // relevant settings / state. Bump DEBUG_EXPORT_SCHEMA_VERSION on material
   // schema changes. Never include secrets.
-  if (!self.lockWorkBuf()) {
+  if (!self.lockWorkBufForStatus()) {
     return self.workBufBusy(request);
   }
   NetworkWorkBuf &work = *self.workBuf_;
-  self.callbacks_.copyControlStatus(work.control);
+  self.loadControlStatus(work.control);
   if (self.callbacks_.copyDebugExportExtras != nullptr) {
     self.callbacks_.copyDebugExportExtras(work.debugExport, work.control);
   } else {
@@ -5453,13 +5465,13 @@ esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
     }
   }
 
-  if (!self.lockWorkBuf()) {
+  if (!self.lockWorkBufForStatus()) {
     return self.workBufBusy(request);
   }
   NetworkWorkBuf &work = *self.workBuf_;
   const size_t count = self.callbacks_.copyDebugEvents(
       after, work.logBatch, LOG_BATCH_SIZE);
-  self.callbacks_.copyControlStatus(work.control);
+  self.loadControlStatus(work.control);
   httpd_resp_set_type(request, JSON_CONTENT_TYPE);
   httpd_resp_set_hdr(request, "Cache-Control", "no-store");
   httpd_resp_set_hdr(request, "Connection", "close");
@@ -5550,11 +5562,11 @@ esp_err_t ShotStopperNetwork::shotsHandler(httpd_req_t *request) {
   ShotLogSort sort = ShotLogSort::Date;
   ShotLogSortDir dir = ShotLogSortDir::Desc;
   parseShotsPageQuery(request, offset, limit, sort, dir);
-  if (!self.lockWorkBuf()) {
+  if (!self.lockWorkBufForStatus()) {
     return self.workBufBusy(request);
   }
   NetworkWorkBuf &work = *self.workBuf_;
-  self.callbacks_.copyControlStatus(work.control);
+  self.loadControlStatus(work.control);
   const size_t count =
       self.callbacks_.copyShotRecords != nullptr
           ? self.callbacks_.copyShotRecords(work.shotRecords, SHOT_LOG_CAPACITY)

@@ -82,6 +82,12 @@ void resetMomentaryHarness() {
   persistenceReady = true;
   bleStackReady = true;
   firmwareInitializationComplete = true;
+  lastScaleWeightAtMs = 0;
+  lastScalePacketGapLogMs = 0;
+  telemetryWeightStreamState = WeightStreamState::NO_SAMPLE;
+  publishedControlGate = ControlGateSnapshot{};
+  controlGateSeq = 0;
+  controlStatusPublishRequested = false;
   circuitClosed = false;
   relaySafetyTripped = false;
   operationalLimitTripped = false;

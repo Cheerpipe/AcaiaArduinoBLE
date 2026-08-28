@@ -2911,6 +2911,11 @@ inline bool formatLifecycleDebugMessage(const DebugEvent &event, char *message,
       snprintf(message, capacity, "health loop gap high max=%ld ms",
                static_cast<long>(event.argument1));
       return true;
+    case DebugCode::SCALE_PACKET_GAP:
+      snprintf(message, capacity, "scale packet gap seq=%ld dt=%ld ms",
+               static_cast<long>(event.argument1),
+               static_cast<long>(event.argument2));
+      return true;
     case DebugCode::OTA_UPLOAD_STARTED:
       snprintf(message, capacity, "OTA upload started size=%ld KiB",
                static_cast<long>(event.argument1));

@@ -143,6 +143,9 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   taskProfiler.resetForHost();
   stagingControlStatus = ControlStatusSnapshot{};
   controlStatusSeq = 0;
+  publishedControlGate = ControlGateSnapshot{};
+  controlGateSeq = 0;
+  controlStatusPublishRequested = false;
   bleCompanionRuntimeSnapshot = BleCompanionRuntimeSnapshot{};
   bleCompanionRuntimeSnapshot.enabled = true;
   bleCompanionStatusSnapshot = BleCompanionStatusSnapshot{};
@@ -195,6 +198,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scalePacketSequence = 0;
   scalePacketGaps = 0;
   lastScalePacketGapLogMs = 0;
+  lastScaleWeightAtMs = 0;
   scaleRejectedPackets = 0;
   scaleReconnects = 0;
   scaleRecoveredStaleCount = 0;
@@ -203,6 +207,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   recoverableStaleStartedAtMs = 0;
   recoverableStaleDisconnectSequence = 0;
   recoverableStaleConnectionGeneration = 0;
+  telemetryWeightStreamState = WeightStreamState::NO_SAMPLE;
   scaleLastDisconnectReason = 0;
   scaleTimerValid = false;
   scaleTimerMs = 0;
@@ -4104,22 +4109,7 @@ void d13_idle_delays_relax_without_scale() {
   CHECK(controlLoopTickDelayMs() == 1);
 }
 
-void d14_control_status_interval_follows_scale() {
-  resetHarness(false, false);
-  CHECK(!scaleAvailable());
-  CHECK(controlStatusPublishIntervalMs() == CONTROL_STATUS_PUBLISH_NO_SCALE_MS);
-  CHECK(!controlStatusShouldPublish(false, 100, 199));
-  CHECK(controlStatusShouldPublish(false, 100, 200));
-  CHECK(controlStatusShouldPublish(true, 100, 101));
-
-  resetHarness(false, true);
-  markScaleWorkerProgress();
-  CHECK(scaleAvailable());
-  CHECK(controlStatusPublishIntervalMs() == CONTROL_STATUS_PUBLISH_MS);
-  CHECK(!controlStatusShouldPublish(false, 100, 149));
-  CHECK(controlStatusShouldPublish(false, 100, 150));
-  CHECK(controlStatusShouldPublish(true, 100, 101));
-
+void d14_control_status_publishes_on_cycle_edge() {
   resetHarness(false, false);
   reachReadyFromBoot();
   publishControlStatus();
@@ -4129,6 +4119,18 @@ void d14_control_status_interval_follows_scale() {
   CHECK(publishedControlStatus.activeCycle);
   CHECK(publishedControlStatus.state == StopperState::BREW ||
         publishedControlStatus.state == StopperState::MANUAL_NO_SCALE);
+  ControlGateSnapshot gate;
+  copyControlGate(gate);
+  CHECK(gate.activeCycle);
+  CHECK(gate.relayClosed);
+
+  const uint32_t seqAfterEdge = controlStatusSeq;
+  serviceControlStatusPublish();
+  CHECK(controlStatusSeq == seqAfterEdge);
+  controlStatusPublishRequested = true;
+  serviceControlStatusPublish();
+  CHECK(controlStatusSeq != seqAfterEdge);
+  CHECK(!controlStatusPublishRequested);
 }
 
 void d15_companion_publish_throttles_without_scale() {
@@ -5052,7 +5054,7 @@ void r32_old_connection_generation_cannot_update_weight() {
   CHECK(currentWeight != 12.0f);
 }
 
-void r33_weight_mailbox_keeps_latest_and_reports_gap() {
+void r33_weight_mailbox_keeps_latest_without_consumer_gap() {
   resetHarness(false, true);
   reachReadyFromBoot();
   ScaleEvent first;
@@ -5064,19 +5066,63 @@ void r33_weight_mailbox_keeps_latest_and_reports_gap() {
   CHECK(publishScaleEvent(first, false));
   debugLog.clear();
   CHECK(publishScaleEvent(latest, false));
-  CHECK(scalePacketGaps == 1);
-  CHECK(debugEventExists(DebugCode::SCALE_PACKET_GAP));
-  debugLog.clear();
+  CHECK(scalePacketGaps == 0);
+  CHECK(!debugEventExists(DebugCode::SCALE_PACKET_GAP));
   latest.weightG = 3.0f;
   CHECK(publishScaleEvent(latest, false));
+  CHECK(scalePacketGaps == 0);
+  processScaleWorkerEvents();
+  CHECK(observedWeight == 3.0f);
+}
+
+void r33b_stream_gap_counts_connected_inter_packet_silence() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  ScaleEvent sample;
+  sample.type = ScaleEventType::WEIGHT;
+  sample.receivedAtMs = hostMillis;
+  sample.weightG = 1.0f;
+  CHECK(publishScaleEvent(sample, false));
+  CHECK(scalePacketGaps == 0);
+
+  hostMillis += SCALE_STREAM_GAP_MS;
+  sample.receivedAtMs = hostMillis;
+  sample.weightG = 1.1f;
+  debugLog.clear();
+  CHECK(publishScaleEvent(sample, false));
+  CHECK(scalePacketGaps == 0);
+
+  hostMillis += SCALE_STREAM_GAP_MS + 1;
+  sample.receivedAtMs = hostMillis;
+  sample.weightG = 1.2f;
+  CHECK(publishScaleEvent(sample, false));
+  CHECK(scalePacketGaps == 1);
+  CHECK(debugEventExists(DebugCode::SCALE_PACKET_GAP));
+
+  debugLog.clear();
+  hostMillis += SCALE_STREAM_GAP_MS + 1;
+  sample.receivedAtMs = hostMillis;
+  sample.weightG = 1.3f;
+  CHECK(publishScaleEvent(sample, false));
   CHECK(scalePacketGaps == 2);
   CHECK(!debugEventExists(DebugCode::SCALE_PACKET_GAP));
   hostMillis += SCALE_PACKET_GAP_LOG_MIN_MS;
-  latest.weightG = 4.0f;
-  CHECK(publishScaleEvent(latest, false));
+  sample.receivedAtMs = hostMillis;
+  sample.weightG = 1.4f;
+  CHECK(publishScaleEvent(sample, false));
   CHECK(debugEventExists(DebugCode::SCALE_PACKET_GAP));
+
+  setScaleConnected(false);
+  hostMillis += 5000;
+  setScaleConnected(true);
+  sample.receivedAtMs = hostMillis;
+  sample.weightG = 2.0f;
+  const uint32_t gapsBeforeReconnect = scalePacketGaps;
+  CHECK(publishScaleEvent(sample, false));
+  CHECK(scalePacketGaps == gapsBeforeReconnect);
+
   processScaleWorkerEvents();
-  CHECK(observedWeight == 4.0f);
+  CHECK(observedWeight == 2.0f);
 }
 
 void r34_suspended_control_recovers_after_three_attributed_samples() {
@@ -5154,6 +5200,8 @@ void r36_recovered_stale_metrics_count_connected_gaps_only() {
 
   hostMillis += MAX_AUTOMATION_WEIGHT_AGE_MS + 100;
   markScaleWorkerProgress();
+  loop();
+  CHECK(telemetryWeightStreamState == WeightStreamState::STALE);
   publishControlStatus();
   copyControlStatus(status);
   CHECK(status.weightStreamState == WeightStreamState::STALE);
@@ -10291,7 +10339,8 @@ const TestCase testCases[] = {
     {"FF15", ff15_orchestrate_post_tare_holds_cup_transitions},
     {"R65", r65_slow_extended_shot_does_not_learn_weight_offset},
     {"R32", r32_old_connection_generation_cannot_update_weight},
-    {"R33", r33_weight_mailbox_keeps_latest_and_reports_gap},
+    {"R33", r33_weight_mailbox_keeps_latest_without_consumer_gap},
+    {"R33b", r33b_stream_gap_counts_connected_inter_packet_silence},
     {"R34", r34_suspended_control_recovers_after_three_attributed_samples},
     {"R35", r35_connected_without_weight_stream_is_not_available},
     {"R36", r36_recovered_stale_metrics_count_connected_gaps_only},
@@ -10499,7 +10548,7 @@ const TestCase testCases[] = {
     {"W98", w98_buzzer_sequences_start_and_end_with_sound},
     {"D01", d01_idle_scan_stays_enabled_between_ticks},
     {"D13", d13_idle_delays_relax_without_scale},
-    {"D14", d14_control_status_interval_follows_scale},
+    {"D14", d14_control_status_publishes_on_cycle_edge},
     {"D15", d15_companion_publish_throttles_without_scale},
     {"D02", d02_first_mode_uses_name_scan},
     {"D03", d03_scan_start_failed_uses_backoff},

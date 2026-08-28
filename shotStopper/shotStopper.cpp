@@ -112,6 +112,10 @@ constexpr uint32_t SCALE_CONNECT_RETRY_MS = 1000;
 constexpr uint32_t SCALE_CONNECT_RETRY_MAX_MS = 10000;
 constexpr uint32_t SCALE_CONNECT_LOG_MS = 10000;
 constexpr uint32_t SCALE_PACKET_GAP_LOG_MIN_MS = 1000;
+// Inter-packet silence on the worker, below the 1 s STALE window. Mailbox
+// overwrites are latest-wins and are not gaps.
+constexpr uint32_t SCALE_STREAM_GAP_MS = 250;
+constexpr uint32_t CONTROL_STATUS_REFRESH_WAIT_MS = 50;
 constexpr uint32_t SCALE_DISCOVERY_TICK_MS = 3000;
 constexpr uint32_t SCALE_SCAN_HCI_RESTART_MS = 60000;
 constexpr uint32_t SCALE_SCAN_BURST_MS = 3000;
@@ -119,8 +123,6 @@ constexpr uint32_t BOOKOO_CONNECT_BEEP_DEFER_MS = 750;
 constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;
 constexpr uint32_t SCALE_WORKER_NO_SCALE_DELAY_MS = 10;
 constexpr uint32_t LOOP_NO_SCALE_DELAY_MS = 5;
-constexpr uint32_t CONTROL_STATUS_PUBLISH_MS = 50;
-constexpr uint32_t CONTROL_STATUS_PUBLISH_NO_SCALE_MS = 100;
 constexpr uint32_t BLE_COMPANION_NO_SCALE_PUBLISH_MS = 50;
 constexpr uint32_t BLE_COMPANION_RUNTIME_PUBLISH_MS = 100;
 constexpr uint32_t SCALE_WORKER_BACKGROUND_MS = 25;
@@ -165,6 +167,11 @@ static_assert(BLE_CONNECT_TIMEOUT_MS + SCALE_ATT_TIMEOUT_MS <
               "GAP connect plus one ATT wait must fit under the task watchdog");
 static_assert(BLE_DISCOVER_TIMEOUT_MS < TASK_WATCHDOG_TIMEOUT_MS,
               "GATT discovery must fit under the task watchdog");
+static_assert(SCALE_STREAM_GAP_MS < MAX_AUTOMATION_WEIGHT_AGE_MS,
+              "Stream gaps must stay below the 1 s STALE window");
+static_assert(CONTROL_STATUS_REFRESH_WAIT_MS >= 20U &&
+                  CONTROL_STATUS_REFRESH_WAIT_MS <= 50U,
+              "GET snapshot wait must cover one control tick without hanging httpd");
 
 // ---------------------------------------------------------------------------
 // Persistent storage and scale prediction
@@ -458,6 +465,7 @@ uint32_t scaleConnectionGeneration = 0;
 uint32_t scalePacketSequence = 0;
 uint32_t scalePacketGaps = 0;
 uint32_t lastScalePacketGapLogMs = 0;
+uint32_t lastScaleWeightAtMs = 0;
 uint32_t scaleRejectedPackets = 0;
 uint32_t scaleReconnects = 0;
 uint32_t scaleRecoveredStaleCount = 0;
@@ -466,6 +474,7 @@ bool recoverableStaleOpen = false;
 uint32_t recoverableStaleStartedAtMs = 0;
 uint32_t recoverableStaleDisconnectSequence = 0;
 uint32_t recoverableStaleConnectionGeneration = 0;
+WeightStreamState telemetryWeightStreamState = WeightStreamState::NO_SAMPLE;
 uint8_t scaleLastDisconnectReason = 0;
 bool scaleTimerValid = false;
 uint32_t scaleTimerMs = 0;
@@ -498,10 +507,14 @@ bool scaleCompletionBeepPending = false;
 bool scaleCompletionBeepScheduled = false;
 
 bool virtualHoldOn = false;
-// Keep status snapshots in internal DRAM: loop copies ~2 KiB every 50 ms.
+// Full status snapshots stay in internal DRAM. The 32-byte gate is published
+// every loop tick; the ~4 KiB blob is rebuilt on GET and control/safety edges.
 ControlStatusSnapshot publishedControlStatus;
 ControlStatusSnapshot stagingControlStatus;
 uint32_t controlStatusSeq = 0;
+ControlGateSnapshot publishedControlGate;
+uint32_t controlGateSeq = 0;
+bool controlStatusPublishRequested = false;
 constexpr uint32_t kControlStatusSeqlockTries = 64;
 RuntimeConfig publishedRuntimeConfig;
 ShotPresetBank publishedPresetBank;
@@ -839,18 +852,18 @@ RelaySafetySnapshot getRelaySafetySnapshot();
 
 void copyControlGate(ControlGateSnapshot &output) {
   for (uint32_t attempt = 0; attempt < kControlStatusSeqlockTries; ++attempt) {
-    const uint32_t s0 = __atomic_load_n(&controlStatusSeq, __ATOMIC_ACQUIRE);
+    const uint32_t s0 = __atomic_load_n(&controlGateSeq, __ATOMIC_ACQUIRE);
     if ((s0 & 1U) != 0U) {
       taskYIELD();
       continue;
     }
-    output = controlGateOf(publishedControlStatus);
-    const uint32_t s1 = __atomic_load_n(&controlStatusSeq, __ATOMIC_ACQUIRE);
+    output = publishedControlGate;
+    const uint32_t s1 = __atomic_load_n(&controlGateSeq, __ATOMIC_ACQUIRE);
     if (s0 == s1) {
       return;
     }
   }
-  output = controlGateOf(publishedControlStatus);
+  output = publishedControlGate;
 }
 
 void reportTaskWatchdogFault() {
@@ -1265,6 +1278,7 @@ void setScaleLinkState(ScaleLinkState state) {
   if (scaleLinkState == ScaleLinkState::CONNECTED &&
       state == ScaleLinkState::DISCONNECTED) {
     ++scaleDisconnectSequence;
+    lastScaleWeightAtMs = 0;
   }
   if (scaleLinkState != ScaleLinkState::CONNECTED &&
       state == ScaleLinkState::CONNECTED) {
@@ -1332,20 +1346,6 @@ uint32_t scaleWorkerTickDelayMs() {
 
 uint32_t controlLoopTickDelayMs() {
   return scaleAvailable() ? 1 : LOOP_NO_SCALE_DELAY_MS;
-}
-
-uint32_t controlStatusPublishIntervalMs() {
-  return scaleAvailable() ? CONTROL_STATUS_PUBLISH_MS
-                          : CONTROL_STATUS_PUBLISH_NO_SCALE_MS;
-}
-
-bool controlStatusShouldPublish(bool forcePublish, uint32_t lastPublishMs,
-                                uint32_t nowMs) {
-  if (forcePublish || lastPublishMs == 0U) {
-    return true;
-  }
-  return static_cast<uint32_t>(nowMs - lastPublishMs) >=
-         controlStatusPublishIntervalMs();
 }
 
 bool bleCompanionStatusUnchanged(const BleCompanionStatusSnapshot &a,
@@ -1426,6 +1426,24 @@ bool observedWeightIsFresh(uint32_t now = millis()) {
          static_cast<int32_t>(now - observedWeightReceivedAtMs) >= 0 &&
          static_cast<uint32_t>(now - observedWeightReceivedAtMs) <=
              MAX_AUTOMATION_WEIGHT_AGE_MS;
+}
+
+WeightStreamState observedWeightStreamStateAt(uint32_t now) {
+  if (observedWeightSequence == 0) {
+    return WeightStreamState::NO_SAMPLE;
+  }
+  if (!observedWeightIsFresh(now)) {
+    return WeightStreamState::STALE;
+  }
+  return weightStreamState;
+}
+
+void serviceWeightStreamTelemetry() {
+  const uint32_t now = millis();
+  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+  const WeightStreamState next = observedWeightStreamStateAt(now);
+  noteRecoverableStaleTransition(telemetryWeightStreamState, next, link, now);
+  telemetryWeightStreamState = next;
 }
 
 void latchAtmCurveFromSession(uint32_t atMs) {
@@ -2573,6 +2591,7 @@ void pendingShotFinalizeTask() {
 bool publishScaleEvent(const ScaleEvent &event, bool critical) {
   if (event.type == ScaleEventType::WEIGHT) {
     ScaleEvent stamped = event;
+    uint32_t streamGapMs = 0;
     portENTER_CRITICAL(&scaleLinkMux);
     if (stamped.connectionGeneration == 0) {
       stamped.connectionGeneration = scaleConnectionGeneration;
@@ -2584,25 +2603,32 @@ bool publishScaleEvent(const ScaleEvent &event, bool critical) {
       }
       stamped.packetSequence = scalePacketSequence;
     }
+    if (firmwareInitializationComplete &&
+        scaleLinkState == ScaleLinkState::CONNECTED &&
+        lastScaleWeightAtMs != 0 &&
+        static_cast<int32_t>(stamped.receivedAtMs - lastScaleWeightAtMs) > 0) {
+      const uint32_t dt = stamped.receivedAtMs - lastScaleWeightAtMs;
+      if (dt > SCALE_STREAM_GAP_MS) {
+        ++scalePacketGaps;
+        streamGapMs = dt;
+      }
+    }
+    lastScaleWeightAtMs = stamped.receivedAtMs;
     portEXIT_CRITICAL(&scaleLinkMux);
 
-    bool overwrotePendingWeight = false;
     portENTER_CRITICAL(&scaleWeightEventMux);
-    overwrotePendingWeight = scaleWeightEventPending;
     scaleWeightEvent = stamped;
     scaleWeightEventPending = true;
     portEXIT_CRITICAL(&scaleWeightEventMux);
-    if (overwrotePendingWeight) {
-      portENTER_CRITICAL(&scaleLinkMux);
-      ++scalePacketGaps;
-      portEXIT_CRITICAL(&scaleLinkMux);
+    if (streamGapMs != 0) {
       const uint32_t nowMs = millis();
       if (lastScalePacketGapLogMs == 0 ||
           static_cast<uint32_t>(nowMs - lastScalePacketGapLogMs) >=
               SCALE_PACKET_GAP_LOG_MIN_MS) {
         lastScalePacketGapLogMs = nowMs;
         addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_PACKET_GAP,
-                      static_cast<int32_t>(stamped.packetSequence));
+                      static_cast<int32_t>(stamped.packetSequence),
+                      static_cast<int32_t>(streamGapMs));
       }
     }
     return true;
@@ -5909,6 +5935,34 @@ void processBleCompanionRequests() {
   }
 }
 
+bool liveConfigPersistPending() {
+#ifndef SHOT_STOPPER_HOST_TEST
+  portENTER_CRITICAL(&settingsPersistMux);
+  const bool pending = runtimePersistPending || settingsPersistInFlight ||
+                       settingsPersistResultReady;
+  portEXIT_CRITICAL(&settingsPersistMux);
+  return pending;
+#else
+  return runtimePersistPending;
+#endif
+}
+
+void publishControlGate() {
+  ControlGateSnapshot next;
+  const RelaySafetySnapshot relay = getRelaySafetySnapshot();
+  next.state = stopperState;
+  next.activeCycle = session.active;
+  next.relayClosed = relay.closed;
+  next.machineRunning = machineIsRunning();
+  next.physicalActivatorOn = rawActivatorOn;
+  next.maintenanceLeaseActive = maintenanceLease.active;
+  next.maintenanceLeaseId = maintenanceLease.active ? maintenanceLease.id : 0;
+  next.source = session.active ? session.source : ControlSource::NONE;
+  __atomic_fetch_add(&controlGateSeq, 1U, __ATOMIC_RELAXED);
+  publishedControlGate = next;
+  __atomic_fetch_add(&controlGateSeq, 1U, __ATOMIC_RELEASE);
+}
+
 void publishControlStatus() {
   const uint32_t now = millis();
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
@@ -5944,15 +5998,8 @@ void publishControlStatus() {
   next.weightControlState = session.active
                                 ? session.weightControlState
                                 : WeightControlState::INACTIVE;
-  if (observedWeightSequence == 0) {
-    next.weightStreamState = WeightStreamState::NO_SAMPLE;
-  } else if (!observedWeightIsFresh(now)) {
-    next.weightStreamState = WeightStreamState::STALE;
-  } else {
-    next.weightStreamState = weightStreamState;
-  }
-  noteRecoverableStaleTransition(publishedControlStatus.weightStreamState,
-                                 next.weightStreamState, scaleLink, now);
+  serviceWeightStreamTelemetry();
+  next.weightStreamState = telemetryWeightStreamState;
   next.scaleRecoveredStaleCount = scaleRecoveredStaleCount;
   next.scaleRecoveredStaleMs = scaleRecoveredStaleMs;
   next.currentWeightValid = next.scaleAvailable && currentWeightIsFresh(now);
@@ -6090,7 +6137,7 @@ void publishControlStatus() {
   next.machineRunState = machineRunState();
   next.cupPresenceState = cupPresenceState();
   next.cupPresent = cupPresenceState() == CupPresenceState::PRESENT;
-  next.configPersistPending = runtimePersistPending;
+  next.configPersistPending = liveConfigPersistPending();
   next.configPersistFailed = runtimePersistFailed;
   next.bootComplete = firmwareInitializationComplete;
   next.bootDegraded = bootDegraded;
@@ -6110,19 +6157,58 @@ void publishControlStatus() {
     next.bleCompanionRejectedWrites = ble.rejectedWrites;
     next.bleCompanionLastReject = static_cast<uint8_t>(ble.lastReject);
   }
-#ifndef SHOT_STOPPER_HOST_TEST
-  portENTER_CRITICAL(&settingsPersistMux);
-  next.configPersistPending =
-      runtimePersistPending || settingsPersistInFlight ||
-      settingsPersistResultReady;
-  portEXIT_CRITICAL(&settingsPersistMux);
-#endif
   portENTER_CRITICAL(&debugLogMux);
   next.debugEventsDropped = debugLog.overwritten();
   portEXIT_CRITICAL(&debugLogMux);
   __atomic_fetch_add(&controlStatusSeq, 1U, __ATOMIC_RELAXED);
   publishedControlStatus = next;
   __atomic_fetch_add(&controlStatusSeq, 1U, __ATOMIC_RELEASE);
+  publishControlGate();
+}
+
+void refreshControlStatus() {
+#if defined(SHOT_STOPPER_HOST_TEST)
+  return;
+#else
+  // Waits until loop commits the 4 KiB seqlock, not merely until the request
+  // is noticed. Timeout copies the last snapshot and leaves the flag set.
+  __atomic_store_n(&controlStatusPublishRequested, true, __ATOMIC_RELEASE);
+  const uint32_t startedAtMs = millis();
+  while (__atomic_load_n(&controlStatusPublishRequested, __ATOMIC_ACQUIRE)) {
+    if (static_cast<uint32_t>(millis() - startedAtMs) >=
+        CONTROL_STATUS_REFRESH_WAIT_MS) {
+      return;
+    }
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+#endif
+}
+
+void serviceControlStatusPublish() {
+  publishControlGate();
+  serviceWeightStreamTelemetry();
+  const RelaySafetySnapshot relaySnap = getRelaySafetySnapshot();
+  const bool requested =
+      __atomic_load_n(&controlStatusPublishRequested, __ATOMIC_ACQUIRE);
+  const bool forcePublish =
+      publishedControlStatus.state != stopperState ||
+      publishedControlStatus.activeCycle != session.active ||
+      publishedControlStatus.relayClosed != relaySnap.closed ||
+      publishedControlStatus.machineRunning != machineIsRunning() ||
+      publishedControlStatus.safetyGeneration != relaySnap.generation ||
+      publishedControlStatus.safetyFault != relaySnap.fault ||
+      publishedControlStatus.configPersistPending !=
+          liveConfigPersistPending() ||
+      publishedControlStatus.configPersistFailed != runtimePersistFailed;
+  if (requested || forcePublish) {
+    publishControlStatus();
+  }
+  // Clear after the seqlock commit so httpd's wait cannot copy the previous
+  // blob. A GET that arrives mid-publish still sees the snapshot that just
+  // finished.
+  if (requested) {
+    __atomic_store_n(&controlStatusPublishRequested, false, __ATOMIC_RELEASE);
+  }
 }
 
 SerialCliParser serialCliParser;
@@ -6974,6 +7060,7 @@ void setup() {
     NetworkBridgeCallbacks callbacks;
     callbacks.copyControlStatus = copyControlStatus;
     callbacks.copyControlGate = copyControlGate;
+    callbacks.refreshControlStatus = refreshControlStatus;
     callbacks.enqueueWebCommand = enqueueWebCommand;
     callbacks.copyDebugEvents = copyDebugEvents;
     callbacks.addDebugEvent = addDebugEvent;
@@ -7187,27 +7274,7 @@ void loop() {
   serviceShotStorePersistence();
   servicePreferredScaleMacPersistence();
   serviceMaintenanceLease();
-  {
-    // Web UI / Companion poll ~1–2 Hz; rebuilding the full snapshot every 1 ms
-    // loop tick wastes CPU copying presets + scale history under the mux.
-    // Force on control/safety edges so the UI never lags a shot start/stop by
-    // the throttle interval.
-    static uint32_t lastControlStatusPublishMs = 0;
-    const RelaySafetySnapshot relaySnap = getRelaySafetySnapshot();
-    const bool forcePublish =
-        publishedControlStatus.state != stopperState ||
-        publishedControlStatus.activeCycle != session.active ||
-        publishedControlStatus.relayClosed != relaySnap.closed ||
-        publishedControlStatus.machineRunning != machineIsRunning() ||
-        publishedControlStatus.safetyGeneration != relaySnap.generation ||
-        publishedControlStatus.safetyFault != relaySnap.fault;
-    const uint32_t nowMs = millis();
-    if (controlStatusShouldPublish(forcePublish, lastControlStatusPublishMs,
-                                   nowMs)) {
-      lastControlStatusPublishMs = nowMs;
-      publishControlStatus();
-    }
-  }
+  serviceControlStatusPublish();
   publishBleCompanionRuntimeSnapshot();
   serviceScaleConnectedLed();
   if (!feedCurrentTaskWatchdog()) {
@@ -7218,5 +7285,6 @@ void loop() {
     return;
   }
   serviceSafetyHeartbeat(true);
+  processScaleWorkerEvents();
   vTaskDelay(pdMS_TO_TICKS(controlLoopTickDelayMs()));
 }

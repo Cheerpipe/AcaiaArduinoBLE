@@ -269,6 +269,7 @@ if (firmwareCore.includes('portENTER_CRITICAL(&webStatusMux)') ||
     firmwareCore.includes('next.presets = presetBank') ||
     firmwareCore.includes('copyScaleHistory(next.scaleHistory)') ||
     !firmwareCore.includes('__atomic_fetch_add(&controlStatusSeq') ||
+    !firmwareCore.includes('__atomic_fetch_add(&controlGateSeq') ||
     !network.includes('self.callbacks_.copyPresetBank(&g_work->presetBank)') ||
     !network.includes('self.callbacks_.copyScaleHistory(g_work->scaleHistory)')) {
   throw new Error(
@@ -300,11 +301,31 @@ if (!bleLibrary.includes('BLE.scan(true)') ||
 if (!firmwareCore.includes('scaleWorkerTickDelayMs()') ||
     !firmwareCore.includes('controlLoopTickDelayMs()') ||
     !firmwareCore.includes('SCALE_WORKER_NO_SCALE_DELAY_MS') ||
-    !firmwareCore.includes('CONTROL_STATUS_PUBLISH_NO_SCALE_MS') ||
+    !firmwareCore.includes('SCALE_STREAM_GAP_MS') ||
+    !firmwareCore.includes('void refreshControlStatus()') ||
+    !firmwareCore.includes('void serviceControlStatusPublish()') ||
+    !firmwareCore.includes('void publishControlGate()') ||
     !firmwareCore.includes('taskYIELD()') ||
+    firmwareCore.includes('CONTROL_STATUS_PUBLISH_MS') ||
+    firmwareCore.includes('CONTROL_STATUS_PUBLISH_NO_SCALE_MS') ||
     (firmwareCore.split('publishBleCompanionStatus(inactiveStatus)').length - 1) !== 1) {
   throw new Error(
-      'No-scale idle must relax worker/loop/status and skip inactive Companion each tick');
+      'No-scale idle must relax worker/loop; status snapshot is GET-driven, not 50 ms');
+}
+{
+  const loopBody = firmwareCore.slice(firmwareCore.indexOf('void loop()'));
+  const drainCount = (loopBody.match(/processScaleWorkerEvents\(\)/g) || []).length;
+  if (drainCount < 2 ||
+      !network.includes('bool ShotStopperNetwork::lockWorkBufForStatus') ||
+      !network.includes('void ShotStopperNetwork::loadControlStatus') ||
+      !network.includes('callbacks_.refreshControlStatus != nullptr') ||
+      (network.split('lockWorkBufForStatus()').length - 1) < 4 ||
+      !firmwareCore.includes('callbacks.refreshControlStatus = refreshControlStatus') ||
+      !firmwareCore.includes(
+          '__atomic_store_n(&controlStatusPublishRequested, false')) {
+    throw new Error(
+        'Weight mailbox must drain twice per loop; GET status must wait for a committed snapshot');
+  }
 }
 {
   const reedState = fs.readFileSync(
@@ -1057,8 +1078,9 @@ if (!ui.includes('id="shotPanel"') ||
     !css.includes('.shotSparkHost .ruleChartTicks') ||
     !css.includes('.shotSparkHost[hidden]') ||
     !css.includes('#shotPanel .shotSparkHost{min-height:4.05rem;margin:.55rem 0 .1rem') ||
-    !css.includes('#shotPanel{position:relative;padding-right:3.4rem') ||
-    !css.includes('#shotPanel .shotDel{top:.35rem;right:.35rem') ||
+    !css.includes('#shotPanel{position:relative}') ||
+    css.includes('#shotPanel{position:relative;padding-right:3.4rem') ||
+    !css.includes('#shotPanel .shotDel{top:-.55rem;right:.15rem') ||
     !css.includes('#shotTable tr.noSpark{') ||
     !css.includes('.shotSpark{grid-area:plot;display:block;width:100%;height:100%;color:var(--ok);overflow:visible}') ||
     !ui.includes('function renderShotSpark(') ||
@@ -1846,7 +1868,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
      html.slice(html.indexOf('id="clearLastShotButton"'),
                 html.indexOf('</button>', html.indexOf('id="clearLastShotButton"')) + 9)
          .includes('<span class="t">Clear</span>')) ||
-    !css.includes('#shotPanel{position:relative;padding-right:3.4rem') ||
+    !css.includes('#shotPanel{position:relative}') ||
+    css.includes('#shotPanel{position:relative;padding-right:3.4rem') ||
     !css.includes('#shotPanel .btnGlyph{min-height:2.85rem') ||
     html.includes('id="lastCycle"') ||
     !ui.includes('function renderShotPanel(') ||

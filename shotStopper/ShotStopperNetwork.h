@@ -137,6 +137,7 @@ struct NetworkWorkBuf;
 struct NetworkBridgeCallbacks {
   void (*copyControlStatus)(ControlStatusSnapshot &output) = nullptr;
   void (*copyControlGate)(ControlGateSnapshot &output) = nullptr;
+  void (*refreshControlStatus)() = nullptr;
   bool (*enqueueWebCommand)(const WebCommand &command) = nullptr;
   size_t (*copyDebugEvents)(uint32_t afterSequence, DebugEvent *output,
                             size_t capacity) = nullptr;
@@ -331,6 +332,8 @@ class ShotStopperNetwork {
   bool revertPendingNetwork(uint32_t now, const char *reason);
   bool controlAllowsNetworkMutation();
   ControlGateSnapshot controlGate() const;
+  bool lockWorkBufForStatus();
+  void loadControlStatus(ControlStatusSnapshot &control);
   void log(DebugCategory category, DebugCode code, int32_t argument1 = 0,
            int32_t argument2 = 0);
   void actionLog(const char *message);
