@@ -139,6 +139,28 @@ class LastShotStore {
     return save();
   }
 
+  bool erasePersisted() {
+#if defined(SHOT_STOPPER_HOST_TEST)
+    hostStorageValid_ = false;
+    resetLastShotBlob(blob_);
+    return true;
+#else
+    if (!lockFlashIo()) {
+      return false;
+    }
+    Preferences preferences;
+    if (!preferences.begin(LAST_SHOT_NAMESPACE, false)) {
+      unlockFlashIo();
+      return false;
+    }
+    (void)preferences.remove(LAST_SHOT_KEY);
+    preferences.end();
+    unlockFlashIo();
+    resetLastShotBlob(blob_);
+    return true;
+#endif
+  }
+
   bool clear() {
     resetLastShotBlob(blob_);
     return save();

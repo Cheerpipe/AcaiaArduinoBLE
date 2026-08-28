@@ -172,4 +172,41 @@ inline bool clearRecoveryIntent() {
   return verified;
 }
 
+enum class PendingRecoveryKind : uint8_t {
+  NONE = 0,
+  VALID = 1,
+  MALFORMED = 2,
+};
+
+inline PendingRecoveryKind inspectPendingRecovery(RecoveryIntent &intent) {
+  if (loadRecoveryIntent(intent)) {
+    return PendingRecoveryKind::VALID;
+  }
+  if (recoveryIntentRecordPresent()) {
+    return PendingRecoveryKind::MALFORMED;
+  }
+  return PendingRecoveryKind::NONE;
+}
+
+inline bool recoveryIntentMatches(RecoveryOperation operation) {
+  RecoveryIntent intent;
+  return loadRecoveryIntent(intent) &&
+         intent.operation == static_cast<uint8_t>(operation);
+}
+
+// Persist the latch only when missing or for a different operation. Rewriting
+// a valid blob on a full NVS partition can tear it and brick boot recovery.
+inline bool ensureRecoveryIntent(RecoveryOperation operation) {
+  if (recoveryIntentMatches(operation)) {
+    return true;
+  }
+  return saveRecoveryIntent(operation);
+}
+
+inline bool abandonRecoveryIntent() { return clearRecoveryIntent(); }
+
+inline bool bootRecoveryShouldRestartAfterSuccess() {
+  return !recoveryIntentRecordPresent();
+}
+
 }  // namespace shotstopper

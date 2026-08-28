@@ -5338,29 +5338,22 @@ void waitForRecoveryBuzzer() {
 
 void completeBootRecovery(RecoveryOperation operation);
 
-void holdFailedBootRecovery() {
+void abandonFailedBootRecovery(RecoveryOperation operation) {
   (void)playRecoveryCue(BuzzerCue::RECOVERY_ERROR);
   waitForRecoveryBuzzer();
-  RecoveryGestureRecognizer gesture;
-  gesture.begin(millis());
-  for (;;) {
-    // Persistence did not reach a verified state. Keep machine circuit open. A power cycle
-    // retries the durable intent; the same paddle recovery gesture can also
-    // re-enter NETWORK_ACCESS_RESET / FACTORY_RESET without cycling power.
-    machineSampleInput();
-    const MachineIntention intent = machinePollIntention();
-    const RecoveryGestureResult result = gesture.update(
-        millis(), intent.holdActive, intent.turnedOn, intent.turnedOff);
-    if (result == RecoveryGestureResult::NETWORK_ACCESS_RESET) {
-      completeBootRecovery(RecoveryOperation::NETWORK_ACCESS_RESET);
-    } else if (result == RecoveryGestureResult::FACTORY_RESET) {
-      completeBootRecovery(RecoveryOperation::FACTORY_RESET);
-    } else if (result == RecoveryGestureResult::TIMED_OUT) {
-      gesture.begin(millis());
-    }
-    serviceBootRecoverySafety();
-    vTaskDelay(pdMS_TO_TICKS(10));
+  if (operation == RecoveryOperation::FACTORY_RESET) {
+    (void)resetPersistedSettingsToFactory(persistedSettings);
+  } else if (operation == RecoveryOperation::NETWORK_ACCESS_RESET) {
+    (void)resetPersistedNetworkAccess(persistedSettings);
   }
+  (void)abandonRecoveryIntent();
+}
+
+void abandonMalformedRecoveryIntent() {
+  (void)playRecoveryCue(BuzzerCue::RECOVERY_ERROR);
+  waitForRecoveryBuzzer();
+  (void)resetPersistedSettingsToFactory(persistedSettings);
+  (void)abandonRecoveryIntent();
 }
 
 bool applyBootRecoveryOperation(RecoveryOperation operation) {
@@ -5375,13 +5368,12 @@ bool applyBootRecoveryOperation(RecoveryOperation operation) {
 }
 
 void completeBootRecovery(RecoveryOperation operation) {
-  if (!saveRecoveryIntent(operation) ||
-      !applyBootRecoveryOperation(operation)) {
-    holdFailedBootRecovery();
+  // Do not rewrite a valid latch: a failed put on full NVS can tear it.
+  (void)ensureRecoveryIntent(operation);
+  if (!applyBootRecoveryOperation(operation)) {
+    abandonFailedBootRecovery(operation);
     return;
   }
-  // Apply already succeeded. A failed clear must not hang here: reboot so the
-  // next boot can re-apply (idempotent) and retry clearing the intent.
   (void)clearRecoveryIntent();
 
   const BuzzerCue success =
@@ -5398,6 +5390,11 @@ void completeBootRecovery(RecoveryOperation operation) {
     serviceBootRecoverySafety();
     vTaskDelay(pdMS_TO_TICKS(1));
   }
+  // If the latch could not be dropped, continue this boot instead of
+  // restarting into the same pending operation forever.
+  if (!bootRecoveryShouldRestartAfterSuccess()) {
+    return;
+  }
   ESP.restart();
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -5406,13 +5403,13 @@ void completeBootRecovery(RecoveryOperation operation) {
 
 void resumePendingBootRecovery() {
   RecoveryIntent intent;
-  if (loadRecoveryIntent(intent)) {
+  const PendingRecoveryKind kind = inspectPendingRecovery(intent);
+  if (kind == PendingRecoveryKind::VALID) {
     completeBootRecovery(static_cast<RecoveryOperation>(intent.operation));
+    return;
   }
-  if (recoveryIntentRecordPresent()) {
-    // A malformed/torn intent cannot safely identify which destructive
-    // operation was requested. Keep machine circuit open for explicit service.
-    holdFailedBootRecovery();
+  if (kind == PendingRecoveryKind::MALFORMED) {
+    abandonMalformedRecoveryIntent();
   }
 }
 
@@ -5434,9 +5431,11 @@ void maybeRunBootRecoveryGesture() {
         millis(), intent.holdActive, intent.turnedOn, intent.turnedOff);
     if (result == RecoveryGestureResult::NETWORK_ACCESS_RESET) {
       completeBootRecovery(RecoveryOperation::NETWORK_ACCESS_RESET);
+      return;
     }
     if (result == RecoveryGestureResult::FACTORY_RESET) {
       completeBootRecovery(RecoveryOperation::FACTORY_RESET);
+      return;
     }
     if (result == RecoveryGestureResult::TIMED_OUT) {
       (void)playRecoveryCue(BuzzerCue::RECOVERY_START);

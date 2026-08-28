@@ -2747,19 +2747,19 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
       if (callbacks_.resetAllDurableStores == nullptr) {
         return false;
       }
-      if (!saveRecoveryIntent(RecoveryOperation::FACTORY_RESET)) {
+      if (!ensureRecoveryIntent(RecoveryOperation::FACTORY_RESET)) {
         return false;
       }
-      restartPending_ = true;
       if (!callbacks_.resetAllDurableStores(next)) {
         if (!otaRollbackRestartPending_) {
           apRestartPending_ = false;
         }
         log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
-        break;
+        return false;
       }
       (void)clearRecoveryIntent();
       factoryReset = true;
+      restartPending_ = true;
       log(DebugCategory::SECURITY, DebugCode::FACTORY_RESET);
       break;
 

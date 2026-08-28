@@ -342,6 +342,35 @@ class ShotLog {
     return false;
   }
 
+  bool erasePersisted() {
+#if defined(SHOT_STOPPER_HOST_TEST)
+    hostStorageValid_ = false;
+    resetShotLogStore(store_,
+                      store_.header.bootId == 0 ? 1U : store_.header.bootId);
+    dirty_ = false;
+    return true;
+#else
+    if (!lockFlashIo()) {
+      return false;
+    }
+    Preferences preferences;
+    if (!preferences.begin(SHOT_LOG_NAMESPACE, false)) {
+      unlockFlashIo();
+      return false;
+    }
+    (void)preferences.remove(SHOT_LOG_KEY_A);
+    (void)preferences.remove(SHOT_LOG_KEY_B);
+    (void)preferences.remove(SHOT_LOG_ACTIVE_KEY);
+    (void)preferences.remove(SHOT_LOG_KEY_LEGACY);
+    preferences.end();
+    unlockFlashIo();
+    resetShotLogStore(store_,
+                      store_.header.bootId == 0 ? 1U : store_.header.bootId);
+    dirty_ = false;
+    return true;
+#endif
+  }
+
   bool clear() {
     const uint32_t bootId = store_.header.bootId;
     resetShotLogStore(store_, bootId);

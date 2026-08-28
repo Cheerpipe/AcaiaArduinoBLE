@@ -145,9 +145,11 @@ operation safely.
 2. Verify that the paddle is OFF and power the controller back on.
 3. Look for `AdvancedShotStopperAP`; the initial STA attempt may delay its
    appearance by approximately 15 seconds.
-4. If you hear a long-short-long pattern and startup does not continue, there
-   was a storage failure. Machine circuit stays open. Cut and restore power to
-   automatically retry the pending operation.
+4. If you hear a long-short-long pattern, storage failed the pending
+   operation. The firmware drops the recovery latch and **continues
+   startup** (SoftAP / default credentials when settings could be rebuilt).
+   It does not stay hung. If SoftAP still does not appear, cut and restore
+   power once; then use the [USB CLI](SERIAL_CLI.md) or reflash.
 5. If the issue persists, use the [USB CLI](SERIAL_CLI.md) or reflash the
    firmware before connecting machine circuit again.
 

@@ -37,9 +37,10 @@ inline bool resetPersistedNetworkAccess(PersistedSettings &settings) {
   return true;
 }
 
-// Independent stores first, settings next (overwrite dual-slot settings
-// without clearing the shared NVS namespace), BLE companion last. Every store
-// is verified before success. Idempotent.
+// Erase independent NVS history first (frees the 20 KiB partition), then
+// overwrite dual-slot settings without clearing the shared NVS namespace,
+// BLE companion last. Every store is verified before success. Idempotent
+// except that a mid-fail may already have dropped history.
 // Orchestrator last-shot UI snapshot (`persistedLastShot`) is not this
 // store: callers that publish status must drop it after this returns true.
 inline bool resetAllDurableStores(PersistedSettings &settings,
@@ -47,6 +48,13 @@ inline bool resetAllDurableStores(PersistedSettings &settings,
                                   ShotLog &shotLog,
                                   LastShotStore &lastShot,
                                   ShotCurveLog &shotCurves) {
+  yieldFlashIo();
+  feedFlashIoWatchdog();
+  // Drop history blobs first so the 20 KiB NVS partition has room for
+  // factory settings writes. A later failure may already have erased
+  // history; settings stay until resetPersistedSettingsToFactory succeeds.
+  (void)shotLog.erasePersisted();
+  (void)lastShot.erasePersisted();
   yieldFlashIo();
   feedFlashIoWatchdog();
   if (!shotLog.clear() || !shotCurves.clear() || !lastShot.clear()) {

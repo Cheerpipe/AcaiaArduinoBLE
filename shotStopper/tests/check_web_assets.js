@@ -2628,7 +2628,7 @@ if (!ui.includes('id="factoryResetButton"') ||
     !ui.includes("confirm:'ERASE_ALL_SETTINGS'") ||
     !network.includes('FACTORY_RESET_NOT_CONFIRMED') ||
     !network.includes('resetAllDurableStores(next)') ||
-    !network.includes('saveRecoveryIntent(RecoveryOperation::FACTORY_RESET)') ||
+    !network.includes('ensureRecoveryIntent(RecoveryOperation::FACTORY_RESET)') ||
     !ui.includes('id="restartPanel"') ||
     html.indexOf('id="saveDateTimeButton"') > html.indexOf('id="restartPanel"') ||
     html.indexOf('id="restartPanel"') > html.indexOf('id="factoryResetButton"') ||
@@ -4575,11 +4575,15 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
     const start = firmwareCore.indexOf('void completeBootRecovery(');
     const end = firmwareCore.indexOf('void resumePendingBootRecovery(');
     const body = start >= 0 && end > start ? firmwareCore.slice(start, end) : '';
-    const clearAt = body.indexOf('(void)clearRecoveryIntent()');
-    const holdAt = body.lastIndexOf('holdFailedBootRecovery');
-    if (clearAt < 0 || holdAt < 0 || holdAt > clearAt) {
+    if (!body.includes('ensureRecoveryIntent') ||
+        !body.includes('abandonFailedBootRecovery') ||
+        !body.includes('(void)clearRecoveryIntent()') ||
+        !body.includes('bootRecoveryShouldRestartAfterSuccess') ||
+        firmwareCore.includes('void holdFailedBootRecovery') ||
+        !firmwareCore.includes('void abandonMalformedRecoveryIntent()') ||
+        !firmwareCore.includes('PendingRecoveryKind::MALFORMED')) {
       throw new Error(
-          'Successful boot recovery must clear intent without hanging on clear failure');
+          'Boot recovery must apply or abandon the latch and never hang');
     }
   }
   {

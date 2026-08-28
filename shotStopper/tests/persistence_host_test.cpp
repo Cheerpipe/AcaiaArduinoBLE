@@ -1264,7 +1264,9 @@ void p58_reset_all_durable_stores_and_mid_fail_keeps_settings() {
   CHECK(loaded.runtime.goalWeightG == 40);
   ShotLog reloaded;
   CHECK(reloaded.load());
-  CHECK(reloaded.count() == 1);
+  // History NVS is dropped before settings writes so a full partition can
+  // still accept factory settings. A mid-fail may therefore lose history.
+  CHECK(reloaded.count() == 0);
 }
 
 void p59_deferred_shot_log_append_writes_only_on_flush() {
@@ -1371,6 +1373,51 @@ void p62_shot_curve_foreign_schema_is_rejected() {
   CHECK(!validShotCurveStore(store));
 }
 
+void p67_ensure_recovery_intent_skips_rewrite_when_valid() {
+  resetHostPersistence();
+  CHECK(saveRecoveryIntent(RecoveryOperation::FACTORY_RESET));
+  persistence_host::failNextWrite = true;
+  CHECK(ensureRecoveryIntent(RecoveryOperation::FACTORY_RESET));
+  CHECK(recoveryIntentMatches(RecoveryOperation::FACTORY_RESET));
+  CHECK(!ensureRecoveryIntent(RecoveryOperation::NETWORK_ACCESS_RESET));
+  RecoveryIntent intent;
+  CHECK(inspectPendingRecovery(intent) == PendingRecoveryKind::VALID);
+  CHECK(intent.operation ==
+        static_cast<uint8_t>(RecoveryOperation::FACTORY_RESET));
+}
+
+void p68_malformed_recovery_intent_is_abandoned() {
+  resetHostPersistence();
+  CHECK(saveRecoveryIntent(RecoveryOperation::FACTORY_RESET));
+  CHECK(persistence_host::corrupt(RECOVERY_NAMESPACE, RECOVERY_INTENT_KEY,
+                                  offsetof(RecoveryIntent, checksum)));
+  RecoveryIntent intent;
+  CHECK(inspectPendingRecovery(intent) == PendingRecoveryKind::MALFORMED);
+  CHECK(abandonRecoveryIntent());
+  CHECK(inspectPendingRecovery(intent) == PendingRecoveryKind::NONE);
+  CHECK(!recoveryIntentRecordPresent());
+}
+
+void p69_factory_reset_erases_shot_log_slots_before_rewrite() {
+  resetHostPersistence();
+  ShotLog log;
+  CHECK(log.load());
+  ShotLogRecord record = {};
+  record.durationDs = 250;
+  record.goalWeightG = 36;
+  CHECK(log.append(record));
+  CHECK(log.append(record));
+  CHECK(persistence_host::records.count("shotlog/recordsA") +
+            persistence_host::records.count("shotlog/recordsB") >=
+        1);
+  CHECK(log.erasePersisted());
+  CHECK(persistence_host::records.count("shotlog/recordsA") == 0);
+  CHECK(persistence_host::records.count("shotlog/recordsB") == 0);
+  CHECK(persistence_host::records.count("shotlog/active") == 0);
+  CHECK(log.load());
+  CHECK(log.count() == 0);
+}
+
 void p63_flash_io_lock_fails_closed_without_mutex() {
   resetHostPersistence();
   g_hostFlashIoMutexAvailable = false;
@@ -1433,6 +1480,9 @@ const TestCase tests[] = {
     {"P58", p58_reset_all_durable_stores_and_mid_fail_keeps_settings},
     {"P59", p59_deferred_shot_log_append_writes_only_on_flush},
     {"P60", p60_factory_intent_survives_failed_store_reset},
+    {"P67", p67_ensure_recovery_intent_skips_rewrite_when_valid},
+    {"P68", p68_malformed_recovery_intent_is_abandoned},
+    {"P69", p69_factory_reset_erases_shot_log_slots_before_rewrite},
     {"P61", p61_shot_curve_dual_slot_round_trip_and_delete},
     {"P62", p62_shot_curve_foreign_schema_is_rejected},
     {"P63", p63_flash_io_lock_fails_closed_without_mutex},

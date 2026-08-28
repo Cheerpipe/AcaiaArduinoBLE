@@ -31,5 +31,10 @@ Connect to `AdvancedShotStopperAP` / `ineedacoffee` at `http://192.168.4.1` and 
 the device up again. See [AP](ap.md) and the
 [README first connection](../../README.md#first-connection).
 
+If the wipe cannot finish (for example NVS is full), the Web UI reports an
+error and does **not** reboot into recovery. The next boot retries once; if
+it still cannot finish, the firmware drops the latch, plays the error motif,
+and starts SoftAP rather than hanging.
+
 Related: [Wi-Fi](wifi.md), [Emergency recovery](../EMERGENCY_RECOVERY.md),
 [FAQ](../FAQ.md).
