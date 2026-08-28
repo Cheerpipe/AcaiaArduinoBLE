@@ -173,17 +173,18 @@ static_assert(SHOT_STOPPER_ENABLE_JTAG == 0 || SHOT_STOPPER_ENABLE_JTAG == 1,
               "SHOT_STOPPER_ENABLE_JTAG must be 0 (off) or 1 (USB Serial/JTAG)");
 
 // Why USB CDC/Serial.begin ran at boot (latch). Live IO4 is separate.
+// Enumerator names must not be JTAG/IO4: Arduino-ESP32 defines those as macros.
 enum class UsbSerialEnableSource : uint8_t {
   DISABLED = 0,
-  JTAG = 1,
-  IO4 = 2,
+  COMPILE_FLAG = 1,
+  JUMPER = 2,
 };
 
 inline const char *usbSerialStateId(UsbSerialEnableSource source) {
   switch (source) {
-  case UsbSerialEnableSource::JTAG:
+  case UsbSerialEnableSource::COMPILE_FLAG:
     return "enabled_jtag";
-  case UsbSerialEnableSource::IO4:
+  case UsbSerialEnableSource::JUMPER:
     return "enabled_io4";
   case UsbSerialEnableSource::DISABLED:
   default:

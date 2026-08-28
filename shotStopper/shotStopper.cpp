@@ -5498,10 +5498,10 @@ void setup() {
   // -DSHOT_STOPPER_ENABLE_JTAG=1 starts CDC at boot (OpenOCD + CLI, no jumper).
   // Latch the enable source for Diagnostic; live IO4 is re-read each status.
   if (SHOT_STOPPER_ENABLE_JTAG == 1) {
-    usbSerialEnableSource = UsbSerialEnableSource::JTAG;
+    usbSerialEnableSource = UsbSerialEnableSource::COMPILE_FLAG;
     Serial.begin(SERIAL_BAUD);
   } else if (usbConsoleJumperPresent()) {
-    usbSerialEnableSource = UsbSerialEnableSource::IO4;
+    usbSerialEnableSource = UsbSerialEnableSource::JUMPER;
     Serial.begin(SERIAL_BAUD);
   }
 

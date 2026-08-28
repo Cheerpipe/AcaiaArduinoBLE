@@ -199,12 +199,13 @@ if (sdkconfigDefaults.includes('CONFIG_BT_LE_SLEEP_ENABLE=y') ||
   if (!firmware.includes('USB_CONSOLE_GPIO') ||
       !firmware.includes('SHOT_STOPPER_USB_CONSOLE_GPIO 4') ||
       !firmwareCore.includes('usbConsoleJumperPresent()') ||
-      !firmwareCore.includes('UsbSerialEnableSource::JTAG') ||
-      !firmwareCore.includes('UsbSerialEnableSource::IO4') ||
+      !firmwareCore.includes('UsbSerialEnableSource::COMPILE_FLAG') ||
+      !firmwareCore.includes('UsbSerialEnableSource::JUMPER') ||
       !firmwareCore.includes('Serial.begin(SERIAL_BAUD)') ||
-      !firmwareCore.includes('usbSerialEnableSource = UsbSerialEnableSource::JTAG') ||
       !firmwareCore.includes(
-          'usbSerialEnableSource = UsbSerialEnableSource::IO4')) {
+          'usbSerialEnableSource = UsbSerialEnableSource::COMPILE_FLAG') ||
+      !firmwareCore.includes(
+          'usbSerialEnableSource = UsbSerialEnableSource::JUMPER')) {
     throw new Error(
         'USB CDC must start for ENABLE_JTAG=1 or when the GPIO4 jumper is held at boot');
   }
@@ -995,6 +996,10 @@ if (!domainCore.includes('#ifndef SHOT_STOPPER_ENABLE_JTAG') ||
         'SHOT_STOPPER_ENABLE_JTAG must be 0 (off) or 1 (USB Serial/JTAG)') ||
     !domainCore.includes('CONFIG_SHOT_STOPPER_ENABLE_JTAG') ||
     !domainCore.includes('enum class UsbSerialEnableSource') ||
+    !domainCore.includes('COMPILE_FLAG = 1') ||
+    !domainCore.includes('JUMPER = 2') ||
+    domainCore.includes('JTAG = 1') ||
+    domainCore.includes('IO4 = 2') ||
     !domainCore.includes('usbSerialStateId') ||
     !domainCore.includes('usbConsoleIo4StateId') ||
     !kconfig.includes('config SHOT_STOPPER_ENABLE_JTAG') ||

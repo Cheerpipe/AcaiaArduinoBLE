@@ -8164,9 +8164,9 @@ void b03_jtag_build_starts_serial_without_jumper() {
   CHECK(!usbConsoleJumperPresent());
   setup();
   CHECK(Serial.beginCalls == 1);
-  CHECK(usbSerialEnableSource == UsbSerialEnableSource::JTAG);
+  CHECK(usbSerialEnableSource == UsbSerialEnableSource::COMPILE_FLAG);
   CHECK(publishedControlStatus.usbSerialEnableSource ==
-        UsbSerialEnableSource::JTAG);
+        UsbSerialEnableSource::COMPILE_FLAG);
   CHECK(!publishedControlStatus.usbConsoleIo4Closed);
 }
 #else
@@ -8190,9 +8190,9 @@ void b04_usb_console_starts_when_jumper_held() {
   setup();
   CHECK(Serial.beginCalls == 1);
 #if SHOT_STOPPER_ENABLE_JTAG == 1
-  CHECK(usbSerialEnableSource == UsbSerialEnableSource::JTAG);
+  CHECK(usbSerialEnableSource == UsbSerialEnableSource::COMPILE_FLAG);
 #else
-  CHECK(usbSerialEnableSource == UsbSerialEnableSource::IO4);
+  CHECK(usbSerialEnableSource == UsbSerialEnableSource::JUMPER);
 #endif
   CHECK(publishedControlStatus.usbConsoleIo4Closed);
   CHECK(publishedControlStatus.usbSerialEnableSource ==
