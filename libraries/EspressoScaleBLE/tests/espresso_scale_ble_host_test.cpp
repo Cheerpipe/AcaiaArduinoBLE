@@ -384,6 +384,52 @@ void testNameScanIgnoresNamelessEurekaUuid() {
     CHECK(!scale.isConnected());
 }
 
+void testAddressScanUsesScanForAddress() {
+    resetFake();
+    ScaleFixture fixture = makeScale(NEW);
+    fixture.peripheral->address = "AA:BB:CC:DD:EE:FF";
+    EspressoScaleBLE scale(false);
+    CHECK(scale.startScan("AA:BB:CC:DD:EE:FF", false,
+                          BLE_SCAN_NORMAL_INTERVAL, BLE_SCAN_NORMAL_WINDOW,
+                          true));
+    CHECK(scale.isDirectedScan());
+    CHECK(BLE.scanCalls == 0);
+    CHECK(BLE.scanForAddressCalls == 1);
+    CHECK(BLE.lastWithDuplicates);
+    CHECK(BLE.lastScanAddress == "AA:BB:CC:DD:EE:FF");
+    CHECK(pollUntilConnected(scale));
+    CHECK(scale.isConnected());
+    CHECK(strcmp(scale.address(), "AA:BB:CC:DD:EE:FF") == 0);
+
+    resetFake();
+    fixture = makeScale(NEW);
+    fixture.peripheral->address = "11:22:33:44:55:66";
+    fixture.peripheral->localName = "PYXIS";
+    EspressoScaleBLE mismatch(false);
+    CHECK(mismatch.startScan("AA:BB:CC:DD:EE:FF", false,
+                             BLE_SCAN_NORMAL_INTERVAL, BLE_SCAN_NORMAL_WINDOW,
+                             true));
+    CHECK(!mismatch.pollScan());
+    CHECK(mismatch.isScanning());
+    char seenMac[ACAIA_MAC_CAPACITY] = {};
+    char seenName[ACAIA_NAME_CAPACITY] = {};
+    CHECK(!mismatch.takeSeenAdvertisement(seenMac, sizeof(seenMac), seenName,
+                                          sizeof(seenName)));
+
+    resetFake();
+    EspressoScaleBLE restart(false);
+    CHECK(restart.startScan("AA:BB:CC:DD:EE:FF"));
+    CHECK(BLE.scanCalls == 1);
+    CHECK(BLE.scanForAddressCalls == 0);
+    CHECK(restart.startScan("AA:BB:CC:DD:EE:FF", false,
+                            BLE_SCAN_NORMAL_INTERVAL, BLE_SCAN_NORMAL_WINDOW,
+                            true));
+    CHECK(restart.isScanning());
+    CHECK(BLE.stopScanCalls == 1);
+    CHECK(BLE.scanCalls == 1);
+    CHECK(BLE.scanForAddressCalls == 1);
+}
+
 void testStartScanRestartsOnFilterChange() {
     resetFake();
     EspressoScaleBLE scale(false);
@@ -1218,6 +1264,7 @@ int main() {
     testNameScanIgnoresEmptyLocalName();
     testNameScanConnectsNamelessBookooByUuid16();
     testNameScanIgnoresNamelessEurekaUuid();
+    testAddressScanUsesScanForAddress();
     testStartScanRestartsOnFilterChange();
     testCleanupOnInitializationFailures();
     testConnectRetriesThenSucceeds();

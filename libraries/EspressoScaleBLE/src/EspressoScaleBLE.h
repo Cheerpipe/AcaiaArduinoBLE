@@ -97,7 +97,8 @@ class EspressoScaleBLE {
 
         bool startScan(const char *mac = nullptr, bool forceRestart = false,
                        uint16_t interval = BLE_SCAN_NORMAL_INTERVAL,
-                       uint16_t window = BLE_SCAN_NORMAL_WINDOW);
+                       uint16_t window = BLE_SCAN_NORMAL_WINDOW,
+                       bool addressScan = false);
         bool pollScan();
         bool isScanning() const;
         bool isConnecting() const;
@@ -217,6 +218,7 @@ class EspressoScaleBLE {
         uint8_t             _connectAttempts;
         uint32_t            _linkDownSince;
         char                _scanMac[SCALE_MAC_CAPACITY];
+        bool                _scanAddressFilter;
         uint16_t            _scanInterval;
         uint16_t            _scanWindow;
         char                _address[SCALE_MAC_CAPACITY];

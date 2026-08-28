@@ -4106,6 +4106,7 @@ void d01_idle_scan_stays_enabled_between_ticks() {
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
+  CHECK(scale.lastAddressScan);
   CHECK(scale.startScanCalls == 1);
   const size_t calls = scale.startScanCalls;
   hostMillis += SCALE_DISCOVERY_TICK_MS - 1;
@@ -4194,6 +4195,7 @@ void d02_first_mode_uses_name_scan() {
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(!scale.directedScan);
+  CHECK(!scale.lastAddressScan);
   CHECK(scale.lastStartScanMac[0] == '\0');
 }
 
@@ -4237,6 +4239,7 @@ void d04_full_cache_keeps_directed_scan() {
   }
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
+  CHECK(scale.lastAddressScan);
   CHECK(strcmp(scale.lastStartScanMac, "AA:BB:CC:DD:EE:FF") == 0);
 }
 
@@ -4271,6 +4274,7 @@ void d05_hci_watchdog_force_restarts_same_filter() {
   CHECK(ticks == SCALE_SCAN_HCI_RESTART_MS / SCALE_DISCOVERY_TICK_MS);
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
+  CHECK(scale.lastAddressScan);
   CHECK(scale.lastForceRestart);
   CHECK(scale.startScanCalls == 2);
 }
@@ -4439,6 +4443,7 @@ void d07_prefer_falls_back_after_grace() {
                               scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
+  CHECK(!scale.lastAddressScan);
   const size_t callsBefore = scale.startScanCalls;
   hostMillis += SCALE_PREFER_FALLBACK_MS;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
@@ -4446,6 +4451,7 @@ void d07_prefer_falls_back_after_grace() {
                               scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(!scale.directedScan);
+  CHECK(!scale.lastAddressScan);
   CHECK(scale.startScanCalls > callsBefore);
   CHECK(scale.lastStartScanMac[0] == '\0');
 }

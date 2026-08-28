@@ -96,6 +96,7 @@ EspressoScaleBLE::EspressoScaleBLE(bool debug) :
     _connectAttempts(0),
     _linkDownSince(0),
     _scanMac{},
+    _scanAddressFilter(false),
     _scanInterval(0),
     _scanWindow(0),
     _address{},
@@ -130,13 +131,15 @@ void EspressoScaleBLE::stopIdleScan(ScaleDisconnectReason reason) {
     _connected = false;
     _scanStartedAt = 0;
     _scanMac[0] = '\0';
+    _scanAddressFilter = false;
     if (reason != ScaleDisconnectReason::NONE) {
         _lastDisconnectReason = reason;
     }
 }
 
 bool EspressoScaleBLE::startScan(const char *mac, bool forceRestart,
-                                 uint16_t interval, uint16_t window) {
+                                 uint16_t interval, uint16_t window,
+                                 bool addressScan) {
     logVersionOnce();
 
     if (window == 0 || window > interval) {
@@ -145,13 +148,15 @@ bool EspressoScaleBLE::startScan(const char *mac, bool forceRestart,
     }
 
     const bool filtered = mac != nullptr && mac[0] != '\0';
+    const bool useAddressScan = filtered && addressScan;
     if (_scanning && !_connected && !_hasPeripheral) {
         const bool sameFilter = filtered
             ? macAddressEqual(_scanMac, mac)
             : _scanMac[0] == '\0';
         const bool sameHci =
             _scanInterval == interval && _scanWindow == window;
-        if (sameFilter && sameHci && !forceRestart) {
+        const bool sameScanKind = _scanAddressFilter == useAddressScan;
+        if (sameFilter && sameHci && sameScanKind && !forceRestart) {
             return true;
         }
         stopIdleScan(ScaleDisconnectReason::NONE);
@@ -165,6 +170,7 @@ bool EspressoScaleBLE::startScan(const char *mac, bool forceRestart,
     BLE.setScanParameters(interval, window);
     _scanInterval = interval;
     _scanWindow = window;
+    _scanAddressFilter = useAddressScan;
     _seenPending = false;
     _seenMac[0] = '\0';
     _seenName[0] = '\0';
@@ -177,6 +183,10 @@ bool EspressoScaleBLE::startScan(const char *mac, bool forceRestart,
     if (_debug) {
         if (!filtered) {
             Serial.println("Scanning for any compatible scale (name scan)...");
+        } else if (useAddressScan) {
+            Serial.print("Scanning for preferred scale ");
+            Serial.print(_scanMac);
+            Serial.println(" (address scan)...");
         } else {
             Serial.print("Scanning for preferred scale ");
             Serial.print(_scanMac);
@@ -184,7 +194,9 @@ bool EspressoScaleBLE::startScan(const char *mac, bool forceRestart,
         }
     }
 
-    const bool scanStarted = static_cast<bool>(BLE.scan(true));
+    const bool scanStarted = useAddressScan
+        ? static_cast<bool>(BLE.scanForAddress(mac, true))
+        : static_cast<bool>(BLE.scan(true));
     if (!scanStarted) {
         if (_debug) {
             Serial.println("BLE scan failed to start");
@@ -903,6 +915,7 @@ void EspressoScaleBLE::resetConnection(bool disconnectPeer,
     }
     _scanStartedAt = 0;
     _scanMac[0] = '\0';
+    _scanAddressFilter = false;
 
     clearCharacteristic(_read);
     clearCharacteristic(_write);

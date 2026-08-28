@@ -308,11 +308,13 @@ class EspressoScaleBLE {
   }
   bool startScan(const char *mac = nullptr, bool forceRestart = false,
                  uint16_t interval = BLE_SCAN_NORMAL_INTERVAL,
-                 uint16_t window = BLE_SCAN_NORMAL_WINDOW) {
+                 uint16_t window = BLE_SCAN_NORMAL_WINDOW,
+                 bool addressScan = false) {
     lastForceRestart = forceRestart;
     lastScanInterval = interval;
     lastScanWindow = window;
     const bool directed = mac != nullptr && mac[0] != '\0';
+    const bool wantAddressScan = directed && addressScan;
     if (scanning && !connected) {
       const bool sameFilter =
           directed ? (directedScan &&
@@ -321,13 +323,16 @@ class EspressoScaleBLE {
                    : !directedScan;
       const bool sameHci = lastAppliedScanInterval == interval &&
                            lastAppliedScanWindow == window;
-      if (sameFilter && sameHci && !forceRestart) {
+      const bool sameScanKind = lastAppliedAddressScan == wantAddressScan;
+      if (sameFilter && sameHci && sameScanKind && !forceRestart) {
         return true;
       }
     }
     ++startScanCalls;
     lastAppliedScanInterval = interval;
     lastAppliedScanWindow = window;
+    lastAppliedAddressScan = wantAddressScan;
+    lastAddressScan = wantAddressScan;
     if (directed) {
       strncpy(lastStartScanMac, mac, sizeof(lastStartScanMac) - 1);
       lastStartScanMac[sizeof(lastStartScanMac) - 1] = '\0';
@@ -339,12 +344,14 @@ class EspressoScaleBLE {
     if (!startScanSucceeds) {
       scanning = false;
       directedScan = false;
+      lastAddressScan = false;
       disconnectReason = ScaleDisconnectReason::SCAN_START_FAILED;
       return false;
     }
     if (connected) {
       scanning = false;
       directedScan = false;
+      lastAddressScan = false;
       return false;
     }
     scanning = true;
@@ -496,6 +503,7 @@ class EspressoScaleBLE {
     connecting = false;
     scanning = false;
     directedScan = false;
+    lastAddressScan = false;
   }
   bool newWeightAvailable() {
     ++newWeightAvailableCalls;
@@ -578,6 +586,8 @@ class EspressoScaleBLE {
   uint16_t lastScanWindow = BLE_SCAN_NORMAL_WINDOW;
   uint16_t lastAppliedScanInterval = 0;
   uint16_t lastAppliedScanWindow = 0;
+  bool lastAddressScan = false;
+  bool lastAppliedAddressScan = false;
   size_t startScanCalls = 0;
   char lastStartScanMac[ACAIA_MAC_CAPACITY] = {};
   char seenMac[ACAIA_MAC_CAPACITY] = {};

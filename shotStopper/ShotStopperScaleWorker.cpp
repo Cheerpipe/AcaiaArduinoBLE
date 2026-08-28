@@ -1162,7 +1162,10 @@ bool startScaleDiscoveryScan(const char *mac, bool forceRestart) {
   const bool scanningBefore = scale.isScanning();
   const uint16_t prevInterval = scaleScanAppliedInterval;
   const uint16_t prevWindow = scaleScanAppliedWindow;
-  if (!scale.startScan(mac, forceRestart, interval, window)) {
+  const bool addressScan =
+      mac != nullptr && mac[0] != '\0' &&
+      currentScaleMacCacheMode() == ScaleMacCacheMode::ONLY;
+  if (!scale.startScan(mac, forceRestart, interval, window, addressScan)) {
     return false;
   }
   scaleScanAppliedInterval = interval;

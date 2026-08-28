@@ -351,9 +351,16 @@ if (!bleLibrary.includes('readValue(input, MAX_BLE_PACKET_LENGTH)') ||
       'Acaia BLE reads must clamp to MAX_BLE_PACKET_LENGTH');
 }
 if (!bleLibrary.includes('BLE.scan(true)') ||
-    bleLibrary.includes('BLE.scan(false)')) {
+    bleLibrary.includes('BLE.scan(false)') ||
+    !bleLibrary.includes('BLE.scanForAddress(mac, true)') ||
+    bleLibrary.includes('scanForAddress(mac, false)') ||
+    !bleLibrary.includes('bool addressScan = false') ||
+    !firmware.includes(
+        'currentScaleMacCacheMode() == ScaleMacCacheMode::ONLY') ||
+    !firmware.includes(
+        'scale.startScan(mac, forceRestart, interval, window, addressScan)')) {
   throw new Error(
-      'Idle GAP scan must stay on with withDuplicates=true');
+      'Idle GAP scan must stay on with withDuplicates=true; ONLY uses scanForAddress');
 }
 if (!firmware.includes('scaleWorkerTickDelayMs()') ||
     !firmware.includes('controlLoopTickDelayMs()') ||
