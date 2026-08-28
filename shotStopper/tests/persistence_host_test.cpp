@@ -643,6 +643,33 @@ void p43_scale_history_upsert_and_lru() {
   CHECK(!foundTwo);
 }
 
+void p45_scale_mac_nvs_ignores_seq_and_defers_while_linked() {
+  ScaleHistoryEntry left[SCALE_HISTORY_CAPACITY] = {};
+  ScaleHistoryEntry right[SCALE_HISTORY_CAPACITY] = {};
+  uint32_t seq = 0;
+  CHECK(upsertScaleHistory(left, seq, "AA:BB:CC:DD:EE:01", "One"));
+  memcpy(right, left, sizeof(left));
+  CHECK(scaleHistoryIdentityEqual(left, right));
+  CHECK(!upsertScaleHistory(left, seq, "AA:BB:CC:DD:EE:01", "One"));
+  CHECK(left[0].lastSeenSeq != right[0].lastSeenSeq);
+  CHECK(scaleHistoryIdentityEqual(left, right));
+  CHECK(memcmp(left, right, sizeof(left)) != 0);
+
+  CHECK(decideScaleMacNvsAction(true, false, false) ==
+        ScaleMacNvsAction::CLEAR_DIRTY);
+  CHECK(decideScaleMacNvsAction(true, true, true) ==
+        ScaleMacNvsAction::CLEAR_DIRTY);
+  CHECK(decideScaleMacNvsAction(false, true, false) == ScaleMacNvsAction::DEFER);
+  CHECK(decideScaleMacNvsAction(false, false, true) == ScaleMacNvsAction::DEFER);
+  CHECK(decideScaleMacNvsAction(false, false, false) == ScaleMacNvsAction::QUEUE);
+  CHECK(!scaleMacNvsWriteAllowed(true, false));
+  CHECK(!scaleMacNvsWriteAllowed(false, true));
+  CHECK(scaleMacNvsWriteAllowed(false, false));
+
+  CHECK(upsertScaleHistory(left, seq, "AA:BB:CC:DD:EE:02", "Two"));
+  CHECK(!scaleHistoryIdentityEqual(left, right));
+}
+
 void p44_scale_history_canonicalizes_mac_case() {
   ScaleHistoryEntry entries[SCALE_HISTORY_CAPACITY] = {};
   uint32_t seq = 0;
@@ -1375,6 +1402,7 @@ const TestCase tests[] = {
     {"P47C", p47c_desired_wifi_power_save_policy},
     {"P46", p46_ring_retain_log_level_persists_round_trip},
     {"P43", p43_scale_history_upsert_and_lru},
+    {"P45", p45_scale_mac_nvs_ignores_seq_and_defers_while_linked},
     {"P44", p44_scale_history_canonicalizes_mac_case},
     {"P24", p24_preset_bank_size_and_crud_budgets},
     {"P25", p25_invalid_active_id_keeps_customs},

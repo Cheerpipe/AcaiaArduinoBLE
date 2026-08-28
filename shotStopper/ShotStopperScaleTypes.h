@@ -777,8 +777,47 @@ inline size_t scaleHistoryOccupiedCount(const ScaleHistoryEntry *entries) {
   return count;
 }
 
+// MAC+name identity for NVS. lastSeenSeq is RAM LRU only and must not
+// trigger a flash write on every connect.
+inline bool scaleHistoryIdentityEqual(const ScaleHistoryEntry *left,
+                                      const ScaleHistoryEntry *right) {
+  if (left == nullptr || right == nullptr) {
+    return left == right;
+  }
+  for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
+    if (!preferredScaleMacEqual(left[i].mac, right[i].mac)) {
+      return false;
+    }
+    if (strncmp(left[i].name, right[i].name, PREFERRED_SCALE_NAME_CAPACITY) !=
+        0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline bool scaleMacNvsWriteAllowed(bool connecting, bool connected) {
+  return !connecting && !connected;
+}
+
+// NVS/flash cache-off during a live GATT session drops Bookoo/Themis links.
+enum class ScaleMacNvsAction : uint8_t { CLEAR_DIRTY = 0, DEFER = 1, QUEUE = 2 };
+
+inline ScaleMacNvsAction decideScaleMacNvsAction(bool identityUnchanged,
+                                                 bool connecting,
+                                                 bool connected) {
+  if (identityUnchanged) {
+    return ScaleMacNvsAction::CLEAR_DIRTY;
+  }
+  if (!scaleMacNvsWriteAllowed(connecting, connected)) {
+    return ScaleMacNvsAction::DEFER;
+  }
+  return ScaleMacNvsAction::QUEUE;
+}
+
 // Upsert by MAC (case-insensitive). Stores canonical uppercase MAC.
-// Returns true if the table changed. Advances *seqCounter.
+// Returns true if MAC/name membership changed. lastSeenSeq always advances
+// for in-session LRU and is not by itself a persist reason.
 inline bool upsertScaleHistory(ScaleHistoryEntry *entries, uint32_t &seqCounter,
                                const char *mac, const char *name) {
   if (entries == nullptr || mac == nullptr || !validPreferredScaleMac(mac) ||

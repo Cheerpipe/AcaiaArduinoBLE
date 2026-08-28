@@ -2681,12 +2681,21 @@ void servicePreferredScaleMacPersistence() {
   if (!scaleWorkerCopyPreferredIfDirty(mac, name, history)) {
     return;
   }
-  if (strncmp(persistedSettings.preferredScaleMac, mac,
+  const bool identityUnchanged =
+      strncmp(persistedSettings.preferredScaleMac, mac,
               PREFERRED_SCALE_MAC_CAPACITY) == 0 &&
       strncmp(persistedSettings.preferredScaleName, name,
               PREFERRED_SCALE_NAME_CAPACITY) == 0 &&
-      memcmp(persistedSettings.scaleHistory, history, sizeof(history)) == 0) {
+      scaleHistoryIdentityEqual(persistedSettings.scaleHistory, history);
+  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+  const ScaleMacNvsAction action = decideScaleMacNvsAction(
+      identityUnchanged, link.connecting,
+      link.state == ScaleLinkState::CONNECTED);
+  if (action == ScaleMacNvsAction::CLEAR_DIRTY) {
     scaleWorkerClearPreferredDirty();
+    return;
+  }
+  if (action == ScaleMacNvsAction::DEFER) {
     return;
   }
   bool persistBusy = false;
@@ -3630,12 +3639,16 @@ void serviceSettingsPersistResult() {
                 PREFERRED_SCALE_MAC_CAPACITY) == 0 &&
         strncmp(persistedSettings.preferredScaleName, liveName,
                 PREFERRED_SCALE_NAME_CAPACITY) == 0 &&
-        memcmp(persistedSettings.scaleHistory, liveHistory,
-               sizeof(liveHistory)) == 0) {
+        scaleHistoryIdentityEqual(persistedSettings.scaleHistory,
+                                  liveHistory)) {
       scaleWorkerClearPreferredDirty();
     } else {
-      runtimePersistPending = true;
-      runtimePersistReasonBits |= RUNTIME_PERSIST_REASON_SCALE_MAC;
+      const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+      if (scaleMacNvsWriteAllowed(link.connecting,
+                                  link.state == ScaleLinkState::CONNECTED)) {
+        runtimePersistPending = true;
+        runtimePersistReasonBits |= RUNTIME_PERSIST_REASON_SCALE_MAC;
+      }
     }
     if (runtimeConfig.revision != runtimeRevision) {
       runtimePersistPending = true;

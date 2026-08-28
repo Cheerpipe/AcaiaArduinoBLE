@@ -894,6 +894,18 @@ if (!domain.includes('DebugCode::SCALE_SCAN_STARTED') ||
   throw new Error(
       'Scale discovery debug must report scan, GATT connect, attempt, and fail reason');
 }
+if (!domain.includes('inline bool scaleHistoryIdentityEqual') ||
+    !domain.includes('inline ScaleMacNvsAction decideScaleMacNvsAction') ||
+    !firmwareCore.includes('decideScaleMacNvsAction(') ||
+    !firmwareCore.includes(
+        'scaleHistoryIdentityEqual(persistedSettings.scaleHistory') ||
+    firmwareCore.includes(
+        'memcmp(persistedSettings.scaleHistory, history, sizeof(history))') ||
+    firmwareCore.includes(
+        'memcmp(persistedSettings.scaleHistory, liveHistory')) {
+  throw new Error(
+      'Scale MAC NVS must ignore lastSeenSeq and must not write flash while GATT is live');
+}
 if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0') ||
     !domain.includes('SHOT_STOPPER_ENABLE_BUZZER must be 0 (off) or 1 (passive RTTTL)') ||
     !domain.includes('compiledBuzzerModeId') ||
