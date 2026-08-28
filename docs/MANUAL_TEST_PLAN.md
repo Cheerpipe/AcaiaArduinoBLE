@@ -16,13 +16,13 @@ Perform all relay and machine circuit tests on a bench first. Do not connect mac
 | M10 | Change a workflow field during brew, rinse, and manual states. | UI is disabled and API rejects each change; current snapshot is unchanged. |
 | M11 | Save valid workflow settings while Ready, restart, and reopen UI. | Values persist and apply to the next cycle only. |
 | M12 | Enter a relationship-invalid timing configuration. | Server rejects the complete transaction; no field changes. |
-| M13 | Boot without STA credentials; leave SoftAP idle for more than 3 minutes. | AP remains reachable at `http://192.168.4.1/` (no idle SoftAP shutdown). |
+| M13 | Boot without STA credentials; leave SoftAP idle for more than 3 minutes. | SoftAP stops; `http://192.168.4.1/` is unreachable until USB `AP_START` or reboot. |
 | M14 | Save valid STA credentials (DHCP) and restart. | Full-screen wait overlay counts down from 180 s and hides Reload; SoftAP stops after STA associates; Serial prints DHCP address; overlay reclaims the UI at that address and the pending config is confirmed. |
 | M14b | Save valid static IP and restart; stay on the wait overlay or open the new IP within 3 min. | STA uses configured IP; status shows static mode; config becomes CONFIRMED. Overlay reconnects if the address is unchanged. |
 | M14c | Save unreachable/wrong static IP (or leave the wait overlay until 0 s). | Overlay keeps polling after the countdown hits 0. Pending config reverts to last-known-good (or clears STA); overlay reconnects on the previous address when it returns. STA retries continue when credentials remain. SoftAP auto-raise only if STA never joined this boot; otherwise recover with USB `AP_START` or reboot. |
-| M15 | Save invalid/unreachable STA credentials and restart. | After the attempt timeout, SoftAP is available and STA association retries continue while SoftAP stays up. |
-| M15b | With confirmed STA online, disable the home AP / force a link drop for less than ~15 s, then restore it. | SoftAP does not appear; STA recovers and Web UI stays on the STA IP. |
-| M15c | With confirmed STA online, disable the home AP for more than ~15 s. | SoftAP does **not** appear; STA association retries continue. SoftAP recovery requires USB `AP_START` or a reboot (boot SoftAP path). |
+| M15 | Save invalid/unreachable STA credentials and restart. | After the ~25 s attempt timeout, SoftAP is available and STA association retries continue. SoftAP idle-stops after 3 min with no SoftAP stations; STA retries continue without SoftAP. |
+| M15b | With confirmed STA online, disable the home AP / force a link drop for less than ~25 s, then restore it. | SoftAP does not appear; STA recovers and Web UI stays on the STA IP. |
+| M15c | With confirmed STA online, disable the home AP for more than ~25 s. | SoftAP does **not** appear; STA association retries continue. SoftAP recovery requires USB `AP_START` or a reboot (boot SoftAP path). |
 | M16 | Scan Wi-Fi in Ready, then start a physical cycle. | Scan is cancelled; control and relay behavior are unaffected. |
 | M17 | On the remote-control opt-in build, leave a browser virtual paddle ON, then close/disconnect the browser. | Machine circuit stays under shot limits / physical paddle / Stop; closing the browser alone does not open the machine circuit. |
 | M18 | Reset or remove controller power while measuring relay COM/NO. | Contact remains open; there is no unintended close pulse. |

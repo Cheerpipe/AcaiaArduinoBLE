@@ -194,6 +194,9 @@ class ShotStopperNetwork {
   static constexpr uint32_t STA_RECOVERY_ATTEMPT_MS = 60000;
   static constexpr uint32_t STA_CONFIRM_TIMEOUT_MS = 180000;
   static constexpr uint32_t STA_RECONNECT_INTERVAL_MS = 10000;
+  // Auto SoftAP shuts down after this long with zero SoftAP stations.
+  // Resets when the last client leaves; skipped while AP_START keep is set.
+  static constexpr uint32_t SOFTAP_IDLE_TIMEOUT_MS = 180000;
   static constexpr uint32_t WIFI_SCAN_TIMEOUT_MS = 20000;
   static constexpr uint32_t RESTART_DELAY_MS = 750;
   // A freshly committed OTA image proves itself by serving its Web UI. Confirm
@@ -257,6 +260,9 @@ class ShotStopperNetwork {
   bool staReconnectHeld_ = false;
   bool apStartHeld_ = false;
   bool apKeepRequested_ = false;
+  // Latched when SoftAP idle timeout fires. Blocks further auto SoftAP this
+  // boot; USB AP_START (force + keep) still works. Cleared only by reboot.
+  bool apAutoRaiseExhausted_ = false;
   bool httpStartHeld_ = false;
   std::atomic<bool> scaleConnectingOrUp_{false};
   std::atomic<bool> scaleConnecting_{false};
@@ -280,6 +286,8 @@ class ShotStopperNetwork {
   uint32_t scanMaintenanceLeaseId_ = 0;
   uint32_t scanRequestId_ = 0;
   uint32_t networkStartedAtMs_ = 0;
+  uint32_t apIdleDeadlineMs_ = 0;
+  uint8_t lastApClients_ = 0;
   uint32_t staConnectStartedAtMs_ = 0;
   uint32_t staReconnectAttemptAtMs_ = 0;
   uint32_t staConfirmDeadlineMs_ = 0;
@@ -314,6 +322,9 @@ class ShotStopperNetwork {
   void stopSoftApKeepStation();
   void stopSoftApLeaveHttp();
   void stopSoftAp(bool stopHttp);
+  void clearSoftApIdleState();
+  void armSoftApIdleDeadline(uint32_t now);
+  void serviceSoftApIdle(uint32_t now);
   bool wifiScanInProgress();
   void abortWifiScan(uint32_t now, bool logTimeout);
   void stopNetwork();

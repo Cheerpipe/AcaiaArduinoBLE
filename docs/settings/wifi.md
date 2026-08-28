@@ -26,8 +26,8 @@ stays available.
 | **Wi-Fi sleep** | on | When on, STA uses modem sleep (`MIN_MODEM`) whenever it is associated and SoftAP is down. Stays `NONE` on SoftAP, during OTA, or when this checkbox is off. Does not change when a scale connects or disconnects. Factory default on; V1 migration stays off. Scale discovery duty is Admin → Bluetooth → Scan intensity, not this checkbox. |
 | **IP mode** | DHCP | **DHCP** or **static** (`ip` / `netmask` / `gateway` / `dns1` / `dns2`). |
 | **Confirm window** | 3 minutes | After a Web UI STA save, a full-screen wait overlay counts down 3 minutes and reclaims this address when the controller returns. The first successful UI claim confirms the new network. If this page never returns, previous network settings are restored (BLE Companion saves use the same window: open the UI at the new IP). USB `SET_WIFI` commits immediately. |
-| **Boot with no credentials** | SoftAP up | See [AP](ap.md). |
-| **Boot with credentials** | STA first | SoftAP only if STA does not associate in about **15 s**. Then AP+STA until STA connects; SoftAP is then stopped. |
+| **Boot with no credentials** | SoftAP up | SoftAP at boot with a **3 min** idle shutdown when no SoftAP stations are associated. See [AP](ap.md). |
+| **Boot with credentials** | STA first | SoftAP only if STA does not associate in about **25 s** (and STA never joined this boot). Then AP+STA until STA connects or SoftAP idle-stops; SoftAP is then stopped. |
 | **STA drops after a successful join** | retry STA only | SoftAP is **not** raised automatically. Use USB `AP_START` or reboot. |
 | **Timezone offset (min)** | UTC+0 | Wall-clock labels in shot history. |
 | **NTP server** | pool | Preset or custom hostname for time sync. |

@@ -76,9 +76,12 @@ matching `CONNECT` / `START` / `RESTART` or a reboot. Automatic STA retry,
 boot SoftAP fallback (only before a successful STA join this session), and
 HTTP retry do not undo those stops.
 
-`AP_START` keeps SoftAP up even if STA is already connected (AP+STA). After a
+`AP_START` keeps SoftAP up even if STA is already connected (AP+STA) and
+skips the 3-minute SoftAP idle shutdown until `AP_STOP`. After a
 successful STA join, SoftAP is not auto-raised on link loss — use `AP_START` or
-reboot. Automatic SoftAP from boot is still torn down when STA comes up.
+reboot. Automatic SoftAP from boot is still torn down when STA comes up, and
+also after 3 minutes idle with no SoftAP stations (latched for the rest of the
+boot; `AP_START` still works).
 `WEBUI_STOP` is not undone by `AP_START`.
 
 ## Probe and help
@@ -120,7 +123,7 @@ reboot. Automatic SoftAP from boot is still torn down when STA comes up.
 
 | Command | Parameters | Effect |
 | --- | --- | --- |
-| `AP_START` | none | Raises SoftAP (`AdvancedShotStopperAP` at `192.168.4.1`). Stays up if STA is connected. Does not start HTTP if `WEBUI_STOP` is held |
+| `AP_START` | none | Raises SoftAP (`AdvancedShotStopperAP` at `192.168.4.1`). Stays up if STA is connected. Skips SoftAP idle shutdown until `AP_STOP`. Does not start HTTP if `WEBUI_STOP` is held |
 | `AP_STOP` | none | Stops SoftAP and holds auto-raise. HTTP stays if STA is up |
 | `AP_STATUS` | none | Dumps SoftAP state (never the device password) |
 

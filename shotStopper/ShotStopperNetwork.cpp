@@ -1312,6 +1312,7 @@ void ShotStopperNetwork::service() {
   portENTER_CRITICAL(&dataMux_);
   status_.apClients = apClients;
   portEXIT_CRITICAL(&dataMux_);
+  serviceSoftApIdle(now);
   refreshExtendedStatus(now);
 
   // Gate check is a 16-byte ControlGateSnapshot, not the 4 KiB status
@@ -1379,10 +1380,15 @@ bool ShotStopperNetwork::startNetwork() {
     startStation(settings, now);
     startupComplete_ = true;
     return true;
-  } else {
-    startupComplete_ = ensureAccessPoint(now);
-    return startupComplete_;
   }
+  if (apAutoRaiseExhausted_ || apStartHeld_) {
+    lifecycleLog(apStartHeld_ ? "SoftAP raise held at boot"
+                              : "SoftAP auto-raise exhausted at boot");
+    startupComplete_ = false;
+    return false;
+  }
+  startupComplete_ = ensureAccessPoint(now);
+  return startupComplete_;
 }
 
 void ShotStopperNetwork::publishConfiguredAddressStatus() {
@@ -1760,6 +1766,7 @@ void ShotStopperNetwork::stopSoftAp(bool stopHttp) {
   }
   status_.windowRemainingMs = 0;
   portEXIT_CRITICAL(&dataMux_);
+  clearSoftApIdleState();
   log(DebugCategory::NETWORK, DebugCode::AP_STOPPED);
   lifecycleLog(stopHttp ? "WiFi SoftAP stopped; HTTP stopped"
                         : "WiFi SoftAP stopped; HTTP kept");
@@ -1772,6 +1779,62 @@ void ShotStopperNetwork::stopSoftApKeepStation() {
 
 void ShotStopperNetwork::stopSoftApLeaveHttp() {
   stopSoftAp(false);
+}
+
+void ShotStopperNetwork::clearSoftApIdleState() {
+  apIdleDeadlineMs_ = 0;
+  lastApClients_ = 0;
+}
+
+void ShotStopperNetwork::armSoftApIdleDeadline(uint32_t now) {
+  if (apKeepRequested_) {
+    clearSoftApIdleState();
+    return;
+  }
+  apIdleDeadlineMs_ = now + SOFTAP_IDLE_TIMEOUT_MS;
+  lastApClients_ = 0;
+}
+
+void ShotStopperNetwork::serviceSoftApIdle(uint32_t now) {
+  NetworkStatusSnapshot status = snapshot();
+  if (!status.apActive || apKeepRequested_) {
+    if (!status.apActive) {
+      clearSoftApIdleState();
+    } else {
+      lastApClients_ = status.apClients;
+      apIdleDeadlineMs_ = 0;
+    }
+    return;
+  }
+
+  const uint8_t clients = status.apClients;
+  if (clients > 0) {
+    apIdleDeadlineMs_ = 0;
+    lastApClients_ = clients;
+    return;
+  }
+
+  // Zero SoftAP stations: arm/re-arm on raise or when the last client leaves.
+  if (lastApClients_ > 0 || apIdleDeadlineMs_ == 0) {
+    armSoftApIdleDeadline(now);
+  }
+  lastApClients_ = 0;
+
+  if (apIdleDeadlineMs_ == 0 ||
+      static_cast<int32_t>(now - apIdleDeadlineMs_) < 0) {
+    return;
+  }
+
+  apAutoRaiseExhausted_ = true;
+  clearSoftApIdleState();
+  lifecycleLog("WiFi SoftAP idle timeout; SoftAP down for rest of boot");
+  const bool staUp = status.staState == StaState::CONNECTED &&
+                     WiFi.status() == WL_CONNECTED;
+  if (staUp) {
+    stopSoftApLeaveHttp();
+  } else {
+    stopSoftAp(true);
+  }
 }
 
 bool ShotStopperNetwork::wifiScanInProgress() {
@@ -1825,6 +1888,11 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
   NetworkStatusSnapshot status = snapshot();
   if (!force && status.apActive && status.networkActive && server_ != nullptr) {
     return true;
+  }
+  if (!force && (apAutoRaiseExhausted_ || apStartHeld_)) {
+    lifecycleLog(apStartHeld_ ? "SoftAP raise held"
+                              : "SoftAP auto-raise exhausted");
+    return false;
   }
 
   abortWifiScan(now, false);
@@ -1883,9 +1951,11 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
     status_.apActive = false;
     status_.networkActive = false;
     portEXIT_CRITICAL(&dataMux_);
+    clearSoftApIdleState();
     applyWifiPowerSave();
     return false;
   }
+  armSoftApIdleDeadline(now);
   applyWifiPowerSave();
   return true;
 }
@@ -1912,6 +1982,7 @@ void ShotStopperNetwork::stopNetwork() {
   clearStaLinkMetrics();
   status_.windowRemainingMs = 0;
   portEXIT_CRITICAL(&dataMux_);
+  clearSoftApIdleState();
   log(DebugCategory::NETWORK, DebugCode::AP_STOPPED);
 }
 
@@ -2110,8 +2181,9 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       return;
     }
     lifecycleLog("WiFi STA failed; SoftAP up, STA retry continues");
-    if (apStartHeld_) {
-      lifecycleLog("SoftAP raise held after STA fail");
+    if (apStartHeld_ || apAutoRaiseExhausted_) {
+      lifecycleLog(apStartHeld_ ? "SoftAP raise held after STA fail"
+                                : "SoftAP auto-raise exhausted after STA fail");
       startupFailures_ = 0;
       portENTER_CRITICAL(&dataMux_);
       status_.startupFailures = 0;
@@ -2140,17 +2212,17 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
   }
 
   // SoftAP after STA bootstrap window while still DISCONNECTED/FAILED (e.g.
-  // scan delayed the reconnect begin). Never after a prior CONNECTED session.
-  // Also skip while brew RF is active so SoftAP raise cannot steal airtime.
+  // scan delayed the reconnect begin). Never after a prior CONNECTED session,
+  // AP_STOP hold, or SoftAP idle exhaustion. Also skip while brew RF is active
+  // so SoftAP raise cannot steal airtime.
   if (!staEverConnected_ && !status.apActive && !brewRf && !scaleConnecting &&
+      !apStartHeld_ && !apAutoRaiseExhausted_ &&
       (status.staState == StaState::DISCONNECTED ||
        status.staState == StaState::FAILED) &&
       static_cast<uint32_t>(millis() - staConnectStartedAtMs_) >=
           STA_CONNECT_TIMEOUT_MS &&
       !wifiScanInProgress()) {
-    if (apStartHeld_) {
-      lifecycleLog("SoftAP raise held");
-    } else if (!ensureAccessPoint(now)) {
+    if (!ensureAccessPoint(now)) {
       startupComplete_ = false;
       if (startupFailures_ < UINT8_MAX) {
         ++startupFailures_;

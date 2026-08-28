@@ -582,7 +582,8 @@ is a separate 3 s hold. See [Emergency recovery](EMERGENCY_RECOVERY.md).
 
 **Purpose.** Join the configured home network without fighting BLE
 mid-shot. SoftAP raise is **boot/bootstrap only** after a successful
-STA join.
+STA join. Auto SoftAP also idle-stops after 3 minutes with zero SoftAP
+stations (latched for the rest of the boot; USB `AP_START` still works).
 
 Source: `ShotStopperNetwork.h`.
 
@@ -590,10 +591,10 @@ Source: `ShotStopperNetwork.h`.
 
 | State | Meaning |
 | --- | --- |
-| `NOT_CONFIGURED` | No saved STA credentials. |
+| `NOT_CONFIGURED` | No saved STA credentials. SoftAP at boot with idle shutdown. |
 | `CONNECTING` | `WiFi.begin` in flight (25 s connect timeout). |
 | `CONNECTED` | STA has a link. NTP may arm. SoftAP auto-raise is latched off for this boot. |
-| `FAILED` | Connect timed out or was rejected. Retry / recovery timers apply. |
+| `FAILED` | Connect timed out or was rejected. SoftAP may raise once if STA never joined this boot; then retry / recovery timers apply. |
 | `DISCONNECTED` | Had a link (or was configured) and lost it. Reconnect interval 10 s; SoftAP does **not** come back automatically after `staEverConnected_`. |
 
 ### Events
