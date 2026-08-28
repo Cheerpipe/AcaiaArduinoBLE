@@ -263,6 +263,9 @@ constexpr size_t SCALE_MAC_CAPACITY = 18;
 constexpr size_t SCALE_NAME_CAPACITY = 32;
 constexpr size_t ACAIA_MAC_CAPACITY = SCALE_MAC_CAPACITY;
 constexpr size_t ACAIA_NAME_CAPACITY = SCALE_NAME_CAPACITY;
+#ifndef SCALE_LINK_RSSI_UNAVAILABLE
+#define SCALE_LINK_RSSI_UNAVAILABLE 127
+#endif
 
 enum class ScaleDisconnectReason : uint8_t {
   NONE,
@@ -569,6 +572,9 @@ class EspressoScaleBLE {
   uint8_t connectStepId() const { return connectStep; }
   uint32_t rejectedPacketCount() const { return rejectedPackets; }
   uint32_t reconnectCount() const { return reconnects; }
+  int linkRssi() const {
+    return connected ? linkRssiValue : SCALE_LINK_RSSI_UNAVAILABLE;
+  }
 
   bool connected = false;
   bool scanning = false;
@@ -616,6 +622,7 @@ class EspressoScaleBLE {
   ScaleDisconnectReason disconnectReason = ScaleDisconnectReason::NONE;
   uint32_t rejectedPackets = 0;
   uint32_t reconnects = 0;
+  int linkRssiValue = SCALE_LINK_RSSI_UNAVAILABLE;
   size_t tareCalls = 0;
   size_t startTimerCalls = 0;
   size_t stopTimerCalls = 0;

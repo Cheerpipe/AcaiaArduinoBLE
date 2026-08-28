@@ -279,7 +279,7 @@ if (!network.includes('copyTaskProfiler') ||
     !network.includes('static constexpr size_t kStatusJson = 12288') ||
     !networkHeader.includes('void (*copyTaskProfiler)(TaskProfilerSnapshot &out)') ||
     !fs.readFileSync(path.join(sketchDir, 'ShotStopperDebugExport.h'), 'utf8')
-        .includes('DEBUG_EXPORT_SCHEMA_VERSION = 4')) {
+        .includes('DEBUG_EXPORT_SCHEMA_VERSION = 5')) {
   throw new Error(
       'Diagnostic status, POST /api/v1/diagnostic/profiler, and debug export must expose tasks');
 }
@@ -2220,6 +2220,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('id="dRecovery"') ||
       !diagHtml.includes('id="dStream"') ||
       !diagHtml.includes('id="dControl"') ||
+      !diagHtml.includes('id="dScaleRssi"') ||
       !diagHtml.includes('id="hRecoveredStales"') ||
       !diagHtml.includes('id="hStaleTime"') ||
       !ui.includes("t('dMachine',s.machineState)") ||
@@ -2234,6 +2235,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes("t('dReed',s.reedOn?'ON':'OFF')") ||
       !ui.includes("t('dStream',sc.streamState)") ||
       !ui.includes("t('dControl',sc.controlState)") ||
+      !ui.includes("t('dScaleRssi',typeof sc.rssi==='number'?sc.rssi+' dBm':'')") ||
       !ui.includes("t('hRecoveredStales',String(sc.recoveredStaleCount))") ||
       !ui.includes("t('hStaleTime',typeof sc.recoveredStaleMs==='number'?sc.recoveredStaleMs+' ms':'')") ||
       !diagHtml.includes('<strong>Heap min</strong>') ||
@@ -3481,6 +3483,15 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     if (!diagBody.includes(field)) {
       throw new Error('status/diagnostic missing required field: ' + field);
     }
+  }
+  if (!diagBody.includes('\\"recoveredStaleMs\\":%lu,\\"rssi\\":%s}') ||
+      !network.includes('scaleRssiJson') ||
+      !network.includes('\\"lastDisconnectReasonName\\":\\"%s\\",\\"rssi\\":%s}') ||
+      !firmware.includes('serviceScaleLinkRssi') ||
+      !firmware.includes('SCALE_LINK_RSSI_SAMPLE_MS') ||
+      !firmware.includes('linkRssi()')) {
+    throw new Error(
+        'status/diagnostic scale object and debug export must include connected-link RSSI');
   }
   if (!diagBody.includes('\\"serial\\":{\\"io4\\":\\"%s\\",\\"state\\":\\"%s\\"}') ||
       !network.includes('usbConsoleIo4StateId') ||

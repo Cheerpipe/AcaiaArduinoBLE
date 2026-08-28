@@ -37,6 +37,7 @@ struct PeripheralState {
     int connectCalls = 0;
     int disconnectCalls = 0;
     unsigned long timeoutMsAtConnect = 0;
+    int rssi = 127;
     std::vector<uint16_t> advertisedUuid16s;
     std::map<std::string, std::shared_ptr<CharacteristicState> >
         characteristics;
@@ -188,6 +189,9 @@ public:
         strncpy(buffer, src, capacity - 1);
         buffer[capacity - 1] = '\0';
         return strlen(buffer);
+    }
+    int rssi() {
+        return state_ ? state_->rssi : 127;
     }
     bool hasAdvertisedUuid16(uint16_t uuid) const {
         if (!state_) {

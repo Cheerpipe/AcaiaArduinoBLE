@@ -1938,6 +1938,8 @@ struct ControlStatusSnapshot {
   uint32_t scaleRecoveredStaleCount = 0;
   uint32_t scaleRecoveredStaleMs = 0;
   uint8_t scaleLastDisconnectReason = 0;
+  bool scaleRssiValid = false;
+  int8_t scaleRssi = 0;
   uint32_t uptimeMs = 0;
   // Recent loop gap: max over the last completed ~5 s health window (and any
   // larger gap already seen in the in-progress window). Lifetime max is

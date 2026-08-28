@@ -619,6 +619,8 @@ struct SerialCliScaleDump {
   uint32_t recoveredStaleCount = 0;
   uint32_t recoveredStaleMs = 0;
   uint8_t lastDisconnectReason = 0;
+  bool rssiValid = false;
+  int8_t rssi = 0;
   uint32_t workerAgeMs = 0;
   bool timerValid = false;
   uint32_t timerMs = 0;
@@ -868,6 +870,12 @@ inline void serialCliPrintScaleStatus(const SerialCliScaleDump &dump) {
   Serial.println(static_cast<unsigned long>(dump.connectionGeneration));
   Serial.print("lastDisconnectReason=");
   Serial.println(static_cast<unsigned>(dump.lastDisconnectReason));
+  Serial.print("rssi=");
+  if (dump.rssiValid) {
+    Serial.println(static_cast<int>(dump.rssi));
+  } else {
+    Serial.println("-");
+  }
   Serial.print("workerAgeMs=");
   Serial.println(static_cast<unsigned long>(dump.workerAgeMs));
   Serial.print("timerValid=");

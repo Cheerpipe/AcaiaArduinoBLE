@@ -1022,6 +1022,13 @@ uint32_t EspressoScaleBLE::reconnectCount() const {
     return _reconnects;
 }
 
+int EspressoScaleBLE::linkRssi() {
+    if (!_connected || !_hasPeripheral) {
+        return SCALE_LINK_RSSI_UNAVAILABLE;
+    }
+    return _peripheral.rssi();
+}
+
 bool EspressoScaleBLE::isScaleName(const char *name) const {
     return scaleNameIsCompatible(name);
 }

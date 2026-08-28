@@ -75,6 +75,8 @@ struct ScaleLinkSnapshot {
   uint32_t timerAgeMs;
   char protocolName[20];
   ScaleFeatureSet features;
+  bool rssiValid;
+  int8_t rssi;
 };
 
 }  // namespace shotstopper

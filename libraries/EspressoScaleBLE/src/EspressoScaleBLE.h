@@ -50,6 +50,7 @@
 #define MAX_CONSECUTIVE_REJECTED_PACKETS 8U
 #define SCALE_MAC_CAPACITY               18U
 #define SCALE_NAME_CAPACITY              32U
+#define SCALE_LINK_RSSI_UNAVAILABLE      127
 #define ACAIA_MAC_CAPACITY               SCALE_MAC_CAPACITY
 #define ACAIA_NAME_CAPACITY              SCALE_NAME_CAPACITY
 
@@ -142,6 +143,7 @@ class EspressoScaleBLE {
         uint32_t lastValidPacketAgeMs() const;
         uint32_t rejectedPacketCount() const;
         uint32_t reconnectCount() const;
+        int linkRssi();
 
     private:
         bool isScaleName(const char *name) const;

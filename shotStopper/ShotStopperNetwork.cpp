@@ -4113,6 +4113,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   char staRssiJson[16] = "null";
   char staSignalQualityJson[16] = "null";
   char staChannelJson[8] = "null";
+  char scaleRssiJson[16] = "null";
   if (control.currentWeightValid) {
     snprintf(currentWeight, sizeof(currentWeight), "%.2f",
              static_cast<double>(control.currentWeightG));
@@ -4138,6 +4139,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   if (network.staState == StaState::CONNECTED && network.channel != 0) {
     snprintf(staChannelJson, sizeof(staChannelJson), "%u",
              static_cast<unsigned>(network.channel));
+  }
+  if (control.scaleRssiValid) {
+    snprintf(scaleRssiJson, sizeof(scaleRssiJson), "%d",
+             static_cast<int>(control.scaleRssi));
   }
 
   char safeNtpCustom[NTP_SERVER_HOST_CAPACITY] = {};
@@ -4642,7 +4647,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"packetGaps\":%lu,\"rejectedPackets\":%lu,"
         "\"reconnects\":%lu,\"lastDisconnectReasonName\":\"%s\","
         "\"eventsDropped\":%lu,\"recoveredStaleCount\":%lu,"
-        "\"recoveredStaleMs\":%lu},"
+        "\"recoveredStaleMs\":%lu,\"rssi\":%s},"
         "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"},"
         "\"compileFlags\":{\"buzzer\":\"%s\",\"remoteMachineControl\":%s,"
         "\"arch\":\"%s\",\"machineType\":\"%s\",\"stopPulseMs\":%lu,"
@@ -4722,6 +4727,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.scaleEventsDropped),
         static_cast<unsigned long>(control.scaleRecoveredStaleCount),
         static_cast<unsigned long>(control.scaleRecoveredStaleMs),
+        scaleRssiJson,
         static_cast<unsigned long>(network.lastCommandRequestId),
         commandResultStateName(network.lastCommandState),
         compiledBuzzerModeId(),
@@ -5246,6 +5252,12 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            static_cast<double>(x.cupHoleWeightG),
            static_cast<double>(x.cupPlaceCandidateWeightG));
 
+  char scaleLinkRssiJson[16] = "null";
+  if (c.scaleRssiValid) {
+    snprintf(scaleLinkRssiJson, sizeof(scaleLinkRssiJson), "%d",
+             static_cast<int>(c.scaleRssi));
+  }
+
   ok = ok &&
        debugExportChunkf(
            request, buf, cap,
@@ -5255,7 +5267,7 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            "\"recoveredStaleCount\":%lu,\"recoveredStaleMs\":%lu,"
            "\"workerProgressAtMs\":%lu,\"timerValid\":%s,\"timerMs\":%lu,"
            "\"timerAgeMs\":%lu,\"protocol\":\"%s\","
-           "\"lastDisconnectReasonName\":\"%s\"},",
+           "\"lastDisconnectReasonName\":\"%s\",\"rssi\":%s},",
            debugExportScaleLinkStateName(x.scaleLinkState),
            static_cast<unsigned long>(x.scaleDisconnectSequence),
            static_cast<unsigned long>(x.scaleConnectionGeneration),
@@ -5269,7 +5281,8 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            x.scaleTimerValid ? "true" : "false",
            static_cast<unsigned long>(x.scaleTimerMs),
            static_cast<unsigned long>(x.scaleTimerAgeMs), x.scaleProtocolName,
-           scaleDisconnectReasonName(c.scaleLastDisconnectReason));
+           scaleDisconnectReasonName(c.scaleLastDisconnectReason),
+           scaleLinkRssiJson);
 
   char safeStaSsid[WIFI_SSID_CAPACITY] = {};
   sanitizeJsonEmbed(network.staSsid, safeStaSsid, sizeof(safeStaSsid));

@@ -291,6 +291,7 @@ void testNonBlockingScanConnectsWithoutInit() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
     EspressoScaleBLE scale(false);
+    CHECK(scale.linkRssi() == SCALE_LINK_RSSI_UNAVAILABLE);
     CHECK(scale.startScan());
     CHECK(pollUntilConnected(scale));
     CHECK(scale.isConnected());
@@ -299,6 +300,10 @@ void testNonBlockingScanConnectsWithoutInit() {
     CHECK(fixture.peripheral->connected);
     CHECK(strcmp(scale.address(), "01:02:03:04:05:06") == 0);
     CHECK(strcmp(scale.localName(), "PYXIS") == 0);
+    fixture.peripheral->rssi = -64;
+    CHECK(scale.linkRssi() == -64);
+    scale.disconnect();
+    CHECK(scale.linkRssi() == SCALE_LINK_RSSI_UNAVAILABLE);
 }
 
 void testConnectFilterUsesNameScan() {

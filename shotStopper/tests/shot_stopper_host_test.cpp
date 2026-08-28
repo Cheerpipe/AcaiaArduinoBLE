@@ -209,6 +209,9 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   recoverableStaleConnectionGeneration = 0;
   telemetryWeightStreamState = WeightStreamState::NO_SAMPLE;
   scaleLastDisconnectReason = 0;
+  scaleLinkRssiValid = false;
+  scaleLinkRssi = 0;
+  lastScaleLinkRssiSampleMs = 0;
   scaleTimerValid = false;
   scaleTimerMs = 0;
   scaleTimerAgeMs = 0;
@@ -1591,6 +1594,44 @@ void r12b_discovery_clears_stale_connected_link_snapshot() {
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(getScaleLinkSnapshot().state == ScaleLinkState::DISCONNECTED);
   CHECK(!scaleAvailable());
+}
+
+void r12c_connected_link_rssi_samples_and_clears() {
+  resetHarness(false, true);
+  scale.linkRssiValue = -64;
+  serviceScaleLinkRssi(1000);
+  ScaleLinkSnapshot snap = getScaleLinkSnapshot();
+  CHECK(snap.rssiValid);
+  CHECK(snap.rssi == -64);
+  publishControlStatus();
+  ControlStatusSnapshot status;
+  copyControlStatus(status);
+  CHECK(status.scaleRssiValid);
+  CHECK(status.scaleRssi == -64);
+
+  scale.linkRssiValue = -40;
+  serviceScaleLinkRssi(1500);
+  snap = getScaleLinkSnapshot();
+  CHECK(snap.rssiValid);
+  CHECK(snap.rssi == -64);
+
+  serviceScaleLinkRssi(2000);
+  snap = getScaleLinkSnapshot();
+  CHECK(snap.rssi == -40);
+
+  scale.linkRssiValue = SCALE_LINK_RSSI_UNAVAILABLE;
+  serviceScaleLinkRssi(3000);
+  snap = getScaleLinkSnapshot();
+  CHECK(!snap.rssiValid);
+
+  scale.linkRssiValue = -70;
+  serviceScaleLinkRssi(4000);
+  setScaleConnected(false);
+  snap = getScaleLinkSnapshot();
+  CHECK(!snap.rssiValid);
+  publishControlStatus();
+  copyControlStatus(status);
+  CHECK(!status.scaleRssiValid);
 }
 
 void r13_full_queue_prevents_stop_without_delaying_relay_open() {
@@ -8009,7 +8050,14 @@ void sc15_status_printers_use_dump_views() {
   CHECK(serialTxContains("preferredMac=AA:BB:CC:DD:EE:FF"));
   CHECK(serialTxContains("recoveredStaleCount=0"));
   CHECK(serialTxContains("recoveredStaleMs=0"));
+  CHECK(serialTxContains("rssi=-"));
   CHECK(serialTxContains("weightG=18.50"));
+
+  scale.rssiValid = true;
+  scale.rssi = -62;
+  Serial.tx.clear();
+  serialCliPrintScaleStatus(scale);
+  CHECK(serialTxContains("rssi=-62"));
 
   SerialCliNtpDump ntp;
   ntp.state = TimeSyncState::SYNCED;
@@ -10485,6 +10533,7 @@ const TestCase testCases[] = {
     {"R11", r11_final_shot_analysis_updates_only_valid_offset},
     {"R12", r12_scale_worker_service_publishes_weight_and_detects_failure},
     {"R12b", r12b_discovery_clears_stale_connected_link_snapshot},
+    {"R12c", r12c_connected_link_rssi_samples_and_clears},
     {"R13", r13_full_queue_prevents_stop_without_delaying_relay_open},
     {"R14", r14_invalid_runtime_configuration_is_transactionally_rejected},
     {"R15", r15_gptimer_opens_circuit_without_arduino_or_esp_timer_tasks},

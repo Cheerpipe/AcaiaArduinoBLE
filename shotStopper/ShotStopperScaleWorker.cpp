@@ -96,6 +96,9 @@ uint32_t scaleTimerMs = 0;
 uint32_t scaleTimerAgeMs = 0;
 char scaleProtocolName[20] = "none";
 ScaleFeatureSet scaleLinkFeatures = {};
+bool scaleLinkRssiValid = false;
+int8_t scaleLinkRssi = 0;
+uint32_t lastScaleLinkRssiSampleMs = 0;
 char scalePreferredMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
 char scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY] = {};
 ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY] = {};
@@ -230,6 +233,8 @@ ScaleLinkSnapshot getScaleLinkSnapshot() {
   snapshot.timerAgeMs = scaleTimerAgeMs;
   memcpy(snapshot.protocolName, scaleProtocolName, sizeof(snapshot.protocolName));
   snapshot.features = scaleLinkFeatures;
+  snapshot.rssiValid = scaleLinkRssiValid;
+  snapshot.rssi = scaleLinkRssi;
   portEXIT_CRITICAL(&scaleLinkMux);
   return snapshot;
 }
@@ -262,6 +267,9 @@ void setScaleLinkState(ScaleLinkState state) {
     scaleTimerMs = 0;
     scaleTimerAgeMs = 0;
     scaleLinkFeatures = scaleFeatureSetNone();
+    scaleLinkRssiValid = false;
+    scaleLinkRssi = 0;
+    lastScaleLinkRssiSampleMs = 0;
   }
   portEXIT_CRITICAL(&scaleLinkMux);
   if (previous != state) {
@@ -1142,6 +1150,33 @@ void resetScaleWorkerRadioStateForHost() {
   bookooConnectBeepPending = false;
   bookooConnectBeepSawWeight = false;
   bookooConnectBeepArmedAtMs = 0;
+  scaleLinkRssiValid = false;
+  scaleLinkRssi = 0;
+  lastScaleLinkRssiSampleMs = 0;
+}
+
+void serviceScaleLinkRssi(uint32_t nowMs) {
+  if (!scale.isConnected()) {
+    lastScaleLinkRssiSampleMs = 0;
+    portENTER_CRITICAL(&scaleLinkMux);
+    scaleLinkRssiValid = false;
+    scaleLinkRssi = 0;
+    portEXIT_CRITICAL(&scaleLinkMux);
+    return;
+  }
+  if (lastScaleLinkRssiSampleMs != 0 &&
+      static_cast<uint32_t>(nowMs - lastScaleLinkRssiSampleMs) <
+          SCALE_LINK_RSSI_SAMPLE_MS) {
+    return;
+  }
+  lastScaleLinkRssiSampleMs = nowMs;
+  const int raw = scale.linkRssi();
+  const bool valid = raw != SCALE_LINK_RSSI_UNAVAILABLE && raw >= -128 &&
+                     raw <= 126;
+  portENTER_CRITICAL(&scaleLinkMux);
+  scaleLinkRssiValid = valid;
+  scaleLinkRssi = valid ? static_cast<int8_t>(raw) : 0;
+  portEXIT_CRITICAL(&scaleLinkMux);
 }
 
 void applyLiveBleScanIntensity(BleScanIntensity intensity) {
@@ -1565,6 +1600,7 @@ void scaleWorkerTask(void *) {
     if (linked) {
       connectAttemptSeriesActive = false;
       serviceScaleWorkerLink();
+      serviceScaleLinkRssi(nowMs);
       if (linkSnapshotDue) {
         lastLinkSnapshotMs = nowMs;
         updateWorkerLinkState();

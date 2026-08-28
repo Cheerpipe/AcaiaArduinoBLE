@@ -4662,6 +4662,8 @@ void publishControlStatus() {
   next.scaleRejectedPackets = scaleLink.rejectedPackets;
   next.scaleReconnects = scaleLink.reconnects;
   next.scaleLastDisconnectReason = scaleLink.lastDisconnectReason;
+  next.scaleRssiValid = scaleLink.rssiValid;
+  next.scaleRssi = scaleLink.rssi;
   next.uptimeMs = elapsedMs(bootStartedAtMs);
   next.loopIntervalGapMs =
       healthIntervalMaxGapMs > loopIntervalGapMs ? healthIntervalMaxGapMs
@@ -5042,6 +5044,8 @@ void serialCliPrintLiveScaleStatus() {
   dump.recoveredStaleCount = scaleRecoveredStaleCount;
   dump.recoveredStaleMs = scaleRecoveredStaleMs;
   dump.lastDisconnectReason = link.lastDisconnectReason;
+  dump.rssiValid = link.rssiValid;
+  dump.rssi = link.rssi;
   dump.workerAgeMs = elapsedMs(link.workerProgressAtMs);
   dump.timerValid = link.timerValid;
   dump.timerMs = link.timerMs;
