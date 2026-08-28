@@ -883,6 +883,17 @@ if (ui.includes('bleCompanionEnabled" type="checkbox" role="switch" checked>') |
         'PUT scanIntensity must apply live and must not set restartRequired');
   }
 }
+if (!domain.includes('DebugCode::SCALE_SCAN_STARTED') ||
+    !domain.includes('DebugCode::SCALE_GATT_CONNECTING') ||
+    !domain.includes('DebugCode::SCALE_CONNECT_ATTEMPT_FAILED') ||
+    !domain.includes('DebugCode::SCALE_CONNECT_FAILED') ||
+    !domain.includes('scale connect failed: %s (step=%s)') ||
+    !firmware.includes('logScaleScanStarted') ||
+    !firmware.includes('SCALE_GATT_CONNECTING') ||
+    firmware.includes('addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_CONNECTING)')) {
+  throw new Error(
+      'Scale discovery debug must report scan, GATT connect, attempt, and fail reason');
+}
 if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0') ||
     !domain.includes('SHOT_STOPPER_ENABLE_BUZZER must be 0 (off) or 1 (passive RTTTL)') ||
     !domain.includes('compiledBuzzerModeId') ||

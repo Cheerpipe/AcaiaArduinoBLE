@@ -2206,8 +2206,20 @@ enum class DebugCode : uint8_t {
   OTA_IMAGE_CONFIRMED,
   OTA_ROLLBACK_ARMED,
   OTA_ROLLBACK_FAILED,
-  RELAY_GPIO_DESYNC
+  RELAY_GPIO_DESYNC,
+  SCALE_SCAN_STARTED,
+  SCALE_SCAN_WAITING,
+  SCALE_GATT_CONNECTING,
+  SCALE_CONNECT_ATTEMPT_FAILED,
+  SCALE_CONNECT_FAILED
 };
+
+// argument1 for SCALE_SCAN_STARTED / SCALE_GATT_CONNECTING.
+constexpr int32_t SCALE_SCAN_TARGET_ANY = 0;
+constexpr int32_t SCALE_SCAN_TARGET_PREFERRED = 1;
+// argument1 for SCALE_SCAN_WAITING.
+constexpr int32_t SCALE_SCAN_WAIT_NO_ADVERT = 0;
+constexpr int32_t SCALE_SCAN_WAIT_OTHER_SCALE = 1;
 
 // Health telemetry thresholds. Never close or open the machine circuit from
 // these samples. Sustained internal-heap pressure may request a safe restart
@@ -2459,11 +2471,14 @@ inline LogLevel debugCodeDefaultLevel(DebugCode code) {
     case DebugCode::HEALTH_LOOP_GAP:
     case DebugCode::OTA_UPLOAD_REJECTED:
     case DebugCode::RELAY_GPIO_DESYNC:
+    case DebugCode::SCALE_CONNECT_ATTEMPT_FAILED:
+    case DebugCode::SCALE_CONNECT_FAILED:
       return LogLevel::WARNING;
     case DebugCode::OTA_ROLLBACK_ARMED:
     case DebugCode::OTA_ROLLBACK_FAILED:
       return LogLevel::CRITICAL;
     case DebugCode::SCALE_CONNECTING:
+    case DebugCode::SCALE_SCAN_WAITING:
     case DebugCode::SCALE_TIMER_START_OK:
     case DebugCode::SCALE_TIMER_STOP_OK:
     case DebugCode::SCALE_BEEP_OK:
@@ -2541,6 +2556,12 @@ inline const char *debugCodeName(DebugCode code) {
       return "configured wall limit reached";
     case DebugCode::STATE_TRANSITION: return "state transition";
     case DebugCode::SCALE_CONNECTING: return "scale connecting";
+    case DebugCode::SCALE_SCAN_STARTED: return "scale scan started";
+    case DebugCode::SCALE_SCAN_WAITING: return "scale scan waiting";
+    case DebugCode::SCALE_GATT_CONNECTING: return "scale GATT connecting";
+    case DebugCode::SCALE_CONNECT_ATTEMPT_FAILED:
+      return "scale GAP connect attempt failed";
+    case DebugCode::SCALE_CONNECT_FAILED: return "scale connect failed";
     case DebugCode::SCALE_CONNECTED: return "scale connected";
     case DebugCode::SCALE_DISCONNECTED: return "scale disconnected";
     case DebugCode::SCALE_TIMER_START_OK: return "scale timer started";
@@ -2805,6 +2826,40 @@ inline bool formatPersistDebugMessage(const DebugEvent &event, char *message,
   }
 }
 
+inline const char *scaleDisconnectReasonDebugName(int32_t reason) {
+  switch (reason) {
+    case 0: return "none";
+    case 1: return "user request";
+    case 2: return "scan start failed";
+    case 3: return "scan timeout";
+    case 4: return "connect failed";
+    case 5: return "discovery failed";
+    case 6: return "unsupported scale";
+    case 7: return "subscribe failed";
+    case 8: return "initialization write failed";
+    case 9: return "remote disconnected";
+    case 10: return "first packet timeout";
+    case 11: return "packet timeout";
+    case 12: return "invalid packet stream";
+    case 13: return "command write failed";
+    case 14: return "supervision timeout";
+    case 15: return "connection failed to be established";
+  }
+  return "unknown";
+}
+
+inline const char *scaleConnectStepDebugName(int32_t step) {
+  switch (step) {
+    case 1: return "settle";
+    case 2: return "connect";
+    case 3: return "discover";
+    case 4: return "configure";
+    case 5: return "subscribe";
+    case 6: return "init writes";
+    default: return "idle";
+  }
+}
+
 inline const char *endReasonDebugName(EndReason reason) {
   switch (reason) {
     case EndReason::NONE: return "none";
@@ -2916,6 +2971,43 @@ inline bool formatLifecycleDebugMessage(const DebugEvent &event, char *message,
     case DebugCode::HEALTH_LOOP_GAP:
       snprintf(message, capacity, "health loop gap high max=%ld ms",
                static_cast<long>(event.argument1));
+      return true;
+    case DebugCode::SCALE_SCAN_STARTED:
+      snprintf(message, capacity, "scale scan started (%s, intensity=%s)",
+               event.argument1 == SCALE_SCAN_TARGET_PREFERRED ? "preferred"
+                                                              : "any",
+               bleScanIntensityName(clampBleScanIntensity(
+                   static_cast<uint8_t>(event.argument2))));
+      return true;
+    case DebugCode::SCALE_SCAN_WAITING:
+      snprintf(message, capacity, "scale scan waiting: %s",
+               event.argument1 == SCALE_SCAN_WAIT_OTHER_SCALE
+                   ? "other scale seen"
+                   : "no advertisement");
+      return true;
+    case DebugCode::SCALE_GATT_CONNECTING:
+      snprintf(message, capacity, "scale GATT connecting (%s)",
+               event.argument1 == SCALE_SCAN_TARGET_PREFERRED ? "preferred"
+                                                              : "any");
+      return true;
+    case DebugCode::SCALE_CONNECT_ATTEMPT_FAILED:
+      snprintf(message, capacity,
+               "scale GAP connect attempt %ld failed (step=%s)",
+               static_cast<long>(event.argument1),
+               scaleConnectStepDebugName(event.argument2));
+      return true;
+    case DebugCode::SCALE_CONNECT_FAILED:
+      snprintf(message, capacity, "scale connect failed: %s (step=%s)",
+               scaleDisconnectReasonDebugName(event.argument1),
+               scaleConnectStepDebugName(event.argument2));
+      return true;
+    case DebugCode::SCALE_DISCONNECTED:
+      if (event.argument1 <= 0) {
+        copyCString(message, capacity, debugCodeName(event.code));
+      } else {
+        snprintf(message, capacity, "scale disconnected: %s",
+                 scaleDisconnectReasonDebugName(event.argument1));
+      }
       return true;
     case DebugCode::SCALE_PACKET_GAP:
       snprintf(message, capacity, "scale packet gap seq=%ld dt=%ld ms",

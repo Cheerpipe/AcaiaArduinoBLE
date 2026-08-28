@@ -365,6 +365,12 @@ class EspressoScaleBLE {
         directedScan = false;
         return true;
       }
+      if (pollScanFailsConnect) {
+        connecting = false;
+        scanning = false;
+        directedScan = false;
+        return false;
+      }
       return false;
     }
     if (!scanning) {
@@ -373,10 +379,10 @@ class EspressoScaleBLE {
     if (pollScanConnects) {
       connecting = true;
       scanning = false;
-      directedScan = false;
       if (pollScanStepsToConnect <= 1) {
         connected = true;
         connecting = false;
+        directedScan = false;
         return true;
       }
       --pollScanStepsToConnect;
@@ -526,11 +532,33 @@ class EspressoScaleBLE {
   const char* lastDisconnectReasonName() const {
     switch (disconnectReason) {
       case ScaleDisconnectReason::NONE: return "none";
+      case ScaleDisconnectReason::USER_REQUEST: return "user request";
       case ScaleDisconnectReason::SCAN_START_FAILED: return "scan start failed";
       case ScaleDisconnectReason::SCAN_TIMEOUT: return "scan timeout";
+      case ScaleDisconnectReason::CONNECT_FAILED: return "connect failed";
+      case ScaleDisconnectReason::DISCOVERY_FAILED: return "discovery failed";
+      case ScaleDisconnectReason::UNSUPPORTED_SCALE: return "unsupported scale";
+      case ScaleDisconnectReason::SUBSCRIBE_FAILED: return "subscribe failed";
+      case ScaleDisconnectReason::INITIALIZATION_WRITE_FAILED:
+        return "initialization write failed";
+      case ScaleDisconnectReason::REMOTE_DISCONNECTED:
+        return "remote disconnected";
+      case ScaleDisconnectReason::FIRST_PACKET_TIMEOUT:
+        return "first packet timeout";
+      case ScaleDisconnectReason::PACKET_TIMEOUT: return "packet timeout";
+      case ScaleDisconnectReason::INVALID_PACKET_STREAM:
+        return "invalid packet stream";
+      case ScaleDisconnectReason::COMMAND_WRITE_FAILED:
+        return "command write failed";
+      case ScaleDisconnectReason::SUPERVISION_TIMEOUT:
+        return "supervision timeout";
+      case ScaleDisconnectReason::CONNECTION_FAILED_TO_ESTABLISH:
+        return "connection failed to be established";
       default: return "unknown";
     }
   }
+  uint8_t connectAttemptCount() const { return connectAttempts; }
+  uint8_t connectStepId() const { return connectStep; }
   uint32_t rejectedPacketCount() const { return rejectedPackets; }
   uint32_t reconnectCount() const { return reconnects; }
 
@@ -541,7 +569,10 @@ class EspressoScaleBLE {
   bool seenPending = false;
   bool startScanSucceeds = true;
   bool pollScanConnects = false;
+  bool pollScanFailsConnect = false;
   int pollScanStepsToConnect = 1;
+  uint8_t connectAttempts = 0;
+  uint8_t connectStep = 0;
   bool lastForceRestart = false;
   uint16_t lastScanInterval = BLE_SCAN_NORMAL_INTERVAL;
   uint16_t lastScanWindow = BLE_SCAN_NORMAL_WINDOW;

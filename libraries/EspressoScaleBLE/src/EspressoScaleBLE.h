@@ -136,6 +136,8 @@ class EspressoScaleBLE {
 
         ScaleDisconnectReason lastDisconnectReason() const;
         const char* lastDisconnectReasonName() const;
+        uint8_t connectAttemptCount() const;
+        uint8_t connectStepId() const;
         uint32_t lastValidPacketAgeMs() const;
         uint32_t rejectedPacketCount() const;
         uint32_t reconnectCount() const;

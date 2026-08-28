@@ -985,6 +985,14 @@ const char* EspressoScaleBLE::lastDisconnectReasonName() const {
     return "unknown";
 }
 
+uint8_t EspressoScaleBLE::connectAttemptCount() const {
+    return _connectAttempts;
+}
+
+uint8_t EspressoScaleBLE::connectStepId() const {
+    return static_cast<uint8_t>(_connectStep);
+}
+
 uint32_t EspressoScaleBLE::lastValidPacketAgeMs() const {
     return _hasValidPacket ? elapsedSince(_lastPacket) : 0xffffffffUL;
 }

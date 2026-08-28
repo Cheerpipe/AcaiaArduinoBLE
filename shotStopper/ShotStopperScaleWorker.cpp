@@ -122,6 +122,9 @@ bool scaleCompletionBeepPending = false;
 uint16_t scaleScanAppliedInterval = 0;
 uint16_t scaleScanAppliedWindow = 0;
 uint32_t scaleHuntRfUntilMs = 0;
+bool scaleLoggedGattConnecting = false;
+uint8_t scaleLoggedGattConnectAttempts = 0;
+bool scaleDiscoveryDirected = false;
 std::atomic<uint8_t> liveBleScanIntensityRaw{
     static_cast<uint8_t>(BleScanIntensity::NORMAL)};
 bool bookooConnectBeepPending = false;
@@ -265,7 +268,10 @@ void setScaleLinkState(ScaleLinkState state) {
     addDebugEvent(DebugCategory::SCALE,
                   state == ScaleLinkState::CONNECTED
                       ? DebugCode::SCALE_CONNECTED
-                      : DebugCode::SCALE_DISCONNECTED);
+                      : DebugCode::SCALE_DISCONNECTED,
+                  state == ScaleLinkState::CONNECTED
+                      ? 0
+                      : static_cast<int32_t>(scaleLastDisconnectReason));
     if (state == ScaleLinkState::CONNECTED &&
         runtimeConfig.buzzerScaleConnectedBeep) {
       emitAlert(AlertEvent::SCALE_CONNECTED);
@@ -1051,6 +1057,48 @@ void logScaleConnectionFailed(bool directed) {
                scale.lastDisconnectReasonName());
 }
 
+void logScaleScanStarted(bool directed) {
+  scaleDiscoveryDirected = directed;
+  addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_SCAN_STARTED,
+                directed ? SCALE_SCAN_TARGET_PREFERRED : SCALE_SCAN_TARGET_ANY,
+                static_cast<int32_t>(liveBleScanIntensity()));
+}
+
+void logScaleConnectFailed(int32_t step) {
+  addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_CONNECT_FAILED,
+                static_cast<int32_t>(scale.lastDisconnectReason()), step);
+}
+
+bool serviceScaleGattConnecting() {
+  feedOrTripCurrentTaskWatchdog();
+  const uint8_t stepBefore = scale.connectStepId();
+  if (!scaleLoggedGattConnecting) {
+    scaleLoggedGattConnecting = true;
+    scaleLoggedGattConnectAttempts = 0;
+    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_GATT_CONNECTING,
+                  scaleDiscoveryDirected ? SCALE_SCAN_TARGET_PREFERRED
+                                         : SCALE_SCAN_TARGET_ANY);
+  }
+  const bool connected = scale.pollScan();
+  if (connected) {
+    scaleLoggedGattConnecting = false;
+    scaleLoggedGattConnectAttempts = 0;
+    return true;
+  }
+  const uint8_t attempts = scale.connectAttemptCount();
+  if (attempts > scaleLoggedGattConnectAttempts) {
+    scaleLoggedGattConnectAttempts = attempts;
+    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_CONNECT_ATTEMPT_FAILED,
+                  static_cast<int32_t>(attempts),
+                  static_cast<int32_t>(scale.connectStepId()));
+  }
+  if (!scale.isConnecting()) {
+    scaleLoggedGattConnecting = false;
+    logScaleConnectFailed(stepBefore);
+  }
+  return false;
+}
+
 // ONLY + preferred MAC → name scan with connect-filter (not GAP directed).
 // PREFER uses the same filter until SCALE_PREFER_FALLBACK_MS, then any scale.
 bool shouldUseDirectedScaleScan(ScaleMacCacheMode cacheMode, bool hasMac,
@@ -1085,6 +1133,9 @@ void resetScaleWorkerRadioStateForHost() {
   scaleScanAppliedInterval = 0;
   scaleScanAppliedWindow = 0;
   scaleHuntRfUntilMs = 0;
+  scaleLoggedGattConnecting = false;
+  scaleLoggedGattConnectAttempts = 0;
+  scaleDiscoveryDirected = false;
   liveBleScanIntensityRaw.store(
       static_cast<uint8_t>(BleScanIntensity::NORMAL),
       std::memory_order_relaxed);
@@ -1178,10 +1229,9 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
 
   const ScaleMacCacheMode cacheMode = currentScaleMacCacheMode();
 
-  if (scale.isConnecting()) {
+  if (scale.isConnecting() || scaleLoggedGattConnecting) {
     // connect() can block up to BLE_CONNECT_TIMEOUT_MS with no inner WDT feed.
-    feedOrTripCurrentTaskWatchdog();
-    const bool connected = scale.pollScan();
+    const bool connected = serviceScaleGattConnecting();
     if (connected) {
       connectAttemptSeriesActive = false;
       const char *address = scale.address();
@@ -1245,6 +1295,8 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       if (logAttempt && !sawCompatibleAd) {
         lastConnectLogMs = lastScanCycleMs;
         connectAttemptSeriesActive = true;
+        addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_SCAN_WAITING,
+                      SCALE_SCAN_WAIT_NO_ADVERT);
         if (directed) {
           serialTrace(LogLevel::DEBUG,
                       "Preferred scale attempt: no advertisement");
@@ -1255,6 +1307,8 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       } else if (logAttempt && directed && sawCompatibleAd) {
         lastConnectLogMs = lastScanCycleMs;
         connectAttemptSeriesActive = true;
+        addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_SCAN_WAITING,
+                      SCALE_SCAN_WAIT_OTHER_SCALE);
         serialTrace(LogLevel::DEBUG,
                     "Preferred scale attempt: other scale seen, waiting");
       }
@@ -1265,6 +1319,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
           serialTrace(LogLevel::INFO,
                       "Preferred scale not found; falling back to any scale");
           scanLastAdvertAtMs = 0;
+          logScaleScanStarted(false);
         }
         return;
       }
@@ -1286,6 +1341,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
         if (startScaleDiscoveryScan(useDirected ? preferredMac : nullptr, true)) {
           scanSessionAtMs = lastScanCycleMs;
           scanLastAdvertAtMs = 0;
+          logScaleScanStarted(useDirected);
         }
       }
       return;
@@ -1309,9 +1365,11 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     if (finishedDirectedAttempt) {
       lastConnectLogMs = lastScanCycleMs;
       connectAttemptSeriesActive = true;
+      logScaleConnectFailed(scale.connectStepId());
     } else if (logAttempt) {
       lastConnectLogMs = lastScanCycleMs;
       connectAttemptSeriesActive = true;
+      logScaleConnectFailed(scale.connectStepId());
       logScaleConnectionFailed(false);
     }
     updateWorkerLinkState();
@@ -1328,10 +1386,9 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
   // PREFER always starts directed; fallback switches mid-session.
   const bool useDirected =
       shouldUseDirectedScaleScan(cacheMode, hasMac, true);
-  const bool logAttempt =
-      !connectAttemptSeriesActive ||
-      elapsedMs(lastConnectLogMs) >= SCALE_CONNECT_LOG_MS;
-  if (logAttempt) {
+  if (startScaleDiscoveryScan(useDirected ? preferredMac : nullptr, false)) {
+    scanSessionAtMs = lastScanCycleMs;
+    scanLastAdvertAtMs = 0;
     lastConnectLogMs = lastScanCycleMs;
     connectAttemptSeriesActive = true;
     if (useDirected) {
@@ -1341,17 +1398,16 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       serialTrace(LogLevel::INFO,
                   "Scanning for any compatible scale (name scan)");
     }
-    addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_CONNECTING);
-  }
-  if (startScaleDiscoveryScan(useDirected ? preferredMac : nullptr, false)) {
-    scanSessionAtMs = lastScanCycleMs;
-    scanLastAdvertAtMs = 0;
+    logScaleScanStarted(useDirected);
     return;
   }
 
+  lastConnectLogMs = lastScanCycleMs;
+  connectAttemptSeriesActive = true;
+  logScaleConnectFailed(0);
   if (useDirected) {
     serialTrace(LogLevel::WARNING, "Preferred scale scan failed to start");
-  } else if (logAttempt) {
+  } else {
     logScaleConnectionFailed(false);
   }
   updateWorkerLinkState();

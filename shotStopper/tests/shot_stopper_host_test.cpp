@@ -4297,6 +4297,57 @@ void d05c_scan_intensity_hci_presets() {
   CHECK(strcmp(bleScanIntensityName(BleScanIntensity::NORMAL), "normal") == 0);
 }
 
+void d16_scale_connect_debug_reports_phases() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  debugLog.clear();
+  ringRetainLogLevel = LogLevel::DEBUG;
+  uint32_t lastScanCycleMs = 0;
+  uint32_t lastConnectLogMs = 0;
+  bool connectAttemptSeriesActive = false;
+  uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(debugEventExists(DebugCode::SCALE_SCAN_STARTED, SCALE_SCAN_TARGET_ANY,
+                         static_cast<int32_t>(BleScanIntensity::NORMAL)));
+  CHECK(!debugEventExists(DebugCode::SCALE_CONNECTING));
+
+  scale.connecting = true;
+  scale.scanning = false;
+  scale.connectStep = 2;
+  scale.connectAttempts = 1;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(debugEventExists(DebugCode::SCALE_GATT_CONNECTING, SCALE_SCAN_TARGET_ANY,
+                         INT32_MIN));
+  CHECK(debugEventExists(DebugCode::SCALE_CONNECT_ATTEMPT_FAILED, 1, 2));
+
+  scale.connectAttempts = 3;
+  scale.pollScanFailsConnect = true;
+  scale.disconnectReason = ScaleDisconnectReason::CONNECT_FAILED;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(debugEventExists(DebugCode::SCALE_CONNECT_FAILED, 4, 2));
+
+  char message[128] = {};
+  DebugEvent failed = {};
+  failed.code = DebugCode::SCALE_CONNECT_FAILED;
+  failed.argument1 = 4;
+  failed.argument2 = 2;
+  CHECK(formatLifecycleDebugMessage(failed, message, sizeof(message)));
+  CHECK(std::string(message).find("connect failed") != std::string::npos);
+  CHECK(std::string(message).find("step=connect") != std::string::npos);
+  CHECK(debugCodeDefaultLevel(DebugCode::SCALE_CONNECT_FAILED) ==
+        LogLevel::WARNING);
+  CHECK(debugCodeDefaultLevel(DebugCode::SCALE_SCAN_STARTED) == LogLevel::INFO);
+  CHECK(debugCodeDefaultLevel(DebugCode::SCALE_GATT_CONNECTING) ==
+        LogLevel::INFO);
+}
+
 void d06_forget_pauses_discovery_for_30s() {
   resetHarness(false, false);
   reachReadyFromBoot();
@@ -10634,6 +10685,7 @@ const TestCase testCases[] = {
     {"D05", d05_hci_watchdog_force_restarts_same_filter},
     {"D05b", d05b_scan_intensity_change_restarts_gap},
     {"D05c", d05c_scan_intensity_hci_presets},
+    {"D16", d16_scale_connect_debug_reports_phases},
     {"D06", d06_forget_pauses_discovery_for_30s},
     {"D07", d07_prefer_falls_back_after_grace},
     {"D08", d08_select_none_clears_without_pause},
