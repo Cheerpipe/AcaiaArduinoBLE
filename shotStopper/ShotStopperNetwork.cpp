@@ -2430,7 +2430,7 @@ void ShotStopperNetwork::processAcceptedCommands() {
     return;
   }
 
-  // Maintenance commands used to keep a 4 KiB ControlStatusSnapshot in this
+  // Maintenance commands used to keep a ControlStatusSnapshot in this
   // frame. Gate fields live in ControlGateSnapshot so WEBUI_RESTART does not
   // carry that object into httpd_stop() / LwIP.
   processAcceptedMaintenanceCommand(now);

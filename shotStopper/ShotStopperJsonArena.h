@@ -30,7 +30,7 @@ inline bool g_jsonArenaHooksInstalled = false;
 inline uint8_t *jsonArenaStorage() {
   static uint8_t *block = nullptr;
   if (block == nullptr) {
-    block = static_cast<uint8_t *>(allocExternalOrInternal(JSON_ARENA_CAPACITY));
+    block = static_cast<uint8_t *>(allocExternal(JSON_ARENA_CAPACITY));
   }
   return block;
 }

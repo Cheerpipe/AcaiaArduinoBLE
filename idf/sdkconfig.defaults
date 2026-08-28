@@ -40,10 +40,18 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+# Keep a DMA/controller pool that regular malloc() cannot eat. Matches the
+# IDF 5.5 default already present in generated n16r8 sdkconfig.
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 # Prefer PSRAM for Wi-Fi/lwIP buffers when the driver allows it (soak-tested
 # SoftAP+STA+BLE on n16r8). Leaves more internal DRAM for BLE controller.
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+# IDF may set CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y as a permission.
+# xTaskCreate still allocates internal stacks. Do not enable
+# CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM and do not call
+# xTaskCreateWithCaps(..., MALLOC_CAP_SPIRAM): flash-writing tasks (loop,
+# network, httpd, persist) and VHCI would fault while the cache is off.
 
 # Trim Wi-Fi / lwIP DRAM for a single Web UI client + SoftAP.
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=8

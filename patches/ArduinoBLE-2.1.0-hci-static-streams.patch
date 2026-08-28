@@ -1,0 +1,29 @@
+--- a/src/utility/HCIVirtualTransport.cpp
++++ b/src/utility/HCIVirtualTransport.cpp
+@@ -53,6 +53,13 @@
+ static uint8_t vhci_tx_buf[HCI_VHCI_PKT_MAX];
+ static uint32_t g_hciRxDropped = 0;
+ static uint32_t g_hciTxDropped = 0;
++// Internal DRAM BSS. Do not mark EXT_RAM_BSS_ATTR: malloc() of 4096 bytes can
++// fall back to PSRAM when internal heap is fragmented, and VHCI RX must stay
++// reachable if flash cache is off.
++static uint8_t vhci_rx_storage[HCI_VHCI_STREAM_BYTES];
++static uint8_t vhci_tx_storage[HCI_VHCI_STREAM_BYTES];
++static StaticStreamBuffer_t vhci_rx_control;
++static StaticStreamBuffer_t vhci_tx_control;
+ 
+ extern "C" uint32_t BLEHostHciRxDropped(void) {
+   return g_hciRxDropped;
+@@ -129,8 +136,10 @@
+ {
+   btStarted(); // this somehow stops the arduino ide from initializing bluedroid
+ 
+-  rec_buffer = xStreamBufferCreate(HCI_VHCI_STREAM_BYTES, 1);
+-  send_buffer = xStreamBufferCreate(HCI_VHCI_STREAM_BYTES, 1);
++  rec_buffer = xStreamBufferCreateStatic(HCI_VHCI_STREAM_BYTES, 1, vhci_rx_storage,
++                                        &vhci_rx_control);
++  send_buffer = xStreamBufferCreateStatic(HCI_VHCI_STREAM_BYTES, 1, vhci_tx_storage,
++                                         &vhci_tx_control);
+   if (rec_buffer == nullptr || send_buffer == nullptr) {
+     end();
+     return 0;

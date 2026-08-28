@@ -1574,8 +1574,8 @@ void t_logical_elapsed_after_start_pulse_opens() {
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(machineElapsedMs() > 0);
   publishControlStatus();
-  CHECK(stagingControlStatus.circuitElapsedMs > 0);
-  CHECK(stagingControlStatus.machineRunning);
+  CHECK(publishedControlStatus.circuitElapsedMs > 0);
+  CHECK(publishedControlStatus.machineRunning);
 }
 
 void t_orphan_wall_does_not_auto_pulse_user_still_mirrors() {

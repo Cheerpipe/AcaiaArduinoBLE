@@ -2001,13 +2001,13 @@ struct ControlStatusSnapshot {
   uint8_t bleCompanionLastReject = 0;
 };
 
-// Staging and the published copy live in BSS, not on the 8 KiB loop stack.
+// Published copy lives in BSS, not on the 8 KiB loop stack.
 static_assert(sizeof(ControlStatusSnapshot) <= 4096,
-              "ControlStatusSnapshot grew past the loop-stack staging budget");
+              "ControlStatusSnapshot grew past the loop-stack status budget");
 
-// Gate checks (Ready / machine working / paddle / lease) do not need the ~4 KiB
+// Gate checks (Ready / machine working / paddle / lease) do not need the ~876 B
 // snapshot. Network and httpd copy this onto the stack; the full snapshot stays
-// in BSS or NetworkWorkBuf (PSRAM).
+// in DRAM BSS (control path) or NetworkWorkBuf (PSRAM, HTTP).
 struct ControlGateSnapshot {
   StopperState state = StopperState::REQUIRES_OFF;
   bool activeCycle = false;

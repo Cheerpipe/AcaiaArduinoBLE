@@ -3,9 +3,10 @@
 #  1) GAP default idle 150/30 ms (0x00F0/0x0030); EspressoScaleBLE idle is
 #     300/30 (10%) via setScanParameters, burst 60/30 (50%)
 #  2) OOM-safe discovery (malloc + placement new; no abort on bad_alloc)
-#  3) BLE host objects in PSRAM (GAP/ATT/GATT/local values; VHCI stream buffers untouched)
+#  3) BLE host objects in PSRAM (GAP/ATT/GATT/local values)
 #  4) Bound ATT indication / ACL credit waits (no indefinite blocks)
-#  5) VHCI: 4 KiB RX/TX streams, non-blocking RX, TX without PDU drop, 4 KiB bleTask
+#  5) VHCI: 4 KiB RX/TX streams in internal DRAM (xStreamBufferCreateStatic),
+#     non-blocking RX, TX without PDU drop, 4 KiB bleTask
 #  6) Block BLE.poll(timeout) on VHCI RX instead of busy-spinning
 #  7) BLEDevice copyAddress/copyLocalName (no Arduino String on the scan path)
 #  8) Fixed 32-slot GAP BLEDevice pool in PSRAM BSS (no malloc per advert)
@@ -18,6 +19,7 @@ hci_patch="$script_dir/../patches/ArduinoBLE-2.1.0-hci-bounded-waits.patch"
 vhci_init_patch="$script_dir/../patches/ArduinoBLE-2.1.0-vhci-controller-init.patch"
 hci_wait_patch="$script_dir/../patches/ArduinoBLE-2.1.0-hci-blocking-wait.patch"
 hci_nodrop_patch="$script_dir/../patches/ArduinoBLE-2.1.0-hci-nodrop.patch"
+hci_static_patch="$script_dir/../patches/ArduinoBLE-2.1.0-hci-static-streams.patch"
 gap_scan_patch="$script_dir/../patches/ArduinoBLE-2.1.0-gap-scan-params.patch"
 copy_patch="$script_dir/../patches/ArduinoBLE-2.1.0-ble-device-copy.patch"
 pool_patch="$script_dir/../patches/ArduinoBLE-2.1.0-gap-device-pool.patch"
@@ -70,6 +72,7 @@ apply_hci=0
 apply_vhci_init=0
 apply_hci_wait=0
 apply_hci_nodrop=0
+apply_hci_static=0
 apply_gap_scan=0
 apply_copy=0
 apply_pool=0
@@ -117,6 +120,11 @@ if [[ -f "$vhci" ]] && ! grep -q 'HCI_VHCI_STREAM_BYTES' "$vhci"; then
   apply_hci_nodrop=1
 fi
 
+if [[ -f "$vhci" ]] && grep -q 'HCI_VHCI_STREAM_BYTES' "$vhci" && \
+   ! grep -q 'xStreamBufferCreateStatic' "$vhci"; then
+  apply_hci_static=1
+fi
+
 if [[ -f "$gap" ]] && ! grep -q 'setScanParameters' "$gap"; then
   apply_gap_scan=1
 fi
@@ -133,9 +141,10 @@ fi
 if [[ "$restore_scan" -eq 0 && "$apply_oom" -eq 0 && "$apply_psram" -eq 0 && \
       "$apply_hci" -eq 0 && "$apply_vhci_init" -eq 0 && \
       "$apply_hci_wait" -eq 0 && "$apply_hci_nodrop" -eq 0 && \
+      "$apply_hci_static" -eq 0 && \
       "$apply_gap_scan" -eq 0 && "$apply_copy" -eq 0 && \
       "$apply_pool" -eq 0 ]]; then
-  echo "ArduinoBLE already patched (GAP idle default 150/30; EspressoScaleBLE idle 300/30 via setScanParameters + OOM-safe + host PSRAM + HCI no-drop + VHCI init + blocking HCI wait + copyAddress + GAP device pool): $target"
+  echo "ArduinoBLE already patched (GAP idle default 150/30; EspressoScaleBLE idle 300/30 via setScanParameters + OOM-safe + host PSRAM + HCI no-drop + static VHCI streams + VHCI init + blocking HCI wait + copyAddress + GAP device pool): $target"
   exit 0
 fi
 
@@ -283,6 +292,28 @@ if [[ "$apply_hci_nodrop" -eq 1 ]]; then
   fi
   patch -p1 -d "$target" < "$hci_nodrop_patch"
   echo "Patched ArduinoBLE HCI no-drop VHCI: $target"
+  if [[ -f "$vhci" ]] && grep -q 'HCI_VHCI_STREAM_BYTES' "$vhci" && \
+     ! grep -q 'xStreamBufferCreateStatic' "$vhci"; then
+    apply_hci_static=1
+  fi
+fi
+
+if [[ "$apply_hci_static" -eq 1 ]]; then
+  if [[ ! -f "$hci_static_patch" ]]; then
+    echo "Missing HCI static-stream patch: $hci_static_patch" >&2
+    exit 1
+  fi
+  if ! command -v patch >/dev/null 2>&1; then
+    echo "patch(1) is required to apply $hci_static_patch" >&2
+    exit 1
+  fi
+  if ! patch -p1 --dry-run -d "$target" < "$hci_static_patch" >/dev/null 2>&1; then
+    echo "HCI static-stream patch does not apply cleanly to: $target" >&2
+    echo "Install stock ArduinoBLE@2.1.0, apply no-drop VHCI, then retry." >&2
+    exit 1
+  fi
+  patch -p1 -d "$target" < "$hci_static_patch"
+  echo "Patched ArduinoBLE HCI static VHCI streams (internal DRAM): $target"
 fi
 
 if [[ "$apply_gap_scan" -eq 1 ]]; then

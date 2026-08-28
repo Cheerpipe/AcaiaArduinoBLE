@@ -89,13 +89,14 @@ if (!bleCompanion.includes('BLECharacteristic::writeValue') ||
   throw new Error(
       'BLE companion string writes must use BLECharacteristic::writeValue(const char*), not Arduino String');
 }
-if (!taskProfiler.includes('allocExternalOrInternal(sizeof(ActiveWorkspace))') ||
+if (!taskProfiler.includes('allocExternal(sizeof(ActiveWorkspace))') ||
     !taskProfiler.includes('heapCapsFree(workspace_)') ||
+    taskProfiler.includes('allocExternalOrInternal(sizeof(ActiveWorkspace))') ||
     taskProfiler.includes('calloc(') ||
     /\bfree\(workspace_\)/.test(taskProfiler) ||
     /\bfree\(next\)/.test(taskProfiler)) {
   throw new Error(
-      'TaskProfiler workspace must use allocExternalOrInternal/heapCapsFree, not calloc/free');
+      'TaskProfiler workspace must use allocExternal/heapCapsFree, not calloc/free or internal fallback');
 }
 if (taskProfiler.includes('task.xCoreID') ||
     !taskProfiler.includes('xTaskGetCoreID(task.xHandle)')) {
@@ -106,6 +107,27 @@ if (!sdkconfigDefaults.includes('CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y') ||
     !sdkconfigDefaults.includes('CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y')) {
   throw new Error(
       'sdkconfig.defaults must enable run-time stats and vTaskList core IDs');
+}
+if (!sdkconfigDefaults.includes('CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768') ||
+    !sdkconfigDefaults.includes('xTaskCreate still allocates internal stacks') ||
+    sdkconfigDefaults.includes('CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM=y')) {
+  throw new Error(
+      'sdkconfig.defaults must pin SPIRAM_MALLOC_RESERVE_INTERNAL=32768 and keep task stacks internal');
+}
+{
+  const patchScript = fs.readFileSync(
+      path.resolve(sketchDir, '..', 'scripts', 'patch_arduinoble.sh'), 'utf8');
+  const staticPatch = fs.readFileSync(
+      path.resolve(sketchDir, '..', 'patches',
+                   'ArduinoBLE-2.1.0-hci-static-streams.patch'),
+      'utf8');
+  if (!patchScript.includes('hci-static-streams.patch') ||
+      !patchScript.includes('xStreamBufferCreateStatic') ||
+      !staticPatch.includes('xStreamBufferCreateStatic') ||
+      !staticPatch.includes('vhci_rx_storage')) {
+    throw new Error(
+        'ArduinoBLE VHCI streams must be xStreamBufferCreateStatic in internal DRAM');
+  }
 }
 if (!sdkconfigDefaults.includes('CONFIG_FREERTOS_USE_TICKLESS_IDLE=y') ||
     sdkconfigDefaults.includes('CONFIG_PM_ENABLE=y')) {
@@ -256,10 +278,15 @@ if (!psram.includes('#define SHOT_STOPPER_PSRAM_BSS EXT_RAM_BSS_ATTR') ||
     !networkHeader.includes('PersistedSettings &settings_') ||
     !firmwareCore.includes(
         'SHOT_STOPPER_PSRAM_BSS DebugRingBuffer debugLog') ||
+    !firmwareCore.includes(
+        'SHOT_STOPPER_PSRAM_BSS RuntimeConfig publishedRuntimeConfig') ||
+    !firmwareCore.includes(
+        'SHOT_STOPPER_PSRAM_BSS ShotPresetBank publishedPresetBank') ||
+    firmwareCore.includes('stagingControlStatus') ||
     !flashIoScratch.includes('allocInternal(FLASH_IO_SCRATCH_BYTES)') ||
     firmwareCore.includes('SHOT_STOPPER_PSRAM_BSS ControlStatusSnapshot')) {
   throw new Error(
-      'Large history/settings/debug-ring BSS must use SHOT_STOPPER_PSRAM_BSS; flash scratch and live status snapshots stay internal');
+      'Large history/settings/debug-ring/recipe BSS must use SHOT_STOPPER_PSRAM_BSS; flash scratch and live status snapshots stay internal');
 }
 if (network.includes('ControlStatusSnapshot status;') ||
     network.includes('ControlStatusSnapshot control;') ||
@@ -1903,6 +1930,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !shotCurveIo.includes('copyToFlashIoScratch(&store_') ||
     !lastShotIo.includes('copyToFlashIoScratch(&blob_') ||
     !jsonArena.includes('size > JSON_ARENA_CAPACITY') ||
+    jsonArena.includes('allocExternalOrInternal(JSON_ARENA_CAPACITY)') ||
+    !jsonArena.includes('allocExternal(JSON_ARENA_CAPACITY)') ||
     !network.includes('workBuf_->~NetworkWorkBuf()') ||
     !firmware.includes('resetAllDurableStoresForNetwork') ||
     !firmware.includes(
@@ -3868,6 +3897,8 @@ if (!network.includes('sendCopiedBody(request, SHOT_STOPPER_WEB_UI_GZIP') ||
         'allocExternal(sizeof(wifi_ap_record_t) * kWifiScanFetchMax)') ||
     !psram.includes('inline void *allocExternal(size_t bytes)') ||
     !jsonArena.includes('jsonArenaIsExternal()') ||
+    !jsonArena.includes('allocExternal(JSON_ARENA_CAPACITY)') ||
+    jsonArena.includes('allocExternalOrInternal(JSON_ARENA_CAPACITY)') ||
     !network.includes(
         'sendCopiedChunk(request, work.jsonItem, strlen(work.jsonItem))')) {
   throw new Error(

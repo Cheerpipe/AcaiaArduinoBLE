@@ -96,7 +96,8 @@ internal fallback) + placement `new` so small host objects skip the
 ALWAYSINTERNAL DRAM threshold and a failed alloc drops the advert instead of
 `abort()` via `bad_alloc`. VHCI RX/TX stream ops, ACL credit waits, and ATT
 indication confirms use ≤1 s deadlines (or the configured ATT timeout). The
-VHCI stream buffers stay in internal SRAM. `bleTask` uses a 4 KiB internal
+VHCI stream buffers are `xStreamBufferCreateStatic` in internal DRAM BSS
+(not `malloc`, which can fall back to PSRAM). `bleTask` uses a 4 KiB internal
 stack (stock ArduinoBLE 2.1.0 is 2048 bytes, which overflows on IDF 5.5
 VHCI send). Idle discovery
 keeps that scan enabled until a match or filter change; `startScan()` /

@@ -394,17 +394,18 @@ WeightStreamState telemetryWeightStreamState = WeightStreamState::NO_SAMPLE;
 bool scaleCompletionBeepScheduled = false;
 
 bool virtualHoldOn = false;
-// Full status snapshots stay in internal DRAM. The 32-byte gate is published
-// every loop tick; the ~4 KiB blob is rebuilt on GET and control/safety edges.
+// Full status snapshots stay in internal DRAM (check_web_assets forbids
+// SHOT_STOPPER_PSRAM_BSS on this type). The 32-byte gate is published every
+// loop tick; the ~876 B blob is rebuilt in-place on GET and control/safety
+// edges under the seqlock — no staging copy.
 ControlStatusSnapshot publishedControlStatus;
-ControlStatusSnapshot stagingControlStatus;
 uint32_t controlStatusSeq = 0;
 ControlGateSnapshot publishedControlGate;
 uint32_t controlGateSeq = 0;
 bool controlStatusPublishRequested = false;
 constexpr uint32_t kControlStatusSeqlockTries = 64;
-RuntimeConfig publishedRuntimeConfig;
-ShotPresetBank publishedPresetBank;
+SHOT_STOPPER_PSRAM_BSS RuntimeConfig publishedRuntimeConfig;
+SHOT_STOPPER_PSRAM_BSS ShotPresetBank publishedPresetBank;
 uint32_t recipeSeq = 0;
 bool bootDegraded = false;
 uint32_t bleCompanionResultDropped = 0;
@@ -4421,7 +4422,8 @@ void publishControlStatus() {
   const uint32_t now = millis();
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
-  ControlStatusSnapshot &next = stagingControlStatus;
+  __atomic_fetch_add(&controlStatusSeq, 1U, __ATOMIC_RELAXED);
+  ControlStatusSnapshot &next = publishedControlStatus;
   next = ControlStatusSnapshot{};
   next.state = stopperState;
   next.activeCycle = session.active;
@@ -4614,8 +4616,6 @@ void publishControlStatus() {
   portENTER_CRITICAL(&debugLogMux);
   next.debugEventsDropped = debugLog.overwritten();
   portEXIT_CRITICAL(&debugLogMux);
-  __atomic_fetch_add(&controlStatusSeq, 1U, __ATOMIC_RELAXED);
-  publishedControlStatus = next;
   __atomic_fetch_add(&controlStatusSeq, 1U, __ATOMIC_RELEASE);
   publishControlGate();
 }
@@ -4624,7 +4624,7 @@ void refreshControlStatus() {
 #if defined(SHOT_STOPPER_HOST_TEST)
   return;
 #else
-  // Waits until loop commits the 4 KiB seqlock, not merely until the request
+  // Waits until loop commits the status seqlock, not merely until the request
   // is noticed. Timeout copies the last snapshot and leaves the flag set.
   __atomic_store_n(&controlStatusPublishRequested, true, __ATOMIC_RELEASE);
   const uint32_t startedAtMs = millis();

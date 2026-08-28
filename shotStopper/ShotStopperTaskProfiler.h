@@ -88,7 +88,7 @@ class TaskProfiler {
     }
 #if defined(ARDUINO) && !defined(SHOT_STOPPER_HOST_TEST)
     ActiveWorkspace *next = static_cast<ActiveWorkspace *>(
-        allocExternalOrInternal(sizeof(ActiveWorkspace)));
+        allocExternal(sizeof(ActiveWorkspace)));
     if (next == nullptr) {
       noteStartFailure_(TaskProfilerStopReason::ALLOCATION_FAILED);
       return false;

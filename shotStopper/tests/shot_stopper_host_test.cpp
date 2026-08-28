@@ -141,7 +141,6 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   ringRetainLogLevel = LogLevel::INFO;
   publishedControlStatus = ControlStatusSnapshot{};
   taskProfiler.resetForHost();
-  stagingControlStatus = ControlStatusSnapshot{};
   controlStatusSeq = 0;
   publishedControlGate = ControlGateSnapshot{};
   controlGateSeq = 0;
