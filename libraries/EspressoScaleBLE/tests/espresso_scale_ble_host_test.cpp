@@ -234,8 +234,8 @@ void testNonBlockingScanDoesNotRestartOrResetIdle() {
     CHECK(scale.isScanning());
     CHECK(BLE.scanCalls == 1);
     CHECK(BLE.lastWithDuplicates);
-    CHECK(BLE.lastScanInterval == BLE_SCAN_IDLE_INTERVAL);
-    CHECK(BLE.lastScanWindow == BLE_SCAN_IDLE_WINDOW);
+    CHECK(BLE.lastScanInterval == BLE_SCAN_NORMAL_INTERVAL);
+    CHECK(BLE.lastScanWindow == BLE_SCAN_NORMAL_WINDOW);
     CHECK(BLE.stopScanCalls == 0);
 
     CHECK(scale.startScan());
@@ -260,19 +260,24 @@ void testNonBlockingScanDoesNotRestartOrResetIdle() {
     CHECK(BLE.stopScanCalls == 1);
 }
 
-void testBurstScanParametersAndDiscoverTimeoutRestored() {
+void testScanParametersPresetsAndDiscoverTimeoutRestored() {
     resetFake();
     EspressoScaleBLE scale(false);
-    CHECK(scale.startScan(nullptr, false, true));
-    CHECK(BLE.lastScanInterval == BLE_SCAN_BURST_INTERVAL);
-    CHECK(BLE.lastScanWindow == BLE_SCAN_BURST_WINDOW);
-    CHECK(BLE_SCAN_IDLE_INTERVAL == 0x00C0);
-    CHECK(BLE_SCAN_IDLE_WINDOW == 0x0030);
-    CHECK(BLE_SCAN_BURST_INTERVAL == 0x0060);
-    CHECK(BLE_SCAN_BURST_WINDOW == 0x0030);
-    CHECK(scale.startScan(nullptr, true, false));
-    CHECK(BLE.lastScanInterval == BLE_SCAN_IDLE_INTERVAL);
-    CHECK(BLE.lastScanWindow == BLE_SCAN_IDLE_WINDOW);
+    CHECK(scale.startScan(nullptr, false, BLE_SCAN_AGGRESSIVE_INTERVAL,
+                          BLE_SCAN_AGGRESSIVE_WINDOW));
+    CHECK(BLE.lastScanInterval == BLE_SCAN_AGGRESSIVE_INTERVAL);
+    CHECK(BLE.lastScanWindow == BLE_SCAN_AGGRESSIVE_WINDOW);
+    CHECK(BLE_SCAN_LIGHT_INTERVAL == 0x00B8);
+    CHECK(BLE_SCAN_LIGHT_WINDOW == 0x002E);
+    CHECK(BLE_SCAN_NORMAL_INTERVAL == 0x0064);
+    CHECK(BLE_SCAN_NORMAL_WINDOW == 0x0032);
+    CHECK(BLE_SCAN_AGGRESSIVE_INTERVAL == 0x0020);
+    CHECK(BLE_SCAN_AGGRESSIVE_WINDOW == 0x0020);
+    CHECK(scale.startScan(nullptr, false, BLE_SCAN_LIGHT_INTERVAL,
+                          BLE_SCAN_LIGHT_WINDOW));
+    CHECK(BLE.lastScanInterval == BLE_SCAN_LIGHT_INTERVAL);
+    CHECK(BLE.lastScanWindow == BLE_SCAN_LIGHT_WINDOW);
+    CHECK(BLE.scanCalls == 2);
 
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
@@ -349,6 +354,29 @@ void testNameScanIgnoresEmptyLocalName() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
     fixture.peripheral->localName.clear();
+    EspressoScaleBLE scale(false);
+    CHECK(scale.startScan());
+    CHECK(!scale.pollScan());
+    CHECK(scale.isScanning());
+    CHECK(!scale.isConnected());
+}
+
+void testNameScanConnectsNamelessBookooByUuid16() {
+    resetFake();
+    ScaleFixture fixture = makeScale(GENERIC);
+    fixture.peripheral->localName.clear();
+    fixture.peripheral->advertisedUuid16s.push_back(0xFF11);
+    EspressoScaleBLE scale(false);
+    CHECK(scale.startScan());
+    CHECK(pollUntilConnected(scale));
+    CHECK(scale.isConnected());
+    CHECK(std::strcmp(scale.connectedProtocolName(), "bookoo_generic") == 0);
+}
+
+void testNameScanIgnoresNamelessEurekaUuid() {
+    resetFake();
+    ScaleFixture fixture = makeNamedScale("", "fff2", "fff1");
+    fixture.peripheral->advertisedUuid16s.push_back(0xFFF1);
     EspressoScaleBLE scale(false);
     CHECK(scale.startScan());
     CHECK(!scale.pollScan());
@@ -877,6 +905,16 @@ void testGoldenCommandPayloadsAndFeatures() {
     CHECK(!scaleProtocolAt(0)->requireAdvertisedName);
     CHECK(scaleProtocolAt(9)->requireAdvertisedName);
     CHECK(scaleProtocolAt(10)->requireAdvertisedName);
+    uint16_t uuid16 = 0;
+    CHECK(scaleParseUuid16("ff11", &uuid16) && uuid16 == 0xFF11);
+    CHECK(scaleParseUuid16("2A80", &uuid16) && uuid16 == 0x2A80);
+    CHECK(!scaleParseUuid16("ff1", &uuid16));
+    CHECK(!scaleParseUuid16("ff110", &uuid16));
+    CHECK(scaleUuid16AllowsNamelessConnect(0xFF11));
+    CHECK(scaleUuid16AllowsNamelessConnect(0xFF12));
+    CHECK(scaleUuid16AllowsNamelessConnect(0x2A80));
+    CHECK(!scaleUuid16AllowsNamelessConnect(0xFFF1));
+    CHECK(!scaleUuid16AllowsNamelessConnect(0xFFF2));
     CHECK(scaleNameIsCompatible("CINCO"));
     CHECK(scaleNameIsCompatible("ACAIA"));
     CHECK(scaleNameIsCompatible("PYXIS"));
@@ -1173,11 +1211,13 @@ void testGaggimateScaleProtocols() {
 int main() {
     testScanDiagnostics();
     testNonBlockingScanDoesNotRestartOrResetIdle();
-    testBurstScanParametersAndDiscoverTimeoutRestored();
+    testScanParametersPresetsAndDiscoverTimeoutRestored();
     testNonBlockingScanConnectsWithoutInit();
     testConnectFilterUsesNameScan();
     testConnectFilterConnectsWithoutLocalName();
     testNameScanIgnoresEmptyLocalName();
+    testNameScanConnectsNamelessBookooByUuid16();
+    testNameScanIgnoresNamelessEurekaUuid();
     testStartScanRestartsOnFilterChange();
     testCleanupOnInitializationFailures();
     testConnectRetriesThenSucceeds();

@@ -1626,6 +1626,7 @@ enum class WebCommandType : uint8_t {
   WEBUI_RESTART,
   BLE_COMPAT_ENABLE,
   BLE_COMPAT_DISABLE,
+  BLE_SCAN_INTENSITY,
   TASK_PROFILER_START,
   TASK_PROFILER_STOP,
   STATE_OVERRIDE_OFF,
@@ -1674,6 +1675,7 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::WEBUI_RESTART: return "restart Web UI";
     case WebCommandType::BLE_COMPAT_ENABLE: return "enable BLE Companion";
     case WebCommandType::BLE_COMPAT_DISABLE: return "disable BLE Companion";
+    case WebCommandType::BLE_SCAN_INTENSITY: return "set BLE scan intensity";
     case WebCommandType::TASK_PROFILER_START: return "start task profiler";
     case WebCommandType::TASK_PROFILER_STOP: return "stop task profiler";
     case WebCommandType::STATE_OVERRIDE_OFF:
@@ -1746,6 +1748,8 @@ struct WebCommand {
   // SET_WIFI does not clobber the persisted flag.
   bool wifiSleep = false;
   bool wifiSleepSpecified = false;
+  bool bleScanIntensitySpecified = false;
+  uint8_t bleScanIntensity = 0;
   // USB SET_WIFI only. Web UI / BLE Companion keep the HTTP confirm window.
   bool commitConfirmed = false;
   uint8_t staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
@@ -1999,6 +2003,7 @@ struct ControlStatusSnapshot {
   uint32_t bleCompanionAcceptedWrites = 0;
   uint32_t bleCompanionRejectedWrites = 0;
   uint8_t bleCompanionLastReject = 0;
+  uint8_t bleCompanionScanIntensity = 0;
 };
 
 // Published copy lives in BSS, not on the 8 KiB loop stack.

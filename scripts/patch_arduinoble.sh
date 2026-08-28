@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Patch ArduinoBLE 2.1.0 for Shot Stopper:
-#  1) GAP default idle 150/30 ms (0x00F0/0x0030); EspressoScaleBLE idle is
-#     120/30 (25%) via setScanParameters, burst 60/30 (50%)
+#  1) GAP default idle 150/30 ms (0x00F0/0x0030); EspressoScaleBLE Light/Normal
+#     via setScanParameters (28.75/115 = 25%, 31.25/62.5 = 50%)
 #  2) OOM-safe discovery (malloc + placement new; no abort on bad_alloc)
 #  3) BLE host objects in PSRAM (GAP/ATT/GATT/local values)
 #  4) Bound ATT indication / ACL credit waits (no indefinite blocks)
 #  5) VHCI: 4 KiB RX/TX streams in internal DRAM (xStreamBufferCreateStatic),
 #     non-blocking RX, TX without PDU drop, 4 KiB bleTask
 #  6) Block BLE.poll(timeout) on VHCI RX instead of busy-spinning
-#  7) BLEDevice copyAddress/copyLocalName (no Arduino String on the scan path)
+#  7) BLEDevice copyAddress/copyLocalName/hasAdvertisedUuid16 (no Arduino String on the scan path)
 #  8) Fixed 32-slot GAP BLEDevice pool in PSRAM BSS (no malloc per advert)
 set -euo pipefail
 
@@ -75,6 +75,7 @@ apply_hci_nodrop=0
 apply_hci_static=0
 apply_gap_scan=0
 apply_copy=0
+apply_uuid16=0
 apply_pool=0
 
 if grep -q '_scanInterval(0x00F0)' "$gap"; then
@@ -133,6 +134,11 @@ if [[ -f "$device_h" ]] && ! grep -q 'copyAddress' "$device_h"; then
   apply_copy=1
 fi
 
+if [[ -f "$device_h" ]] && grep -q 'copyAddress' "$device_h" && \
+   ! grep -q 'hasAdvertisedUuid16' "$device_h"; then
+  apply_uuid16=1
+fi
+
 if [[ -f "$gap" ]] && grep -q 'BLEHostFree(device)' "$gap" && \
    ! grep -q 'gapAllocDevice' "$gap"; then
   apply_pool=1
@@ -143,8 +149,9 @@ if [[ "$restore_scan" -eq 0 && "$apply_oom" -eq 0 && "$apply_psram" -eq 0 && \
       "$apply_hci_wait" -eq 0 && "$apply_hci_nodrop" -eq 0 && \
       "$apply_hci_static" -eq 0 && \
       "$apply_gap_scan" -eq 0 && "$apply_copy" -eq 0 && \
+      "$apply_uuid16" -eq 0 && \
       "$apply_pool" -eq 0 ]]; then
-  echo "ArduinoBLE already patched (GAP idle default 150/30; EspressoScaleBLE idle 120/30 via setScanParameters + OOM-safe + host PSRAM + HCI no-drop + static VHCI streams + VHCI init + blocking HCI wait + copyAddress + GAP device pool): $target"
+  echo "ArduinoBLE already patched (GAP idle default 150/30; EspressoScaleBLE Light/Normal via setScanParameters + OOM-safe + host PSRAM + HCI no-drop + static VHCI streams + VHCI init + blocking HCI wait + copyAddress + GAP device pool): $target"
   exit 0
 fi
 
@@ -331,7 +338,7 @@ if [[ "$apply_gap_scan" -eq 1 ]]; then
     exit 1
   fi
   patch -p1 -d "$target" < "$gap_scan_patch"
-  echo "Patched ArduinoBLE GAP idle default 150/30 + setScanParameters (EspressoScaleBLE idle 120/30): $target"
+  echo "Patched ArduinoBLE GAP idle default 150/30 + setScanParameters (EspressoScaleBLE Light/Normal): $target"
 fi
 
 if [[ "$apply_copy" -eq 1 ]]; then
@@ -349,7 +356,67 @@ if [[ "$apply_copy" -eq 1 ]]; then
     exit 1
   fi
   patch -p1 -d "$target" < "$copy_patch"
-  echo "Patched ArduinoBLE BLEDevice copyAddress/copyLocalName: $target"
+  echo "Patched ArduinoBLE BLEDevice copyAddress/copyLocalName/hasAdvertisedUuid16: $target"
+fi
+
+if [[ "$apply_uuid16" -eq 1 ]]; then
+  device_cpp="$target/src/BLEDevice.cpp"
+  if [[ ! -f "$device_cpp" ]]; then
+    echo "Missing BLEDevice.cpp for hasAdvertisedUuid16: $device_cpp" >&2
+    exit 1
+  fi
+  python3 - "$device_h" "$device_cpp" <<'PY'
+from pathlib import Path
+import sys
+
+header_path = Path(sys.argv[1])
+source_path = Path(sys.argv[2])
+header = header_path.read_text()
+source = source_path.read_text()
+decl = "  bool hasAdvertisedUuid16(uint16_t uuid) const;\n"
+if "hasAdvertisedUuid16" not in header:
+    needle = "  size_t copyLocalName(char* buffer, size_t capacity) const;\n"
+    if needle not in header:
+        raise SystemExit("BLEDevice.h missing copyLocalName for uuid16 insert")
+    header = header.replace(needle, needle + decl, 1)
+    header_path.write_text(header)
+impl = """
+bool BLEDevice::hasAdvertisedUuid16(uint16_t uuid) const
+{
+  for (int i = 0; i < _eirDataLength;) {
+    int eirLength = _eirData[i++];
+    if (eirLength < 1 || i >= _eirDataLength) {
+      break;
+    }
+    int eirType = _eirData[i++];
+    int dataLen = eirLength - 1;
+    if (dataLen < 0 || i + dataLen > _eirDataLength) {
+      break;
+    }
+    if (eirType == 0x02 || eirType == 0x03) {
+      for (int j = 0; j + 1 < dataLen; j += 2) {
+        uint16_t value = (uint16_t)_eirData[i + j] |
+                         ((uint16_t)_eirData[i + j + 1] << 8);
+        if (value == uuid) {
+          return true;
+        }
+      }
+    }
+    i += dataLen;
+  }
+
+  return false;
+}
+
+"""
+if "hasAdvertisedUuid16" not in source:
+    needle = "bool BLEDevice::hasLocalName() const"
+    if needle not in source:
+        raise SystemExit("BLEDevice.cpp missing hasLocalName for uuid16 insert")
+    source = source.replace(needle, impl + needle, 1)
+    source_path.write_text(source)
+PY
+  echo "Patched ArduinoBLE BLEDevice hasAdvertisedUuid16: $target"
 fi
 
 if [[ "$apply_pool" -eq 1 ]]; then

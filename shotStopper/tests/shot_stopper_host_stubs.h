@@ -36,24 +36,30 @@ using portMUX_TYPE = int;
 
 // Match libraries/EspressoScaleBLE/src/EspressoScaleBLE.h so shotStopper.cpp can
 // static_assert GAP connect vs the 5 s task watchdog in host builds, and so
-// idle/burst scan duty helpers see the same HCI interval/window.
+// scan-intensity HCI presets see the same interval/window.
 #ifndef BLE_CONNECT_TIMEOUT_MS
 #define BLE_CONNECT_TIMEOUT_MS 2000UL
 #endif
 #ifndef BLE_DISCOVER_TIMEOUT_MS
 #define BLE_DISCOVER_TIMEOUT_MS 3000UL
 #endif
-#ifndef BLE_SCAN_IDLE_INTERVAL
-#define BLE_SCAN_IDLE_INTERVAL 0x00C0
+#ifndef BLE_SCAN_LIGHT_INTERVAL
+#define BLE_SCAN_LIGHT_INTERVAL 0x00B8
 #endif
-#ifndef BLE_SCAN_IDLE_WINDOW
-#define BLE_SCAN_IDLE_WINDOW 0x0030
+#ifndef BLE_SCAN_LIGHT_WINDOW
+#define BLE_SCAN_LIGHT_WINDOW 0x002E
 #endif
-#ifndef BLE_SCAN_BURST_INTERVAL
-#define BLE_SCAN_BURST_INTERVAL 0x0060
+#ifndef BLE_SCAN_NORMAL_INTERVAL
+#define BLE_SCAN_NORMAL_INTERVAL 0x0064
 #endif
-#ifndef BLE_SCAN_BURST_WINDOW
-#define BLE_SCAN_BURST_WINDOW 0x0030
+#ifndef BLE_SCAN_NORMAL_WINDOW
+#define BLE_SCAN_NORMAL_WINDOW 0x0032
+#endif
+#ifndef BLE_SCAN_AGGRESSIVE_INTERVAL
+#define BLE_SCAN_AGGRESSIVE_INTERVAL 0x0020
+#endif
+#ifndef BLE_SCAN_AGGRESSIVE_WINDOW
+#define BLE_SCAN_AGGRESSIVE_WINDOW 0x0020
 #endif
 
 #include "../../libraries/EspressoScaleBLE/src/ScaleFeatures.h"
@@ -301,9 +307,11 @@ class EspressoScaleBLE {
     return connected;
   }
   bool startScan(const char *mac = nullptr, bool forceRestart = false,
-                 bool burst = false) {
+                 uint16_t interval = BLE_SCAN_NORMAL_INTERVAL,
+                 uint16_t window = BLE_SCAN_NORMAL_WINDOW) {
     lastForceRestart = forceRestart;
-    lastBurst = burst;
+    lastScanInterval = interval;
+    lastScanWindow = window;
     const bool directed = mac != nullptr && mac[0] != '\0';
     if (scanning && !connected) {
       const bool sameFilter =
@@ -311,11 +319,15 @@ class EspressoScaleBLE {
                       strncmp(lastStartScanMac, mac,
                               sizeof(lastStartScanMac)) == 0)
                    : !directedScan;
-      if (sameFilter && !forceRestart) {
+      const bool sameHci = lastAppliedScanInterval == interval &&
+                           lastAppliedScanWindow == window;
+      if (sameFilter && sameHci && !forceRestart) {
         return true;
       }
     }
     ++startScanCalls;
+    lastAppliedScanInterval = interval;
+    lastAppliedScanWindow = window;
     if (directed) {
       strncpy(lastStartScanMac, mac, sizeof(lastStartScanMac) - 1);
       lastStartScanMac[sizeof(lastStartScanMac) - 1] = '\0';
@@ -531,7 +543,10 @@ class EspressoScaleBLE {
   bool pollScanConnects = false;
   int pollScanStepsToConnect = 1;
   bool lastForceRestart = false;
-  bool lastBurst = false;
+  uint16_t lastScanInterval = BLE_SCAN_NORMAL_INTERVAL;
+  uint16_t lastScanWindow = BLE_SCAN_NORMAL_WINDOW;
+  uint16_t lastAppliedScanInterval = 0;
+  uint16_t lastAppliedScanWindow = 0;
   size_t startScanCalls = 0;
   char lastStartScanMac[ACAIA_MAC_CAPACITY] = {};
   char seenMac[ACAIA_MAC_CAPACITY] = {};

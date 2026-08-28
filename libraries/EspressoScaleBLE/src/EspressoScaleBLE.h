@@ -34,12 +34,15 @@
 #define BLE_DISCOVER_TIMEOUT_MS           3000UL
 #define SCALE_CONNECT_SETTLE_MS           120UL
 #define LINK_DOWN_DEBOUNCE_MS             120UL
-// Idle GAP duty 25% (30 ms / 120 ms). Used only while scanning — connecting
-// and GATT-up paths never start an idle scan. Burst stays 50% (30/60 ms).
-#define BLE_SCAN_IDLE_INTERVAL            0x00C0
-#define BLE_SCAN_IDLE_WINDOW              0x0030
-#define BLE_SCAN_BURST_INTERVAL           0x0060
-#define BLE_SCAN_BURST_WINDOW             0x0030
+// GAP scan duty while discovering. Connecting and GATT-up paths never start
+// a scan. Intervals avoid 20/60/100/120 ms advertising harmonics.
+// Light 25% (28.75/115 ms), Normal 50% (31.25/62.5 ms), Aggressive 100% (20/20).
+#define BLE_SCAN_LIGHT_INTERVAL           0x00B8
+#define BLE_SCAN_LIGHT_WINDOW             0x002E
+#define BLE_SCAN_NORMAL_INTERVAL          0x0064
+#define BLE_SCAN_NORMAL_WINDOW            0x0032
+#define BLE_SCAN_AGGRESSIVE_INTERVAL      0x0020
+#define BLE_SCAN_AGGRESSIVE_WINDOW        0x0020
 #define SCALE_CONNECT_ATTEMPTS           3U
 #define SCALE_CONNECT_BUDGET_MS         10000UL
 #define MAX_BLE_PACKET_LENGTH           20
@@ -93,7 +96,8 @@ class EspressoScaleBLE {
         bool init(const char *mac = nullptr);
 
         bool startScan(const char *mac = nullptr, bool forceRestart = false,
-                       bool burst = false);
+                       uint16_t interval = BLE_SCAN_NORMAL_INTERVAL,
+                       uint16_t window = BLE_SCAN_NORMAL_WINDOW);
         bool pollScan();
         bool isScanning() const;
         bool isConnecting() const;
@@ -210,6 +214,8 @@ class EspressoScaleBLE {
         uint8_t             _connectAttempts;
         uint32_t            _linkDownSince;
         char                _scanMac[SCALE_MAC_CAPACITY];
+        uint16_t            _scanInterval;
+        uint16_t            _scanWindow;
         char                _address[SCALE_MAC_CAPACITY];
         char                _localName[SCALE_NAME_CAPACITY];
         char                _seenMac[SCALE_MAC_CAPACITY];

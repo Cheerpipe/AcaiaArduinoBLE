@@ -24,6 +24,52 @@ bool scaleNameMatchesProtocol(const char *name, const ScaleProtocol *protocol) {
     return false;
 }
 
+bool scaleParseUuid16(const char *uuid, uint16_t *out) {
+    if (uuid == 0 || out == 0) {
+        return false;
+    }
+    uint16_t value = 0;
+    for (int i = 0; i < 4; ++i) {
+        const char c = uuid[i];
+        uint8_t nibble = 0;
+        if (c >= '0' && c <= '9') {
+            nibble = static_cast<uint8_t>(c - '0');
+        } else if (c >= 'a' && c <= 'f') {
+            nibble = static_cast<uint8_t>(c - 'a' + 10);
+        } else if (c >= 'A' && c <= 'F') {
+            nibble = static_cast<uint8_t>(c - 'A' + 10);
+        } else {
+            return false;
+        }
+        value = static_cast<uint16_t>((value << 4) | nibble);
+    }
+    if (uuid[4] != '\0') {
+        return false;
+    }
+    *out = value;
+    return true;
+}
+
+bool scaleUuid16AllowsNamelessConnect(uint16_t uuid) {
+    if (uuid == 0xFFF1 || uuid == 0xFFF2) {
+        return false;
+    }
+    for (size_t i = 0; i < scaleProtocolCount(); ++i) {
+        const ScaleProtocol *protocol = scaleProtocolAt(i);
+        if (protocol == 0 || protocol->requireAdvertisedName) {
+            continue;
+        }
+        uint16_t parsed = 0;
+        if (scaleParseUuid16(protocol->readUuid, &parsed) && parsed == uuid) {
+            return true;
+        }
+        if (scaleParseUuid16(protocol->writeUuid, &parsed) && parsed == uuid) {
+            return true;
+        }
+    }
+    return false;
+}
+
 uint8_t scaleXorBytes(const byte *data, int length) {
     uint8_t result = 0;
     for (int i = 0; i < length; ++i) {

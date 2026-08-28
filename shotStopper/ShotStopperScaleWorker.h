@@ -10,24 +10,34 @@
 namespace shotstopper {
 
 // Worker timing. Keep identical to the values previously in shotStopper.cpp.
-constexpr uint32_t SCALE_CONNECT_RETRY_MS = 1000;
-constexpr uint32_t SCALE_CONNECT_RETRY_MAX_MS = 10000;
 constexpr uint32_t SCALE_CONNECT_LOG_MS = 10000;
 constexpr uint32_t SCALE_PACKET_GAP_LOG_MIN_MS = 1000;
 constexpr uint32_t SCALE_STREAM_GAP_MS = 250;
 constexpr uint32_t SCALE_DISCOVERY_TICK_MS = 3000;
 constexpr uint32_t SCALE_SCAN_HCI_RESTART_MS = 60000;
-constexpr uint32_t SCALE_SCAN_BURST_MS = 3000;
+constexpr uint32_t SCALE_HUNT_RF_CLEAR_MS = 3000;
 
-// True when idle and burst HCI interval/window match, so a duty-flag change
-// must not stop/start GAP (same LE scan parameters).
-inline bool scaleScanDutyHciParamsEqual(
-    uint16_t idleInterval = BLE_SCAN_IDLE_INTERVAL,
-    uint16_t idleWindow = BLE_SCAN_IDLE_WINDOW,
-    uint16_t burstInterval = BLE_SCAN_BURST_INTERVAL,
-    uint16_t burstWindow = BLE_SCAN_BURST_WINDOW) {
-  return idleInterval == burstInterval && idleWindow == burstWindow;
+inline void bleScanHciParams(BleScanIntensity intensity, uint16_t &interval,
+                             uint16_t &window) {
+  switch (intensity) {
+    case BleScanIntensity::AGGRESSIVE:
+      interval = BLE_SCAN_AGGRESSIVE_INTERVAL;
+      window = BLE_SCAN_AGGRESSIVE_WINDOW;
+      return;
+    case BleScanIntensity::LIGHT:
+      interval = BLE_SCAN_LIGHT_INTERVAL;
+      window = BLE_SCAN_LIGHT_WINDOW;
+      return;
+    case BleScanIntensity::NORMAL:
+    default:
+      interval = BLE_SCAN_NORMAL_INTERVAL;
+      window = BLE_SCAN_NORMAL_WINDOW;
+      return;
+  }
 }
+
+void applyLiveBleScanIntensity(BleScanIntensity intensity);
+BleScanIntensity liveBleScanIntensity();
 
 constexpr uint32_t BOOKOO_CONNECT_BEEP_DEFER_MS = 750;
 constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;

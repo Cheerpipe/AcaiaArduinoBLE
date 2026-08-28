@@ -16,7 +16,8 @@ struct BleCompanionPersistedSettings {
   uint16_t structureSize = sizeof(BleCompanionPersistedSettings);
   uint32_t revision = 0;
   uint8_t enabled = 0;
-  uint8_t reserved[3] = {};
+  uint8_t scanIntensity = 0;  // BleScanIntensity; 0 = Normal
+  uint8_t reserved[2] = {};
   uint32_t checksum = 0;
 };
 
@@ -38,6 +39,8 @@ inline void finalizeBleCompanionSettings(
   settings.version = BLE_COMPANION_SETTINGS_VERSION;
   settings.structureSize = sizeof(BleCompanionPersistedSettings);
   settings.enabled = settings.enabled != 0 ? 1 : 0;
+  settings.scanIntensity =
+      static_cast<uint8_t>(clampBleScanIntensity(settings.scanIntensity));
   settings.checksum = 0;
   settings.checksum = bleCompanionSettingsChecksum(settings);
 }
@@ -48,6 +51,7 @@ inline bool validBleCompanionSettings(
          settings.version == BLE_COMPANION_SETTINGS_VERSION &&
          settings.structureSize == sizeof(BleCompanionPersistedSettings) &&
          settings.enabled <= 1 &&
+         validBleScanIntensity(settings.scanIntensity) &&
          settings.checksum == bleCompanionSettingsChecksum(settings);
 }
 

@@ -59,15 +59,7 @@ inline void machineObserveSense(const MachineSense &sense) {
 }
 
 inline void machineSetPreferBleAirtime(bool prefer) {
-  const bool was = machinePreferBleAirtime;
   machinePreferBleAirtime = prefer;
-  // Claim BLE before K1 pull-in so coex/GATT work does not race the coil.
-  // Clearing the flag does not release the claim: syncScaleRadioCoex owns
-  // connecting / GATT / circuit-closed, and a failed close must not drop BT
-  // while the scale is still linked.
-  if (prefer && !was) {
-    applyBrewRfPreference(true);
-  }
 }
 
 // Dumb drive bit + hold-continuity latch. Specializations must not know why

@@ -121,12 +121,21 @@ if (!sdkconfigDefaults.includes('CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768') |
       path.resolve(sketchDir, '..', 'patches',
                    'ArduinoBLE-2.1.0-hci-static-streams.patch'),
       'utf8');
+  const copyPatch = fs.readFileSync(
+      path.resolve(sketchDir, '..', 'patches',
+                   'ArduinoBLE-2.1.0-ble-device-copy.patch'),
+      'utf8');
   if (!patchScript.includes('hci-static-streams.patch') ||
       !patchScript.includes('xStreamBufferCreateStatic') ||
       !staticPatch.includes('xStreamBufferCreateStatic') ||
       !staticPatch.includes('vhci_rx_storage')) {
     throw new Error(
         'ArduinoBLE VHCI streams must be xStreamBufferCreateStatic in internal DRAM');
+  }
+  if (!copyPatch.includes('hasAdvertisedUuid16') ||
+      !patchScript.includes('hasAdvertisedUuid16')) {
+    throw new Error(
+        'ArduinoBLE BLEDevice must expose hasAdvertisedUuid16 without Arduino String');
   }
 }
 if (!sdkconfigDefaults.includes('CONFIG_FREERTOS_USE_TICKLESS_IDLE=y') ||
@@ -178,12 +187,14 @@ if (sdkconfigDefaults.includes('CONFIG_BT_LE_SLEEP_ENABLE=y') ||
     throw new Error(
         'Legacy FQBN must use CDCOnBoot=default to match jumper-gated CDC');
   }
-  if (!bleHeader.includes('#define BLE_SCAN_IDLE_INTERVAL            0x00C0') ||
-      !bleHeader.includes('#define BLE_SCAN_IDLE_WINDOW              0x0030') ||
-      !bleHeader.includes('#define BLE_SCAN_BURST_INTERVAL           0x0060') ||
-      !bleHeader.includes('#define BLE_SCAN_BURST_WINDOW             0x0030')) {
+  if (!bleHeader.includes('#define BLE_SCAN_LIGHT_INTERVAL           0x00B8') ||
+      !bleHeader.includes('#define BLE_SCAN_LIGHT_WINDOW             0x002E') ||
+      !bleHeader.includes('#define BLE_SCAN_NORMAL_INTERVAL          0x0064') ||
+      !bleHeader.includes('#define BLE_SCAN_NORMAL_WINDOW            0x0032') ||
+      !bleHeader.includes('#define BLE_SCAN_AGGRESSIVE_INTERVAL      0x0020') ||
+      !bleHeader.includes('#define BLE_SCAN_AGGRESSIVE_WINDOW        0x0020')) {
     throw new Error(
-        'Idle BLE scan must be 25% (30/120); burst must stay 50% (30/60)');
+        'BLE scan presets must be Light 25% (28.75/115), Normal 50% (31.25/62.5), Aggressive 100% (20/20)');
   }
   if (!firmware.includes('USB_CONSOLE_GPIO') ||
       !firmware.includes('SHOT_STOPPER_USB_CONSOLE_GPIO 4') ||
@@ -416,13 +427,19 @@ if (/#define\s+BLE_CONNECT_TIMEOUT_MS\s+4000UL/.test(bleLibrary)) {
   if (!pollScan.includes('char mac[ACAIA_MAC_CAPACITY]') ||
       !pollScan.includes('char name[ACAIA_NAME_CAPACITY]') ||
       !pollScan.includes('isScaleName(name)') ||
+      !pollScan.includes('advertisedUuidLooksLikeScale') ||
       !pollScan.includes('copyAddress') ||
       !pollScan.includes('copyLocalName') ||
       pollScan.includes('peripheral.address()') ||
       pollScan.includes('peripheral.localName()') ||
       pollScan.includes('advertisedServiceUuid()')) {
     throw new Error(
-        'pollScan must copy MAC/name into C buffers without Arduino String');
+        'pollScan must copy MAC/name into C buffers and match UUID16 without Arduino String');
+  }
+  if (!bleLibrary.includes('hasAdvertisedUuid16') ||
+      !bleLibrary.includes('scaleUuid16AllowsNamelessConnect')) {
+    throw new Error(
+        'Nameless scale ads must match 16-bit UUIDs via hasAdvertisedUuid16');
   }
 }
 {
@@ -466,6 +483,8 @@ if (firmware.includes('if (scaleLinked || changed)')) {
 if (!firmware.includes('companionAdvertisingShouldPause') ||
     !firmware.includes('syncCompanionAdvertisingForScaleLink') ||
     !firmware.includes('scale.isConnecting()') ||
+    !firmware.includes('SCALE_HUNT_RF_CLEAR_MS') ||
+    !firmware.includes('scaleHuntRfClearActive') ||
     !firmware.includes('BLE.poll(tickDelayMs)') ||
     firmware.includes('vTaskDelay(pdMS_TO_TICKS(scaleWorkerTickDelayMs()))') ||
     (firmware.split('syncCompanionAdvertisingForScaleLink();').length - 1) < 3 ||
@@ -473,17 +492,25 @@ if (!firmware.includes('companionAdvertisingShouldPause') ||
     !bleCompanion.includes('BLE_COMPANION_ADV_INTERVAL') ||
     !bleCompanion.includes('setAdvertisingInterval(BLE_COMPANION_ADV_INTERVAL)')) {
   throw new Error(
-      'Companion advertising must pause while connecting or scale-linked; worker must block on HCI');
+      'Companion advertising must pause while connecting, scale-linked, or in the hunt RF window; worker must block on HCI');
 }
 if (firmware.includes('SCALE_LINK_COEX_BT_MS') ||
     firmware.includes('scaleLinkCoexHadLink') ||
+    firmware.includes('setRfCoexClaim') ||
+    firmware.includes('rfCoexWinner') ||
+    firmware.includes('preferStaWifiCoex') ||
     !firmware.includes('scale.isConnecting() || scale.isLinkUp()') ||
-    !firmware.includes('setRfCoexClaim(RfCoexClaim::BLE') ||
-    !firmware.includes('rfCoexWinner') ||
-    !firmware.includes('publishRfCoexPreference') ||
-    !firmware.includes('applyRfCoexPreference')) {
+    !firmware.includes('ensureRfCoexBt') ||
+    !firmware.includes('ESP_COEX_PREFER_BT') ||
+    !firmware.includes('applyRfCoexPreference') ||
+    !firmware.includes('serviceScaleScanIntensity') ||
+    firmware.includes('serviceScaleScanDuty') ||
+    firmware.includes('SCALE_SCAN_BURST_MS') ||
+    firmware.includes('nextScaleConnectRetryMs') ||
+    firmware.includes('SCALE_CONNECT_RETRY_MS') ||
+    !firmware.includes('applyLiveBleScanIntensity')) {
   throw new Error(
-      'RF coex must prefer BT for the whole GATT link via a shared claim resolver, not a 1s window');
+      'RF coex must always prefer BT (ensureRfCoexBt); claims and STA WIFI preference are gone; scan uses live intensity, not idle/burst');
 }
 {
   const restoreStart = firmwareCore.indexOf('void servicePendingBrewRfRestore()');
@@ -577,10 +604,10 @@ const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 52520) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 139600) {
+if (jsBytes > 140500) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 192200) {
+if (htmlBytes + jsBytes > 193100) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -820,15 +847,36 @@ if (html.indexOf('<summary>Brew by Weight</summary>') >
 
 if (ui.includes('bleCompanionEnabled" type="checkbox" role="switch" checked>') ||
     !ui.includes('bleCompanionEnabled') ||
+    !ui.includes('<legend>Bluetooth</legend>') ||
+    !ui.includes('id="bleScanIntensity"') ||
+    !ui.includes("scanIntensity:wanted") ||
     !ui.includes('/api/v1/admin/ble-compat') ||
     !ui.includes("method:'PUT'") ||
     !ui.includes('active this boot') ||
     !ui.includes('restart required') ||
     !network.includes('bleCompanion') ||
     !network.includes('restartRequired') ||
+    !network.includes('scanIntensity') ||
     !network.includes('WebCommandType::BLE_COMPAT_ENABLE') ||
+    !network.includes('WebCommandType::BLE_SCAN_INTENSITY') ||
+    !network.includes('command.type = WebCommandType::BLE_SCAN_INTENSITY') ||
+    !firmwareCore.includes('bool persistBleScanIntensity') ||
     !networkHeader.includes('bleCompatHandler')) {
-  throw new Error('BLE Companion Admin controls must be wired end-to-end');
+  throw new Error('Bluetooth Admin controls must keep Companion next-boot and live scan intensity');
+}
+{
+  const persistStart = firmwareCore.indexOf(
+      'bool persistBleScanIntensity(BleScanIntensity intensity) {');
+  const persistEnd = firmwareCore.indexOf(
+      'bool persistBleCompanionEnabled(bool enabled) {', persistStart + 1);
+  const persist = persistStart >= 0 && persistEnd > persistStart
+      ? firmwareCore.slice(persistStart, persistEnd)
+      : '';
+  if (!persist.includes('applyLiveBleScanIntensity') ||
+      persist.includes('restartRequired')) {
+    throw new Error(
+        'PUT scanIntensity must apply live and must not set restartRequired');
+  }
 }
 if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0') ||
     !domain.includes('SHOT_STOPPER_ENABLE_BUZZER must be 0 (off) or 1 (passive RTTTL)') ||
@@ -2753,7 +2801,9 @@ if (!network.includes('restoreLkgToActive(next)') ||
       !network.includes('WIFI_PS_MIN_MODEM') ||
       /WiFi\.setSleep\(\s*WIFI_PS_MAX_MODEM\s*\)/.test(network) ||
       !network.includes('syncScaleLinkRf') ||
+      !network.includes('syncScaleHuntRf') ||
       !firmware.includes('networkManager.syncScaleLinkRf') ||
+      !firmware.includes('networkManager.syncScaleHuntRf') ||
       !domainCore.includes('desiredWifiPowerSave') ||
       !domainCore.includes('scaleConnectingOrUp') ||
       !domainCore.includes('staAssociated') ||
@@ -3282,7 +3332,7 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
     'wifiSleep',
     'staState', 'staIp', 'ipMode', 'configState', 'confirmRemainingMs', 'rssi',
     'signalQualityPct', 'configuredIp', 'configuredNetmask', 'configuredGateway',
-    'configuredDns1', 'configuredDns2'
+    'configuredDns1', 'configuredDns2', 'scanIntensity'
   ]) {
     if (!adminBody.includes(field)) {
       throw new Error('status/admin missing required network field: ' + field);
@@ -3314,7 +3364,7 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
     }
   }
   if (!ui.includes(
-          "v==='admin'?!!(typeof s.adminUnlocked==='boolean'&&s.network&&(s.adminUnlocked?(s.bleCompanion&&typeof s.bleCompanion.enabled==='boolean'&&typeof s.bleCompanion.active==='boolean'&&typeof s.bleCompanion.restartRequired==='boolean'&&typeof c.timezoneOffsetMinutes==='number'&&c.ntpServerPreset!=null&&s.ota&&typeof s.ota.available==='boolean'):typeof s.network.configState==='string'))")) {
+          "v==='admin'?!!(typeof s.adminUnlocked==='boolean'&&s.network&&(s.adminUnlocked?(s.bleCompanion&&typeof s.bleCompanion.enabled==='boolean'&&typeof s.bleCompanion.active==='boolean'&&typeof s.bleCompanion.restartRequired==='boolean'&&typeof s.bleCompanion.scanIntensity==='string'&&typeof c.timezoneOffsetMinutes==='number'&&c.ntpServerPreset!=null&&s.ota&&typeof s.ota.available==='boolean'):typeof s.network.configState==='string'))")) {
     throw new Error(
         'statusPageOk(admin) must accept a locked payload and validate unlocked network/BLE/NTP/OTA');
   }
@@ -3500,8 +3550,6 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
     !network.includes('setScanMethod') ||
     !network.includes('setSortMethod') ||
     !network.includes('all-channel RSSI sort') ||
-    !network.includes('preferStaWifiCoex') ||
-    !network.includes('setRfCoexClaim') ||
     !network.includes('brewRfActive()') ||
     !network.includes('associate deferred; brew RF active') ||
     !network.includes('associate aborted; brew RF active') ||
@@ -3847,8 +3895,8 @@ if (generated.jsGzip.length > 6144) {
 if (generated.cssGzip.length > 6500) {
   throw new Error('Compressed Web CSS exceeds the 6.3 KiB gzip budget');
 }
-if (generated.runtimeGzip.length > 28000) {
-  throw new Error('Compressed Web UI runtime JS exceeds the 27.3 KiB gzip budget');
+if (generated.runtimeGzip.length > 28100) {
+  throw new Error('Compressed Web UI runtime JS exceeds the 27.4 KiB gzip budget');
 }
 if (generated.secondaryGzip.length > 4096) {
   throw new Error('Compressed secondary view JS exceeds the 4 KiB gzip budget');
@@ -3856,8 +3904,8 @@ if (generated.secondaryGzip.length > 4096) {
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
 }
-if (generated.combined > 54400) {
-  throw new Error('Combined Web UI gzip exceeds the 53.1 KiB flash budget');
+if (generated.combined > 54600) {
+  throw new Error('Combined Web UI gzip exceeds the 53.3 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {

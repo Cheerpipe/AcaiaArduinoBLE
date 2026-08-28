@@ -92,6 +92,7 @@
 using namespace shotstopper;
 
 #include "ShotStopperScaleWorker.h"
+#include "ShotStopperRfCoex.h"
 
 #if !defined(SHOT_STOPPER_HOST_TEST)
 // ArduinoBLE BLEHostAlloc counters (patches/ArduinoBLE-2.1.0-ble-host-psram).
@@ -3719,6 +3720,7 @@ void serviceRuntimePersistence() {
 }
 
 bool persistBleCompanionEnabled(bool enabled);
+bool persistBleScanIntensity(BleScanIntensity intensity);
 
 void completeMaintenanceLease(const WebCommand &result) {
   if (!maintenanceLease.active ||
@@ -3765,6 +3767,7 @@ void rejectWebCommand(const WebCommand &command) {
 }
 
 bool persistBleCompanionEnabled(bool enabled);
+bool persistBleScanIntensity(BleScanIntensity intensity);
 
 void processWebCommand(const WebCommand &command) {
   switch (command.type) {
@@ -4167,8 +4170,26 @@ void processWebCommand(const WebCommand &command) {
         rejectWebCommand(command);
         return;
       }
+      if (command.bleScanIntensitySpecified &&
+          !persistBleScanIntensity(clampBleScanIntensity(
+              command.bleScanIntensity))) {
+        rejectWebCommand(command);
+        return;
+      }
       addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED,
                     enabled ? 1 : 0);
+      reportControlCommandResult(command, CommandResultState::PERSISTED);
+      return;
+    }
+
+    case WebCommandType::BLE_SCAN_INTENSITY: {
+      if (!persistBleScanIntensity(clampBleScanIntensity(
+              command.bleScanIntensity))) {
+        rejectWebCommand(command);
+        return;
+      }
+      addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED,
+                    static_cast<int32_t>(command.bleScanIntensity));
       reportControlCommandResult(command, CommandResultState::PERSISTED);
       return;
     }
@@ -4214,6 +4235,23 @@ void reportBleCompanionResult(const BleCompanionRequest &request,
               static_cast<int32_t>(request.type));
     }
   }
+}
+
+bool persistBleScanIntensity(BleScanIntensity intensity) {
+  intensity = clampBleScanIntensity(static_cast<uint8_t>(intensity));
+#if !defined(SHOT_STOPPER_HOST_TEST)
+  const uint8_t stored = static_cast<uint8_t>(intensity);
+  if (bleCompanionPersistedSettings.scanIntensity != stored) {
+    BleCompanionPersistedSettings candidate = bleCompanionPersistedSettings;
+    candidate.scanIntensity = stored;
+    if (!saveBleCompanionSettings(candidate)) {
+      return false;
+    }
+    bleCompanionPersistedSettings = candidate;
+  }
+#endif
+  applyLiveBleScanIntensity(intensity);
+  return true;
 }
 
 bool persistBleCompanionEnabled(bool enabled) {
@@ -4612,6 +4650,8 @@ void publishControlStatus() {
     next.bleCompanionAcceptedWrites = ble.acceptedWrites;
     next.bleCompanionRejectedWrites = ble.rejectedWrites;
     next.bleCompanionLastReject = static_cast<uint8_t>(ble.lastReject);
+    next.bleCompanionScanIntensity =
+        static_cast<uint8_t>(liveBleScanIntensity());
   }
   portENTER_CRITICAL(&debugLogMux);
   next.debugEventsDropped = debugLog.overwritten();
@@ -4911,6 +4951,8 @@ void serialCliPrintBleCompanionStatus() {
   Serial.println(ble.rejectedWrites);
   Serial.print("lastReject=");
   Serial.println(bleCompanionRejectReasonName(ble.lastReject));
+  Serial.print("scanIntensity=");
+  Serial.println(bleScanIntensityName(liveBleScanIntensity()));
 }
 
 void serialCliPrintLiveLogDump() {
@@ -5344,6 +5386,8 @@ void setup() {
   }
   const bool bleCompanionConfigured =
       bleCompanionPersistedSettings.enabled != 0;
+  applyLiveBleScanIntensity(clampBleScanIntensity(
+      bleCompanionPersistedSettings.scanIntensity));
   bleCompanionStatusSnapshot.configuredEnabled = bleCompanionConfigured;
   bleCompanionRuntimeSnapshot.configuredEnabled = bleCompanionConfigured;
   if (bleCompanionConfigured) {

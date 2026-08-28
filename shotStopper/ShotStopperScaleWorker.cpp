@@ -13,8 +13,10 @@
 #endif
 
 #include "ShotStopperAlert.h"
+#include "ShotStopperRfCoex.h"
 #include "ShotStopperSafety.h"
 
+#include <atomic>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -35,7 +37,6 @@ void feedOrTripCurrentTaskWatchdog();
 bool feedCurrentTaskWatchdog();
 void reportTaskWatchdogFault();
 shotstopper::RelaySafetySnapshot getRelaySafetySnapshot();
-void applyBrewRfPreference(bool preferBluetooth);
 void commitLiveRuntimeConfig(const shotstopper::RuntimeConfig &composed,
                              int32_t reasonBits);
 void resetCupPresence();
@@ -117,8 +118,11 @@ BookooDebugAction scaleDebugAction = BookooDebugAction::START;
 uint8_t scaleDebugBeepLevel = 0;
 bool scalePaddleReturnReminderBeepPending = false;
 bool scaleCompletionBeepPending = false;
-bool scanBurstActive = false;
-uint32_t scanBurstUntilMs = 0;
+uint16_t scaleScanAppliedInterval = 0;
+uint16_t scaleScanAppliedWindow = 0;
+uint32_t scaleHuntRfUntilMs = 0;
+std::atomic<uint8_t> liveBleScanIntensityRaw{
+    static_cast<uint8_t>(BleScanIntensity::NORMAL)};
 bool bookooConnectBeepPending = false;
 bool bookooConnectBeepSawWeight = false;
 uint32_t bookooConnectBeepArmedAtMs = 0;
@@ -795,13 +799,6 @@ void executeScaleCommand(const ScaleCommand &command) {
   }
 }
 
-uint32_t nextScaleConnectRetryMs(uint32_t currentRetryMs) {
-  if (currentRetryMs > SCALE_CONNECT_RETRY_MAX_MS / 2U) {
-    return SCALE_CONNECT_RETRY_MAX_MS;
-  }
-  return currentRetryMs * 2U;
-}
-
 void copyPreferredScaleMac(char *out, size_t capacity) {
   if (out == nullptr || capacity == 0) {
     return;
@@ -854,14 +851,24 @@ ScaleMacCacheMode currentScaleMacCacheMode() {
   return static_cast<ScaleMacCacheMode>(runtimeConfig.scaleMacCacheMode);
 }
 
+bool scaleHuntRfClearActive(uint32_t nowMs = millis()) {
+  return scaleHuntRfUntilMs != 0 &&
+         static_cast<int32_t>(nowMs - scaleHuntRfUntilMs) < 0;
+}
+
+void armScaleHuntRfClear() {
+  scaleHuntRfUntilMs = millis() + SCALE_HUNT_RF_CLEAR_MS;
+}
+
 // Pause companion advertising while connecting to a scale (GAP connect cannot
 // coexist with a peripheral advert), while the machine circuit is closed
-// (brew RF preference), and while a scale GATT link is up (dual-role
-// advertising is the btController hog). Scan can coexist with advertising, so
-// idle/disconnected discovery still lets a phone find Companion.
+// (brew RF preference), while a scale GATT link is up (dual-role advertising
+// is the btController hog), and for SCALE_HUNT_RF_CLEAR_MS after GAP (re)start
+// so the scanner owns the radio. After that window, scan coexists with
+// Companion advertising again.
 bool companionAdvertisingShouldPause() {
   return scale.isConnecting() || scale.isLinkUp() ||
-         getRelaySafetySnapshot().closed;
+         getRelaySafetySnapshot().closed || scaleHuntRfClearActive();
 }
 
 void syncCompanionAdvertisingForScaleLink() {
@@ -1067,23 +1074,43 @@ bool applyScaleDiscoveryPause() {
 }
 
 void resetScaleWorkerRadioStateForHost() {
-  scanBurstActive = false;
-  scanBurstUntilMs = 0;
+  scaleScanAppliedInterval = 0;
+  scaleScanAppliedWindow = 0;
+  scaleHuntRfUntilMs = 0;
+  liveBleScanIntensityRaw.store(
+      static_cast<uint8_t>(BleScanIntensity::NORMAL),
+      std::memory_order_relaxed);
   bookooConnectBeepPending = false;
   bookooConnectBeepSawWeight = false;
   bookooConnectBeepArmedAtMs = 0;
 }
 
-bool startScaleDiscoveryScan(const char *mac, bool forceRestart, bool burst) {
-  if (!scale.startScan(mac, forceRestart, burst)) {
+void applyLiveBleScanIntensity(BleScanIntensity intensity) {
+  liveBleScanIntensityRaw.store(static_cast<uint8_t>(clampBleScanIntensity(
+                                    static_cast<uint8_t>(intensity))),
+                                std::memory_order_relaxed);
+}
+
+BleScanIntensity liveBleScanIntensity() {
+  return clampBleScanIntensity(
+      liveBleScanIntensityRaw.load(std::memory_order_relaxed));
+}
+
+bool startScaleDiscoveryScan(const char *mac, bool forceRestart) {
+  uint16_t interval = BLE_SCAN_NORMAL_INTERVAL;
+  uint16_t window = BLE_SCAN_NORMAL_WINDOW;
+  bleScanHciParams(liveBleScanIntensity(), interval, window);
+  const bool scanningBefore = scale.isScanning();
+  const uint16_t prevInterval = scaleScanAppliedInterval;
+  const uint16_t prevWindow = scaleScanAppliedWindow;
+  if (!scale.startScan(mac, forceRestart, interval, window)) {
     return false;
   }
-  if (burst) {
-    scanBurstActive = true;
-    scanBurstUntilMs = millis() + SCALE_SCAN_BURST_MS;
-  } else {
-    scanBurstActive = false;
-    scanBurstUntilMs = 0;
+  scaleScanAppliedInterval = interval;
+  scaleScanAppliedWindow = window;
+  if (!scanningBefore || forceRestart || prevInterval != interval ||
+      prevWindow != window) {
+    armScaleHuntRfClear();
   }
   return true;
 }
@@ -1101,52 +1128,32 @@ void fillCurrentScaleScanFilter(char *macOut, size_t cap, bool &useDirected) {
   }
 }
 
-void serviceScaleScanDuty(bool sawCompatibleAd) {
-  // Idle 25% / burst 50% apply only while scanning. Connecting and GATT-up
-  // never reach this path (isConnecting() or !isScanning()).
+void serviceScaleScanIntensity() {
   if (!scale.isScanning() || scale.isConnecting()) {
+    return;
+  }
+  uint16_t interval = BLE_SCAN_NORMAL_INTERVAL;
+  uint16_t window = BLE_SCAN_NORMAL_WINDOW;
+  bleScanHciParams(liveBleScanIntensity(), interval, window);
+  if (scaleScanAppliedInterval == interval &&
+      scaleScanAppliedWindow == window) {
     return;
   }
   char mac[PREFERRED_SCALE_MAC_CAPACITY] = {};
   bool useDirected = false;
   fillCurrentScaleScanFilter(mac, sizeof(mac), useDirected);
-  const char *filter = useDirected ? mac : nullptr;
-  const bool sameHciParams = scaleScanDutyHciParamsEqual();
-  if (sawCompatibleAd) {
-    if (!scanBurstActive) {
-      if (sameHciParams) {
-        scanBurstActive = true;
-        scanBurstUntilMs = millis() + SCALE_SCAN_BURST_MS;
-      } else {
-        (void)startScaleDiscoveryScan(filter, true, true);
-      }
-    } else {
-      scanBurstUntilMs = millis() + SCALE_SCAN_BURST_MS;
-    }
-    return;
-  }
-  if (scanBurstActive &&
-      static_cast<int32_t>(millis() - scanBurstUntilMs) >= 0) {
-    if (sameHciParams) {
-      scanBurstActive = false;
-      scanBurstUntilMs = 0;
-    } else {
-      (void)startScaleDiscoveryScan(filter, true, false);
-    }
-  }
+  (void)startScaleDiscoveryScan(useDirected ? mac : nullptr, true);
 }
 
 void syncScaleRadioCoex() {
-  applyBrewRfPreference(scale.isConnecting() || scale.isLinkUp() ||
-                        getRelaySafetySnapshot().closed);
 #if !defined(SHOT_STOPPER_HOST_TEST)
   networkManager.syncScaleLinkRf(scale.isConnecting() || scale.isLinkUp());
+  networkManager.syncScaleHuntRf(scaleHuntRfClearActive());
 #endif
 }
 
 void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
                                  uint32_t &lastConnectLogMs,
-                                 uint32_t &connectRetryMs,
                                  bool &connectAttemptSeriesActive,
                                  uint32_t &scanSessionAtMs,
                                  uint32_t &scanLastAdvertAtMs) {
@@ -1169,7 +1176,6 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     const bool connected = scale.pollScan();
     if (connected) {
       connectAttemptSeriesActive = false;
-      connectRetryMs = SCALE_CONNECT_RETRY_MS;
       const char *address = scale.address();
       const char *name = scale.localName();
       notePreferredScale(address, name);
@@ -1199,7 +1205,6 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     }
     if (connected) {
       connectAttemptSeriesActive = false;
-      connectRetryMs = SCALE_CONNECT_RETRY_MS;
       const char *address = scale.address();
       const char *name = scale.localName();
       notePreferredScale(address, name);
@@ -1217,7 +1222,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       return;
     }
     if (scale.isScanning()) {
-      serviceScaleScanDuty(sawCompatibleAd);
+      serviceScaleScanIntensity();
       if (elapsedMs(lastScanCycleMs) < SCALE_DISCOVERY_TICK_MS) {
         return;
       }
@@ -1245,7 +1250,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
       // PREFER: after grace, drop the preferred-only filter and accept any.
       if (cacheMode == ScaleMacCacheMode::PREFER && directed &&
           elapsedMs(scanSessionAtMs) >= SCALE_PREFER_FALLBACK_MS) {
-        if (startScaleDiscoveryScan(nullptr, true, scanBurstActive)) {
+        if (startScaleDiscoveryScan(nullptr, true)) {
           serialTrace(LogLevel::INFO,
                       "Preferred scale not found; falling back to any scale");
           scanLastAdvertAtMs = 0;
@@ -1267,8 +1272,7 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
             elapsedMs(scanSessionAtMs) < SCALE_PREFER_FALLBACK_MS;
         const bool useDirected =
             shouldUseDirectedScaleScan(cacheMode, hasMac, preferWaiting);
-        if (startScaleDiscoveryScan(useDirected ? preferredMac : nullptr, true,
-                                    false)) {
+        if (startScaleDiscoveryScan(useDirected ? preferredMac : nullptr, true)) {
           scanSessionAtMs = lastScanCycleMs;
           scanLastAdvertAtMs = 0;
         }
@@ -1277,7 +1281,6 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     }
 
     lastScanCycleMs = millis();
-    const ScaleDisconnectReason reason = scale.lastDisconnectReason();
     const bool finishedDirectedAttempt =
         (cacheMode == ScaleMacCacheMode::ONLY ||
          cacheMode == ScaleMacCacheMode::PREFER) &&
@@ -1289,14 +1292,6 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
                    scale.lastDisconnectReasonName());
     }
 
-    if (reason == ScaleDisconnectReason::SCAN_START_FAILED ||
-        reason == ScaleDisconnectReason::PACKET_TIMEOUT ||
-        reason == ScaleDisconnectReason::FIRST_PACKET_TIMEOUT ||
-        reason == ScaleDisconnectReason::CONNECT_FAILED) {
-      connectRetryMs = nextScaleConnectRetryMs(connectRetryMs);
-    } else {
-      connectRetryMs = SCALE_CONNECT_RETRY_MS;
-    }
     const bool logAttempt =
         !connectAttemptSeriesActive ||
         elapsedMs(lastConnectLogMs) >= SCALE_CONNECT_LOG_MS;
@@ -1310,11 +1305,8 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     }
     updateWorkerLinkState();
     setScaleLinkState(ScaleLinkState::DISCONNECTED);
-    return;
-  }
-
-  if (elapsedMs(lastScanCycleMs) < connectRetryMs) {
-    return;
+    // Fall through and startScan on this same tick. Do not wait after a
+    // connect/GATT/scan-start failure.
   }
 
   lastScanCycleMs = millis();
@@ -1340,14 +1332,12 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
     }
     addDebugEvent(DebugCategory::SCALE, DebugCode::SCALE_CONNECTING);
   }
-  if (startScaleDiscoveryScan(useDirected ? preferredMac : nullptr, false,
-                              true)) {
+  if (startScaleDiscoveryScan(useDirected ? preferredMac : nullptr, false)) {
     scanSessionAtMs = lastScanCycleMs;
     scanLastAdvertAtMs = 0;
     return;
   }
 
-  connectRetryMs = nextScaleConnectRetryMs(connectRetryMs);
   if (useDirected) {
     serialTrace(LogLevel::WARNING, "Preferred scale scan failed to start");
   } else if (logAttempt) {
@@ -1395,7 +1385,6 @@ void serviceScaleWorkerLink() {
 void scaleWorkerTask(void *) {
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
-  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
   uint32_t scanLastAdvertAtMs = 0;
@@ -1419,6 +1408,7 @@ void scaleWorkerTask(void *) {
   // ArduinoBLE defaults ATT operations to five seconds. Bound every central
   // operation owned by this task so scale-staleness telemetry remains useful.
   BLE.setTimeout(SCALE_ATT_TIMEOUT_MS);
+  ensureRfCoexBt();
   logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
           BOOT_SUBSYSTEM_BLE, 1);
   BleCompanionRuntimeSnapshot initialBleSnapshot;
@@ -1503,7 +1493,6 @@ void scaleWorkerTask(void *) {
     // queued commands. Bookoo has no heartbeat; silence is the only watchdog.
     if (linked) {
       connectAttemptSeriesActive = false;
-      connectRetryMs = SCALE_CONNECT_RETRY_MS;
       serviceScaleWorkerLink();
       if (linkSnapshotDue) {
         lastLinkSnapshotMs = nowMs;
@@ -1541,7 +1530,6 @@ void scaleWorkerTask(void *) {
           executeScaleDebugCommand(debugAction, debugLevel);
         } else if (!linked && !applyScaleDiscoveryPause()) {
           serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
-                                      connectRetryMs,
                                       connectAttemptSeriesActive,
                                       scanSessionAtMs, scanLastAdvertAtMs);
         }

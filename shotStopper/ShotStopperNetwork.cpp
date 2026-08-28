@@ -981,6 +981,7 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
   initJsonArenaHooks();
   ntpConfigRevision_ = settings_.runtime.revision;
   g_wallClock.reset();
+  ensureRfCoexBt();
   // Pin beside the Wi-Fi/LwIP stacks on PRO_CPU (core 0).
   // Stack must stay in internal RAM: this task calls NVS/Preferences (flash
   // write disables the cache, which makes a PSRAM stack inaccessible).
@@ -1591,18 +1592,6 @@ void ShotStopperNetwork::clearStaLinkMetrics() {
   status_.staBssid[0] = '\0';
 }
 
-void ShotStopperNetwork::preferStaWifiCoex(bool enable) {
-  if (enable) {
-    setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, true);
-    staWifiCoexPreferred_ = true;
-    return;
-  }
-  if (staWifiCoexPreferred_) {
-    setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, false);
-    staWifiCoexPreferred_ = false;
-  }
-}
-
 bool ShotStopperNetwork::brewRfActive() const {
   const ControlGateSnapshot control = controlGate();
   return control.activeCycle || control.relayClosed;
@@ -1610,6 +1599,10 @@ bool ShotStopperNetwork::brewRfActive() const {
 
 void ShotStopperNetwork::syncScaleLinkRf(bool connectingOrUp) {
   scaleConnectingOrUp_.store(connectingOrUp, std::memory_order_relaxed);
+}
+
+void ShotStopperNetwork::syncScaleHuntRf(bool huntActive) {
+  scaleHuntRfActive_.store(huntActive, std::memory_order_relaxed);
 }
 
 void ShotStopperNetwork::applyWifiPowerSave() {
@@ -1657,7 +1650,6 @@ void ShotStopperNetwork::applyWifiPowerSave() {
 bool ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
                                              uint32_t now) {
   if (brewRfActive()) {
-    preferStaWifiCoex(false);
     lifecycleLog("WiFi STA associate deferred; brew RF active");
     return false;
   }
@@ -1692,7 +1684,6 @@ bool ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   // Let the IDF connect path scan every channel and sort by RSSI.
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
-  preferStaWifiCoex(true);
   if (!feedCurrentTaskWatchdog()) {
     callbacks_.reportTaskWatchdogFault();
   }
@@ -1705,7 +1696,6 @@ bool ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
   // can disconnect while the start handler runs (ESP_ERR_WIFI_STOP_STATE 12308).
   if (!WiFi.STA.begin(false)) {
     lifecycleLog("WiFi STA enable failed");
-    preferStaWifiCoex(false);
     return false;
   }
   applyWifiPowerSave();
@@ -1895,7 +1885,6 @@ bool ShotStopperNetwork::ensureAccessPoint(uint32_t now, bool force) {
 }
 
 void ShotStopperNetwork::stopNetwork() {
-  preferStaWifiCoex(false);
   esp_wifi_scan_stop();
   WiFi.scanDelete();
   stopHttpServer();
@@ -1931,7 +1920,6 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
   // must promote to CONNECTED: associated traffic can coexist under PREFER_BT.
   if (brewRf && status.staState == StaState::CONNECTING &&
       WiFi.status() != WL_CONNECTED) {
-    preferStaWifiCoex(false);
     WiFi.disconnect(false, false);
     portENTER_CRITICAL(&dataMux_);
     status_.staState = StaState::DISCONNECTED;
@@ -1943,7 +1931,6 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
 
   if (status.staState == StaState::CONNECTED) {
     if (WiFi.status() != WL_CONNECTED) {
-      preferStaWifiCoex(false);
       portENTER_CRITICAL(&dataMux_);
       status_.staState = StaState::DISCONNECTED;
       status_.networkActive = false;
@@ -2030,7 +2017,6 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
     const bool httpReady = mayStartHttp && startHttpServer();
     httpRetryAtMs_ = httpReady || httpStartHeld_ ? 0 : now + HTTP_RETRY_MS;
     staEverConnected_ = true;
-    preferStaWifiCoex(false);
     {
       const int32_t rssi = WiFi.RSSI();
       char bssidText[18] = {};
@@ -2072,7 +2058,6 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
     if (wifiScanInProgress()) {
       return;
     }
-    preferStaWifiCoex(false);
     WiFi.disconnect(false, false);
     portENTER_CRITICAL(&dataMux_);
     status_.staState = StaState::FAILED;
@@ -2215,6 +2200,15 @@ void ShotStopperNetwork::serviceWifiScan(uint32_t now) {
   requested = scanRequested_;
   state = g_wifiScan.state;
   portEXIT_CRITICAL(&dataMux_);
+
+  if (scaleHuntRfActive_.load(std::memory_order_relaxed)) {
+    const bool canceled = requested || state == WifiScanState::RUNNING ||
+                          state == WifiScanState::QUEUED;
+    if (canceled) {
+      abortWifiScan(now, false);
+    }
+    return;
+  }
 
   if (!safe) {
     const bool canceled = requested || state == WifiScanState::RUNNING ||
@@ -2796,7 +2790,6 @@ bool ShotStopperNetwork::handleCliWifiAction(const WebCommand &command,
     }
     case WebCommandType::WIFI_DISCONNECT: {
       staReconnectHeld_ = true;
-      preferStaWifiCoex(false);
       WiFi.disconnect(false, false);
       stopNtp();
       staNtpEligibleAtMs_ = 0;
@@ -4494,7 +4487,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
           "\"restartRequired\":%s,\"stackReady\":%s,"
           "\"advertising\":%s,\"connected\":%s,\"protocolVersion\":%u,"
           "\"acceptedWrites\":%lu,\"rejectedWrites\":%lu,"
-          "\"lastReject\":\"%s\"}",
+          "\"lastReject\":\"%s\",\"scanIntensity\":\"%s\"}",
           network.apActive ? "true" : "false", network.apIp,
           static_cast<unsigned>(network.apClients),
           network.wifiConfigured ? "true" : "false", safeStaSsid,
@@ -4516,7 +4509,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
           static_cast<unsigned long>(control.bleCompanionAcceptedWrites),
           static_cast<unsigned long>(control.bleCompanionRejectedWrites),
           bleCompanionRejectReasonName(static_cast<BleCompanionRejectReason>(
-              control.bleCompanionLastReject)));
+              control.bleCompanionLastReject)),
+          bleScanIntensityName(clampBleScanIntensity(
+              control.bleCompanionScanIntensity)));
       if (ok) {
         self.buildOtaJson(g_work->otaJson, NetworkWorkBuf::kOtaJson,
                           controlGateOf(control));
@@ -5330,7 +5325,7 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            "\"bleCompanion\":{\"enabled\":%s,\"active\":%s,"
            "\"restartRequired\":%s,\"stackReady\":%s,\"advertising\":%s,"
            "\"connected\":%s,\"protocolVersion\":%u,\"acceptedWrites\":%lu,"
-           "\"rejectedWrites\":%lu},",
+           "\"rejectedWrites\":%lu,\"scanIntensity\":\"%s\"},",
            c.bleCompanionEnabled ? "true" : "false",
            c.bleCompanionActive ? "true" : "false",
            c.bleCompanionRestartRequired ? "true" : "false",
@@ -5339,7 +5334,9 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            c.bleCompanionConnected ? "true" : "false",
            static_cast<unsigned>(c.bleCompanionProtocolVersion),
            static_cast<unsigned long>(c.bleCompanionAcceptedWrites),
-           static_cast<unsigned long>(c.bleCompanionRejectedWrites));
+           static_cast<unsigned long>(c.bleCompanionRejectedWrites),
+           bleScanIntensityName(clampBleScanIntensity(
+               c.bleCompanionScanIntensity)));
 
   self.buildOtaJson(work.otaJson, NetworkWorkBuf::kOtaJson, controlGateOf(c));
   ok = ok && debugExportChunk(request, "\"ota\":");
@@ -7084,22 +7081,43 @@ esp_err_t ShotStopperNetwork::bleCompatHandler(httpd_req_t *request) {
     return bodyStatus;
   }
   cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
+  static const char *const fields[] = {"enabled", "scanIntensity"};
   bool enabled = false;
-  static const char *const fields[] = {"enabled"};
-  const bool parsed =
-      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
-      jsonBoolean(root, "enabled", enabled);
+  char intensityText[12] = {};
+  BleScanIntensity intensity = BleScanIntensity::NORMAL;
+  const bool hasEnabled = root != nullptr && jsonFieldPresent(root, "enabled");
+  const bool hasScan =
+      root != nullptr && jsonFieldPresent(root, "scanIntensity");
+  bool parsed = root != nullptr && jsonHasOnlyUniqueFields(root, fields, 2) &&
+                (hasEnabled || hasScan);
+  if (parsed && hasEnabled) {
+    parsed = jsonBoolean(root, "enabled", enabled);
+  }
+  if (parsed && hasScan) {
+    parsed = jsonString(root, "scanIntensity", intensityText,
+                        sizeof(intensityText), false) &&
+             parseBleScanIntensityId(intensityText, intensity);
+  }
   if (root != nullptr) {
     cJSON_Delete(root);
   }
   self.unlockJsonBody();
   if (!parsed) {
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_BLE_CONFIG",
-                     "enabled must be a boolean.");
+                     "enabled must be a boolean and/or scanIntensity must be "
+                     "normal, aggressive, or light.");
   }
   WebCommand command;
-  command.type = enabled ? WebCommandType::BLE_COMPAT_ENABLE
-                         : WebCommandType::BLE_COMPAT_DISABLE;
+  if (hasEnabled) {
+    command.type = enabled ? WebCommandType::BLE_COMPAT_ENABLE
+                           : WebCommandType::BLE_COMPAT_DISABLE;
+  } else {
+    command.type = WebCommandType::BLE_SCAN_INTENSITY;
+  }
+  if (hasScan) {
+    command.bleScanIntensitySpecified = true;
+    command.bleScanIntensity = static_cast<uint8_t>(intensity);
+  }
   command.requestId = self.allocateRequestId();
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",

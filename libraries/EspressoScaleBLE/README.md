@@ -75,18 +75,21 @@ failure reasons, and connection telemetry. Idle discovery uses `startScan()` /
 watchdog; the idle GAP scan stays enabled until a match or a filter change.
 `init()` remains the blocking helper for sketches and still stops at
 `SCALE_SCAN_TIMEOUT_MS`. Neither path calls `BLE.begin()` or `BLE.end()`.
-`startScan()` does not restart an already-active GAP scan with the same filter;
-it does stop and restart when the MAC/name filter changes or `forceRestart` is
-set. Idle scans request `withDuplicates=true` so a missed first advertisement
+`startScan()` does not restart an already-active GAP scan with the same filter
+and HCI interval/window; it does stop and restart when the MAC/name filter
+changes, the scan parameters change, or `forceRestart` is set. Idle scans request `withDuplicates=true` so a missed first advertisement
 is not dropped for the rest of the session. A non-empty `startScan(mac)` still
 runs a **name scan** (`BLE.scan`), but only GATT-connects when the address
 matches; other compatible advertisements are exposed via
 `takeSeenAdvertisement()` for history without connecting. Name scans without a
-filter still require a known scale prefix; a connect-filter MAC may connect
-even when the advertisement has no local name.
+filter match a known scale prefix **or** a 16-bit service UUID from a protocol
+that does not require a GAP name (Bookoo `ff11`/`ff12`, Felicita `ffe1`, and
+similar). Varia/Eureka `fff1`/`fff2` still require a name. A connect-filter MAC
+may connect even when the advertisement has no local name.
 
 Stock ArduinoBLE 2.1.0 scans active at 20/20 ms (100% duty). Shot Stopper
-keeps that default so SCAN_RSP names stay visible.
+passes Light / Normal / Aggressive HCI presets into `startScan()` (Light
+28.75/115 ms = 25%, Normal 31.25/62.5 ms = 50% default, Aggressive 20/20 ms = 100%).
 `scripts/patch_arduinoble.sh` reverts leftover 40/20 or 100/30 GAP params and
 also applies an OOM-safe discovery patch, a BLE-host PSRAM allocator, and HCI
 bounded waits:

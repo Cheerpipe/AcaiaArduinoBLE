@@ -98,9 +98,6 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   pendingFinalize = PendingShotFinalize{};
   pendingScaleTimerStop = PendingScaleTimerStop{};
   pendingBrewRfRestore = false;
-  rfCoexLastAppliedValid = false;
-  setRfCoexClaim(RfCoexClaim::BLE, false);
-  setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, false);
   runtimeConfig = RuntimeConfig{};
   runtimeConfig.rinseEnabled = true;
   // Host scenarios cover scale-path alerts unless a test sets the channel.
@@ -1581,11 +1578,10 @@ void r12b_discovery_clears_stale_connected_link_snapshot() {
   scale.scanning = true;
   uint32_t lastScanCycleMs = hostMillis;
   uint32_t lastConnectLogMs = 0;
-  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = hostMillis;
   uint32_t scanLastAdvertAtMs = 0;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(getScaleLinkSnapshot().state == ScaleLinkState::DISCONNECTED);
   CHECK(!scaleAvailable());
@@ -3757,11 +3753,10 @@ void w75_bookoo_discovery_connect_applies_beep_policy() {
   scale.commandLog.clear();
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
-  uint32_t connectRetryMs = 1000;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
   uint32_t scanLastAdvertAtMs = 0;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.commandLog.empty());
 
@@ -3783,11 +3778,10 @@ void w75_bookoo_discovery_connect_applies_beep_policy() {
   scale.commandLog.clear();
   lastScanCycleMs = 0;
   lastConnectLogMs = 0;
-  connectRetryMs = 1000;
   connectAttemptSeriesActive = false;
   scanSessionAtMs = 0;
   scanLastAdvertAtMs = 0;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.commandLog.empty());
   scale.newWeightAvailableValue = true;
@@ -4062,21 +4056,19 @@ void d01_idle_scan_stays_enabled_between_ticks() {
   runtimeConfig.scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
   setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
-  hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
-  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
   uint32_t scanLastAdvertAtMs = 0;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
   CHECK(scale.startScanCalls == 1);
   const size_t calls = scale.startScanCalls;
   hostMillis += SCALE_DISCOVERY_TICK_MS - 1;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
@@ -4152,45 +4144,35 @@ void d02_first_mode_uses_name_scan() {
   runtimeConfig.scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
   scalePreferredMac[0] = '\0';
-  hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
-  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
   uint32_t scanLastAdvertAtMs = 0;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(!scale.directedScan);
   CHECK(scale.lastStartScanMac[0] == '\0');
 }
 
-void d03_scan_start_failed_uses_backoff() {
+void d03_scan_start_failed_retries_immediately() {
   resetHarness(false, false);
   reachReadyFromBoot();
   scale.startScanSucceeds = false;
-  hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
-  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
   uint32_t scanLastAdvertAtMs = 0;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(!scale.scanning);
-  CHECK(connectRetryMs == SCALE_CONNECT_RETRY_MS * 2U);
   CHECK(scale.startScanCalls == 1);
-  hostMillis += SCALE_CONNECT_RETRY_MS;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
-  CHECK(scale.startScanCalls == 1);
-  hostMillis += SCALE_CONNECT_RETRY_MS;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.startScanCalls == 2);
-  CHECK(connectRetryMs == SCALE_CONNECT_RETRY_MS * 4U);
+  CHECK(!scale.scanning);
 }
 
 void d04_full_cache_keeps_directed_scan() {
@@ -4199,19 +4181,17 @@ void d04_full_cache_keeps_directed_scan() {
   runtimeConfig.scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
   setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
-  hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
-  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
   uint32_t scanLastAdvertAtMs = 0;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   for (uint8_t tick = 0; tick < 3; ++tick) {
     hostMillis += SCALE_DISCOVERY_TICK_MS;
     serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
-                                connectRetryMs, connectAttemptSeriesActive,
+                                connectAttemptSeriesActive,
                                 scanSessionAtMs, scanLastAdvertAtMs);
   }
   CHECK(scale.scanning);
@@ -4225,63 +4205,93 @@ void d05_hci_watchdog_force_restarts_same_filter() {
   runtimeConfig.scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
   setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
-  hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
-  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
   uint32_t scanLastAdvertAtMs = 0;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
-                              connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
   CHECK(scale.startScanCalls == 1);
   CHECK(!scale.lastForceRestart);
-  CHECK(scale.lastBurst);
-  // Idle 25% (120 ms) != burst 50% (60 ms): burst expiry must stop/start GAP.
-  CHECK(!scaleScanDutyHciParamsEqual());
+  CHECK(scale.lastScanInterval == BLE_SCAN_NORMAL_INTERVAL);
+  CHECK(scale.lastScanWindow == BLE_SCAN_NORMAL_WINDOW);
   const size_t callsBeforeRestart = scale.startScanCalls;
   size_t ticks = 0;
   while (scale.startScanCalls == callsBeforeRestart) {
     hostMillis += SCALE_DISCOVERY_TICK_MS;
     serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
-                                connectRetryMs, connectAttemptSeriesActive,
+                                connectAttemptSeriesActive,
                                 scanSessionAtMs, scanLastAdvertAtMs);
     ++ticks;
     CHECK(ticks < 40);
   }
-  CHECK(ticks == 1);
+  CHECK(ticks == SCALE_SCAN_HCI_RESTART_MS / SCALE_DISCOVERY_TICK_MS);
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
   CHECK(scale.lastForceRestart);
-  CHECK(!scale.lastBurst);
   CHECK(scale.startScanCalls == 2);
-
-  const size_t callsAfterBurst = scale.startScanCalls;
-  ticks = 0;
-  while (scale.startScanCalls == callsAfterBurst) {
-    hostMillis += SCALE_DISCOVERY_TICK_MS;
-    serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
-                                connectRetryMs, connectAttemptSeriesActive,
-                                scanSessionAtMs, scanLastAdvertAtMs);
-    ++ticks;
-    CHECK(ticks < 40);
-  }
-  CHECK(scale.scanning);
-  CHECK(scale.directedScan);
-  CHECK(scale.lastForceRestart);
-  CHECK(!scale.lastBurst);
-  CHECK(scale.startScanCalls == 3);
 }
 
-void d05b_matching_hci_scan_params_do_not_need_gap_restart() {
-  CHECK(BLE_SCAN_IDLE_INTERVAL == 0x00C0);
-  CHECK(BLE_SCAN_IDLE_WINDOW == 0x0030);
-  CHECK(BLE_SCAN_BURST_INTERVAL == 0x0060);
-  CHECK(BLE_SCAN_BURST_WINDOW == 0x0030);
-  CHECK(!scaleScanDutyHciParamsEqual());
-  CHECK(scaleScanDutyHciParamsEqual(
-      BLE_SCAN_BURST_INTERVAL, BLE_SCAN_BURST_WINDOW, BLE_SCAN_BURST_INTERVAL,
-      BLE_SCAN_BURST_WINDOW));
+void d05b_scan_intensity_change_restarts_gap() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
+  setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
+  uint32_t lastScanCycleMs = 0;
+  uint32_t lastConnectLogMs = 0;
+  bool connectAttemptSeriesActive = false;
+  uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.startScanCalls == 1);
+  CHECK(scale.lastScanInterval == BLE_SCAN_NORMAL_INTERVAL);
+  applyLiveBleScanIntensity(BleScanIntensity::AGGRESSIVE);
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.startScanCalls == 2);
+  CHECK(scale.lastForceRestart);
+  CHECK(scale.lastScanInterval == BLE_SCAN_AGGRESSIVE_INTERVAL);
+  CHECK(scale.lastScanWindow == BLE_SCAN_AGGRESSIVE_WINDOW);
+  const size_t calls = scale.startScanCalls;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.startScanCalls == calls);
+}
+
+void d05c_scan_intensity_hci_presets() {
+  CHECK(BLE_SCAN_LIGHT_INTERVAL == 0x00B8);
+  CHECK(BLE_SCAN_LIGHT_WINDOW == 0x002E);
+  CHECK(BLE_SCAN_NORMAL_INTERVAL == 0x0064);
+  CHECK(BLE_SCAN_NORMAL_WINDOW == 0x0032);
+  CHECK(BLE_SCAN_AGGRESSIVE_INTERVAL == 0x0020);
+  CHECK(BLE_SCAN_AGGRESSIVE_WINDOW == 0x0020);
+  uint16_t interval = 0;
+  uint16_t window = 0;
+  bleScanHciParams(BleScanIntensity::LIGHT, interval, window);
+  CHECK(interval == BLE_SCAN_LIGHT_INTERVAL);
+  CHECK(window == BLE_SCAN_LIGHT_WINDOW);
+  bleScanHciParams(BleScanIntensity::NORMAL, interval, window);
+  CHECK(interval == BLE_SCAN_NORMAL_INTERVAL);
+  CHECK(window == BLE_SCAN_NORMAL_WINDOW);
+  bleScanHciParams(BleScanIntensity::AGGRESSIVE, interval, window);
+  CHECK(interval == BLE_SCAN_AGGRESSIVE_INTERVAL);
+  CHECK(window == BLE_SCAN_AGGRESSIVE_WINDOW);
+  BleScanIntensity parsed = BleScanIntensity::LIGHT;
+  CHECK(parseBleScanIntensityId("aggressive", parsed));
+  CHECK(parsed == BleScanIntensity::AGGRESSIVE);
+  CHECK(parseBleScanIntensityId("light", parsed));
+  CHECK(parsed == BleScanIntensity::LIGHT);
+  CHECK(parseBleScanIntensityId("normal", parsed));
+  CHECK(parsed == BleScanIntensity::NORMAL);
+  CHECK(!parseBleScanIntensityId("burst", parsed));
+  CHECK(strcmp(bleScanIntensityName(BleScanIntensity::NORMAL), "normal") == 0);
 }
 
 void d06_forget_pauses_discovery_for_30s() {
@@ -4290,32 +4300,30 @@ void d06_forget_pauses_discovery_for_30s() {
   runtimeConfig.scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
   setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
-  hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
-  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
   uint32_t scanLastAdvertAtMs = 0;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
   const size_t callsBeforeForget = scale.startScanCalls;
   scale.connected = true;
   clearPreferredScaleCache();
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(!scale.connected);
   CHECK(!scale.scanning);
   CHECK(scale.startScanCalls == callsBeforeForget);
   hostMillis += SCALE_PAIRING_DISCOVERY_PAUSE_MS - 1;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(!scale.scanning);
   CHECK(scale.startScanCalls == callsBeforeForget);
   hostMillis += 2;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs, scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(!scale.directedScan);
@@ -4328,21 +4336,19 @@ void d07_prefer_falls_back_after_grace() {
   runtimeConfig.scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::PREFER);
   setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
-  hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
-  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
   uint32_t scanLastAdvertAtMs = 0;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs,
                               scanLastAdvertAtMs);
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
   const size_t callsBefore = scale.startScanCalls;
   hostMillis += SCALE_PREFER_FALLBACK_MS;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs,
                               scanLastAdvertAtMs);
   CHECK(scale.scanning);
@@ -4357,7 +4363,6 @@ void d08_select_none_clears_without_pause() {
   runtimeConfig.scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
   setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
-  hostMillis = SCALE_CONNECT_RETRY_MS;
   selectPreferredScale("", "");
   CHECK(scalePreferredMac[0] == '\0');
   CHECK(runtimeConfig.scaleMacCacheMode ==
@@ -4365,11 +4370,10 @@ void d08_select_none_clears_without_pause() {
   CHECK(!scaleDiscoveryPaused());
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
-  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
   uint32_t scanLastAdvertAtMs = 0;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs,
                               scanLastAdvertAtMs);
   CHECK(scale.scanning);
@@ -4384,14 +4388,12 @@ void d09_first_mode_connects_seen_advertisement() {
   scalePreferredMac[0] = '\0';
   memset(scaleHistory, 0, sizeof(scaleHistory));
   scaleHistorySeq = 0;
-  hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
-  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
   uint32_t scanLastAdvertAtMs = 0;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs,
                               scanLastAdvertAtMs);
   CHECK(scale.scanning);
@@ -4404,7 +4406,7 @@ void d09_first_mode_connects_seen_advertisement() {
   scale.pollScanConnects = true;
   scale.pollScanStepsToConnect = 1;
   hostMillis += SCALE_DISCOVERY_TICK_MS;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs,
                               scanLastAdvertAtMs);
   CHECK(scale.connected);
@@ -4422,14 +4424,12 @@ void d12_advertisement_history_does_not_dirty_persist() {
   memset(scaleHistory, 0, sizeof(scaleHistory));
   scaleHistorySeq = 0;
   scalePreferredMacDirty = false;
-  hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
-  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
   uint32_t scanLastAdvertAtMs = 0;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs,
                               scanLastAdvertAtMs);
   strncpy(scale.seenMac, "AA:BB:CC:DD:EE:01", sizeof(scale.seenMac) - 1);
@@ -4437,7 +4437,7 @@ void d12_advertisement_history_does_not_dirty_persist() {
   scale.seenPending = true;
   scale.pollScanConnects = false;
   hostMillis += SCALE_DISCOVERY_TICK_MS;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs,
                               scanLastAdvertAtMs);
   CHECK(preferredScaleMacEqual(scaleHistory[0].mac, "AA:BB:CC:DD:EE:01"));
@@ -4449,7 +4449,7 @@ void d12_advertisement_history_does_not_dirty_persist() {
   strncpy(scale.seenName, "LUNAR", sizeof(scale.seenName) - 1);
   scale.seenPending = true;
   hostMillis += SCALE_DISCOVERY_TICK_MS;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs,
                               scanLastAdvertAtMs);
   CHECK(scale.connected);
@@ -4473,19 +4473,37 @@ void d10_companion_pauses_while_scale_connected_or_connecting() {
   CHECK(companionAdvertisingShouldPause());
 }
 
+void d10b_companion_pauses_for_hunt_window_after_scan_start() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  uint32_t lastScanCycleMs = 0;
+  uint32_t lastConnectLogMs = 0;
+  bool connectAttemptSeriesActive = false;
+  uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.scanning);
+  CHECK(companionAdvertisingShouldPause());
+  hostMillis += SCALE_HUNT_RF_CLEAR_MS - 1;
+  CHECK(companionAdvertisingShouldPause());
+  hostMillis += 2;
+  CHECK(!companionAdvertisingShouldPause());
+  CHECK(scale.scanning);
+}
+
 void d11_select_preferred_is_noop_when_unchanged() {
   resetHarness(false, false);
   reachReadyFromBoot();
   runtimeConfig.scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
-  hostMillis = SCALE_CONNECT_RETRY_MS;
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
-  uint32_t connectRetryMs = SCALE_CONNECT_RETRY_MS;
   bool connectAttemptSeriesActive = false;
   uint32_t scanSessionAtMs = 0;
   uint32_t scanLastAdvertAtMs = 0;
-  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs, connectRetryMs,
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs,
                               scanLastAdvertAtMs);
   CHECK(scale.scanning);
@@ -7203,30 +7221,13 @@ void n03_unsynced_retry_is_fifteen_seconds() {
   CHECK(ntpRetryDelayMs(5) == NTP_UNSYNCED_RETRY_MS);
 }
 
-void rf01_coex_winner_prefers_ble_then_wifi() {
-  CHECK(rfCoexWinner(true, true) == RfCoexPreference::BT);
-  CHECK(rfCoexWinner(true, false) == RfCoexPreference::BT);
-  CHECK(rfCoexWinner(false, true) == RfCoexPreference::WIFI);
-  CHECK(rfCoexWinner(false, false) == RfCoexPreference::BALANCE);
+void rf01_coex_is_always_bt() {
+  CHECK(snapshotRfCoexPreference() == RfCoexPreference::BT);
   CHECK(strcmp(rfCoexPreferenceName(RfCoexPreference::BT), "BT") == 0);
   CHECK(strcmp(rfCoexPreferenceName(RfCoexPreference::WIFI), "WIFI") == 0);
   CHECK(strcmp(rfCoexPreferenceName(RfCoexPreference::BALANCE), "BALANCE") == 0);
-
-  setRfCoexClaim(RfCoexClaim::BLE, false);
-  setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, false);
-  CHECK(currentRfCoexPreference() == RfCoexPreference::BALANCE);
-  setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, true);
-  CHECK(currentRfCoexPreference() == RfCoexPreference::WIFI);
-  setRfCoexClaim(RfCoexClaim::BLE, true);
-  CHECK(currentRfCoexPreference() == RfCoexPreference::BT);
-  setRfCoexClaim(RfCoexClaim::BLE, false);
-  CHECK(currentRfCoexPreference() == RfCoexPreference::WIFI);
-  setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, false);
-  CHECK(currentRfCoexPreference() == RfCoexPreference::BALANCE);
-  setRfCoexClaim(RfCoexClaim::BLE, false);
-  setRfCoexClaim(RfCoexClaim::WIFI_ASSOCIATE, false);
-  CHECK(currentRfCoexPreference() == RfCoexPreference::BALANCE);
-  CHECK(snapshotRfCoexPreference() == RfCoexPreference::BALANCE);
+  ensureRfCoexBt();
+  CHECK(snapshotRfCoexPreference() == RfCoexPreference::BT);
 }
 
 void n04_brew_start_requests_ntp_when_unsynced() {
@@ -7553,6 +7554,30 @@ void bc04_ble_companion_enablement_is_next_boot_only() {
   CHECK(canceled.enabled);
   CHECK(canceled.configuredEnabled);
   CHECK(!canceled.restartRequired);
+}
+
+void bc05_ble_scan_intensity_applies_live_without_restart() {
+  resetHarness(false, false);
+  CHECK(liveBleScanIntensity() == BleScanIntensity::NORMAL);
+  CHECK(!copyBleCompanionStatus().restartRequired);
+
+  CHECK(persistBleScanIntensity(BleScanIntensity::LIGHT));
+  CHECK(liveBleScanIntensity() == BleScanIntensity::LIGHT);
+  CHECK(!copyBleCompanionStatus().restartRequired);
+  publishControlStatus();
+  ControlStatusSnapshot control;
+  copyControlStatus(control);
+  CHECK(control.bleCompanionScanIntensity ==
+        static_cast<uint8_t>(BleScanIntensity::LIGHT));
+  CHECK(!control.bleCompanionRestartRequired);
+
+  WebCommand command = webControlCommand(WebCommandType::BLE_SCAN_INTENSITY);
+  command.bleScanIntensitySpecified = true;
+  command.bleScanIntensity =
+      static_cast<uint8_t>(BleScanIntensity::AGGRESSIVE);
+  processWebCommand(command);
+  CHECK(liveBleScanIntensity() == BleScanIntensity::AGGRESSIVE);
+  CHECK(!copyBleCompanionStatus().restartRequired);
 }
 
 void sc07_reset_device_password_and_clear_wifi_queue() {
@@ -10564,16 +10589,18 @@ const TestCase testCases[] = {
     {"D14", d14_control_status_publishes_on_cycle_edge},
     {"D15", d15_companion_publish_throttles_without_scale},
     {"D02", d02_first_mode_uses_name_scan},
-    {"D03", d03_scan_start_failed_uses_backoff},
+    {"D03", d03_scan_start_failed_retries_immediately},
     {"D04", d04_full_cache_keeps_directed_scan},
     {"D05", d05_hci_watchdog_force_restarts_same_filter},
-    {"D05b", d05b_matching_hci_scan_params_do_not_need_gap_restart},
+    {"D05b", d05b_scan_intensity_change_restarts_gap},
+    {"D05c", d05c_scan_intensity_hci_presets},
     {"D06", d06_forget_pauses_discovery_for_30s},
     {"D07", d07_prefer_falls_back_after_grace},
     {"D08", d08_select_none_clears_without_pause},
     {"D09", d09_first_mode_connects_seen_advertisement},
     {"D12", d12_advertisement_history_does_not_dirty_persist},
     {"D10", d10_companion_pauses_while_scale_connected_or_connecting},
+    {"D10b", d10b_companion_pauses_for_hunt_window_after_scan_start},
     {"D11", d11_select_preferred_is_noop_when_unchanged},
     {"S01", s01_shot_log_filters_short_and_rinse},
     {"S01b", s01b_shot_log_stop_detail_names_end_reasons},
@@ -10632,7 +10659,7 @@ const TestCase testCases[] = {
     {"N01b", n01b_wall_clock_survives_millis_wrap},
     {"N02", n02_ntp_hostname_validation},
     {"N03", n03_unsynced_retry_is_fifteen_seconds},
-    {"RF01", rf01_coex_winner_prefers_ble_then_wifi},
+    {"RF01", rf01_coex_is_always_bt},
     {"N04", n04_brew_start_requests_ntp_when_unsynced},
     {"N05", n05_rinse_start_requests_ntp_when_unsynced},
     {"N06", n06_synced_clock_skips_activity_ntp_request},
@@ -10658,6 +10685,7 @@ const TestCase testCases[] = {
     {"BC02", bc02_ble_companion_rejects_config_while_active_but_allows_ap},
     {"BC03", bc03_ble_companion_rejects_legacy_reset_bbw_value},
     {"BC04", bc04_ble_companion_enablement_is_next_boot_only},
+    {"BC05", bc05_ble_scan_intensity_applies_live_without_restart},
 };
 
 }  // namespace

@@ -44,6 +44,27 @@ bool macAddressEqual(const char *left, const char *right) {
 
 } // namespace
 
+bool advertisedUuidLooksLikeScale(const BLEDevice &peripheral) {
+    for (size_t i = 0; i < scaleProtocolCount(); ++i) {
+        const ScaleProtocol *protocol = scaleProtocolAt(i);
+        if (protocol == 0) {
+            continue;
+        }
+        uint16_t parsed = 0;
+        if (scaleParseUuid16(protocol->readUuid, &parsed) &&
+            scaleUuid16AllowsNamelessConnect(parsed) &&
+            peripheral.hasAdvertisedUuid16(parsed)) {
+            return true;
+        }
+        if (scaleParseUuid16(protocol->writeUuid, &parsed) &&
+            scaleUuid16AllowsNamelessConnect(parsed) &&
+            peripheral.hasAdvertisedUuid16(parsed)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 EspressoScaleBLE::EspressoScaleBLE(bool debug) :
     _currentWeight(0.0f),
     _currentTimerMs(0),
@@ -74,6 +95,8 @@ EspressoScaleBLE::EspressoScaleBLE(bool debug) :
     _connectAttempts(0),
     _linkDownSince(0),
     _scanMac{},
+    _scanInterval(0),
+    _scanWindow(0),
     _address{},
     _localName{},
     _seenMac{},
@@ -112,15 +135,22 @@ void EspressoScaleBLE::stopIdleScan(ScaleDisconnectReason reason) {
 }
 
 bool EspressoScaleBLE::startScan(const char *mac, bool forceRestart,
-                                 bool burst) {
+                                 uint16_t interval, uint16_t window) {
     logVersionOnce();
+
+    if (window == 0 || window > interval) {
+        interval = BLE_SCAN_NORMAL_INTERVAL;
+        window = BLE_SCAN_NORMAL_WINDOW;
+    }
 
     const bool filtered = mac != nullptr && mac[0] != '\0';
     if (_scanning && !_connected && !_hasPeripheral) {
         const bool sameFilter = filtered
             ? macAddressEqual(_scanMac, mac)
             : _scanMac[0] == '\0';
-        if (sameFilter && !forceRestart) {
+        const bool sameHci =
+            _scanInterval == interval && _scanWindow == window;
+        if (sameFilter && sameHci && !forceRestart) {
             return true;
         }
         stopIdleScan(ScaleDisconnectReason::NONE);
@@ -131,11 +161,9 @@ bool EspressoScaleBLE::startScan(const char *mac, bool forceRestart,
     }
 
     BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
-    if (burst) {
-        BLE.setScanParameters(BLE_SCAN_BURST_INTERVAL, BLE_SCAN_BURST_WINDOW);
-    } else {
-        BLE.setScanParameters(BLE_SCAN_IDLE_INTERVAL, BLE_SCAN_IDLE_WINDOW);
-    }
+    BLE.setScanParameters(interval, window);
+    _scanInterval = interval;
+    _scanWindow = window;
     _seenPending = false;
     _seenMac[0] = '\0';
     _seenName[0] = '\0';
@@ -235,9 +263,11 @@ bool EspressoScaleBLE::pollScan() {
 
         const bool filtered = _scanMac[0] != '\0';
         const bool nameOk = isScaleName(name);
+        const bool uuidOk = advertisedUuidLooksLikeScale(peripheral);
         const bool macOk = filtered && macAddressEqual(mac, _scanMac);
+        const bool compatibleAd = nameOk || uuidOk;
 
-        if (nameOk) {
+        if (compatibleAd) {
             strncpy(_seenMac, mac, sizeof(_seenMac) - 1);
             _seenMac[sizeof(_seenMac) - 1] = '\0';
             strncpy(_seenName, name, sizeof(_seenName) - 1);
@@ -245,7 +275,7 @@ bool EspressoScaleBLE::pollScan() {
             _seenPending = true;
         }
 
-        if ((!filtered && nameOk) || macOk) {
+        if ((!filtered && compatibleAd) || macOk) {
             rememberPeripheral(peripheral);
             BLE.stopScan();
             _scanning = false;

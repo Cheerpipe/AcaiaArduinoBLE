@@ -37,6 +37,7 @@ struct PeripheralState {
     int connectCalls = 0;
     int disconnectCalls = 0;
     unsigned long timeoutMsAtConnect = 0;
+    std::vector<uint16_t> advertisedUuid16s;
     std::map<std::string, std::shared_ptr<CharacteristicState> >
         characteristics;
 };
@@ -187,6 +188,17 @@ public:
         strncpy(buffer, src, capacity - 1);
         buffer[capacity - 1] = '\0';
         return strlen(buffer);
+    }
+    bool hasAdvertisedUuid16(uint16_t uuid) const {
+        if (!state_) {
+            return false;
+        }
+        for (size_t i = 0; i < state_->advertisedUuid16s.size(); ++i) {
+            if (state_->advertisedUuid16s[i] == uuid) {
+                return true;
+            }
+        }
+        return false;
     }
     String advertisedServiceUuid() const { return String(""); }
     String deviceName() const { return localName(); }

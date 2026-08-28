@@ -37,7 +37,8 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 | **How do I close Admin unlock?** | **Lock** in the header or at the top of Admin. Unlock stays while the Admin page is open, or for 15 minutes after Start/Stop, rinse, Wi-Fi, or OTA. Leaving Home polling does not renew it. |
 | **The Web UI looks like garbage in `curl`.** | HTML is gzip. Browsers decode it. Use `curl --compressed http://<ip>/`. |
 | **Serial shows `FT-PSK present but FT disabled, falling back to WPA2-PSK`.** | Harmless WPA2 fallback: the router advertises 802.11r and the ESP32 does not use it. Current firmware silences that IDF `wifi` warning. Not a failed join. |
-| **Wi-Fi or the Web UI is flaky only when no scale is linked.** | **Wi-Fi sleep when idle** may be on (Admin → Wi-Fi; default off). With no scale connecting or connected, STA can use modem sleep, which can lag or drop the UI until a scale links. Turn the checkbox off. See [Wi-Fi](settings/wifi.md). |
+| **Wi-Fi or the Web UI is flaky only when no scale is linked.** | **Wi-Fi sleep when idle** may be on (Admin → Wi-Fi; default off). With no scale connecting or connected, STA can use modem sleep, which can lag or drop the UI until a scale links. Turn the checkbox off. See [Wi-Fi](settings/wifi.md). If the UI stutters while waiting for a scale, try Admin → Bluetooth → Scan intensity **Light**. |
+| **The scale takes several seconds to connect after power-on.** | Admin → Bluetooth → **Scan intensity**. Default is **Normal** (50%). Use **Aggressive** if discovery still exceeds ~2 s; **Light** if the Web UI stutters while waiting. |
 
 ## Hardware and compatibility
 
@@ -61,7 +62,7 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 | **The board LED does not light with the scale connected.** | Check **Blue LED while scale connected** (on by default) and that BLE shows connected. |
 | **Is the ESP32 relay enough as a safety guarantee?** | **No.** Watchdogs and the 60 s cap reduce lockups, but a welded contact needs a second isolated barrier (K2). See [Hardware](HARDWARE.md). |
 | **After an ESP32 core bump I see `ble=fail` but the Web UI works.** | Use the IDF build in this repo (Arduino-ESP32 **3.3.11**). See [Build environment](BUILD.md). |
-| **During a shot the scale drops or the Web UI stutters.** | The firmware favors Bluetooth during BBW. Avoid SoftAP and Wi-Fi scans mid-shot when you can. |
+| **During a shot the scale drops or the Web UI stutters.** | The firmware always prefers Bluetooth on the shared 2.4 GHz radio. Avoid SoftAP and Wi-Fi scans mid-shot when you can. |
 
 ## Where to change it
 
@@ -75,4 +76,5 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 | Late cup | [Tare and retare](features/tare-retare.md), [Tare](settings/tare.md), [Cup](settings/cup.md) |
 | No weight stop | [Brew by weight](features/brew-by-weight.md) OFF |
 | First BBW shot blocked without a scale | [No-scale BBW](settings/no-scale-bbw.md) |
-| Wi-Fi/UI problems only with no scale | Admin → Wi-Fi — [Wi-Fi sleep when idle](settings/wifi.md) |
+| Wi-Fi/UI problems only with no scale | Admin → Wi-Fi — [Wi-Fi sleep when idle](settings/wifi.md); scan duty is Admin → Bluetooth |
+| Slow scale discovery after power-on | Admin → Bluetooth — Scan intensity |

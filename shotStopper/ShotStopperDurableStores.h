@@ -73,6 +73,7 @@ inline bool resetAllDurableStores(PersistedSettings &settings,
   return loadPersistedSettings(verifiedSettings) &&
          verifyFactorySettings(verifiedSettings) &&
          loadBleCompanionSettings(verifiedBle) && verifiedBle.enabled == 0 &&
+         verifiedBle.scanIntensity == 0 &&
          shotLogVerified && shotCurvesVerified && lastShotVerified;
 }
 

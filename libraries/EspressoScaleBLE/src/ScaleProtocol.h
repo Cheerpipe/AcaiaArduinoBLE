@@ -37,6 +37,8 @@ const ScaleProtocol *scaleProtocolAt(size_t index);
 size_t scaleProtocolCount();
 bool scaleNameIsCompatible(const char *name);
 bool scaleNameMatchesProtocol(const char *name, const ScaleProtocol *protocol);
+bool scaleParseUuid16(const char *uuid, uint16_t *out);
+bool scaleUuid16AllowsNamelessConnect(uint16_t uuid);
 
 bool scaleValidWeight(float weight);
 uint8_t scaleXorBytes(const byte *data, int length);

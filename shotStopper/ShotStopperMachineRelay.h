@@ -2,7 +2,6 @@
 
 #include "ShotStopperHardware.h"
 #include "ShotStopperMachineTypes.h"
-#include "ShotStopperRfCoex.h"
 #include "ShotStopperSafety.h"
 
 // K1 electrical driver and independent deadline/feedback safety.
@@ -214,13 +213,6 @@ RelaySafetySnapshot getRelaySafetySnapshot() {
   return snapshot;
 }
 
-void applyBrewRfPreference(bool preferBluetooth) {
-  // BLE claim only. The shared resolver keeps PREFER_BT if the scale worker
-  // still holds the claim (GATT up / connecting / circuit closed). Releasing
-  // here must not force BALANCE over a live WIFI_ASSOCIATE claim.
-  setRfCoexClaim(RfCoexClaim::BLE, preferBluetooth);
-}
-
 bool relayOutputIsClosed() {
   return digitalRead(RELAY_GPIO) == RELAY_CLOSED_LEVEL;
 }
@@ -362,7 +354,6 @@ bool setMachineCircuitClosed(bool closed,
     addDebugEvent(DebugCategory::RELAY, DebugCode::RELAY_CLOSED,
                   static_cast<int32_t>(operationalLimitMs));
     pendingBrewRfRestore = false;
-    applyBrewRfPreference(true);
     return true;
   }
 

@@ -178,6 +178,7 @@ class ShotStopperNetwork {
   void syncPreferredScaleMac(const char *mac);
   void syncPreferredScale(const char *mac, const char *name);
   void syncScaleLinkRf(bool connectingOrUp);
+  void syncScaleHuntRf(bool huntActive);
   void syncLiveRuntime(const RuntimeConfig &runtime,
                        const ShotPresetBank *presets);
   void syncDurableStorageRevision(uint32_t storageRevision);
@@ -256,8 +257,8 @@ class ShotStopperNetwork {
   bool apStartHeld_ = false;
   bool apKeepRequested_ = false;
   bool httpStartHeld_ = false;
-  bool staWifiCoexPreferred_ = false;
   std::atomic<bool> scaleConnectingOrUp_{false};
+  std::atomic<bool> scaleHuntRfActive_{false};
   wifi_ps_type_t lastAppliedWifiPs_{WIFI_PS_NONE};
   bool lastAppliedWifiPsValid_{false};
   bool otaRestartPending_ = false;
@@ -306,7 +307,6 @@ class ShotStopperNetwork {
   bool beginStationConnect(const PersistedSettings &settings, uint32_t now);
   void applyWifiPowerSave();
   void clearStaLinkMetrics();
-  void preferStaWifiCoex(bool enable);
   bool brewRfActive() const;
   bool ensureAccessPoint(uint32_t now, bool force = false);
   void stopSoftApKeepStation();

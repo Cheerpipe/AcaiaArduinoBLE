@@ -937,16 +937,25 @@ void p16b_usb_set_wifi_commits_confirmed_lkg() {
 
 void p48_ble_companion_defaults_and_dual_slot_round_trip() {
   resetHostPersistence();
+  CHECK(sizeof(BleCompanionPersistedSettings) == 20);
   BleCompanionPersistedSettings settings;
   CHECK(settings.enabled == 0);
+  CHECK(settings.scanIntensity == 0);
+  settings.scanIntensity = 9;
+  finalizeBleCompanionSettings(settings);
+  CHECK(settings.scanIntensity == 0);
   CHECK(saveBleCompanionSettings(settings));
   CHECK(settings.revision == 1);
   settings.enabled = 1;
+  settings.scanIntensity =
+      static_cast<uint8_t>(BleScanIntensity::AGGRESSIVE);
   CHECK(saveBleCompanionSettings(settings));
   CHECK(settings.revision == 2);
   BleCompanionPersistedSettings loaded;
   CHECK(loadBleCompanionSettings(loaded));
   CHECK(loaded.enabled == 1);
+  CHECK(loaded.scanIntensity ==
+        static_cast<uint8_t>(BleScanIntensity::AGGRESSIVE));
   CHECK(loaded.revision == 2);
   CHECK(validBleCompanionSettings(loaded));
 }
@@ -966,6 +975,7 @@ void p49_ble_companion_corruption_falls_back_and_reset_stays_off() {
   CHECK(loaded.revision == 1);
   CHECK(resetBleCompanionSettings(loaded));
   CHECK(loaded.enabled == 0);
+  CHECK(loaded.scanIntensity == 0);
 }
 
 RecoveryGestureResult recoveryEdge(RecoveryGestureRecognizer &recognizer,

@@ -1,7 +1,7 @@
 diff -ruN a/src/BLEDevice.cpp b/src/BLEDevice.cpp
 --- a/src/BLEDevice.cpp
 +++ b/src/BLEDevice.cpp
-@@ -82,9 +82,60 @@
+@@ -82,10 +82,87 @@
    return result;
  }
  
@@ -55,6 +55,33 @@ diff -ruN a/src/BLEDevice.cpp b/src/BLEDevice.cpp
 +  return 0;
 +}
 +
++bool BLEDevice::hasAdvertisedUuid16(uint16_t uuid) const
++{
++  for (int i = 0; i < _eirDataLength;) {
++    int eirLength = _eirData[i++];
++    if (eirLength < 1 || i >= _eirDataLength) {
++      break;
++    }
++    int eirType = _eirData[i++];
++    int dataLen = eirLength - 1;
++    if (dataLen < 0 || i + dataLen > _eirDataLength) {
++      break;
++    }
++    if (eirType == 0x02 || eirType == 0x03) {
++      for (int j = 0; j + 1 < dataLen; j += 2) {
++        uint16_t value = (uint16_t)_eirData[i + j] |
++                         ((uint16_t)_eirData[i + j + 1] << 8);
++        if (value == uuid) {
++          return true;
++        }
++      }
++    }
++    i += dataLen;
++  }
++
++  return false;
++}
+ 
  bool BLEDevice::hasLocalName() const
  {
 -  return (localName().length() > 0);
@@ -66,7 +93,7 @@ diff -ruN a/src/BLEDevice.cpp b/src/BLEDevice.cpp
 diff -ruN a/src/BLEDevice.h b/src/BLEDevice.h
 --- a/src/BLEDevice.h
 +++ b/src/BLEDevice.h
-@@ -48,6 +48,10 @@
+@@ -48,6 +48,11 @@
    virtual bool disconnect();
  
    virtual String address() const;
@@ -74,6 +101,7 @@ diff -ruN a/src/BLEDevice.h b/src/BLEDevice.h
 +  // advertisement: address()/localName() return String by value.
 +  size_t copyAddress(char* buffer, size_t capacity) const;
 +  size_t copyLocalName(char* buffer, size_t capacity) const;
++  bool hasAdvertisedUuid16(uint16_t uuid) const;
  
    bool hasLocalName() const;
      

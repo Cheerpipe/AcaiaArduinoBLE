@@ -163,7 +163,7 @@ persist.
 | `NTP_STATUS` | none | Wall clock / NTP state. Notes if STA is down |
 | `BLE_COMPAT_ENABLE` | none | Enables the ShotStopper Companion GATT profile on the next boot; restart required |
 | `BLE_COMPAT_DISABLE` | none | Disables the Companion GATT profile on the next boot so its RAM is not allocated; restart required |
-| `BLE_COMPAT_STATUS` | none | Configured next-boot state, active-this-boot state, restart requirement, protocol, advertising, client/AP state, and write counters |
+| `BLE_COMPAT_STATUS` | none | Configured next-boot state, active-this-boot state, restart requirement, protocol, advertising, client/AP state, write counters, and live `scanIntensity` (`normal` / `aggressive` / `light`) |
 
 ## Shot history
 

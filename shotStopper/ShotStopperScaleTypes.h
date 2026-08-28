@@ -46,6 +46,55 @@ enum class ScaleMacCacheMode : uint8_t {
   PREFER = 2, // Prefer preferred; after grace, fall back to any compatible.
 };
 
+// GAP scan duty while discovering a scale. 0 matches existing Companion
+// reserved[0] so V1 BLEC blobs stay Normal without a version bump.
+enum class BleScanIntensity : uint8_t {
+  NORMAL = 0,      // 50% — 31.25 ms / 62.5 ms
+  AGGRESSIVE = 1,  // 100% — 20 ms / 20 ms
+  LIGHT = 2        // 25% — 28.75 ms / 115 ms
+};
+
+inline bool validBleScanIntensity(uint8_t value) {
+  return value <= static_cast<uint8_t>(BleScanIntensity::LIGHT);
+}
+
+inline BleScanIntensity clampBleScanIntensity(uint8_t value) {
+  return validBleScanIntensity(value)
+             ? static_cast<BleScanIntensity>(value)
+             : BleScanIntensity::NORMAL;
+}
+
+inline const char *bleScanIntensityName(BleScanIntensity intensity) {
+  switch (intensity) {
+    case BleScanIntensity::AGGRESSIVE:
+      return "aggressive";
+    case BleScanIntensity::LIGHT:
+      return "light";
+    case BleScanIntensity::NORMAL:
+    default:
+      return "normal";
+  }
+}
+
+inline bool parseBleScanIntensityId(const char *id, BleScanIntensity &out) {
+  if (id == nullptr || id[0] == '\0') {
+    return false;
+  }
+  if (strcmp(id, "aggressive") == 0) {
+    out = BleScanIntensity::AGGRESSIVE;
+    return true;
+  }
+  if (strcmp(id, "light") == 0) {
+    out = BleScanIntensity::LIGHT;
+    return true;
+  }
+  if (strcmp(id, "normal") == 0) {
+    out = BleScanIntensity::NORMAL;
+    return true;
+  }
+  return false;
+}
+
 // BLE-seen scales remembered for the preferred-scale dropdown (NVS + status).
 struct ScaleHistoryEntry {
   char mac[PREFERRED_SCALE_MAC_CAPACITY] = {};
