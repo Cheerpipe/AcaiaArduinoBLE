@@ -3123,6 +3123,9 @@ bool ShotStopperNetwork::ntpMayArm(uint32_t now, bool staConnected) const {
   if (brewRfActive()) {
     return false;
   }
+  if (scaleConnecting_.load(std::memory_order_relaxed)) {
+    return false;
+  }
   if (staNtpEligibleAtMs_ != 0 &&
       static_cast<int32_t>(now - staNtpEligibleAtMs_) < 0) {
     return false;
@@ -3174,7 +3177,18 @@ void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
     return;
   }
 
-  const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(now);
+  TimeStatusSnapshot timeStatus = g_wallClock.snapshot(now);
+
+  // Brew RF or scale connecting: do not arm, and abort any in-flight SNTP
+  // without counting a failure so NTP rearms when the gate clears.
+  if (!ntpMayArm(now, staConnected)) {
+    if (ntpStarted_ || timeStatus.state == TimeSyncState::SYNCING) {
+      stopNtp();
+      g_wallClock.cancelSyncing();
+      ntpRearmPending_ = true;
+    }
+    return;
+  }
 
   if (timeStatus.state == TimeSyncState::SYNCING) {
     if (applySystemTimeToWallClock(now)) {
@@ -3184,10 +3198,6 @@ void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
                NTP_FIRST_SYNC_TIMEOUT_MS) {
       handleNtpFailure(now);
     }
-    return;
-  }
-
-  if (!ntpMayArm(now, staConnected)) {
     return;
   }
 

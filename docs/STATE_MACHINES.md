@@ -641,6 +641,11 @@ Source: `ShotStopperTime.h`.
 | `FAILED` | Sync attempt failed; retry delay applies. |
 | `STALE` | Was synced, but last success is older than `NTP_STALE_AFTER_MS` (derived in the snapshot, not a stored latch). |
 
+NTP does **not** arm while brew RF is active (`activeCycle` or machine
+circuit closed) or while the scale is **connecting**. An in-flight SNTP
+attempt is aborted (`stopNtp` + `cancelSyncing`) without counting a
+failure; `ntpRearmPending` retries when the gate clears.
+
 Shot rows without a sync store `hasWallTime = 0` and show “no time” in
 the UI.
 

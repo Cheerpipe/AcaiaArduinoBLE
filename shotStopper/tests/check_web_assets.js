@@ -1998,6 +1998,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !firmware.includes('clearLastShot') ||
     !firmware.includes('clearLastShotSnapshot') ||
     !firmware.includes('serviceShotStorePersistence') ||
+    !firmware.includes('durableFlashWriteAllowed(') ||
+    !domainCore.includes('durableFlashWriteAllowed') ||
     !firmwareCore.includes('shotLogPersistFailLatched') ||
     !firmwareCore.includes('shotStorePersistRetryAtMs') ||
     !firmwareCore.includes('SHOT_STORE_PERSIST_RETRY_MS') ||
@@ -3632,8 +3634,25 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
   const ntpArm = ntpArmStart >= 0 && ntpArmEnd > ntpArmStart
       ? network.slice(ntpArmStart, ntpArmEnd)
       : '';
-  if (!ntpArm.includes('brewRfActive()')) {
-    throw new Error('ntpMayArm must not start SNTP while brew RF is active');
+  if (!ntpArm.includes('brewRfActive()') ||
+      !ntpArm.includes('scaleConnecting_')) {
+    throw new Error(
+        'ntpMayArm must not start SNTP while brew RF is active or scale is connecting');
+  }
+  const serviceNtpStart = network.indexOf('void ShotStopperNetwork::serviceNtp');
+  const serviceNtpEnd = network.indexOf('bool ShotStopperNetwork::startHttpServer',
+                                        serviceNtpStart);
+  const serviceNtp = serviceNtpStart >= 0 && serviceNtpEnd > serviceNtpStart
+      ? network.slice(serviceNtpStart, serviceNtpEnd)
+      : '';
+  const gateAbortAt = serviceNtp.indexOf('if (!ntpMayArm(');
+  const syncingAt = serviceNtp.indexOf('TimeSyncState::SYNCING');
+  if (gateAbortAt < 0 || syncingAt < 0 || gateAbortAt > syncingAt ||
+      !serviceNtp.includes('cancelSyncing()') ||
+      !serviceNtp.includes('ntpRearmPending_ = true') ||
+      !serviceNtp.includes('stopNtp()')) {
+    throw new Error(
+        'serviceNtp must abort in-flight SNTP under ntpMayArm gate before SYNCING handling');
   }
 }
 if (!domain.includes('selectBestStaAp') ||

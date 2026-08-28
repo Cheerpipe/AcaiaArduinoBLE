@@ -146,6 +146,26 @@ class WallClock {
     (void)monotonicMs;
   }
 
+  // Abort an in-flight SNTP attempt without counting a failure. Restores
+  // SYNCED when a prior anchor exists; otherwise OFF.
+  void cancelSyncing() {
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
+    portENTER_CRITICAL(&mux_);
+#endif
+    pendingSync_ = false;
+    nextRetryAtMs_ = 0;
+    if (anchorUtcSec_ >= 1000000000U) {
+      state_ = TimeSyncState::SYNCED;
+    } else {
+      state_ = TimeSyncState::OFF;
+    }
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
+    portEXIT_CRITICAL(&mux_);
+#endif
+  }
+
   void markFailed(uint32_t monotonicMs, uint8_t maxConsecutiveFailures) {
 #if !defined(SHOT_STOPPER_HOST_TEST) && \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)

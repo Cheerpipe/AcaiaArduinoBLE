@@ -1401,6 +1401,13 @@ inline WifiPowerSaveMode desiredWifiPowerSave(bool sleepAllowed, bool apActive,
   return WifiPowerSaveMode::MIN_MODEM;
 }
 
+// Settings / shot-store NVS flushes. Defer while a shot (or machine circuit)
+// is busy or the scale is mid-connect; dirty state stays in RAM.
+inline bool durableFlashWriteAllowed(bool shotOrMachineBusy,
+                                     bool scaleConnecting) {
+  return !shotOrMachineBusy && !scaleConnecting;
+}
+
 // Live STA power-save reported by the driver (diagnostic). May be MAX_MODEM
 // if IDF restored it; applyWifiPowerSave never requests that.
 enum class WifiPsLive : uint8_t {

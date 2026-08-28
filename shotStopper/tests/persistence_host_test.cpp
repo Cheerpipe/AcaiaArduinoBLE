@@ -596,6 +596,13 @@ void p47c_desired_wifi_power_save_policy() {
   CHECK(strcmp(wifiPsLiveName(WifiPsLive::UNKNOWN), "UNKNOWN") == 0);
 }
 
+void p47d_durable_flash_write_gate() {
+  CHECK(durableFlashWriteAllowed(false, false));
+  CHECK(!durableFlashWriteAllowed(true, false));
+  CHECK(!durableFlashWriteAllowed(false, true));
+  CHECK(!durableFlashWriteAllowed(true, true));
+}
+
 void p46_ring_retain_log_level_persists_round_trip() {
   resetHostPersistence();
   PersistedSettings settings;
@@ -1399,6 +1406,7 @@ const TestCase tests[] = {
     {"P47", p47_rejects_non_current_schema_blob},
     {"P47B", p47b_migrates_v1_blob_wifi_sleep_defaults_off},
     {"P47C", p47c_desired_wifi_power_save_policy},
+    {"P47D", p47d_durable_flash_write_gate},
     {"P46", p46_ring_retain_log_level_persists_round_trip},
     {"P43", p43_scale_history_upsert_and_lru},
     {"P45", p45_scale_mac_nvs_ignores_seq_and_defers_while_linked},

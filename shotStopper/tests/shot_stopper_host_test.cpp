@@ -7278,6 +7278,28 @@ void n01_wall_clock_tracks_utc_from_anchor() {
   CHECK(g_wallClock.nowUtcSec(6000) == 1'700'000'005U);
 }
 
+void n01c_wall_clock_cancel_syncing_restores_anchor() {
+  g_wallClock.reset();
+  g_wallClock.setSyncing("pool.ntp.org", 1000);
+  g_wallClock.queueSyncFromCallback(1'700'000'000U);
+  CHECK(g_wallClock.applyPendingSync(1000));
+  CHECK(g_wallClock.synced());
+  g_wallClock.setSyncing("time.google.com", 5000);
+  CHECK(g_wallClock.snapshot(5000).state == TimeSyncState::SYNCING);
+  g_wallClock.cancelSyncing();
+  const TimeStatusSnapshot restored = g_wallClock.snapshot(5000);
+  CHECK(restored.state == TimeSyncState::SYNCED);
+  CHECK(g_wallClock.synced());
+  CHECK(g_wallClock.nowUtcSec(5000) == 1'700'000'004U);
+  CHECK(restored.consecutiveFailures == 0);
+
+  g_wallClock.reset();
+  g_wallClock.setSyncing("pool.ntp.org", 100);
+  g_wallClock.cancelSyncing();
+  CHECK(g_wallClock.snapshot(100).state == TimeSyncState::OFF);
+  CHECK(!g_wallClock.synced());
+}
+
 void n01b_wall_clock_survives_millis_wrap() {
   g_wallClock.reset();
   g_wallClock.setSyncing("pool.ntp.org", 1000);
@@ -10750,6 +10772,7 @@ const TestCase testCases[] = {
     {"H03", h03_task_profiler_start_stop_updates_snapshot},
     {"N01", n01_wall_clock_tracks_utc_from_anchor},
     {"N01b", n01b_wall_clock_survives_millis_wrap},
+    {"N01c", n01c_wall_clock_cancel_syncing_restores_anchor},
     {"N02", n02_ntp_hostname_validation},
     {"N03", n03_unsynced_retry_is_fifteen_seconds},
     {"RF01", rf01_coex_is_always_bt},

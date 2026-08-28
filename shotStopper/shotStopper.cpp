@@ -3701,7 +3701,9 @@ bool dispatchSettingsPersist() {
 #endif
 
 void serviceShotStorePersistence() {
-  if (session.active || machineIsRunning()) {
+  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+  if (!durableFlashWriteAllowed(session.active || machineIsRunning(),
+                                link.connecting)) {
     return;
   }
   if (static_cast<int32_t>(millis() - shotStorePersistRetryAtMs) < 0) {
@@ -3760,18 +3762,22 @@ void serviceRuntimePersistence() {
   portENTER_CRITICAL(&settingsPersistMux);
   inFlight = settingsPersistInFlight;
   portEXIT_CRITICAL(&settingsPersistMux);
+  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
   if (!runtimePersistPending || inFlight || maintenanceLease.active ||
       static_cast<int32_t>(millis() - runtimePersistRetryAtMs) < 0 ||
-      !controlAllowsConfigurationNow()) {
+      !controlAllowsConfigurationNow() ||
+      !durableFlashWriteAllowed(false, link.connecting)) {
     return;
   }
   if (!dispatchSettingsPersist()) {
     runtimePersistRetryAtMs = millis() + RUNTIME_PERSIST_RETRY_MS;
   }
 #else
+  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
   if (!runtimePersistPending || maintenanceLease.active ||
       static_cast<int32_t>(millis() - runtimePersistRetryAtMs) < 0 ||
-      !controlAllowsConfigurationNow()) {
+      !controlAllowsConfigurationNow() ||
+      !durableFlashWriteAllowed(false, link.connecting)) {
     return;
   }
   ++hostRuntimePersistAttempts;
