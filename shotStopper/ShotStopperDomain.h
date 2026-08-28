@@ -1389,15 +1389,13 @@ inline bool shouldReuseSavedWifiCredentials(const char *ssid,
 
 // Host-testable Wi-Fi modem-sleep policy. Device maps NONE/MIN_MODEM onto
 // WIFI_PS_NONE / WIFI_PS_MIN_MODEM. Never MAX_MODEM or WIFI_OFF.
+// Admin "Wi-Fi sleep" is sticky: scale connect/GATT-up does not flip PS.
 enum class WifiPowerSaveMode : uint8_t { NONE = 0, MIN_MODEM = 1 };
 
-inline WifiPowerSaveMode desiredWifiPowerSave(bool idleSleepAllowed,
-                                              bool apActive,
-                                              bool scaleConnectingOrUp,
+inline WifiPowerSaveMode desiredWifiPowerSave(bool sleepAllowed, bool apActive,
                                               bool staAssociated,
                                               bool otaBusy) {
-  if (!idleSleepAllowed || apActive || scaleConnectingOrUp || !staAssociated ||
-      otaBusy) {
+  if (!sleepAllowed || apActive || !staAssociated || otaBusy) {
     return WifiPowerSaveMode::NONE;
   }
   return WifiPowerSaveMode::MIN_MODEM;
@@ -1745,7 +1743,7 @@ struct WebCommand {
   char ssid[WIFI_SSID_CAPACITY] = {};
   char password[WIFI_PASSWORD_CAPACITY] = {};
   bool openNetwork = false;
-  // Admin "Wi-Fi sleep when idle". USB/BLE leave wifiSleepSpecified false so
+  // Admin "Wi-Fi sleep". USB/BLE leave wifiSleepSpecified false so
   // SET_WIFI does not clobber the persisted flag.
   bool wifiSleep = false;
   bool wifiSleepSpecified = false;

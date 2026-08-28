@@ -45,7 +45,7 @@ void p01_defaults_are_valid() {
   CHECK(settings.staConfigState ==
         static_cast<uint8_t>(StaConfigState::CONFIRMED));
   CHECK(!settings.lkgValid);
-  CHECK(!settings.staWifiSleep);
+  CHECK(settings.staWifiSleep);
   CHECK(settings.runtime.fastExtractionGuardEnabled);
   CHECK(std::fabs(settings.runtime.maxRecoveryWeightG -
                   DEFAULT_MAX_RECOVERY_WEIGHT_G) < 0.001f);
@@ -335,7 +335,7 @@ void p08_factory_reset_rebuilds_defaults() {
   CHECK(savePersistedSettings(settings));
   CHECK(resetPersistedSettingsToFactory(settings));
   CHECK(settings.schemaVersion == CONFIG_SCHEMA_VERSION);
-  CHECK(!settings.staWifiSleep);
+  CHECK(settings.staWifiSleep);
   CHECK(settings.runtime.goalWeightG == DEFAULT_GOAL_WEIGHT_G);
   CHECK(settings.runtime.fastExtractionGuardEnabled);
   CHECK(settings.runtime.autoToManualGuardEnabled);
@@ -583,14 +583,13 @@ void p47b_migrates_v1_blob_wifi_sleep_defaults_off() {
 
 void p47c_desired_wifi_power_save_policy() {
   using M = WifiPowerSaveMode;
-  CHECK(desiredWifiPowerSave(false, false, false, true, false) == M::NONE);
-  CHECK(desiredWifiPowerSave(false, true, true, false, false) == M::NONE);
-  CHECK(desiredWifiPowerSave(true, false, false, true, false) == M::MIN_MODEM);
-  CHECK(desiredWifiPowerSave(true, true, false, true, false) == M::NONE);
-  CHECK(desiredWifiPowerSave(true, false, true, true, false) == M::NONE);
-  CHECK(desiredWifiPowerSave(true, false, false, false, false) == M::NONE);
-  CHECK(desiredWifiPowerSave(true, true, true, true, false) == M::NONE);
-  CHECK(desiredWifiPowerSave(true, false, false, true, true) == M::NONE);
+  CHECK(desiredWifiPowerSave(false, false, true, false) == M::NONE);
+  CHECK(desiredWifiPowerSave(false, true, false, false) == M::NONE);
+  CHECK(desiredWifiPowerSave(true, false, true, false) == M::MIN_MODEM);
+  CHECK(desiredWifiPowerSave(true, true, true, false) == M::NONE);
+  CHECK(desiredWifiPowerSave(true, false, false, false) == M::NONE);
+  CHECK(desiredWifiPowerSave(true, true, true, true) == M::NONE);
+  CHECK(desiredWifiPowerSave(true, false, true, true) == M::NONE);
   CHECK(strcmp(wifiPsLiveName(WifiPsLive::NONE), "NONE") == 0);
   CHECK(strcmp(wifiPsLiveName(WifiPsLive::MIN_MODEM), "MIN_MODEM") == 0);
   CHECK(strcmp(wifiPsLiveName(WifiPsLive::MAX_MODEM), "MAX_MODEM") == 0);

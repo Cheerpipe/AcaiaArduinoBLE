@@ -407,7 +407,7 @@ void testCleanupOnInitializationFailures() {
     CHECK(connectFailure.lastDisconnectReason() ==
           ScaleDisconnectReason::CONNECT_FAILED);
     CHECK(fixture.peripheral->connectCalls == SCALE_CONNECT_ATTEMPTS);
-    CHECK(fixture.peripheral->disconnectCalls == 1);
+    CHECK(fixture.peripheral->disconnectCalls == 0);
 
     resetFake();
     fixture = makeScale(NEW);
@@ -446,7 +446,7 @@ void testConnectRetriesThenSucceeds() {
     fixture.peripheral->connectFailRemaining = SCALE_CONNECT_ATTEMPTS - 1;
     EspressoScaleBLE scale(false);
     CHECK(scale.startScan());
-    CHECK(pollUntilConnected(scale, 40));
+    CHECK(pollUntilConnected(scale, 80));
     CHECK(scale.isConnected());
     CHECK(scale.isLinkUp());
     CHECK(fixture.peripheral->connectCalls == SCALE_CONNECT_ATTEMPTS);
@@ -460,14 +460,14 @@ void testConnectFailedOnlyAfterRetries() {
     fixture.peripheral->connectResult = false;
     EspressoScaleBLE scale(false);
     CHECK(scale.startScan());
-    CHECK(!pollUntilConnected(scale, 40));
+    CHECK(!pollUntilConnected(scale, 80));
     CHECK(!scale.isConnected());
     CHECK(!scale.isConnecting());
     CHECK(fixture.peripheral->connectCalls == SCALE_CONNECT_ATTEMPTS);
     CHECK(scale.lastDisconnectReason() ==
           ScaleDisconnectReason::CONNECT_FAILED);
     CHECK(BLE.timeoutMs == BLE_OPERATION_TIMEOUT_MS);
-    CHECK(fixture.peripheral->disconnectCalls == 1);
+    CHECK(fixture.peripheral->disconnectCalls == 0);
 }
 
 void testFirstPacketAndSteadyStateTimeouts() {

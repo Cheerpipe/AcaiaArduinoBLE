@@ -1601,6 +1601,10 @@ void ShotStopperNetwork::syncScaleLinkRf(bool connectingOrUp) {
   scaleConnectingOrUp_.store(connectingOrUp, std::memory_order_relaxed);
 }
 
+void ShotStopperNetwork::syncScaleConnectingRf(bool connecting) {
+  scaleConnecting_.store(connecting, std::memory_order_relaxed);
+}
+
 void ShotStopperNetwork::syncScaleHuntRf(bool huntActive) {
   scaleHuntRfActive_.store(huntActive, std::memory_order_relaxed);
 }
@@ -1611,19 +1615,17 @@ void ShotStopperNetwork::applyWifiPowerSave() {
     lastAppliedWifiPsValid_ = false;
     return;
   }
-  bool idleSleepAllowed = false;
+  bool sleepAllowed = false;
   bool apActive = false;
   bool staAssociated = false;
   portENTER_CRITICAL(&dataMux_);
-  idleSleepAllowed = settings_.staWifiSleep;
+  sleepAllowed = settings_.staWifiSleep;
   apActive = status_.apActive;
   staAssociated = status_.staState == StaState::CONNECTED;
   portEXIT_CRITICAL(&dataMux_);
-  const bool scaleConnectingOrUp =
-      scaleConnectingOrUp_.load(std::memory_order_relaxed);
   const bool otaBusy = ShotStopperOta::instance().busy();
   const WifiPowerSaveMode desired = desiredWifiPowerSave(
-      idleSleepAllowed, apActive, scaleConnectingOrUp, staAssociated, otaBusy);
+      sleepAllowed, apActive, staAssociated, otaBusy);
   const wifi_ps_type_t desiredPs = desired == WifiPowerSaveMode::MIN_MODEM
                                        ? WIFI_PS_MIN_MODEM
                                        : WIFI_PS_NONE;
@@ -1651,6 +1653,10 @@ bool ShotStopperNetwork::beginStationConnect(const PersistedSettings &settings,
                                              uint32_t now) {
   if (brewRfActive()) {
     lifecycleLog("WiFi STA associate deferred; brew RF active");
+    return false;
+  }
+  if (scaleConnecting_.load(std::memory_order_relaxed)) {
+    lifecycleLog("WiFi STA associate deferred; scale connecting");
     return false;
   }
   const bool apActive = snapshot().apActive;
@@ -1916,15 +1922,18 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
   }
 
   const bool brewRf = brewRfActive();
+  const bool scaleConnecting =
+      scaleConnecting_.load(std::memory_order_relaxed);
   // Abort an in-flight scan/associate only. A STA that already has an IP
   // must promote to CONNECTED: associated traffic can coexist under PREFER_BT.
-  if (brewRf && status.staState == StaState::CONNECTING &&
+  if ((brewRf || scaleConnecting) && status.staState == StaState::CONNECTING &&
       WiFi.status() != WL_CONNECTED) {
     WiFi.disconnect(false, false);
     portENTER_CRITICAL(&dataMux_);
     status_.staState = StaState::DISCONNECTED;
     portEXIT_CRITICAL(&dataMux_);
-    lifecycleLog("WiFi STA associate aborted; brew RF active");
+    lifecycleLog(brewRf ? "WiFi STA associate aborted; brew RF active"
+                        : "WiFi STA associate aborted; scale connecting");
     applyWifiPowerSave();
     return;
   }
@@ -1948,12 +1957,15 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
       staReconnectAttemptAtMs_ = now;
       lifecycleLog("WiFi STA disconnected; retrying STA (no SoftAP after prior connect)");
       applyWifiPowerSave();
-      if (!staReconnectHeld_ && !wifiScanInProgress() && !brewRf) {
+      if (!staReconnectHeld_ && !wifiScanInProgress() && !brewRf &&
+          !scaleConnecting) {
         beginStationConnect(settingsCopy(), now);
       } else if (staReconnectHeld_) {
         lifecycleLog("STA reconnect held; skipping retry");
       } else if (brewRf) {
         lifecycleLog("STA reconnect deferred; brew RF active");
+      } else if (scaleConnecting) {
+        lifecycleLog("STA reconnect deferred; scale connecting");
       }
       return;
     }
@@ -2130,7 +2142,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
   // SoftAP after STA bootstrap window while still DISCONNECTED/FAILED (e.g.
   // scan delayed the reconnect begin). Never after a prior CONNECTED session.
   // Also skip while brew RF is active so SoftAP raise cannot steal airtime.
-  if (!staEverConnected_ && !status.apActive && !brewRf &&
+  if (!staEverConnected_ && !status.apActive && !brewRf && !scaleConnecting &&
       (status.staState == StaState::DISCONNECTED ||
        status.staState == StaState::FAILED) &&
       static_cast<uint32_t>(millis() - staConnectStartedAtMs_) >=
@@ -2178,6 +2190,7 @@ void ShotStopperNetwork::serviceStaState(uint32_t now) {
   if ((status.staState == StaState::DISCONNECTED ||
        status.staState == StaState::FAILED) &&
       !staReconnectHeld_ && !wifiScanInProgress() && !brewRf &&
+      !scaleConnecting &&
       static_cast<uint32_t>(now - staReconnectAttemptAtMs_) >=
           STA_RECONNECT_INTERVAL_MS) {
     beginStationConnect(settingsCopy(), now);
@@ -2201,7 +2214,8 @@ void ShotStopperNetwork::serviceWifiScan(uint32_t now) {
   state = g_wifiScan.state;
   portEXIT_CRITICAL(&dataMux_);
 
-  if (scaleHuntRfActive_.load(std::memory_order_relaxed)) {
+  if (scaleHuntRfActive_.load(std::memory_order_relaxed) ||
+      scaleConnecting_.load(std::memory_order_relaxed)) {
     const bool canceled = requested || state == WifiScanState::RUNNING ||
                           state == WifiScanState::QUEUED;
     if (canceled) {

@@ -213,6 +213,7 @@ class EspressoScaleBLE {
         };
         ConnectStep         _connectStep;
         uint32_t            _connectStartedAt;
+        uint32_t            _connectSettleStartedAt;
         uint8_t             _connectAttempts;
         uint32_t            _linkDownSince;
         char                _scanMac[SCALE_MAC_CAPACITY];

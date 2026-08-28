@@ -92,6 +92,7 @@ EspressoScaleBLE::EspressoScaleBLE(bool debug) :
     _debug(debug),
     _connectStep(ConnectStep::Idle),
     _connectStartedAt(0),
+    _connectSettleStartedAt(0),
     _connectAttempts(0),
     _linkDownSince(0),
     _scanMac{},
@@ -215,7 +216,7 @@ void EspressoScaleBLE::clearConnectingState() {
     _connecting = false;
     _connectStep = ConnectStep::Idle;
     _connectStartedAt = 0;
-    _connectAttempts = 0;
+    _connectSettleStartedAt = 0;
 }
 
 bool EspressoScaleBLE::takeSeenAdvertisement(char *macOut, size_t macCapacity,
@@ -297,6 +298,7 @@ bool EspressoScaleBLE::beginConnection(BLEDevice& peripheral) {
     _connecting = true;
     _connectStep = ConnectStep::Settle;
     _connectStartedAt = static_cast<uint32_t>(millis());
+    _connectSettleStartedAt = _connectStartedAt;
     _connectAttempts = 0;
     return false;
 }
@@ -317,7 +319,7 @@ bool EspressoScaleBLE::advanceConnection() {
     switch (_connectStep) {
         case ConnectStep::Settle:
             BLE.poll();
-            if (elapsedSince(_connectStartedAt) < SCALE_CONNECT_SETTLE_MS) {
+            if (elapsedSince(_connectSettleStartedAt) < SCALE_CONNECT_SETTLE_MS) {
                 return false;
             }
             _connectStep = ConnectStep::Connect;
@@ -334,6 +336,8 @@ bool EspressoScaleBLE::advanceConnection() {
                 }
                 if (_connectAttempts < SCALE_CONNECT_ATTEMPTS) {
                     BLE.poll();
+                    _connectSettleStartedAt = static_cast<uint32_t>(millis());
+                    _connectStep = ConnectStep::Settle;
                     return false;
                 }
                 BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
@@ -903,7 +907,7 @@ void EspressoScaleBLE::resetConnection(bool disconnectPeer,
     clearCharacteristic(_read);
     clearCharacteristic(_write);
 
-    if (_hasPeripheral && disconnectPeer) {
+    if (_hasPeripheral && disconnectPeer && _peripheral.connected()) {
         _peripheral.disconnect();
     }
     clearPeripheral();

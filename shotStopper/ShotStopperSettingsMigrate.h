@@ -3,9 +3,9 @@
 // Settings schema migrations.
 //
 // Current on-disk schema is CONFIG_SCHEMA_VERSION (V2). V1 (1912 bytes) has
-// unnamed padding after staOpen; V2 names that byte staWifiSleep (default
-// off) without growing the blob. Unrecognized blobs are rejected and factory
-// defaults are used instead.
+// unnamed padding after staOpen; V2 names that byte staWifiSleep (factory
+// default on; V1 migrate stays off) without growing the blob. Unrecognized
+// blobs are rejected and factory defaults are used instead.
 //
 // When bumping CONFIG_SCHEMA_VERSION:
 // 1. Keep the previous blob layout/size as a named legacy constant.
@@ -96,6 +96,7 @@ inline bool migratePersistedSettingsFromV1(const PersistedSettingsV1 &v1,
   }
   out = PersistedSettings{};
   memcpy(&out, &v1, offsetof(PersistedSettingsV1, staSsid));
+  // V1 had no sleep preference; keep off so upgrades do not flip behavior.
   out.staWifiSleep = false;
   memcpy(&out.staSsid, &v1.staSsid,
          offsetof(PersistedSettings, checksum) -

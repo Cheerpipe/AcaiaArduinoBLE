@@ -68,7 +68,7 @@ struct NetworkStatusSnapshot {
   bool apActive = false;
   bool wifiConfigured = false;
   bool staOpen = false;
-  bool staWifiSleep = false;
+  bool staWifiSleep = true;
   WifiPsLive wifiPs = WifiPsLive::UNKNOWN;
   RfCoexPreference wifiCoex = RfCoexPreference::BALANCE;
   bool staLinkMetricsValid = false;
@@ -178,6 +178,7 @@ class ShotStopperNetwork {
   void syncPreferredScaleMac(const char *mac);
   void syncPreferredScale(const char *mac, const char *name);
   void syncScaleLinkRf(bool connectingOrUp);
+  void syncScaleConnectingRf(bool connecting);
   void syncScaleHuntRf(bool huntActive);
   void syncLiveRuntime(const RuntimeConfig &runtime,
                        const ShotPresetBank *presets);
@@ -258,6 +259,7 @@ class ShotStopperNetwork {
   bool apKeepRequested_ = false;
   bool httpStartHeld_ = false;
   std::atomic<bool> scaleConnectingOrUp_{false};
+  std::atomic<bool> scaleConnecting_{false};
   std::atomic<bool> scaleHuntRfActive_{false};
   wifi_ps_type_t lastAppliedWifiPs_{WIFI_PS_NONE};
   bool lastAppliedWifiPsValid_{false};

@@ -4331,6 +4331,7 @@ void d16_scale_connect_debug_reports_phases() {
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs,
                               scanLastAdvertAtMs);
+  CHECK(debugEventExists(DebugCode::SCALE_CONNECT_ATTEMPT_FAILED, 3, 2));
   CHECK(debugEventExists(DebugCode::SCALE_CONNECT_FAILED, 4, 2));
 
   char message[128] = {};

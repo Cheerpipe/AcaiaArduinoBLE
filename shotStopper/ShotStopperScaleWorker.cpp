@@ -1207,6 +1207,7 @@ void serviceScaleScanIntensity() {
 void syncScaleRadioCoex() {
 #if !defined(SHOT_STOPPER_HOST_TEST)
   networkManager.syncScaleLinkRf(scale.isConnecting() || scale.isLinkUp());
+  networkManager.syncScaleConnectingRf(scale.isConnecting());
   networkManager.syncScaleHuntRf(scaleHuntRfClearActive());
 #endif
 }
@@ -1572,33 +1573,43 @@ void scaleWorkerTask(void *) {
       lastLinkSnapshotMs = nowMs;
     }
 
-    ScaleCommand command;
-    if (xQueueReceive(scaleCommandQueue, &command, 0) == pdTRUE) {
-      executeScaleCommand(command);
+    // GAP/GATT setup must not wait behind tare/beep/debug: connecting is not
+    // linked, so those would otherwise skip advanceConnection() for a tick.
+    const bool connecting =
+        scale.isConnecting() || scaleLoggedGattConnecting;
+    if (connecting) {
+      serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                                  connectAttemptSeriesActive, scanSessionAtMs,
+                                  scanLastAdvertAtMs);
     } else {
-      uint32_t beepCycleId = 0;
-      if (takeScaleBrewBeep(beepCycleId)) {
-        (void)beepCycleId;
-        executeScaleBeepCommand(DebugCode::SCALE_BEEP_OK,
-                                DebugCode::SCALE_BEEP_FAILED,
-                                DebugCode::SCALE_BEEP_UNSUPPORTED);
-      } else if (takeScalePaddleReturnReminderBeep()) {
-        executeScaleBeepCommand(DebugCode::SCALE_PADDLE_REMINDER_BEEP_OK,
-                                DebugCode::SCALE_PADDLE_REMINDER_BEEP_FAILED,
-                                DebugCode::SCALE_PADDLE_REMINDER_BEEP_UNSUPPORTED);
-      } else if (takeScaleCompletionBeep()) {
-        executeScaleBeepCommand(DebugCode::SCALE_BEEP_OK,
-                                DebugCode::SCALE_BEEP_FAILED,
-                                DebugCode::SCALE_BEEP_UNSUPPORTED);
+      ScaleCommand command;
+      if (xQueueReceive(scaleCommandQueue, &command, 0) == pdTRUE) {
+        executeScaleCommand(command);
       } else {
-        BookooDebugAction debugAction = BookooDebugAction::START;
-        uint8_t debugLevel = 0;
-        if (takeScaleDebugCommand(debugAction, debugLevel)) {
-          executeScaleDebugCommand(debugAction, debugLevel);
-        } else if (!linked && !applyScaleDiscoveryPause()) {
-          serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
-                                      connectAttemptSeriesActive,
-                                      scanSessionAtMs, scanLastAdvertAtMs);
+        uint32_t beepCycleId = 0;
+        if (takeScaleBrewBeep(beepCycleId)) {
+          (void)beepCycleId;
+          executeScaleBeepCommand(DebugCode::SCALE_BEEP_OK,
+                                  DebugCode::SCALE_BEEP_FAILED,
+                                  DebugCode::SCALE_BEEP_UNSUPPORTED);
+        } else if (takeScalePaddleReturnReminderBeep()) {
+          executeScaleBeepCommand(DebugCode::SCALE_PADDLE_REMINDER_BEEP_OK,
+                                  DebugCode::SCALE_PADDLE_REMINDER_BEEP_FAILED,
+                                  DebugCode::SCALE_PADDLE_REMINDER_BEEP_UNSUPPORTED);
+        } else if (takeScaleCompletionBeep()) {
+          executeScaleBeepCommand(DebugCode::SCALE_BEEP_OK,
+                                  DebugCode::SCALE_BEEP_FAILED,
+                                  DebugCode::SCALE_BEEP_UNSUPPORTED);
+        } else {
+          BookooDebugAction debugAction = BookooDebugAction::START;
+          uint8_t debugLevel = 0;
+          if (takeScaleDebugCommand(debugAction, debugLevel)) {
+            executeScaleDebugCommand(debugAction, debugLevel);
+          } else if (!linked && !applyScaleDiscoveryPause()) {
+            serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                                        connectAttemptSeriesActive,
+                                        scanSessionAtMs, scanLastAdvertAtMs);
+          }
         }
       }
     }
@@ -1606,6 +1617,7 @@ void scaleWorkerTask(void *) {
     // Pause advertising on the same tick beginConnection() sets _connecting,
     // so the next Settle/Connect steps never race a live peripheral advert.
     syncCompanionAdvertisingForScaleLink();
+    syncScaleRadioCoex();
 
     if (!feedCurrentTaskWatchdog()) {
       reportTaskWatchdogFault();

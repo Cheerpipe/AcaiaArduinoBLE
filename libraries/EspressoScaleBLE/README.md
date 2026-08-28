@@ -48,8 +48,9 @@ indication waits (1 s deadlines; see patch
 `BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS)` for ATT and
 `BLE.setTimeout(BLE_CONNECT_TIMEOUT_MS)` (2 s) for GAP connect, host-side waits
 return instead of blocking forever. GAP `connect()` is retried
-`SCALE_CONNECT_ATTEMPTS` times after `stopScan()`, returning to the caller
-between attempts so a task watchdog can be fed. This library is still not
+`SCALE_CONNECT_ATTEMPTS` times after `stopScan()`, with
+`SCALE_CONNECT_SETTLE_MS` before the first attempt and between retries,
+returning to the caller between attempts so a task watchdog can be fed. This library is still not
 a standalone safety mechanism:
 pair it with task watchdogs and fail-open outputs. See
 [Audit remediation](../../docs/audits/AUDIT_REMEDIATION.md) for residuals and

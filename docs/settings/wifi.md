@@ -23,7 +23,7 @@ stays available.
 | Setting / behavior | Default | Effect |
 | --- | --- | --- |
 | **Home Wi-Fi (STA)** | none on a fresh flash | Saved SSID/password. Device joins your network and serves the Web UI at the STA IP. |
-| **Wi-Fi sleep when idle** | off | When on, STA may use modem sleep (`MIN_MODEM`) only while no scale is connecting or linked and SoftAP is down. Stays `NONE` while connecting/connected, on SoftAP, or when this checkbox is off. Default off (including V1 migration). Scale discovery duty is Admin → Bluetooth → Scan intensity, not this checkbox. |
+| **Wi-Fi sleep** | on | When on, STA uses modem sleep (`MIN_MODEM`) whenever it is associated and SoftAP is down. Stays `NONE` on SoftAP, during OTA, or when this checkbox is off. Does not change when a scale connects or disconnects. Factory default on; V1 migration stays off. Scale discovery duty is Admin → Bluetooth → Scan intensity, not this checkbox. |
 | **IP mode** | DHCP | **DHCP** or **static** (`ip` / `netmask` / `gateway` / `dns1` / `dns2`). |
 | **Confirm window** | 3 minutes | After a Web UI STA save, a full-screen wait overlay counts down 3 minutes and reclaims this address when the controller returns. The first successful UI claim confirms the new network. If this page never returns, previous network settings are restored (BLE Companion saves use the same window: open the UI at the new IP). USB `SET_WIFI` commits immediately. |
 | **Boot with no credentials** | SoftAP up | See [AP](ap.md). |

@@ -410,9 +410,11 @@ if (!bleLibrary.includes('BLE_CONNECT_TIMEOUT_MS') ||
     !bleLibrary.includes('SCALE_CONNECT_ATTEMPTS') ||
     !bleLibrary.includes('ConnectStep::Settle') ||
     !bleLibrary.includes('rememberPeripheral(peripheral)') ||
-    !bleLibrary.includes('_connectAttempts < SCALE_CONNECT_ATTEMPTS')) {
+    !bleLibrary.includes('_connectAttempts < SCALE_CONNECT_ATTEMPTS') ||
+    !bleLibrary.includes('_connectSettleStartedAt') ||
+    !bleLibrary.includes('_peripheral.connected()')) {
   throw new Error(
-      'GAP connect must settle after stopScan, use a longer timeout, and retry');
+      'GAP connect must settle after stopScan, settle between retries, skip disconnect if never linked, and retry');
 }
 if (/#define\s+BLE_CONNECT_TIMEOUT_MS\s+4000UL/.test(bleLibrary)) {
   throw new Error(
@@ -488,6 +490,8 @@ if (!firmware.includes('companionAdvertisingShouldPause') ||
     !firmware.includes('BLE.poll(tickDelayMs)') ||
     firmware.includes('vTaskDelay(pdMS_TO_TICKS(scaleWorkerTickDelayMs()))') ||
     (firmware.split('syncCompanionAdvertisingForScaleLink();').length - 1) < 3 ||
+    (scaleWorker.split('syncScaleRadioCoex();').length - 1) < 2 ||
+    !scaleWorker.includes('GAP/GATT setup must not wait behind') ||
     !bleCompanion.includes('advertisingPaused_ && !status_.connected') ||
     !bleCompanion.includes('BLE_COMPANION_ADV_INTERVAL') ||
     !bleCompanion.includes('setAdvertisingInterval(BLE_COMPANION_ADV_INTERVAL)')) {
@@ -2347,7 +2351,7 @@ if (!js.includes('function commandOkMessage(') ||
     !js.includes("label+(on?' enabled.':' disabled.')") ||
     !js.includes("'Could not '+(on?'enable ':'disable ')+label+'.'") ||
     !js.includes('Wi-Fi settings saved. Restarting.') ||
-    !js.includes('Wi-Fi idle sleep saved.') ||
+    !js.includes('Wi-Fi sleep saved.') ||
     !js.includes("cn('save Wi-Fi settings')") ||
     !js.includes('Wi-Fi scan started.') ||
     !js.includes('Could not start Wi-Fi scan.') ||
@@ -2804,22 +2808,23 @@ if (!network.includes('restoreLkgToActive(next)') ||
   throw new Error('STA confirm timeout must reassociate last-known-good before SoftAP fallback');
 }
 {
-  if (!html.includes('id="staWifiSleep"') ||
-      !html.includes('Wi-Fi sleep when idle') ||
-      !html.includes('Saves power when no scale is linked') ||
-      !html.includes('Stays off while connecting or connected') ||
-      !html.includes('May slow scale discovery') ||
+  if (      !html.includes('id="staWifiSleep"') ||
+      !html.includes('id="staWifiSleep" type="checkbox" checked') ||
+      !html.includes('Wi-Fi sleep<small') ||
+      !html.includes('Modem sleep while STA is associated') ||
+      !html.includes('SoftAP and OTA keep the radio awake') ||
+      !html.includes('May lag the Web UI') ||
       !ui.includes("wifiSleep:$('staWifiSleep').checked") ||
       !ui.includes("savedStaWifiSleep=!!n.wifiSleep") ||
       !ui.includes("if($('staWifiSleep'))$('staWifiSleep').checked=savedStaWifiSleep") ||
-      !ui.includes("if(n.wifiSleep)t+=' — idle sleep allowed'") ||
+      !ui.includes("if(n.wifiSleep)t+=' — sleep on'") ||
       !ui.includes('function networkSaveIsSleepOnly(') ||
       !ui.includes('_noReconnectWait') ||
       !ui.includes('delete payload._noReconnectWait') ||
       !ui.includes('sleepOnly') ||
       !ui.includes('if(noReconnect)savedStaWifiSleep=') ||
       !ui.includes('if(!sleepOnly)R.resetNetworkAddressLoaded()') ||
-      !ui.includes('Wi-Fi idle sleep saved.') ||
+      !ui.includes('Wi-Fi sleep saved.') ||
       !network.includes('\\"wifiSleep\\":%s') ||
       !network.includes('jsonHasOnlyUniqueFields(root, saveFields, 11)') ||
       !network.includes('jsonBoolean(root, "wifiSleep", command.wifiSleep)') ||
@@ -2829,15 +2834,17 @@ if (!network.includes('restoreLkgToActive(next)') ||
       !network.includes('WIFI_PS_MIN_MODEM') ||
       /WiFi\.setSleep\(\s*WIFI_PS_MAX_MODEM\s*\)/.test(network) ||
       !network.includes('syncScaleLinkRf') ||
+      !network.includes('syncScaleConnectingRf') ||
       !network.includes('syncScaleHuntRf') ||
       !firmware.includes('networkManager.syncScaleLinkRf') ||
+      !firmware.includes('networkManager.syncScaleConnectingRf') ||
       !firmware.includes('networkManager.syncScaleHuntRf') ||
       !domainCore.includes('desiredWifiPowerSave') ||
-      !domainCore.includes('scaleConnectingOrUp') ||
+      domainCore.includes('scaleConnectingOrUp') ||
       !domainCore.includes('staAssociated') ||
       !domainCore.includes('otaBusy')) {
     throw new Error(
-        'Wi-Fi sleep when idle must be wired in Admin UI, /network save, status, and power-save helper');
+        'Wi-Fi sleep must be wired in Admin UI, /network save, status, and power-save helper');
   }
   const applyStart = network.indexOf('void ShotStopperNetwork::applyWifiPowerSave()');
   const applyEnd = network.indexOf(
@@ -2853,9 +2860,10 @@ if (!network.includes('restoreLkgToActive(next)') ||
       !applyBody.includes('esp_wifi_get_ps') ||
       !applyBody.includes('mode == WIFI_OFF') ||
       applyBody.includes('WIFI_PS_MAX_MODEM') ||
+      applyBody.includes('scaleConnectingOrUp') ||
       /WiFi\.mode\(\s*WIFI_OFF\s*\)/.test(applyBody)) {
     throw new Error(
-        'applyWifiPowerSave must set NONE/MIN_MODEM via setSleep+get_ps, skip if driver off, and never WIFI_OFF/MAX_MODEM');
+        'applyWifiPowerSave must set NONE/MIN_MODEM via setSleep+get_ps, skip if driver off, never WIFI_OFF/MAX_MODEM, and not follow scale link state');
   }
   const saveStart = network.indexOf('case WebCommandType::SAVE_NETWORK:');
   const saveEnd = network.indexOf('case WebCommandType::FORGET_NETWORK', saveStart);
@@ -3582,6 +3590,9 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
     !network.includes('associate deferred; brew RF active') ||
     !network.includes('associate aborted; brew RF active') ||
     !network.includes('STA reconnect deferred; brew RF active') ||
+    !network.includes('associate deferred; scale connecting') ||
+    !network.includes('associate aborted; scale connecting') ||
+    !network.includes('STA reconnect deferred; scale connecting') ||
     network.includes('esp_coex_preference_set') ||
     network.includes('findBestStaCandidate') ||
     !network.includes('stopSoftApKeepStation') ||
@@ -3600,9 +3611,10 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
       : '';
   if (!beginSta.includes('WiFi.disconnect(false, false)') ||
       !beginSta.includes('brewRfActive()') ||
+      !beginSta.includes('scaleConnecting_') ||
       beginSta.includes('WIFI_OFF')) {
     throw new Error(
-        'beginStationConnect must disconnect STA before reassociate without WIFI_OFF and defer while brew RF is active');
+        'beginStationConnect must disconnect STA before reassociate without WIFI_OFF and defer while brew RF or scale connecting');
   }
 }
 {
