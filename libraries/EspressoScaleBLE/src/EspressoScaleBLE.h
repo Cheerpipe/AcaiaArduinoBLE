@@ -34,7 +34,9 @@
 #define BLE_DISCOVER_TIMEOUT_MS           3000UL
 #define SCALE_CONNECT_SETTLE_MS           120UL
 #define LINK_DOWN_DEBOUNCE_MS             120UL
-#define BLE_SCAN_IDLE_INTERVAL            0x00F0
+// Idle GAP duty 10% (30 ms / 300 ms). Used only while scanning — connecting
+// and GATT-up paths never start an idle scan. Burst stays 50% (30/60 ms).
+#define BLE_SCAN_IDLE_INTERVAL            0x01E0
 #define BLE_SCAN_IDLE_WINDOW              0x0030
 #define BLE_SCAN_BURST_INTERVAL           0x0060
 #define BLE_SCAN_BURST_WINDOW             0x0030

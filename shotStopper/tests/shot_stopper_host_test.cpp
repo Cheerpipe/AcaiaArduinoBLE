@@ -7917,6 +7917,22 @@ void b02_setup_degrades_without_ble() {
   CHECK(!publishedControlStatus.scaleWorkerReady);
 }
 
+void b03_usb_console_stays_off_without_jumper() {
+  resetHarness(false, false);
+  CHECK(!usbConsoleJumperPresent());
+  CHECK(hostPinMode[USB_CONSOLE_GPIO] == INPUT_PULLUP);
+  setup();
+  CHECK(Serial.beginCalls == 0);
+}
+
+void b04_usb_console_starts_when_jumper_held() {
+  resetHarness(false, false);
+  hostPinLevel[USB_CONSOLE_GPIO] = LOW;
+  CHECK(usbConsoleJumperPresent());
+  setup();
+  CHECK(Serial.beginCalls == 1);
+}
+
 void m08_recipe_copies_match_published_state() {
   resetHarness(false, true);
   RuntimeConfig copied = {};
@@ -10515,6 +10531,8 @@ const TestCase testCases[] = {
     {"S04e", s04e_delete_shot_record_keeps_log_if_curve_remove_fails},
     {"B01", b01_scale_worker_requires_ble_stack},
     {"B02", b02_setup_degrades_without_ble},
+    {"B03", b03_usb_console_stays_off_without_jumper},
+    {"B04", b04_usb_console_starts_when_jumper_held},
     {"M08", m08_recipe_copies_match_published_state},
     {"M09", m09_seqlock_yields_when_writer_active},
     {"M12", m12_ble_companion_result_drop_is_counted},

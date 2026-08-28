@@ -25,6 +25,11 @@ list detected USB-CDC ports (`/dev/cu.usbmodem*` on macOS, `/dev/ttyACM*` on
 Linux), suggest the first match, and accept Enter or a typed path. The chosen
 port is saved to `.shotstopper`.
 
+App CDC enumerates only when **GPIO 4 is jumpered to GND at reset**
+([Hardware](HARDWARE.md)). Without the jumper, `monitor-idf` has no port
+while the app is running. `flash-idf` still works via **BOOT + RST** (ROM
+USB download) or use **OTA**. ROM download does not need the jumper.
+
 After a successful run, non-secret values are saved, so the next command can
 be just `./scripts/bfm-idf`. The **device password is never stored or
 suggested** — pass `--password` / `-t` or `SHOTSTOPPER_DEVICE_PASSWORD`

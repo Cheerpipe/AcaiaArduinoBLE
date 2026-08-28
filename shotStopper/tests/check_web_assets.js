@@ -103,6 +103,69 @@ if (!sdkconfigDefaults.includes('CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y') ||
   throw new Error(
       'sdkconfig.defaults must enable run-time stats and vTaskList core IDs');
 }
+if (!sdkconfigDefaults.includes('CONFIG_FREERTOS_USE_TICKLESS_IDLE=y') ||
+    sdkconfigDefaults.includes('CONFIG_PM_ENABLE=y')) {
+  throw new Error(
+      'sdkconfig.defaults must enable tickless idle without CONFIG_PM / light sleep');
+}
+if (sdkconfigDefaults.includes('CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y') ||
+    !sdkconfigDefaults.includes('CONFIG_ESP_CONSOLE_NONE=y') ||
+    !sdkconfigDefaults.includes('CONFIG_ESP_CONSOLE_SECONDARY_NONE=y')) {
+  throw new Error(
+      'IDF console must be NONE so USB CDC waits for the GPIO4 jumper');
+}
+if (sdkconfigDefaults.includes('CONFIG_BT_LE_SLEEP_ENABLE=y') ||
+    sdkconfigDefaults.includes('CONFIG_BT_CTRL_MODEM_SLEEP=y')) {
+  throw new Error(
+      'BT controller modem-sleep must stay off (would apply during GATT)');
+}
+{
+  const cmakeLists = fs.readFileSync(
+      path.resolve(sketchDir, '..', 'idf', 'CMakeLists.txt'), 'utf8');
+  const boardSh = fs.readFileSync(
+      path.resolve(sketchDir, '..', 'scripts', 'shotstopper_board.sh'), 'utf8');
+  const bleHeader = fs.readFileSync(
+      path.resolve(sketchDir, '..', 'libraries', 'EspressoScaleBLE', 'src',
+                   'EspressoScaleBLE.h'),
+      'utf8');
+  if (cmakeLists.includes('ARDUINO_USB_CDC_ON_BOOT=1') ||
+      !cmakeLists.includes('ARDUINO_USB_CDC_ON_BOOT=0')) {
+    throw new Error(
+        'IDF CMakeLists must leave Arduino CDC off until the USB console jumper');
+  }
+  if (boardSh.includes('CDCOnBoot=cdc') ||
+      !boardSh.includes('CDCOnBoot=default')) {
+    throw new Error(
+        'Legacy FQBN must use CDCOnBoot=default to match jumper-gated CDC');
+  }
+  if (!bleHeader.includes('#define BLE_SCAN_IDLE_INTERVAL            0x01E0') ||
+      !bleHeader.includes('#define BLE_SCAN_IDLE_WINDOW              0x0030') ||
+      !bleHeader.includes('#define BLE_SCAN_BURST_INTERVAL           0x0060') ||
+      !bleHeader.includes('#define BLE_SCAN_BURST_WINDOW             0x0030')) {
+    throw new Error(
+        'Idle BLE scan must be 10% (30/300); burst must stay 50% (30/60)');
+  }
+  if (!firmware.includes('USB_CONSOLE_GPIO') ||
+      !firmware.includes('SHOT_STOPPER_USB_CONSOLE_GPIO 4') ||
+      !firmwareCore.includes('usbConsoleJumperPresent()') ||
+      !firmwareCore.includes('if (usbConsoleJumperPresent())') ||
+      !firmwareCore.includes('Serial.begin(SERIAL_BAUD)')) {
+    throw new Error(
+        'USB CDC must start only when the GPIO4 jumper is held at boot');
+  }
+  const buildIdf = fs.readFileSync(
+      path.resolve(sketchDir, '..', 'scripts', 'build-idf'), 'utf8');
+  const idfHelpers = fs.readFileSync(
+      path.resolve(sketchDir, '..', 'scripts', 'shotstopper_idf.sh'), 'utf8');
+  if (!idfHelpers.includes('ss_idf_prepare_set_target') ||
+      !idfHelpers.includes('ss_idf_commit_extra_flags_stamp') ||
+      !buildIdf.includes('ss_idf_prepare_set_target') ||
+      !buildIdf.includes('ss_idf_commit_extra_flags_stamp') ||
+      !idfHelpers.includes('Preparing empty IDF build tree for set-target')) {
+    throw new Error(
+        'build-idf must empty a non-CMake tree before idf.py set-target fullclean');
+  }
+}
 if (!taskProfiler.includes('void copySnapshot(TaskProfilerSnapshot &out) const') ||
     !taskProfiler.includes('taskYIELD()') ||
     !taskProfiler.includes('__atomic_load_n(&seq_') ||

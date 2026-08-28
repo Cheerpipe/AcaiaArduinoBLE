@@ -40,10 +40,11 @@ They are **not** editable from the Web UI.
 | Function | GPIO | Level |
 | --- | ---: | --- |
 | Activator (to GND) | **21** | Active **LOW** (internal pull-up; ON = GPIO LOW). Paddle or switch, depending on machine type. |
-| Reed (momentary+reed builds) | **13** | Active **LOW** (internal pull-up; ON = GPIO LOW). Compile `SHOT_STOPPER_MACHINE_TYPE=2`. Override with `-DSHOT_STOPPER_REED_GPIO`. Must stay distinct from activator, relay, LED, buzzer, and safety GPIOs. |
+| Reed (momentary+reed builds) | **13** | Active **LOW** (internal pull-up; ON = GPIO LOW). Compile `SHOT_STOPPER_MACHINE_TYPE=2`. Override with `-DSHOT_STOPPER_REED_GPIO`. Must stay distinct from activator, relay, LED, buzzer, USB console, and safety GPIOs. |
 | Onboard relay coil | **2** | Active **HIGH** (HIGH energizes the coil and closes NO) |
 | Scale-connected LED | **1** | Active HIGH while a BLE scale is connected (switchable in Alerts) |
 | Optional buzzer | **14** | Compile with `SHOT_STOPPER_ENABLE_BUZZER=1` (passive piezo, RTTTL). `=0` omits the local buzzer. |
+| USB console jumper | **4** | Active **LOW**. Dupont **IO4 → a GND pad you choose**. Sampled once at boot. **Do not** jumper IO4 to **EN** (that column is reset). Override with `-DSHOT_STOPPER_USB_CONSOLE_GPIO`. Must stay distinct from activator, relay, LED, buzzer, reed, and safety GPIOs. |
 
 Optional external K2 safety (both pins or neither; no defaults, because they
 depend on a reviewed board):
@@ -62,9 +63,22 @@ on the physical activator:
   --flags "-DSHOT_STOPPER_SAFETY_HEARTBEAT_GPIO=16 -DSHOT_STOPPER_CIRCUIT_FEEDBACK_GPIO=17"
 ```
 
-To use a different paddle, relay, LED, or buzzer pin, edit
+To use a different paddle, relay, LED, buzzer, or USB-console pin, edit
 `ShotStopperHardware.h` (or the matching `-D` override) and rebuild. Wrong
 pins can leave machine circuit closed or misread the paddle.
+
+## USB console jumper
+
+App USB CDC is **off** unless GPIO 4 is held LOW at reset (Dupont to GND).
+Leave the pin floating when the stopper is inside the machine. Pull the
+Dupont **before** installing.
+
+- **With jumper at reset:** `/dev/cu.usbmodem*` / `/dev/ttyACM*` appears;
+  [USB serial CLI](SERIAL_CLI.md) and `monitor-idf` work.
+- **Without jumper, app running:** no CDC port. Flash with **BOOT + RST**
+  (ROM USB download) or **OTA**.
+- ROM download always works, jumper or not. On this board IO4 sits next to
+  **EN** — never short that pair.
 
 ## Isolation (must)
 

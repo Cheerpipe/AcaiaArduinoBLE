@@ -25,6 +25,9 @@ constexpr uint8_t RELAY_GPIO = 2;
 #ifndef SHOT_STOPPER_BUZZER_GPIO
 #define SHOT_STOPPER_BUZZER_GPIO 14
 #endif
+#ifndef SHOT_STOPPER_USB_CONSOLE_GPIO
+#define SHOT_STOPPER_USB_CONSOLE_GPIO 4
+#endif
 #else
 #error "Unsupported board: Shot Stopper requires ESP32-S3"
 #endif
@@ -32,6 +35,9 @@ constexpr uint8_t RELAY_GPIO = 2;
 constexpr uint8_t SCALE_CONNECTED_LED_GPIO =
     SHOT_STOPPER_SCALE_CONNECTED_LED_GPIO;
 constexpr uint8_t BUZZER_GPIO = SHOT_STOPPER_BUZZER_GPIO;
+constexpr uint8_t USB_CONSOLE_GPIO = SHOT_STOPPER_USB_CONSOLE_GPIO;
+// Dupont IO4 to a GND pad (never the EN column). Sampled once at boot.
+constexpr uint8_t USB_CONSOLE_ACTIVE_LEVEL = LOW;
 
 constexpr uint8_t ACTIVATOR_ACTIVE_LEVEL = LOW;
 // Active-HIGH relay: GPIO HIGH energizes the coil and closes NO.
@@ -88,12 +94,24 @@ static_assert(SCALE_CONNECTED_LED_GPIO != ACTIVATOR_GPIO &&
 static_assert(BUZZER_GPIO != ACTIVATOR_GPIO && BUZZER_GPIO != RELAY_GPIO &&
                   BUZZER_GPIO != SCALE_CONNECTED_LED_GPIO,
               "Buzzer GPIO must be distinct from activator, relay, and LED GPIOs");
+static_assert(USB_CONSOLE_GPIO != 0 && USB_CONSOLE_GPIO != 45 &&
+                  USB_CONSOLE_GPIO != 46,
+              "USB console jumper must not use BOOT or ESP32-S3 strapping pins");
+static_assert(USB_CONSOLE_GPIO != ACTIVATOR_GPIO &&
+                  USB_CONSOLE_GPIO != RELAY_GPIO &&
+                  USB_CONSOLE_GPIO != SCALE_CONNECTED_LED_GPIO &&
+                  USB_CONSOLE_GPIO != BUZZER_GPIO,
+              "USB console jumper GPIO must be distinct from activator, relay, LED, and buzzer");
+static_assert(USB_CONSOLE_ACTIVE_LEVEL == LOW,
+              "USB console jumper requires INPUT_PULLUP and active LOW");
 #ifndef SHOT_STOPPER_HOST_TEST
 static_assert(GPIO_IS_VALID_OUTPUT_GPIO(SCALE_CONNECTED_LED_GPIO),
               "Scale-connected LED must use a valid output-capable GPIO");
 static_assert(!BUZZER_SUPPORT_ENABLED ||
                   GPIO_IS_VALID_OUTPUT_GPIO(BUZZER_GPIO),
               "Buzzer must use a valid output-capable GPIO");
+static_assert(GPIO_IS_VALID_GPIO(USB_CONSOLE_GPIO),
+              "USB console jumper must use a valid input GPIO");
 #endif
 #if defined(SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO)
 static_assert(SAFETY_HEARTBEAT_GPIO != RELAY_GPIO &&
@@ -108,6 +126,9 @@ static_assert(SAFETY_HEARTBEAT_GPIO != SCALE_CONNECTED_LED_GPIO &&
 static_assert(BUZZER_GPIO != SAFETY_HEARTBEAT_GPIO &&
                   BUZZER_GPIO != CIRCUIT_FEEDBACK_GPIO,
               "Buzzer GPIO must be distinct from safety GPIOs");
+static_assert(USB_CONSOLE_GPIO != SAFETY_HEARTBEAT_GPIO &&
+                  USB_CONSOLE_GPIO != CIRCUIT_FEEDBACK_GPIO,
+              "USB console jumper GPIO must be distinct from safety GPIOs");
 #ifndef SHOT_STOPPER_HOST_TEST
 static_assert(GPIO_IS_VALID_OUTPUT_GPIO(SAFETY_HEARTBEAT_GPIO),
               "Heartbeat must use a valid output-capable GPIO");
@@ -125,8 +146,9 @@ static_assert(ACTIVATOR_DEBOUNCE_MS < 100,
 #if SHOT_STOPPER_MACHINE_TYPE == 2
 static_assert(REED_GPIO != ACTIVATOR_GPIO && REED_GPIO != RELAY_GPIO &&
                   REED_GPIO != SCALE_CONNECTED_LED_GPIO &&
-                  REED_GPIO != BUZZER_GPIO,
-              "Reed GPIO must be distinct from activator, relay, LED, and buzzer");
+                  REED_GPIO != BUZZER_GPIO &&
+                  REED_GPIO != USB_CONSOLE_GPIO,
+              "Reed GPIO must be distinct from activator, relay, LED, buzzer, and USB console");
 #if defined(SHOT_STOPPER_SAFETY_HEARTBEAT_GPIO)
 static_assert(REED_GPIO != SAFETY_HEARTBEAT_GPIO &&
                   REED_GPIO != CIRCUIT_FEEDBACK_GPIO,

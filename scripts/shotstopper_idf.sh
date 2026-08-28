@@ -149,7 +149,11 @@ ss_idf_require_image() {
 
 # idf.py skips CMake when CMakeCache.txt exists, so a new
 # SHOT_STOPPER_EXTRA_FLAGS env value would otherwise never reach the compiler.
-# Stamp the flags and drop the cache when they change.
+# Drop the cache when the stamp changes. Do not write the stamp here:
+# idf.py set-target runs fullclean, which refuses a non-empty directory that
+# is not a CMake build (no CMakeCache.txt). Writing the stamp first made the
+# first n16r8/n8r4 tree fail. Call ss_idf_commit_extra_flags_stamp after
+# set-target. CMake still reads SHOT_STOPPER_EXTRA_FLAGS from the environment.
 ss_idf_sync_extra_flags() {
   ss_idf_resolve_paths
   local stamp="$IDF_BUILD_DIR/shot_stopper_extra_flags"
@@ -165,7 +169,24 @@ ss_idf_sync_extra_flags() {
     echo "  now: ${new:-(none)}"
     rm -f "$IDF_BUILD_DIR/CMakeCache.txt"
   fi
-  printf '%s\n' "$new" > "$stamp"
+}
+
+ss_idf_commit_extra_flags_stamp() {
+  ss_idf_resolve_paths
+  mkdir -p "$IDF_BUILD_DIR"
+  printf '%s\n' "${SHOT_STOPPER_EXTRA_FLAGS-}" > "$IDF_BUILD_DIR/shot_stopper_extra_flags"
+}
+
+# idf.py set-target always fullcleans. fullclean is a no-op on an empty dir,
+# but FatalError if the dir has leftover files and no CMakeCache.txt.
+ss_idf_prepare_set_target() {
+  ss_idf_resolve_paths
+  if [[ -f "$IDF_BUILD_DIR/CMakeCache.txt" ]]; then
+    return 0
+  fi
+  echo "Preparing empty IDF build tree for set-target"
+  rm -rf "$IDF_BUILD_DIR"
+  mkdir -p "$IDF_BUILD_DIR"
 }
 
 # Confirm each extra -D flag actually appears on ShotStopperNetwork.cpp.

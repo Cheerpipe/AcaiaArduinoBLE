@@ -86,8 +86,11 @@ ss_idf_sync_extra_flags
 
 if [[ ! -f "$IDF_SDKCONFIG" ]] ||
    ! grep -q '^CONFIG_IDF_TARGET="esp32s3"$' "$IDF_SDKCONFIG"; then
+  ss_idf_prepare_set_target
   idf.py "${IDF_PY_ARGS[@]}" set-target esp32s3
 fi
+
+ss_idf_commit_extra_flags_stamp
 
 idf.py "${IDF_PY_ARGS[@]}" build
 

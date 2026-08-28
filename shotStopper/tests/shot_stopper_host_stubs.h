@@ -133,13 +133,18 @@ class HostSerial {
   std::string rx;
   std::string tx;
   size_t rxIndex = 0;
+  size_t beginCalls = 0;
 
-  void begin(unsigned long baud) { (void)baud; }
+  void begin(unsigned long baud) {
+    (void)baud;
+    ++beginCalls;
+  }
 
   void reset() {
     rx.clear();
     tx.clear();
     rxIndex = 0;
+    beginCalls = 0;
   }
 
   void inject(const char *text) {

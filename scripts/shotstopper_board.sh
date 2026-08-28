@@ -9,9 +9,10 @@
 # table (two ~3.2 MB app slots).
 # N16R8: 16 MB QSPI flash + 8 MB OPI PSRAM. app3M_fat9M_16MB is the normal
 # 16 MB OTA table (two 3 MB app slots). min_spiffs is no longer used.
-# USB CDC on boot matches native USB ports such as /dev/cu.usbmodem2101.
-SHOTSTOPPER_FQBN_N8R4="esp32:esp32:esp32s3:PSRAM=enabled,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,CDCOnBoot=cdc"
-SHOTSTOPPER_FQBN_N16R8="esp32:esp32:esp32s3:PSRAM=opi,FlashMode=qio,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc"
+# CDCOnBoot=default: app CDC is off until the GPIO4–GND jumper is present at
+# boot. ROM USB download (BOOT+RST) still enumerates without the jumper.
+SHOTSTOPPER_FQBN_N8R4="esp32:esp32:esp32s3:PSRAM=enabled,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,CDCOnBoot=default"
+SHOTSTOPPER_FQBN_N16R8="esp32:esp32:esp32s3:PSRAM=opi,FlashMode=qio,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=default"
 
 # Usable bytes of a single OTA app slot, used by the OTA client for a local
 # size pre-check before uploading anything to the controller.

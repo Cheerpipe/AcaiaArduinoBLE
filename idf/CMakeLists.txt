@@ -3,7 +3,8 @@
 cmake_minimum_required(VERSION 3.16)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Board-parity defines (Arduino FQBN: PSRAM + USB CDC on boot / Hardware CDC).
+# Board-parity defines (Arduino FQBN: PSRAM + Hardware CDC). CDC stays off
+# until setup() sees the USB console jumper (GPIO4–GND) and calls Serial.begin.
 # Product options (remote machine control, buzzer, machine type) live in
 # main/Kconfig.projbuild and sdkconfig.defaults; SHOT_STOPPER_EXTRA_FLAGS may
 # still pass -D overrides. idf.py does not reconfigure when only an env var
@@ -12,7 +13,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 idf_build_set_property(COMPILE_DEFINITIONS "BOARD_HAS_PSRAM" APPEND)
-idf_build_set_property(COMPILE_DEFINITIONS "ARDUINO_USB_CDC_ON_BOOT=1" APPEND)
+idf_build_set_property(COMPILE_DEFINITIONS "ARDUINO_USB_CDC_ON_BOOT=0" APPEND)
 idf_build_set_property(COMPILE_DEFINITIONS "ARDUINO_USB_MODE=1" APPEND)
 
 set(_ss_extra_flags_file "${CMAKE_BINARY_DIR}/shot_stopper_extra_flags")

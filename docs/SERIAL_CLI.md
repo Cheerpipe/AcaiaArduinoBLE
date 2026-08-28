@@ -4,6 +4,12 @@ Shot Stopper accepts **line-based commands** on the same USB serial port as
 the logs (**115200** baud). Verbs are case-insensitive. SSIDs and passwords
 are case-sensitive; wrap values with spaces in double quotes.
 
+App CDC is off unless **GPIO 4 is jumpered to GND at reset**. See
+[Hardware](HARDWARE.md). Without that Dupont, the CLI port does not
+enumerate while the app is running; use **OTA** or **BOOT + RST** (ROM
+download) to flash. Remove the jumper before installing the stopper in the
+machine.
+
 These commands are the same whether you built with ESP-IDF or the legacy
 Arduino-cli path. How you **open the port** differs. Build/flash wrappers
 are in [Build scripts](SCRIPTS.md), not here.

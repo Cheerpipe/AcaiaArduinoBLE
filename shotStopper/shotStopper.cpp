@@ -3666,6 +3666,8 @@ void fillCurrentScaleScanFilter(char *macOut, size_t cap, bool &useDirected) {
 }
 
 void serviceScaleScanDuty(bool sawCompatibleAd) {
+  // Idle 10% / burst 50% apply only while scanning. Connecting and GATT-up
+  // never reach this path (isConnecting() or !isScanning()).
   if (!scale.isScanning() || scale.isConnecting()) {
     return;
   }
@@ -6731,6 +6733,11 @@ void maybeRunBootRecoveryGesture() {
 // Arduino entry points
 // ---------------------------------------------------------------------------
 
+bool usbConsoleJumperPresent() {
+  pinMode(USB_CONSOLE_GPIO, INPUT_PULLUP);
+  return digitalRead(USB_CONSOLE_GPIO) == USB_CONSOLE_ACTIVE_LEVEL;
+}
+
 void setup() {
   bootStartedAtMs = millis();
   // Safe OPEN before Serial, EEPROM or BLE. Arduino-ESP32 3.x rejects
@@ -6763,7 +6770,9 @@ void setup() {
   machineOnActivatorReady();
 #endif
 
-  Serial.begin(SERIAL_BAUD);
+  if (usbConsoleJumperPresent()) {
+    Serial.begin(SERIAL_BAUD);
+  }
 
   persistenceReady = EEPROM.begin(EEPROM_SIZE);
 #ifndef SHOT_STOPPER_HOST_TEST
