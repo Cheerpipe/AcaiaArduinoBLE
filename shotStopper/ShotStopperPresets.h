@@ -468,8 +468,8 @@ inline bool makeDuplicatePresetName(const ShotPresetBank &bank,
   if (base[0] == '\0') {
     copyCString(base, sizeof(base), "Preset");
   }
-  // Longest suffix is " copy 99" (8) + NUL. Cap base so snprintf cannot
-  // truncate under GCC -O2 -Wformat-truncation.
+  // Longest suffix is " copy 99" (8) + NUL. Cap base so the composed name
+  // always fits outCap without snprintf (-Wformat-truncation under -O2).
   constexpr size_t kSuffixRoom = 9;
   if (outCap <= kSuffixRoom) {
     return false;
@@ -479,10 +479,37 @@ inline bool makeDuplicatePresetName(const ShotPresetBank &bank,
     base[maxBase] = '\0';
   }
   for (uint8_t n = 1; n < 100; ++n) {
+    copyCString(outName, outCap, base);
+    const size_t baseUsed = strnlen(outName, outCap);
+    if (baseUsed >= outCap) {
+      continue;
+    }
+    char *tail = outName + baseUsed;
+    size_t tailCap = outCap - baseUsed;
     if (n == 1) {
-      snprintf(outName, outCap, "%s copy", base);
+      copyCString(tail, tailCap, " copy");
     } else {
-      snprintf(outName, outCap, "%s copy %u", base, static_cast<unsigned>(n));
+      copyCString(tail, tailCap, " copy ");
+      const size_t prefixUsed = strnlen(outName, outCap);
+      if (prefixUsed >= outCap) {
+        continue;
+      }
+      tail = outName + prefixUsed;
+      tailCap = outCap - prefixUsed;
+      if (n >= 10) {
+        if (tailCap < 3) {
+          continue;
+        }
+        tail[0] = static_cast<char>('0' + (n / 10));
+        tail[1] = static_cast<char>('0' + (n % 10));
+        tail[2] = '\0';
+      } else {
+        if (tailCap < 2) {
+          continue;
+        }
+        tail[0] = static_cast<char>('0' + n);
+        tail[1] = '\0';
+      }
     }
     if (!shotPresetNameExists(bank, outName, 0)) {
       return true;
