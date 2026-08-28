@@ -35,12 +35,25 @@ using portMUX_TYPE = int;
 #define pdMS_TO_TICKS(ms) (ms)
 
 // Match libraries/EspressoScaleBLE/src/EspressoScaleBLE.h so shotStopper.cpp can
-// static_assert GAP connect vs the 5 s task watchdog in host builds.
+// static_assert GAP connect vs the 5 s task watchdog in host builds, and so
+// idle/burst scan duty helpers see the same HCI interval/window.
 #ifndef BLE_CONNECT_TIMEOUT_MS
 #define BLE_CONNECT_TIMEOUT_MS 2000UL
 #endif
 #ifndef BLE_DISCOVER_TIMEOUT_MS
 #define BLE_DISCOVER_TIMEOUT_MS 3000UL
+#endif
+#ifndef BLE_SCAN_IDLE_INTERVAL
+#define BLE_SCAN_IDLE_INTERVAL 0x00C0
+#endif
+#ifndef BLE_SCAN_IDLE_WINDOW
+#define BLE_SCAN_IDLE_WINDOW 0x0030
+#endif
+#ifndef BLE_SCAN_BURST_INTERVAL
+#define BLE_SCAN_BURST_INTERVAL 0x0060
+#endif
+#ifndef BLE_SCAN_BURST_WINDOW
+#define BLE_SCAN_BURST_WINDOW 0x0030
 #endif
 
 #include "../../libraries/EspressoScaleBLE/src/ScaleFeatures.h"

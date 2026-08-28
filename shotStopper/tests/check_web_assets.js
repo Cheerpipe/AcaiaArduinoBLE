@@ -178,12 +178,12 @@ if (sdkconfigDefaults.includes('CONFIG_BT_LE_SLEEP_ENABLE=y') ||
     throw new Error(
         'Legacy FQBN must use CDCOnBoot=default to match jumper-gated CDC');
   }
-  if (!bleHeader.includes('#define BLE_SCAN_IDLE_INTERVAL            0x01E0') ||
+  if (!bleHeader.includes('#define BLE_SCAN_IDLE_INTERVAL            0x00C0') ||
       !bleHeader.includes('#define BLE_SCAN_IDLE_WINDOW              0x0030') ||
       !bleHeader.includes('#define BLE_SCAN_BURST_INTERVAL           0x0060') ||
       !bleHeader.includes('#define BLE_SCAN_BURST_WINDOW             0x0030')) {
     throw new Error(
-        'Idle BLE scan must be 10% (30/300); burst must stay 50% (30/60)');
+        'Idle BLE scan must be 25% (30/120); burst must stay 50% (30/60)');
   }
   if (!firmware.includes('USB_CONSOLE_GPIO') ||
       !firmware.includes('SHOT_STOPPER_USB_CONSOLE_GPIO 4') ||

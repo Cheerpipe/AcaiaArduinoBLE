@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Patch ArduinoBLE 2.1.0 for Shot Stopper:
 #  1) GAP default idle 150/30 ms (0x00F0/0x0030); EspressoScaleBLE idle is
-#     300/30 (10%) via setScanParameters, burst 60/30 (50%)
+#     120/30 (25%) via setScanParameters, burst 60/30 (50%)
 #  2) OOM-safe discovery (malloc + placement new; no abort on bad_alloc)
 #  3) BLE host objects in PSRAM (GAP/ATT/GATT/local values)
 #  4) Bound ATT indication / ACL credit waits (no indefinite blocks)
@@ -144,7 +144,7 @@ if [[ "$restore_scan" -eq 0 && "$apply_oom" -eq 0 && "$apply_psram" -eq 0 && \
       "$apply_hci_static" -eq 0 && \
       "$apply_gap_scan" -eq 0 && "$apply_copy" -eq 0 && \
       "$apply_pool" -eq 0 ]]; then
-  echo "ArduinoBLE already patched (GAP idle default 150/30; EspressoScaleBLE idle 300/30 via setScanParameters + OOM-safe + host PSRAM + HCI no-drop + static VHCI streams + VHCI init + blocking HCI wait + copyAddress + GAP device pool): $target"
+  echo "ArduinoBLE already patched (GAP idle default 150/30; EspressoScaleBLE idle 120/30 via setScanParameters + OOM-safe + host PSRAM + HCI no-drop + static VHCI streams + VHCI init + blocking HCI wait + copyAddress + GAP device pool): $target"
   exit 0
 fi
 
@@ -331,7 +331,7 @@ if [[ "$apply_gap_scan" -eq 1 ]]; then
     exit 1
   fi
   patch -p1 -d "$target" < "$gap_scan_patch"
-  echo "Patched ArduinoBLE GAP idle default 150/30 + setScanParameters (EspressoScaleBLE idle 300/30): $target"
+  echo "Patched ArduinoBLE GAP idle default 150/30 + setScanParameters (EspressoScaleBLE idle 120/30): $target"
 fi
 
 if [[ "$apply_copy" -eq 1 ]]; then

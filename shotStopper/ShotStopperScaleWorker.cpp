@@ -1102,7 +1102,7 @@ void fillCurrentScaleScanFilter(char *macOut, size_t cap, bool &useDirected) {
 }
 
 void serviceScaleScanDuty(bool sawCompatibleAd) {
-  // Idle 10% / burst 50% apply only while scanning. Connecting and GATT-up
+  // Idle 25% / burst 50% apply only while scanning. Connecting and GATT-up
   // never reach this path (isConnecting() or !isScanning()).
   if (!scale.isScanning() || scale.isConnecting()) {
     return;
@@ -1111,9 +1111,15 @@ void serviceScaleScanDuty(bool sawCompatibleAd) {
   bool useDirected = false;
   fillCurrentScaleScanFilter(mac, sizeof(mac), useDirected);
   const char *filter = useDirected ? mac : nullptr;
+  const bool sameHciParams = scaleScanDutyHciParamsEqual();
   if (sawCompatibleAd) {
     if (!scanBurstActive) {
-      (void)startScaleDiscoveryScan(filter, true, true);
+      if (sameHciParams) {
+        scanBurstActive = true;
+        scanBurstUntilMs = millis() + SCALE_SCAN_BURST_MS;
+      } else {
+        (void)startScaleDiscoveryScan(filter, true, true);
+      }
     } else {
       scanBurstUntilMs = millis() + SCALE_SCAN_BURST_MS;
     }
@@ -1121,7 +1127,12 @@ void serviceScaleScanDuty(bool sawCompatibleAd) {
   }
   if (scanBurstActive &&
       static_cast<int32_t>(millis() - scanBurstUntilMs) >= 0) {
-    (void)startScaleDiscoveryScan(filter, true, false);
+    if (sameHciParams) {
+      scanBurstActive = false;
+      scanBurstUntilMs = 0;
+    } else {
+      (void)startScaleDiscoveryScan(filter, true, false);
+    }
   }
 }
 

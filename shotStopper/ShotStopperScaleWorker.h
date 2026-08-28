@@ -18,6 +18,17 @@ constexpr uint32_t SCALE_STREAM_GAP_MS = 250;
 constexpr uint32_t SCALE_DISCOVERY_TICK_MS = 3000;
 constexpr uint32_t SCALE_SCAN_HCI_RESTART_MS = 60000;
 constexpr uint32_t SCALE_SCAN_BURST_MS = 3000;
+
+// True when idle and burst HCI interval/window match, so a duty-flag change
+// must not stop/start GAP (same LE scan parameters).
+inline bool scaleScanDutyHciParamsEqual(
+    uint16_t idleInterval = BLE_SCAN_IDLE_INTERVAL,
+    uint16_t idleWindow = BLE_SCAN_IDLE_WINDOW,
+    uint16_t burstInterval = BLE_SCAN_BURST_INTERVAL,
+    uint16_t burstWindow = BLE_SCAN_BURST_WINDOW) {
+  return idleInterval == burstInterval && idleWindow == burstWindow;
+}
+
 constexpr uint32_t BOOKOO_CONNECT_BEEP_DEFER_MS = 750;
 constexpr uint32_t SCALE_WORKER_STALE_MS = 2000;
 constexpr uint32_t SCALE_WORKER_NO_SCALE_DELAY_MS = 10;

@@ -4237,6 +4237,8 @@ void d05_hci_watchdog_force_restarts_same_filter() {
   CHECK(scale.startScanCalls == 1);
   CHECK(!scale.lastForceRestart);
   CHECK(scale.lastBurst);
+  // Idle 25% (120 ms) != burst 50% (60 ms): burst expiry must stop/start GAP.
+  CHECK(!scaleScanDutyHciParamsEqual());
   const size_t callsBeforeRestart = scale.startScanCalls;
   size_t ticks = 0;
   while (scale.startScanCalls == callsBeforeRestart) {
@@ -4247,6 +4249,7 @@ void d05_hci_watchdog_force_restarts_same_filter() {
     ++ticks;
     CHECK(ticks < 40);
   }
+  CHECK(ticks == 1);
   CHECK(scale.scanning);
   CHECK(scale.directedScan);
   CHECK(scale.lastForceRestart);
@@ -4268,6 +4271,17 @@ void d05_hci_watchdog_force_restarts_same_filter() {
   CHECK(scale.lastForceRestart);
   CHECK(!scale.lastBurst);
   CHECK(scale.startScanCalls == 3);
+}
+
+void d05b_matching_hci_scan_params_do_not_need_gap_restart() {
+  CHECK(BLE_SCAN_IDLE_INTERVAL == 0x00C0);
+  CHECK(BLE_SCAN_IDLE_WINDOW == 0x0030);
+  CHECK(BLE_SCAN_BURST_INTERVAL == 0x0060);
+  CHECK(BLE_SCAN_BURST_WINDOW == 0x0030);
+  CHECK(!scaleScanDutyHciParamsEqual());
+  CHECK(scaleScanDutyHciParamsEqual(
+      BLE_SCAN_BURST_INTERVAL, BLE_SCAN_BURST_WINDOW, BLE_SCAN_BURST_INTERVAL,
+      BLE_SCAN_BURST_WINDOW));
 }
 
 void d06_forget_pauses_discovery_for_30s() {
@@ -10553,6 +10567,7 @@ const TestCase testCases[] = {
     {"D03", d03_scan_start_failed_uses_backoff},
     {"D04", d04_full_cache_keeps_directed_scan},
     {"D05", d05_hci_watchdog_force_restarts_same_filter},
+    {"D05b", d05b_matching_hci_scan_params_do_not_need_gap_restart},
     {"D06", d06_forget_pauses_discovery_for_30s},
     {"D07", d07_prefer_falls_back_after_grace},
     {"D08", d08_select_none_clears_without_pause},

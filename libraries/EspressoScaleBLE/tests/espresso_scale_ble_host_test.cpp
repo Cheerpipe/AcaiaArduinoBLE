@@ -266,7 +266,7 @@ void testBurstScanParametersAndDiscoverTimeoutRestored() {
     CHECK(scale.startScan(nullptr, false, true));
     CHECK(BLE.lastScanInterval == BLE_SCAN_BURST_INTERVAL);
     CHECK(BLE.lastScanWindow == BLE_SCAN_BURST_WINDOW);
-    CHECK(BLE_SCAN_IDLE_INTERVAL == 0x01E0);
+    CHECK(BLE_SCAN_IDLE_INTERVAL == 0x00C0);
     CHECK(BLE_SCAN_IDLE_WINDOW == 0x0030);
     CHECK(BLE_SCAN_BURST_INTERVAL == 0x0060);
     CHECK(BLE_SCAN_BURST_WINDOW == 0x0030);
