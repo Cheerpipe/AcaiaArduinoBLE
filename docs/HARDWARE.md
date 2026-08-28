@@ -69,14 +69,18 @@ pins can leave machine circuit closed or misread the paddle.
 
 ## USB console jumper
 
-App USB CDC is **off** unless GPIO 4 is held LOW at reset (Dupont to GND).
-Leave the pin floating when the stopper is inside the machine. Pull the
-Dupont **before** installing.
+App USB CDC is **off** unless GPIO 4 is held LOW at reset (Dupont to GND),
+or the firmware was compiled with `-DSHOT_STOPPER_ENABLE_JTAG=1`. Leave the
+pin floating when the stopper is inside the machine. Pull the Dupont
+**before** installing.
 
-- **With jumper at reset:** `/dev/cu.usbmodem*` / `/dev/ttyACM*` appears;
-  [USB serial CLI](SERIAL_CLI.md) and `monitor-idf` work.
-- **Without jumper, app running:** no CDC port. Flash with **BOOT + RST**
-  (ROM USB download) or **OTA**.
+- **With jumper at reset (default firmware):** `/dev/cu.usbmodem*` /
+  `/dev/ttyACM*` appears; [USB serial CLI](SERIAL_CLI.md) and `monitor-idf`
+  work.
+- **JTAG build (`-DSHOT_STOPPER_ENABLE_JTAG=1`):** USB Serial/JTAG is on at
+  boot (OpenOCD + CDC) with no jumper. Do not ship this to a machine build.
+- **Without jumper, default app running:** no CDC port. Flash with
+  **BOOT + RST** (ROM USB download) or **OTA**.
 - ROM download always works, jumper or not. On this board IO4 sits next to
   **EN** — never short that pair.
 

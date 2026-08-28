@@ -44,6 +44,11 @@
 #define SHOT_STOPPER_DEVELOPMENT 0
 #endif
 #endif
+#ifndef SHOT_STOPPER_ENABLE_JTAG
+#ifdef CONFIG_SHOT_STOPPER_ENABLE_JTAG
+#define SHOT_STOPPER_ENABLE_JTAG CONFIG_SHOT_STOPPER_ENABLE_JTAG
+#endif
+#endif
 #endif
 
 #include "ShotStopperMachineTypes.h"
@@ -158,6 +163,14 @@ inline const char *compiledBuzzerModeId() {
 constexpr bool DEVELOPMENT_BUILD = SHOT_STOPPER_DEVELOPMENT == 1;
 static_assert(SHOT_STOPPER_DEVELOPMENT == 0 || SHOT_STOPPER_DEVELOPMENT == 1,
               "SHOT_STOPPER_DEVELOPMENT must be 0 or 1");
+
+#ifndef SHOT_STOPPER_ENABLE_JTAG
+#define SHOT_STOPPER_ENABLE_JTAG 0
+#endif
+
+constexpr bool JTAG_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_JTAG == 1;
+static_assert(SHOT_STOPPER_ENABLE_JTAG == 0 || SHOT_STOPPER_ENABLE_JTAG == 1,
+              "SHOT_STOPPER_ENABLE_JTAG must be 0 (off) or 1 (USB Serial/JTAG)");
 
 #ifndef SHOT_STOPPER_MACHINE_TYPE
 #define SHOT_STOPPER_MACHINE_TYPE 0

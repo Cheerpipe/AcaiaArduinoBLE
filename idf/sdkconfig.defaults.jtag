@@ -1,0 +1,9 @@
+# Overlay applied after sdkconfig.defaults when compiling with
+# -DSHOT_STOPPER_ENABLE_JTAG=1. Turns the USB Serial/JTAG console on at
+# boot (OpenOCD + CDC without the GPIO4 jumper). Later files override
+# earlier SDKCONFIG_DEFAULTS. Existing build-idf/<arch>/sdkconfig is
+# dropped by ss_idf_sync_jtag_console when the flag changes.
+CONFIG_SHOT_STOPPER_ENABLE_JTAG=1
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# CONFIG_ESP_CONSOLE_NONE is not set
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

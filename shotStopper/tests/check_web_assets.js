@@ -110,9 +110,20 @@ if (!sdkconfigDefaults.includes('CONFIG_FREERTOS_USE_TICKLESS_IDLE=y') ||
 }
 if (sdkconfigDefaults.includes('CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y') ||
     !sdkconfigDefaults.includes('CONFIG_ESP_CONSOLE_NONE=y') ||
-    !sdkconfigDefaults.includes('CONFIG_ESP_CONSOLE_SECONDARY_NONE=y')) {
+    !sdkconfigDefaults.includes('CONFIG_ESP_CONSOLE_SECONDARY_NONE=y') ||
+    !sdkconfigDefaults.includes('CONFIG_SHOT_STOPPER_ENABLE_JTAG=0')) {
   throw new Error(
-      'IDF console must be NONE so USB CDC waits for the GPIO4 jumper');
+      'IDF console must default to NONE; JTAG stays off unless ENABLE_JTAG=1');
+}
+{
+  const sdkconfigJtag = fs.readFileSync(
+      path.resolve(sketchDir, '..', 'idf', 'sdkconfig.defaults.jtag'), 'utf8');
+  if (!sdkconfigJtag.includes('CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y') ||
+      !sdkconfigJtag.includes('CONFIG_SHOT_STOPPER_ENABLE_JTAG=1') ||
+      !sdkconfigJtag.includes('# CONFIG_ESP_CONSOLE_NONE is not set')) {
+    throw new Error(
+        'sdkconfig.defaults.jtag must turn USB Serial/JTAG on for ENABLE_JTAG=1');
+  }
 }
 if (sdkconfigDefaults.includes('CONFIG_BT_LE_SLEEP_ENABLE=y') ||
     sdkconfigDefaults.includes('CONFIG_BT_CTRL_MODEM_SLEEP=y')) {
@@ -128,10 +139,13 @@ if (sdkconfigDefaults.includes('CONFIG_BT_LE_SLEEP_ENABLE=y') ||
       path.resolve(sketchDir, '..', 'libraries', 'EspressoScaleBLE', 'src',
                    'EspressoScaleBLE.h'),
       'utf8');
-  if (cmakeLists.includes('ARDUINO_USB_CDC_ON_BOOT=1') ||
-      !cmakeLists.includes('ARDUINO_USB_CDC_ON_BOOT=0')) {
+  if (!cmakeLists.includes('ARDUINO_USB_CDC_ON_BOOT=${_ss_cdc_on_boot}') ||
+      !cmakeLists.includes('set(_ss_cdc_on_boot 0)') ||
+      !cmakeLists.includes('-DSHOT_STOPPER_ENABLE_JTAG=1') ||
+      cmakeLists.includes('COMPILE_DEFINITIONS "ARDUINO_USB_CDC_ON_BOOT=0"') ||
+      cmakeLists.includes('COMPILE_DEFINITIONS "ARDUINO_USB_CDC_ON_BOOT=1"')) {
     throw new Error(
-        'IDF CMakeLists must leave Arduino CDC off until the USB console jumper');
+        'IDF CMakeLists must default Arduino CDC off and turn it on only for ENABLE_JTAG=1');
   }
   if (boardSh.includes('CDCOnBoot=cdc') ||
       !boardSh.includes('CDCOnBoot=default')) {
@@ -148,10 +162,11 @@ if (sdkconfigDefaults.includes('CONFIG_BT_LE_SLEEP_ENABLE=y') ||
   if (!firmware.includes('USB_CONSOLE_GPIO') ||
       !firmware.includes('SHOT_STOPPER_USB_CONSOLE_GPIO 4') ||
       !firmwareCore.includes('usbConsoleJumperPresent()') ||
-      !firmwareCore.includes('if (usbConsoleJumperPresent())') ||
+      !firmwareCore.includes(
+          'if (SHOT_STOPPER_ENABLE_JTAG == 1 || usbConsoleJumperPresent())') ||
       !firmwareCore.includes('Serial.begin(SERIAL_BAUD)')) {
     throw new Error(
-        'USB CDC must start only when the GPIO4 jumper is held at boot');
+        'USB CDC must start for ENABLE_JTAG=1 or when the GPIO4 jumper is held at boot');
   }
   const buildIdf = fs.readFileSync(
       path.resolve(sketchDir, '..', 'scripts', 'build-idf'), 'utf8');
@@ -159,8 +174,12 @@ if (sdkconfigDefaults.includes('CONFIG_BT_LE_SLEEP_ENABLE=y') ||
       path.resolve(sketchDir, '..', 'scripts', 'shotstopper_idf.sh'), 'utf8');
   if (!idfHelpers.includes('ss_idf_prepare_set_target') ||
       !idfHelpers.includes('ss_idf_commit_extra_flags_stamp') ||
+      !idfHelpers.includes('ss_idf_jtag_enabled') ||
+      !idfHelpers.includes('ss_idf_sync_jtag_console') ||
+      !idfHelpers.includes('sdkconfig.defaults.jtag') ||
       !buildIdf.includes('ss_idf_prepare_set_target') ||
       !buildIdf.includes('ss_idf_commit_extra_flags_stamp') ||
+      !buildIdf.includes('ss_idf_sync_jtag_console') ||
       !idfHelpers.includes('Preparing empty IDF build tree for set-target')) {
     throw new Error(
         'build-idf must empty a non-CMake tree before idf.py set-target fullclean');
@@ -833,6 +852,18 @@ if (!domainCore.includes('#ifndef SHOT_STOPPER_DEVELOPMENT') ||
     !js.includes('||developmentMode')) {
   throw new Error(
       'SHOT_STOPPER_DEVELOPMENT must default off, bypass adminUnlockAllowed when on, and unlock Web UI');
+}
+if (!domainCore.includes('#ifndef SHOT_STOPPER_ENABLE_JTAG') ||
+    !domainCore.includes('#define SHOT_STOPPER_ENABLE_JTAG 0') ||
+    !domainCore.includes('JTAG_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_JTAG == 1') ||
+    !domainCore.includes(
+        'SHOT_STOPPER_ENABLE_JTAG must be 0 (off) or 1 (USB Serial/JTAG)') ||
+    !domainCore.includes('CONFIG_SHOT_STOPPER_ENABLE_JTAG') ||
+    !kconfig.includes('config SHOT_STOPPER_ENABLE_JTAG') ||
+    !kconfig.includes('USB Serial/JTAG (0=off, 1=on at boot)') ||
+    !kconfig.includes('omitting the flag leaves JTAG off')) {
+  throw new Error(
+      'SHOT_STOPPER_ENABLE_JTAG must default off and map Kconfig onto the compile macro');
 }
 {
   const remoteKconfig = kconfig.slice(

@@ -6770,7 +6770,9 @@ void setup() {
   machineOnActivatorReady();
 #endif
 
-  if (usbConsoleJumperPresent()) {
+  // Default builds keep USB Serial/JTAG off until GPIO4 is jumpered to GND.
+  // -DSHOT_STOPPER_ENABLE_JTAG=1 starts CDC at boot (OpenOCD + CLI, no jumper).
+  if (SHOT_STOPPER_ENABLE_JTAG == 1 || usbConsoleJumperPresent()) {
     Serial.begin(SERIAL_BAUD);
   }
 

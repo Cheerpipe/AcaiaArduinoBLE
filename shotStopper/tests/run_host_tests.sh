@@ -77,6 +77,12 @@ for machine_type in 1 2; do
 done
 
 "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+  -DSHOT_STOPPER_ENABLE_JTAG=1 \
+  "$test_dir/shot_stopper_host_test.cpp" \
+  -o /tmp/shot_stopper_host_test_jtag
+echo "JTAG-enabled host compile OK"
+
+"$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
   -fno-omit-frame-pointer -fsanitize=address,undefined \
   "$test_dir/shot_stopper_host_test.cpp" \
   -o "$sanitized_binary"

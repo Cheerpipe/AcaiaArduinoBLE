@@ -7917,6 +7917,14 @@ void b02_setup_degrades_without_ble() {
   CHECK(!publishedControlStatus.scaleWorkerReady);
 }
 
+#if SHOT_STOPPER_ENABLE_JTAG == 1
+void b03_jtag_build_starts_serial_without_jumper() {
+  resetHarness(false, false);
+  CHECK(!usbConsoleJumperPresent());
+  setup();
+  CHECK(Serial.beginCalls == 1);
+}
+#else
 void b03_usb_console_stays_off_without_jumper() {
   resetHarness(false, false);
   CHECK(!usbConsoleJumperPresent());
@@ -7924,6 +7932,7 @@ void b03_usb_console_stays_off_without_jumper() {
   setup();
   CHECK(Serial.beginCalls == 0);
 }
+#endif
 
 void b04_usb_console_starts_when_jumper_held() {
   resetHarness(false, false);
@@ -10531,7 +10540,11 @@ const TestCase testCases[] = {
     {"S04e", s04e_delete_shot_record_keeps_log_if_curve_remove_fails},
     {"B01", b01_scale_worker_requires_ble_stack},
     {"B02", b02_setup_degrades_without_ble},
+#if SHOT_STOPPER_ENABLE_JTAG == 1
+    {"B03", b03_jtag_build_starts_serial_without_jumper},
+#else
     {"B03", b03_usb_console_stays_off_without_jumper},
+#endif
     {"B04", b04_usb_console_starts_when_jumper_held},
     {"M08", m08_recipe_copies_match_published_state},
     {"M09", m09_seqlock_yields_when_writer_active},

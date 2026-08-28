@@ -43,4 +43,17 @@ menu "Advanced Shot Stopper"
             For local/dev builds only — never ship to production devices.
             Command-line -DSHOT_STOPPER_DEVELOPMENT=… still overrides.
 
+    config SHOT_STOPPER_ENABLE_JTAG
+        int "USB Serial/JTAG (0=off, 1=on at boot)"
+        range 0 1
+        default 0
+        help
+            Maps to the SHOT_STOPPER_ENABLE_JTAG compile-time macro.
+            0 (default) keeps the IDF USB Serial/JTAG console off so the
+            PHY stays down until the GPIO4 jumper calls Serial.begin.
+            1 turns USB Serial/JTAG on at boot for OpenOCD and CDC without
+            the jumper. Flash firmware built with
+            -DSHOT_STOPPER_ENABLE_JTAG=1; omitting the flag leaves JTAG off.
+            Command-line -DSHOT_STOPPER_ENABLE_JTAG=… still overrides.
+
 endmenu

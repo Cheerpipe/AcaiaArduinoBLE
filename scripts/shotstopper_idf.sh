@@ -78,6 +78,22 @@ ss_idf_require_version() {
   esac
 }
 
+# True when extra flags request USB Serial/JTAG at boot.
+ss_idf_jtag_enabled() {
+  local tok
+  # Word-splitting is intentional: extra flags is a space-separated list.
+  # shellcheck disable=SC2086
+  set -- ${SHOT_STOPPER_EXTRA_FLAGS-}
+  for tok in "$@"; do
+    case "$tok" in
+      -DSHOT_STOPPER_ENABLE_JTAG=1|SHOT_STOPPER_ENABLE_JTAG=1)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
 # Call after shotstopper_resolve_board. Sets IDF_PROJECT, IDF_BUILD_DIR,
 # IDF_IMAGE, IDF_ELF, IDF_MAP, IDF_SDKCONFIG, IDF_SDKCONFIG_DEFAULTS.
 ss_idf_resolve_paths() {
@@ -88,6 +104,9 @@ ss_idf_resolve_paths() {
   IDF_MAP="$IDF_BUILD_DIR/${IDF_PROJECT_NAME}.map"
   IDF_SDKCONFIG="$IDF_BUILD_DIR/sdkconfig"
   IDF_SDKCONFIG_DEFAULTS="$IDF_PROJECT/sdkconfig.defaults;$IDF_PROJECT/sdkconfig.defaults.$SHOTSTOPPER_ARCH"
+  if ss_idf_jtag_enabled; then
+    IDF_SDKCONFIG_DEFAULTS="$IDF_SDKCONFIG_DEFAULTS;$IDF_PROJECT/sdkconfig.defaults.jtag"
+  fi
 }
 
 ss_idf_py_args() {
@@ -175,6 +194,21 @@ ss_idf_commit_extra_flags_stamp() {
   ss_idf_resolve_paths
   mkdir -p "$IDF_BUILD_DIR"
   printf '%s\n' "${SHOT_STOPPER_EXTRA_FLAGS-}" > "$IDF_BUILD_DIR/shot_stopper_extra_flags"
+}
+
+# Existing sdkconfig keeps CONSOLE_NONE vs USB_SERIAL_JTAG until rewritten.
+# Drop it when the JTAG extra flag does not match so SDKCONFIG_DEFAULTS apply.
+ss_idf_sync_jtag_console() {
+  ss_idf_resolve_paths
+  [[ -f "$IDF_SDKCONFIG" ]] || return 0
+  local want=0 has=0
+  ss_idf_jtag_enabled && want=1
+  grep -q '^CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y$' "$IDF_SDKCONFIG" && has=1
+  if [[ "$want" -eq "$has" ]]; then
+    return 0
+  fi
+  echo "USB Serial/JTAG console mismatch (want=${want} has=${has}); dropping sdkconfig so defaults re-apply"
+  rm -f "$IDF_SDKCONFIG" "$IDF_BUILD_DIR/CMakeCache.txt"
 }
 
 # idf.py set-target always fullcleans. fullclean is a no-op on an empty dir,
@@ -317,6 +351,23 @@ ss_idf_verify_firmware() {
   fi
   echo "Image OTA identity:"
   node "$SS_CLI_ROOT/scripts/image_tag.js" "$IDF_IMAGE" --expect-arch "$SHOTSTOPPER_ARCH"
+
+  if ss_idf_jtag_enabled; then
+    if ! grep -q '^CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y$' "$IDF_SDKCONFIG"; then
+      echo "SHOT_STOPPER_ENABLE_JTAG=1 but USB Serial/JTAG console is off in $IDF_SDKCONFIG." >&2
+      grep 'CONFIG_ESP_CONSOLE' "$IDF_SDKCONFIG" >&2 || true
+      exit 1
+    fi
+    echo "sdkconfig: CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y (JTAG build)"
+  else
+    if grep -q '^CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y$' "$IDF_SDKCONFIG" ||
+       ! grep -q '^CONFIG_ESP_CONSOLE_NONE=y$' "$IDF_SDKCONFIG"; then
+      echo "USB Serial/JTAG must stay off unless compiled with -DSHOT_STOPPER_ENABLE_JTAG=1." >&2
+      grep 'CONFIG_ESP_CONSOLE' "$IDF_SDKCONFIG" >&2 || true
+      exit 1
+    fi
+    echo "sdkconfig: CONFIG_ESP_CONSOLE_NONE=y (JTAG off)"
+  fi
 
   ss_idf_verify_extra_flags
 }

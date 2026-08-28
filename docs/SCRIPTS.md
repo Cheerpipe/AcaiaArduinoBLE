@@ -26,7 +26,8 @@ Linux), suggest the first match, and accept Enter or a typed path. The chosen
 port is saved to `.shotstopper`.
 
 App CDC enumerates only when **GPIO 4 is jumpered to GND at reset**
-([Hardware](HARDWARE.md)). Without the jumper, `monitor-idf` has no port
+([Hardware](HARDWARE.md)), unless you compiled with
+`-DSHOT_STOPPER_ENABLE_JTAG=1`. Without the jumper, `monitor-idf` has no port
 while the app is running. `flash-idf` still works via **BOOT + RST** (ROM
 USB download) or use **OTA**. ROM download does not need the jumper.
 
@@ -63,6 +64,11 @@ Remote machine control stays off unless you add
 For local development only, add `-DSHOT_STOPPER_DEVELOPMENT=1` to bypass WebUI
 admin unlock (Admin / Diagnostic / Home Actions without the device password).
 Do not ship development builds to production devices.
+
+USB Serial/JTAG stays **off** unless you add `-DSHOT_STOPPER_ENABLE_JTAG=1`.
+That build turns the IDF USB Serial/JTAG console on at boot (OpenOCD + CDC,
+no GPIO4 jumper). Default firmware and any flash without that flag keep JTAG
+off.
 
 `idf.py` does not reconfigure when only the environment changes. Changing
 `--flags` (for example `-DSHOT_STOPPER_MACHINE_TYPE=1`) drops the IDF CMake

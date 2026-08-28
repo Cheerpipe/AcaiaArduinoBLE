@@ -75,9 +75,11 @@ CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 CONFIG_LOG_DEFAULT_LEVEL=2
 
 # USB Serial/JTAG console stays off so the PHY is not started before setup().
-# App CDC starts only when GPIO4 is jumpered to GND at boot (Serial.begin).
-# ROM USB download (BOOT+RST) still works. Existing build-idf/<arch>/sdkconfig
-# keeps the old USB_SERIAL_JTAG console until that file is deleted.
+# App CDC starts only when GPIO4 is jumpered to GND at boot (Serial.begin),
+# unless compiled with -DSHOT_STOPPER_ENABLE_JTAG=1 (sdkconfig.defaults.jtag).
+# ROM USB download (BOOT+RST) still works. build-idf drops a mismatched
+# sdkconfig when the JTAG flag changes.
+CONFIG_SHOT_STOPPER_ENABLE_JTAG=0
 CONFIG_ESP_CONSOLE_NONE=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 

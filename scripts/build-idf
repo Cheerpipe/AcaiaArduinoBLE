@@ -32,7 +32,7 @@ it exists.
 
 Examples:
   ./scripts/build-idf --arch n16r8
-  ./scripts/build-idf -a n8r4 -f "-DSHOT_STOPPER_ENABLE_BUZZER=2"
+  ./scripts/build-idf -a n16r8 -f "-DSHOT_STOPPER_ENABLE_JTAG=1"
 EOF
 }
 
@@ -82,7 +82,9 @@ if [[ -f "$IDF_BUILD_DIR/shotstopper_idf_spike.elf" ]] ||
 fi
 
 echo "Building IDF firmware $SHOTSTOPPER_ARCH → $IDF_BUILD_DIR"
+ss_idf_py_args
 ss_idf_sync_extra_flags
+ss_idf_sync_jtag_console
 
 if [[ ! -f "$IDF_SDKCONFIG" ]] ||
    ! grep -q '^CONFIG_IDF_TARGET="esp32s3"$' "$IDF_SDKCONFIG"; then
