@@ -22,7 +22,13 @@ Firmware was developed on an **ESP32-S3 1-channel relay** board (WROOM-1
 with COM / NO / NC screw terminals). Product listing used for development:
 [ESP32-S3 1-channel relay (AliExpress)](https://es.aliexpress.com/item/1005011880181624.html).
 
-![ESP32-S3 1-channel relay development board](images/ESP32-S3_Relay_X1.png)
+### Front
+
+![Front of the ESP32-S3 1-channel relay development board](images/ESP32-S3_Relay_X1-front.png)
+
+### Back
+
+![Back of the ESP32-S3 1-channel relay development board](images/ESP32-S3_Relay_X1-back.png)
 
 The firmware **default GPIO map matches this board**. It is not a generic
 DevKit pinout.

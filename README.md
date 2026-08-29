@@ -95,8 +95,8 @@ That split is what makes the firmware “advanced”:
 - Intelligent handling when the scale drops or the stream goes stale.
 - Guards for extractions that finish too fast or too slow.
 
-Development used the ESP32-S3 1-channel relay board shown in
-[`ESP32-S3_Relay_X1.png`](docs/images/ESP32-S3_Relay_X1.png)
+Development used the ESP32-S3 1-channel relay board shown in the
+[front and back photos](docs/HARDWARE.md#development-board)
 ([AliExpress listing](https://es.aliexpress.com/item/1005011880181624.html)).
 The firmware’s default GPIO map matches that board. Details are in
 [Hardware](docs/HARDWARE.md).
@@ -267,6 +267,7 @@ claim the Web UI to save your home Wi-Fi. Step-by-step notes are in
 - [Firmware state machines](docs/STATE_MACHINES.md) — states, events, and how the FSMs interact
 - [OTA](docs/features/ota.md) — Wi-Fi firmware update; scripts in [Build scripts](docs/SCRIPTS.md)
 - [Emergency recovery](docs/EMERGENCY_RECOVERY.md) — paddle recovery mode
+- [Screenshots](docs/SCREENSHOTS.md) — Web UI in dark mode; light mode coming soon
 
 **Settings**
 
