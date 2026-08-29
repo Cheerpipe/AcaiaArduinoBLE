@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/advanced-shot-stopper.svg" alt="Advanced Shot Stopper" width="520">
+  <img src="docs/advanced-shot-stopper.svg" alt="Advanced Shot Stopper" >
 </p>
 
 # Advanced Shot Stopper
