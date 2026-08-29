@@ -131,9 +131,33 @@ heartbeat, and feedback.
 
 ## Local buzzer
 
-Wire a **passive** piezo between `SHOT_STOPPER_BUZZER_GPIO` (default 14) and
-GND: marked **+** to the GPIO. The firmware drives the pin with PWM (RTTTL
-melodies). `SHOT_STOPPER_ENABLE_BUZZER=0` omits the driver. See
-[Alerts](alerts.md) and [Build environment](BUILD.md).
+Wire a **passive** 3.3 V piezo/speaker to `SHOT_STOPPER_BUZZER_GPIO` (default
+14). The firmware drives it with PWM (RTTTL melodies), so it must be
+**passive, not active**. A module with three pins — **GND**, **VCC** and
+**IN** — is preferred over a loose two-wire speaker: connect GND to GND, VCC
+to 3.3 V, and IN to the buzzer GPIO. For a two-wire passive piezo, connect
+the marked **+** to the GPIO and the other lead to GND.
+
+Example used: [3.3 V passive buzzer module (AliExpress)](https://es.aliexpress.com/item/1005007287329656.html).
+
+`SHOT_STOPPER_ENABLE_BUZZER=0` omits the driver. See [Alerts](alerts.md) and
+[Build environment](BUILD.md).
+
+## Additional hardware used
+
+### Reed switch (optional, strongly recommended for momentary machines)
+
+The reed switch is optional, but is strongly recommended for momentary-button
+machines such as the **Rancilio Silvia Pro X**. Without it, firmware combines
+its internal state machine with scale readings to infer whether the machine is
+running. With a reed switch on the solenoid, it reads the machine state
+directly, which is substantially more reliable and precise.
+
+Use it with the momentary+reed build (`SHOT_STOPPER_MACHINE_TYPE=2`); the
+default input is GPIO 13, as documented in [Default GPIOs](#default-gpios).
+It is generally unnecessary for latch/paddle machines such as the **Linea
+Micra**.
+
+Example used: [reed switch sensor module (AliExpress)](https://es.aliexpress.com/item/1005002797173105.html).
 
 Related: [Disclaimer](../README.md#disclaimer), [FAQ](FAQ.md).
