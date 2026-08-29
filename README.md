@@ -4,6 +4,27 @@
 
 # Advanced Shot Stopper
 
+## TL;DR
+
+Advanced Shot Stopper turns an inexpensive (about **US$15**)
+[ESP32-S3 single-relay board](https://es.aliexpress.com/item/1005011880181624.html?spm=a2g0o.order_list.order_list_main.328.21ef194dsjEl51&gatewayAdapt=glo2esp)
+into a highly capable brew-by-weight controller for a wide range of espresso
+machines. It connects over Bluetooth to compatible scales (including Bookoo,
+Acaia, and others), then intercepts and controls the machine's brew-button,
+paddle, or activation circuit through an isolated relay. It supports both
+latching-paddle machines such as the **La Marzocco Linea Micra** and
+momentary-switch machines such as the **Rancilio Silvia Pro X**.
+
+Designed to be stable, resilient, configurable, and hands-off, it includes
+shot guards, cup detection, automatic tare/retare, shot history, basic
+statistics, low-power operation, audible alerts, paddle/switch command resets,
+and quick rinse for machines that do not provide it. OTA updates use dual
+firmware slots and automatic recovery. It also includes a very simple
+3D-printable enclosure. The hardware is affordable and requires only modest
+assembly—but this is firmware and wiring guidance, not a plug-and-play kit:
+you need to understand the electrical work and your machine before installing
+it. The project as a whole is still a work in progress.
+
 ESP32-S3 firmware that began on a **La Marzocco Linea Micra**. It adds
 brew-by-weight and related workflow controls without replacing the machine’s
 own brew switch.
