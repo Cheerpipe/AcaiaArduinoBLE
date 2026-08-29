@@ -52,6 +52,7 @@ prompting. The same applies with `SHOTSTOPPER_NONINTERACTIVE=1`.
 | `-H`, `--host` | `SHOTSTOPPER_HOST` | Controller IP or hostname for OTA. |
 | `-t`, `--password` | `SHOTSTOPPER_DEVICE_PASSWORD` | Device password. Never persisted. |
 | `-f`, `--flags` | `SHOTSTOPPER_FLAGS` | Extra compile flags, as a single string. |
+| `-i`, `--image` | `SHOTSTOPPER_IMAGE` | Firmware `.bin` to use for flash or OTA instead of the normal build output. Checked locally and never persisted. |
 | `-b`, `--build-dir` | `SHOTSTOPPER_BUILD_DIR_OVERRIDE` | Build directory (`static` legacy only). |
 | `-o`, `--output-dir` | `SHOTSTOPPER_OUTPUT_DIR` | Reports directory (`static` / `static-idf` only). |
 | `-h`, `--help` | — | Show the script help. |
@@ -83,9 +84,9 @@ Writes to `build-idf/<architecture>` (`shotstopper.bin`).
 | Script | Alias | Required | Description |
 | --- | --- | --- | --- |
 | `./scripts/build-idf` | `b-idf` | `--arch` (`--flags` optional) | Generate version and Web UI, build with ESP-IDF. |
-| `./scripts/flash-idf` | `f-idf` | `--port`, `--arch` | Flash the existing binary; does not rebuild or open the monitor. |
+| `./scripts/flash-idf` | `f-idf` | `--port`, `--arch` | Flash the existing binary (or `--image <path>`); does not rebuild or open the monitor. |
 | `./scripts/monitor-idf` | `m-idf` | `--port`, `--speed` | IDF serial monitor (Ctrl+] to exit). |
-| `./scripts/ota-idf` | `o-idf` | `--arch`, `--host`, `--password` | Wi-Fi update with the already-built IDF binary. |
+| `./scripts/ota-idf` | `o-idf` | `--arch`, `--host`, `--password` | Wi-Fi update with the already-built IDF binary, or `--image <path>`. |
 | `./scripts/static-idf` | `s-idf` | `--arch` | Cppcheck against the IDF compilation database. Does not build. |
 | `./scripts/bf-idf` | | `--port`, `--arch` | build-idf then flash-idf. |
 | `./scripts/bfm-idf` | | `--port`, `--arch`, `--speed` | build-idf, flash-idf, monitor-idf. |
@@ -102,6 +103,7 @@ Examples:
 # Explicit (macOS CDC port)
 ./scripts/build-idf --arch n16r8
 ./scripts/flash-idf --port /dev/cu.usbmodem2101 --arch n16r8
+./scripts/flash-idf --port /dev/cu.usbmodem2101 --arch n16r8 --image ~/Downloads/shotstopper.bin
 ./scripts/monitor-idf -p /dev/cu.usbmodem2101 -s 115200
 
 # Linux
@@ -110,7 +112,15 @@ Examples:
 # Wi-Fi update
 ./scripts/bo-idf --arch n16r8 --host 192.168.1.50
 ./scripts/o-idf --arch n16r8 --host 192.168.1.50
+./scripts/o-idf --arch n16r8 --host 192.168.1.50 --image ~/Downloads/shotstopper.bin
 ```
+
+`--image` can also be passed to the flash/OTA wrappers (`bf`, `bfm`, `bo`,
+`bsfm` and their `*-idf` variants); they still execute their named build or
+analysis steps, then use the selected image for the transfer. The image is
+checked against the selected `--arch` before transfer. For an IDF USB flash,
+an external image is written to the app partition at `0x10000`; it does not
+replace the bootloader or partition table.
 
 ## Arduino-cli (unsupported)
 
@@ -120,9 +130,9 @@ See [Build environment](BUILD.md) for why.
 | Script | Alias | Description |
 | --- | --- | --- |
 | `./scripts/build` | `b` | Build with arduino-cli. |
-| `./scripts/flash` | `f` | Flash the Arduino-cli image. |
+| `./scripts/flash` | `f` | Flash the Arduino-cli image, or `--image <path>`. |
 | `./scripts/monitor` | `m` | Arduino-cli serial monitor. |
-| `./scripts/ota` | `o` | OTA with the Arduino-cli image. |
+| `./scripts/ota` | `o` | OTA with the Arduino-cli image, or `--image <path>`. |
 | `./scripts/static` | `s` | Cppcheck against the Arduino-cli build directory. |
 | `./scripts/bf` / `bfm` / `bo` / `bsfm` | | Wrappers, same idea as the `*-idf` variants. |
 

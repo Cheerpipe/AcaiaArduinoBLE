@@ -27,10 +27,12 @@ $(shotstopper_arch_help)
 Examples:
   ./scripts/ota-idf --arch n16r8 --host 192.168.1.50
   ./scripts/ota-idf -a n16r8 -H 192.168.4.1 -t "my-device-password"
+  ./scripts/ota-idf -a n16r8 -H 192.168.1.50 -t "my-device-password" --image ~/Downloads/shotstopper.bin
 
-The image comes from build-idf/<architecture>/shotstopper.bin, so compile first
-(./scripts/build-idf / ./scripts/b-idf) or use ./scripts/bo-idf, which does both.
-You can also use the short alias ./scripts/o-idf.
+Without --image, the image comes from build-idf/<architecture>/shotstopper.bin,
+so compile first (./scripts/build-idf / ./scripts/b-idf) or use
+./scripts/bo-idf, which does both. You can also use the short alias
+./scripts/o-idf.
 EOF
 }
 
@@ -41,6 +43,7 @@ if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
 fi
 
 ss_cli_resolve "arch host password" || exit $?
+ss_cli_normalize_image || exit $?
 shotstopper_resolve_board "$(ss_get arch)"
 ss_idf_resolve_paths
 
@@ -54,8 +57,12 @@ done
 root="$SS_CLI_ROOT"
 cd "$root"
 
-ss_idf_require_image
 image="$IDF_IMAGE"
+if ss_is_set image; then
+  image="$(ss_get image)"
+else
+  ss_idf_require_image
+fi
 
 host="$(ss_get host)"
 base="http://$host"

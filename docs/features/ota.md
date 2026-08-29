@@ -75,6 +75,14 @@ Upload an image that was already built:
 ./scripts/ota-idf --arch n16r8 --host 192.168.1.50 --password "my-device-password"
 ```
 
+Upload a firmware image stored elsewhere (for example, a release downloaded
+outside this repository):
+
+```sh
+./scripts/ota-idf --arch n16r8 --host 192.168.1.50 --password "my-device-password" \
+  --image ~/Downloads/shotstopper.bin
+```
+
 For a controller using its SoftAP, replace the host with `192.168.4.1`:
 
 ```sh

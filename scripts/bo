@@ -34,6 +34,7 @@ if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
 fi
 
 ss_cli_resolve "arch host password" "flags" || exit $?
+ss_cli_normalize_image || exit $?
 
 root="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$root"
@@ -41,6 +42,6 @@ cd "$root"
 ss_cli_flags_for arch flags
 ./scripts/build ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
 
-ss_cli_flags_for arch host
+ss_cli_flags_for arch host image
 ss_cli_export_secrets
 exec ./scripts/o ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}

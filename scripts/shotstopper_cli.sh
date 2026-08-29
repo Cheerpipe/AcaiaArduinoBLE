@@ -19,13 +19,13 @@
 # Written for bash 3.2 (the system bash on macOS): no associative arrays,
 # no ${var,,} case conversion.
 
-SS_CLI_KEYS="port arch speed host password flags build_dir output_dir"
+SS_CLI_KEYS="port arch speed host password flags image build_dir output_dir"
 SS_CLI_SECRET_KEYS="password"
 # Extra compiler flags offered when the prompt for --flags is answered with Enter.
 SS_CLI_DEFAULT_FLAGS='-Werror=deprecated-copy -DSHOT_STOPPER_ENABLE_BUZZER=1'
 # Per-run path overrides. Persisting them would let a stale build_dir silently
 # point an analysis at the wrong architecture, so they never touch the store.
-SS_CLI_TRANSIENT_KEYS="build_dir output_dir"
+SS_CLI_TRANSIENT_KEYS="image build_dir output_dir"
 
 if [[ -z "${SS_CLI_ROOT:-}" ]]; then
   SS_CLI_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -103,6 +103,7 @@ ss_env_name() {
     host) printf 'SHOTSTOPPER_HOST' ;;
     password) printf 'SHOTSTOPPER_DEVICE_PASSWORD' ;;
     flags) printf 'SHOTSTOPPER_FLAGS' ;;
+    image) printf 'SHOTSTOPPER_IMAGE' ;;
     build_dir) printf 'SHOTSTOPPER_BUILD_DIR_OVERRIDE' ;;
     output_dir) printf 'SHOTSTOPPER_OUTPUT_DIR' ;;
   esac
@@ -117,6 +118,7 @@ Named parameters (long and short):
   -H, --host <ip|name>     Controller address for OTA
   -t, --password <pw>      Device password (never persisted)
   -f, --flags "<flags>"    Extra compile flags (single string)
+  -i, --image <path>       Firmware .bin to flash or upload (not persisted)
   -b, --build-dir <path>   Build directory (static / static-idf only)
   -o, --output-dir <path>  Reports directory (static / static-idf only)
   -h, --help               Show this help
@@ -155,6 +157,7 @@ ss_cli_parse() {
       -H|--host) key="host" ;;
       -t|--password|--token) key="password" ;;
       -f|--flags) key="flags" ;;
+      -i|--image) key="image" ;;
       -b|--build-dir) key="build_dir" ;;
       -o|--output-dir) key="output_dir" ;;
       -h|--help|help)
@@ -476,7 +479,7 @@ ss_validate_key() {
         return 1
       fi
       ;;
-    password|build_dir|output_dir)
+    password|image|build_dir|output_dir)
       if [[ -z "$value" ]]; then
         ss_cli_die "Parameter --$(printf '%s' "$key" | tr '_' '-') cannot be empty."
         return 1
@@ -619,6 +622,24 @@ ss_cli_save() {
   return 0
 }
 
+# Make an explicitly selected firmware image absolute before wrapper scripts
+# change to the repository root. The override is deliberately transient: a
+# stale release image must never become the next command's surprise default.
+ss_cli_normalize_image() {
+  local image dir base origin
+  ss_is_set image || return 0
+  image="$(ss_get image)"
+  if [[ ! -f "$image" || ! -r "$image" ]]; then
+    printf 'Firmware image does not exist or is not readable: %s\n' "$image" >&2
+    return 2
+  fi
+  dir="$(dirname -- "$image")"
+  base="$(basename -- "$image")"
+  dir="$(CDPATH= cd -- "$dir" && pwd -P)" || return 2
+  origin="$(ss_origin image)"
+  ss_put image "$dir/$base" "$origin"
+}
+
 # Re-emits the resolved values as flags so wrapper scripts can call children
 # without triggering a second round of prompts.
 #
@@ -635,6 +656,7 @@ ss_cli_flags_for() {
       arch) SS_CLI_FORWARD+=(--arch "$(ss_get arch)") ;;
       speed) SS_CLI_FORWARD+=(--speed "$(ss_get speed)") ;;
       host) SS_CLI_FORWARD+=(--host "$(ss_get host)") ;;
+      image) SS_CLI_FORWARD+=(--image "$(ss_get image)") ;;
       # password is deliberately absent: a command line is world-readable
       # through `ps` for as long as the child runs, which for an OTA is
       # minutes. Use ss_cli_export_secrets instead.

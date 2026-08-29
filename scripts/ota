@@ -25,9 +25,11 @@ $(shotstopper_arch_help)
 Examples:
   ./scripts/ota --arch n16r8 --host 192.168.1.50
   ./scripts/ota -a n16r8 -H 192.168.4.1 -t "my-device-password"
+  ./scripts/ota -a n16r8 -H 192.168.1.50 -t "my-device-password" --image ~/Downloads/shotstopper.bin
 
-The image comes from build/<architecture>/shotStopper.ino.bin, so compile
-first (./scripts/build / ./scripts/b) or use ./scripts/bo, which does both.
+Without --image, the image comes from build/<architecture>/shotStopper.ino.bin,
+so compile first (./scripts/build / ./scripts/b) or use ./scripts/bo, which
+does both.
 You can also use the short alias ./scripts/o.
 EOF
 }
@@ -39,6 +41,7 @@ if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
 fi
 
 ss_cli_resolve "arch host password" || exit $?
+ss_cli_normalize_image || exit $?
 shotstopper_resolve_board "$(ss_get arch)"
 
 for tool in curl node; do
@@ -52,9 +55,11 @@ root="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$root"
 
 image="$SHOTSTOPPER_BUILD_DIR/shotStopper.ino.bin"
-if [[ ! -f "$image" ]]; then
+if ss_is_set image; then
+  image="$(ss_get image)"
+elif [[ ! -f "$image" ]]; then
   echo "$image does not exist." >&2
-  echo "Build first: ./scripts/build --arch $SHOTSTOPPER_ARCH" >&2
+  echo "Build first: ./scripts/build --arch $SHOTSTOPPER_ARCH or pass --image <path>." >&2
   exit 1
 fi
 

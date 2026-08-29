@@ -14,9 +14,10 @@ usage() {
   cat <<EOF
 Usage: ./scripts/flash-idf [flags]
 
-Flash the already-built ESP-IDF binary from build-idf/<architecture> over USB.
-Does not recompile and does not open the monitor. This is the official USB
-flash path (replaces the firmware currently on the device).
+Flash an ESP-IDF firmware binary over USB. Without --image, uses the
+already-built binary from build-idf/<architecture>. Does not recompile and
+does not open the monitor. This is the official USB flash path (replaces the
+firmware currently on the device).
 
 Required parameters: --port and --arch.
 
@@ -27,6 +28,7 @@ $(shotstopper_arch_help)
 Examples:
   ./scripts/flash-idf --port /dev/cu.usbmodem2101 --arch n16r8
   ./scripts/flash-idf -p /dev/cu.usbmodem2101 -a n8r4
+  ./scripts/flash-idf -p /dev/cu.usbmodem2101 -a n16r8 --image ~/Downloads/shotstopper.bin
 EOF
 }
 
@@ -37,16 +39,41 @@ if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
 fi
 
 ss_cli_resolve "port arch" || exit $?
+ss_cli_normalize_image || exit $?
 shotstopper_resolve_board "$(ss_get arch)"
 ss_idf_source
 ss_idf_py_args
-ss_idf_require_image
+
+command -v node >/dev/null 2>&1 || {
+  echo "node not found on PATH (needed to verify the firmware image)." >&2
+  exit 127
+}
 
 cd "$SS_CLI_ROOT"
 
-port="$(ss_get port)"
-echo "Flashing $SHOTSTOPPER_ARCH via $port (IDF)"
+image="$IDF_IMAGE"
+if ss_is_set image; then
+  image="$(ss_get image)"
+else
+  ss_idf_require_image
+fi
 
-idf.py "${IDF_PY_ARGS[@]}" -p "$port" flash
+echo "Local image identity:"
+node ./scripts/image_tag.js "$image" --expect-arch "$SHOTSTOPPER_ARCH"
+
+port="$(ss_get port)"
+echo "Flashing $image ($SHOTSTOPPER_ARCH) via $port (IDF)"
+
+if ss_is_set image; then
+  command -v esptool.py >/dev/null 2>&1 || {
+    echo "esptool.py not found on PATH (did ESP-IDF export.sh run?)." >&2
+    exit 127
+  }
+  # An external application image replaces app0 only. Bootloader and partition
+  # table remain in place, so the selected image must match this architecture.
+  esptool.py --chip esp32s3 --port "$port" write_flash 0x10000 "$image"
+else
+  idf.py "${IDF_PY_ARGS[@]}" -p "$port" flash
+fi
 
 ss_cli_save

@@ -32,6 +32,7 @@ fi
 
 # Resolve everything once here so the child scripts never prompt again.
 ss_cli_resolve "port arch" "flags" || exit $?
+ss_cli_normalize_image || exit $?
 
 root="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$root"
@@ -39,5 +40,5 @@ cd "$root"
 ss_cli_flags_for arch flags
 ./scripts/build-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
 
-ss_cli_flags_for port arch
+ss_cli_flags_for port arch image
 exec ./scripts/flash-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}

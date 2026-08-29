@@ -31,6 +31,7 @@ if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
 fi
 
 ss_cli_resolve "port arch speed" "flags" || exit $?
+ss_cli_normalize_image || exit $?
 
 root="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$root"
@@ -38,7 +39,7 @@ cd "$root"
 ss_cli_flags_for arch flags
 ./scripts/build-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
 
-ss_cli_flags_for port arch
+ss_cli_flags_for port arch image
 ./scripts/flash-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
 
 ss_cli_flags_for port speed
