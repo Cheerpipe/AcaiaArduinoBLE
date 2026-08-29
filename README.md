@@ -23,7 +23,9 @@ firmware slots and automatic recovery. It also includes a very simple
 3D-printable enclosure. The hardware is affordable and requires only modest
 assembly—but this is firmware and wiring guidance, not a plug-and-play kit:
 you need to understand the electrical work and your machine before installing
-it. The project as a whole is still a work in progress.
+it. The project as a whole is still a work in progress. See the
+[3D-printable enclosure](docs/HARDWARE.md#3d-printable-enclosure) for the
+print files and an example of the printed case.
 
 ESP32-S3 firmware that began on a **La Marzocco Linea Micra**. It adds
 brew-by-weight and related workflow controls without replacing the machine’s
@@ -314,7 +316,7 @@ claim the Web UI to save your home Wi-Fi. Step-by-step notes are in
 - [Machine types](#machine-types) — paddle/latch, momentary, momentary+reed (compile-time)
 - [Build environment](docs/BUILD.md) — macOS and Linux, from `git clone` to a flashable image. ESP-IDF only.
 - [Build scripts](docs/SCRIPTS.md) — IDF commands and legacy Arduino-cli (unsupported).
-- [Hardware](docs/HARDWARE.md) — development board, default GPIOs; BOM and schematic are TODO.
+- [Hardware](docs/HARDWARE.md) — development board, default GPIOs, and 3D-printable enclosure; BOM and schematic are TODO.
 
 **For contributors**
 
