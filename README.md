@@ -111,6 +111,19 @@ The firmware will also not provide a way to start a shot remotely. An espresso
 machine operates with high-temperature water and pressurized steam, so it
 should not be activated remotely, unattended, or without a person present.
 
+**Not planned — legacy ESP32 or boards without PSRAM.** Support for classic
+(non-S3) ESP32 boards and boards without PSRAM is out of scope for now. The
+firmware currently supports only ESP32-S3 **n16r8** and **n8r4** boards with
+PSRAM.
+
+**Not planned — real-time shot data in the Web UI.** Live shot telemetry in
+the Web UI would compete with the Bluetooth connection to the scale, so it is
+out of scope. The scale connection takes priority during a shot.
+
+**Not planned — Timemore scale support.** Supporting Timemore scales is
+technically possible, but the complexity of their Bluetooth protocol would add
+substantial code and maintenance burden. It is therefore out of scope.
+
 Advanced Shot Stopper is now the main application in this repository. The
 derived scale library remains here as a local dependency.
 
