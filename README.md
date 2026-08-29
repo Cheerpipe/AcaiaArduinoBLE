@@ -97,6 +97,20 @@ guidelines only**. It is not a product, not sold in packs, and not supported as
 a commercial kit. You still need to know what to wire and how. See the
 [Disclaimer](#disclaimer).
 
+### Roadmap and safety boundaries
+
+**TODO — Webhooks.** The project plans to add outbound webhooks for state
+change events, especially the final result of a shot: time, weight, and the
+kind of finish/cut (normal BBW, fast guard, slow guard, and similar outcomes).
+These notifications will be event-based; they are not a persistent connection
+or a remote-control interface.
+
+**Not planned — MQTT or remote shot start.** MQTT and other persistent
+HTTP/socket-based communication mechanisms are deliberately out of scope.
+The firmware will also not provide a way to start a shot remotely. An espresso
+machine operates with high-temperature water and pressurized steam, so it
+should not be activated remotely, unattended, or without a person present.
+
 Advanced Shot Stopper is now the main application in this repository. The
 derived scale library remains here as a local dependency.
 
