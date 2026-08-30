@@ -96,7 +96,8 @@ void p01_defaults_are_valid() {
         static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE));
   CHECK(settings.runtime.buzzerSlowExtendedPulseRate ==
         static_cast<uint8_t>(DEFAULT_EXTENDED_PULSE_RATE));
-  CHECK(settings.runtime.avoidBbwShotWithoutScale);
+  CHECK(settings.runtime.noScaleBbwMode ==
+        static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE));
   CHECK(settings.runtime.cupProtectionEnabled);
   CHECK(settings.runtime.stopIfCupRemoved);
   CHECK(!settings.runtime.requireCupToStart);

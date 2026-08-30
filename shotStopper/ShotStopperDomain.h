@@ -83,6 +83,33 @@ enum class NtpServerPreset : uint8_t {
   NIST = 3
 };
 
+enum class NoScaleBbwMode : uint8_t {
+  OFF = 0,
+  WARN_ONCE = 1,
+  REQUIRE_SCALE = 2
+};
+
+inline bool validNoScaleBbwMode(uint8_t mode) {
+  return mode <= static_cast<uint8_t>(NoScaleBbwMode::REQUIRE_SCALE);
+}
+
+inline bool noScaleBbwEnabled(uint8_t mode) {
+  return mode != static_cast<uint8_t>(NoScaleBbwMode::OFF);
+}
+
+inline bool noScaleBbwRequiresScale(uint8_t mode) {
+  return mode == static_cast<uint8_t>(NoScaleBbwMode::REQUIRE_SCALE);
+}
+
+inline const char *noScaleBbwModeId(uint8_t mode) {
+  switch (static_cast<NoScaleBbwMode>(mode)) {
+    case NoScaleBbwMode::OFF: return "off";
+    case NoScaleBbwMode::WARN_ONCE: return "warn_once";
+    case NoScaleBbwMode::REQUIRE_SCALE: return "require_scale";
+  }
+  return "off";
+}
+
 
 inline bool validNtpHostnameChar(char c) {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
@@ -633,7 +660,8 @@ struct RuntimeConfig {
   // Dead field: cup presence uses minimumCupWeightG. Kept for NVS layout.
   float cupPresentWeightG = DEFAULT_CUP_PRESENT_WEIGHT_G;
   float cupRemovedWeightG = DEFAULT_CUP_REMOVED_WEIGHT_G;
-  bool avoidBbwShotWithoutScale = true;
+  // Reuses the legacy avoidBbwShotWithoutScale byte: false=OFF, true=WARN_ONCE.
+  uint8_t noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE);
   uint32_t lastShotCooldownMs = DEFAULT_LAST_SHOT_COOLDOWN_MS;
   // USB debug spew (paddle/machine circuit/Wi-Fi traces). CLI replies stay independent.
   bool serialDebugOutput = false;
@@ -898,6 +926,7 @@ enum class ConfigValidationError : uint8_t {
   EXTENDED_PULSE_RATE,
   SLOW_EXTENDED_PULSE_RATE,
   BOOKOO_CONNECT_BEEP_LEVEL,
+  NO_SCALE_BBW_MODE,
   LAST_SHOT_COOLDOWN,
   DRIP_DELAY,
   RING_RETAIN_LOG_LEVEL,
@@ -1192,6 +1221,9 @@ inline ConfigValidationError validateRuntimeConfig(
   if (config.bookooConnectBeepLevel > BOOKOO_BEEP_LEVEL_MAX) {
     return ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL;
   }
+  if (!validNoScaleBbwMode(config.noScaleBbwMode)) {
+    return ConfigValidationError::NO_SCALE_BBW_MODE;
+  }
   if (config.lastShotCooldownMs < MIN_LAST_SHOT_COOLDOWN_MS ||
       config.lastShotCooldownMs > MAX_LAST_SHOT_COOLDOWN_MS) {
     return ConfigValidationError::LAST_SHOT_COOLDOWN;
@@ -1345,6 +1377,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "buzzerSlowExtendedPulseRate";
     case ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL:
       return "bookooConnectBeepLevel";
+    case ConfigValidationError::NO_SCALE_BBW_MODE:
+      return "noScaleBbwMode";
     case ConfigValidationError::LAST_SHOT_COOLDOWN:
       return "lastShotCooldownMs";
     case ConfigValidationError::DRIP_DELAY:
@@ -1887,6 +1921,8 @@ struct PersistedLastShot {
   bool noScaleShotGuardArmed = false;
   char scaleProtocol[20] = "none";
   uint8_t rating = 0;
+  // Uses existing alignment padding before shotLogId; keeps blob size stable.
+  uint8_t noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::OFF);
   uint32_t shotLogId = 0;
 };
 
@@ -2013,6 +2049,7 @@ struct ControlStatusSnapshot {
   bool noScaleShotGuardArmed = true;
   bool noScaleShotGuardHold = false;
   bool noScaleShotGuardScaleWasAvailable = false;
+  uint32_t noScaleShotGuardCooldownRemainingMs = 0;
   bool cupStartGuardHold = false;
   MachineRunState machineRunState = MachineRunState::CONFIRMED_OFF;
   bool machineStartAckPending = false;

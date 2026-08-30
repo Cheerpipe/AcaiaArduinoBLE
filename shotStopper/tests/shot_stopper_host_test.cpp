@@ -108,7 +108,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   runtimeConfig.bbwProtectionMs = 3000;
   runtimeConfig.fastExtractionGuardEnabled = false;
   runtimeConfig.slowExtractionGuardEnabled = false;
-  runtimeConfig.avoidBbwShotWithoutScale = false;
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::OFF);
   runtimeConfig.avoidAccidentalTouchEnabled = false;
   // Host scenarios assert immediate scale timer stop when the display is
   // already at/past circuit whole seconds; catch-up is covered by ST02–ST06.
@@ -131,6 +131,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   noScaleShotGuardScaleWasAvailable = false;
   noScaleShotGuardHold = false;
   noScaleShotGuardHoldAtMs = 0;
+  noScaleShotGuardNeedsFreshActivator = false;
   cupStartGuardHold = false;
   cupStartGuardHoldAtMs = 0;
   debugLog.clear();
@@ -1847,7 +1848,8 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(fabsf(config.minRecoveryWeightG - DEFAULT_MIN_RECOVERY_WEIGHT_G) <
         0.001f);
   CHECK(config.maxBbwBrewTimeMs == DEFAULT_MAX_BBW_BREW_TIME_MS);
-  CHECK(config.avoidBbwShotWithoutScale);
+  CHECK(config.noScaleBbwMode ==
+        static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE));
   CHECK(config.cupProtectionEnabled);
   CHECK(config.stopIfCupRemoved);
   CHECK(!config.requireCupToStart);
@@ -1949,6 +1951,10 @@ void w03_runtime_timing_relations_are_transactional() {
   config.buzzerSlowExtendedPulseRate = 9;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::SLOW_EXTENDED_PULSE_RATE);
+  config = RuntimeConfig{};
+  config.noScaleBbwMode = 3;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::NO_SCALE_BBW_MODE);
   config = RuntimeConfig{};
   config.lastShotCooldownMs = MIN_LAST_SHOT_COOLDOWN_MS - 1;
   CHECK(validateRuntimeConfig(config) ==
@@ -2908,11 +2914,12 @@ bool debugEventExists(DebugCode code, int32_t argument1 = INT32_MIN,
                       int32_t argument2 = INT32_MIN);
 
 void enableNoScaleShotGuardForTest() {
-  runtimeConfig.avoidBbwShotWithoutScale = true;
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE);
   noScaleShotGuardArmed = true;
   noScaleShotGuardActivityAtMs = 0;
   noScaleShotGuardHold = false;
   noScaleShotGuardHoldAtMs = 0;
+  noScaleShotGuardNeedsFreshActivator = false;
 }
 
 void attemptBlockedNoScaleStart() {
@@ -3107,6 +3114,80 @@ void ns12_failed_rinse_does_not_consume_guard() {
   CHECK(noScaleShotGuardArmed);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(!debugEventExists(DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED));
+}
+
+void ns13_require_scale_blocks_repeated_starts() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  runtimeConfig.noScaleBbwMode =
+      static_cast<uint8_t>(NoScaleBbwMode::REQUIRE_SCALE);
+  reachReadyFromBoot();
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    setRawPaddle(true);
+    runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+    runLoopAfter(runtimeConfig.rinseGestureMs + 1);
+    CHECK(stopperState == StopperState::READY);
+    CHECK(noScaleShotGuardArmed);
+    CHECK(noScaleShotGuardHold);
+    CHECK(!getRelaySafetySnapshot().closed);
+    setRawPaddle(false);
+    runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+    CHECK(!noScaleShotGuardHold);
+  }
+  runLoopAfter(runtimeConfig.lastShotCooldownMs + 1);
+  CHECK(noScaleShotGuardArmed);
+}
+
+void ns14_require_scale_blocks_rinse() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  runtimeConfig.noScaleBbwMode =
+      static_cast<uint8_t>(NoScaleBbwMode::REQUIRE_SCALE);
+  reachReadyFromBoot();
+  processWebCommand(webControlCommand(WebCommandType::RINSE));
+  CHECK(stopperState == StopperState::READY);
+  CHECK(!session.active);
+  CHECK(noScaleShotGuardArmed);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
+void ns15_require_scale_is_inactive_when_bbw_off() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  runtimeConfig.noScaleBbwMode =
+      static_cast<uint8_t>(NoScaleBbwMode::REQUIRE_SCALE);
+  runtimeConfig.timerOnly = true;
+  ShotPreset &preset = mutableActiveShotPreset(presetBank);
+  preset.brewByWeight = false;
+  runtimeConfig = composeEffectiveConfig(runtimeConfig, presetBank);
+  reachReadyFromBoot();
+  startCycle();
+  CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  CHECK(getRelaySafetySnapshot().closed);
+}
+
+void ns16_require_scale_reconnect_while_held_needs_new_gesture() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  runtimeConfig.noScaleBbwMode =
+      static_cast<uint8_t>(NoScaleBbwMode::REQUIRE_SCALE);
+  reachReadyFromBoot();
+  setRawPaddle(true);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+  CHECK(noScaleShotGuardHold);
+  setScaleConnected(true);
+  markScaleWorkerProgress();
+  publishWeight(0.0f);
+  loop();
+  CHECK(noScaleShotGuardHold);
+  CHECK(!getRelaySafetySnapshot().closed);
+  setRawPaddle(false);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+  runLoopAfter(1);
+  CHECK(!noScaleShotGuardHold);
+  CHECK(stopperState == StopperState::READY);
+  startCycle();
+  CHECK(getRelaySafetySnapshot().closed);
 }
 
 void w54_local_buzzer_triple_on_auto_to_manual_guard_end() {
@@ -4932,18 +5013,22 @@ void w86_config_applies_to_ram_immediately_and_coalesces() {
   resetHarness(false, false);
   reachReadyFromBoot();
   const uint32_t firstRevision = runtimeConfig.revision;
-  const bool originalAvoid = runtimeConfig.avoidBbwShotWithoutScale;
+  const uint8_t originalMode = runtimeConfig.noScaleBbwMode;
+  const uint8_t alternateMode = originalMode ==
+                                        static_cast<uint8_t>(NoScaleBbwMode::OFF)
+                                    ? static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE)
+                                    : static_cast<uint8_t>(NoScaleBbwMode::OFF);
   const uint32_t originalCooldown = runtimeConfig.lastShotCooldownMs;
   const bool originalAutoTare = runtimeConfig.autoTare;
   WebCommand first;
   first.type = WebCommandType::APPLY_CONFIG;
   first.config = runtimeConfig;
-  first.config.avoidBbwShotWithoutScale = !originalAvoid;
+  first.config.noScaleBbwMode = alternateMode;
   first.config.dripDelayMs = 4200;
   first.config.postTareBaselineGraceMs = 3500;
   processWebCommand(first);
   CHECK(!maintenanceLease.active);
-  CHECK(runtimeConfig.avoidBbwShotWithoutScale == !originalAvoid);
+  CHECK(runtimeConfig.noScaleBbwMode == alternateMode);
   CHECK(runtimeConfig.lastShotCooldownMs == originalCooldown);
   CHECK(runtimeConfig.autoTare == originalAutoTare);
   CHECK(runtimeConfig.dripDelayMs == 4200);
@@ -4955,15 +5040,15 @@ void w86_config_applies_to_ram_immediately_and_coalesces() {
   second.type = WebCommandType::APPLY_CONFIG;
   second.config = runtimeConfig;
   second.config.lastShotCooldownMs = runtimeConfig.lastShotCooldownMs;
-  second.config.avoidBbwShotWithoutScale = originalAvoid;
+  second.config.noScaleBbwMode = originalMode;
   processWebCommand(second);
-  CHECK(runtimeConfig.avoidBbwShotWithoutScale == originalAvoid);
+  CHECK(runtimeConfig.noScaleBbwMode == originalMode);
   CHECK(runtimeConfig.revision == firstRevision + 2);
   CHECK(runtimePersistPending);
   CHECK(!maintenanceLease.active);
 
   setRawPaddle(true);
-  CHECK(runtimeConfig.avoidBbwShotWithoutScale == originalAvoid);
+  CHECK(runtimeConfig.noScaleBbwMode == originalMode);
   CHECK(runtimeConfig.revision == firstRevision + 2);
 }
 
@@ -4971,19 +5056,23 @@ void w87_nvs_fail_keeps_ram_and_requeues() {
   resetHarness(false, false);
   reachReadyFromBoot();
   const uint32_t firstRevision = runtimeConfig.revision;
-  const bool originalAvoid = runtimeConfig.avoidBbwShotWithoutScale;
+  const uint8_t originalMode = runtimeConfig.noScaleBbwMode;
+  const uint8_t alternateMode = originalMode ==
+                                        static_cast<uint8_t>(NoScaleBbwMode::OFF)
+                                    ? static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE)
+                                    : static_cast<uint8_t>(NoScaleBbwMode::OFF);
   WebCommand update;
   update.type = WebCommandType::APPLY_CONFIG;
   update.config = runtimeConfig;
-  update.config.avoidBbwShotWithoutScale = !originalAvoid;
+  update.config.noScaleBbwMode = alternateMode;
   processWebCommand(update);
-  CHECK(runtimeConfig.avoidBbwShotWithoutScale == !originalAvoid);
+  CHECK(runtimeConfig.noScaleBbwMode == alternateMode);
   CHECK(runtimeConfig.revision == firstRevision + 1);
   CHECK(runtimePersistPending);
 
   hostRuntimePersistSucceeds = false;
   runLoopAfter(RUNTIME_PERSIST_DEBOUNCE_MS + 1);
-  CHECK(runtimeConfig.avoidBbwShotWithoutScale == !originalAvoid);
+  CHECK(runtimeConfig.noScaleBbwMode == alternateMode);
   CHECK(runtimeConfig.revision == firstRevision + 1);
   CHECK(runtimePersistPending);
   CHECK(runtimePersistFailed);
@@ -4996,7 +5085,7 @@ void w87_nvs_fail_keeps_ram_and_requeues() {
   CHECK(!runtimePersistFailed);
   CHECK(hostLastFlushIncludedLive);
   CHECK(hostLastFlushedRuntime.revision == runtimeConfig.revision);
-  CHECK(hostLastFlushedRuntime.avoidBbwShotWithoutScale == !originalAvoid);
+  CHECK(hostLastFlushedRuntime.noScaleBbwMode == alternateMode);
 }
 
 void w88_save_network_flush_includes_live_runtime() {
@@ -5006,7 +5095,7 @@ void w88_save_network_flush_includes_live_runtime() {
   WebCommand apply;
   apply.type = WebCommandType::APPLY_CONFIG;
   apply.config = runtimeConfig;
-  apply.config.avoidBbwShotWithoutScale = !runtimeConfig.avoidBbwShotWithoutScale;
+  apply.config.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::OFF);
   processWebCommand(apply);
   CHECK(runtimePersistPending);
   CHECK(runtimeConfig.revision == firstRevision + 1);
@@ -5019,8 +5108,8 @@ void w88_save_network_flush_includes_live_runtime() {
   finishHostMaintenance();
   CHECK(hostLastFlushIncludedLive);
   CHECK(hostLastFlushedRuntime.revision == runtimeConfig.revision);
-  CHECK(hostLastFlushedRuntime.avoidBbwShotWithoutScale ==
-        runtimeConfig.avoidBbwShotWithoutScale);
+  CHECK(hostLastFlushedRuntime.noScaleBbwMode ==
+        runtimeConfig.noScaleBbwMode);
   CHECK(!runtimePersistPending);
 }
 
@@ -10880,6 +10969,10 @@ const TestCase testCases[] = {
     {"NS10", ns10_idle_rinse_gesture_does_not_rearm},
     {"NS11", ns11_web_rinse_with_scale_keeps_armed},
     {"NS12", ns12_failed_rinse_does_not_consume_guard},
+    {"NS13", ns13_require_scale_blocks_repeated_starts},
+    {"NS14", ns14_require_scale_blocks_rinse},
+    {"NS15", ns15_require_scale_is_inactive_when_bbw_off},
+    {"NS16", ns16_require_scale_reconnect_while_held_needs_new_gesture},
     {"W54", w54_local_buzzer_triple_on_auto_to_manual_guard_end},
     {"W55", w55_local_buzzer_queues_second_triple_while_busy},
     {"W56", w56_atm_beep_queued_when_scale_lost_after_deadline},

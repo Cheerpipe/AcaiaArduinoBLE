@@ -75,7 +75,7 @@ void resetMomentaryHarness() {
   scaleWeightEvent = ScaleEvent{};
   runtimeConfig = RuntimeConfig{};
   runtimeConfig.requireCupToStart = false;
-  runtimeConfig.avoidBbwShotWithoutScale = false;
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::OFF);
   runtimeConfig.fastExtractionGuardEnabled = false;
   runtimeConfig.slowExtractionGuardEnabled = false;
   platformClockReady = true;
@@ -182,7 +182,7 @@ void resetMomentaryHarness() {
   seedDefaultShotPresetBank(presetBank);
   runtimeConfig = composeEffectiveConfig(runtimeConfig, presetBank);
   runtimeConfig.requireCupToStart = false;
-  runtimeConfig.avoidBbwShotWithoutScale = false;
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::OFF);
   mutableActiveShotPreset(presetBank).requireCupToStart = false;
   hostRelayClosedWrites = 0;
   hostRelayOpenWrites = 0;
@@ -306,7 +306,7 @@ void t_second_short_press_stops_without_rinse() {
 
 void t_noscale_last_shot_keeps_logical_duration() {
   resetMomentaryHarness();
-  runtimeConfig.avoidBbwShotWithoutScale = false;
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::OFF);
   scale.connected = false;
   setScaleLinkState(ScaleLinkState::DISCONNECTED);
   currentWeightSequence = 0;
@@ -357,10 +357,10 @@ void t_guard_reject_does_not_mirror() {
 void t_no_scale_bbw_armed_does_not_mirror_then_idle_allows() {
   resetMomentaryHarness();
   runtimeConfig.timerOnly = false;
-  runtimeConfig.avoidBbwShotWithoutScale = true;
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE);
   mutableActiveShotPreset(presetBank).brewByWeight = true;
   runtimeConfig = composeEffectiveConfig(runtimeConfig, presetBank);
-  runtimeConfig.avoidBbwShotWithoutScale = true;
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE);
   noScaleShotGuardArmed = true;
   noScaleShotGuardHold = false;
   noScaleShotGuardActivityAtMs = 0;
@@ -509,10 +509,10 @@ void t_rinse_armed_noscale_long_press_consumes_guard() {
   resetMomentaryHarness();
   enableFirmwareRinseForTest();
   runtimeConfig.timerOnly = false;
-  runtimeConfig.avoidBbwShotWithoutScale = true;
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE);
   mutableActiveShotPreset(presetBank).brewByWeight = true;
   runtimeConfig = composeEffectiveConfig(runtimeConfig, presetBank);
-  runtimeConfig.avoidBbwShotWithoutScale = true;
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE);
   runtimeConfig.rinseEnabled = true;
   runtimeConfig.buzzerManualNoScaleBeep = true;
   noScaleShotGuardArmed = true;
@@ -606,7 +606,7 @@ void t_only_auto_cut_needs_confirmed_on() {
 
 void t_quiet_pan_does_not_force_cut_when_unknown() {
   resetMomentaryHarness();
-  runtimeConfig.avoidBbwShotWithoutScale = false;
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::OFF);
   noScaleShotGuardArmed = false;
   scale.connected = false;
   setScaleLinkState(ScaleLinkState::DISCONNECTED);
@@ -1670,7 +1670,7 @@ void t_confirmed_wall_pulses_once_and_ends_session() {
 void t_noscale_hard_cap_idles_without_pulse_and_next_press_starts() {
   resetMomentaryHarness();
   runtimeConfig.operationalWallMs = 2000;
-  runtimeConfig.avoidBbwShotWithoutScale = false;
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::OFF);
   scale.connected = false;
   setScaleLinkState(ScaleLinkState::DISCONNECTED);
   currentWeightSequence = 0;
@@ -1917,7 +1917,7 @@ void t_reed_wall_pulses_once_and_ends_session() {
 void t_reed_manual_skips_operational_wall_pulses_at_hard_cap() {
   resetMomentaryHarness();
   runtimeConfig.operationalWallMs = 2000;
-  runtimeConfig.avoidBbwShotWithoutScale = false;
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::OFF);
   scale.connected = false;
   setScaleLinkState(ScaleLinkState::DISCONNECTED);
   currentWeightSequence = 0;

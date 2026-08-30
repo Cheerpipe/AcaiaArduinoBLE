@@ -517,17 +517,18 @@ not a state machine; it only filters which peripheral may enter
 
 ## 11. No-scale BBW guard
 
-**Purpose.** When brew-by-weight is on and there is no usable scale,
-do **not** start a full automatic shot on a long activator ON (paddle or
-momentary switch). A rinse gesture still rinses when Enable rinse is on.
-The next long start is manual. See [No-scale BBW](settings/no-scale-bbw.md).
+**Purpose.** Select whether missing-scale BBW attempts are allowed, warned
+once, or blocked until a scale is usable. In **Require a scale**, both shot and
+rinse gestures keep the machine circuit open. See
+[No-scale BBW](settings/no-scale-bbw.md).
 
 The stopper, not the guard, pushes `machineSetActivatorDriveAllowed` so
 momentary does not 1:1-forward while this guard (or cup-start) would
 block. Paddle has no GPIO→K1 mirror; `beginCycle` still withholds
 `machineRequestStart`.
 
-Not a C++ enum; latches `noScaleShotGuardArmed` / `Idle`.
+`NoScaleBbwMode` selects `OFF`, `WARN_ONCE`, or `REQUIRE_SCALE`; the runtime
+still exposes the Armed/cooldown latch.
 
 ### States
 
@@ -535,14 +536,17 @@ Not a C++ enum; latches `noScaleShotGuardArmed` / `Idle`.
 | --- | --- |
 | Off | Setting disabled or BBW off. Guard does nothing. |
 | Armed | Next long activator ON is blocked (machine circuit stays open, local buzzer cue). |
-| Idle | Guard consumed (blocked start, Armed rinse, or finished non-rinse shot). Re-arms on scale connect, boot, or **Last shot cooldown**. |
+| Temporarily allowed | Warn-once guard consumed. Re-arms on scale connect, boot, or **Protection returns after**. |
+| Scale required | Strict mode is armed and no usable scale exists; shot and rinse remain blocked. |
+| Ready | Strict mode is configured and the scale is usable. |
 
 ### Events
 
 | Event | Effect |
 | --- | --- |
 | Scale becomes usable | Arm immediately. |
-| Long activator ON while Armed | Block; hold then consume → Idle. Circuit stays open (paddle: no start; momentary: no 1:1 forward). |
+| Activator while Warn once is Armed | Block and consume → Temporarily allowed. Circuit stays open. |
+| Activator while Require scale is blocking | Block without consuming; release is required before a later valid start. |
 | Short ON→OFF / idle long-press (rinse) while Armed | If Enable rinse is on: rinse runs; consume → Idle. If off: paddle short ON→OFF ends without `RINSE`; momentary long-press is not forwarded. |
 | Shot (non-rinse) ends | Idle; cooldown then Arm. |
 | Cooldown elapsed / boot | Arm. |

@@ -1,48 +1,36 @@
 # No-scale BBW
 
-Machine-level guard that **blocks a full automatic shot** when brew by weight
-is on and there is no usable scale. **On by default.**
+Machine-level protection for attempts to use Brew by weight without a usable
+scale. Configure it under **Settings → Machine and scale → No-scale BBW**.
 
-The Web UI label is **Avoid BBW shot without scale**, under
-**Settings → Machine and scale**. The ON/OFF switch is also on
-**Home → Quick Settings** (read-only when brew by weight is off).
+It applies only while **Brew by weight** is on. With BBW off, shots and rinses
+remain manual regardless of this setting. A scale is usable only when its link
+is available and its weight stream is fresh.
 
-## When it applies
+## Modes
 
-Only while **Brew by weight** is on and the scale is missing or not usable.
-With BBW off, this guard does nothing.
-
-A long activator ON (paddle or momentary switch) **longer than the quick
-rinse gesture** does not close the machine circuit. A shorter paddle ON→OFF,
-or a momentary idle long-press with **Enable quick rinse** on, is still a rinse:
-machine circuit closes (paddle) or firmware pulses start (momentary) and the
-guard goes **Idle**. With Enable quick rinse off, momentary long-press while Armed
-is not forwarded to the relay; after Idle, the next press mirrors 1:1 as a
-manual no-scale shot (or a machine-native long hold). The no-scale buzzer
-cue still plays on activator ON (brew or rinse) whenever BBW is on and the
-scale is missing.
-
-The next start after a blocked shot or an Armed rinse runs as a **manual
-no-scale** shot. The guard re-arms on boot, when the scale becomes available,
-or after **Last shot cooldown**.
-
-## Parameters
-
-| Setting | Default | Range | Effect on the shot |
+| Mode | Shot without a scale | Rinse without a scale | Cooldown |
 | --- | --- | --- | --- |
-| **Avoid BBW shot without scale** | ON | ON / OFF | Armed: a long activator ON does not close the machine circuit. A rinse gesture (paddle short ON→OFF, or momentary idle long-press with Enable quick rinse) still rinses and consumes Armed. With Enable quick rinse off, a momentary hold stays open and then consumes Armed. |
-| **Last shot cooldown (min)** | 60 min | 5–240 min | After a blocked start, an Armed rinse, or a finished (non-rinse) shot, wait this long before the guard re-arms. Boot and scale reconnect re-arm immediately. |
+| **Allow manual brewing** | Allowed | Allowed | Not used |
+| **Warn once, then allow** (default) | First attempt is blocked and alerts; later attempts are manual | An Armed rinse runs and consumes the warning | Protection returns after the configured delay |
+| **Require a scale** | Always blocked | Always blocked | Not used; protection stays armed |
 
-Status shows `Off` / `Armed` / `Idle`.
+In **Require a scale**, the machine circuit remains open: paddle, momentary
+switch, Web start, and Web rinse cannot drive the relay until the scale becomes
+usable or BBW is turned off. If the scale reconnects while an activator is held,
+release it before starting again; reconnection alone never closes the circuit.
 
-## Example
+**Protection returns after (min)** is visible only for **Warn once, then
+allow**. It defaults to 60 minutes and accepts 5–240 minutes. Boot and scale
+reconnect also re-arm that mode immediately.
 
-BBW is on, the Bookoo is still in the drawer. A long paddle or switch ON
-plays the local buzzer cue and leaves machine circuit open. On paddle, a short
-ON→OFF still rinses. On momentary with Enable quick rinse on, an idle long-press
-rinses and consumes Armed. After that, the next long start is a manual shot
-without a scale. When the scale connects, the guard re-arms immediately.
+Home shows the configured mode as a read-only summary. Its live status is
+**Off**, **Armed**, **Temporarily allowed** (with remaining time), **Scale
+required**, or **Ready** when Require scale is configured and the scale is
+usable.
+
+The optional **Manual without scale (BBW on)** alert sounds once per distinct
+blocked attempt; holding the activator does not repeat it continuously.
 
 Related: [Quick rinse](quick-rinse.md), [Momentary](momentary.md),
-[Brew by weight](../features/brew-by-weight.md), [Alerts](../alerts.md)
-(ATM / manual-no-scale).
+[Brew by weight](../features/brew-by-weight.md), [Alerts](../alerts.md).

@@ -305,6 +305,7 @@ struct PendingShotFinalize {
   uint32_t autoToManualGuardRemainingMs = 0;
   bool noScaleShotGuardEnabled = false;
   bool noScaleShotGuardArmed = false;
+  uint8_t noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::OFF);
   char scaleProtocol[20] = "none";
   ShotCurveRecord curve = {};
 };
@@ -369,6 +370,7 @@ uint32_t noScaleShotGuardActivityAtMs = 0;
 bool noScaleShotGuardScaleWasAvailable = false;
 bool noScaleShotGuardHold = false;
 uint32_t noScaleShotGuardHoldAtMs = 0;
+bool noScaleShotGuardNeedsFreshActivator = false;
 bool cupStartGuardHold = false;
 uint32_t cupStartGuardHoldAtMs = 0;
 
@@ -921,6 +923,7 @@ void persistLastShotFromFinalize(const PendingShotFinalize &snapshot,
   last.autoToManualGuardRemainingMs = snapshot.autoToManualGuardRemainingMs;
   last.noScaleShotGuardEnabled = snapshot.noScaleShotGuardEnabled;
   last.noScaleShotGuardArmed = snapshot.noScaleShotGuardArmed;
+  last.noScaleBbwMode = snapshot.noScaleBbwMode;
   copyCString(last.scaleProtocol, sizeof(last.scaleProtocol),
               snapshot.scaleProtocol);
   last.scaleProtocol[sizeof(last.scaleProtocol) - 1] = '\0';
@@ -984,8 +987,9 @@ void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
   last.autoToManualGuardEnabled = session.config.autoToManualGuardEnabled;
   last.autoToManualGuardEnforced = session.autoToManualGuardEnforced;
   last.autoToManualGuardArmed = session.autoToManualGuardArmed;
-  last.noScaleShotGuardEnabled = runtimeConfig.avoidBbwShotWithoutScale;
+  last.noScaleShotGuardEnabled = noScaleBbwEnabled(runtimeConfig.noScaleBbwMode);
   last.noScaleShotGuardArmed = noScaleShotGuardArmed;
+  last.noScaleBbwMode = runtimeConfig.noScaleBbwMode;
   if (session.autoToManualGuardEnforced) {
     const uint32_t nowMs = millis();
     last.autoToManualGuardRemainingMs =
@@ -2090,8 +2094,9 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
             : session.autoToManualGuardDeadlineAtMs - nowMs;
   }
   pendingFinalize.noScaleShotGuardEnabled =
-      runtimeConfig.avoidBbwShotWithoutScale;
+      noScaleBbwEnabled(runtimeConfig.noScaleBbwMode);
   pendingFinalize.noScaleShotGuardArmed = noScaleShotGuardArmed;
+  pendingFinalize.noScaleBbwMode = runtimeConfig.noScaleBbwMode;
   copyCString(pendingFinalize.scaleProtocol,
               sizeof(pendingFinalize.scaleProtocol), scaleProtocolName);
   pendingFinalize.scaleProtocol[sizeof(pendingFinalize.scaleProtocol) - 1] =
@@ -2945,11 +2950,19 @@ bool enterRinse();
 
 void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   refreshLoopGuardsFromLastIntention();
+  if (source == ControlSource::PHYSICAL &&
+      noScaleShotGuardNeedsFreshActivator) {
+    if (!machineLastIntention().turnedOn) {
+      return;
+    }
+    noScaleShotGuardNeedsFreshActivator = false;
+  }
   maybeEmitManualNoScaleBeep(loopGuardInputs);
   if (noScaleShotGuardWouldBlock(loopGuardInputs)) {
     if (source == ControlSource::PHYSICAL) {
       noScaleShotGuardHold = true;
       noScaleShotGuardHoldAtMs = millis();
+      noScaleShotGuardNeedsFreshActivator = true;
       return;
     }
     blockNoScaleShotGuard();
@@ -3130,6 +3143,16 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
 }
 
 bool beginRinseCycle(ControlSource source) {
+  refreshLoopGuardsFromLastIntention();
+  if (noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode) &&
+      noScaleShotGuardWouldBlock(loopGuardInputs)) {
+    if (source == ControlSource::WEB) {
+      maybeEmitManualNoScaleBeep(loopGuardInputs);
+    }
+    addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED);
+    return false;
+  }
+  noScaleShotGuardNeedsFreshActivator = false;
   flushPendingScaleTimerStopNow();
   cancelPendingFinalize(source == ControlSource::WEB
                             ? "Previous drip analysis cancelled by a web rinse"
@@ -3163,7 +3186,8 @@ bool beginRinseCycle(ControlSource source) {
     const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
     const bool scaleUsable =
         scaleLinkAvailable(scaleLink) && currentWeightIsFresh();
-    if (!scaleUsable) {
+    if (!scaleUsable &&
+        !noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode)) {
       consumeNoScaleShotGuard();
     }
   }
@@ -3337,6 +3361,10 @@ void stateMachineTask() {
         beginCycle(ControlSource::PHYSICAL);
       }
       if (intent.intent == UserIntent::REQUEST_RINSE && machineSupportsRinse()) {
+        if (noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode) &&
+            noScaleShotGuardNeedsFreshActivator) {
+          return;
+        }
         noScaleShotGuardHold = false;
         cupStartGuardHold = false;
         if (!beginRinseCycle(ControlSource::PHYSICAL)) {
@@ -3625,7 +3653,17 @@ void queueRuntimePersist(int32_t reasonBits) {
 
 void commitLiveRuntimeConfig(const RuntimeConfig &composed, int32_t reasonBits) {
   const bool alertsWereEnabled = soundAlertsEnabled();
+  const uint8_t previousNoScaleMode = runtimeConfig.noScaleBbwMode;
   runtimeConfig = composed;
+  if (runtimeConfig.noScaleBbwMode != previousNoScaleMode) {
+    noScaleShotGuardActivityAtMs = 0;
+    noScaleShotGuardArmed = noScaleBbwEnabled(runtimeConfig.noScaleBbwMode);
+    if (!noScaleBbwEnabled(runtimeConfig.noScaleBbwMode)) {
+      // Changing settings must not turn an already-held activator into a new
+      // relay close. The hold clears on release in serviceNoScaleShotGuard().
+      noScaleShotGuardHold = machineLastIntention().holdActive;
+    }
+  }
   if (!soundAlertsEnabled()) {
     cancelOperationalAlerts();
   }
@@ -4056,8 +4094,7 @@ void processWebCommand(const WebCommand &command) {
         rejectWebCommand(command);
         return;
       }
-      candidate.avoidBbwShotWithoutScale =
-          command.config.avoidBbwShotWithoutScale;
+      candidate.noScaleBbwMode = command.config.noScaleBbwMode;
       candidate.lastShotCooldownMs = command.config.lastShotCooldownMs;
       candidate.serialDebugOutput = command.config.serialDebugOutput;
       candidate.ringRetainLogLevel = command.config.ringRetainLogLevel;
@@ -4777,10 +4814,20 @@ void publishControlStatus() {
     next.autoToManualGuardTrendMs = autoToManualGuardTrendMs(
         active.autoToManualGuardSamplesDs, active.operationalWallMs);
   }
-  next.noScaleShotGuardEnabled = runtimeConfig.avoidBbwShotWithoutScale;
+  next.noScaleShotGuardEnabled = noScaleBbwEnabled(runtimeConfig.noScaleBbwMode);
   next.noScaleShotGuardArmed = noScaleShotGuardArmed;
   next.noScaleShotGuardHold = noScaleShotGuardHold;
   next.noScaleShotGuardScaleWasAvailable = noScaleShotGuardScaleWasAvailable;
+  next.noScaleShotGuardCooldownRemainingMs = 0;
+  if (runtimeConfig.noScaleBbwMode ==
+          static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE) &&
+      !noScaleShotGuardArmed && noScaleShotGuardActivityAtMs != 0) {
+    const uint32_t elapsed = elapsedMs(noScaleShotGuardActivityAtMs);
+    next.noScaleShotGuardCooldownRemainingMs =
+        elapsed >= runtimeConfig.lastShotCooldownMs
+            ? 0U
+            : runtimeConfig.lastShotCooldownMs - elapsed;
+  }
   next.cupStartGuardHold = cupStartGuardHold;
   next.machineRunState = machineRunState();
   next.cupPresenceState = cupPresenceState();

@@ -432,6 +432,10 @@ void armNoScaleShotGuard() {
 }
 
 void consumeNoScaleShotGuard() {
+  if (noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode)) {
+    noScaleShotGuardArmed = true;
+    return;
+  }
   noScaleShotGuardArmed = false;
   noScaleShotGuardActivityAtMs = millis();
   addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED);
@@ -439,7 +443,7 @@ void consumeNoScaleShotGuard() {
 
 bool noScaleShotGuardWouldBlock(const GuardInputs &inputs) {
   const RuntimeConfig effective = effectiveRuntimeConfig();
-  return runtimeConfig.avoidBbwShotWithoutScale && !effective.timerOnly &&
+  return noScaleBbwEnabled(runtimeConfig.noScaleBbwMode) && !effective.timerOnly &&
          !inputs.scaleUsable && noScaleShotGuardArmed;
 }
 
@@ -456,7 +460,9 @@ void maybeEmitManualNoScaleBeep(const GuardInputs &inputs) {
 
 void blockNoScaleShotGuard() {
   noScaleShotGuardHold = false;
-  consumeNoScaleShotGuard();
+  if (!noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode)) {
+    consumeNoScaleShotGuard();
+  }
   addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED);
 }
 
@@ -466,15 +472,19 @@ void serviceNoScaleShotGuard(const GuardInputs &inputs) {
   }
   noScaleShotGuardScaleWasAvailable = inputs.scaleAvailable;
   if (noScaleShotGuardHold) {
-    if (!noScaleShotGuardWouldBlock(inputs)) {
+    if (!inputs.holdActive) {
       noScaleShotGuardHold = false;
-    } else if (inputs.holdActive &&
+    } else if (noScaleShotGuardWouldBlock(inputs) &&
                elapsedMs(noScaleShotGuardHoldAtMs) >
                    inputs.blockedHoldTimeoutMs) {
-      blockNoScaleShotGuard();
+      if (!noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode)) {
+        blockNoScaleShotGuard();
+      }
     }
   }
-  if (!noScaleShotGuardArmed && !session.active &&
+  if (noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode)) {
+    noScaleShotGuardArmed = true;
+  } else if (!noScaleShotGuardArmed && !session.active &&
       noScaleShotGuardActivityAtMs != 0 &&
       elapsedMs(noScaleShotGuardActivityAtMs) >=
           runtimeConfig.lastShotCooldownMs) {
@@ -491,7 +501,8 @@ bool cupStartGuardWouldBlock(const GuardInputs &inputs) {
 
 // Read-only composition for the stopper. Does not arm, consume, or call machine.
 bool guardsWouldBlockActivatorDrive(const GuardInputs &inputs) {
-  return noScaleShotGuardWouldBlock(inputs) || cupStartGuardWouldBlock(inputs);
+  return noScaleShotGuardHold || noScaleShotGuardWouldBlock(inputs) ||
+         cupStartGuardWouldBlock(inputs);
 }
 
 void serviceCupStartGuard(const GuardInputs &inputs) {

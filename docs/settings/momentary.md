@@ -15,7 +15,7 @@ and pulses stop (the auto-stop pulse width). The only other extra pulse is
 the **auto-stop pulse** it sends when a weight cut (or a safety wall) needs
 to toggle the group.
 
-If **Avoid BBW shot without scale** is Armed (BBW on, no usable scale) or
+If **No-scale BBW** is Armed or set to **Require a scale** (BBW on, no usable scale), or
 **Require cup to start** would reject the start, the relay does **not**
 mirror: K1 stays open for that whole hold, even after the guard goes Idle
 mid-press. Release, then press again with the guard Idle / a cup present,

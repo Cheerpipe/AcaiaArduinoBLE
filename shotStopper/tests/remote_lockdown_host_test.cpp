@@ -78,7 +78,7 @@ void resetHarness() {
   pendingScaleTimerStop = PendingScaleTimerStop{};
   runtimeConfig = RuntimeConfig{};
   runtimeConfig.rinseEnabled = true;
-  runtimeConfig.avoidBbwShotWithoutScale = false;
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::OFF);
   runtimeConfig.requireCupToStart = false;
   noScaleShotGuardArmed = false;
   noScaleShotGuardHold = false;

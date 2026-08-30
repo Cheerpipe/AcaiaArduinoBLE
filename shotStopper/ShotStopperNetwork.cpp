@@ -401,6 +401,8 @@ const char *configValidationMessage(ConfigValidationError error) {
              "rapid.";
     case ConfigValidationError::BOOKOO_CONNECT_BEEP_LEVEL:
       return "Bookoo scale volume must be disabled (0) or 1 to 5.";
+    case ConfigValidationError::NO_SCALE_BBW_MODE:
+      return "No-scale BBW mode must be off, warn_once, or require_scale.";
     case ConfigValidationError::LAST_SHOT_COOLDOWN:
       return "Last shot cooldown must be from 5 to 240 min.";
     case ConfigValidationError::DRIP_DELAY:
@@ -438,6 +440,26 @@ bool jsonAutoToManualGuardLimitMode(cJSON *object, const char *name,
   }
   if (strcmp(item->valuestring, "auto") == 0) {
     output = static_cast<uint8_t>(AutoToManualGuardLimitMode::AUTO);
+    return true;
+  }
+  return false;
+}
+
+bool jsonNoScaleBbwMode(cJSON *object, const char *name, uint8_t &output) {
+  cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+  if (!cJSON_IsString(item) || item->valuestring == nullptr) {
+    return false;
+  }
+  if (strcmp(item->valuestring, "off") == 0) {
+    output = static_cast<uint8_t>(NoScaleBbwMode::OFF);
+    return true;
+  }
+  if (strcmp(item->valuestring, "warn_once") == 0) {
+    output = static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE);
+    return true;
+  }
+  if (strcmp(item->valuestring, "require_scale") == 0) {
+    output = static_cast<uint8_t>(NoScaleBbwMode::REQUIRE_SCALE);
     return true;
   }
   return false;
@@ -4262,7 +4284,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"stopIfCupRemoved\":%s,\"requireCupToStart\":%s,"
         "\"avoidAccidentalTouchEnabled\":%s,"
         "\"cupPresentWeightG\":%.1f,\"cupRemovedWeightG\":%.1f,"
-        "\"avoidBbwShotWithoutScale\":%s,"
+        "\"avoidBbwShotWithoutScale\":%s,\"noScaleBbwMode\":\"%s\","
         "\"scaleMacCacheMode\":\"%s\"",
         control.config.soundAlertsMuted ? "false" : "true",
         alertOutputChannelId(control.config.alertOutputChannel),
@@ -4282,7 +4304,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.config.avoidAccidentalTouchEnabled ? "true" : "false",
         static_cast<double>(control.config.cupPresentWeightG),
         static_cast<double>(control.config.cupRemovedWeightG),
-        control.config.avoidBbwShotWithoutScale ? "true" : "false",
+        noScaleBbwEnabled(control.config.noScaleBbwMode) ? "true" : "false",
+        noScaleBbwModeId(control.config.noScaleBbwMode),
         scaleMacCacheModeId(control.config.scaleMacCacheMode));
   } else if (ok && page == StatusPage::Settings) {
     ok = statusJsonAppend(
@@ -4322,7 +4345,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"cupPresentWeightG\":%.1f,\"cupRemovedWeightG\":%.1f,"
         "\"scaleMacCacheMode\":\"%s\","
         "\"bookooMuteOnBuzzerOnly\":%s,\"bookooConnectBeepLevel\":%u,"
-        "\"avoidBbwShotWithoutScale\":%s,\"lastShotCooldownMs\":%lu",
+        "\"avoidBbwShotWithoutScale\":%s,\"noScaleBbwMode\":\"%s\","
+        "\"lastShotCooldownMs\":%lu",
         static_cast<unsigned>(control.config.goalWeightG),
         static_cast<double>(control.config.weightOffsetG),
         static_cast<double>(control.config.weightOffsetBaselineG),
@@ -4387,7 +4411,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         scaleMacCacheModeId(control.config.scaleMacCacheMode),
         control.config.bookooMuteOnBuzzerOnly ? "true" : "false",
         static_cast<unsigned>(control.config.bookooConnectBeepLevel),
-        control.config.avoidBbwShotWithoutScale ? "true" : "false",
+        noScaleBbwEnabled(control.config.noScaleBbwMode) ? "true" : "false",
+        noScaleBbwModeId(control.config.noScaleBbwMode),
         static_cast<unsigned long>(control.config.lastShotCooldownMs));
   }
 
@@ -4440,9 +4465,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"autoToManualGuardEnforced\":%s,"
         "\"autoToManualGuardRemainingMs\":%lu,"
         "\"noScaleShotGuardEnabled\":%s,"
-        "\"noScaleShotGuardArmed\":%s,\"endReason\":\"%s\","
+        "\"noScaleShotGuardArmed\":%s,\"noScaleBbwMode\":\"%s\","
+        "\"endReason\":\"%s\","
         "\"rating\":%u,\"shotLogId\":%lu},"
-        "\"noScaleShotGuard\":{\"enabled\":%s,\"armed\":%s},"
+        "\"noScaleShotGuard\":{\"enabled\":%s,\"armed\":%s,"
+        "\"mode\":\"%s\",\"cooldownRemainingMs\":%lu,"
+        "\"scaleUsable\":%s},"
         "\"cupPresence\":{\"state\":\"%s\",\"present\":%s}",
         stopperStateName(control.state), stateLabel(control.state),
         machineRunStateName(control.machineRunState),
@@ -4499,11 +4527,24 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
             control.lastShot.autoToManualGuardRemainingMs),
         control.lastShot.noScaleShotGuardEnabled ? "true" : "false",
         control.lastShot.noScaleShotGuardArmed ? "true" : "false",
+        noScaleBbwModeId(
+            control.lastShot.noScaleShotGuardEnabled &&
+                    control.lastShot.noScaleBbwMode ==
+                        static_cast<uint8_t>(NoScaleBbwMode::OFF)
+                ? static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE)
+                : control.lastShot.noScaleBbwMode),
         endReasonName(control.lastShot.endReason),
         static_cast<unsigned>(control.lastShot.rating),
         static_cast<unsigned long>(control.lastShot.shotLogId),
         control.noScaleShotGuardEnabled ? "true" : "false",
         control.noScaleShotGuardArmed ? "true" : "false",
+        noScaleBbwModeId(control.config.noScaleBbwMode),
+        static_cast<unsigned long>(
+            control.noScaleShotGuardCooldownRemainingMs),
+        (control.scaleAvailable &&
+         control.weightStreamState == WeightStreamState::FRESH)
+            ? "true"
+            : "false",
         cupPresenceStateName(control.cupPresenceState),
         control.cupPresent ? "true" : "false");
     if (ok) {
@@ -4755,6 +4796,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
           ",\"guards\":{"
           "\"bbwEnabled\":%s,\"scaleUsable\":%s,\"lastShotCupRemoved\":%s,"
           "\"noScale\":{\"enabled\":%s,\"armed\":%s,\"hold\":%s,"
+          "\"mode\":\"%s\",\"cooldownRemainingMs\":%lu,"
           "\"scaleWasAvailable\":%s},"
           "\"atm\":{\"enabled\":%s,\"armed\":%s,\"enforced\":%s,"
           "\"remainingMs\":%lu},"
@@ -4774,6 +4816,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
           control.noScaleShotGuardEnabled ? "true" : "false",
           control.noScaleShotGuardArmed ? "true" : "false",
           control.noScaleShotGuardHold ? "true" : "false",
+          noScaleBbwModeId(control.config.noScaleBbwMode),
+          static_cast<unsigned long>(
+              control.noScaleShotGuardCooldownRemainingMs),
           control.noScaleShotGuardScaleWasAvailable ? "true" : "false",
           control.config.autoToManualGuardEnabled ? "true" : "false",
           control.cycleAutoToManualGuardArmed ? "true" : "false",
@@ -4941,7 +4986,8 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            "\"cupProtectionEnabled\":%s,\"stopIfCupRemoved\":%s,"
            "\"requireCupToStart\":%s,\"avoidAccidentalTouchEnabled\":%s,"
            "\"cupPresentWeightG\":%.1f,\"cupRemovedWeightG\":%.1f,"
-           "\"avoidBbwShotWithoutScale\":%s,\"autoRetare\":%s,"
+           "\"avoidBbwShotWithoutScale\":%s,\"noScaleBbwMode\":\"%s\","
+           "\"autoRetare\":%s,"
            "\"retareWindowMs\":%lu,\"minimumCupWeightG\":%.1f,"
            "\"lastShotCooldownMs\":%lu,\"timezoneOffsetMinutes\":%d,"
            "\"serialDebugOutput\":%s},",
@@ -4980,7 +5026,8 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            c.config.avoidAccidentalTouchEnabled ? "true" : "false",
            static_cast<double>(c.config.cupPresentWeightG),
            static_cast<double>(c.config.cupRemovedWeightG),
-           c.config.avoidBbwShotWithoutScale ? "true" : "false",
+           noScaleBbwEnabled(c.config.noScaleBbwMode) ? "true" : "false",
+           noScaleBbwModeId(c.config.noScaleBbwMode),
            c.config.autoRetare ? "true" : "false",
            static_cast<unsigned long>(c.config.retareWindowMs),
            static_cast<double>(c.config.minimumCupWeightG),
@@ -5185,6 +5232,7 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
              "\"guards\":{\"bbwEnabled\":%s,\"scaleUsable\":%s,"
              "\"lastShotCupRemoved\":%s,"
              "\"noScale\":{\"enabled\":%s,\"armed\":%s,\"hold\":%s,"
+             "\"mode\":\"%s\",\"cooldownRemainingMs\":%lu,"
              "\"scaleWasAvailable\":%s},"
              "\"atm\":{\"enabled\":%s,\"armed\":%s,\"enforced\":%s,"
              "\"remainingMs\":%lu},"
@@ -5204,6 +5252,9 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
              c.noScaleShotGuardEnabled ? "true" : "false",
              c.noScaleShotGuardArmed ? "true" : "false",
              c.noScaleShotGuardHold ? "true" : "false",
+             noScaleBbwModeId(c.config.noScaleBbwMode),
+             static_cast<unsigned long>(
+                 c.noScaleShotGuardCooldownRemainingMs),
              c.noScaleShotGuardScaleWasAvailable ? "true" : "false",
              c.config.autoToManualGuardEnabled ? "true" : "false",
              c.cycleAutoToManualGuardArmed ? "true" : "false",
@@ -6004,6 +6055,9 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   bool baseRevisionPresent = false;
   uint32_t baseRevision = 0;
   bool soundAlertsEnabled = !candidate.soundAlertsMuted;
+  bool legacyAvoidBbwShotWithoutScale =
+      noScaleBbwEnabled(candidate.noScaleBbwMode);
+  bool legacyNoScalePresent = false;
   char customNtp[NTP_SERVER_HOST_CAPACITY] = {};
   memcpy(customNtp, candidate.ntpServerCustom, sizeof(customNtp));
   static const char *const fields[] = {
@@ -6030,7 +6084,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "autoToManualGuardManualLimitMs", "autoToManualGuardBaselineMs",
       "weightOffsetBaselineG", "timezoneOffsetMinutes", "ntpServerPreset",
       "ntpServerCustom", "scaleMacCacheMode", "bookooMuteOnBuzzerOnly",
-      "bookooConnectBeepLevel", "avoidBbwShotWithoutScale", "lastShotCooldownMs",
+      "bookooConnectBeepLevel", "noScaleBbwMode", "avoidBbwShotWithoutScale",
+      "lastShotCooldownMs",
       "serialDebugOutput", "ringRetainLogLevel"};
   const char *parseError = nullptr;
   size_t settingFieldCount = 0;
@@ -6276,9 +6331,18 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
                          candidate.bookooConnectBeepLevel) ||
               candidate.bookooConnectBeepLevel > BOOKOO_BEEP_LEVEL_MAX)) {
     parseError = "bookooConnectBeepLevel must be an integer from 0 to 5.";
+  } else if (jsonFieldPresent(root, "noScaleBbwMode") &&
+             jsonFieldPresent(root, "avoidBbwShotWithoutScale")) {
+    parseError =
+        "Send noScaleBbwMode or avoidBbwShotWithoutScale, not both.";
+  } else if (jsonFieldPresent(root, "noScaleBbwMode") &&
+             !jsonNoScaleBbwMode(root, "noScaleBbwMode",
+                                 candidate.noScaleBbwMode)) {
+    parseError =
+        "noScaleBbwMode must be off, warn_once, or require_scale.";
   } else if (jsonFieldPresent(root, "avoidBbwShotWithoutScale") &&
              !jsonBoolean(root, "avoidBbwShotWithoutScale",
-                          candidate.avoidBbwShotWithoutScale)) {
+                          legacyAvoidBbwShotWithoutScale)) {
     parseError = "avoidBbwShotWithoutScale must be a boolean.";
   } else if (jsonFieldPresent(root, "lastShotCooldownMs") &&
              !jsonUint32(root, "lastShotCooldownMs",
@@ -6298,6 +6362,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   if (root != nullptr) {
     brewByWeightPresent = jsonFieldPresent(root, "brewByWeight");
     baseRevisionPresent = jsonFieldPresent(root, "baseRevision");
+    legacyNoScalePresent =
+        jsonFieldPresent(root, "avoidBbwShotWithoutScale");
     cJSON_Delete(root);
   }
   self.unlockJsonBody();
@@ -6321,6 +6387,11 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   }
   if (brewByWeightPresent) {
     candidate.timerOnly = !brewByWeight;
+  }
+  if (legacyNoScalePresent) {
+    candidate.noScaleBbwMode = static_cast<uint8_t>(
+        legacyAvoidBbwShotWithoutScale ? NoScaleBbwMode::WARN_ONCE
+                                       : NoScaleBbwMode::OFF);
   }
   candidate.soundAlertsMuted = !soundAlertsEnabled;
   memcpy(candidate.ntpServerCustom, customNtp, sizeof(candidate.ntpServerCustom));

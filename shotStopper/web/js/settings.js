@@ -19,7 +19,7 @@ export function init(){
   if($('preferredScaleSelect'))$('preferredScaleSelect').onchange=()=>{R.selectPreferredScale();R.updateScalePreferenceOptions()};
   $('autoTare').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('autoRetare').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
-  $('avoidBbwShotWithoutScale').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings();R.markConfigDirty()};
+  $('noScaleBbwMode').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('soundAlertsEnabled').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('paddleReturnReminderBeep').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('alertOutputChannel').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
