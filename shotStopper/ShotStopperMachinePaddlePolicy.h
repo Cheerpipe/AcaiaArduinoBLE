@@ -115,6 +115,7 @@ MachineIntention machinePollIntention() {
   out.turnedOn = activatorTurnedOn;
   out.turnedOff = activatorTurnedOff;
   out.holdActive = activatorOn || rawActivatorOn;
+  out.physicalOn = activatorOn;
   out.stablyOff = activatorIsStablyOff();
 
   const bool swallowStop = activatorTurnedOff && !machineReportsStopOnRelease();

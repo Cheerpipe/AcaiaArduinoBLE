@@ -101,6 +101,8 @@ enum class ControlSource : uint8_t {
 // internals (no PaddleMode, reed, pulse state, MachineType, or rinseGestureMs).
 struct GuardInputs {
   bool holdActive = false;
+  bool physicalOn = false;
+  bool stablyOff = false;
   bool scaleAvailable = false;
   bool scaleUsable = false;
   CupPresenceState cup = CupPresenceState::ABSENT;

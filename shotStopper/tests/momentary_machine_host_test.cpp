@@ -187,6 +187,14 @@ void resetMomentaryHarness() {
   hostRelayClosedWrites = 0;
   hostRelayOpenWrites = 0;
   lastCycle = LastCycleSummary{};
+  noScaleShotGuardArmed = true;
+  noScaleShotGuardActivityAtMs = 0;
+  noScaleShotGuardScaleWasAvailable = false;
+  noScaleShotGuardHold = false;
+  noScaleShotGuardHoldAtMs = 0;
+  noScaleShotGuardNeedsFreshActivator = false;
+  resetNoScaleRequireBypassGesture();
+  noScaleRequireBypassCompletedThisLoop = false;
 }
 
 void runLoopAfter(uint32_t deltaMs) {
@@ -388,6 +396,41 @@ void t_no_scale_bbw_armed_does_not_mirror_then_idle_allows() {
   pressDown();
   CHECK(getRelaySafetySnapshot().closed);
   CHECK(session.active);
+}
+
+void t_require_scale_triple_press_release_never_starts_on_final_release() {
+  for (bool startOnPress : {true, false}) {
+    resetMomentaryHarness();
+    runtimeConfig.momentaryStartOnPress = startOnPress;
+    runtimeConfig.timerOnly = false;
+    runtimeConfig.noScaleBbwMode =
+        static_cast<uint8_t>(NoScaleBbwMode::REQUIRE_SCALE);
+    mutableActiveShotPreset(presetBank).brewByWeight = true;
+    runtimeConfig = composeEffectiveConfig(runtimeConfig, presetBank);
+    runtimeConfig.noScaleBbwMode =
+        static_cast<uint8_t>(NoScaleBbwMode::REQUIRE_SCALE);
+    scale.connected = false;
+    setScaleLinkState(ScaleLinkState::DISCONNECTED);
+    runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+
+    for (int cycle = 0; cycle < 3; ++cycle) {
+      shortPress(50);
+      CHECK(!session.active);
+      CHECK(!getRelaySafetySnapshot().closed);
+      if (cycle < 2) {
+        CHECK(noScaleShotGuardArmed);
+        CHECK(noScaleRequireBypassCycles == cycle + 1);
+      }
+    }
+
+    CHECK(!noScaleShotGuardArmed);
+    CHECK(stopperState == StopperState::READY);
+    CHECK(localBuzzer.activeCue == BuzzerCue::SCALE_CONNECTED);
+
+    shortPress(50);
+    CHECK(session.active);
+    CHECK(stopperState == StopperState::MANUAL_NO_SCALE);
+  }
 }
 
 void t_user_stop_without_session_does_not_leave_orphan_run() {
@@ -1997,6 +2040,7 @@ const TestCase kTests[] = {
     {"P52", t_noscale_last_shot_keeps_logical_duration},
     {"P02", t_guard_reject_does_not_mirror},
     {"P50", t_no_scale_bbw_armed_does_not_mirror_then_idle_allows},
+    {"P66", t_require_scale_triple_press_release_never_starts_on_final_release},
     {"P39", t_user_stop_without_session_does_not_leave_orphan_run},
     {"P03", t_long_press_mirrors_from_first_instant},
     {"P41", t_release_mode_long_press_ignored_as_start},

@@ -39,6 +39,7 @@
 struct MachineIntention {
   UserIntent intent = UserIntent::NONE;
   bool holdActive = false;
+  bool physicalOn = false;
   bool turnedOn = false;
   bool turnedOff = false;
   bool stablyOff = false;
@@ -157,6 +158,7 @@ inline MachineIntention machinePollIntention() {
   out.turnedOn = activatorTurnedOn;
   out.turnedOff = activatorTurnedOff;
   out.holdActive = momentaryPhysicalOn || rawActivatorOn;
+  out.physicalOn = momentaryPhysicalOn;
   out.stablyOff = activatorIsStablyOff();
   if (momentaryRinseRequested) {
     out.intent = UserIntent::REQUEST_RINSE;

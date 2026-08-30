@@ -518,8 +518,9 @@ not a state machine; it only filters which peripheral may enter
 ## 11. No-scale BBW guard
 
 **Purpose.** Select whether missing-scale BBW attempts are allowed, warned
-once, or blocked until a scale is usable. In **Require a scale**, both shot and
-rinse gestures keep the machine circuit open. See
+once, or blocked until a scale is usable. In **Require a scale**, ordinary shot
+and rinse gestures stay blocked; the three-cycle emergency gesture temporarily
+allows manual use. See
 [No-scale BBW](settings/no-scale-bbw.md).
 
 The stopper, not the guard, pushes `machineSetActivatorDriveAllowed` so
@@ -536,7 +537,7 @@ still exposes the Armed/cooldown latch.
 | --- | --- |
 | Off | Setting disabled or BBW off. Guard does nothing. |
 | Armed | Next long activator ON is blocked (machine circuit stays open, local buzzer cue). |
-| Temporarily allowed | Warn-once guard consumed. Re-arms on scale connect, boot, or **Protection returns after**. |
+| Temporarily allowed | Warn-once guard consumed or Require-scale bypass accepted. Re-arms on scale connect, boot, or **Protection returns after**. |
 | Scale required | Strict mode is armed and no usable scale exists; shot and rinse remain blocked. |
 | Ready | Strict mode is configured and the scale is usable. |
 
@@ -547,6 +548,7 @@ still exposes the Armed/cooldown latch.
 | Scale becomes usable | Arm immediately. |
 | Activator while Warn once is Armed | Block and consume → Temporarily allowed. Circuit stays open. |
 | Activator while Require scale is blocking | Block without consuming; release is required before a later valid start. |
+| Three complete ON→OFF cycles within 2 s while Require scale is blocking | Move to Temporarily allowed, play the scale-connected melody, and consume the final release so it cannot start a shot. |
 | Short ON→OFF / idle long-press (rinse) while Armed | If Enable rinse is on: rinse runs; consume → Idle. If off: paddle short ON→OFF ends without `RINSE`; momentary long-press is not forwarded. |
 | Shot (non-rinse) ends | Idle; cooldown then Arm. |
 | Cooldown elapsed / boot | Arm. |

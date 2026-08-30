@@ -432,7 +432,7 @@ void armNoScaleShotGuard() {
 }
 
 void consumeNoScaleShotGuard() {
-  if (noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode) && !noScaleOverrideActive) {
+  if (noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode)) {
     noScaleShotGuardArmed = true;
     return;
   }
@@ -466,6 +466,84 @@ void blockNoScaleShotGuard() {
   addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED);
 }
 
+constexpr uint8_t NO_SCALE_REQUIRE_BYPASS_CYCLES = 3;
+constexpr uint32_t NO_SCALE_REQUIRE_BYPASS_WINDOW_MS = 2000;
+
+void resetNoScaleRequireBypassGesture() {
+  noScaleRequireBypassReady = false;
+  noScaleRequireBypassHoldSeen = false;
+  noScaleRequireBypassCycles = 0;
+  noScaleRequireBypassStartedAtMs = 0;
+}
+
+void temporarilyAllowNoScaleRequireMode() {
+  noScaleShotGuardArmed = false;
+  noScaleShotGuardActivityAtMs = millis();
+  noScaleShotGuardHold = false;
+  // Consume the release that completed the gesture. A later, fresh
+  // activation may start a manual shot.
+  noScaleShotGuardNeedsFreshActivator = true;
+  noScaleRequireBypassCompletedThisLoop = true;
+  // Confirmation must be heard even if a recent disconnect or one of the
+  // blocked attempts is still sounding.
+  localBuzzer.stopIfCue(BuzzerCue::SCALE_LOST);
+  localBuzzer.stopIfCue(BuzzerCue::NO_SCALE);
+  emitAlert(AlertEvent::SCALE_CONNECTED);
+  addDebugEvent(DebugCategory::STATE, DebugCode::NO_SCALE_SHOT_GUARD_CONSUMED);
+  resetNoScaleRequireBypassGesture();
+}
+
+void serviceNoScaleRequireBypassGesture(const GuardInputs &inputs) {
+  const RuntimeConfig effective = effectiveRuntimeConfig();
+  const bool eligible =
+      noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode) &&
+      !effective.timerOnly && !inputs.scaleUsable && !session.active &&
+      noScaleShotGuardArmed;
+  if (!eligible) {
+    resetNoScaleRequireBypassGesture();
+    return;
+  }
+
+  // The gesture must begin from a settled OFF state.
+  if (!noScaleRequireBypassReady) {
+    if (inputs.stablyOff) {
+      noScaleRequireBypassReady = true;
+    }
+    return;
+  }
+
+  // Count only the debounced physical activator. holdActive intentionally
+  // includes raw/logical continuity for circuit safety and can otherwise make
+  // one physical click look like more than one gesture cycle.
+  if (inputs.physicalOn) {
+    if (!noScaleRequireBypassHoldSeen) {
+      if (noScaleRequireBypassCycles == 0 ||
+          elapsedMs(noScaleRequireBypassStartedAtMs) >
+              NO_SCALE_REQUIRE_BYPASS_WINDOW_MS) {
+        noScaleRequireBypassCycles = 0;
+        noScaleRequireBypassStartedAtMs = millis();
+      }
+      noScaleRequireBypassHoldSeen = true;
+    }
+    return;
+  }
+
+  if (!noScaleRequireBypassHoldSeen || !inputs.stablyOff) {
+    return;
+  }
+  noScaleRequireBypassHoldSeen = false;
+  if (elapsedMs(noScaleRequireBypassStartedAtMs) >
+      NO_SCALE_REQUIRE_BYPASS_WINDOW_MS) {
+    noScaleRequireBypassCycles = 0;
+    noScaleRequireBypassStartedAtMs = 0;
+    return;
+  }
+  ++noScaleRequireBypassCycles;
+  if (noScaleRequireBypassCycles >= NO_SCALE_REQUIRE_BYPASS_CYCLES) {
+    temporarilyAllowNoScaleRequireMode();
+  }
+}
+
 void serviceNoScaleShotGuard(const GuardInputs &inputs) {
   if (inputs.scaleAvailable && !noScaleShotGuardScaleWasAvailable) {
     armNoScaleShotGuard();
@@ -482,15 +560,13 @@ void serviceNoScaleShotGuard(const GuardInputs &inputs) {
       }
     }
   }
-  if (noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode) && !noScaleOverrideActive) {
-    noScaleShotGuardArmed = true;
-  } else if (!noScaleShotGuardArmed && !session.active &&
+  if (!noScaleShotGuardArmed && !session.active &&
       noScaleShotGuardActivityAtMs != 0 &&
       elapsedMs(noScaleShotGuardActivityAtMs) >=
           runtimeConfig.lastShotCooldownMs) {
     armNoScaleShotGuard();
-    noScaleOverrideActive = false;
   }
+  serviceNoScaleRequireBypassGesture(inputs);
 }
 
 bool cupStartGuardWouldBlock(const GuardInputs &inputs) {

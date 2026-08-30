@@ -371,9 +371,11 @@ bool noScaleShotGuardScaleWasAvailable = false;
 bool noScaleShotGuardHold = false;
 uint32_t noScaleShotGuardHoldAtMs = 0;
 bool noScaleShotGuardNeedsFreshActivator = false;
-uint8_t noScaleOverrideCycles = 0;
-uint32_t noScaleOverrideStartedAtMs = 0;
-bool noScaleOverrideActive = false;
+bool noScaleRequireBypassReady = false;
+bool noScaleRequireBypassHoldSeen = false;
+uint8_t noScaleRequireBypassCycles = 0;
+uint32_t noScaleRequireBypassStartedAtMs = 0;
+bool noScaleRequireBypassCompletedThisLoop = false;
 bool cupStartGuardHold = false;
 uint32_t cupStartGuardHoldAtMs = 0;
 
@@ -1748,6 +1750,8 @@ void observeMachineSenseFromSession() {
 
 void fillLoopGuardsFromIntention(const MachineIntention &intention) {
   loopGuardInputs.holdActive = intention.holdActive;
+  loopGuardInputs.physicalOn = intention.physicalOn;
+  loopGuardInputs.stablyOff = intention.stablyOff;
   const ScaleLinkSnapshot link = getScaleLinkSnapshot();
   loopGuardInputs.scaleAvailable = scaleLinkAvailable(link);
   loopGuardInputs.scaleUsable =
@@ -3313,6 +3317,13 @@ void stateMachineTask() {
 
   const MachineIntention intent = machineLastIntention();
 
+  // The OFF edge that completes the emergency gesture is confirmation only.
+  // This also covers momentary builds configured to start on button release.
+  if (noScaleRequireBypassCompletedThisLoop) {
+    noScaleRequireBypassCompletedThisLoop = false;
+    return;
+  }
+
   if (maintenanceLease.active) {
     if (relay.closed) {
       machineRequestStop();
@@ -3661,6 +3672,7 @@ void commitLiveRuntimeConfig(const RuntimeConfig &composed, int32_t reasonBits) 
   if (runtimeConfig.noScaleBbwMode != previousNoScaleMode) {
     noScaleShotGuardActivityAtMs = 0;
     noScaleShotGuardArmed = noScaleBbwEnabled(runtimeConfig.noScaleBbwMode);
+    resetNoScaleRequireBypassGesture();
     if (!noScaleBbwEnabled(runtimeConfig.noScaleBbwMode)) {
       // Changing settings must not turn an already-held activator into a new
       // relay close. The hold clears on release in serviceNoScaleShotGuard().
@@ -4822,8 +4834,7 @@ void publishControlStatus() {
   next.noScaleShotGuardHold = noScaleShotGuardHold;
   next.noScaleShotGuardScaleWasAvailable = noScaleShotGuardScaleWasAvailable;
   next.noScaleShotGuardCooldownRemainingMs = 0;
-  if (runtimeConfig.noScaleBbwMode ==
-          static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE) &&
+  if (noScaleBbwEnabled(runtimeConfig.noScaleBbwMode) &&
       !noScaleShotGuardArmed && noScaleShotGuardActivityAtMs != 0) {
     const uint32_t elapsed = elapsedMs(noScaleShotGuardActivityAtMs);
     next.noScaleShotGuardCooldownRemainingMs =
@@ -5951,23 +5962,6 @@ void loop() {
   observeMachineSenseFromSession();
   serviceMachine();
   captureLoopGuards();
-  
-  if (noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode) && machineLastIntention().turnedOn) {
-    const uint32_t nowMs = millis();
-    if (noScaleOverrideCycles == 0 || elapsedMs(noScaleOverrideStartedAtMs) > 2000) {
-      noScaleOverrideCycles = 1;
-      noScaleOverrideStartedAtMs = nowMs;
-    } else {
-      noScaleOverrideCycles++;
-      if (noScaleOverrideCycles >= 3) {
-        noScaleOverrideCycles = 0;
-        noScaleOverrideActive = true;
-        consumeNoScaleShotGuard();
-        emitAlert(AlertEvent::SCALE_CONNECTED);
-      }
-    }
-  }
-
   serviceNoScaleShotGuard(loopGuardInputs);
   serviceCupStartGuard(loopGuardInputs);
   stateMachineTask();
