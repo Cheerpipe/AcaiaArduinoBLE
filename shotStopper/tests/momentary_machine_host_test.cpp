@@ -1392,10 +1392,14 @@ void t_override_sets_inferred_idle_and_brewing_without_pulse() {
   resetMomentaryHarness();
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
   const size_t closedBefore = hostRelayClosedWrites;
-  machineOverrideInferredOn();
+  WebCommand brewing;
+  brewing.type = WebCommandType::STATE_OVERRIDE_ON;
+  processWebCommand(brewing);
   CHECK(machineRunState() == MachineRunState::CONFIRMED_ON);
   CHECK(machineIsRunning());
-  machineOverrideInferredOff();
+  WebCommand idle;
+  idle.type = WebCommandType::STATE_OVERRIDE_OFF;
+  processWebCommand(idle);
   CHECK(machineRunState() == MachineRunState::CONFIRMED_OFF);
   CHECK(!machineIsRunning());
   CHECK(hostRelayClosedWrites == closedBefore);
