@@ -1327,7 +1327,8 @@ RelaySafetySnapshot getRelaySafetySnapshot();
 bool machineRunningElapsed(uint32_t &elapsedOut);
 uint32_t machineElapsedMs();
 bool machineIsRunning();
-bool machineRequestStart(uint32_t operationalLimitMs);
+bool machineRequestStart(uint32_t operationalLimitMs,
+                         bool remoteActuation = false);
 bool machineRequestStop();
 void requestRemoteTimerStop();
 uint32_t cycleShotElapsedMs();
@@ -3021,7 +3022,7 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
   const uint32_t closeLimitMs =
       automaticBbw ? machineCloseLimitMs(session.config.operationalWallMs)
                    : HARD_MAX_CIRCUIT_CLOSED_MS;
-  if (!machineRequestStart(closeLimitMs)) {
+  if (!machineRequestStart(closeLimitMs, source == ControlSource::WEB)) {
     session.active = false;
     session.endReason = EndReason::RELAY_SAFETY_FAILURE;
     machineSetPreferBleAirtime(false);

@@ -6,8 +6,8 @@
 // SPECIALIZATION: Momentary switch — actuator (control)
 // =============================================================================
 // WHAT: K1 mirrors the physical switch 1:1 when the façade allows activator
-//       drive. The only synthetic close is a firmware stop pulse (weight cut /
-//       walls), aborted if the user presses. Logical run walls reuse
+//       drive. Firmware uses synthetic pulses for a remote start and for a
+//       stop (weight cut / walls), aborted if the user presses. Logical run walls reuse
 //       tripRelaySafety so brew sees existing flags.
 //
 // BOUNDARY: Momentary-only. No paddle latch/PaddleMode policy. Stopper/brew
@@ -171,15 +171,22 @@ void serviceLogicalRunWalls() {
   }
 }
 
-inline bool machineRequestStart(uint32_t operationalLimitMs) {
+inline bool machineRequestStart(uint32_t operationalLimitMs,
+                                bool remoteActuation) {
   clearMomentaryElapsedLatch();
   noteMomentaryLogicalStart();
   momentaryLogicalRunActive = true;
   momentaryLogicalRunStartedAtMs = millis();
   momentaryLogicalOperationalLimitMs = operationalLimitMs;
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
-  return relay.state != RelaySafetyState::LOCKOUT &&
-         relay.state != RelaySafetyState::TRIPPED;
+  if (relay.state == RelaySafetyState::LOCKOUT ||
+      relay.state == RelaySafetyState::TRIPPED) {
+    return false;
+  }
+  // A physical press already toggles the machine circuit. In particular, a
+  // release-edge start must not add a second pulse, which would toggle it back
+  // off. A Web start has no physical edge, so it must synthesize that pulse.
+  return !remoteActuation || emitFirmwarePulse(true);
 }
 
 inline bool machineRequestStop() {

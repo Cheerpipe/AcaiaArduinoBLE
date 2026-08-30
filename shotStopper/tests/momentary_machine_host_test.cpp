@@ -1401,6 +1401,18 @@ void t_override_sets_inferred_idle_and_brewing_without_pulse() {
   CHECK(hostRelayClosedWrites == closedBefore);
 }
 
+void t_remote_start_emits_synthetic_start_pulse() {
+  resetMomentaryHarness();
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+  CHECK(machineRequestStart(HARD_MAX_CIRCUIT_CLOSED_MS, true));
+  CHECK(pulseOutputActive);
+  CHECK(pulseOutputIsStart);
+  CHECK(getRelaySafetySnapshot().closed);
+  runLoopAfter(runtimeStopPulseMs(runtimeConfig) + 1);
+  CHECK(!pulseOutputActive);
+  CHECK(!getRelaySafetySnapshot().closed);
+}
+
 void t_scale_connect_settles_idle_when_idle() {
   resetMomentaryHarness();
   runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
@@ -2026,6 +2038,7 @@ const TestCase kTests[] = {
     {"P25L", t_firmware_cut_stale_weight_stays_assumed_off},
     {"P25M", t_gusher_flow_confirms_on},
     {"P25D", t_override_sets_inferred_idle_and_brewing_without_pulse},
+    {"P25R", t_remote_start_emits_synthetic_start_pulse},
     {"P25E", t_scale_connect_settles_idle_when_idle},
     {"P25F", t_settled_weight_cut_confirms_off},
     {"P25G", t_settled_weight_cut_stays_armed_while_pouring},

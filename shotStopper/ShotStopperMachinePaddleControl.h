@@ -27,7 +27,9 @@ void applyPaddleRelayDrive() {
   }
 }
 
-inline bool machineRequestStart(uint32_t operationalLimitMs) {
+inline bool machineRequestStart(uint32_t operationalLimitMs,
+                                bool remoteActuation) {
+  (void)remoteActuation;
   return setMachineCircuitClosed(true, operationalLimitMs);
 }
 
