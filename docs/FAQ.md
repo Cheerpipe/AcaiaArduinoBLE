@@ -22,6 +22,7 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 | **I turned Brew by weight off. Why no weight stop?** | Tare and the timer remain. Weight stop, retare, BBW protection, Max BBW time, and offset learning do not. Cut is paddle/switch, the 60 s firmware cap, or remote **Stop**. Fast, Slow, A→M, and No-scale BBW become read-only on Home. |
 | **Home Brew by weight is OFF but Settings is ON.** | Both can be right. **Home** is the live session (Manual) and is what the next shot uses. **Settings → Brew** is the saved recipe and does not flip off when you turn Home off. Turn Home ON to resume weight stop without changing the recipe. |
 | **BBW is on and the scale is off. Can I prevent all use?** | [No-scale BBW](settings/no-scale-bbw.md) has **Allow manual brewing**, **Warn once, then allow** (default), and **Require a scale**. Require scale keeps the machine circuit open for both shots and rinses until the scale is usable; BBW off remains manual. |
+| **I use Require scale mode, the scale is dead, and I have no Wi-Fi to change settings. Am I locked out?** | No. You can activate an **emergency override** by toggling the brew switch or paddle **3 times within 2 seconds**. The device will emit the scale-connected alert to confirm, temporarily bypassing the protection so you can pull manual shots. This safety gesture ensures you are never stranded without coffee. |
 
 ## Network and access
 
