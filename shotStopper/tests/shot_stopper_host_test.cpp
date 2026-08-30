@@ -2913,6 +2913,8 @@ void w53_local_buzzer_silent_when_bbw_off_without_scale() {
 bool debugEventExists(DebugCode code, int32_t argument1 = INT32_MIN,
                       int32_t argument2 = INT32_MIN);
 
+
+
 void enableNoScaleShotGuardForTest() {
   runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE);
   noScaleShotGuardArmed = true;
@@ -2920,6 +2922,9 @@ void enableNoScaleShotGuardForTest() {
   noScaleShotGuardHold = false;
   noScaleShotGuardHoldAtMs = 0;
   noScaleShotGuardNeedsFreshActivator = false;
+  noScaleOverrideCycles = 0;
+  noScaleOverrideStartedAtMs = 0;
+  noScaleOverrideActive = false;
 }
 
 void attemptBlockedNoScaleStart() {
@@ -3188,6 +3193,37 @@ void ns16_require_scale_reconnect_while_held_needs_new_gesture() {
   CHECK(stopperState == StopperState::READY);
   startCycle();
   CHECK(getRelaySafetySnapshot().closed);
+}
+
+void ns17_require_scale_emergency_override_gesture() {
+  resetHarness(false, false);
+  enableNoScaleShotGuardForTest();
+  runtimeConfig.noScaleBbwMode =
+      static_cast<uint8_t>(NoScaleBbwMode::REQUIRE_SCALE);
+  reachReadyFromBoot();
+  
+  // 1st edge
+  setRawPaddle(true);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+  setRawPaddle(false);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+  
+  // 2nd edge
+  setRawPaddle(true);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+  setRawPaddle(false);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+  
+  // 3rd edge (should trigger override)
+  const uint32_t beforeAlerts = localBuzzer.acceptedRequests;
+  setRawPaddle(true);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
+  
+  CHECK(!noScaleShotGuardArmed);
+  CHECK(localBuzzer.acceptedRequests > beforeAlerts);
+  
+  setRawPaddle(false);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS);
 }
 
 void w54_local_buzzer_triple_on_auto_to_manual_guard_end() {
@@ -10973,6 +11009,7 @@ const TestCase testCases[] = {
     {"NS14", ns14_require_scale_blocks_rinse},
     {"NS15", ns15_require_scale_is_inactive_when_bbw_off},
     {"NS16", ns16_require_scale_reconnect_while_held_needs_new_gesture},
+    {"NS17", ns17_require_scale_emergency_override_gesture},
     {"W54", w54_local_buzzer_triple_on_auto_to_manual_guard_end},
     {"W55", w55_local_buzzer_queues_second_triple_while_busy},
     {"W56", w56_atm_beep_queued_when_scale_lost_after_deadline},

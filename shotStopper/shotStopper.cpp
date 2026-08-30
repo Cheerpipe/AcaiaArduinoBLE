@@ -371,6 +371,9 @@ bool noScaleShotGuardScaleWasAvailable = false;
 bool noScaleShotGuardHold = false;
 uint32_t noScaleShotGuardHoldAtMs = 0;
 bool noScaleShotGuardNeedsFreshActivator = false;
+uint8_t noScaleOverrideCycles = 0;
+uint32_t noScaleOverrideStartedAtMs = 0;
+bool noScaleOverrideActive = false;
 bool cupStartGuardHold = false;
 uint32_t cupStartGuardHoldAtMs = 0;
 
@@ -5948,6 +5951,23 @@ void loop() {
   observeMachineSenseFromSession();
   serviceMachine();
   captureLoopGuards();
+  
+  if (noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode) && machineLastIntention().turnedOn) {
+    const uint32_t nowMs = millis();
+    if (noScaleOverrideCycles == 0 || elapsedMs(noScaleOverrideStartedAtMs) > 2000) {
+      noScaleOverrideCycles = 1;
+      noScaleOverrideStartedAtMs = nowMs;
+    } else {
+      noScaleOverrideCycles++;
+      if (noScaleOverrideCycles >= 3) {
+        noScaleOverrideCycles = 0;
+        noScaleOverrideActive = true;
+        consumeNoScaleShotGuard();
+        emitAlert(AlertEvent::SCALE_CONNECTED);
+      }
+    }
+  }
+
   serviceNoScaleShotGuard(loopGuardInputs);
   serviceCupStartGuard(loopGuardInputs);
   stateMachineTask();

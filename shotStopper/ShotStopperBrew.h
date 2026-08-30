@@ -432,7 +432,7 @@ void armNoScaleShotGuard() {
 }
 
 void consumeNoScaleShotGuard() {
-  if (noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode)) {
+  if (noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode) && !noScaleOverrideActive) {
     noScaleShotGuardArmed = true;
     return;
   }
@@ -482,13 +482,14 @@ void serviceNoScaleShotGuard(const GuardInputs &inputs) {
       }
     }
   }
-  if (noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode)) {
+  if (noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode) && !noScaleOverrideActive) {
     noScaleShotGuardArmed = true;
   } else if (!noScaleShotGuardArmed && !session.active &&
       noScaleShotGuardActivityAtMs != 0 &&
       elapsedMs(noScaleShotGuardActivityAtMs) >=
           runtimeConfig.lastShotCooldownMs) {
     armNoScaleShotGuard();
+    noScaleOverrideActive = false;
   }
 }
 
