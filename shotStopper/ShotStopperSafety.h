@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "ShotStopperResetHistory.h"
+
 namespace shotstopper {
 
 enum class RelaySafetyState : uint8_t {
@@ -90,6 +92,8 @@ struct RelaySafetySnapshot {
   uint32_t unsafeResetCount = 0;
   bool resetRecoveryRequired = false;
   bool bootLoopDetected = false;
+  uint8_t resetHistoryCount = 0;
+  ResetHistoryEntry resetHistory[RESET_HISTORY_CAPACITY] = {};
 };
 
 }  // namespace shotstopper

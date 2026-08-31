@@ -72,6 +72,7 @@ HWCDC shotStopperUsbConsole;
 #include "ShotStopperHardwareTimer.h"
 #include "ShotStopperResetGuard.h"
 #include "ShotStopperRecoveryGesture.h"
+#include "ShotStopperResetHistoryStore.h"
 #include "ShotStopperSafety.h"
 #include "ShotStopperShotLog.h"
 #include "ShotStopperShotCurve.h"
@@ -3709,6 +3710,7 @@ void settingsPersistTask(void *parameter) {
     if (xQueueReceive(settingsPersistQueue, &settingsPersistReceive,
                       pdMS_TO_TICKS(SETTINGS_PERSIST_IDLE_WAIT_MS)) !=
         pdTRUE) {
+      (void)persistResetUptimeCheckpoint(millis());
       feedOrTripCurrentTaskWatchdog();
       continue;
     }
@@ -4692,6 +4694,9 @@ void publishControlStatus() {
   next.unsafeResetCount = relay.unsafeResetCount;
   next.resetRecoveryRequired = relay.resetRecoveryRequired;
   next.bootLoopDetected = relay.bootLoopDetected;
+  next.resetHistoryCount = relay.resetHistoryCount;
+  for (uint8_t i = 0; i < next.resetHistoryCount; ++i)
+    next.resetHistory[i] = relay.resetHistory[i];
   next.scaleAvailable = scaleLinkAvailable(scaleLink);
   next.weightControlState = session.active
                                 ? session.weightControlState
@@ -5476,6 +5481,7 @@ void completeBootRecovery(RecoveryOperation operation) {
   if (!bootRecoveryShouldRestartAfterSuccess()) {
     return;
   }
+  recordResetUptime(millis(), true);
   ESP.restart();
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -5588,6 +5594,9 @@ void setup() {
     addDebugEvent(DebugCategory::CONFIG, DebugCode::INITIALIZATION_FAILED,
                   BOOT_SUBSYSTEM_PERSISTENCE);
   }
+  // RTC captures the prior uptime immediately across warm resets; NVS keeps
+  // the history when RTC memory is lost (for example after power loss).
+  persistResetHistoryAfterBoot(safetyResetStatus);
   bool settingsLoaded = false;
   if (persistenceReady && loadPersistedSettings(persistedSettings)) {
     settingsLoaded = true;
@@ -5891,6 +5900,7 @@ void serviceHealthThresholdAlerts(uint32_t intervalMaxGapMs) {
 
 void loop() {
   const uint32_t loopStartedAtMs = millis();
+  recordResetUptime(loopStartedAtMs);
   if (lastLoopAtMs != 0) {
     const uint32_t gap = loopStartedAtMs - lastLoopAtMs;
     if (gap > loopMaxGapMs) {
@@ -5919,6 +5929,7 @@ void loop() {
       machineRequestStop();
       serviceSafetyHeartbeat(false);
 #ifndef SHOT_STOPPER_HOST_TEST
+      recordResetUptime(millis(), true);
       ESP.restart();
 #else
       safeRestartRequested = false;

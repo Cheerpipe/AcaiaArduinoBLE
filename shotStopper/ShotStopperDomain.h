@@ -1954,6 +1954,8 @@ struct ControlStatusSnapshot {
   uint32_t unsafeResetCount = 0;
   bool resetRecoveryRequired = false;
   bool bootLoopDetected = false;
+  uint8_t resetHistoryCount = 0;
+  ResetHistoryEntry resetHistory[RESET_HISTORY_CAPACITY] = {};
   bool scaleAvailable = false;
   WeightStreamState weightStreamState = WeightStreamState::NO_SAMPLE;
   WeightControlState weightControlState = WeightControlState::INACTIVE;

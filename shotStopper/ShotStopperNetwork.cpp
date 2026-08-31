@@ -6,6 +6,7 @@
 #include "ShotStopperOta.h"
 #include "ShotStopperPsram.h"
 #include "ShotStopperRecovery.h"
+#include "ShotStopperResetGuard.h"
 #include "ShotStopperSerialCli.h"
 #include "ShotStopperShotCurveTypes.h"
 #include "ShotStopperVersion.h"
@@ -4783,6 +4784,15 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         control.bootComplete ? "true" : "false",
         control.bootDegraded ? "true" : "false",
         control.scaleWorkerReady ? "true" : "false");
+    if (ok) ok = statusJsonAppend(&used, ",\"resetHistory\":[");
+    for (uint8_t i = 0; ok && i < control.resetHistoryCount; ++i) {
+      const ResetHistoryEntry &entry = control.resetHistory[i];
+      ok = statusJsonAppend(
+          &used, "%s{\"reason\":\"%s\",\"uptimeMs\":%lu}",
+          i ? "," : "", safetyResetReasonName(entry.reasonCode),
+          static_cast<unsigned long>(entry.uptimeMs));
+    }
+    if (ok) ok = statusJsonAppend(&used, "]");
     if (ok) {
       const bool bbwEnabled = !control.config.timerOnly;
       const bool scaleUsable =
@@ -5187,7 +5197,7 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            "\"operationalTripped\":%s,\"generation\":%lu,\"closedAtMs\":%lu,"
            "\"operationalLimitMs\":%lu,\"resetReasonCode\":%lu,"
            "\"unsafeResetCount\":%lu,\"resetRecoveryRequired\":%s,"
-           "\"bootLoopDetected\":%s},",
+           "\"bootLoopDetected\":%s,\"resetHistory\":[",
            relaySafetyStateName(x.relay.state),
            relaySafetyFaultName(x.relay.fault),
            x.relay.closed ? "true" : "false",
@@ -5206,6 +5216,15 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            static_cast<unsigned long>(x.relay.unsafeResetCount),
            x.relay.resetRecoveryRequired ? "true" : "false",
            x.relay.bootLoopDetected ? "true" : "false");
+  for (uint8_t i = 0; i < x.relay.resetHistoryCount; ++i) {
+    const ResetHistoryEntry &entry = x.relay.resetHistory[i];
+    ok = ok && debugExportChunkf(
+                   request, buf, cap,
+                   "%s{\"reason\":\"%s\",\"uptimeMs\":%lu}",
+                   i ? "," : "", safetyResetReasonName(entry.reasonCode),
+                   static_cast<unsigned long>(entry.uptimeMs));
+  }
+  ok = ok && debugExportChunk(request, "]},");
 
   ok = ok &&
        debugExportChunkf(

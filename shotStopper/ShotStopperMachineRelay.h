@@ -208,6 +208,9 @@ RelaySafetySnapshot getRelaySafetySnapshot() {
   snapshot.unsafeResetCount = safetyResetStatus.unsafeResetCount;
   snapshot.resetRecoveryRequired = safetyResetStatus.recoveryRequired;
   snapshot.bootLoopDetected = safetyResetStatus.bootLoopDetected;
+  snapshot.resetHistoryCount = safetyResetStatus.resetHistoryCount;
+  for (uint8_t i = 0; i < snapshot.resetHistoryCount; ++i)
+    snapshot.resetHistory[i] = safetyResetStatus.resetHistory[i];
   portEXIT_CRITICAL(&relayMux);
   snapshot.feedbackClosed = readCircuitFeedbackClosed();
   return snapshot;

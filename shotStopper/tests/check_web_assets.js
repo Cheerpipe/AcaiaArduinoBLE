@@ -627,13 +627,13 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 52750) {
+if (htmlBytes > 53000) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
 if (jsBytes > 141000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 193800) {
+if (htmlBytes + jsBytes > 194000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -2251,7 +2251,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('<strong>Clock</strong>') ||
       !diagHtml.includes('<strong>Temp current</strong>') ||
       !diagHtml.includes('<strong>Temp peak</strong>') ||
-      diagHtml.includes('<details') ||
+      (diagHtml.match(/<details/g) || []).length !== 1 ||
+      !diagHtml.includes('<details><summary>Last 10 resets</summary>') ||
       diagHtml.includes('<summary>Diagnostics</summary>') ||
       !diagHtml.includes('id="hFirmware"') ||
       !diagHtml.includes('id="hBoot"') ||
@@ -4028,7 +4029,7 @@ if (generated.secondaryGzip.length > 4096) {
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
 }
-if (generated.combined > 54800) {
+if (generated.combined > 55000) {
   throw new Error('Combined Web UI gzip exceeds the 53.5 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||

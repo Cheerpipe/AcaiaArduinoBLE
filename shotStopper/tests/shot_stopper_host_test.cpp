@@ -1810,6 +1810,36 @@ void r20_three_unsafe_resets_are_latched_as_a_boot_loop() {
   CHECK(!reset.recoveryRequired);
 }
 
+void r20b_reset_history_keeps_reason_and_previous_uptime() {
+  resetHarness(false, false);
+  SafetyResetSnapshot reset = beginSafetyResetGuard();
+  CHECK(reset.resetHistoryCount == 1);
+  CHECK(reset.resetHistory[0].reasonCode == 1);
+  CHECK(reset.resetHistory[0].uptimeMs == 0);
+
+  recordResetUptime(123456);
+  hostSafetyResetReasonCode = 4;
+  hostSafetyResetReasonUnsafe = true;
+  reset = beginSafetyResetGuard();
+  CHECK(reset.resetHistoryCount == 2);
+  CHECK(reset.resetHistory[0].reasonCode == 4);
+  CHECK(reset.resetHistory[0].uptimeMs == 123456);
+  CHECK(reset.resetHistory[1].reasonCode == 1);
+}
+
+void r20c_reset_uptime_checkpoint_is_no_more_frequent_than_one_minute() {
+  resetHarness(false, false);
+  (void)beginSafetyResetGuard();
+  recordResetUptime(59999);
+  CHECK(safetyResetRecord.currentUptimeMs == 0);
+  recordResetUptime(60000);
+  CHECK(safetyResetRecord.currentUptimeMs == 60000);
+  recordResetUptime(119999);
+  CHECK(safetyResetRecord.currentUptimeMs == 60000);
+  recordResetUptime(120000);
+  CHECK(safetyResetRecord.currentUptimeMs == 120000);
+}
+
 void w01_default_runtime_configuration_is_valid() {
   const RuntimeConfig config;
   CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
@@ -10833,6 +10863,8 @@ const TestCase testCases[] = {
     {"R19", r19_reset_during_close_reopens_without_recovery_lockout},
     {"R19b", r19b_panic_boot_is_ready_for_webui_and_next_circuit_cycle},
     {"R20", r20_three_unsafe_resets_are_latched_as_a_boot_loop},
+    {"R20b", r20b_reset_history_keeps_reason_and_previous_uptime},
+    {"R20c", r20c_reset_uptime_checkpoint_is_no_more_frequent_than_one_minute},
     {"R21", r21_automatic_control_requires_fresh_weight},
     {"R22", r22_confirmed_implausible_weight_does_not_stop},
     {"R23", r23_maintenance_is_canceled_fail_open_by_physical_paddle},

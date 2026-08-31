@@ -330,3 +330,5 @@ html.theme-dark{--bg:#1a1612;--sf:#2a241e;--fg:#f3efe9;--mu:#b5a99a;--ln:#3d342c
 html.theme-light input,html.theme-light select,html.theme-light textarea{color-scheme:light}
 html.theme-dark,html.theme-dark input,html.theme-dark select,html.theme-dark textarea{color-scheme:dark}
 html.theme-dark #message{background:var(--bg)}
+
+#diagnosticsPanel details{grid-column:1/-1}#diagnosticsPanel details table{width:100%;border-collapse:collapse}#diagnosticsPanel details th,#diagnosticsPanel details td{text-align:left;padding:.3rem;border-bottom:1px solid var(--ln)}

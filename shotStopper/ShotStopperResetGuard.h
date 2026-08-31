@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "ShotStopperResetHistory.h"
+
 #ifndef SHOT_STOPPER_HOST_TEST
 #include <esp_attr.h>
 #include <esp_system.h>
@@ -13,7 +15,7 @@ constexpr uint32_t SAFETY_RESET_RECORD_MAGIC = 0x534E3947UL;
 constexpr uint32_t SAFETY_RELAY_OPEN_MARKER = 0x4F50454EUL;
 constexpr uint32_t SAFETY_RELAY_CLOSED_MARKER = 0x434C5344UL;
 constexpr uint32_t SAFETY_BOOT_LOOP_THRESHOLD = 3;
-
+constexpr uint32_t RESET_UPTIME_CHECKPOINT_INTERVAL_MS = 60000UL;
 struct SafetyResetRecord {
   uint32_t magic;
   uint32_t magicInverse;
@@ -21,6 +23,12 @@ struct SafetyResetRecord {
   uint32_t relayMarkerInverse;
   uint32_t unsafeResetCount;
   uint32_t unsafeResetCountInverse;
+  uint32_t historyCount;
+  uint32_t historyCountInverse;
+  ResetHistoryEntry history[RESET_HISTORY_CAPACITY];
+  uint32_t historyChecksum;
+  uint32_t currentUptimeMs;
+  uint32_t currentUptimeMsInverse;
 };
 
 struct SafetyResetSnapshot {
@@ -30,6 +38,8 @@ struct SafetyResetSnapshot {
   bool unsafeReset = false;
   bool bootLoopDetected = false;
   bool recoveryRequired = false;
+  uint8_t resetHistoryCount = 0;
+  ResetHistoryEntry resetHistory[RESET_HISTORY_CAPACITY] = {};
 };
 
 #ifndef SHOT_STOPPER_HOST_TEST
@@ -38,25 +48,57 @@ RTC_NOINIT_ATTR static volatile SafetyResetRecord safetyResetRecord;
 static volatile SafetyResetRecord safetyResetRecord;
 #endif
 
+static uint32_t resetUptimeLastCheckpointMs = 0;
+
 inline bool safetyResetRecordValid() {
+  uint32_t checksum = SAFETY_RESET_RECORD_MAGIC ^ safetyResetRecord.historyCount;
+  for (uint32_t i = 0;
+       i < safetyResetRecord.historyCount && i < RESET_HISTORY_CAPACITY;
+       ++i) {
+    checksum = (checksum * 16777619UL) ^ safetyResetRecord.history[i].reasonCode;
+    checksum = (checksum * 16777619UL) ^ safetyResetRecord.history[i].uptimeMs;
+  }
   return safetyResetRecord.magic == SAFETY_RESET_RECORD_MAGIC &&
          safetyResetRecord.magicInverse == ~SAFETY_RESET_RECORD_MAGIC &&
          safetyResetRecord.relayMarkerInverse ==
              ~safetyResetRecord.relayMarker &&
          safetyResetRecord.unsafeResetCountInverse ==
              ~safetyResetRecord.unsafeResetCount &&
+         safetyResetRecord.historyCount <= RESET_HISTORY_CAPACITY &&
+         safetyResetRecord.historyCountInverse == ~safetyResetRecord.historyCount &&
+         safetyResetRecord.historyChecksum == checksum &&
          (safetyResetRecord.relayMarker == SAFETY_RELAY_OPEN_MARKER ||
           safetyResetRecord.relayMarker == SAFETY_RELAY_CLOSED_MARKER);
 }
 
 inline void initializeSafetyResetRecord(
-    uint32_t relayMarker, uint32_t unsafeResetCount) {
+    uint32_t relayMarker, uint32_t unsafeResetCount,
+    const ResetHistoryEntry *history = nullptr, uint32_t historyCount = 0) {
   safetyResetRecord.magic = 0;
   safetyResetRecord.magicInverse = 0;
   safetyResetRecord.relayMarker = relayMarker;
   safetyResetRecord.relayMarkerInverse = ~relayMarker;
   safetyResetRecord.unsafeResetCount = unsafeResetCount;
   safetyResetRecord.unsafeResetCountInverse = ~unsafeResetCount;
+  safetyResetRecord.historyCount = historyCount > RESET_HISTORY_CAPACITY ? RESET_HISTORY_CAPACITY : historyCount;
+  safetyResetRecord.historyCountInverse = ~safetyResetRecord.historyCount;
+  for (uint32_t i = 0; i < RESET_HISTORY_CAPACITY; ++i) {
+    safetyResetRecord.history[i].reasonCode =
+        history && i < safetyResetRecord.historyCount
+            ? history[i].reasonCode
+            : 0;
+    safetyResetRecord.history[i].uptimeMs =
+        history && i < safetyResetRecord.historyCount ? history[i].uptimeMs
+                                                       : 0;
+  }
+  uint32_t checksum = SAFETY_RESET_RECORD_MAGIC ^ safetyResetRecord.historyCount;
+  for (uint32_t i = 0; i < safetyResetRecord.historyCount; ++i) {
+    checksum = (checksum * 16777619UL) ^ safetyResetRecord.history[i].reasonCode;
+    checksum = (checksum * 16777619UL) ^ safetyResetRecord.history[i].uptimeMs;
+  }
+  safetyResetRecord.historyChecksum = checksum;
+  safetyResetRecord.currentUptimeMs = 0;
+  safetyResetRecord.currentUptimeMsInverse = UINT32_MAX;
   safetyResetRecord.magicInverse = ~SAFETY_RESET_RECORD_MAGIC;
   safetyResetRecord.magic = SAFETY_RESET_RECORD_MAGIC;
 }
@@ -71,6 +113,19 @@ inline void recordRelayCommandedClosed(bool closed) {
                                  : SAFETY_RELAY_OPEN_MARKER;
   safetyResetRecord.relayMarkerInverse = ~marker;
   safetyResetRecord.relayMarker = marker;
+}
+
+inline void recordResetUptime(uint32_t uptimeMs, bool force = false) {
+  if (!safetyResetRecordValid()) return;
+  if (!force &&
+      (uptimeMs < RESET_UPTIME_CHECKPOINT_INTERVAL_MS ||
+       uptimeMs - resetUptimeLastCheckpointMs <
+           RESET_UPTIME_CHECKPOINT_INTERVAL_MS)) {
+    return;
+  }
+  safetyResetRecord.currentUptimeMsInverse = ~uptimeMs;
+  safetyResetRecord.currentUptimeMs = uptimeMs;
+  resetUptimeLastCheckpointMs = uptimeMs;
 }
 
 inline uint32_t currentSafetyResetReasonCode() {
@@ -149,6 +204,24 @@ inline SafetyResetSnapshot beginSafetyResetGuard() {
       valid ? safetyResetRecord.unsafeResetCount : 0;
 
   snapshot.reasonCode = currentSafetyResetReasonCode();
+  const uint32_t previousUptimeMs =
+      valid && safetyResetRecord.currentUptimeMsInverse ==
+                   ~safetyResetRecord.currentUptimeMs
+          ? safetyResetRecord.currentUptimeMs
+          : 0;
+  if (valid) {
+    snapshot.resetHistoryCount = static_cast<uint8_t>(safetyResetRecord.historyCount);
+    for (uint8_t i = 0; i < snapshot.resetHistoryCount; ++i) {
+      snapshot.resetHistory[i].reasonCode =
+          safetyResetRecord.history[i].reasonCode;
+      snapshot.resetHistory[i].uptimeMs = safetyResetRecord.history[i].uptimeMs;
+    }
+  }
+  const uint8_t oldCount = snapshot.resetHistoryCount;
+  const uint8_t newCount = oldCount < RESET_HISTORY_CAPACITY ? oldCount + 1 : RESET_HISTORY_CAPACITY;
+  for (int i = newCount - 1; i > 0; --i) snapshot.resetHistory[i] = snapshot.resetHistory[i - 1];
+  snapshot.resetHistory[0] = {snapshot.reasonCode, previousUptimeMs};
+  snapshot.resetHistoryCount = newCount;
   snapshot.resetDuringClose = resetDuringClose;
   // A torn or corrupted redundant record is unsafe after any warm reset. A
   // real power-on may legitimately start with undefined RTC no-init memory.
@@ -167,8 +240,8 @@ inline SafetyResetSnapshot beginSafetyResetGuard() {
 
   // The physical relay has already been driven OPEN by setup() before this
   // function is called. Publish that safe fact while retaining crash count.
-  initializeSafetyResetRecord(SAFETY_RELAY_OPEN_MARKER,
-                              snapshot.unsafeResetCount);
+  initializeSafetyResetRecord(SAFETY_RELAY_OPEN_MARKER, snapshot.unsafeResetCount,
+                              snapshot.resetHistory, snapshot.resetHistoryCount);
   return snapshot;
 }
 
@@ -180,6 +253,7 @@ inline void resetSafetyResetGuardForHost() {
   safetyResetRecord.relayMarkerInverse = 0;
   safetyResetRecord.unsafeResetCount = 0;
   safetyResetRecord.unsafeResetCountInverse = 0;
+  resetUptimeLastCheckpointMs = 0;
   hostSafetyResetReasonCode = 1;
   hostSafetyResetReasonUnsafe = false;
   hostSafetyResetReasonPowerOn = true;
