@@ -2971,6 +2971,15 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
       noScaleShotGuardHold = true;
       noScaleShotGuardHoldAtMs = millis();
       noScaleShotGuardNeedsFreshActivator = true;
+      if (!noScaleBbwRequiresScale(runtimeConfig.noScaleBbwMode) &&
+          !machineBlockedStartNeedsHoldQualification()) {
+        // WARN_ONCE is consumed by the first rejected start, including a
+        // normal momentary tap. Keep the hold latched until release so the
+        // same physical activation cannot close K1 after Armed clears.
+        consumeNoScaleShotGuard();
+        addDebugEvent(DebugCategory::STATE,
+                      DebugCode::NO_SCALE_SHOT_GUARD_BLOCKED);
+      }
       return;
     }
     blockNoScaleShotGuard();

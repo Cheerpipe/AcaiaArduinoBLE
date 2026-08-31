@@ -97,6 +97,9 @@ inline void machineNoteActivatorReleased() {
 inline void machineOnActivatorReady() {}
 inline void machineOnBrewOutcome(bool) {}
 inline bool machineSupportsRinse() { return runtimeConfig.rinseEnabled; }
+// A paddle ON may still classify as a short ON->OFF rinse. Keep a rejected
+// start pending until that gesture window has elapsed.
+inline bool machineBlockedStartNeedsHoldQualification() { return true; }
 inline void machineNoteFirmwareStop() {
   if (activatorOn || rawActivatorOn) {
     machineActivatorDriveSuppressedThisHold = true;
@@ -132,6 +135,9 @@ inline void machineCancelSettledWeightCutOff() {}
 #endif
 
 inline bool machineSupportsRinse() { return runtimeConfig.rinseEnabled; }
+// A momentary start edge is already a complete attempt. In particular,
+// release mode has no active hold left by the time REQUEST_START is emitted.
+inline bool machineBlockedStartNeedsHoldQualification() { return false; }
 inline void machineBeginCycle(bool) {}
 inline void machineEndCycle() { rinseActuationActive = false; }
 inline bool machineHidesPhysicalStop() { return false; }

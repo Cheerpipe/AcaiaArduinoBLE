@@ -383,18 +383,47 @@ void t_no_scale_bbw_armed_does_not_mirror_then_idle_allows() {
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(!session.active);
   CHECK(stopperState == StopperState::READY);
-  CHECK(noScaleShotGuardArmed);
-  CHECK(noScaleShotGuardHold);
-  runLoopAfter(runtimeConfig.rinseGestureMs + 1);
   CHECK(!noScaleShotGuardArmed);
-  CHECK(!noScaleShotGuardHold);
-  CHECK(!session.active);
-  CHECK(!getRelaySafetySnapshot().closed);
+  CHECK(noScaleShotGuardHold);
   releaseUp();
+  CHECK(!noScaleShotGuardHold);
   CHECK(!getRelaySafetySnapshot().closed);
   CHECK(!session.active);
   pressDown();
   CHECK(getRelaySafetySnapshot().closed);
+  CHECK(session.active);
+}
+
+void t_no_scale_bbw_release_mode_short_press_consumes_warning() {
+  resetMomentaryHarness();
+  runtimeConfig.momentaryStartOnPress = false;
+  runtimeConfig.timerOnly = false;
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE);
+  mutableActiveShotPreset(presetBank).brewByWeight = true;
+  runtimeConfig = composeEffectiveConfig(runtimeConfig, presetBank);
+  runtimeConfig.noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE);
+  noScaleShotGuardArmed = true;
+  scale.connected = false;
+  setScaleLinkState(ScaleLinkState::DISCONNECTED);
+  runLoopAfter(ACTIVATOR_DEBOUNCE_MS + 1);
+
+  pressDown();
+  CHECK(noScaleShotGuardArmed);
+  CHECK(!session.active);
+  releaseUp();
+  CHECK(!noScaleShotGuardArmed);
+  CHECK(noScaleShotGuardHold);
+  CHECK(!session.active);
+  CHECK(!getRelaySafetySnapshot().closed);
+
+  // The next idle loop releases the safety latch. A fresh press/release is
+  // then allowed to start a manual no-scale shot.
+  runLoopAfter(1);
+  CHECK(!noScaleShotGuardHold);
+  pressDown();
+  CHECK(getRelaySafetySnapshot().closed);
+  CHECK(!session.active);
+  releaseUp();
   CHECK(session.active);
 }
 
@@ -569,7 +598,7 @@ void t_rinse_armed_noscale_long_press_consumes_guard() {
   pressDown();
   CHECK(stopperState == StopperState::READY);
   CHECK(!getRelaySafetySnapshot().closed);
-  CHECK(noScaleShotGuardArmed);
+  CHECK(!noScaleShotGuardArmed);
   CHECK(localBuzzer.acceptedRequests == beforeBeeps + 1);
   runLoopAfter(runtimeConfig.rinseGestureMs);
   CHECK(stopperState == StopperState::RINSE);
@@ -2040,6 +2069,7 @@ const TestCase kTests[] = {
     {"P52", t_noscale_last_shot_keeps_logical_duration},
     {"P02", t_guard_reject_does_not_mirror},
     {"P50", t_no_scale_bbw_armed_does_not_mirror_then_idle_allows},
+    {"P50B", t_no_scale_bbw_release_mode_short_press_consumes_warning},
     {"P66", t_require_scale_triple_press_release_never_starts_on_final_release},
     {"P39", t_user_stop_without_session_does_not_leave_orphan_run},
     {"P03", t_long_press_mirrors_from_first_instant},
