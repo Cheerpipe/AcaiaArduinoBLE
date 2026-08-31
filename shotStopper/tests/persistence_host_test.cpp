@@ -561,10 +561,14 @@ void p47b_migrates_v1_blob_wifi_sleep_defaults_off() {
   finalizePersistedSettings(current);
 
   PersistedSettingsV1 v1{};
-  memcpy(&v1, &current, offsetof(PersistedSettingsV1, staSsid));
+  v1.storageRevision = current.storageRevision;
+  v1.runtime = current.runtime;
+  memcpy(&v1.presets, &current.presets,
+         offsetof(PersistedSettingsV1, staSsid) -
+             offsetof(PersistedSettingsV1, presets));
   memcpy(&v1.staSsid, &current.staSsid,
-         offsetof(PersistedSettings, checksum) -
-             offsetof(PersistedSettings, staSsid));
+         offsetof(PersistedSettingsV1, checksum) -
+             offsetof(PersistedSettingsV1, staSsid));
   v1.schemaVersion = 1;
   v1.structureSize = sizeof(PersistedSettingsV1);
   v1.checksum = 0;
@@ -580,6 +584,53 @@ void p47b_migrates_v1_blob_wifi_sleep_defaults_off() {
   CHECK(loaded.staConfigured);
   CHECK(strcmp(loaded.staSsid, "CafeLAN") == 0);
   CHECK(strcmp(loaded.staPassword, "CafePass1") == 0);
+}
+
+void p47e_migrates_v2_blob_with_bullseye_disabled() {
+  resetHostPersistence();
+  PersistedSettings current;
+  CHECK(initializeDefaultSettings(current));
+  current.staWifiSleep = false;
+  strcpy(current.preferredScaleMac, "AA:BB:CC:DD:EE:22");
+  finalizePersistedSettings(current);
+
+  PersistedSettingsV2 v2{};
+  v2.storageRevision = 17;
+  v2.runtime = current.runtime;
+  memcpy(&v2.presets, &current.presets,
+         offsetof(PersistedSettingsV2, checksum) -
+             offsetof(PersistedSettingsV2, presets));
+  v2.schemaVersion = 2;
+  v2.structureSize = sizeof(PersistedSettingsV2);
+  v2.checksum = 0;
+  v2.checksum = persistedSettingsV2Checksum(v2);
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &v2,
+                           sizeof(v2));
+
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(loaded.schemaVersion == CONFIG_SCHEMA_VERSION);
+  CHECK(loaded.storageRevision == 17);
+  CHECK(!loaded.staWifiSleep);
+  CHECK(strcmp(loaded.preferredScaleMac, "AA:BB:CC:DD:EE:22") == 0);
+  CHECK(!loaded.bullseyeMelody.enabled);
+  CHECK(loaded.bullseyeMelody.rtttl[0] == '\0');
+}
+
+void p47f_bullseye_melody_persists_as_fixed_record() {
+  resetHostPersistence();
+  PersistedSettings settings;
+  CHECK(initializeDefaultSettings(settings));
+  settings.bullseyeMelody.enabled = true;
+  copyCString(settings.bullseyeMelody.rtttl,
+              sizeof(settings.bullseyeMelody.rtttl),
+              "bullseye:d=8,o=5,b=180:c,e,g,c6");
+  CHECK(savePersistedSettings(settings));
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(loaded.bullseyeMelody.enabled);
+  CHECK(strcmp(loaded.bullseyeMelody.rtttl,
+               "bullseye:d=8,o=5,b=180:c,e,g,c6") == 0);
 }
 
 void p47c_desired_wifi_power_save_policy() {
@@ -694,7 +745,7 @@ void p24_preset_bank_size_and_crud_budgets() {
   CHECK(sizeof(ShotPreset) <= 136);
   CHECK(sizeof(ShotPresetBank) <= 1100);
   CHECK(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET);
-  CHECK(sizeof(PersistedSettings) == 1912);
+  CHECK(sizeof(PersistedSettings) == 2416);
   CHECK(sizeof(RuntimeConfig) == 252);
   CHECK(sizeof(SettingsPersistRequest) <= PERSISTED_SETTINGS_NVS_BUDGET + 16);
   CHECK(sizeof(ControlStatusSnapshot) <= 4096);
@@ -1453,6 +1504,8 @@ const TestCase tests[] = {
     {"P12", p12_shot_log_persists_compact_blob},
     {"P47", p47_rejects_non_current_schema_blob},
     {"P47B", p47b_migrates_v1_blob_wifi_sleep_defaults_off},
+    {"P47E", p47e_migrates_v2_blob_with_bullseye_disabled},
+    {"P47F", p47f_bullseye_melody_persists_as_fixed_record},
     {"P47C", p47c_desired_wifi_power_save_policy},
     {"P47D", p47d_durable_flash_write_gate},
     {"P46", p46_ring_retain_log_level_persists_round_trip},

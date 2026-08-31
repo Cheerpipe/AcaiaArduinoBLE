@@ -44,6 +44,22 @@ including rinse end.
 | **Blue LED while scale connected** | ON | ON / OFF | Onboard GPIO 1 HIGH while a scale is BLE-connected. Independent of Sound alerts. |
 | **Extended shot pulse** | Fast | Disabled / Slow / Medium / Fast / Rapid | Local-buzzer pulses while Fast extraction guard keeps the shot running past the normal cut. Disabled when Output channel is Scale only. |
 | **Slow extended pulse** | Fast | Same rates | Same idea for Slow extraction guard. |
+| **Bullseye melody** | OFF | ON / OFF; Buzzer only | Plays the saved custom RTTTL tune once when a finished shot remains exactly at its target weight for at least 1 second. The text is retained when disabled. |
+| **Custom RTTTL** | empty | Up to 500 ASCII characters / 250 notes | Validated when saved and parsed into a fixed-capacity buffer. Editable only while Bullseye melody is enabled; otherwise it remains visible and read-only. |
+
+## Bullseye timing
+
+Bullseye applies to automatic, timer-only, and manual shots, but not rinses.
+It is active only when **Sound alerts** is on, **Output channel** is **Buzzer
+only**, and a local buzzer is compiled in.
+
+Tracking starts when the machine circuit opens. Repeated fresh scale samples
+must report the target exactly for a continuous 1 second; a different weight
+or a gap longer than the normal 1-second automation freshness limit restarts
+the stability timer. The melody can therefore play during the configured drip
+delay as soon as the 1-second condition is met. A target run beginning at the
+drip-delay boundary gets one additional second to complete, after which the
+pending Bullseye is discarded. Starting another cycle also discards it.
 
 In **Buzzer only** (and Scale priority when the scale is not usable),
 tare/retare sounds follow paddle/retare immediately and do not wait for a

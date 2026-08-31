@@ -71,9 +71,11 @@ fieldset{margin:.85rem 0;padding:.85rem;border:1px solid var(--ln);border-radius
 legend{font-weight:700;padding:0 .3rem;color:var(--ac)}
 legend .hint{font-weight:400;font-size:.75rem;color:var(--mu)}
 label{display:block;margin:.55rem 0}
-input,select,button{font:inherit;padding:.45rem .5rem;line-height:1.2}
+input,select,textarea,button{font:inherit;padding:.45rem .5rem;line-height:1.2}
 button{-webkit-appearance:none;appearance:none}
 input[type=number],input[type=text],input[type=password],select{display:block;width:100%;max-width:100%;box-sizing:border-box;height:2.5rem;min-height:2.5rem;margin-top:.35rem;border:1px solid var(--ln);border-radius:.4rem;background:var(--bg);color:var(--fg)}
+textarea{display:block;width:100%;max-width:38rem;box-sizing:border-box;margin-top:.35rem;border:1px solid var(--ln);border-radius:.4rem;background:var(--bg);color:var(--fg);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}
+textarea[readonly]{cursor:default}
 input[type=file]{display:block;margin-top:.35rem}
 input[type=text],input[type=password]{-webkit-appearance:none;appearance:none}
 select{-webkit-appearance:none;appearance:none;padding-right:1.85rem;background-image:linear-gradient(45deg,transparent 50%,var(--mu) 50%),linear-gradient(135deg,var(--mu) 50%,transparent 50%);background-position:calc(100% - 1.05rem) calc(50% - .12rem),calc(100% - .7rem) calc(50% - .12rem);background-size:.4rem .4rem,.4rem .4rem;background-repeat:no-repeat}

@@ -25,6 +25,7 @@ inline bool validPersistedSettings(const PersistedSettings &settings) {
       settings.structureSize != sizeof(PersistedSettings) ||
       settings.checksum != persistedSettingsChecksum(settings) ||
       validateRuntimeConfig(settings.runtime) != ConfigValidationError::NONE ||
+      !validBullseyeMelodyConfig(settings.bullseyeMelody) ||
       !validateShotPresetBank(settings.presets, settings.runtime.retareWindowMs,
                               settings.runtime.autoRetare) ||
       !validDevicePassword(settings.devicePassword) ||
@@ -86,13 +87,21 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
       return true;
     }
   }
-  if (storedLength == sizeof(PersistedSettingsV1)) {
-    PersistedSettingsV1 v1{};
-    if (preferences.getBytes(key, &v1, sizeof(v1)) != sizeof(v1)) {
+  if (storedLength == sizeof(PersistedSettingsV2)) {
+    PersistedSettingsV2 legacy{};
+    if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy)) {
       return false;
     }
-    return migratePersistedSettingsFromV1(v1, settings) &&
-           validPersistedSettings(settings);
+    if (legacy.schemaVersion == 2) {
+      return migratePersistedSettingsFromV2(legacy, settings) &&
+             validPersistedSettings(settings);
+    }
+    if (legacy.schemaVersion == 1) {
+      PersistedSettingsV1 v1{};
+      memcpy(&v1, &legacy, sizeof(v1));
+      return migratePersistedSettingsFromV1(v1, settings) &&
+             validPersistedSettings(settings);
+    }
   }
   return false;
 }

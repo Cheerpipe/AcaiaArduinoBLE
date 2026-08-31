@@ -56,6 +56,7 @@ const serialCli = fs.readFileSync(path.join(sketchDir, 'ShotStopperSerialCli.h')
 const buzzer = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzer.h'), 'utf8');
 const buzzerPatterns = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzerPatterns.h'), 'utf8');
 const buzzerPassive = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzerPassive.h'), 'utf8');
+const rtttlParser = fs.readFileSync(path.join(sketchDir, 'ShotStopperRtttl.h'), 'utf8');
 const buzzerRtttl = fs.readFileSync(path.join(sketchDir, 'ShotStopperBuzzerRtttl.h'), 'utf8');
 const alertChannel = fs.readFileSync(path.join(sketchDir, 'ShotStopperAlertChannel.h'), 'utf8');
 const alertTone = fs.readFileSync(path.join(sketchDir, 'ShotStopperAlertTone.h'), 'utf8');
@@ -627,13 +628,13 @@ for (const name of VIEW_NAMES) {
 
 const htmlBytes = Buffer.byteLength(allHtml, 'utf8');
 const jsBytes = Buffer.byteLength(allJs, 'utf8');
-if (htmlBytes > 53000) {
+if (htmlBytes > 54000) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 141000) {
+if (jsBytes > 143000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 194000) {
+if (htmlBytes + jsBytes > 197000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -731,8 +732,8 @@ if (!network.includes('"firstDropBeep"') ||
     !network.includes('jsonFieldPresent') ||
     !network.includes('CONFIG_REVISION_STALE') ||
     !network.includes('settingFieldCount') ||
-    !network.includes('allowedCount > 64') ||
-    !network.includes('uint64_t seen') ||
+    !network.includes('allowedCount > kSeenWords * 64U') ||
+    !network.includes('uint64_t seen[kSeenWords]') ||
     !network.includes('WEB_UI_ETAG') ||
     !network.includes('\\"buzzerSupported\\"') ||
     !network.includes('BUZZER_SUPPORT_ENABLED') ||
@@ -807,6 +808,19 @@ if (firmware.includes('SHOT_STOPPER_ENABLE_ALED') ||
     domain.includes('SHOT_STOPPER_ENABLE_ALED') ||
     domain.includes('BOOT_SUBSYSTEM_INDICATORS')) {
   throw new Error('WS2812B/ALED support must be fully removed');
+}
+if (!ui.includes('id="bullseyeMelodyEnabled"') ||
+    !ui.includes('id="bullseyeRtttl" maxlength="500"') ||
+    !ui.includes('Bullseye melody') ||
+    !js.includes('bullseyeMelodyEnabled') ||
+    !js.includes('bullseyeRtttl') ||
+    !network.includes('"bullseyeMelodyEnabled"') ||
+    !network.includes('"bullseyeRtttl"') ||
+    !network.includes('stageBullseyeConfig') ||
+    !firmwareCore.includes('serviceBullseyeMelody') ||
+    !firmwareCore.includes('AlertOutputChannel::BUZZER_ONLY') ||
+    !firmwareCore.includes('BULLSEYE_STABILITY_MS')) {
+  throw new Error('Bullseye RTTTL alert must be configurable end-to-end');
 }
 if (!ui.includes("scaleConnectedLed:$('scaleConnectedLed').checked") ||
     !ui.includes("'scaleConnectedLed'") ||
@@ -941,7 +955,7 @@ if (!domain.includes('BUZZER_SUPPORT_ENABLED = SHOT_STOPPER_ENABLE_BUZZER != 0')
     !domain.includes('static_cast<uint8_t>(DEFAULT_ALERT_OUTPUT_CHANNEL)') ||
     !buzzer.includes('requestTone') ||
     !buzzerPassive.includes('ledcAttach') ||
-    !buzzerPassive.includes('parseRtttl') ||
+    !rtttlParser.includes('parseRtttl') ||
     !buzzerPatterns.includes('BUZZER_ECHO_INVERTED_NOTES') ||
     buzzerPatterns.includes('buzzerActiveSetTone') ||
     !buzzerRtttl.includes('RTTTL_TARE') ||
@@ -4017,11 +4031,11 @@ if (generated.gzip.length > 4096) {
 if (generated.jsGzip.length > 6144) {
   throw new Error('Compressed Web UI shell JS exceeds the 6 KiB gzip budget');
 }
-if (generated.cssGzip.length > 6500) {
-  throw new Error('Compressed Web CSS exceeds the 6.3 KiB gzip budget');
+if (generated.cssGzip.length > 6600) {
+  throw new Error('Compressed Web CSS exceeds the 6.5 KiB gzip budget');
 }
-if (generated.runtimeGzip.length > 28300) {
-  throw new Error('Compressed Web UI runtime JS exceeds the 27.6 KiB gzip budget');
+if (generated.runtimeGzip.length > 28800) {
+  throw new Error('Compressed Web UI runtime JS exceeds the 28.1 KiB gzip budget');
 }
 if (generated.secondaryGzip.length > 4096) {
   throw new Error('Compressed secondary view JS exceeds the 4 KiB gzip budget');
@@ -4029,8 +4043,8 @@ if (generated.secondaryGzip.length > 4096) {
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
 }
-if (generated.combined > 55000) {
-  throw new Error('Combined Web UI gzip exceeds the 53.5 KiB flash budget');
+if (generated.combined > 56000) {
+  throw new Error('Combined Web UI gzip exceeds the 54.7 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {

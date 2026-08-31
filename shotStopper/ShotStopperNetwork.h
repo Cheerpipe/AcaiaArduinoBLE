@@ -159,6 +159,9 @@ struct NetworkBridgeCallbacks {
   void (*copyScaleHistory)(ScaleHistoryEntry *out) = nullptr;
   void (*copyPresetBank)(ShotPresetBank *out) = nullptr;
   void (*copyRuntimeConfig)(RuntimeConfig *out) = nullptr;
+  void (*copyBullseyeConfig)(BullseyeMelodyConfig *out) = nullptr;
+  bool (*stageBullseyeConfig)(const BullseyeMelodyConfig &config,
+                              uint32_t requestId) = nullptr;
   void (*copyDebugExportExtras)(DebugExportExtras &out,
                                 const ControlStatusSnapshot &control) = nullptr;
   void (*copyTaskProfiler)(TaskProfilerSnapshot &out) = nullptr;
@@ -182,6 +185,7 @@ class ShotStopperNetwork {
   void syncScaleHuntRf(bool huntActive);
   void syncLiveRuntime(const RuntimeConfig &runtime,
                        const ShotPresetBank *presets);
+  void syncLiveBullseye(const BullseyeMelodyConfig &config);
   void syncDurableStorageRevision(uint32_t storageRevision);
   PersistedSettings settingsCopy();
   StaJoinHints staJoinHints();

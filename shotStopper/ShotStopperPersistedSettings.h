@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ShotStopperDomain.h"
+#include "ShotStopperBullseye.h"
 #include "ShotStopperPresets.h"
 
 namespace shotstopper {
@@ -17,6 +18,7 @@ struct PersistedSettings {
   uint32_t structureSize = 0;
   uint32_t storageRevision = 0;
   RuntimeConfig runtime = {};
+  BullseyeMelodyConfig bullseyeMelody = {};
   ShotPresetBank presets = {};
   bool staConfigured = false;
   bool staOpen = false;
@@ -69,7 +71,7 @@ static_assert(offsetof(PersistedSettings, storageRevision) + sizeof(uint32_t) ==
 
 static_assert(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET,
               "PersistedSettings exceeds NVS dual-slot budget");
-static_assert(sizeof(PersistedSettings) == 1912,
+static_assert(sizeof(PersistedSettings) == 2416,
               "PersistedSettings size changed; bump CONFIG_SCHEMA_VERSION");
 
 inline uint32_t persistedSettingsChecksum(const PersistedSettings &settings) {

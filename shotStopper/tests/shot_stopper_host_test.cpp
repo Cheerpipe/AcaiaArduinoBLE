@@ -97,6 +97,10 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   session = CycleSession{};
   resetCupPresence();
   pendingFinalize = PendingShotFinalize{};
+  bullseyeTracker.clear();
+  bullseyeMelodyConfig = BullseyeMelodyConfig{};
+  stagedBullseyeMelodyConfig = BullseyeMelodyConfig{};
+  stagedBullseyeRequestId = 0;
   pendingScaleTimerStop = PendingScaleTimerStop{};
   pendingBrewRfRestore = false;
   runtimeConfig = RuntimeConfig{};
@@ -4873,7 +4877,7 @@ void w99_rtttl_parser_decodes_notes_and_rests() {
     const BuzzerCue cue = static_cast<BuzzerCue>(i);
     const char *rtttl = rtttlForCue(cue);
     if (rtttl == nullptr) {
-      CHECK(buzzerCueIsLooping(cue));
+      CHECK(buzzerCueIsLooping(cue) || cue == BuzzerCue::BULLSEYE);
       continue;
     }
     CHECK(parseRtttl(rtttl, notes, count));
@@ -4908,6 +4912,88 @@ void w99_rtttl_parser_decodes_notes_and_rests() {
   CHECK(localBuzzer.pulseNoteCount[static_cast<uint8_t>(
             ExtendedPulseRate::FAST)] == 3);
 #endif
+}
+
+void w99f_bullseye_rtttl_is_bounded_and_plays_without_allocation() {
+  resetHarness(false, false);
+  constexpr const char *tune =
+      "bullseye:d=16,o=5,b=180:c,e,g,c6,8p,c6";
+  BullseyeMelodyConfig config;
+  config.enabled = true;
+  copyCString(config.rtttl, sizeof(config.rtttl), tune);
+  CHECK(validBullseyeMelodyConfig(config));
+  CHECK(localBuzzer.configureBullseyeRtttl(config.rtttl));
+  CHECK(localBuzzer.requestBullseye());
+  CHECK(localBuzzer.activeCue == BuzzerCue::BULLSEYE);
+  CHECK(localBuzzer.rtttlPlayback);
+  CHECK(localBuzzer.rtttlCount == 6);
+
+  config.rtttl[0] = '\0';
+  CHECK(!validBullseyeMelodyConfig(config));
+  config.enabled = false;
+  CHECK(validBullseyeMelodyConfig(config));
+  copyCString(config.rtttl, sizeof(config.rtttl), "not-rtttl");
+  CHECK(!validBullseyeMelodyConfig(config));
+}
+
+void w99g_bullseye_requires_one_second_of_exact_fresh_samples() {
+  BullseyeTracker tracker;
+  tracker.arm(36, 1000, 3000, 10);
+  CHECK(!tracker.accept(36.0f, 1100, 11, 1000));
+  CHECK(!tracker.accept(35.99f, 1500, 12, 1000));
+  CHECK(!tracker.accept(36.0f, 1600, 13, 1000));
+  CHECK(!tracker.accept(36.0f, 2500, 14, 1000));
+  CHECK(tracker.accept(36.0f, 2600, 15, 1000));
+  CHECK(!tracker.pending);
+
+  tracker.arm(36, 1000, 3000, 20);
+  CHECK(!tracker.accept(36.0f, 3900, 21, 1000));
+  CHECK(tracker.accept(36.0f, 4900, 22, 1000));
+  CHECK(!tracker.expired(5000));
+
+  tracker.arm(36, 1000, 3000, 30);
+  CHECK(!tracker.accept(36.0f, 2000, 31, 1000));
+  CHECK(!tracker.accept(36.0f, 3001, 32, 1000));
+  CHECK(tracker.targetSampleCount == 1);
+  CHECK(tracker.expired(5001));
+}
+
+void w99h_bullseye_service_runs_only_in_buzzer_only_mode() {
+  resetHarness(false, true);
+  bullseyeMelodyConfig.enabled = true;
+  copyCString(bullseyeMelodyConfig.rtttl,
+              sizeof(bullseyeMelodyConfig.rtttl),
+              "bullseye:d=16,o=5,b=180:c,e,g,c6");
+  CHECK(localBuzzer.configureBullseyeRtttl(bullseyeMelodyConfig.rtttl));
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  hostMillis = 1000;
+  markScaleWorkerProgress();
+  bullseyeTracker.arm(36, hostMillis, 3000, 10);
+  currentWeight = 36.0f;
+  currentWeightSequence = 11;
+  currentWeightReceivedAtMs = 1100;
+  hostMillis = 1100;
+  serviceBullseyeMelody();
+  CHECK(bullseyeTracker.pending);
+  currentWeightSequence = 12;
+  currentWeightReceivedAtMs = 2100;
+  hostMillis = 2100;
+  markScaleWorkerProgress();
+  serviceBullseyeMelody();
+  CHECK(!bullseyeTracker.pending);
+  CHECK(localBuzzer.activeCue == BuzzerCue::BULLSEYE);
+
+  localBuzzer.stopAll();
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+  bullseyeTracker.arm(36, hostMillis, 3000, currentWeightSequence);
+  ++currentWeightSequence;
+  currentWeightReceivedAtMs = hostMillis + 100;
+  hostMillis += 100;
+  serviceBullseyeMelody();
+  CHECK(!bullseyeTracker.pending);
+  CHECK(localBuzzer.activeCue == BuzzerCue::NONE);
 }
 
 void w99b_passive_cue_drives_ledc_note_frequency() {
@@ -11097,6 +11183,9 @@ const TestCase testCases[] = {
     {"W99c", w99c_select_alert_sink_preserves_channel_rules},
     {"W99d", w99d_pending_rtttl_starts_from_preparsed_catalog},
     {"W99e", w99e_recovery_cue_bypasses_mute_via_pipeline},
+    {"W99f", w99f_bullseye_rtttl_is_bounded_and_plays_without_allocation},
+    {"W99g", w99g_bullseye_requires_one_second_of_exact_fresh_samples},
+    {"W99h", w99h_bullseye_service_runs_only_in_buzzer_only_mode},
     {"W63", w63_scale_priority_paddle_uses_scale_when_connected},
     {"W64", w64_buzzer_only_first_drop_uses_local_buzzer},
     {"W65", w65_scale_only_mutes_scale_lost},

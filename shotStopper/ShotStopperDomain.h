@@ -63,7 +63,7 @@ constexpr uint32_t SERIAL_BAUD = 115200;
 // after staOpen). V2 names that byte staWifiSleep without growing the blob.
 // Bump and add a migration when the blob layout changes
 // (see ShotStopperSettingsMigrate.h).
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 2;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 3;
 // Rinse clock default. Detection window default is DEFAULT_RINSE_GESTURE_MS
 // (machine-owned, ShotStopperMachineTypes.h).
 constexpr uint32_t DEFAULT_RINSE_DURATION_MS = 4000;
@@ -1798,6 +1798,10 @@ struct WebCommand {
   bool unsafeWebUiOverride = false;
   uint32_t maintenanceLeaseId = 0;
   RuntimeConfig config = {};
+  // The 501-byte RTTTL text is staged in a fixed PSRAM mailbox instead of
+  // inflating every four-deep FreeRTOS command queue element in internal RAM.
+  bool bullseyeConfigSpecified = false;
+  uint32_t bullseyeStageRequestId = 0;
   // PRESET_OP payload (keep small — no full bank on the queue element).
   uint8_t presetAction = 0;
   uint8_t presetId = 0;

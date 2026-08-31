@@ -344,6 +344,11 @@ ShotTrajectory shot;
 CycleSession session;
 PendingShotFinalize pendingFinalize;
 RuntimeConfig runtimeConfig;
+SHOT_STOPPER_PSRAM_BSS BullseyeMelodyConfig bullseyeMelodyConfig;
+SHOT_STOPPER_PSRAM_BSS BullseyeMelodyConfig stagedBullseyeMelodyConfig;
+uint32_t stagedBullseyeRequestId = 0;
+portMUX_TYPE bullseyeConfigMux = portMUX_INITIALIZER_UNLOCKED;
+BullseyeTracker bullseyeTracker;
 LocalBuzzer localBuzzer;
 ShotPresetBank presetBank;
 LastCycleSummary lastCycle;
@@ -1141,6 +1146,53 @@ void copyRuntimeConfig(RuntimeConfig *out) {
     }
   }
   *out = publishedRuntimeConfig;
+}
+
+void copyBullseyeConfig(BullseyeMelodyConfig *out) {
+  if (out == nullptr) {
+    return;
+  }
+  portENTER_CRITICAL(&bullseyeConfigMux);
+  *out = bullseyeMelodyConfig;
+  portEXIT_CRITICAL(&bullseyeConfigMux);
+}
+
+bool stageBullseyeConfig(const BullseyeMelodyConfig &config,
+                         uint32_t requestId) {
+  if (requestId == 0 || !validBullseyeMelodyConfig(config)) {
+    return false;
+  }
+  portENTER_CRITICAL(&bullseyeConfigMux);
+  stagedBullseyeMelodyConfig = config;
+  stagedBullseyeRequestId = requestId;
+  portEXIT_CRITICAL(&bullseyeConfigMux);
+  return true;
+}
+
+bool takeStagedBullseyeConfig(uint32_t requestId,
+                              BullseyeMelodyConfig &out) {
+  bool matched = false;
+  portENTER_CRITICAL(&bullseyeConfigMux);
+  if (requestId != 0 && stagedBullseyeRequestId == requestId) {
+    out = stagedBullseyeMelodyConfig;
+    stagedBullseyeRequestId = 0;
+    matched = true;
+  }
+  portEXIT_CRITICAL(&bullseyeConfigMux);
+  return matched;
+}
+
+void commitLiveBullseyeConfig(const BullseyeMelodyConfig &config) {
+  portENTER_CRITICAL(&bullseyeConfigMux);
+  bullseyeMelodyConfig = config;
+  portEXIT_CRITICAL(&bullseyeConfigMux);
+  (void)localBuzzer.configureBullseyeRtttl(bullseyeMelodyConfig.rtttl);
+  if (!bullseyeMelodyConfig.enabled) {
+    bullseyeTracker.clear();
+  }
+#ifndef SHOT_STOPPER_HOST_TEST
+  networkManager.syncLiveBullseye(bullseyeMelodyConfig);
+#endif
 }
 
 
@@ -2433,6 +2485,32 @@ void pendingShotFinalizeTask() {
                preset->weightOffsetG);
 }
 
+void serviceBullseyeMelody() {
+  if (!bullseyeTracker.pending) {
+    return;
+  }
+  const uint32_t nowMs = millis();
+  if (!bullseyeMelodyConfig.enabled || !soundAlertsEnabled() ||
+      currentAlertOutputChannel() != AlertOutputChannel::BUZZER_ONLY ||
+      !localBuzzer.ready || session.active || bullseyeTracker.expired(nowMs)) {
+    bullseyeTracker.clear();
+    return;
+  }
+  if (!scaleAvailable() || !currentWeightIsFresh(nowMs) ||
+      currentWeightSequence == bullseyeTracker.processedWeightSequence) {
+    return;
+  }
+  if (bullseyeTracker.accept(currentWeight, currentWeightReceivedAtMs,
+                              currentWeightSequence,
+                              MAX_AUTOMATION_WEIGHT_AGE_MS)) {
+    (void)localBuzzer.requestBullseye();
+    serialTracef(LogLevel::INFO,
+                 "Bullseye: %.2fg stable at target for %lums",
+                 static_cast<double>(currentWeight),
+                 static_cast<unsigned long>(BULLSEYE_STABILITY_MS));
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Scale connection and weight packets
 // ---------------------------------------------------------------------------
@@ -2926,6 +3004,7 @@ void processScaleWorkerEvents() {
 // ---------------------------------------------------------------------------
 
 void resetSessionForNewCycle(ControlSource source) {
+  bullseyeTracker.clear();
   session = CycleSession{};
   session.id = nextCycleId++;
   if (nextCycleId == 0) {
@@ -3120,6 +3199,16 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
     emitAlert(AlertEvent::ATM_END);
   }
   scheduleScaleTimerStopAfterCycle(durationMs);
+
+  if (!rinseEnd && !brewEndIsAbandonedStart(reason) &&
+      bullseyeMelodyConfig.enabled && soundAlertsEnabled() &&
+      currentAlertOutputChannel() == AlertOutputChannel::BUZZER_ONLY &&
+      localBuzzer.ready) {
+    bullseyeTracker.arm(session.config.goalWeightG, millis(),
+                         session.config.dripDelayMs, currentWeightSequence);
+  } else {
+    bullseyeTracker.clear();
+  }
 
   schedulePendingShotFinalize(reason, durationMs);
   // Home status must show the last shot immediately (during drip delay),
@@ -3809,6 +3898,7 @@ bool dispatchSettingsPersist() {
   SettingsPersistRequest &request = settingsPersistRequest;
   request.blob = networkManager.settingsCopy();
   request.blob.runtime = runtimeConfig;
+  request.blob.bullseyeMelody = bullseyeMelodyConfig;
   request.blob.presets = presetBank;
   copyPreferredScaleMac(request.blob.preferredScaleMac,
                         sizeof(request.blob.preferredScaleMac));
@@ -4069,6 +4159,14 @@ void processWebCommand(const WebCommand &command) {
         rejectWebCommand(command);
         return;
       }
+      BullseyeMelodyConfig stagedBullseye = {};
+      if (command.bullseyeConfigSpecified &&
+          (!takeStagedBullseyeConfig(command.bullseyeStageRequestId,
+                                     stagedBullseye) ||
+           !validBullseyeMelodyConfig(stagedBullseye))) {
+        rejectWebCommand(command);
+        return;
+      }
       // Machine/workflow fields only. Recipe authority stays on the active preset.
       RuntimeConfig candidate = runtimeConfig;
       candidate.autoTare = command.config.autoTare;
@@ -4148,6 +4246,9 @@ void processWebCommand(const WebCommand &command) {
       ensureShotPresetBank(presetBank, composed.retareWindowMs,
                            composed.autoRetare);
       commitLiveRuntimeConfig(composed, RUNTIME_PERSIST_REASON_USER);
+      if (command.bullseyeConfigSpecified) {
+        commitLiveBullseyeConfig(stagedBullseye);
+      }
       reportControlCommandResult(command, CommandResultState::APPLIED);
       return;
     }
@@ -5653,6 +5754,7 @@ void setup() {
       bleCompanionConfigured != bleCompanionRuntimeSnapshot.enabled;
   if (settingsLoaded) {
     runtimeConfig = persistedSettings.runtime;
+    bullseyeMelodyConfig = persistedSettings.bullseyeMelody;
     presetBank = persistedSettings.presets;
     ensureShotPresetBank(presetBank, runtimeConfig.retareWindowMs,
                          runtimeConfig.autoRetare);
@@ -5662,8 +5764,10 @@ void setup() {
   }
 #else
   runtimeConfig = RuntimeConfig{};
+  bullseyeMelodyConfig = BullseyeMelodyConfig{};
   seedDefaultShotPresetBank(presetBank);
 #endif
+  (void)localBuzzer.configureBullseyeRtttl(bullseyeMelodyConfig.rtttl);
   serialLogLevel = serialLogLevelFromRuntime(runtimeConfig);
   ringRetainLogLevel =
       static_cast<LogLevel>(runtimeConfig.ringRetainLogLevel);
@@ -5799,6 +5903,8 @@ void setup() {
     callbacks.copyScaleHistory = copyScaleHistory;
     callbacks.copyPresetBank = copyPresetBank;
     callbacks.copyRuntimeConfig = copyRuntimeConfig;
+    callbacks.copyBullseyeConfig = copyBullseyeConfig;
+    callbacks.stageBullseyeConfig = stageBullseyeConfig;
     callbacks.copyDebugExportExtras = copyDebugExportExtras;
     callbacks.copyTaskProfiler = copyTaskProfiler;
     if (!networkManager.begin(persistedSettings, callbacks)) {
@@ -5992,6 +6098,7 @@ void loop() {
   serviceScaleCompletionBeep();
   servicePendingScaleTimerStop();
   serviceRemoteTimerStopRetry();
+  serviceBullseyeMelody();
   pendingShotFinalizeTask();
   serviceSerialCli();
   serviceMaintenanceCancellation();

@@ -23,6 +23,7 @@ export function init(){
   $('soundAlertsEnabled').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('paddleReturnReminderBeep').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('alertOutputChannel').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
+  $('bullseyeMelodyEnabled').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('fastExtractionGuardEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings()};
   if($('avoidAccidentalTouchEnabled'))$('avoidAccidentalTouchEnabled').onchange=()=>{R.syncHomeGuardSwitchesFromSettings()};
   $('slowExtractionGuardEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings()};
@@ -30,7 +31,7 @@ export function init(){
   $('autoToManualGuardEnabled').onchange=()=>{R.syncHomeGuardSwitchesFromSettings()};
   if($('cupProtectionEnabled'))$('cupProtectionEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings()};
   $('operationalWallS').addEventListener('input',R.updateConfigGroups);
-  document.querySelectorAll('#workflowPanel input,#workflowPanel select').forEach(el=>{
+  document.querySelectorAll('#workflowPanel input,#workflowPanel select,#workflowPanel textarea').forEach(el=>{
     if(el.id==='preferredScaleSelect')return;
     const brewIds=['brewByWeight','goalWeightG','operationalWallS','bbwProtectionS','weightOffsetBaselineG','cupProtectionEnabled','stopIfCupRemoved','requireCupToStart','fastExtractionGuardEnabled','avoidAccidentalTouchEnabled','maxRecoveryWeightG','minBbwBrewTimeS','slowExtractionGuardEnabled','minRecoveryWeightG','maxBbwBrewTimeS','autoToManualGuardEnabled','autoToManualGuardLimitMode','autoToManualGuardManualLimitS','autoToManualGuardBaselineS'];
     const fn=()=>brewIds.includes(el.id)?R.markBrewDirty():R.markConfigDirty();

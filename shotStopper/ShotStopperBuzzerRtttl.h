@@ -25,6 +25,7 @@ enum class BuzzerCue : uint8_t {
   RECOVERY_START,
   NETWORK_RESET_OK,
   FACTORY_RESET_OK,
+  BULLSEYE,
   RECOVERY_ERROR
 };
 
@@ -112,6 +113,8 @@ inline const char *rtttlForCue(BuzzerCue cue) {
       return RTTTL_NETWORK_RESET_OK;
     case BuzzerCue::FACTORY_RESET_OK:
       return RTTTL_FACTORY_RESET_OK;
+    case BuzzerCue::BULLSEYE:
+      break;
     case BuzzerCue::RECOVERY_ERROR:
       return RTTTL_RECOVERY_ERROR;
     case BuzzerCue::NONE:
@@ -126,7 +129,8 @@ inline bool buzzerCueIsLooping(BuzzerCue cue) {
 
 inline bool buzzerCueIsHighPriority(BuzzerCue cue) {
   return cue == BuzzerCue::NO_SCALE || cue == BuzzerCue::GUARD_STOP ||
-         cue == BuzzerCue::SCALE_CONNECTED || cue == BuzzerCue::SCALE_LOST;
+         cue == BuzzerCue::SCALE_CONNECTED || cue == BuzzerCue::SCALE_LOST ||
+         cue == BuzzerCue::BULLSEYE;
 }
 
 }  // namespace shotstopper

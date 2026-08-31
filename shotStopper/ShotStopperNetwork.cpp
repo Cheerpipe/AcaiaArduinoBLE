@@ -55,6 +55,7 @@ struct NetworkWorkBuf {
   DebugExportExtras debugExport{};
   ShotPresetBank presetBank{};
   ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY]{};
+  BullseyeMelodyConfig bullseyeMelody{};
   // Must match ShotStopperNetwork::REQUEST_BODY_CAPACITY (asserted in begin()).
   char requestBody[2048]{};
   WifiScanSnapshot wifiScan{};
@@ -288,13 +289,14 @@ bool jsonString(cJSON *object, const char *name, char *output,
 
 bool jsonHasOnlyUniqueFields(cJSON *object, const char *const *allowed,
                              size_t allowedCount) {
-  // uint64_t bitmask: config payloads can exceed 32 fields (e.g. alerts +
-  // output channel). Keep the ceiling explicit so callers fail loudly if they
-  // outgrow the mask again.
-  if (!cJSON_IsObject(object) || allowed == nullptr || allowedCount > 64) {
+  // Two fixed words cover the broad config patch without heap allocation.
+  // Keep the ceiling explicit so callers fail loudly if they outgrow it.
+  constexpr size_t kSeenWords = 2;
+  if (!cJSON_IsObject(object) || allowed == nullptr ||
+      allowedCount > kSeenWords * 64U) {
     return false;
   }
-  uint64_t seen = 0;
+  uint64_t seen[kSeenWords] = {};
   for (cJSON *item = object->child; item != nullptr; item = item->next) {
     if (item->string == nullptr) {
       return false;
@@ -303,10 +305,15 @@ bool jsonHasOnlyUniqueFields(cJSON *object, const char *const *allowed,
     while (index < allowedCount && strcmp(item->string, allowed[index]) != 0) {
       ++index;
     }
-    if (index == allowedCount || (seen & (uint64_t{1} << index)) != 0) {
+    if (index == allowedCount) {
       return false;
     }
-    seen |= uint64_t{1} << index;
+    const size_t word = index / 64U;
+    const uint64_t bit = uint64_t{1} << (index % 64U);
+    if ((seen[word] & bit) != 0) {
+      return false;
+    }
+    seen[word] |= bit;
   }
   return true;
 }
@@ -1128,6 +1135,9 @@ void ShotStopperNetwork::overlayLiveShotSettings(PersistedSettings &settings) {
     callbacks_.copyPresetBank(&livePresets);
   }
   overlayLivePersistedSettings(settings, liveRuntime, livePresets);
+  if (callbacks_.copyBullseyeConfig != nullptr) {
+    callbacks_.copyBullseyeConfig(&settings.bullseyeMelody);
+  }
   mergePreferredScaleMac(settings);
 }
 
@@ -1158,6 +1168,13 @@ void ShotStopperNetwork::syncLiveRuntime(const RuntimeConfig &runtime,
   if (presets != nullptr) {
     settings_.presets = *presets;
   }
+  portEXIT_CRITICAL(&dataMux_);
+}
+
+void ShotStopperNetwork::syncLiveBullseye(
+    const BullseyeMelodyConfig &config) {
+  portENTER_CRITICAL(&dataMux_);
+  settings_.bullseyeMelody = config;
   portEXIT_CRITICAL(&dataMux_);
 }
 
@@ -4176,6 +4193,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   char safePreferredScaleName[PREFERRED_SCALE_NAME_CAPACITY * 2] = {};
   char safeFirmwareVersion[32] = {};
   char safeStaSsid[WIFI_SSID_CAPACITY] = {};
+  char safeBullseyeRtttl[BULLSEYE_RTTTL_CAPACITY] = {};
   sanitizeJsonEmbed(control.config.ntpServerCustom, safeNtpCustom,
                     sizeof(safeNtpCustom));
   sanitizeJsonEmbed(timeStatus.activeServer, safeActiveServer,
@@ -4191,6 +4209,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   sanitizeJsonEmbed(FW_VERSION, safeFirmwareVersion,
                     sizeof(safeFirmwareVersion));
   sanitizeJsonEmbed(network.staSsid, safeStaSsid, sizeof(safeStaSsid));
+  if (page == StatusPage::Settings &&
+      self.callbacks_.copyBullseyeConfig != nullptr) {
+    self.callbacks_.copyBullseyeConfig(&g_work->bullseyeMelody);
+    sanitizeJsonEmbed(g_work->bullseyeMelody.rtttl, safeBullseyeRtttl,
+                      sizeof(safeBullseyeRtttl));
+  }
 
   const bool needPresets =
       page == StatusPage::Home || page == StatusPage::Settings;
@@ -4415,6 +4439,13 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         noScaleBbwEnabled(control.config.noScaleBbwMode) ? "true" : "false",
         noScaleBbwModeId(control.config.noScaleBbwMode),
         static_cast<unsigned long>(control.config.lastShotCooldownMs));
+  }
+
+  if (ok && page == StatusPage::Settings) {
+    ok = statusJsonAppend(
+        &used, ",\"bullseyeMelodyEnabled\":%s,\"bullseyeRtttl\":\"%s\"",
+        g_work->bullseyeMelody.enabled ? "true" : "false",
+        safeBullseyeRtttl);
   }
 
   if (ok) {
@@ -6074,6 +6105,19 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   bool baseRevisionPresent = false;
   uint32_t baseRevision = 0;
   bool soundAlertsEnabled = !candidate.soundAlertsMuted;
+  BullseyeMelodyConfig candidateBullseye = {};
+  if (self.callbacks_.copyBullseyeConfig != nullptr) {
+    self.callbacks_.copyBullseyeConfig(&candidateBullseye);
+  } else {
+    portENTER_CRITICAL(&self.dataMux_);
+    candidateBullseye = self.settings_.bullseyeMelody;
+    portEXIT_CRITICAL(&self.dataMux_);
+  }
+  const bool bullseyeEnabledPresent =
+      jsonFieldPresent(root, "bullseyeMelodyEnabled");
+  const bool bullseyeRtttlPresent = jsonFieldPresent(root, "bullseyeRtttl");
+  const bool bullseyeConfigSpecified =
+      bullseyeEnabledPresent || bullseyeRtttlPresent;
   bool legacyAvoidBbwShotWithoutScale =
       noScaleBbwEnabled(candidate.noScaleBbwMode);
   bool legacyNoScalePresent = false;
@@ -6092,6 +6136,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "buzzerScaleLostBeep", "buzzerAutoToManualGuardEndBeep",
       "buzzerManualNoScaleBeep", "buzzerScaleConnectedBeep",
       "buzzerExtendedPulseRate", "buzzerSlowExtendedPulseRate",
+      "bullseyeMelodyEnabled", "bullseyeRtttl",
       "alertOutputChannel", "autoRetare", "retareWindowMs", "minimumCupWeightG",
       "cupRemovedWeightG",
       "retareStabilitySamples", "retareStabilityToleranceG",
@@ -6169,6 +6214,19 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   } else if (jsonFieldPresent(root, "firstDropBeep") &&
              !jsonBoolean(root, "firstDropBeep", candidate.firstDropBeep)) {
     parseError = "firstDropBeep must be a boolean.";
+  } else if (bullseyeEnabledPresent &&
+             !jsonBoolean(root, "bullseyeMelodyEnabled",
+                          candidateBullseye.enabled)) {
+    parseError = "bullseyeMelodyEnabled must be a boolean.";
+  } else if (bullseyeRtttlPresent &&
+             !jsonString(root, "bullseyeRtttl", candidateBullseye.rtttl,
+                         sizeof(candidateBullseye.rtttl), true)) {
+    parseError = "bullseyeRtttl must be a string of at most 500 characters.";
+  } else if (bullseyeConfigSpecified &&
+             !validBullseyeMelodyConfig(candidateBullseye)) {
+    parseError = candidateBullseye.enabled && candidateBullseye.rtttl[0] == '\0'
+                     ? "Bullseye melody needs an RTTTL tune when enabled."
+                     : "bullseyeRtttl must be valid single-line RTTTL (up to 250 notes).";
   } else if (jsonFieldPresent(root, "scaleConnectedLed") &&
              !jsonBoolean(root, "scaleConnectedLed",
                           candidate.scaleConnectedLed)) {
@@ -6442,6 +6500,16 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   command.requestId = self.allocateRequestId();
   command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   command.config = candidate;
+  command.bullseyeConfigSpecified = bullseyeConfigSpecified;
+  if (bullseyeConfigSpecified) {
+    if (self.callbacks_.stageBullseyeConfig == nullptr ||
+        !self.callbacks_.stageBullseyeConfig(candidateBullseye,
+                                              command.requestId)) {
+      return sendError(request, STATUS_UNAVAILABLE, "CONTROL_BUSY",
+                       "Control is busy; the Bullseye melody was not staged.");
+    }
+    command.bullseyeStageRequestId = command.requestId;
+  }
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; nothing was saved.");
