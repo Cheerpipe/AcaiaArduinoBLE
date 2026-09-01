@@ -631,10 +631,10 @@ const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 54000) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 143000) {
+if (jsBytes > 148000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 197000) {
+if (htmlBytes + jsBytes > 202000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -3068,6 +3068,7 @@ const expected = new Map([
   ['POST /api/v1/control/stop', 'ownedApiHandler'],
   ['POST /api/v1/control/state-override', 'ownedApiHandler'],
   ['POST /api/v1/control/restart', 'ownedApiHandler'],
+  ['POST /api/v1/diagnostic/reset-history', 'ownedApiHandler'],
   ['POST /api/v1/factory-reset', 'ownedApiHandler'],
   ['GET /api/v1/shots', 'ownedApiHandler'],
   ['POST /api/v1/shots/clear', 'ownedApiHandler'],
@@ -3075,6 +3076,7 @@ const expected = new Map([
   ['POST /api/v1/shots/rate', 'ownedApiHandler'],
   ['POST /api/v1/last-shot/clear', 'ownedApiHandler'],
   ['POST /api/v1/time/sync', 'ownedApiHandler'],
+  ['POST /api/v1/webhooks', 'ownedApiHandler'],
   ['POST /api/v1/network', 'ownedApiHandler'],
   ['POST /api/v1/network/scan', 'ownedApiHandler'],
   ['GET /api/v1/network/scan', 'ownedApiHandler'],
@@ -3477,9 +3479,9 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
     }
   }
   if (!ui.includes(
-          "v==='admin'?!!(typeof s.adminUnlocked==='boolean'&&s.network&&(s.adminUnlocked?(s.bleCompanion&&typeof s.bleCompanion.enabled==='boolean'&&typeof s.bleCompanion.active==='boolean'&&typeof s.bleCompanion.restartRequired==='boolean'&&typeof s.bleCompanion.scanIntensity==='string'&&typeof c.timezoneOffsetMinutes==='number'&&c.ntpServerPreset!=null&&s.ota&&typeof s.ota.available==='boolean'):typeof s.network.configState==='string'))")) {
+          "v==='admin'?!!(typeof s.adminUnlocked==='boolean'&&s.network&&(s.adminUnlocked?(s.bleCompanion&&typeof s.bleCompanion.enabled==='boolean'&&typeof s.bleCompanion.active==='boolean'&&typeof s.bleCompanion.restartRequired==='boolean'&&typeof s.bleCompanion.scanIntensity==='string'&&typeof c.timezoneOffsetMinutes==='number'&&c.ntpServerPreset!=null&&s.ota&&typeof s.ota.available==='boolean'&&s.webhooks&&typeof s.webhooks.enabled==='boolean'):typeof s.network.configState==='string'))")) {
     throw new Error(
-        'statusPageOk(admin) must accept a locked payload and validate unlocked network/BLE/NTP/OTA');
+        'statusPageOk(admin) must accept a locked payload and validate unlocked network/BLE/NTP/OTA/webhooks');
   }
   if (!ui.includes(
           "v==='diagnostic'?!!(typeof s.adminUnlocked==='boolean'&&(s.adminUnlocked?(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalActivatorOn==='boolean'&&'reedOn' in s&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags&&s.serial&&typeof s.serial.io4==='string'&&typeof s.serial.state==='string'&&s.guards&&typeof s.guards.bbwEnabled==='boolean'&&s.guards.noScale&&s.guards.atm&&s.guards.slowExtraction&&s.guards.fastExtraction&&s.guards.accidentalTouch&&s.guards.cupProtection&&s.tasks&&typeof s.tasks.state==='string'):true))")) {
@@ -4054,14 +4056,14 @@ if (generated.cssGzip.length > 6600) {
 if (generated.runtimeGzip.length > 28800) {
   throw new Error('Compressed Web UI runtime JS exceeds the 28.1 KiB gzip budget');
 }
-if (generated.secondaryGzip.length > 4096) {
-  throw new Error('Compressed secondary view JS exceeds the 4 KiB gzip budget');
+if (generated.secondaryGzip.length > 4800) {
+  throw new Error('Compressed secondary view JS exceeds the 4.7 KiB gzip budget');
 }
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
 }
-if (generated.combined > 56000) {
-  throw new Error('Combined Web UI gzip exceeds the 54.7 KiB flash budget');
+if (generated.combined > 57500) {
+  throw new Error('Combined Web UI gzip exceeds the 56.2 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {

@@ -13,6 +13,7 @@
 #include "ShotStopperRfCoex.h"
 
 #include "ShotStopperTaskProfiler.h"
+#include "ShotStopperWebhook.h"
 
 #include <atomic>
 
@@ -189,6 +190,9 @@ class ShotStopperNetwork {
   void syncDurableStorageRevision(uint32_t storageRevision);
   PersistedSettings settingsCopy();
   StaJoinHints staJoinHints();
+  bool enqueueWebhook(const WebhookEvent &event);
+  WebhookStatus webhookStatus() const;
+  WebhookConfig webhookConfig() const;
 
   private:
   void mergePreferredScaleMac(PersistedSettings &settings);
@@ -305,6 +309,9 @@ class ShotStopperNetwork {
   uint32_t staNtpEligibleAtMs_ = 0;
   uint32_t ntpConfigRevision_ = 0;
   char ntpServerBuffer_[NTP_SERVER_HOST_CAPACITY] = {};
+  WebhookDispatcher webhooks_;
+  WebhookConfig stagedWebhook_ = {};
+  uint32_t stagedWebhookRequestId_ = 0;
 
   static void taskEntry(void *parameter);
   void taskLoop();
@@ -401,6 +408,7 @@ class ShotStopperNetwork {
   static esp_err_t lastShotClearHandler(httpd_req_t *request);
   static esp_err_t timeSyncHandler(httpd_req_t *request);
   static esp_err_t configHandler(httpd_req_t *request);
+  static esp_err_t webhookHandler(httpd_req_t *request);
   static esp_err_t bullseyeTestHandler(httpd_req_t *request);
   static esp_err_t preferredScaleClearHandler(httpd_req_t *request);
   static esp_err_t preferredScaleSelectHandler(httpd_req_t *request);
@@ -412,6 +420,7 @@ class ShotStopperNetwork {
   static esp_err_t stopHandler(httpd_req_t *request);
   static esp_err_t stateOverrideHandler(httpd_req_t *request);
   static esp_err_t restartHandler(httpd_req_t *request);
+  static esp_err_t clearResetHistoryHandler(httpd_req_t *request);
   static esp_err_t factoryResetHandler(httpd_req_t *request);
   static esp_err_t networkHandler(httpd_req_t *request);
   static esp_err_t wifiScanStartHandler(httpd_req_t *request);

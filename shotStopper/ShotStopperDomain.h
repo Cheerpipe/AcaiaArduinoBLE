@@ -63,7 +63,7 @@ constexpr uint32_t SERIAL_BAUD = 115200;
 // after staOpen). V2 names that byte staWifiSleep without growing the blob.
 // Bump and add a migration when the blob layout changes
 // (see ShotStopperSettingsMigrate.h).
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 3;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 4;
 // Rinse clock default. Detection window default is DEFAULT_RINSE_GESTURE_MS
 // (machine-owned, ShotStopperMachineTypes.h).
 constexpr uint32_t DEFAULT_RINSE_DURATION_MS = 4000;
@@ -1675,6 +1675,8 @@ enum class WebCommandType : uint8_t {
   RESET_NETWORK_AP,
   FACTORY_RESET,
   CLEAR_SHOT_LOG,
+  CLEAR_RESET_HISTORY,
+  SAVE_WEBHOOK,
   CLEAR_PREFERRED_SCALE,
   SELECT_PREFERRED_SCALE,
   PERSIST_RUNTIME,
@@ -1722,6 +1724,8 @@ inline const char *webCommandTypeName(WebCommandType type) {
     case WebCommandType::RESET_NETWORK_AP: return "recover network/AP";
     case WebCommandType::FACTORY_RESET: return "restore factory settings";
     case WebCommandType::CLEAR_SHOT_LOG: return "clear shot history";
+    case WebCommandType::CLEAR_RESET_HISTORY: return "clear reset history";
+    case WebCommandType::SAVE_WEBHOOK: return "save webhook";
     case WebCommandType::CLEAR_PREFERRED_SCALE:
       return "forget paired scale";
     case WebCommandType::SELECT_PREFERRED_SCALE:
@@ -1802,6 +1806,7 @@ struct WebCommand {
   // inflating every four-deep FreeRTOS command queue element in internal RAM.
   bool bullseyeConfigSpecified = false;
   uint32_t bullseyeStageRequestId = 0;
+  uint32_t webhookStageRequestId = 0;
   // PRESET_OP payload (keep small — no full bank on the queue element).
   uint8_t presetAction = 0;
   uint8_t presetId = 0;

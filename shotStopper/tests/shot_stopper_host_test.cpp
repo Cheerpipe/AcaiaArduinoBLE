@@ -1844,6 +1844,17 @@ void r20c_reset_uptime_checkpoint_is_no_more_frequent_than_one_minute() {
   CHECK(safetyResetRecord.currentUptimeMs == 120000);
 }
 
+void r20d_clear_reset_history_keeps_current_reset_reason() {
+  resetHarness(false, false);
+  SafetyResetSnapshot reset = beginSafetyResetGuard();
+  const uint32_t reason = reset.reasonCode;
+  CHECK(reset.resetHistoryCount == 1);
+  CHECK(clearPersistedResetHistory(reset.unsafeResetCount));
+  CHECK(safetyResetRecordValid());
+  CHECK(safetyResetRecord.historyCount == 0);
+  CHECK(reason == hostSafetyResetReasonCode);
+}
+
 void w01_default_runtime_configuration_is_valid() {
   const RuntimeConfig config;
   CHECK(validateRuntimeConfig(config) == ConfigValidationError::NONE);
@@ -10986,6 +10997,7 @@ const TestCase testCases[] = {
     {"R20", r20_three_unsafe_resets_are_latched_as_a_boot_loop},
     {"R20b", r20b_reset_history_keeps_reason_and_previous_uptime},
     {"R20c", r20c_reset_uptime_checkpoint_is_no_more_frequent_than_one_minute},
+    {"R20d", r20d_clear_reset_history_keeps_current_reset_reason},
     {"R21", r21_automatic_control_requires_fresh_weight},
     {"R22", r22_confirmed_implausible_weight_does_not_stop},
     {"R23", r23_maintenance_is_canceled_fail_open_by_physical_paddle},

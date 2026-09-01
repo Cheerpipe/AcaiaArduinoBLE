@@ -409,6 +409,9 @@ uint32_t recoverableStaleDisconnectSequence = 0;
 uint32_t recoverableStaleConnectionGeneration = 0;
 WeightStreamState telemetryWeightStreamState = WeightStreamState::NO_SAMPLE;
 bool scaleCompletionBeepScheduled = false;
+#ifndef SHOT_STOPPER_HOST_TEST
+bool webhookBrewStartPending = false;
+#endif
 
 bool virtualHoldOn = false;
 // Full status snapshots stay in internal DRAM (check_web_assets forbids
@@ -1697,10 +1700,68 @@ void serviceRemoteTimerStopRetry() {
 // between brew ↔ cup ↔ scale — this file applies their effects.
 // ---------------------------------------------------------------------------
 
+void notifyWebhookFirstDrop(uint32_t receivedAtMs);
+
 #include "ShotStopperCupPresence.h"
 #include "ShotStopperBrew.h"
 #include "ShotStopperRinse.h"
 #include "ShotStopperScaleSense.h"
+
+#ifndef SHOT_STOPPER_HOST_TEST
+uint32_t webhookUnixSec(uint32_t now) {
+  return g_wallClock.synced() ? g_wallClock.nowUtcSec(now) : 0U;
+}
+
+WebhookEvent baseWebhookEvent(WebhookEventType type, uint32_t cycleId) {
+  WebhookEvent event;
+  event.type = type;
+  event.cycleId = cycleId;
+  event.uptimeMs = millis();
+  event.unixSec = webhookUnixSec(event.uptimeMs);
+  return event;
+}
+
+void queueWebhookBrewStart() {
+  if (!webhookBrewStartPending) return;
+  webhookBrewStartPending = false;
+  const WebhookConfig config = networkManager.webhookConfig();
+  if (!config.enabled || !config.brewState) return;
+  WebhookEvent event = baseWebhookEvent(WebhookEventType::BREWING, session.id);
+  event.targetWeightG = static_cast<float>(session.config.goalWeightG);
+  event.presetId = session.activePresetId;
+  (void)networkManager.enqueueWebhook(event);
+}
+
+void serviceWebhookBrewStart() {
+  if (!webhookBrewStartPending || !session.active) return;
+  const uint32_t ageMs = elapsedMs(session.startedAtMs);
+  if ((ageMs >= WEBHOOK_START_MIN_DELAY_MS && currentWeightIsFresh() &&
+       currentWeightSequence != session.weightSequenceAtStart) ||
+      ageMs >= WEBHOOK_START_MAX_DELAY_MS) {
+    queueWebhookBrewStart();
+  }
+}
+
+void notifyWebhookFirstDrop(uint32_t receivedAtMs) {
+  queueWebhookBrewStart();
+  const WebhookConfig config = networkManager.webhookConfig();
+  if (!config.enabled || !config.firstDrop) return;
+  WebhookEvent event = baseWebhookEvent(WebhookEventType::FIRST_DROP, session.id);
+  const uint32_t anchor = session.circuitClosedAtMs != 0
+                              ? session.circuitClosedAtMs
+                              : session.startedAtMs;
+  event.firstDropValid = static_cast<int32_t>(receivedAtMs - anchor) >= 0;
+  event.firstDropMs = event.firstDropValid ? receivedAtMs - anchor : 0;
+  event.weightValid = isfinite(currentWeight);
+  event.weightG = event.weightValid ? currentWeight : 0.0f;
+  event.targetWeightG = static_cast<float>(session.config.goalWeightG);
+  event.presetId = session.activePresetId;
+  (void)networkManager.enqueueWebhook(event);
+}
+#else
+void notifyWebhookFirstDrop(uint32_t receivedAtMs) { (void)receivedAtMs; }
+void serviceWebhookBrewStart() {}
+#endif
 
 #if defined(SHOT_STOPPER_HOST_TEST)
 #define SHOT_STOPPER_SCALE_WORKER_IN_ORCHESTRATOR
@@ -2087,7 +2148,12 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
                               session.calibrationEligible &&
                               !session.extractionExtended &&
                               !session.slowExtractionExtended;
-  if (!(logEligible && bbwEligible) && !offsetAnalysis) {
+  bool webhookEligible = false;
+#ifndef SHOT_STOPPER_HOST_TEST
+  const WebhookConfig webhook = networkManager.webhookConfig();
+  webhookEligible = webhook.enabled && webhook.end;
+#endif
+  if (!(logEligible && bbwEligible) && !offsetAnalysis && !webhookEligible) {
     return;
   }
 
@@ -2275,6 +2341,50 @@ void commitPendingShotLog(const PendingShotFinalize &snapshot, float finalWeight
   }
 }
 
+void queueWebhookEnd(const PendingShotFinalize &snapshot, float finalWeightG,
+                     bool finalWeightValid) {
+#ifndef SHOT_STOPPER_HOST_TEST
+  const WebhookConfig config = networkManager.webhookConfig();
+  if (!config.enabled || !config.end || pendingFinalizeIsRinse(snapshot) ||
+      brewEndIsAbandonedStart(snapshot.endReason)) {
+    return;
+  }
+  WebhookEvent event = baseWebhookEvent(WebhookEventType::END, snapshot.cycleId);
+  event.durationMs = static_cast<uint32_t>(snapshot.durationDs) * 100U;
+  event.firstDropValid = snapshot.firstDropDs != SHOT_LOG_METRIC_MISSING;
+  event.firstDropMs = event.firstDropValid
+                          ? static_cast<uint32_t>(snapshot.firstDropDs) * 100U
+                          : 0U;
+  event.weightValid = finalWeightValid && isfinite(finalWeightG);
+  event.weightG = event.weightValid ? finalWeightG : 0.0f;
+  event.targetWeightG = static_cast<float>(snapshot.goalWeightG);
+  event.presetId = snapshot.activePresetId;
+  const ShotLogType type = shotLogTypeFromCycle(
+      snapshot.finalState, snapshot.startedWithScale, snapshot.timerOnly,
+      snapshot.automaticBrew);
+  snprintf(event.shotType, sizeof(event.shotType), "%s", shotLogTypeName(type));
+  snprintf(event.stopDetail, sizeof(event.stopDetail), "%s",
+           shotLogStopDetailName(shotLogStopDetailFromEndReason(
+               snapshot.endReason, snapshot.extractionGuardEnabled,
+               snapshot.extractionExtended)));
+  if (event.weightValid && event.firstDropValid &&
+      event.durationMs > event.firstDropMs + 500U) {
+    const float brewSeconds =
+        static_cast<float>(event.durationMs - event.firstDropMs) / 1000.0f;
+    const float delta = finalWeightG - snapshot.scaleBaselineG;
+    if (delta > 0.0f && isfinite(delta)) {
+      event.averageFlowGps = delta / brewSeconds;
+      event.averageFlowValid = isfinite(event.averageFlowGps);
+    }
+  }
+  (void)networkManager.enqueueWebhook(event);
+#else
+  (void)snapshot;
+  (void)finalWeightG;
+  (void)finalWeightValid;
+#endif
+}
+
 void cancelPendingFinalize(const char *reason) {
   if (!pendingFinalize.pending) {
     return;
@@ -2305,6 +2415,7 @@ void cancelPendingFinalize(const char *reason) {
       !brewEndIsAbandonedStart(snapshot.endReason)) {
     persistLastShotFromFinalize(snapshot, weightG, valid);
   }
+  queueWebhookEnd(snapshot, weightG, valid);
 }
 
 void maybeQueueAutoToManualGuardSample(const PendingShotFinalize &snapshot,
@@ -2415,6 +2526,7 @@ void pendingShotFinalizeTask() {
       !brewEndIsAbandonedStart(snapshot.endReason)) {
     persistLastShotFromFinalize(snapshot, logWeightG, logWeightValid);
   }
+  queueWebhookEnd(snapshot, logWeightG, logWeightValid);
 
   maybeQueueAutoToManualGuardSample(snapshot, finalWeightG, postDripWeightValid);
 
@@ -3157,6 +3269,10 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
 
   enterBrewOrManualFromStart();
 
+#ifndef SHOT_STOPPER_HOST_TEST
+  webhookBrewStartPending = true;
+#endif
+
   addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_STARTED,
                 weightToCentigrams(
                     static_cast<float>(session.config.goalWeightG)),
@@ -3166,6 +3282,10 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
 
 void finalizeCycle(EndReason reason, StopperState nextState) {
   const uint32_t durationMs = endedCycleDurationMs();
+
+#ifndef SHOT_STOPPER_HOST_TEST
+  queueWebhookBrewStart();
+#endif
 
   stopPulseTrains();
   cancelScaleBrewBeep(session.id);
@@ -3211,6 +3331,23 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   }
 
   schedulePendingShotFinalize(reason, durationMs);
+#ifndef SHOT_STOPPER_HOST_TEST
+  {
+    const WebhookConfig webhook = networkManager.webhookConfig();
+    if (webhook.enabled && webhook.brewState &&
+        !endingRinseCycle(reason)) {
+      WebhookEvent event = baseWebhookEvent(WebhookEventType::IDLE, session.id);
+      event.durationMs = durationMs;
+      event.targetWeightG = static_cast<float>(session.config.goalWeightG);
+      event.presetId = session.activePresetId;
+      snprintf(event.stopDetail, sizeof(event.stopDetail), "%s",
+               shotLogStopDetailName(shotLogStopDetailFromEndReason(
+                   reason, session.config.fastExtractionGuardEnabled,
+                   session.extractionExtended)));
+      (void)networkManager.enqueueWebhook(event);
+    }
+  }
+#endif
   // Home status must show the last shot immediately (during drip delay),
   // including empty / sub-1 g results. Rinses (including early abort) and
   // abandoned starts do not overwrite last shot.
@@ -4370,6 +4507,7 @@ void processWebCommand(const WebCommand &command) {
       return;
 
     case WebCommandType::SAVE_NETWORK:
+    case WebCommandType::SAVE_WEBHOOK:
     case WebCommandType::FORGET_NETWORK:
     case WebCommandType::CHANGE_DEVICE_PASSWORD:
     case WebCommandType::RESET_DEVICE_PASSWORD:
@@ -4390,6 +4528,17 @@ void processWebCommand(const WebCommand &command) {
 
     case WebCommandType::CLEAR_SHOT_LOG:
       rejectWebCommand(command);
+      return;
+
+    case WebCommandType::CLEAR_RESET_HISTORY:
+      if (!clearPersistedResetHistory(safetyResetStatus.unsafeResetCount)) {
+        rejectWebCommand(command);
+        return;
+      }
+      safetyResetStatus.resetHistoryCount = 0;
+      memset(safetyResetStatus.resetHistory, 0,
+             sizeof(safetyResetStatus.resetHistory));
+      reportControlCommandResult(command, CommandResultState::PERSISTED);
       return;
 
     case WebCommandType::CLEAR_PREFERRED_SCALE:
@@ -6110,6 +6259,7 @@ void loop() {
   serviceNoScaleShotGuard(loopGuardInputs);
   serviceCupStartGuard(loopGuardInputs);
   stateMachineTask();
+  serviceWebhookBrewStart();
   machineOnBrewOutcome(session.active);
   serviceExtendedPulseAlert();
   localBuzzer.service(millis());

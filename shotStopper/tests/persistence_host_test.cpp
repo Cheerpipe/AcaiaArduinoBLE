@@ -633,6 +633,49 @@ void p47f_bullseye_melody_persists_as_fixed_record() {
                "bullseye:d=8,o=5,b=180:c,e,g,c6") == 0);
 }
 
+void p47g_migrates_v3_with_webhooks_disabled() {
+  resetHostPersistence();
+  PersistedSettings current;
+  CHECK(initializeDefaultSettings(current));
+  current.bullseyeMelody.enabled = true;
+  copyCString(current.bullseyeMelody.rtttl,
+              sizeof(current.bullseyeMelody.rtttl),
+              "bullseye:d=8,o=5,b=180:c,e,g,c6");
+  finalizePersistedSettings(current);
+  PersistedSettingsV3 v3{};
+  memcpy(&v3, &current, offsetof(PersistedSettingsV3, checksum));
+  v3.schemaVersion = 3;
+  v3.structureSize = sizeof(PersistedSettingsV3);
+  v3.checksum = persistedSettingsV3Checksum(v3);
+  persistence_host::putRaw(SETTINGS_NAMESPACE, SETTINGS_SLOT_A, &v3,
+                           sizeof(v3));
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(!loaded.webhook.enabled);
+  CHECK(loaded.webhook.url[0] == '\0');
+  CHECK(loaded.webhook.brewState);
+  CHECK(loaded.webhook.firstDrop);
+  CHECK(loaded.webhook.end);
+  CHECK(loaded.bullseyeMelody.enabled);
+}
+
+void p47h_webhook_url_validation_is_http_only() {
+  CHECK(validWebhookUrl("http://192.168.1.10/hook"));
+  CHECK(validWebhookUrl("http://server.local:8123/api/webhook?x=1"));
+  CHECK(!validWebhookUrl("https://server.local/hook"));
+  CHECK(!validWebhookUrl("http://user@server.local/hook"));
+  CHECK(!validWebhookUrl("http://server.local/hook#fragment"));
+  CHECK(!validWebhookUrl("http://server.local/bad path"));
+  CHECK(!validWebhookUrl("http://server.local/\"bad\""));
+  WebhookConfig disabled;
+  CHECK(validWebhookConfig(disabled));
+  copyCString(disabled.url, sizeof(disabled.url), "https://server.local/hook");
+  CHECK(!validWebhookConfig(disabled));
+  disabled.url[0] = '\0';
+  disabled.enabled = true;
+  CHECK(!validWebhookConfig(disabled));
+}
+
 void p47c_desired_wifi_power_save_policy() {
   using M = WifiPowerSaveMode;
   CHECK(desiredWifiPowerSave(false, false, true, false) == M::NONE);
@@ -745,7 +788,7 @@ void p24_preset_bank_size_and_crud_budgets() {
   CHECK(sizeof(ShotPreset) <= 136);
   CHECK(sizeof(ShotPresetBank) <= 1100);
   CHECK(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET);
-  CHECK(sizeof(PersistedSettings) == 2416);
+  CHECK(sizeof(PersistedSettings) == 2612);
   CHECK(sizeof(RuntimeConfig) == 252);
   CHECK(sizeof(SettingsPersistRequest) <= PERSISTED_SETTINGS_NVS_BUDGET + 16);
   CHECK(sizeof(ControlStatusSnapshot) <= 4096);
@@ -1506,6 +1549,8 @@ const TestCase tests[] = {
     {"P47B", p47b_migrates_v1_blob_wifi_sleep_defaults_off},
     {"P47E", p47e_migrates_v2_blob_with_bullseye_disabled},
     {"P47F", p47f_bullseye_melody_persists_as_fixed_record},
+    {"P47G", p47g_migrates_v3_with_webhooks_disabled},
+    {"P47H", p47h_webhook_url_validation_is_http_only},
     {"P47C", p47c_desired_wifi_power_save_policy},
     {"P47D", p47d_durable_flash_write_gate},
     {"P46", p46_ring_retain_log_level_persists_round_trip},

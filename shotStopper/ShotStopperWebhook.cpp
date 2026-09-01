@@ -1,0 +1,240 @@
+#include "ShotStopperWebhook.h"
+
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include <esp_heap_caps.h>
+#include <esp_http_client.h>
+#include <esp_mac.h>
+
+namespace shotstopper {
+namespace {
+
+constexpr size_t kWebhookQueueDepth = 4;
+constexpr size_t kWebhookPayloadCapacity = 1024;
+constexpr int kWebhookTimeoutMs = 1800;
+
+const char *eventName(WebhookEventType type) {
+  switch (type) {
+    case WebhookEventType::BREWING: return "brew_state";
+    case WebhookEventType::IDLE: return "brew_state";
+    case WebhookEventType::FIRST_DROP: return "first_drop";
+    case WebhookEventType::END: return "end";
+    case WebhookEventType::TEST: return "test";
+  }
+  return "unknown";
+}
+
+void deviceId(char *output, size_t capacity) {
+  uint8_t mac[6] = {};
+  if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
+    snprintf(output, capacity, "unknown");
+    return;
+  }
+  snprintf(output, capacity, "%02X:%02X:%02X:%02X:%02X:%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+}  // namespace
+
+bool WebhookDispatcher::begin(const WebhookConfig &config) {
+  portENTER_CRITICAL(&mux_);
+  config_ = config;
+  portEXIT_CRITICAL(&mux_);
+  return !config.enabled || startWorker();
+}
+
+bool WebhookDispatcher::startWorker() {
+  if (queue_ != nullptr && payload_ != nullptr && task_ != nullptr) return true;
+  queue_ = xQueueCreate(kWebhookQueueDepth, sizeof(WebhookEvent));
+  payload_ = static_cast<char *>(heap_caps_malloc(
+      kWebhookPayloadCapacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (payload_ == nullptr) {
+    payload_ = static_cast<char *>(malloc(kWebhookPayloadCapacity));
+  }
+  if (queue_ == nullptr || payload_ == nullptr) {
+    if (queue_ != nullptr) vQueueDelete(queue_);
+    if (payload_ != nullptr) free(payload_);
+    queue_ = nullptr;
+    payload_ = nullptr;
+    return false;
+  }
+  if (xTaskCreatePinnedToCore(taskEntry, "webhook", 4096, this,
+                             tskIDLE_PRIORITY, &task_, 0) != pdPASS) {
+    vQueueDelete(queue_);
+    free(payload_);
+    queue_ = nullptr;
+    payload_ = nullptr;
+    return false;
+  }
+  portENTER_CRITICAL(&mux_);
+  status_.workerReady = true;
+  portEXIT_CRITICAL(&mux_);
+  return true;
+}
+
+void WebhookDispatcher::setConfig(const WebhookConfig &config) {
+  portENTER_CRITICAL(&mux_);
+  config_ = config;
+  portEXIT_CRITICAL(&mux_);
+  if (config.enabled) (void)startWorker();
+}
+
+WebhookConfig WebhookDispatcher::config() const {
+  WebhookConfig copy;
+  portENTER_CRITICAL(&mux_);
+  copy = config_;
+  portEXIT_CRITICAL(&mux_);
+  return copy;
+}
+
+WebhookStatus WebhookDispatcher::status() const {
+  WebhookStatus copy;
+  portENTER_CRITICAL(&mux_);
+  copy = status_;
+  portEXIT_CRITICAL(&mux_);
+  return copy;
+}
+
+bool WebhookDispatcher::enqueue(const WebhookEvent &event) {
+  const WebhookConfig live = config();
+  if (event.type == WebhookEventType::TEST && queue_ == nullptr) {
+    (void)startWorker();
+  }
+  bool selected = event.type == WebhookEventType::TEST;
+  if (event.type == WebhookEventType::BREWING ||
+      event.type == WebhookEventType::IDLE) selected = live.brewState;
+  if (event.type == WebhookEventType::FIRST_DROP) selected = live.firstDrop;
+  if (event.type == WebhookEventType::END) selected = live.end;
+  if (queue_ == nullptr || !validWebhookUrl(live.url) ||
+      (event.type != WebhookEventType::TEST && (!live.enabled || !selected)) ||
+      xQueueSend(queue_, &event, 0) != pdTRUE) {
+    portENTER_CRITICAL(&mux_);
+    ++status_.dropped;
+    portEXIT_CRITICAL(&mux_);
+    return false;
+  }
+  return true;
+}
+
+void WebhookDispatcher::taskEntry(void *parameter) {
+  static_cast<WebhookDispatcher *>(parameter)->task();
+}
+
+void WebhookDispatcher::task() {
+  WebhookEvent event;
+  for (;;) {
+    if (xQueueReceive(queue_, &event, portMAX_DELAY) == pdTRUE) {
+      (void)send(event);
+    }
+  }
+}
+
+bool WebhookDispatcher::buildPayload(const WebhookEvent &event, char *output,
+                                     size_t capacity) {
+  char id[18] = {};
+  deviceId(id, sizeof(id));
+  int written = snprintf(
+      output, capacity,
+      "{\"schemaVersion\":1,\"event\":\"%s\",\"deviceId\":\"%s\","
+      "\"cycleId\":%lu,\"uptimeMs\":%lu,\"timestamp\":%lu",
+      eventName(event.type), id, static_cast<unsigned long>(event.cycleId),
+      static_cast<unsigned long>(event.uptimeMs),
+      static_cast<unsigned long>(event.unixSec));
+  if (written <= 0 || static_cast<size_t>(written) >= capacity) return false;
+  size_t used = static_cast<size_t>(written);
+  auto append = [&](const char *format, auto... args) {
+    if (used >= capacity) return false;
+    const int count = snprintf(output + used, capacity - used, format, args...);
+    if (count <= 0 || static_cast<size_t>(count) >= capacity - used) return false;
+    used += static_cast<size_t>(count);
+    return true;
+  };
+  switch (event.type) {
+    case WebhookEventType::BREWING:
+    case WebhookEventType::IDLE:
+      if (!append(",\"state\":\"%s\",\"durationMs\":%lu,"
+                  "\"targetWeightG\":%.2f,\"presetId\":%u,"
+                  "\"stopDetail\":\"%s\"",
+                  event.type == WebhookEventType::BREWING ? "brewing" : "idle",
+                  static_cast<unsigned long>(event.durationMs),
+                  event.targetWeightG, static_cast<unsigned>(event.presetId),
+                  event.stopDetail)) return false;
+      break;
+    case WebhookEventType::FIRST_DROP:
+      if (!append(",\"firstDropMs\":%lu,\"weightG\":%.2f,"
+                  "\"targetWeightG\":%.2f,\"presetId\":%u",
+                  static_cast<unsigned long>(event.firstDropMs), event.weightG,
+                  event.targetWeightG, static_cast<unsigned>(event.presetId))) {
+        return false;
+      }
+      break;
+    case WebhookEventType::END:
+      if (!append(",\"durationMs\":%lu,\"targetWeightG\":%.2f,"
+                  "\"presetId\":%u,\"shotType\":\"%s\","
+                  "\"stopDetail\":\"%s\"",
+                  static_cast<unsigned long>(event.durationMs),
+                  event.targetWeightG, static_cast<unsigned>(event.presetId),
+                  event.shotType, event.stopDetail)) return false;
+      if (event.firstDropValid &&
+          !append(",\"firstDropMs\":%lu",
+                  static_cast<unsigned long>(event.firstDropMs))) return false;
+      if (event.weightValid && !append(",\"weightG\":%.2f", event.weightG))
+        return false;
+      if (event.averageFlowValid &&
+          !append(",\"averageFlowGps\":%.2f", event.averageFlowGps))
+        return false;
+      break;
+    case WebhookEventType::TEST:
+      break;
+  }
+  return append("}");
+}
+
+bool WebhookDispatcher::send(const WebhookEvent &event) {
+  const WebhookConfig live = config();
+  portENTER_CRITICAL(&mux_);
+  status_.sending = true;
+  status_.lastAttemptAtMs = millis();
+  status_.lastHttpStatus = 0;
+  status_.lastError = 0;
+  portEXIT_CRITICAL(&mux_);
+
+  bool ok = false;
+  int statusCode = 0;
+  esp_err_t error = ESP_FAIL;
+  if (WiFi.status() == WL_CONNECTED && validWebhookUrl(live.url) &&
+      buildPayload(event, payload_, kWebhookPayloadCapacity)) {
+    esp_http_client_config_t config = {};
+    config.url = live.url;
+    config.timeout_ms = kWebhookTimeoutMs;
+    config.disable_auto_redirect = true;
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client != nullptr) {
+      esp_http_client_set_method(client, HTTP_METHOD_POST);
+      esp_http_client_set_header(client, "Content-Type", "application/json");
+      esp_http_client_set_header(client, "User-Agent", "ShotStopper/1");
+      esp_http_client_set_post_field(client, payload_, strlen(payload_));
+      error = esp_http_client_perform(client);
+      statusCode = esp_http_client_get_status_code(client);
+      ok = error == ESP_OK && statusCode >= 200 && statusCode < 300;
+      esp_http_client_cleanup(client);
+    }
+  }
+
+  portENTER_CRITICAL(&mux_);
+  status_.sending = false;
+  status_.lastSuccess = ok;
+  status_.lastHttpStatus = statusCode > 0 ? static_cast<uint16_t>(statusCode) : 0;
+  status_.lastError = static_cast<int32_t>(error);
+  if (ok) ++status_.sent;
+  else ++status_.dropped;
+  portEXIT_CRITICAL(&mux_);
+  return ok;
+}
+
+}  // namespace shotstopper
+
+#endif

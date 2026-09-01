@@ -99,11 +99,11 @@ a commercial kit. You still need to know what to wire and how. See the
 
 ### Roadmap and safety boundaries
 
-**TODO — Webhooks.** The project plans to add outbound webhooks for state
-change events, especially the final result of a shot: time, weight, and the
-kind of finish/cut (normal BBW, fast guard, slow guard, and similar outcomes).
-These notifications will be event-based; they are not a persistent connection
-or a remote-control interface.
+**Webhooks.** Admin can configure asynchronous HTTP-only webhooks for brew
+state, first drop, and the final shot result (including time, weight, and stop
+detail). Delivery uses a bounded low-priority queue with short timeouts and no
+retries, so it never blocks the control loop or BLE. These notifications are
+event-based; they are not a persistent connection or remote-control interface.
 
 **Not planned — MQTT or remote shot start.** MQTT and other persistent
 HTTP/socket-based communication mechanisms are deliberately out of scope.

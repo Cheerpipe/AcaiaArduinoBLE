@@ -242,12 +242,16 @@ bool bbwWeightStopInhibited() {
 }
 
 void onFirstDropsDetected(uint32_t receivedAtMs) {
+  const bool first = session.firstDropMs == 0;
   recordFirstDropTimestamp(receivedAtMs);
   if (session.hasWeightAnchor && isfinite(session.lastAcceptedWeightG)) {
     shotCurveSampler.latchFirstDrop(receivedAtMs, session.lastAcceptedWeightG);
   }
   requestFirstDropBeep();
   notifyRetareFlowDetected(receivedAtMs);
+  if (first) {
+    notifyWebhookFirstDrop(receivedAtMs);
+  }
 }
 
 void performAutomaticRetare() {

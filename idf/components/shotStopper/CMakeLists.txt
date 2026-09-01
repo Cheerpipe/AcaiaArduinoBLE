@@ -8,6 +8,7 @@ idf_component_register(
     "${SHOT_STOPPER_DIR}/ShotStopperScaleWorker.cpp"
     "${SHOT_STOPPER_DIR}/ShotStopperNetwork.cpp"
     "${SHOT_STOPPER_DIR}/ShotStopperOta.cpp"
+    "${SHOT_STOPPER_DIR}/ShotStopperWebhook.cpp"
   INCLUDE_DIRS
     "${SHOT_STOPPER_DIR}"
   REQUIRES
@@ -23,6 +24,7 @@ idf_component_register(
     spi_flash
     app_update
     esp_http_server
+    esp_http_client
     esp_partition
     esp_hw_support
     heap

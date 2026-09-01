@@ -3,6 +3,7 @@
 #include "ShotStopperDomain.h"
 #include "ShotStopperBullseye.h"
 #include "ShotStopperPresets.h"
+#include "ShotStopperWebhook.h"
 
 namespace shotstopper {
 
@@ -46,6 +47,7 @@ struct PersistedSettings {
   char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
   char preferredScaleName[PREFERRED_SCALE_NAME_CAPACITY] = {};
   ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY] = {};
+  WebhookConfig webhook = {};
   uint32_t checksum = 0;
 };
 
@@ -71,7 +73,7 @@ static_assert(offsetof(PersistedSettings, storageRevision) + sizeof(uint32_t) ==
 
 static_assert(sizeof(PersistedSettings) <= PERSISTED_SETTINGS_NVS_BUDGET,
               "PersistedSettings exceeds NVS dual-slot budget");
-static_assert(sizeof(PersistedSettings) == 2416,
+static_assert(sizeof(PersistedSettings) == 2612,
               "PersistedSettings size changed; bump CONFIG_SCHEMA_VERSION");
 
 inline uint32_t persistedSettingsChecksum(const PersistedSettings &settings) {

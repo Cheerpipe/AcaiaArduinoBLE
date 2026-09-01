@@ -961,6 +961,7 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
   quietIdfWifiDriverWarnings();
   settings_ = settings;
   callbacks_ = callbacks;
+  (void)webhooks_.begin(settings.webhook);
   acceptedCommandQueue_ =
       xQueueCreate(WEB_COMMAND_QUEUE_LENGTH, sizeof(WebCommand));
   if (acceptedCommandQueue_ == nullptr) {
@@ -1110,6 +1111,18 @@ StaJoinHints ShotStopperNetwork::staJoinHints() {
   memcpy(hints.staSsid, settings_.staSsid, sizeof(hints.staSsid));
   portEXIT_CRITICAL(&dataMux_);
   return hints;
+}
+
+bool ShotStopperNetwork::enqueueWebhook(const WebhookEvent &event) {
+  return webhooks_.enqueue(event);
+}
+
+WebhookStatus ShotStopperNetwork::webhookStatus() const {
+  return webhooks_.status();
+}
+
+WebhookConfig ShotStopperNetwork::webhookConfig() const {
+  return webhooks_.config();
 }
 
 void ShotStopperNetwork::mergePreferredScaleMac(PersistedSettings &settings) {
@@ -2606,6 +2619,7 @@ bool ShotStopperNetwork::enqueueMaintenanceCompletion(
       command.requestId,
       succeeded ? (command.type == WebCommandType::PERSIST_RUNTIME ||
                            command.type == WebCommandType::SAVE_NETWORK ||
+                           command.type == WebCommandType::SAVE_WEBHOOK ||
                            command.type == WebCommandType::FORGET_NETWORK ||
                            command.type == WebCommandType::CHANGE_DEVICE_PASSWORD ||
                            command.type == WebCommandType::RESET_DEVICE_PASSWORD ||
@@ -2662,6 +2676,22 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
       next.runtime = command.config;
       persist = true;
       break;
+
+    case WebCommandType::SAVE_WEBHOOK: {
+      WebhookConfig staged = {};
+      portENTER_CRITICAL(&dataMux_);
+      const bool matches = stagedWebhookRequestId_ != 0 &&
+                           stagedWebhookRequestId_ == command.webhookStageRequestId;
+      if (matches) staged = stagedWebhook_;
+      portEXIT_CRITICAL(&dataMux_);
+      if (!matches || !validWebhookConfig(staged)) {
+        log(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
+        return false;
+      }
+      next.webhook = staged;
+      persist = true;
+      break;
+    }
 
     case WebCommandType::SAVE_NETWORK: {
       char password[WIFI_PASSWORD_CAPACITY] = {};
@@ -2823,6 +2853,13 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
     status_.wifiConfigured = next.staConfigured;
     status_.staConfigState = next.staConfigState;
     portEXIT_CRITICAL(&dataMux_);
+    if (command.type == WebCommandType::SAVE_WEBHOOK) {
+      webhooks_.setConfig(next.webhook);
+      portENTER_CRITICAL(&dataMux_);
+      stagedWebhook_ = WebhookConfig{};
+      stagedWebhookRequestId_ = 0;
+      portEXIT_CRITICAL(&dataMux_);
+    }
     publishConfiguredAddressStatus();
     log(DebugCategory::CONFIG, DebugCode::CONFIG_PERSISTED,
         static_cast<int32_t>(next.runtime.revision));
@@ -3346,7 +3383,7 @@ bool ShotStopperNetwork::startHttpServer() {
   // makes the last registerHandler fail, which tears down the whole Web UI, so
   // check_web_assets.js fails the build before the margin is gone.
   // Shell + app.js/css/runtime + secondary + settings + 4 HTML partials + APIs.
-  config.max_uri_handlers = 64;
+  config.max_uri_handlers = 65;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
   // the IDF default (1024) is enough most of the time but intermittent
   // long browser headers have returned 431 Request Header Fields Too Large.
@@ -3406,6 +3443,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/last-shot/clear", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/time/sync", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/config", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/webhooks", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/bullseye/test", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/scale/preferred/clear", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/scale/preferred/select", HTTP_POST, ownedApiHandler) &&
@@ -3417,6 +3455,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/control/stop", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/control/state-override", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/control/restart", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/diagnostic/reset-history", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/factory-reset", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/network", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/network/scan", HTTP_GET, ownedApiHandler) &&
@@ -3823,6 +3862,7 @@ esp_err_t ShotStopperNetwork::ownedApiHandler(httpd_req_t *request) {
   if (apiUriMatches(request->uri, "/api/v1/last-shot/clear")) return lastShotClearHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/time/sync")) return timeSyncHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/config")) return configHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/webhooks")) return webhookHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/bullseye/test")) return bullseyeTestHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/scale/preferred/clear")) return preferredScaleClearHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/scale/preferred/select")) return preferredScaleSelectHandler(request);
@@ -3834,6 +3874,7 @@ esp_err_t ShotStopperNetwork::ownedApiHandler(httpd_req_t *request) {
   if (apiUriMatches(request->uri, "/api/v1/control/stop")) return stopHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/control/state-override")) return stateOverrideHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/control/restart")) return restartHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/diagnostic/reset-history")) return clearResetHistoryHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/factory-reset")) return factoryResetHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/network/scan")) {
     return request->method == HTTP_GET ? wifiScanStatusHandler(request)
@@ -4213,6 +4254,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   char safePreferredScaleName[PREFERRED_SCALE_NAME_CAPACITY * 2] = {};
   char safeFirmwareVersion[32] = {};
   char safeStaSsid[WIFI_SSID_CAPACITY] = {};
+  char safeWebhookUrl[WEBHOOK_URL_CAPACITY * 2] = {};
   sanitizeJsonEmbed(control.config.ntpServerCustom, safeNtpCustom,
                     sizeof(safeNtpCustom));
   sanitizeJsonEmbed(timeStatus.activeServer, safeActiveServer,
@@ -4226,6 +4268,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   sanitizeJsonEmbed(FW_VERSION, safeFirmwareVersion,
                     sizeof(safeFirmwareVersion));
   sanitizeJsonEmbed(network.staSsid, safeStaSsid, sizeof(safeStaSsid));
+  const WebhookConfig webhookConfig = self.webhooks_.config();
+  const WebhookStatus webhookStatus = self.webhooks_.status();
+  sanitizeJsonEmbed(webhookConfig.url, safeWebhookUrl,
+                    sizeof(safeWebhookUrl));
   if (page == StatusPage::Settings &&
       self.callbacks_.copyBullseyeConfig != nullptr) {
     self.callbacks_.copyBullseyeConfig(&g_work->bullseyeMelody);
@@ -4696,6 +4742,27 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
               control.bleCompanionLastReject)),
           bleScanIntensityName(clampBleScanIntensity(
               control.bleCompanionScanIntensity)));
+      if (ok) {
+        ok = statusJsonAppend(
+            &used,
+            ",\"webhooks\":{\"enabled\":%s,\"url\":\"%s\","
+            "\"brewState\":%s,\"firstDrop\":%s,\"end\":%s,"
+            "\"workerReady\":%s,\"sending\":%s,\"lastSuccess\":%s,"
+            "\"lastHttpStatus\":%u,\"lastError\":%ld,"
+            "\"lastAttemptAtMs\":%lu,\"sent\":%lu,\"dropped\":%lu}",
+            webhookConfig.enabled ? "true" : "false", safeWebhookUrl,
+            webhookConfig.brewState ? "true" : "false",
+            webhookConfig.firstDrop ? "true" : "false",
+            webhookConfig.end ? "true" : "false",
+            webhookStatus.workerReady ? "true" : "false",
+            webhookStatus.sending ? "true" : "false",
+            webhookStatus.lastSuccess ? "true" : "false",
+            static_cast<unsigned>(webhookStatus.lastHttpStatus),
+            static_cast<long>(webhookStatus.lastError),
+            static_cast<unsigned long>(webhookStatus.lastAttemptAtMs),
+            static_cast<unsigned long>(webhookStatus.sent),
+            static_cast<unsigned long>(webhookStatus.dropped));
+      }
       if (ok) {
         self.buildOtaJson(g_work->otaJson, NetworkWorkBuf::kOtaJson,
                           controlGateOf(control));
@@ -6548,6 +6615,80 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   return self.sendAccepted(request, command.requestId);
 }
 
+esp_err_t ShotStopperNetwork::webhookHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  const ControlGateSnapshot gate = self.controlGate();
+  if (!self.webUiConfigurationAllowed(request, gate)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "Webhooks can be changed or tested only while Ready.");
+  }
+  if (!self.requireAdminUnlock(request)) return ESP_OK;
+  const esp_err_t bodyStatus = self.lockJsonBody(
+      request, "A bounded webhook JSON request is required.");
+  if (bodyStatus != ESP_OK) return bodyStatus;
+
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
+  static const char *const fields[] = {
+      "action", "enabled", "url", "brewState", "firstDrop", "end"};
+  char action[8] = {};
+  WebhookConfig candidate = self.webhooks_.config();
+  const bool known = root != nullptr &&
+      jsonHasOnlyUniqueFields(root, fields, sizeof(fields) / sizeof(fields[0]));
+  const bool actionOk = known &&
+      jsonString(root, "action", action, sizeof(action), false);
+  bool parsed = actionOk;
+  if (parsed && strcmp(action, "save") == 0) {
+    parsed = jsonBoolean(root, "enabled", candidate.enabled) &&
+             jsonString(root, "url", candidate.url, sizeof(candidate.url), true) &&
+             jsonBoolean(root, "brewState", candidate.brewState) &&
+             jsonBoolean(root, "firstDrop", candidate.firstDrop) &&
+             jsonBoolean(root, "end", candidate.end) &&
+             validWebhookConfig(candidate);
+  } else if (parsed && strcmp(action, "test") == 0) {
+    parsed = validWebhookUrl(candidate.url);
+  } else {
+    parsed = false;
+  }
+  if (root != nullptr) cJSON_Delete(root);
+  self.unlockJsonBody();
+  if (!parsed) {
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_WEBHOOK",
+                     "Use an http:// URL without embedded credentials; HTTPS is not supported.");
+  }
+
+  if (strcmp(action, "test") == 0) {
+    WebhookEvent event;
+    event.type = WebhookEventType::TEST;
+    event.uptimeMs = millis();
+    event.unixSec = g_wallClock.synced() ? g_wallClock.nowUtcSec(millis()) : 0;
+    if (!self.webhooks_.enqueue(event)) {
+      return sendError(request, STATUS_UNAVAILABLE, "WEBHOOK_QUEUE_FULL",
+                       "The webhook test could not be queued.");
+    }
+    return sendJson(request, STATUS_ACCEPTED, "{\"queued\":true}");
+  }
+
+  WebCommand command;
+  command.type = WebCommandType::SAVE_WEBHOOK;
+  command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
+  command.webhookStageRequestId = command.requestId;
+  portENTER_CRITICAL(&self.dataMux_);
+  self.stagedWebhook_ = candidate;
+  self.stagedWebhookRequestId_ = command.requestId;
+  portEXIT_CRITICAL(&self.dataMux_);
+  if (!self.callbacks_.enqueueWebCommand(command)) {
+    portENTER_CRITICAL(&self.dataMux_);
+    self.stagedWebhook_ = WebhookConfig{};
+    self.stagedWebhookRequestId_ = 0;
+    portEXIT_CRITICAL(&self.dataMux_);
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
+                     "Control is busy; webhook settings were not saved.");
+  }
+  return self.sendAccepted(request, command.requestId);
+}
+
 esp_err_t ShotStopperNetwork::bullseyeTestHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   const ControlGateSnapshot status = self.controlGate();
@@ -7020,6 +7161,36 @@ esp_err_t ShotStopperNetwork::restartHandler(httpd_req_t *request) {
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control queue is full.");
+  }
+  return self.sendAccepted(request, command.requestId);
+}
+
+esp_err_t ShotStopperNetwork::clearResetHistoryHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.requireAdminUnlock(request)) return ESP_OK;
+  const esp_err_t bodyStatus = self.lockJsonBody(
+      request, "An explicit reset-history confirmation is required.");
+  if (bodyStatus != ESP_OK) return bodyStatus;
+  char confirmation[32] = {};
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
+  static const char *const fields[] = {"confirm"};
+  const bool parsed =
+      root != nullptr && jsonHasOnlyUniqueFields(root, fields, 1) &&
+      jsonString(root, "confirm", confirmation, sizeof(confirmation), false) &&
+      strcmp(confirmation, "CLEAR_RESET_HISTORY") == 0;
+  if (root != nullptr) cJSON_Delete(root);
+  self.unlockJsonBody();
+  memset(confirmation, 0, sizeof(confirmation));
+  if (!parsed) {
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_CONFIRMATION",
+                     "Confirm reset-history clearing explicitly.");
+  }
+  WebCommand command;
+  command.type = WebCommandType::CLEAR_RESET_HISTORY;
+  command.requestId = self.allocateRequestId();
+  if (!self.callbacks_.enqueueWebCommand(command)) {
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
+                     "Control is busy; reset history was not cleared.");
   }
   return self.sendAccepted(request, command.requestId);
 }

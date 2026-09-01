@@ -38,6 +38,7 @@ the [README](../README.md). This FAQ answers “why did that happen?”
 | **The Web UI looks like garbage in `curl`.** | HTML is gzip. Browsers decode it. Use `curl --compressed http://<ip>/`. |
 | **Serial shows `FT-PSK present but FT disabled, falling back to WPA2-PSK`.** | Harmless WPA2 fallback: the router advertises 802.11r and the ESP32 does not use it. Current firmware silences that IDF `wifi` warning. Not a failed join. |
 | **Wi-Fi or the Web UI is flaky.** | **Wi-Fi sleep** may be on (Admin → Wi-Fi; on by default). STA can use modem sleep while associated, including with a scale linked, which can lag or drop the UI. Turn the checkbox off. See [Wi-Fi](settings/wifi.md). If the UI stutters while waiting for a scale, try Admin → Bluetooth → Scan intensity **Light**. |
+| **Why do webhooks support HTTP but not HTTPS?** | The target ESP32-S3 board has limited internal resources. HTTPS is technically possible, but creating a TLS client during a shot adds RAM, CPU, and radio work that could delay or complicate the Bluetooth scale connection. Webhooks are therefore HTTP-only, asynchronous, and intended for a trusted local network. |
 | **The scale takes several seconds to connect after power-on.** | Admin → Bluetooth → **Scan intensity**. Default is **Normal** (50%). Use **Aggressive** if discovery still exceeds ~2 s; **Light** if the Web UI stutters while waiting. |
 
 ## Hardware and compatibility

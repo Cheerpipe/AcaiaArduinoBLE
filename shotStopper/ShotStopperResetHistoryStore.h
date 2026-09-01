@@ -127,4 +127,31 @@ inline bool persistResetUptimeCheckpoint(uint32_t uptimeMs) {
 #endif
 }
 
+// Clears the diagnostic reset list from both durable NVS and RTC memory. The
+// caller retains the current boot's reset reason separately, so clearing this
+// list never removes the "Last reset" diagnostic value.
+inline bool clearPersistedResetHistory(uint32_t unsafeResetCount) {
+#ifdef SHOT_STOPPER_HOST_TEST
+  initializeSafetyResetRecord(SAFETY_RELAY_OPEN_MARKER, unsafeResetCount);
+  return true;
+#else
+  ResetHistoryStoreBlob next = {};
+  finalizeResetHistoryStore(next);
+  if (!tryLockFlashIo(FLASH_IO_LOCK_TIMEOUT_MS)) return false;
+  Preferences preferences;
+  bool ok = false;
+  if (preferences.begin("rsthist", false)) {
+    ok = preferences.putBytes("history", &next, sizeof(next)) == sizeof(next);
+    preferences.end();
+  }
+  unlockFlashIo();
+  if (!ok) return false;
+
+  initializeSafetyResetRecord(SAFETY_RELAY_OPEN_MARKER, unsafeResetCount);
+  resetHistoryStoreLive = next;
+  resetHistoryStoreLastCheckpointMs = 0;
+  return true;
+#endif
+}
+
 }  // namespace shotstopper

@@ -2,7 +2,8 @@
 
 // Settings schema migrations.
 //
-// Current on-disk schema is CONFIG_SCHEMA_VERSION (V3). V3 adds the fixed-size
+// Current on-disk schema is CONFIG_SCHEMA_VERSION (V4). V4 adds HTTP webhook
+// settings. V3 adds the fixed-size
 // Bullseye melody record. V1/V2 are both 1912 bytes; V1 has unnamed padding
 // after staOpen while V2 names that byte staWifiSleep. Unrecognized blobs are
 // rejected and factory defaults are used instead.
@@ -105,8 +106,46 @@ struct PersistedSettingsV2 {
   uint32_t checksum = 0;
 };
 
+struct PersistedSettingsV3 {
+  uint32_t magic = PERSISTED_SETTINGS_MAGIC;
+  uint32_t schemaVersion = 3;
+  uint32_t structureSize = 0;
+  uint32_t storageRevision = 0;
+  RuntimeConfig runtime = {};
+  BullseyeMelodyConfig bullseyeMelody = {};
+  ShotPresetBank presets = {};
+  bool staConfigured = false;
+  bool staOpen = false;
+  bool staWifiSleep = true;
+  char staSsid[WIFI_SSID_CAPACITY] = {};
+  char staPassword[WIFI_PASSWORD_CAPACITY] = {};
+  uint8_t staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  uint8_t staIp[4] = {};
+  uint8_t staNetmask[4] = {};
+  uint8_t staGateway[4] = {};
+  uint8_t staDns1[4] = {};
+  uint8_t staDns2[4] = {};
+  uint8_t staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  bool lkgValid = false;
+  bool lkgOpen = false;
+  char lkgSsid[WIFI_SSID_CAPACITY] = {};
+  char lkgPassword[WIFI_PASSWORD_CAPACITY] = {};
+  uint8_t lkgIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  uint8_t lkgIp[4] = {};
+  uint8_t lkgNetmask[4] = {};
+  uint8_t lkgGateway[4] = {};
+  uint8_t lkgDns1[4] = {};
+  uint8_t lkgDns2[4] = {};
+  char devicePassword[WIFI_PASSWORD_CAPACITY] = {};
+  char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+  char preferredScaleName[PREFERRED_SCALE_NAME_CAPACITY] = {};
+  ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY] = {};
+  uint32_t checksum = 0;
+};
+
 static_assert(sizeof(PersistedSettingsV1) == 1912, "V1 settings blob size");
 static_assert(sizeof(PersistedSettingsV2) == 1912, "V2 settings blob size");
+static_assert(sizeof(PersistedSettingsV3) == 2416, "V3 settings blob size");
 static_assert(offsetof(PersistedSettingsV1, staOpen) ==
                   offsetof(PersistedSettingsV2, staOpen),
               "V1/V2 header through staOpen must match");
@@ -125,6 +164,27 @@ inline uint32_t persistedSettingsV1Checksum(const PersistedSettingsV1 &settings)
 inline uint32_t persistedSettingsV2Checksum(const PersistedSettingsV2 &settings) {
   return crc32(reinterpret_cast<const uint8_t *>(&settings),
                offsetof(PersistedSettingsV2, checksum));
+}
+
+inline uint32_t persistedSettingsV3Checksum(const PersistedSettingsV3 &settings) {
+  return crc32(reinterpret_cast<const uint8_t *>(&settings),
+               offsetof(PersistedSettingsV3, checksum));
+}
+
+inline bool migratePersistedSettingsFromV3(const PersistedSettingsV3 &v3,
+                                           PersistedSettings &out) {
+  if (v3.magic != PERSISTED_SETTINGS_MAGIC || v3.schemaVersion != 3 ||
+      v3.structureSize != sizeof(PersistedSettingsV3) ||
+      v3.checksum != persistedSettingsV3Checksum(v3)) {
+    return false;
+  }
+  out = PersistedSettings{};
+  memcpy(&out, &v3, offsetof(PersistedSettingsV3, checksum));
+  out.schemaVersion = CONFIG_SCHEMA_VERSION;
+  out.structureSize = sizeof(PersistedSettings);
+  out.checksum = 0;
+  out.checksum = persistedSettingsChecksum(out);
+  return true;
 }
 
 inline bool migratePersistedSettingsFromV1(const PersistedSettingsV1 &v1,
