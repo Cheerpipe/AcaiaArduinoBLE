@@ -1401,7 +1401,7 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !ui.includes('Shot aborted') ||
     !ui.includes('Brew allowed') ||
     !ui.includes("c.state==='PRESENT'||c.present?'Present':'Absent'") ||
-    !network.includes('endReasonName(control.lastShot.endReason)') ||
+    !network.includes('shotLogStopDetailName(') ||
     !html.includes('option value="scale_priority">Scale priority') ||
     !css.includes('.swS') ||
     !css.includes('.homeSwitchGrid .swS') ||
@@ -1430,6 +1430,13 @@ if (!ui.includes('id="autoToManualGuardEnabled"') ||
     !ui.includes('requireCupToStart:$(\'requireCupToStart\')') ||
     !ui.includes("cupRemovedWeightG:number('cupRemovedWeightG')")) {
   throw new Error('Auto-to-manual time guard must be wired in config UI, live panel, shots API, and routes');
+}
+if (!network.includes('copyShotRecords(&homeLastShot, 1)') ||
+    !network.includes('newestCurve.shotId == homeLastShot.id') ||
+    !network.includes('static_cast<unsigned long>(homeLastShot.id)') ||
+    !ui.includes('rateLastShotValue(ls.shotLogId,n)') ||
+    !ui.includes("deleteOneShot(+$('clearLastShotButton').dataset.shotId)")) {
+  throw new Error('Home last shot must read and manage the newest Stats record');
 }
 if (!html.includes('<summary>Paddle</summary>') ||
     !html.includes('id="paddleMode"') ||
@@ -2036,8 +2043,6 @@ if (!ui.includes('<legend>Brew</legend>') ||
     html.includes('id="lastCycle"') ||
     !ui.includes('function renderShotPanel(') ||
     !ui.includes('function renderShotSpark(') ||
-    !ui.includes("confirm:'CLEAR_LAST_SHOT'") ||
-    !ui.includes('/api/v1/last-shot/clear') ||
     !network.includes('\\"lastShot\\"') ||
     !network.includes('\\"shotCurve\\"') ||
     !network.includes('formatShotCurveJsonBody') ||
@@ -2379,7 +2384,6 @@ if (!ui.includes('id="shotRating"') ||
     !runtimeJs.includes("className='shotRateCell'") ||
     !runtimeJs.includes("dataset.label='Rate'") ||
     !runtimeJs.includes('function postShotRating(') ||
-    !runtimeJs.includes('{lastShot:true,rating:n}') ||
     !runtimeJs.includes('{id,rating:n}') ||
     !runtimeJs.includes("'rating','ended_at_ms'") ||
     !css.includes('.starRate{') ||
@@ -3351,9 +3355,10 @@ for (const [route, handler] of expected) {
     const browserIcon = uri === '/favicon.ico' ||
         uri === '/apple-touch-icon.png' ||
         uri === '/apple-touch-icon-precomposed.png';
+    const rawLastShotApi = uri === '/api/v1/last-shot/clear';
     if (!(statusPage && ui.includes('function statusUrl(') && ui.includes('/api/v1/status/')) &&
         !(lazyAsset && (ui.includes('/partials/') || ui.includes('/js/'))) &&
-        !browserIcon) {
+        !browserIcon && !rawLastShotApi) {
       throw new Error(`Registered API is not referenced by the UI: ${uri}`);
     }
   }
