@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <ctype.h>
 #include <string.h>
 
 #if !defined(SHOT_STOPPER_HOST_TEST) && \
@@ -9,6 +10,7 @@
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 #endif
 
@@ -42,9 +44,51 @@ inline bool validWebhookUrl(const char *url) {
     const unsigned char value = static_cast<unsigned char>(*cursor);
     if (value <= 0x20U || *cursor == '"' || *cursor == '\\') return false;
   }
-  const char *authorityEnd = strchr(host, '/');
+  const char *authorityEnd = strpbrk(host, "/?");
   if (authorityEnd == nullptr) authorityEnd = url + length;
-  return authorityEnd > host;
+  if (authorityEnd <= host) return false;
+
+  const char *port = nullptr;
+  const char *hostEnd = authorityEnd;
+  if (*host == '[') {
+    const char *close = static_cast<const char *>(
+        memchr(host + 1, ']', static_cast<size_t>(authorityEnd - host - 1)));
+    if (close == nullptr || close == host + 1) return false;
+    for (const char *cursor = host + 1; cursor < close; ++cursor) {
+      if (!(isxdigit(static_cast<unsigned char>(*cursor)) || *cursor == ':' ||
+            *cursor == '.')) return false;
+    }
+    if (close + 1 < authorityEnd) {
+      if (close[1] != ':') return false;
+      port = close + 2;
+    }
+  } else {
+    const char *colon = static_cast<const char *>(
+        memchr(host, ':', static_cast<size_t>(authorityEnd - host)));
+    if (colon != nullptr) {
+      hostEnd = colon;
+      port = colon + 1;
+      if (memchr(port, ':', static_cast<size_t>(authorityEnd - port)) != nullptr)
+        return false;
+    }
+    if (hostEnd <= host || *host == '.' || hostEnd[-1] == '.' ||
+        *host == '-' || hostEnd[-1] == '-') return false;
+    for (const char *cursor = host; cursor < hostEnd; ++cursor) {
+      if (!(isalnum(static_cast<unsigned char>(*cursor)) || *cursor == '.' ||
+            *cursor == '-' || *cursor == '_')) return false;
+    }
+  }
+  if (port != nullptr) {
+    if (port >= authorityEnd) return false;
+    uint32_t value = 0;
+    for (const char *cursor = port; cursor < authorityEnd; ++cursor) {
+      if (!isdigit(static_cast<unsigned char>(*cursor))) return false;
+      value = value * 10U + static_cast<uint32_t>(*cursor - '0');
+      if (value > 65535U) return false;
+    }
+    if (value == 0U) return false;
+  }
+  return true;
 }
 
 inline bool validWebhookConfig(const WebhookConfig &config) {
@@ -87,6 +131,8 @@ struct WebhookStatus {
   uint32_t lastAttemptAtMs = 0;
   uint32_t sent = 0;
   uint32_t dropped = 0;
+  uint32_t staleConfigDropped = 0;
+  uint32_t workerStartFailures = 0;
 };
 
 #if !defined(SHOT_STOPPER_HOST_TEST) && \
@@ -101,15 +147,28 @@ class WebhookDispatcher {
   bool enqueue(const WebhookEvent &event);
 
  private:
+  struct QueuedWebhook {
+    WebhookEvent event;
+    uint32_t configGeneration = 0;
+  };
+
+  enum class WorkerState : uint8_t { STOPPED, STARTING, READY, STOPPING };
+
   bool startWorker();
+  void requestWorkerStop();
+  void releaseWorkerFromTask();
   static void taskEntry(void *parameter);
   void task();
-  bool send(const WebhookEvent &event);
+  bool send(const QueuedWebhook &queued);
   bool buildPayload(const WebhookEvent &event, char *output, size_t capacity);
 
   mutable portMUX_TYPE mux_ = portMUX_INITIALIZER_UNLOCKED;
   WebhookConfig config_ = {};
   WebhookStatus status_ = {};
+  uint32_t configGeneration_ = 1;
+  WorkerState workerState_ = WorkerState::STOPPED;
+  SemaphoreHandle_t lifecycleMutex_ = nullptr;
+  bool stopAfterDrain_ = false;
   QueueHandle_t queue_ = nullptr;
   TaskHandle_t task_ = nullptr;
   char *payload_ = nullptr;

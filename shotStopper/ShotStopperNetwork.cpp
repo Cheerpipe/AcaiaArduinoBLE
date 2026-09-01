@@ -961,7 +961,10 @@ bool ShotStopperNetwork::begin(const PersistedSettings &settings,
   quietIdfWifiDriverWarnings();
   settings_ = settings;
   callbacks_ = callbacks;
-  (void)webhooks_.begin(settings.webhook);
+  if (!webhooks_.begin(settings.webhook) && settings.webhook.enabled) {
+    log(DebugCategory::NETWORK, DebugCode::INITIALIZATION_FAILED,
+        BOOT_SUBSYSTEM_NETWORK, 1);
+  }
   acceptedCommandQueue_ =
       xQueueCreate(WEB_COMMAND_QUEUE_LENGTH, sizeof(WebCommand));
   if (acceptedCommandQueue_ == nullptr) {
@@ -1125,6 +1128,15 @@ WebhookConfig ShotStopperNetwork::webhookConfig() const {
   return webhooks_.config();
 }
 
+void ShotStopperNetwork::clearStagedWebhook(uint32_t requestId) {
+  portENTER_CRITICAL(&dataMux_);
+  if (requestId == 0 || stagedWebhookRequestId_ == requestId) {
+    stagedWebhook_ = WebhookConfig{};
+    stagedWebhookRequestId_ = 0;
+  }
+  portEXIT_CRITICAL(&dataMux_);
+}
+
 void ShotStopperNetwork::mergePreferredScaleMac(PersistedSettings &settings) {
   if (callbacks_.copyPreferredScaleMac != nullptr) {
     callbacks_.copyPreferredScaleMac(settings.preferredScaleMac,
@@ -1214,8 +1226,11 @@ void ShotStopperNetwork::recordCommandResult(
     return;
   }
   portENTER_CRITICAL(&dataMux_);
-  if (status_.lastCommandRequestId == 0 ||
-      status_.lastCommandRequestId == requestId ||
+  const bool sameRequest = status_.lastCommandRequestId == requestId;
+  const bool nonRegressing =
+      !sameRequest || static_cast<uint8_t>(state) >=
+                          static_cast<uint8_t>(status_.lastCommandState);
+  if (status_.lastCommandRequestId == 0 || (sameRequest && nonRegressing) ||
       static_cast<int32_t>(requestId - status_.lastCommandRequestId) > 0) {
     status_.lastCommandRequestId = requestId;
     status_.lastCommandState = state;
@@ -2563,6 +2578,9 @@ void ShotStopperNetwork::processAcceptedMaintenanceCommand(uint32_t now) {
         MAINTENANCE_PUBLICATION_TIMEOUT_MS;
     if (control.maintenanceLeaseActive || control.activeCycle ||
         control.physicalActivatorOn || publicationTimedOut) {
+      if (acceptedCommand_.type == WebCommandType::SAVE_WEBHOOK) {
+        clearStagedWebhook(acceptedCommand_.webhookStageRequestId);
+      }
       (void)enqueueMaintenanceCompletion(
           acceptedCommand_, false, CommandResultState::CANCELED);
       acceptedCommandPending_ = false;
@@ -2572,6 +2590,9 @@ void ShotStopperNetwork::processAcceptedMaintenanceCommand(uint32_t now) {
   }
   if (control.activeCycle || control.relayClosed ||
       control.physicalActivatorOn) {
+    if (acceptedCommand_.type == WebCommandType::SAVE_WEBHOOK) {
+      clearStagedWebhook(acceptedCommand_.webhookStageRequestId);
+    }
     (void)enqueueMaintenanceCompletion(
         acceptedCommand_, false, CommandResultState::CANCELED);
     acceptedCommandPending_ = false;
@@ -2590,6 +2611,9 @@ void ShotStopperNetwork::processAcceptedMaintenanceCommand(uint32_t now) {
       log(DebugCategory::SECURITY, DebugCode::COMMAND_RETRY,
           acceptedCommand_.requestId, acceptedCommandAttempts_);
       return;
+    }
+    if (acceptedCommand_.type == WebCommandType::SAVE_WEBHOOK) {
+      clearStagedWebhook(acceptedCommand_.webhookStageRequestId);
     }
     (void)enqueueMaintenanceCompletion(acceptedCommand_, false);
     log(DebugCategory::SECURITY, DebugCode::COMMAND_FAILED,
@@ -2855,10 +2879,7 @@ bool ShotStopperNetwork::processPersistedCommand(const WebCommand &command) {
     portEXIT_CRITICAL(&dataMux_);
     if (command.type == WebCommandType::SAVE_WEBHOOK) {
       webhooks_.setConfig(next.webhook);
-      portENTER_CRITICAL(&dataMux_);
-      stagedWebhook_ = WebhookConfig{};
-      stagedWebhookRequestId_ = 0;
-      portEXIT_CRITICAL(&dataMux_);
+      clearStagedWebhook(command.webhookStageRequestId);
     }
     publishConfiguredAddressStatus();
     log(DebugCategory::CONFIG, DebugCode::CONFIG_PERSISTED,
@@ -4749,7 +4770,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
             "\"brewState\":%s,\"firstDrop\":%s,\"end\":%s,"
             "\"workerReady\":%s,\"sending\":%s,\"lastSuccess\":%s,"
             "\"lastHttpStatus\":%u,\"lastError\":%ld,"
-            "\"lastAttemptAtMs\":%lu,\"sent\":%lu,\"dropped\":%lu}",
+            "\"lastAttemptAtMs\":%lu,\"sent\":%lu,\"dropped\":%lu,"
+            "\"staleConfigDropped\":%lu,\"workerStartFailures\":%lu},"
+            "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"}",
             webhookConfig.enabled ? "true" : "false", safeWebhookUrl,
             webhookConfig.brewState ? "true" : "false",
             webhookConfig.firstDrop ? "true" : "false",
@@ -4761,7 +4784,11 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
             static_cast<long>(webhookStatus.lastError),
             static_cast<unsigned long>(webhookStatus.lastAttemptAtMs),
             static_cast<unsigned long>(webhookStatus.sent),
-            static_cast<unsigned long>(webhookStatus.dropped));
+            static_cast<unsigned long>(webhookStatus.dropped),
+            static_cast<unsigned long>(webhookStatus.staleConfigDropped),
+            static_cast<unsigned long>(webhookStatus.workerStartFailures),
+            static_cast<unsigned long>(network.lastCommandRequestId),
+            commandResultStateName(network.lastCommandState));
       }
       if (ok) {
         self.buildOtaJson(g_work->otaJson, NetworkWorkBuf::kOtaJson,
@@ -6663,8 +6690,8 @@ esp_err_t ShotStopperNetwork::webhookHandler(httpd_req_t *request) {
     event.uptimeMs = millis();
     event.unixSec = g_wallClock.synced() ? g_wallClock.nowUtcSec(millis()) : 0;
     if (!self.webhooks_.enqueue(event)) {
-      return sendError(request, STATUS_UNAVAILABLE, "WEBHOOK_QUEUE_FULL",
-                       "The webhook test could not be queued.");
+      return sendError(request, STATUS_UNAVAILABLE, "WEBHOOK_UNAVAILABLE",
+                       "The webhook worker is unavailable or its queue is full.");
     }
     return sendJson(request, STATUS_ACCEPTED, "{\"queued\":true}");
   }
@@ -6675,14 +6702,18 @@ esp_err_t ShotStopperNetwork::webhookHandler(httpd_req_t *request) {
   command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   command.webhookStageRequestId = command.requestId;
   portENTER_CRITICAL(&self.dataMux_);
-  self.stagedWebhook_ = candidate;
-  self.stagedWebhookRequestId_ = command.requestId;
+  const bool stageAvailable = self.stagedWebhookRequestId_ == 0;
+  if (stageAvailable) {
+    self.stagedWebhook_ = candidate;
+    self.stagedWebhookRequestId_ = command.requestId;
+  }
   portEXIT_CRITICAL(&self.dataMux_);
+  if (!stageAvailable) {
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_BUSY",
+                     "Another webhook configuration save is still pending.");
+  }
   if (!self.callbacks_.enqueueWebCommand(command)) {
-    portENTER_CRITICAL(&self.dataMux_);
-    self.stagedWebhook_ = WebhookConfig{};
-    self.stagedWebhookRequestId_ = 0;
-    portEXIT_CRITICAL(&self.dataMux_);
+    self.clearStagedWebhook(command.requestId);
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; webhook settings were not saved.");
   }

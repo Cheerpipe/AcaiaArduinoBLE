@@ -196,6 +196,7 @@ class ShotStopperNetwork {
 
   private:
   void mergePreferredScaleMac(PersistedSettings &settings);
+  void clearStagedWebhook(uint32_t requestId);
   void overlayLiveShotSettings(PersistedSettings &settings);
   bool serialDebugEnabled() const;
   static constexpr uint32_t STA_CONNECT_TIMEOUT_MS = 25000;

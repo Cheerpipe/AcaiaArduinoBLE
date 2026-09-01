@@ -1708,16 +1708,21 @@ void notifyWebhookFirstDrop(uint32_t receivedAtMs);
 #include "ShotStopperScaleSense.h"
 
 #ifndef SHOT_STOPPER_HOST_TEST
-uint32_t webhookUnixSec(uint32_t now) {
-  return g_wallClock.synced() ? g_wallClock.nowUtcSec(now) : 0U;
+uint32_t webhookUnixSecAt(uint32_t occurredAtMs) {
+  if (!g_wallClock.synced()) return 0U;
+  const uint32_t nowMs = millis();
+  const uint32_t nowUtcSec = g_wallClock.nowUtcSec(nowMs);
+  const uint32_t ageSec = static_cast<uint32_t>(nowMs - occurredAtMs) / 1000U;
+  return nowUtcSec >= ageSec ? nowUtcSec - ageSec : 0U;
 }
 
-WebhookEvent baseWebhookEvent(WebhookEventType type, uint32_t cycleId) {
+WebhookEvent baseWebhookEvent(WebhookEventType type, uint32_t cycleId,
+                              uint32_t occurredAtMs = millis()) {
   WebhookEvent event;
   event.type = type;
   event.cycleId = cycleId;
-  event.uptimeMs = millis();
-  event.unixSec = webhookUnixSec(event.uptimeMs);
+  event.uptimeMs = occurredAtMs;
+  event.unixSec = webhookUnixSecAt(occurredAtMs);
   return event;
 }
 
@@ -1726,7 +1731,11 @@ void queueWebhookBrewStart() {
   webhookBrewStartPending = false;
   const WebhookConfig config = networkManager.webhookConfig();
   if (!config.enabled || !config.brewState) return;
-  WebhookEvent event = baseWebhookEvent(WebhookEventType::BREWING, session.id);
+  const uint32_t startedAtMs = session.circuitClosedAtMs != 0U
+                                   ? session.circuitClosedAtMs
+                                   : session.startedAtMs;
+  WebhookEvent event = baseWebhookEvent(WebhookEventType::BREWING, session.id,
+                                        startedAtMs);
   event.targetWeightG = static_cast<float>(session.config.goalWeightG);
   event.presetId = session.activePresetId;
   (void)networkManager.enqueueWebhook(event);
@@ -1746,7 +1755,8 @@ void notifyWebhookFirstDrop(uint32_t receivedAtMs) {
   queueWebhookBrewStart();
   const WebhookConfig config = networkManager.webhookConfig();
   if (!config.enabled || !config.firstDrop) return;
-  WebhookEvent event = baseWebhookEvent(WebhookEventType::FIRST_DROP, session.id);
+  WebhookEvent event = baseWebhookEvent(WebhookEventType::FIRST_DROP, session.id,
+                                        receivedAtMs);
   const uint32_t anchor = session.circuitClosedAtMs != 0
                               ? session.circuitClosedAtMs
                               : session.startedAtMs;
@@ -2349,7 +2359,8 @@ void queueWebhookEnd(const PendingShotFinalize &snapshot, float finalWeightG,
       brewEndIsAbandonedStart(snapshot.endReason)) {
     return;
   }
-  WebhookEvent event = baseWebhookEvent(WebhookEventType::END, snapshot.cycleId);
+  WebhookEvent event = baseWebhookEvent(WebhookEventType::END, snapshot.cycleId,
+                                        snapshot.endedAtMs);
   event.durationMs = static_cast<uint32_t>(snapshot.durationDs) * 100U;
   event.firstDropValid = snapshot.firstDropDs != SHOT_LOG_METRIC_MISSING;
   event.firstDropMs = event.firstDropValid
@@ -3284,7 +3295,11 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   const uint32_t durationMs = endedCycleDurationMs();
 
 #ifndef SHOT_STOPPER_HOST_TEST
-  queueWebhookBrewStart();
+  if (brewEndIsAbandonedStart(reason) || endingRinseCycle(reason)) {
+    webhookBrewStartPending = false;
+  } else {
+    queueWebhookBrewStart();
+  }
 #endif
 
   stopPulseTrains();
@@ -3335,7 +3350,7 @@ void finalizeCycle(EndReason reason, StopperState nextState) {
   {
     const WebhookConfig webhook = networkManager.webhookConfig();
     if (webhook.enabled && webhook.brewState &&
-        !endingRinseCycle(reason)) {
+        !endingRinseCycle(reason) && !brewEndIsAbandonedStart(reason)) {
       WebhookEvent event = baseWebhookEvent(WebhookEventType::IDLE, session.id);
       event.durationMs = durationMs;
       event.targetWeightG = static_cast<float>(session.config.goalWeightG);

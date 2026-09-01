@@ -42,44 +42,119 @@ void deviceId(char *output, size_t capacity) {
 bool WebhookDispatcher::begin(const WebhookConfig &config) {
   portENTER_CRITICAL(&mux_);
   config_ = config;
+  configGeneration_ = 1;
   portEXIT_CRITICAL(&mux_);
+  lifecycleMutex_ = xSemaphoreCreateMutex();
+  if (lifecycleMutex_ == nullptr) {
+    portENTER_CRITICAL(&mux_);
+    ++status_.workerStartFailures;
+    portEXIT_CRITICAL(&mux_);
+    return !config.enabled;
+  }
   return !config.enabled || startWorker();
 }
 
 bool WebhookDispatcher::startWorker() {
-  if (queue_ != nullptr && payload_ != nullptr && task_ != nullptr) return true;
-  queue_ = xQueueCreate(kWebhookQueueDepth, sizeof(WebhookEvent));
-  payload_ = static_cast<char *>(heap_caps_malloc(
-      kWebhookPayloadCapacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-  if (payload_ == nullptr) {
-    payload_ = static_cast<char *>(malloc(kWebhookPayloadCapacity));
+  if (lifecycleMutex_ == nullptr ||
+      xSemaphoreTake(lifecycleMutex_, portMAX_DELAY) != pdTRUE) return false;
+  if (workerState_ == WorkerState::READY) {
+    xSemaphoreGive(lifecycleMutex_);
+    return true;
   }
-  if (queue_ == nullptr || payload_ == nullptr) {
-    if (queue_ != nullptr) vQueueDelete(queue_);
-    if (payload_ != nullptr) free(payload_);
-    queue_ = nullptr;
-    payload_ = nullptr;
+  if (workerState_ == WorkerState::STARTING ||
+      workerState_ == WorkerState::STOPPING) {
+    xSemaphoreGive(lifecycleMutex_);
     return false;
   }
-  if (xTaskCreatePinnedToCore(taskEntry, "webhook", 4096, this,
-                             tskIDLE_PRIORITY, &task_, 0) != pdPASS) {
-    vQueueDelete(queue_);
-    free(payload_);
-    queue_ = nullptr;
-    payload_ = nullptr;
+  workerState_ = WorkerState::STARTING;
+  stopAfterDrain_ = false;
+
+  QueueHandle_t queue = xQueueCreate(kWebhookQueueDepth, sizeof(QueuedWebhook));
+  char *payload = static_cast<char *>(heap_caps_malloc(
+      kWebhookPayloadCapacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (payload == nullptr) {
+    payload = static_cast<char *>(malloc(kWebhookPayloadCapacity));
+  }
+  if (queue == nullptr || payload == nullptr) {
+    if (queue != nullptr) vQueueDelete(queue);
+    if (payload != nullptr) free(payload);
+    portENTER_CRITICAL(&mux_);
+    workerState_ = WorkerState::STOPPED;
+    status_.workerReady = false;
+    ++status_.workerStartFailures;
+    portEXIT_CRITICAL(&mux_);
+    xSemaphoreGive(lifecycleMutex_);
     return false;
   }
   portENTER_CRITICAL(&mux_);
+  queue_ = queue;
+  payload_ = payload;
+  portEXIT_CRITICAL(&mux_);
+  if (xTaskCreatePinnedToCore(taskEntry, "webhook", 4096, this,
+                             tskIDLE_PRIORITY, &task_, 0) != pdPASS) {
+    vQueueDelete(queue);
+    free(payload);
+    portENTER_CRITICAL(&mux_);
+    queue_ = nullptr;
+    payload_ = nullptr;
+    task_ = nullptr;
+    workerState_ = WorkerState::STOPPED;
+    status_.workerReady = false;
+    ++status_.workerStartFailures;
+    portEXIT_CRITICAL(&mux_);
+    xSemaphoreGive(lifecycleMutex_);
+    return false;
+  }
+  portENTER_CRITICAL(&mux_);
+  workerState_ = WorkerState::READY;
   status_.workerReady = true;
   portEXIT_CRITICAL(&mux_);
+  xSemaphoreGive(lifecycleMutex_);
   return true;
 }
 
+void WebhookDispatcher::requestWorkerStop() {
+  if (lifecycleMutex_ == nullptr ||
+      xSemaphoreTake(lifecycleMutex_, portMAX_DELAY) != pdTRUE) return;
+  if (workerState_ == WorkerState::READY) workerState_ = WorkerState::STOPPING;
+  stopAfterDrain_ = false;
+  xSemaphoreGive(lifecycleMutex_);
+}
+
+void WebhookDispatcher::releaseWorkerFromTask() {
+  QueueHandle_t queue = nullptr;
+  char *payload = nullptr;
+  if (lifecycleMutex_ != nullptr &&
+      xSemaphoreTake(lifecycleMutex_, portMAX_DELAY) == pdTRUE) {
+    queue = queue_;
+    payload = payload_;
+    queue_ = nullptr;
+    payload_ = nullptr;
+    task_ = nullptr;
+    workerState_ = WorkerState::STOPPED;
+    stopAfterDrain_ = false;
+    portENTER_CRITICAL(&mux_);
+    status_.workerReady = false;
+    status_.sending = false;
+    portEXIT_CRITICAL(&mux_);
+    xSemaphoreGive(lifecycleMutex_);
+  }
+  if (queue != nullptr) vQueueDelete(queue);
+  if (payload != nullptr) free(payload);
+}
+
 void WebhookDispatcher::setConfig(const WebhookConfig &config) {
+  bool changed = false;
   portENTER_CRITICAL(&mux_);
-  config_ = config;
+  changed = memcmp(&config_, &config, sizeof(config)) != 0;
+  if (changed) {
+    config_ = config;
+    ++configGeneration_;
+    if (configGeneration_ == 0) configGeneration_ = 1;
+  }
   portEXIT_CRITICAL(&mux_);
   if (config.enabled) (void)startWorker();
+  else requestWorkerStop();
 }
 
 WebhookConfig WebhookDispatcher::config() const {
@@ -99,23 +174,44 @@ WebhookStatus WebhookDispatcher::status() const {
 }
 
 bool WebhookDispatcher::enqueue(const WebhookEvent &event) {
-  const WebhookConfig live = config();
-  if (event.type == WebhookEventType::TEST && queue_ == nullptr) {
-    (void)startWorker();
-  }
-  bool selected = event.type == WebhookEventType::TEST;
-  if (event.type == WebhookEventType::BREWING ||
-      event.type == WebhookEventType::IDLE) selected = live.brewState;
-  if (event.type == WebhookEventType::FIRST_DROP) selected = live.firstDrop;
-  if (event.type == WebhookEventType::END) selected = live.end;
-  if (queue_ == nullptr || !validWebhookUrl(live.url) ||
-      (event.type != WebhookEventType::TEST && (!live.enabled || !selected)) ||
-      xQueueSend(queue_, &event, 0) != pdTRUE) {
+  if (event.type == WebhookEventType::TEST) (void)startWorker();
+  WebhookConfig live;
+  QueuedWebhook queued;
+  queued.event = event;
+  QueueHandle_t queue = nullptr;
+  WorkerState workerState = WorkerState::STOPPED;
+  if (lifecycleMutex_ == nullptr ||
+      xSemaphoreTake(lifecycleMutex_, 0) != pdTRUE) {
     portENTER_CRITICAL(&mux_);
     ++status_.dropped;
     portEXIT_CRITICAL(&mux_);
     return false;
   }
+  portENTER_CRITICAL(&mux_);
+  live = config_;
+  queued.configGeneration = configGeneration_;
+  queue = queue_;
+  workerState = workerState_;
+  portEXIT_CRITICAL(&mux_);
+  bool selected = event.type == WebhookEventType::TEST;
+  if (event.type == WebhookEventType::BREWING ||
+      event.type == WebhookEventType::IDLE) selected = live.brewState;
+  if (event.type == WebhookEventType::FIRST_DROP) selected = live.firstDrop;
+  if (event.type == WebhookEventType::END) selected = live.end;
+  if (workerState != WorkerState::READY || queue == nullptr ||
+      !validWebhookUrl(live.url) ||
+      (event.type != WebhookEventType::TEST && (!live.enabled || !selected)) ||
+      xQueueSend(queue, &queued, 0) != pdTRUE) {
+    xSemaphoreGive(lifecycleMutex_);
+    portENTER_CRITICAL(&mux_);
+    ++status_.dropped;
+    portEXIT_CRITICAL(&mux_);
+    return false;
+  }
+  if (event.type == WebhookEventType::TEST && !live.enabled) {
+    stopAfterDrain_ = true;
+  }
+  xSemaphoreGive(lifecycleMutex_);
   return true;
 }
 
@@ -124,12 +220,33 @@ void WebhookDispatcher::taskEntry(void *parameter) {
 }
 
 void WebhookDispatcher::task() {
-  WebhookEvent event;
+  QueuedWebhook queued;
   for (;;) {
-    if (xQueueReceive(queue_, &event, portMAX_DELAY) == pdTRUE) {
-      (void)send(event);
+    QueueHandle_t queue = nullptr;
+    WorkerState state = WorkerState::STOPPED;
+    if (lifecycleMutex_ != nullptr &&
+        xSemaphoreTake(lifecycleMutex_, portMAX_DELAY) == pdTRUE) {
+      queue = queue_;
+      state = workerState_;
+      xSemaphoreGive(lifecycleMutex_);
     }
+    if (state == WorkerState::STOPPING || queue == nullptr) break;
+    if (xQueueReceive(queue, &queued, pdMS_TO_TICKS(100)) == pdTRUE) {
+      (void)send(queued);
+    }
+    if (lifecycleMutex_ != nullptr &&
+        xSemaphoreTake(lifecycleMutex_, portMAX_DELAY) == pdTRUE) {
+      if (workerState_ == WorkerState::READY && stopAfterDrain_ &&
+          uxQueueMessagesWaiting(queue_) == 0) {
+        workerState_ = WorkerState::STOPPING;
+      }
+      state = workerState_;
+      xSemaphoreGive(lifecycleMutex_);
+    }
+    if (state == WorkerState::STOPPING) break;
   }
+  releaseWorkerFromTask();
+  vTaskDelete(nullptr);
 }
 
 bool WebhookDispatcher::buildPayload(const WebhookEvent &event, char *output,
@@ -139,10 +256,12 @@ bool WebhookDispatcher::buildPayload(const WebhookEvent &event, char *output,
   int written = snprintf(
       output, capacity,
       "{\"schemaVersion\":1,\"event\":\"%s\",\"deviceId\":\"%s\","
-      "\"cycleId\":%lu,\"uptimeMs\":%lu,\"timestamp\":%lu",
+      "\"cycleId\":%lu,\"uptimeMs\":%lu,\"timestamp\":%lu,"
+      "\"sentAtUptimeMs\":%lu",
       eventName(event.type), id, static_cast<unsigned long>(event.cycleId),
       static_cast<unsigned long>(event.uptimeMs),
-      static_cast<unsigned long>(event.unixSec));
+      static_cast<unsigned long>(event.unixSec),
+      static_cast<unsigned long>(millis()));
   if (written <= 0 || static_cast<size_t>(written) >= capacity) return false;
   size_t used = static_cast<size_t>(written);
   auto append = [&](const char *format, auto... args) {
@@ -193,8 +312,21 @@ bool WebhookDispatcher::buildPayload(const WebhookEvent &event, char *output,
   return append("}");
 }
 
-bool WebhookDispatcher::send(const WebhookEvent &event) {
-  const WebhookConfig live = config();
+bool WebhookDispatcher::send(const QueuedWebhook &queued) {
+  WebhookConfig live;
+  uint32_t generation = 0;
+  portENTER_CRITICAL(&mux_);
+  live = config_;
+  generation = configGeneration_;
+  portEXIT_CRITICAL(&mux_);
+  if (queued.configGeneration != generation) {
+    portENTER_CRITICAL(&mux_);
+    ++status_.dropped;
+    ++status_.staleConfigDropped;
+    portEXIT_CRITICAL(&mux_);
+    return false;
+  }
+  const WebhookEvent &event = queued.event;
   portENTER_CRITICAL(&mux_);
   status_.sending = true;
   status_.lastAttemptAtMs = millis();

@@ -15,7 +15,27 @@ export function applyStatus(s){
     $('webhookEnd').checked=!!w.end;
   }
   const result=w.sending?'Sending…':w.lastAttemptAtMs?(w.lastSuccess?'Last delivery succeeded'+(w.lastHttpStatus?' (HTTP '+w.lastHttpStatus+')':''):'Last delivery failed'+(w.lastHttpStatus?' (HTTP '+w.lastHttpStatus+')':'')+(w.lastError?' · error '+w.lastError:'')):'No delivery attempted yet.';
-  $('webhookStatus').textContent=result+' Sent '+(w.sent||0)+', dropped '+(w.dropped||0)+'.';
+  $('webhookStatus').textContent=result+' Sent '+(w.sent||0)+', dropped '+(w.dropped||0)+(w.staleConfigDropped?' ('+w.staleConfigDropped+' after configuration changes)':'')+(w.workerStartFailures?' · worker start failures '+w.workerStartFailures:'')+'.';
+}
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function validWebhookUrl(url){
+  if(!url.startsWith('http://')||/[\s#@"\\]/.test(url))return false;
+  try{const parsed=new URL(url);return parsed.protocol==='http:'&&!parsed.username&&!parsed.password&&!!parsed.hostname}catch(_){return false}
+}
+async function waitWebhookPersisted(requestId){
+  const deadline=Date.now()+8e3;
+  while(Date.now()<deadline){
+    await wait(150);
+    const s=await R.api('/api/v1/status/admin');
+    const c=s&&s.lastCommand;
+    if(c&&c.requestId===requestId){
+      if(c.state==='PERSISTED'){applyStatus(s);return}
+      if(c.state==='FAILED'||c.state==='CANCELED')throw new Error('Device could not persist webhook settings')
+    }else if(c&&c.requestId>requestId&&(c.state==='PERSISTED'||c.state==='FAILED'||c.state==='CANCELED')){
+      throw new Error('Webhook save result was superseded by another command')
+    }
+  }
+  throw new Error('Timed out waiting for webhook settings to be persisted');
 }
 export function init(){
   if(ready)return;
@@ -48,9 +68,17 @@ export function init(){
   ['webhookEnabled','webhookUrl','webhookBrewState','webhookFirstDrop','webhookEnd'].forEach(id=>{const el=$(id);el.addEventListener('input',webhookChanged);el.addEventListener('change',webhookChanged)});
   $('saveWebhookButton').onclick=()=>{
     const url=$('webhookUrl').value.trim(),enabled=$('webhookEnabled').checked;
-    if((enabled||url)&&!/^http:\/\/[^\s/@#"\\]+(?:\/[^\s#"\\]*)?$/i.test(url)){R.showFieldError('webhookUrl','Enter an HTTP URL. HTTPS is not supported.');return}
+    if((enabled||url)&&!validWebhookUrl(url)){R.showFieldError('webhookUrl','Enter a lowercase http:// URL. HTTPS is not supported.');return}
     R.clearFieldErrors();
-    R.command('/api/v1/webhooks',{action:'save',enabled,url,brewState:$('webhookBrewState').checked,firstDrop:$('webhookFirstDrop').checked,end:$('webhookEnd').checked},true,'Webhook settings saved.').then(()=>{webhookDirty=false;$('webhookDirtyHint').classList.add('hidden')}).catch(e=>R.message(R.formatCommandError('Could not save webhook settings.',e),'error'));
+    return R.withCommandGate(async()=>{
+      try{
+        R.message('Saving webhook settings…');
+        const accepted=await R.api('/api/v1/webhooks',{method:'POST',body:R.body({action:'save',enabled,url,brewState:$('webhookBrewState').checked,firstDrop:$('webhookFirstDrop').checked,end:$('webhookEnd').checked})});
+        await waitWebhookPersisted(accepted.requestId);
+        webhookDirty=false;$('webhookDirtyHint').classList.add('hidden');
+        R.message('Webhook settings saved.','ok');
+      }catch(e){R.message(R.formatCommandError('Could not save webhook settings.',e),'error');await R.refreshStatus()}
+    });
   };
   $('testWebhookButton').onclick=()=>R.command('/api/v1/webhooks',{action:'test'},false,'Webhook test queued.');
   $('saveNetworkButton').onclick=()=>{const err=R.validateNetworkClient();if(err){R.showFieldError(err.id,err.msg);return}R.clearFieldErrors();const payload=R.networkSavePayload(),sleepOnly=!!payload._noReconnectWait,staticMode=$('staIpMode').value==='static';if(!sleepOnly&&!confirm(staticMode?'Save static IP and restart? Open the new IP if this page does not return.':'Save Wi-Fi and restart?'))return;R.command('/api/v1/network',payload).finally(()=>{$('staPassword').value='';if(!sleepOnly)R.resetNetworkAddressLoaded()})};

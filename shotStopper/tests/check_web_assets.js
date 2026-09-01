@@ -9,6 +9,7 @@ const sketchDir = path.resolve(__dirname, '..');
 const asset = fs.readFileSync(path.join(sketchDir, 'ShotStopperWebAssets.h'), 'utf8');
 const network = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.cpp'), 'utf8');
 const networkHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.h'), 'utf8');
+const webhookSource = fs.readFileSync(path.join(sketchDir, 'ShotStopperWebhook.cpp'), 'utf8');
 const firmwareCore = fs.readFileSync(path.join(sketchDir, 'shotStopper.cpp'), 'utf8');
 const scaleWorker = fs.readFileSync(path.join(sketchDir, 'ShotStopperScaleWorker.cpp'), 'utf8');
 const firmware = [
@@ -3107,6 +3108,26 @@ if (!network.includes('/api/v1/ui/claim') ||
     !network.includes('UI_TAKEN_OVER')) {
   throw new Error('WebUI APIs must enforce the exclusive client claim');
 }
+
+if (!webhookSource.includes('QueuedWebhook') ||
+    !webhookSource.includes('queued.configGeneration != generation') ||
+    !webhookSource.includes('++status_.staleConfigDropped')) {
+  throw new Error('Queued webhooks must be discarded after their configuration changes');
+}
+if (!webhookSource.includes('xSemaphoreTake(lifecycleMutex_, 0)') ||
+    !webhookSource.includes('WorkerState::STOPPING') ||
+    !webhookSource.includes('releaseWorkerFromTask()')) {
+  throw new Error('Webhook dispatch must remain non-blocking and release disabled worker resources');
+}
+if (!webhookSource.includes('\\"sentAtUptimeMs\\"') ||
+    !firmwareCore.includes('webhookUnixSecAt(uint32_t occurredAtMs)') ||
+    !firmwareCore.includes('baseWebhookEvent(WebhookEventType::END, snapshot.cycleId,\n                                        snapshot.endedAtMs)')) {
+  throw new Error('Webhook payloads must preserve occurrence time separately from delivery time');
+}
+if (!firmwareCore.includes('if (brewEndIsAbandonedStart(reason) || endingRinseCycle(reason)) {\n    webhookBrewStartPending = false;') ||
+    !firmwareCore.includes('!endingRinseCycle(reason) && !brewEndIsAbandonedStart(reason)')) {
+  throw new Error('Abandoned starts and rinses must not emit misleading brew-state webhooks');
+}
 if (!ui.includes('function claimWebUiOwnership()') ||
     !ui.includes('function deactivateWebUi()') ||
     !ui.includes('function showInactiveOverlay()') ||
@@ -3469,7 +3490,7 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
   // Diagnostics metrics must not ride on status/admin anymore
   for (const forbidden of [
     'maintenance', 'persistPending', 'hwmon', 'uptimeMs', 'resetReasonCode',
-    'packetGaps', 'lastCommand', 'utcSec', 'activeServer', 'serialDebugOutput',
+    'packetGaps', 'utcSec', 'activeServer', 'serialDebugOutput',
     'buzzerSupported', 'presets', 'brewByWeight'
   ]) {
     if (adminBody.includes(forbidden)) {
@@ -3479,9 +3500,9 @@ if (!statusFormat.includes('page == StatusPage::Admin') ||
     }
   }
   if (!ui.includes(
-          "v==='admin'?!!(typeof s.adminUnlocked==='boolean'&&s.network&&(s.adminUnlocked?(s.bleCompanion&&typeof s.bleCompanion.enabled==='boolean'&&typeof s.bleCompanion.active==='boolean'&&typeof s.bleCompanion.restartRequired==='boolean'&&typeof s.bleCompanion.scanIntensity==='string'&&typeof c.timezoneOffsetMinutes==='number'&&c.ntpServerPreset!=null&&s.ota&&typeof s.ota.available==='boolean'&&s.webhooks&&typeof s.webhooks.enabled==='boolean'):typeof s.network.configState==='string'))")) {
+          "v==='admin'?!!(typeof s.adminUnlocked==='boolean'&&s.network&&(s.adminUnlocked?(s.bleCompanion&&typeof s.bleCompanion.enabled==='boolean'&&typeof s.bleCompanion.active==='boolean'&&typeof s.bleCompanion.restartRequired==='boolean'&&typeof s.bleCompanion.scanIntensity==='string'&&typeof c.timezoneOffsetMinutes==='number'&&c.ntpServerPreset!=null&&s.ota&&typeof s.ota.available==='boolean'&&s.webhooks&&typeof s.webhooks.enabled==='boolean'&&s.lastCommand&&typeof s.lastCommand.requestId==='number'):typeof s.network.configState==='string'))")) {
     throw new Error(
-        'statusPageOk(admin) must accept a locked payload and validate unlocked network/BLE/NTP/OTA/webhooks');
+        'statusPageOk(admin) must accept a locked payload and validate unlocked network/BLE/NTP/OTA/webhooks/lastCommand');
   }
   if (!ui.includes(
           "v==='diagnostic'?!!(typeof s.adminUnlocked==='boolean'&&(s.adminUnlocked?(s.network&&s.time&&s.maintenance&&s.health&&s.safety&&s.scale&&s.lastCommand&&typeof s.machineState==='string'&&typeof s.state==='string'&&s.cupPresence&&typeof s.physicalActivatorOn==='boolean'&&'reedOn' in s&&typeof s.relayClosed==='boolean'&&typeof s.controlSource==='string'&&typeof s.safety.state==='string'&&typeof s.scale.streamState==='string'&&typeof c.serialDebugOutput==='boolean'&&s.compileFlags&&s.serial&&typeof s.serial.io4==='string'&&typeof s.serial.state==='string'&&s.guards&&typeof s.guards.bbwEnabled==='boolean'&&s.guards.noScale&&s.guards.atm&&s.guards.slowExtraction&&s.guards.fastExtraction&&s.guards.accidentalTouch&&s.guards.cupProtection&&s.tasks&&typeof s.tasks.state==='string'):true))")) {
@@ -4056,8 +4077,8 @@ if (generated.cssGzip.length > 6600) {
 if (generated.runtimeGzip.length > 28800) {
   throw new Error('Compressed Web UI runtime JS exceeds the 28.1 KiB gzip budget');
 }
-if (generated.secondaryGzip.length > 4800) {
-  throw new Error('Compressed secondary view JS exceeds the 4.7 KiB gzip budget');
+if (generated.secondaryGzip.length > 5100) {
+  throw new Error('Compressed secondary view JS exceeds the 5 KiB gzip budget');
 }
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');

@@ -662,11 +662,18 @@ void p47g_migrates_v3_with_webhooks_disabled() {
 void p47h_webhook_url_validation_is_http_only() {
   CHECK(validWebhookUrl("http://192.168.1.10/hook"));
   CHECK(validWebhookUrl("http://server.local:8123/api/webhook?x=1"));
+  CHECK(validWebhookUrl("http://[fd00::1]:8123/hook"));
   CHECK(!validWebhookUrl("https://server.local/hook"));
+  CHECK(!validWebhookUrl("HTTP://server.local/hook"));
   CHECK(!validWebhookUrl("http://user@server.local/hook"));
   CHECK(!validWebhookUrl("http://server.local/hook#fragment"));
   CHECK(!validWebhookUrl("http://server.local/bad path"));
   CHECK(!validWebhookUrl("http://server.local/\"bad\""));
+  CHECK(!validWebhookUrl("http://:80/hook"));
+  CHECK(!validWebhookUrl("http://server.local:/hook"));
+  CHECK(!validWebhookUrl("http://server.local:0/hook"));
+  CHECK(!validWebhookUrl("http://server.local:65536/hook"));
+  CHECK(!validWebhookUrl("http://server.local:abc/hook"));
   WebhookConfig disabled;
   CHECK(validWebhookConfig(disabled));
   copyCString(disabled.url, sizeof(disabled.url), "https://server.local/hook");
