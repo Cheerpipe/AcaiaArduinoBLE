@@ -11,6 +11,8 @@ namespace shotstopper {
 
 constexpr size_t BULLSEYE_RTTTL_MAX_CHARS = 500;
 constexpr size_t BULLSEYE_RTTTL_CAPACITY = BULLSEYE_RTTTL_MAX_CHARS + 1;
+static_assert(BULLSEYE_RTTTL_MAX_CHARS == RTTTL_MAX_INPUT_CHARS,
+              "Bullseye and parser RTTTL limits must stay aligned");
 // The shortest useful note token is one character plus a separator.
 constexpr uint8_t BULLSEYE_RTTTL_MAX_NOTES = 250;
 constexpr uint32_t BULLSEYE_STABILITY_MS = 1000;

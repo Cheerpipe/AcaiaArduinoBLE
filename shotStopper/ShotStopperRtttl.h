@@ -1,12 +1,15 @@
 #pragma once
 
 #include <math.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
 namespace shotstopper {
 
 constexpr uint8_t RTTTL_MAX_NOTES = 16;
+constexpr size_t RTTTL_MAX_INPUT_CHARS = 500;
+constexpr size_t RTTTL_INPUT_CAPACITY = RTTTL_MAX_INPUT_CHARS + 1;
 
 struct RtttlNote {
   uint16_t freqHz;
@@ -37,9 +40,15 @@ inline bool parseRtttlBounded(const char *rtttl, RtttlNote *out,
   // Keeping validation allocation-free is important while boot migration is
   // already using the bounded internal flash-I/O workspace.
   if (rtttl == nullptr || capacity == 0) return false;
-  const char *firstColon = strchr(rtttl, ':');
+  const size_t inputLength = strnlen(rtttl, RTTTL_INPUT_CAPACITY);
+  if (inputLength == 0 || inputLength > RTTTL_MAX_INPUT_CHARS) return false;
+  const char *const inputEnd = rtttl + inputLength;
+  const char *firstColon = static_cast<const char *>(
+      memchr(rtttl, ':', inputLength));
   if (firstColon == nullptr) return false;
-  const char *secondColon = strchr(firstColon + 1, ':');
+  const char *secondColon = static_cast<const char *>(
+      memchr(firstColon + 1, ':',
+             static_cast<size_t>(inputEnd - firstColon - 1)));
   if (secondColon == nullptr) return false;
 
   uint8_t defaultDuration = 4;
@@ -81,14 +90,11 @@ inline bool parseRtttlBounded(const char *rtttl, RtttlNote *out,
   while (rtttl[i] != '\0') {
     i = rtttlSkipWs(rtttl, i);
     if (rtttl[i] == '\0') break;
-    if (rtttl[i] == ',') {
-      ++i;
-      continue;
-    }
     if (count >= capacity) return false;
     unsigned duration = 0;
     while (rtttl[i] >= '0' && rtttl[i] <= '9') {
       duration = duration * 10U + static_cast<unsigned>(rtttl[i] - '0');
+      if (duration > 64U) return false;
       ++i;
     }
     if (duration == 0) duration = defaultDuration;
@@ -98,6 +104,7 @@ inline bool parseRtttlBounded(const char *rtttl, RtttlNote *out,
     ++i;
     bool sharp = false;
     if (rtttl[i] == '#') {
+      if (note == 'p') return false;
       sharp = true;
       ++i;
     }
@@ -109,6 +116,7 @@ inline bool parseRtttlBounded(const char *rtttl, RtttlNote *out,
     uint8_t octave = defaultOctave;
     if (rtttl[i] >= '0' && rtttl[i] <= '9') {
       octave = static_cast<uint8_t>(rtttl[i] - '0');
+      if (octave < 4 || octave > 8) return false;
       ++i;
     }
     if (rtttl[i] == '.') {
@@ -119,7 +127,7 @@ inline bool parseRtttlBounded(const char *rtttl, RtttlNote *out,
     if (dotted) noteMs += noteMs / 2U;
     if (noteMs == 0) noteMs = 1;
     uint16_t freqHz = 0;
-    if (note != 'p') {
+    if (out != nullptr && note != 'p') {
       int semitone = 0;
       switch (note) {
         case 'c': semitone = 0; break;
@@ -140,6 +148,13 @@ inline bool parseRtttlBounded(const char *rtttl, RtttlNote *out,
       out[count].durationMs = static_cast<uint16_t>(noteMs);
     }
     ++count;
+    i = rtttlSkipWs(rtttl, i);
+    if (rtttl[i] == '\0') break;
+    if (rtttl[i] != ',') return false;
+    ++i;
+    const int next = rtttlSkipWs(rtttl, i);
+    if (rtttl[next] == '\0' || rtttl[next] == ',') return false;
+    i = next;
   }
   return count > 0;
 }

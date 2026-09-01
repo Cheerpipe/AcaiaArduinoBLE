@@ -822,6 +822,18 @@ if (!ui.includes('id="bullseyeMelodyEnabled"') ||
     !firmwareCore.includes('BULLSEYE_STABILITY_MS')) {
   throw new Error('Bullseye RTTTL alert must be configurable end-to-end');
 }
+{
+  const start = network.indexOf(
+      'esp_err_t ShotStopperNetwork::bullseyeTestHandler');
+  const end = network.indexOf(
+      'esp_err_t ShotStopperNetwork::preferredScaleClearHandler', start);
+  const handler = start >= 0 && end > start ? network.slice(start, end) : '';
+  const unlocks = handler.match(/self\.unlockJsonBody\(\)/g) || [];
+  if (unlocks.length < 2) {
+    throw new Error(
+        'Bullseye test handler must release the shared PSRAM/JSON workspace on success and parse failure');
+  }
+}
 if (!ui.includes("scaleConnectedLed:$('scaleConnectedLed').checked") ||
     !ui.includes("'scaleConnectedLed'") ||
     !network.includes('\\"scaleConnectedLed\\":%s') ||

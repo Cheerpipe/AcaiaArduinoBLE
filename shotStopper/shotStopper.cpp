@@ -4439,13 +4439,15 @@ void processWebCommand(const WebCommand &command) {
           rejectWebCommand(command);
           return;
         }
-        BullseyeMelodyConfig liveBullseye = {};
-        copyBullseyeConfig(&liveBullseye);
         accepted = localBuzzer.configureBullseyeRtttl(testBullseye.rtttl) &&
-                   localBuzzer.requestBullseye();
-        // requestBullseye copies the notes to its playback buffer, so restore
-        // the live tune immediately without affecting this queued test.
-        (void)localBuzzer.configureBullseyeRtttl(liveBullseye.rtttl);
+                   localBuzzer.requestBullseye(/*allowQueue=*/false);
+        // An accepted test has already copied its notes to the active playback
+        // buffer. A busy finite cue rejects the test instead of queueing a cue
+        // whose source would change when the live tune is restored. The live
+        // config has a single writer on this control task, so no stack copy is
+        // needed here.
+        (void)localBuzzer.configureBullseyeRtttl(
+            bullseyeMelodyConfig.rtttl);
       } else {
         accepted = buzzerPatternIsPulseTrain(command.buzzerPattern)
                        ? startPulseTrain(command.buzzerPattern,

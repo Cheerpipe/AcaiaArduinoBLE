@@ -56,6 +56,7 @@ struct NetworkWorkBuf {
   ShotPresetBank presetBank{};
   ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY]{};
   BullseyeMelodyConfig bullseyeMelody{};
+  char safeBullseyeRtttl[BULLSEYE_RTTTL_CAPACITY]{};
   // Must match ShotStopperNetwork::REQUEST_BODY_CAPACITY (asserted in begin()).
   char requestBody[2048]{};
   WifiScanSnapshot wifiScan{};
@@ -4212,7 +4213,6 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   char safePreferredScaleName[PREFERRED_SCALE_NAME_CAPACITY * 2] = {};
   char safeFirmwareVersion[32] = {};
   char safeStaSsid[WIFI_SSID_CAPACITY] = {};
-  char safeBullseyeRtttl[BULLSEYE_RTTTL_CAPACITY] = {};
   sanitizeJsonEmbed(control.config.ntpServerCustom, safeNtpCustom,
                     sizeof(safeNtpCustom));
   sanitizeJsonEmbed(timeStatus.activeServer, safeActiveServer,
@@ -4229,8 +4229,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   if (page == StatusPage::Settings &&
       self.callbacks_.copyBullseyeConfig != nullptr) {
     self.callbacks_.copyBullseyeConfig(&g_work->bullseyeMelody);
-    sanitizeJsonEmbed(g_work->bullseyeMelody.rtttl, safeBullseyeRtttl,
-                      sizeof(safeBullseyeRtttl));
+    sanitizeJsonEmbed(g_work->bullseyeMelody.rtttl,
+                      g_work->safeBullseyeRtttl,
+                      sizeof(g_work->safeBullseyeRtttl));
   }
 
   const bool needPresets =
@@ -4462,7 +4463,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
     ok = statusJsonAppend(
         &used, ",\"bullseyeMelodyEnabled\":%s,\"bullseyeRtttl\":\"%s\"",
         g_work->bullseyeMelody.enabled ? "true" : "false",
-        safeBullseyeRtttl);
+        g_work->safeBullseyeRtttl);
   }
 
   if (ok) {
@@ -6561,7 +6562,10 @@ esp_err_t ShotStopperNetwork::bullseyeTestHandler(httpd_req_t *request) {
     return bodyStatus;
   }
   cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
-  BullseyeMelodyConfig testConfig = {};
+  // This handler owns NetworkWorkBuf until unlockJsonBody(). Keep the 502-byte
+  // candidate in its PSRAM scratch instead of consuming HTTP task stack.
+  BullseyeMelodyConfig &testConfig = self.workBuf_->bullseyeMelody;
+  testConfig = BullseyeMelodyConfig{};
   static const char *const fields[] = {"bullseyeRtttl"};
   const bool parsed = root != nullptr &&
                       jsonHasOnlyUniqueFields(root, fields, 1) &&
@@ -6572,6 +6576,7 @@ esp_err_t ShotStopperNetwork::bullseyeTestHandler(httpd_req_t *request) {
     cJSON_Delete(root);
   }
   if (!parsed) {
+    self.unlockJsonBody();
     return sendError(request, STATUS_UNPROCESSABLE, "INVALID_BULLSEYE_RTTTL",
                      "bullseyeRtttl must be valid single-line RTTTL (up to 250 notes).");
   }
@@ -6582,8 +6587,11 @@ esp_err_t ShotStopperNetwork::bullseyeTestHandler(httpd_req_t *request) {
   command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
   command.bullseyeConfigSpecified = true;
   command.bullseyeStageRequestId = command.requestId;
-  if (self.callbacks_.stageBullseyeConfig == nullptr ||
-      !self.callbacks_.stageBullseyeConfig(testConfig, command.requestId)) {
+  const bool staged = self.callbacks_.stageBullseyeConfig != nullptr &&
+                      self.callbacks_.stageBullseyeConfig(testConfig,
+                                                          command.requestId);
+  self.unlockJsonBody();
+  if (!staged) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_BUSY",
                      "Control is busy; the Bullseye melody was not staged.");
   }

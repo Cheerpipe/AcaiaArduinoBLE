@@ -74,7 +74,7 @@ struct LocalBuzzer {
   uint8_t pulseNoteCount[kPulseRateCount] = {};
 #endif
   esp_timer_handle_t phaseTimer = nullptr;
-  portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+  mutable portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
   void begin(uint8_t gpioPin);
   // Starts immediately when idle, otherwise keeps one pending slot. High
@@ -88,7 +88,9 @@ struct LocalBuzzer {
   bool request(BuzzerPattern pattern, uint32_t durationMs = 0);
   bool requestTone(const BuzzerToneCommand &cmd);
   bool configureBullseyeRtttl(const char *rtttl);
-  bool requestBullseye();
+  // Tests must start immediately so restoring the saved custom tune cannot
+  // change a queued request. Normal shot completion may use the pending slot.
+  bool requestBullseye(bool allowQueue = true);
   void stopIf(BuzzerPattern pattern);
   void stopIfCue(BuzzerCue cue);
   void stopAll();
@@ -99,13 +101,21 @@ struct LocalBuzzer {
   void stopPulseTrains();
   void service(uint32_t nowMs);
   bool busy() const {
-    return active != BuzzerPattern::NONE || pending != BuzzerPattern::NONE ||
-           activeCue != BuzzerCue::NONE || pendingCue != BuzzerCue::NONE;
+    portENTER_CRITICAL(&mux);
+    const bool result =
+        active != BuzzerPattern::NONE || pending != BuzzerPattern::NONE ||
+        activeCue != BuzzerCue::NONE || pendingCue != BuzzerCue::NONE;
+    portEXIT_CRITICAL(&mux);
+    return result;
   }
   bool playingExtendedPulse(const BuzzerToneCommand &cmd) const {
-    return cmd.valid &&
-           ((activeCue == cmd.cue && activePulseRate == cmd.pulseRate) ||
-            (pendingCue == cmd.cue && pendingPulseRate == cmd.pulseRate));
+    portENTER_CRITICAL(&mux);
+    const bool result =
+        cmd.valid &&
+        ((activeCue == cmd.cue && activePulseRate == cmd.pulseRate) ||
+         (pendingCue == cmd.cue && pendingPulseRate == cmd.pulseRate));
+    portEXIT_CRITICAL(&mux);
+    return result;
   }
 
  private:
@@ -541,11 +551,24 @@ inline bool LocalBuzzer::configureBullseyeRtttl(const char *rtttl) {
 #endif
 }
 
-inline bool LocalBuzzer::requestBullseye() {
+inline bool LocalBuzzer::requestBullseye(bool allowQueue) {
   BuzzerToneCommand cmd;
   cmd.cue = BuzzerCue::BULLSEYE;
   cmd.valid = true;
-  return requestTone(cmd);
+  if (allowQueue) {
+    return requestTone(cmd);
+  }
+  if (!BUZZER_SUPPORT_ENABLED || !ready) {
+    return false;
+  }
+  portENTER_CRITICAL(&mux);
+  const bool canStartNow =
+      (active == BuzzerPattern::NONE && activeCue == BuzzerCue::NONE) ||
+      buzzerPatternIsPulseTrain(active) || (looping && rtttlPlayback);
+  const bool accepted =
+      canStartNow && acceptLocked(BuzzerPattern::NONE, cmd.cue, 0, true, &cmd);
+  portEXIT_CRITICAL(&mux);
+  return accepted;
 }
 
 inline void LocalBuzzer::stopAll() {

@@ -4934,6 +4934,41 @@ void w99f_bullseye_rtttl_is_bounded_and_plays_without_allocation() {
   CHECK(validBullseyeMelodyConfig(config));
   copyCString(config.rtttl, sizeof(config.rtttl), "not-rtttl");
   CHECK(!validBullseyeMelodyConfig(config));
+
+  uint8_t count = 0;
+  CHECK(!parseRtttlBounded("x:d=4,o=5,b=120:,c", nullptr,
+                           BULLSEYE_RTTTL_MAX_NOTES, count));
+  CHECK(!parseRtttlBounded("x:d=4,o=5,b=120:c,,d", nullptr,
+                           BULLSEYE_RTTTL_MAX_NOTES, count));
+  CHECK(!parseRtttlBounded("x:d=4,o=5,b=120:cd", nullptr,
+                           BULLSEYE_RTTTL_MAX_NOTES, count));
+  CHECK(!parseRtttlBounded("x:d=4,o=5,b=120:65c", nullptr,
+                           BULLSEYE_RTTTL_MAX_NOTES, count));
+  CHECK(!parseRtttlBounded("x:d=4,o=5,b=120:p#", nullptr,
+                           BULLSEYE_RTTTL_MAX_NOTES, count));
+  CHECK(!parseRtttlBounded("x:d=4,o=5,b=120:c9", nullptr,
+                           BULLSEYE_RTTTL_MAX_NOTES, count));
+  char unterminated[RTTTL_INPUT_CAPACITY];
+  memset(unterminated, 'c', sizeof(unterminated));
+  CHECK(!parseRtttlBounded(unterminated, nullptr,
+                           BULLSEYE_RTTTL_MAX_NOTES, count));
+}
+
+void w99i_bullseye_test_never_queues_mutable_custom_notes() {
+  resetHarness(false, false);
+  constexpr const char *testTune = "test:d=16,o=5,b=180:c,e,g";
+  CHECK(localBuzzer.configureBullseyeRtttl(testTune));
+  const BuzzerToneCommand tare =
+      deriveBuzzerTone(AlertEvent::TARE, false, 0, 0);
+  CHECK(localBuzzer.requestTone(tare));
+  CHECK(!localBuzzer.requestBullseye(/*allowQueue=*/false));
+  CHECK(localBuzzer.activeCue == BuzzerCue::TARE);
+  CHECK(localBuzzer.pendingCue == BuzzerCue::NONE);
+
+  localBuzzer.stopAll();
+  CHECK(localBuzzer.requestBullseye(/*allowQueue=*/false));
+  CHECK(localBuzzer.activeCue == BuzzerCue::BULLSEYE);
+  CHECK(localBuzzer.rtttlCount == 3);
 }
 
 void w99g_bullseye_requires_one_second_of_exact_fresh_samples() {
@@ -11186,6 +11221,7 @@ const TestCase testCases[] = {
     {"W99f", w99f_bullseye_rtttl_is_bounded_and_plays_without_allocation},
     {"W99g", w99g_bullseye_requires_one_second_of_exact_fresh_samples},
     {"W99h", w99h_bullseye_service_runs_only_in_buzzer_only_mode},
+    {"W99i", w99i_bullseye_test_never_queues_mutable_custom_notes},
     {"W63", w63_scale_priority_paddle_uses_scale_when_connected},
     {"W64", w64_buzzer_only_first_drop_uses_local_buzzer},
     {"W65", w65_scale_only_mutes_scale_lost},
