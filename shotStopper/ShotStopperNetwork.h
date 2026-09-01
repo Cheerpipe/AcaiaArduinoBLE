@@ -401,6 +401,7 @@ class ShotStopperNetwork {
   static esp_err_t lastShotClearHandler(httpd_req_t *request);
   static esp_err_t timeSyncHandler(httpd_req_t *request);
   static esp_err_t configHandler(httpd_req_t *request);
+  static esp_err_t bullseyeTestHandler(httpd_req_t *request);
   static esp_err_t preferredScaleClearHandler(httpd_req_t *request);
   static esp_err_t preferredScaleSelectHandler(httpd_req_t *request);
   static esp_err_t presetsHandler(httpd_req_t *request);

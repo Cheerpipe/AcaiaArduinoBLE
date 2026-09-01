@@ -72,6 +72,27 @@ inline PersistedSettings &persistedSettingsScratch(uint8_t index) {
   return slots[index & 1U];
 }
 
+// V2 -> V3 migration runs during setup() on the 8 KiB Arduino loop task.
+// Keeping the legacy blobs in the already-locked internal flash workspace
+// avoids stacking a 1,912-byte V2 record (and another V1 copy) on top of the
+// NVS call chain. The two normal slots occupy the prefix and remain intact.
+inline PersistedSettingsV2 &persistedSettingsV2MigrationScratch() {
+  constexpr size_t kOffset = 2 * sizeof(PersistedSettings);
+  static_assert(kOffset + sizeof(PersistedSettingsV2) +
+                        sizeof(PersistedSettingsV1) <=
+                    FLASH_IO_SCRATCH_BYTES,
+                "Migration scratch exceeds flash I/O buffer");
+  return *reinterpret_cast<PersistedSettingsV2 *>(flashIoScratchBytes() +
+                                                   kOffset);
+}
+
+inline PersistedSettingsV1 &persistedSettingsV1MigrationScratch() {
+  constexpr size_t kOffset = 2 * sizeof(PersistedSettings) +
+                             sizeof(PersistedSettingsV2);
+  return *reinterpret_cast<PersistedSettingsV1 *>(flashIoScratchBytes() +
+                                                   kOffset);
+}
+
 inline bool readSettingsSlot(Preferences &preferences, const char *key,
                              PersistedSettings &settings) {
   if (!preferences.isKey(key)) {
@@ -88,7 +109,8 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
     }
   }
   if (storedLength == sizeof(PersistedSettingsV2)) {
-    PersistedSettingsV2 legacy{};
+    PersistedSettingsV2 &legacy = persistedSettingsV2MigrationScratch();
+    legacy = PersistedSettingsV2{};
     if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy)) {
       return false;
     }
@@ -97,7 +119,7 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
              validPersistedSettings(settings);
     }
     if (legacy.schemaVersion == 1) {
-      PersistedSettingsV1 v1{};
+      PersistedSettingsV1 &v1 = persistedSettingsV1MigrationScratch();
       memcpy(&v1, &legacy, sizeof(v1));
       return migratePersistedSettingsFromV1(v1, settings) &&
              validPersistedSettings(settings);

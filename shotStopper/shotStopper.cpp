@@ -4430,11 +4430,28 @@ void processWebCommand(const WebCommand &command) {
         rejectWebCommand(command);
         return;
       }
-      const bool accepted =
-          buzzerPatternIsPulseTrain(command.buzzerPattern)
-              ? startPulseTrain(command.buzzerPattern,
-                                BUZZER_PULSE_TRAIN_DEBUG_MS)
-              : localBuzzer.request(command.buzzerPattern);
+      bool accepted = false;
+      if (command.bullseyeConfigSpecified) {
+        BullseyeMelodyConfig testBullseye = {};
+        if (!takeStagedBullseyeConfig(command.bullseyeStageRequestId,
+                                      testBullseye) ||
+            !validBullseyeRtttl(testBullseye.rtttl)) {
+          rejectWebCommand(command);
+          return;
+        }
+        BullseyeMelodyConfig liveBullseye = {};
+        copyBullseyeConfig(&liveBullseye);
+        accepted = localBuzzer.configureBullseyeRtttl(testBullseye.rtttl) &&
+                   localBuzzer.requestBullseye();
+        // requestBullseye copies the notes to its playback buffer, so restore
+        // the live tune immediately without affecting this queued test.
+        (void)localBuzzer.configureBullseyeRtttl(liveBullseye.rtttl);
+      } else {
+        accepted = buzzerPatternIsPulseTrain(command.buzzerPattern)
+                       ? startPulseTrain(command.buzzerPattern,
+                                         BUZZER_PULSE_TRAIN_DEBUG_MS)
+                       : localBuzzer.request(command.buzzerPattern);
+      }
       if (!accepted) {
         rejectWebCommand(command);
         return;

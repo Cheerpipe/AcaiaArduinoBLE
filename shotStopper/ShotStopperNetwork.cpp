@@ -3405,6 +3405,7 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/last-shot/clear", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/time/sync", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/config", HTTP_POST, ownedApiHandler) &&
+      registerHandler(server_, "/api/v1/bullseye/test", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/scale/preferred/clear", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/scale/preferred/select", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/presets", HTTP_POST, ownedApiHandler) &&
@@ -3821,6 +3822,7 @@ esp_err_t ShotStopperNetwork::ownedApiHandler(httpd_req_t *request) {
   if (apiUriMatches(request->uri, "/api/v1/last-shot/clear")) return lastShotClearHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/time/sync")) return timeSyncHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/config")) return configHandler(request);
+  if (apiUriMatches(request->uri, "/api/v1/bullseye/test")) return bullseyeTestHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/scale/preferred/clear")) return preferredScaleClearHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/scale/preferred/select")) return preferredScaleSelectHandler(request);
   if (apiUriMatches(request->uri, "/api/v1/presets")) return presetsHandler(request);
@@ -6513,6 +6515,53 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
   if (!self.callbacks_.enqueueWebCommand(command)) {
     return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
                      "Control is busy; nothing was saved.");
+  }
+  return self.sendAccepted(request, command.requestId);
+}
+
+esp_err_t ShotStopperNetwork::bullseyeTestHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  const ControlGateSnapshot status = self.controlGate();
+  if (!self.webUiConfigurationAllowed(request, status)) {
+    return sendError(request, STATUS_CONFLICT,
+                     "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "The Bullseye melody can be tested only while Ready.");
+  }
+  const esp_err_t bodyStatus = self.lockJsonBody(
+      request, "A Bullseye RTTTL test request is required.");
+  if (bodyStatus != ESP_OK) {
+    return bodyStatus;
+  }
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
+  BullseyeMelodyConfig testConfig = {};
+  static const char *const fields[] = {"bullseyeRtttl"};
+  const bool parsed = root != nullptr &&
+                      jsonHasOnlyUniqueFields(root, fields, 1) &&
+                      jsonString(root, "bullseyeRtttl", testConfig.rtttl,
+                                 sizeof(testConfig.rtttl), true) &&
+                      validBullseyeRtttl(testConfig.rtttl);
+  if (root != nullptr) {
+    cJSON_Delete(root);
+  }
+  if (!parsed) {
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_BULLSEYE_RTTTL",
+                     "bullseyeRtttl must be valid single-line RTTTL (up to 250 notes).");
+  }
+
+  WebCommand command;
+  command.type = WebCommandType::BUZZER_TEST;
+  command.requestId = self.allocateRequestId();
+  command.unsafeWebUiOverride = self.webUiOverrideAllowed(request);
+  command.bullseyeConfigSpecified = true;
+  command.bullseyeStageRequestId = command.requestId;
+  if (self.callbacks_.stageBullseyeConfig == nullptr ||
+      !self.callbacks_.stageBullseyeConfig(testConfig, command.requestId)) {
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_BUSY",
+                     "Control is busy; the Bullseye melody was not staged.");
+  }
+  if (!self.callbacks_.enqueueWebCommand(command)) {
+    return sendError(request, STATUS_UNAVAILABLE, "CONTROL_QUEUE_FULL",
+                     "Control is busy; the Bullseye melody was not played.");
   }
   return self.sendAccepted(request, command.requestId);
 }

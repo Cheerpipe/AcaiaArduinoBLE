@@ -520,14 +520,21 @@ inline bool LocalBuzzer::configureBullseyeRtttl(const char *rtttl) {
     portEXIT_CRITICAL(&mux);
     return true;
   }
-  RtttlNote parsed[BULLSEYE_RTTTL_MAX_NOTES] = {};
+  // Validate before publishing a zero count. Parse directly into the inactive
+  // custom-note storage so this setup-time path does not add a 1 KiB automatic
+  // buffer to the Arduino loop task.
+  if (!validBullseyeRtttl(rtttl)) {
+    return false;
+  }
+  portENTER_CRITICAL(&mux);
+  bullseyeNoteCount = 0;
+  portEXIT_CRITICAL(&mux);
   uint8_t count = 0;
-  if (!parseRtttlBounded(rtttl, parsed, BULLSEYE_RTTTL_MAX_NOTES, count) ||
+  if (!parseRtttlBounded(rtttl, bullseyeNotes, BULLSEYE_RTTTL_MAX_NOTES, count) ||
       count == 0) {
     return false;
   }
   portENTER_CRITICAL(&mux);
-  memcpy(bullseyeNotes, parsed, sizeof(RtttlNote) * count);
   bullseyeNoteCount = count;
   portEXIT_CRITICAL(&mux);
   return true;

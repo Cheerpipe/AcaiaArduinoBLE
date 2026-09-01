@@ -50,9 +50,8 @@ inline bool validBullseyeRtttl(const char *text) {
   if (!bullseyeRtttlHasSafeText(text)) {
     return false;
   }
-  RtttlNote notes[BULLSEYE_RTTTL_MAX_NOTES] = {};
   uint8_t count = 0;
-  return parseRtttlBounded(text, notes, BULLSEYE_RTTTL_MAX_NOTES, count) &&
+  return parseRtttlBounded(text, nullptr, BULLSEYE_RTTTL_MAX_NOTES, count) &&
          count > 0;
 }
 

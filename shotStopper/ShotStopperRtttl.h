@@ -33,7 +33,10 @@ inline uint16_t rtttlMidiHz(int midi) {
 inline bool parseRtttlBounded(const char *rtttl, RtttlNote *out,
                               uint8_t capacity, uint8_t &count) {
   count = 0;
-  if (rtttl == nullptr || out == nullptr || capacity == 0) return false;
+  // A null output validates the RTTTL grammar without materializing notes.
+  // Keeping validation allocation-free is important while boot migration is
+  // already using the bounded internal flash-I/O workspace.
+  if (rtttl == nullptr || capacity == 0) return false;
   const char *firstColon = strchr(rtttl, ':');
   if (firstColon == nullptr) return false;
   const char *secondColon = strchr(firstColon + 1, ':');
@@ -132,8 +135,10 @@ inline bool parseRtttlBounded(const char *rtttl, RtttlNote *out,
       const int midi = (static_cast<int>(octave) + 1) * 12 + semitone;
       freqHz = rtttlMidiHz(midi);
     }
-    out[count].freqHz = freqHz;
-    out[count].durationMs = static_cast<uint16_t>(noteMs);
+    if (out != nullptr) {
+      out[count].freqHz = freqHz;
+      out[count].durationMs = static_cast<uint16_t>(noteMs);
+    }
     ++count;
   }
   return count > 0;
