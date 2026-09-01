@@ -3338,14 +3338,14 @@ bool ShotStopperNetwork::startHttpServer() {
   // One active WebUI client plus a brief parallel asset fetch; 6 was oversized
   // for steady-state DRAM (each open socket carries TCP wnd/snd buffers).
   config.max_open_sockets = 4;
-  // Keep one slot of headroom above the owned API routes; /api/v1/ui/unlock
+  // Keep several slots of headroom above the owned API routes; /api/v1/ui/unlock
   // and the four OTA routes are registered separately because they do not use
   // the exclusive WebUI claim.
   // Kept ahead of the number of routes actually registered. Exhausting this
   // makes the last registerHandler fail, which tears down the whole Web UI, so
   // check_web_assets.js fails the build before the margin is gone.
   // Shell + app.js/css/runtime + secondary + settings + 4 HTML partials + APIs.
-  config.max_uri_handlers = 60;
+  config.max_uri_handlers = 64;
   // Safari sends a long UA + Accept-Language + optional Cookie/Sec-Fetch-*;
   // the IDF default (1024) is enough most of the time but intermittent
   // long browser headers have returned 431 Request Header Fields Too Large.

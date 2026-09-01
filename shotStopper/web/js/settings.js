@@ -24,7 +24,7 @@ export function init(){
   $('paddleReturnReminderBeep').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('alertOutputChannel').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
   $('bullseyeMelodyEnabled').onchange=()=>{R.updateConfigGroups();R.markConfigDirty()};
-  {const tune=$('bullseyeRtttl'),hint=tune&&tune.nextElementSibling;if(hint&&!$('bullseyeTestLink')){const link=document.createElement('a');link.id='bullseyeTestLink';link.className='rtttlTest';link.href='#';link.textContent='Test it';link.onclick=e=>{e.preventDefault();if(!R.controlsMutable)return;R.command('/api/v1/bullseye/test',{bullseyeRtttl:tune.value},false,'Playing RTTTL test.','Could not play RTTTL test.')};hint.after(link)}}
+  {const tune=$('bullseyeRtttl'),hint=tune&&tune.nextElementSibling;if(hint&&!$('bullseyeTestLink')){const link=document.createElement('a');link.id='bullseyeTestLink';link.className='rtttlTest';link.href='#';link.textContent='Test it';link.onclick=e=>{e.preventDefault();if(!R.controlsMutable)return;R.command('/api/v1/bullseye/test',{bullseyeRtttl:tune.value},false,'Playing RTTTL test.','Could not play RTTTL test.')};hint.parentNode.insertBefore(link,hint.nextSibling)}}
   $('fastExtractionGuardEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings()};
   if($('avoidAccidentalTouchEnabled'))$('avoidAccidentalTouchEnabled').onchange=()=>{R.syncHomeGuardSwitchesFromSettings()};
   $('slowExtractionGuardEnabled').onchange=()=>{R.updateConfigGroups();R.syncHomeGuardSwitchesFromSettings()};
