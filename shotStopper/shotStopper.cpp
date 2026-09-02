@@ -3949,7 +3949,11 @@ void queueRuntimePersist(int32_t reasonBits) {
 void commitLiveRuntimeConfig(const RuntimeConfig &composed, int32_t reasonBits) {
   const bool alertsWereEnabled = soundAlertsEnabled();
   const uint8_t previousNoScaleMode = runtimeConfig.noScaleBbwMode;
+  const uint8_t previousScaleMacCacheMode = runtimeConfig.scaleMacCacheMode;
   runtimeConfig = composed;
+  if (runtimeConfig.scaleMacCacheMode != previousScaleMacCacheMode) {
+    requestScalePreferenceModeReset();
+  }
   if (runtimeConfig.noScaleBbwMode != previousNoScaleMode) {
     noScaleShotGuardActivityAtMs = 0;
     noScaleShotGuardArmed = noScaleBbwEnabled(runtimeConfig.noScaleBbwMode);

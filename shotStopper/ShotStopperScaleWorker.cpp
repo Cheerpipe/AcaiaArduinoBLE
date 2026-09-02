@@ -107,6 +107,8 @@ uint32_t scaleHistorySeq = 0;
 bool scalePreferredMacDirty = false;
 uint32_t scaleDiscoveryPausedUntilMs = 0;
 uint32_t scalePreferredDirectedResetGeneration = 0;
+uint32_t scalePreferredAppliedResetGeneration = 0;
+uint8_t scalePreferredResetReasonBits = 0;
 uint32_t scaleWorkerProgressAtMs = 0;
 uint32_t scaleEventsDropped = 0;
 uint32_t scaleWorkerStackMinWords = 0;
@@ -879,6 +881,30 @@ bool scaleDiscoveryPaused(uint32_t nowMs) {
   return scaleMacCachePauseRemainingMs(nowMs) > 0;
 }
 
+constexpr uint8_t SCALE_PREFERENCE_RESET_IDENTITY = 1U << 0;
+constexpr uint8_t SCALE_PREFERENCE_RESET_MODE = 1U << 1;
+
+void requestScalePreferenceModeReset() {
+  portENTER_CRITICAL(&scalePreferredMacMux);
+  ++scalePreferredDirectedResetGeneration;
+  scalePreferredResetReasonBits |= SCALE_PREFERENCE_RESET_MODE;
+  portEXIT_CRITICAL(&scalePreferredMacMux);
+}
+
+uint8_t takeScalePreferenceResetReasons() {
+  uint8_t reasons = 0;
+  portENTER_CRITICAL(&scalePreferredMacMux);
+  if (scalePreferredAppliedResetGeneration !=
+      scalePreferredDirectedResetGeneration) {
+    scalePreferredAppliedResetGeneration =
+        scalePreferredDirectedResetGeneration;
+    reasons = scalePreferredResetReasonBits;
+    scalePreferredResetReasonBits = 0;
+  }
+  portEXIT_CRITICAL(&scalePreferredMacMux);
+  return reasons;
+}
+
 ScaleMacCacheMode currentScaleMacCacheMode() {
   return static_cast<ScaleMacCacheMode>(runtimeConfig.scaleMacCacheMode);
 }
@@ -982,14 +1008,9 @@ void clearPreferredScaleSelectionOnly() {
   scalePreferredMacDirty = true;
   scaleDiscoveryPausedUntilMs = 0;
   ++scalePreferredDirectedResetGeneration;
+  scalePreferredResetReasonBits |= SCALE_PREFERENCE_RESET_IDENTITY;
   portEXIT_CRITICAL(&scalePreferredMacMux);
   serialTrace(LogLevel::INFO, "Preferred scale cleared (history kept)");
-  if (scale.isScanning() || scale.isConnected()) {
-    // Restart discovery under the new (unlocked) policy.
-    scale.disconnect();
-  }
-  updateWorkerLinkState();
-  setScaleLinkState(ScaleLinkState::DISCONNECTED);
 }
 
 void selectPreferredScale(const char *mac, const char *name) {
@@ -1027,20 +1048,8 @@ void selectPreferredScale(const char *mac, const char *name) {
   scalePreferredMacDirty = true;
   scaleDiscoveryPausedUntilMs = 0;
   ++scalePreferredDirectedResetGeneration;
+  scalePreferredResetReasonBits |= SCALE_PREFERENCE_RESET_IDENTITY;
   portEXIT_CRITICAL(&scalePreferredMacMux);
-  if (scale.isConnected()) {
-    const char *connected = scale.address();
-    if (connected == nullptr ||
-        !preferredScaleMacEqual(connected, canonicalMac)) {
-      scale.disconnect();
-      updateWorkerLinkState();
-      setScaleLinkState(ScaleLinkState::DISCONNECTED);
-    }
-  } else if (scale.isScanning()) {
-    scale.disconnect();
-    updateWorkerLinkState();
-    setScaleLinkState(ScaleLinkState::DISCONNECTED);
-  }
   serialTracef(LogLevel::INFO, "Preferred scale selected: %s — %s",
                resolvedName[0] != '\0' ? resolvedName : "(unknown)",
                canonicalMac);
@@ -1053,6 +1062,7 @@ void clearPreferredScaleCache() {
   scalePreferredMacDirty = true;
   scaleDiscoveryPausedUntilMs = millis() + SCALE_PAIRING_DISCOVERY_PAUSE_MS;
   ++scalePreferredDirectedResetGeneration;
+  scalePreferredResetReasonBits |= SCALE_PREFERENCE_RESET_IDENTITY;
   portEXIT_CRITICAL(&scalePreferredMacMux);
   serialTrace(LogLevel::INFO,
               "Paired scale forgotten; looking paused for 30 s");
@@ -1136,6 +1146,46 @@ bool applyScaleDiscoveryPause() {
   return true;
 }
 
+// Preference changes originate on the control task, but the BLE client is
+// worker-owned. Consume the request here so a live scan/connect cannot keep
+// using the old filter and no other task touches the BLE object.
+bool applyScalePreferenceReset() {
+  const uint8_t reasons = takeScalePreferenceResetReasons();
+  if (reasons == 0) {
+    return false;
+  }
+
+  if (scale.isLinkUp()) {
+    char preferredMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+    copyPreferredScaleMac(preferredMac, sizeof(preferredMac));
+    const bool hasPreferred =
+        preferredMac[0] != '\0' && validPreferredScaleMac(preferredMac);
+    const ScaleMacCacheMode mode = currentScaleMacCacheMode();
+    const char *connectedMac = scale.address();
+    const bool connectedMatches =
+        hasPreferred && connectedMac != nullptr &&
+        preferredScaleMacEqual(connectedMac, preferredMac);
+    const bool identityCleared =
+        (reasons & SCALE_PREFERENCE_RESET_IDENTITY) != 0 && !hasPreferred;
+    const bool violatesSelection =
+        mode != ScaleMacCacheMode::FIRST && hasPreferred && !connectedMatches;
+    if (!scaleDiscoveryPaused() && !identityCleared && !violatesSelection) {
+      return false;
+    }
+  } else if (!scale.isScanning() && !scale.isConnecting() &&
+             !scaleLoggedGattConnecting) {
+    return false;
+  }
+
+  scale.disconnect();
+  scaleLoggedGattConnecting = false;
+  scaleLoggedGattConnectAttempts = 0;
+  cancelBookooConnectBeepPolicy();
+  updateWorkerLinkState();
+  setScaleLinkState(ScaleLinkState::DISCONNECTED);
+  return true;
+}
+
 void resetScaleWorkerRadioStateForHost() {
   scaleConnecting = false;
   scaleScanAppliedInterval = 0;
@@ -1153,6 +1203,11 @@ void resetScaleWorkerRadioStateForHost() {
   scaleLinkRssiValid = false;
   scaleLinkRssi = 0;
   lastScaleLinkRssiSampleMs = 0;
+  portENTER_CRITICAL(&scalePreferredMacMux);
+  scalePreferredDirectedResetGeneration = 0;
+  scalePreferredAppliedResetGeneration = 0;
+  scalePreferredResetReasonBits = 0;
+  portEXIT_CRITICAL(&scalePreferredMacMux);
 }
 
 void serviceScaleLinkRssi(uint32_t nowMs) {
@@ -1255,6 +1310,12 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
                                  bool &connectAttemptSeriesActive,
                                  uint32_t &scanSessionAtMs,
                                  uint32_t &scanLastAdvertAtMs) {
+  const bool preferenceRestarted = applyScalePreferenceReset();
+  if (preferenceRestarted) {
+    connectAttemptSeriesActive = false;
+    scanSessionAtMs = millis();
+    scanLastAdvertAtMs = 0;
+  }
   // Library drop can happen on a beep/command path that never refreshed the
   // link snapshot. Clear CONNECTED before idle scan work so the UI cannot sit
   // on "BLE connected" for the whole (indefinite) discovery session.
@@ -1454,6 +1515,9 @@ void serviceScaleWorkerDiscovery(uint32_t &lastScanCycleMs,
 }
 
 void serviceScaleWorkerLink() {
+  if (applyScalePreferenceReset()) {
+    return;
+  }
   if (!scale.isLinkUp()) {
     cancelBookooConnectBeepPolicy();
     updateWorkerLinkState();

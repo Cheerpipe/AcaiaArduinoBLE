@@ -4516,6 +4516,71 @@ void d02d_apply_only_without_preferred_is_accepted() {
         static_cast<uint8_t>(ScaleMacCacheMode::ONLY));
 }
 
+void d02e_mode_change_restarts_an_active_scan_with_the_new_filter() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
+  setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
+  uint32_t lastScanCycleMs = 0;
+  uint32_t lastConnectLogMs = 0;
+  bool connectAttemptSeriesActive = false;
+  uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.scanning);
+  CHECK(!scale.directedScan);
+  const size_t calls = scale.startScanCalls;
+
+  RuntimeConfig candidate = runtimeConfig;
+  candidate.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
+  commitLiveRuntimeConfig(candidate, RUNTIME_PERSIST_REASON_USER);
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.startScanCalls == calls + 1);
+  CHECK(scale.scanning);
+  CHECK(scale.directedScan);
+  CHECK(scale.lastAddressScan);
+  CHECK(strcmp(scale.lastStartScanMac, "AA:BB:CC:DD:EE:FF") == 0);
+}
+
+void d02f_only_mode_disconnects_a_nonpreferred_live_scale() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
+  setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
+  scale.connected = true;
+  CHECK(!preferredScaleMacEqual(scale.address(), scalePreferredMac));
+
+  RuntimeConfig candidate = runtimeConfig;
+  candidate.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
+  commitLiveRuntimeConfig(candidate, RUNTIME_PERSIST_REASON_USER);
+  serviceScaleWorkerLink();
+  CHECK(!scale.connected);
+  CHECK(getScaleLinkSnapshot().state == ScaleLinkState::DISCONNECTED);
+}
+
+void d02g_clear_preferred_disconnects_on_the_ble_worker() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
+  setHostPreferredScaleMac(scale.connectedAddress);
+  scale.connected = true;
+
+  selectPreferredScale("", "");
+  CHECK(scale.connected);
+  serviceScaleWorkerLink();
+  CHECK(!scale.connected);
+  CHECK(scalePreferredMac[0] == '\0');
+}
+
 void d03_scan_start_failed_retries_immediately() {
   resetHarness(false, false);
   reachReadyFromBoot();
@@ -11397,6 +11462,9 @@ const TestCase testCases[] = {
     {"D02b", d02b_only_without_preferred_bootstraps_and_adopts_on_connect},
     {"D02c", d02c_prefer_adopts_an_already_connected_scale},
     {"D02d", d02d_apply_only_without_preferred_is_accepted},
+    {"D02e", d02e_mode_change_restarts_an_active_scan_with_the_new_filter},
+    {"D02f", d02f_only_mode_disconnects_a_nonpreferred_live_scale},
+    {"D02g", d02g_clear_preferred_disconnects_on_the_ble_worker},
     {"D03", d03_scan_start_failed_retries_immediately},
     {"D04", d04_full_cache_keeps_directed_scan},
     {"D05", d05_hci_watchdog_force_restarts_same_filter},

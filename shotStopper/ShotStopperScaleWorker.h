@@ -82,6 +82,7 @@ void noteScaleHistory(const char *mac, const char *name, bool persist);
 void selectPreferredScale(const char *mac, const char *name);
 void clearPreferredScaleCache();
 void clearPreferredScaleSelectionOnly();
+void requestScalePreferenceModeReset();
 
 bool enqueueScaleDebugCommand(BookooDebugAction action, uint8_t beepLevel);
 bool scaleHasVolumeControl();

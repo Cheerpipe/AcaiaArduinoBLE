@@ -1187,6 +1187,7 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !ui.includes('id="preferredScale"') ||
     !ui.includes('id="preferredScaleSelect"') ||
     !ui.includes('id="preferredScalePauseHint"') ||
+    !ui.includes('id="preferredScaleBootstrapHint"') ||
     !ui.includes('id="scalePreference"') ||
     !ui.includes('id="forgetPairedScale"') ||
     !ui.includes('Scale preference') ||
@@ -1203,6 +1204,11 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !ui.includes('function updatePreferredScaleSelect(') ||
     !ui.includes('function updateScalePreferenceOptions(') ||
     !ui.includes("if(!preferred){const first=document.createElement('option')") ||
+    !ui.includes("first.textContent=mode==='only'||mode==='prefer'?'First detected':'No preferred'") ||
+    !ui.includes("empty.textContent=bootstrap?'First detected':'No preferred'") ||
+    ui.includes("msg:'Select a preferred scale first.'") ||
+    !ui.includes('<option value="only" selected>Preferred only</option>') ||
+    ui.includes('<option value="first" selected>First available</option>') ||
     ui.includes("if(!canPrefer&&(sel.value==='prefer'||sel.value==='only'))") ||
     ui.includes("o.disabled=!canPrefer||!controlsMutable") ||
     // Regression: missing ';' after `prev` concatenated into
@@ -1212,6 +1218,8 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !ui.includes('preferredScaleSelectSyncing') ||
     !ui.includes("mac===(sel.dataset.applied||'')") ||
     !ui.includes("scaleMacCacheMode:(()=>{const el=$('scalePreference')") ||
+    !ui.includes("const v=el?el.value:'only';return['first','prefer','only'].includes(v)?v:'only'") ||
+    ui.includes("const v=el?el.value:'first';return['first','prefer','only'].includes(v)?v:'first'") ||
     !ui.includes("el.id==='preferredScaleSelect'") ||
     ui.includes('id="alwaysUseThisScale"') ||
     ui.includes('Always use this scale') ||
