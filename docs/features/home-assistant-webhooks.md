@@ -162,85 +162,85 @@ the URL configured in Shot Stopper and the `webhook_id` value below.
 
 ```yaml
 input_number:
-  shot_stopper_duration:
-    name: Shot Stopper duration
+  shot_stopper_last_shot_duration:
+    name: Shot Stopper last shot duration
     min: 0
     max: 60
     step: 0.1
     unit_of_measurement: s
-  shot_stopper_final_weight:
-    name: Shot Stopper final weight
+  shot_stopper_last_shot_final_weight:
+    name: Shot Stopper last shot final weight
     min: 0
     max: 200
     step: 0.01
     unit_of_measurement: g
-  shot_stopper_target_weight:
-    name: Shot Stopper target weight
+  shot_stopper_last_shot_target_weight:
+    name: Shot Stopper last shot target weight
     min: 0
     max: 200
     step: 0.01
     unit_of_measurement: g
-  shot_stopper_average_flow:
-    name: Shot Stopper average flow
+  shot_stopper_last_shot_average_flow:
+    name: Shot Stopper last shot average flow
     min: 0
     max: 20
     step: 0.01
     unit_of_measurement: g/s
-  shot_stopper_first_drop:
-    name: Shot Stopper first drop
+  shot_stopper_last_shot_first_drop:
+    name: Shot Stopper last shot first drop
     min: 0
     max: 60
     step: 0.1
     unit_of_measurement: s
 
 input_text:
-  shot_stopper_state:
-    name: Shot Stopper state
+  shot_stopper_last_shot_state:
+    name: Shot Stopper last shot state
     max: 32
-  shot_stopper_shot_type:
-    name: Shot Stopper shot type
+  shot_stopper_last_shot_type:
+    name: Shot Stopper last shot type
     max: 32
-  shot_stopper_stop_detail:
-    name: Shot Stopper stop detail
+  shot_stopper_last_shot_stop_detail:
+    name: Shot Stopper last shot stop detail
     max: 64
 
 template:
   - sensor:
       - name: Shot Stopper last shot duration
         unique_id: shot_stopper_last_shot_duration
-        state: "{{ states('input_number.shot_stopper_duration') }}"
+        state: "{{ states('input_number.shot_stopper_last_shot_duration') }}"
         unit_of_measurement: s
         device_class: duration
         state_class: measurement
       - name: Shot Stopper last shot final weight
         unique_id: shot_stopper_last_shot_final_weight
-        state: "{{ states('input_number.shot_stopper_final_weight') }}"
+        state: "{{ states('input_number.shot_stopper_last_shot_final_weight') }}"
         unit_of_measurement: g
         device_class: weight
         state_class: measurement
       - name: Shot Stopper last shot target weight
         unique_id: shot_stopper_last_shot_target_weight
-        state: "{{ states('input_number.shot_stopper_target_weight') }}"
+        state: "{{ states('input_number.shot_stopper_last_shot_target_weight') }}"
         unit_of_measurement: g
         device_class: weight
         state_class: measurement
       - name: Shot Stopper last shot average flow
         unique_id: shot_stopper_last_shot_average_flow
-        state: "{{ states('input_number.shot_stopper_average_flow') }}"
+        state: "{{ states('input_number.shot_stopper_last_shot_average_flow') }}"
         unit_of_measurement: g/s
         state_class: measurement
       - name: Shot Stopper last shot first drop
         unique_id: shot_stopper_last_shot_first_drop
-        state: "{{ states('input_number.shot_stopper_first_drop') }}"
+        state: "{{ states('input_number.shot_stopper_last_shot_first_drop') }}"
         unit_of_measurement: s
         device_class: duration
         state_class: measurement
       - name: Shot Stopper last shot state
         unique_id: shot_stopper_last_shot_state
-        state: "{{ states('input_text.shot_stopper_state') }}"
+        state: "{{ states('input_text.shot_stopper_last_shot_state') }}"
       - name: Shot Stopper last shot stop detail
         unique_id: shot_stopper_last_shot_stop_detail
-        state: "{{ states('input_text.shot_stopper_stop_detail') }}"
+        state: "{{ states('input_text.shot_stopper_last_shot_stop_detail') }}"
 
 automation:
   - alias: Shot Stopper — receive extraction
@@ -263,12 +263,12 @@ automation:
             sequence:
               - action: input_text.set_value
                 target:
-                  entity_id: input_text.shot_stopper_state
+                  entity_id: input_text.shot_stopper_last_shot_state
                 data:
                   value: "{{ payload.state }}"
               - action: input_number.set_value
                 target:
-                  entity_id: input_number.shot_stopper_target_weight
+                  entity_id: input_number.shot_stopper_last_shot_target_weight
                 data:
                   value: "{{ payload.targetWeightG | float(0) }}"
               - if:
@@ -277,12 +277,12 @@ automation:
                 then:
                   - action: input_number.set_value
                     target:
-                      entity_id: input_number.shot_stopper_duration
+                      entity_id: input_number.shot_stopper_last_shot_duration
                     data:
                       value: "{{ payload.durationMs | float(0) / 1000 }}"
                   - action: input_text.set_value
                     target:
-                      entity_id: input_text.shot_stopper_stop_detail
+                      entity_id: input_text.shot_stopper_last_shot_stop_detail
                     data:
                       value: "{{ payload.stopDetail }}"
           - conditions:
@@ -291,12 +291,12 @@ automation:
             sequence:
               - action: input_number.set_value
                 target:
-                  entity_id: input_number.shot_stopper_first_drop
+                  entity_id: input_number.shot_stopper_last_shot_first_drop
                 data:
                   value: "{{ payload.firstDropMs | float(0) / 1000 }}"
               - action: input_number.set_value
                 target:
-                  entity_id: input_number.shot_stopper_target_weight
+                  entity_id: input_number.shot_stopper_last_shot_target_weight
                 data:
                   value: "{{ payload.targetWeightG | float(0) }}"
           - conditions:
@@ -305,22 +305,22 @@ automation:
             sequence:
               - action: input_number.set_value
                 target:
-                  entity_id: input_number.shot_stopper_duration
+                  entity_id: input_number.shot_stopper_last_shot_duration
                 data:
                   value: "{{ payload.durationMs | float(0) / 1000 }}"
               - action: input_number.set_value
                 target:
-                  entity_id: input_number.shot_stopper_target_weight
+                  entity_id: input_number.shot_stopper_last_shot_target_weight
                 data:
                   value: "{{ payload.targetWeightG | float(0) }}"
               - action: input_text.set_value
                 target:
-                  entity_id: input_text.shot_stopper_shot_type
+                  entity_id: input_text.shot_stopper_last_shot_type
                 data:
                   value: "{{ payload.shotType }}"
               - action: input_text.set_value
                 target:
-                  entity_id: input_text.shot_stopper_stop_detail
+                  entity_id: input_text.shot_stopper_last_shot_stop_detail
                 data:
                   value: "{{ payload.stopDetail }}"
               - if:
@@ -329,7 +329,7 @@ automation:
                 then:
                   - action: input_number.set_value
                     target:
-                      entity_id: input_number.shot_stopper_final_weight
+                      entity_id: input_number.shot_stopper_last_shot_final_weight
                     data:
                       value: "{{ payload.weightG | float(0) }}"
               - if:
@@ -338,7 +338,7 @@ automation:
                 then:
                   - action: input_number.set_value
                     target:
-                      entity_id: input_number.shot_stopper_first_drop
+                      entity_id: input_number.shot_stopper_last_shot_first_drop
                     data:
                       value: "{{ payload.firstDropMs | float(0) / 1000 }}"
               - if:
@@ -347,7 +347,7 @@ automation:
                 then:
                   - action: input_number.set_value
                     target:
-                      entity_id: input_number.shot_stopper_average_flow
+                      entity_id: input_number.shot_stopper_last_shot_average_flow
                     data:
                       value: "{{ payload.averageFlowGps | float(0) }}"
 ```
