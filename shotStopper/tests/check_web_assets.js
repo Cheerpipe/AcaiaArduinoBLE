@@ -4731,6 +4731,11 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
   if (!html.includes('id="diagnosticControls"') ||
       !js.includes('showDiagnosticPage') ||
       !js.includes('diagnosticPublic') ||
+      !viewJs.admin.includes('waitDiagnosticApplied(wanted)') ||
+      !viewJs.admin.includes("api('/api/v1/status/admin')).config.showDiagnosticPage===wanted") ||
+      !viewJs.admin.includes("R.message('Saving Diagnostic page setting…','warn')") ||
+      viewJs.admin.includes('waitDiagnosticPagePersisted') ||
+      (viewJs.admin.match(/\bapplyStatus\b/g) || []).length !== 2 ||
       js.includes("$('diagnosticUnlockButton').onclick") ||
       !network.includes('DIAGNOSTIC_DISABLED') ||
       !network.includes('showDiagnosticPage') ||

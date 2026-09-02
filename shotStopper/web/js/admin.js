@@ -3,13 +3,12 @@ import * as R from './runtime.js?v=__FW_ASSET_TAG__';
 const $=R.$;
 let ready=false;
 let webhookDirty=false;
-let diagnosticPageSaving=false;
 export function applyStatus(s){
   R.applyAdminStatus(s);
   const link=document.querySelector('[data-route="/diagnostic"]');
   if(link&&typeof s.diagnosticPageVisible==='boolean')link.classList.toggle('hidden',!s.diagnosticPageVisible);
   const diagnostic=s&&s.config&&s.config.showDiagnosticPage;
-  if(!diagnosticPageSaving&&typeof diagnostic==='boolean'&&$('showDiagnosticPage')){
+  if(typeof diagnostic==='boolean'&&$('showDiagnosticPage')&&!$('showDiagnosticPage').disabled){
     $('showDiagnosticPage').checked=diagnostic;
   }
   const w=s&&s.webhooks;
@@ -37,7 +36,7 @@ async function waitWebhookPersisted(requestId){
     const s=await R.api('/api/v1/status/admin');
     const c=s&&s.lastCommand;
     if(c&&c.requestId===requestId){
-      if(c.state==='PERSISTED'){applyStatus(s);return}
+      if(c.state==='PERSISTED')return;
       if(c.state==='FAILED'||c.state==='CANCELED')throw new Error('Device could not persist webhook settings')
     }else if(c&&c.requestId>requestId&&(c.state==='PERSISTED'||c.state==='FAILED'||c.state==='CANCELED')){
       throw new Error('Webhook save result was superseded by another command')
@@ -45,20 +44,12 @@ async function waitWebhookPersisted(requestId){
   }
   throw new Error('Timed out waiting for webhook settings to be persisted');
 }
-async function waitDiagnosticPagePersisted(requestId){
-  const deadline=Date.now()+8e3;
-  while(Date.now()<deadline){
-    await wait(150);
-    const s=await R.api('/api/v1/status/admin');
-    const c=s&&s.lastCommand;
-    if(c&&c.requestId===requestId){
-      if(c.state==='PERSISTED')return s;
-      if(c.state==='FAILED'||c.state==='CANCELED')throw new Error('Device could not persist the Diagnostic page setting')
-    }else if(c&&c.requestId>requestId&&(c.state==='PERSISTED'||c.state==='FAILED'||c.state==='CANCELED')){
-      throw new Error('Diagnostic page setting was superseded by another command')
-    }
+async function waitDiagnosticApplied(wanted){
+  for(let i=0;i<40;i++){
+    await wait(200);
+    if((await R.api('/api/v1/status/admin')).config.showDiagnosticPage===wanted)return;
   }
-  throw new Error('Timed out waiting for the Diagnostic page setting to be persisted');
+  throw new Error();
 }
 export function init(){
   if(ready)return;
@@ -77,15 +68,16 @@ export function init(){
   $('bleScanIntensity').onchange=R.setBleScanIntensity;
   $('showDiagnosticPage').onchange=()=>R.withCommandGate(async()=>{
     const el=$('showDiagnosticPage'),wanted=el.checked;
-    diagnosticPageSaving=true;el.disabled=true;
+    el.disabled=true;
     try{
-      R.message('Saving Diagnostic page setting…');
-      const accepted=await R.api('/api/v1/config',{method:'POST',body:R.body(R.withBaseRev({showDiagnosticPage:wanted}))});
-      const status=await waitDiagnosticPagePersisted(accepted.requestId);
-      diagnosticPageSaving=false;el.disabled=false;applyStatus(status);
+      R.message('Saving Diagnostic page setting…','warn');
+      await R.api('/api/v1/config',{method:'POST',body:R.body(R.withBaseRev({showDiagnosticPage:wanted}))});
+      await waitDiagnosticApplied(wanted);
+      el.disabled=false;
+      document.querySelector('[data-route="/diagnostic"]').classList.toggle('hidden',!wanted);
       R.noteReachOk();R.message(wanted?'Diagnostic page enabled.':'Diagnostic page disabled.','ok');
     }catch(e){
-      diagnosticPageSaving=false;el.disabled=false;
+      el.disabled=false;
       R.message(R.formatCommandError('Could not save the Diagnostic page setting.',e),'error');
       await R.refreshStatus();
     }
