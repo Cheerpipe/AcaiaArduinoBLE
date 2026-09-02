@@ -4714,6 +4714,7 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
       !js.includes('/api/v1/admin/lock') ||
       !js.includes("closest('#adminLockPanel") ||
       !css.includes('.navLock.hidden,.textLock.hidden{display:none}') ||
+      !css.includes('.pageNav a.hidden{display:none}') ||
       !css.includes('.textLock') ||
       !network.includes('/api/v1/admin/unlock') ||
       !network.includes('/api/v1/admin/lock') ||
