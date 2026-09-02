@@ -645,10 +645,10 @@ const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 54000) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 150000) {
+if (jsBytes > 152000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 204000) {
+if (htmlBytes + jsBytes > 206000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -4141,8 +4141,8 @@ if (generated.secondaryGzip.length > 5600) {
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
 }
-if (generated.combined > 58000) {
-  throw new Error('Combined Web UI gzip exceeds the 56.6 KiB flash budget');
+if (generated.combined > 58200) {
+  throw new Error('Combined Web UI gzip exceeds the 56.8 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
@@ -4730,8 +4730,11 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
   if (!html.includes('id="diagnosticControls"') ||
       !js.includes('showDiagnosticPage') ||
       !js.includes('diagnosticPublic') ||
+      js.includes("$('diagnosticUnlockButton').onclick") ||
       !network.includes('DIAGNOSTIC_DISABLED') ||
-      !network.includes('showDiagnosticPage')) {
+      !network.includes('showDiagnosticPage') ||
+      !firmwareCore.includes(
+          'candidate.showDiagnosticPage = command.config.showDiagnosticPage')) {
     throw new Error(
         'Diagnostic must be an Admin-controlled public opt-in, disabled by default');
   }

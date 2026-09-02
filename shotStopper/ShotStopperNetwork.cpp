@@ -4465,6 +4465,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
     ok = statusJsonAppend(&used, ",\"machineType\":\"%s\"",
                           compiledMachineTypeId());
   }
+  if (ok) {
+    ok = statusJsonAppend(&used, ",\"diagnosticPageVisible\":%s",
+                          diagnosticPageVisible ? "true" : "false");
+  }
   if (ok && page == StatusPage::Settings) {
     ok = statusJsonAppend(&used, ",\"buzzerSupported\":%s",
                           BUZZER_SUPPORT_ENABLED ? "true" : "false");
@@ -4651,10 +4655,6 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
     ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s,\"development\":%s",
                           adminUnlocked ? "true" : "false",
                           DEVELOPMENT_BUILD ? "true" : "false");
-    if (ok) {
-      ok = statusJsonAppend(&used, ",\"diagnosticPageVisible\":%s",
-                            diagnosticPageVisible ? "true" : "false");
-    }
   }
   if (ok && page == StatusPage::Home) {
     ok = statusJsonAppend(

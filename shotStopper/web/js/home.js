@@ -2,7 +2,7 @@
 import * as R from './runtime.js?v=__FW_ASSET_TAG__';
 const $=R.$;
 let ready=false;
-export function applyStatus(s){R.applyHomeStatus(s)}
+export function applyStatus(s){R.applyHomeStatus(s);const link=document.querySelector('[data-route="/diagnostic"]');if(link&&typeof s.diagnosticPageVisible==='boolean')link.classList.toggle('hidden',!s.diagnosticPageVisible)}
 export function init(){
   if(ready)return;
   ready=true;

@@ -12,10 +12,9 @@ export function init(){
   if(ready)return;
   ready=true;
   R.registerViewStatus('diagnostic',applyStatus);
-  const unlock=()=>{const pw=$('diagnosticUnlockPassword').value;if(!pw){R.showFieldError('diagnosticUnlockPassword','Password?');return}R.clearFieldErrors();R.api('/api/v1/admin/unlock',{method:'POST',body:R.body({password:pw})}).then(()=>{$('diagnosticUnlockPassword').value='';R.noteReachOk();R.message('Unlocked.','ok');return R.refreshStatus()}).catch(e=>R.message(R.formatCommandError('Could not unlock diagnostics.',e),'error'))};
-  $('diagnosticUnlockButton').onclick=unlock;
-  $('diagnosticUnlockPassword').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();unlock()}});
-  $('diagnosticLockButton').onclick=R.lockAdmin;
+  const lock=$('diagnosticLockPanel'),controls=$('diagnosticControls');
+  if(lock)lock.remove();
+  if(controls)controls.classList.remove('hidden');
   $('serialDebugOutput').onchange=()=>R.command('/api/v1/config',R.withBaseRev({serialDebugOutput:!!$('serialDebugOutput').checked}));$('ringRetainLogLevel').onchange=()=>R.command('/api/v1/config',R.withBaseRev({ringRetainLogLevel:$('ringRetainLogLevel').value||'none'}));
   $('logFilter').onchange=R.renderLog;
   $('logLevelFilter').onchange=R.renderLog;
@@ -26,4 +25,4 @@ export function init(){
   $('taskProfilerStartButton').onclick=()=>R.command('/api/v1/diagnostic/profiler',{enabled:true});
   $('taskProfilerStopButton').onclick=()=>R.command('/api/v1/diagnostic/profiler',{enabled:false});
 }
-export function activate(){const lock=$('diagnosticLockPanel'),controls=$('diagnosticControls');if(lock)lock.remove();if(controls)controls.classList.remove('hidden')}
+export function activate(){}

@@ -8,6 +8,8 @@ function paintTheme(m){const h=document.documentElement,c=m==='auto'?'light dark
 function setTheme(m){if(!THEME_MODES.includes(m))m='auto';try{localStorage.setItem(THEME_KEY,m)}catch(_){}paintTheme(m)}
 paintTheme(themeMode());
 document.addEventListener('change',e=>{if(e.target&&e.target.id==='uiTheme')setTheme(e.target.value)});
+const diagnosticNav=document.querySelector('[data-route="/diagnostic"]');
+if(diagnosticNav)diagnosticNav.classList.add('hidden');
 
 const assetQuery = new URL(import.meta.url).search;
 const htmlCache = new Map();
@@ -145,6 +147,20 @@ async function renderRoute(pathname) {
     view = ROUTES[known];
     target = known;
   }
+  if (view === 'diagnostic') {
+    try {
+      const access = await R.api('/api/v1/status/home');
+      const visible = access && access.diagnosticPageVisible === true;
+      if (diagnosticNav) diagnosticNav.classList.toggle('hidden', !visible);
+      if (!visible) {
+        view = 'home';
+        target = '/';
+      }
+    } catch (_) {
+      view = 'home';
+      target = '/';
+    }
+  }
   if (location.pathname !== target) history.replaceState({}, '', target);
 
   try {
@@ -248,6 +264,4 @@ document.addEventListener('change', R.noteWebUiInteraction, true);
 document.addEventListener('keydown', R.noteWebUiInteraction, true);
 
 R.setMutable(false);
-renderRoute(location.pathname).finally(() => {
-  R.claimWebUiOwnership();
-});
+R.claimWebUiOwnership();

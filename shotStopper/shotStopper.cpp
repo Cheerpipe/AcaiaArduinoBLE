@@ -4404,6 +4404,7 @@ void processWebCommand(const WebCommand &command) {
       candidate.lastShotCooldownMs = command.config.lastShotCooldownMs;
       candidate.serialDebugOutput = command.config.serialDebugOutput;
       candidate.ringRetainLogLevel = command.config.ringRetainLogLevel;
+      candidate.showDiagnosticPage = command.config.showDiagnosticPage;
       // Session Manual switch may arrive via brewByWeight on Home; keep as timerOnly.
       candidate.timerOnly = command.config.timerOnly;
 #if defined(SHOT_STOPPER_HOST_TEST)
