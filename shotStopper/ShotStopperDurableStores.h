@@ -81,7 +81,8 @@ inline bool resetAllDurableStores(PersistedSettings &settings,
   return loadPersistedSettings(verifiedSettings) &&
          verifyFactorySettings(verifiedSettings) &&
          loadBleCompanionSettings(verifiedBle) && verifiedBle.enabled == 0 &&
-         verifiedBle.scanIntensity == 0 &&
+         verifiedBle.scanIntensity ==
+             static_cast<uint8_t>(BleScanIntensity::AGGRESSIVE) &&
          shotLogVerified && shotCurvesVerified && lastShotVerified;
 }
 

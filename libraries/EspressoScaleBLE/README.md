@@ -90,7 +90,7 @@ may connect even when the advertisement has no local name.
 
 Stock ArduinoBLE 2.1.0 scans active at 20/20 ms (100% duty). Shot Stopper
 passes Light / Normal / Aggressive HCI presets into `startScan()` (Light
-28.75/115 ms = 25%, Normal 31.25/62.5 ms = 50% default, Aggressive 20/20 ms = 100%).
+28.75/115 ms = 25%, Normal 31.25/62.5 ms = 50%, Aggressive 20/20 ms = 100% default).
 `scripts/patch_arduinoble.sh` reverts leftover 40/20 or 100/30 GAP params and
 also applies an OOM-safe discovery patch, a BLE-host PSRAM allocator, and HCI
 bounded waits:

@@ -238,13 +238,13 @@ inline bool migratePersistedSettingsFromV4(const PersistedSettingsV4 &v4,
   out = PersistedSettings{};
   memcpy(&out, &v4, offsetof(PersistedSettingsV4, webhook));
   out.schemaVersion = CONFIG_SCHEMA_VERSION;
-  out.runtime.showDiagnosticPage = false;
+  out.runtime.showDiagnosticPage = true;
   out.webhook.enabled = v4.webhook.enabled;
   out.webhook.brewState = v4.webhook.brewState;
   out.webhook.firstDrop = v4.webhook.firstDrop;
   out.webhook.end = v4.webhook.end;
   memcpy(out.webhook.url, v4.webhook.url, sizeof(v4.webhook.url));
-  out.webhook.deferDuringShot = true;
+  out.webhook.deferDuringShot = false;
   out.checksum = 0;
   out.checksum = persistedSettingsChecksum(out);
   return true;
@@ -265,7 +265,7 @@ inline bool migratePersistedSettingsFromV5(const PersistedSettingsV5 &v5,
   out.webhook.firstDrop = v5.webhook.firstDrop;
   out.webhook.end = v5.webhook.end;
   memcpy(out.webhook.url, v5.webhook.url, sizeof(v5.webhook.url));
-  out.webhook.deferDuringShot = true;
+  out.webhook.deferDuringShot = false;
   out.checksum = 0;
   out.checksum = persistedSettingsChecksum(out);
   return true;

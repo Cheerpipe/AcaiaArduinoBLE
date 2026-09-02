@@ -4502,8 +4502,8 @@ void d05_hci_watchdog_force_restarts_same_filter() {
                               scanLastAdvertAtMs);
   CHECK(scale.startScanCalls == 1);
   CHECK(!scale.lastForceRestart);
-  CHECK(scale.lastScanInterval == BLE_SCAN_NORMAL_INTERVAL);
-  CHECK(scale.lastScanWindow == BLE_SCAN_NORMAL_WINDOW);
+  CHECK(scale.lastScanInterval == BLE_SCAN_AGGRESSIVE_INTERVAL);
+  CHECK(scale.lastScanWindow == BLE_SCAN_AGGRESSIVE_WINDOW);
   const size_t callsBeforeRestart = scale.startScanCalls;
   size_t ticks = 0;
   while (scale.startScanCalls == callsBeforeRestart) {
@@ -4537,15 +4537,15 @@ void d05b_scan_intensity_change_restarts_gap() {
                               connectAttemptSeriesActive, scanSessionAtMs,
                               scanLastAdvertAtMs);
   CHECK(scale.startScanCalls == 1);
-  CHECK(scale.lastScanInterval == BLE_SCAN_NORMAL_INTERVAL);
-  applyLiveBleScanIntensity(BleScanIntensity::AGGRESSIVE);
+  CHECK(scale.lastScanInterval == BLE_SCAN_AGGRESSIVE_INTERVAL);
+  applyLiveBleScanIntensity(BleScanIntensity::LIGHT);
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs,
                               scanLastAdvertAtMs);
   CHECK(scale.startScanCalls == 2);
   CHECK(scale.lastForceRestart);
-  CHECK(scale.lastScanInterval == BLE_SCAN_AGGRESSIVE_INTERVAL);
-  CHECK(scale.lastScanWindow == BLE_SCAN_AGGRESSIVE_WINDOW);
+  CHECK(scale.lastScanInterval == BLE_SCAN_LIGHT_INTERVAL);
+  CHECK(scale.lastScanWindow == BLE_SCAN_LIGHT_WINDOW);
   const size_t calls = scale.startScanCalls;
   serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
                               connectAttemptSeriesActive, scanSessionAtMs,
@@ -4596,7 +4596,7 @@ void d16_scale_connect_debug_reports_phases() {
                               connectAttemptSeriesActive, scanSessionAtMs,
                               scanLastAdvertAtMs);
   CHECK(debugEventExists(DebugCode::SCALE_SCAN_STARTED, SCALE_SCAN_TARGET_ANY,
-                         static_cast<int32_t>(BleScanIntensity::NORMAL)));
+                         static_cast<int32_t>(BleScanIntensity::AGGRESSIVE)));
   CHECK(!debugEventExists(DebugCode::SCALE_CONNECTING));
 
   scale.connecting = true;
@@ -8247,7 +8247,7 @@ void bc04_ble_companion_enablement_is_next_boot_only() {
 
 void bc05_ble_scan_intensity_applies_live_without_restart() {
   resetHarness(false, false);
-  CHECK(liveBleScanIntensity() == BleScanIntensity::NORMAL);
+  CHECK(liveBleScanIntensity() == BleScanIntensity::AGGRESSIVE);
   CHECK(!copyBleCompanionStatus().restartRequired);
 
   CHECK(persistBleScanIntensity(BleScanIntensity::LIGHT));

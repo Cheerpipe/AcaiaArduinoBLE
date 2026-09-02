@@ -27,9 +27,9 @@ struct WebhookConfig {
   bool firstDrop = true;
   bool end = true;
   char url[WEBHOOK_URL_CAPACITY] = {};
-  // Keep HTTP off the radio while a shot owns BLE. Users can opt into
-  // real-time delivery, accepting the risk of scale-link interference.
-  bool deferDuringShot = true;
+  // Deliver in real time by default. Queueing protects the scale link, but
+  // defers all shot events until the shot ends.
+  bool deferDuringShot = false;
 };
 
 inline bool validWebhookUrl(const char *url) {
@@ -189,7 +189,7 @@ class WebhookDispatcher {
   TaskHandle_t task_ = nullptr;
   char *payload_ = nullptr;
   std::atomic<bool> controlCritical_{false};
-  std::atomic<bool> deferDuringShot_{true};
+  std::atomic<bool> deferDuringShot_{false};
   std::atomic<bool> scaleConnecting_{false};
   std::atomic<bool> abortRequested_{false};
   // Latched per active perform so a short critical pulse still cancels after

@@ -130,7 +130,7 @@ bool scaleLoggedGattConnecting = false;
 uint8_t scaleLoggedGattConnectAttempts = 0;
 bool scaleDiscoveryDirected = false;
 std::atomic<uint8_t> liveBleScanIntensityRaw{
-    static_cast<uint8_t>(BleScanIntensity::NORMAL)};
+    static_cast<uint8_t>(BleScanIntensity::AGGRESSIVE)};
 bool bookooConnectBeepPending = false;
 bool bookooConnectBeepSawWeight = false;
 uint32_t bookooConnectBeepArmedAtMs = 0;
@@ -1156,7 +1156,7 @@ void resetScaleWorkerRadioStateForHost() {
   scaleLoggedGattConnectAttempts = 0;
   scaleDiscoveryDirected = false;
   liveBleScanIntensityRaw.store(
-      static_cast<uint8_t>(BleScanIntensity::NORMAL),
+      static_cast<uint8_t>(BleScanIntensity::AGGRESSIVE),
       std::memory_order_relaxed);
   bookooConnectBeepPending = false;
   bookooConnectBeepSawWeight = false;

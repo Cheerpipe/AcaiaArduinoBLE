@@ -16,7 +16,8 @@ struct BleCompanionPersistedSettings {
   uint16_t structureSize = sizeof(BleCompanionPersistedSettings);
   uint32_t revision = 0;
   uint8_t enabled = 0;
-  uint8_t scanIntensity = 0;  // BleScanIntensity; 0 = Normal
+  uint8_t scanIntensity =
+      static_cast<uint8_t>(BleScanIntensity::AGGRESSIVE);
   uint8_t reserved[2] = {};
   uint32_t checksum = 0;
 };

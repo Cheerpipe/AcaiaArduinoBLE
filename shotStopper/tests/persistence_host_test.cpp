@@ -46,6 +46,8 @@ void p01_defaults_are_valid() {
         static_cast<uint8_t>(StaConfigState::CONFIRMED));
   CHECK(!settings.lkgValid);
   CHECK(settings.staWifiSleep);
+  CHECK(settings.runtime.showDiagnosticPage);
+  CHECK(!settings.webhook.deferDuringShot);
   CHECK(settings.runtime.fastExtractionGuardEnabled);
   CHECK(std::fabs(settings.runtime.maxRecoveryWeightG -
                   DEFAULT_MAX_RECOVERY_WEIGHT_G) < 0.001f);
@@ -1075,7 +1077,8 @@ void p48_ble_companion_defaults_and_dual_slot_round_trip() {
   CHECK(sizeof(BleCompanionPersistedSettings) == 20);
   BleCompanionPersistedSettings settings;
   CHECK(settings.enabled == 0);
-  CHECK(settings.scanIntensity == 0);
+  CHECK(settings.scanIntensity ==
+        static_cast<uint8_t>(BleScanIntensity::AGGRESSIVE));
   settings.scanIntensity = 9;
   finalizeBleCompanionSettings(settings);
   CHECK(settings.scanIntensity == 0);
@@ -1110,7 +1113,8 @@ void p49_ble_companion_corruption_falls_back_and_reset_stays_off() {
   CHECK(loaded.revision == 1);
   CHECK(resetBleCompanionSettings(loaded));
   CHECK(loaded.enabled == 0);
-  CHECK(loaded.scanIntensity == 0);
+  CHECK(loaded.scanIntensity ==
+        static_cast<uint8_t>(BleScanIntensity::AGGRESSIVE));
 }
 
 RecoveryGestureResult recoveryEdge(RecoveryGestureRecognizer &recognizer,

@@ -685,7 +685,7 @@ struct RuntimeConfig {
   bool rinseEnabled = false;
   // Makes the read-only Diagnostic view available without an Admin unlock.
   // This occupies a former trailing padding byte, preserving the blob size.
-  bool showDiagnosticPage = false;
+  bool showDiagnosticPage = true;
 };
 
 static_assert(sizeof(RuntimeConfig) == 252,
