@@ -4324,6 +4324,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   char staSignalQualityJson[16] = "null";
   char staChannelJson[8] = "null";
   char scaleRssiJson[16] = "null";
+  char scaleWeightUpdateIntervalJson[16] = "null";
   if (control.currentWeightValid) {
     snprintf(currentWeight, sizeof(currentWeight), "%.2f",
              static_cast<double>(control.currentWeightG));
@@ -4357,6 +4358,13 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   if (control.scaleRssiValid) {
     snprintf(scaleRssiJson, sizeof(scaleRssiJson), "%d",
              static_cast<int>(control.scaleRssi));
+  }
+  if (page == StatusPage::Diagnostic &&
+      control.weightStreamState == WeightStreamState::FRESH &&
+      control.scaleWeightUpdateIntervalMs != 0) {
+    snprintf(scaleWeightUpdateIntervalJson,
+             sizeof(scaleWeightUpdateIntervalJson), "%lu",
+             static_cast<unsigned long>(control.scaleWeightUpdateIntervalMs));
   }
 
   char safeNtpCustom[NTP_SERVER_HOST_CAPACITY] = {};
@@ -4936,7 +4944,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"packetGaps\":%lu,\"rejectedPackets\":%lu,"
         "\"reconnects\":%lu,\"lastDisconnectReasonName\":\"%s\","
         "\"eventsDropped\":%lu,\"recoveredStaleCount\":%lu,"
-        "\"recoveredStaleMs\":%lu,\"rssi\":%s},"
+        "\"recoveredStaleMs\":%lu,\"rssi\":%s,"
+        "\"weightUpdateIntervalMs\":%s},"
         "\"lastCommand\":{\"requestId\":%lu,\"state\":\"%s\"},"
         "\"compileFlags\":{\"buzzer\":\"%s\",\"remoteMachineControl\":%s,"
         "\"arch\":\"%s\",\"machineType\":\"%s\",\"stopPulseMs\":%lu,"
@@ -5017,6 +5026,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.scaleRecoveredStaleCount),
         static_cast<unsigned long>(control.scaleRecoveredStaleMs),
         scaleRssiJson,
+        scaleWeightUpdateIntervalJson,
         static_cast<unsigned long>(network.lastCommandRequestId),
         commandResultStateName(network.lastCommandState),
         compiledBuzzerModeId(),
@@ -5582,6 +5592,7 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            "\"connectionGeneration\":%lu,\"packetSequence\":%lu,"
            "\"packetGaps\":%lu,\"rejectedPackets\":%lu,\"reconnects\":%lu,"
            "\"recoveredStaleCount\":%lu,\"recoveredStaleMs\":%lu,"
+           "\"weightUpdateIntervalMs\":%lu,"
            "\"workerProgressAtMs\":%lu,\"timerValid\":%s,\"timerMs\":%lu,"
            "\"timerAgeMs\":%lu,\"protocol\":\"%s\","
            "\"lastDisconnectReasonName\":\"%s\",\"rssi\":%s},",
@@ -5594,6 +5605,7 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            static_cast<unsigned long>(c.scaleReconnects),
            static_cast<unsigned long>(c.scaleRecoveredStaleCount),
            static_cast<unsigned long>(c.scaleRecoveredStaleMs),
+           static_cast<unsigned long>(c.scaleWeightUpdateIntervalMs),
            static_cast<unsigned long>(x.scaleWorkerProgressAtMs),
            x.scaleTimerValid ? "true" : "false",
            static_cast<unsigned long>(x.scaleTimerMs),

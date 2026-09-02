@@ -83,6 +83,7 @@ void resetMomentaryHarness() {
   bleStackReady = true;
   firmwareInitializationComplete = true;
   lastScaleWeightAtMs = 0;
+  scaleWeightUpdateIntervalMs = 0;
   lastScalePacketGapLogMs = 0;
   telemetryWeightStreamState = WeightStreamState::NO_SAMPLE;
   publishedControlGate = ControlGateSnapshot{};

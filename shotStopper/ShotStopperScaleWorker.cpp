@@ -88,6 +88,7 @@ uint32_t scalePacketSequence = 0;
 uint32_t scalePacketGaps = 0;
 uint32_t lastScalePacketGapLogMs = 0;
 uint32_t lastScaleWeightAtMs = 0;
+uint32_t scaleWeightUpdateIntervalMs = 0;
 uint32_t scaleRejectedPackets = 0;
 uint32_t scaleReconnects = 0;
 uint8_t scaleLastDisconnectReason = 0;
@@ -224,6 +225,7 @@ ScaleLinkSnapshot getScaleLinkSnapshot() {
   snapshot.connectionGeneration = scaleConnectionGeneration;
   snapshot.packetSequence = scalePacketSequence;
   snapshot.packetGaps = scalePacketGaps;
+  snapshot.weightUpdateIntervalMs = scaleWeightUpdateIntervalMs;
   snapshot.rejectedPackets = scaleRejectedPackets;
   snapshot.reconnects = scaleReconnects;
   snapshot.lastDisconnectReason = scaleLastDisconnectReason;
@@ -248,6 +250,7 @@ void setScaleLinkState(ScaleLinkState state) {
       state == ScaleLinkState::DISCONNECTED) {
     ++scaleDisconnectSequence;
     lastScaleWeightAtMs = 0;
+    scaleWeightUpdateIntervalMs = 0;
   }
   if (scaleLinkState != ScaleLinkState::CONNECTED &&
       state == ScaleLinkState::CONNECTED) {
@@ -355,6 +358,14 @@ bool publishScaleEvent(const ScaleEvent &event, bool critical) {
       if (dt > SCALE_STREAM_GAP_MS) {
         ++scalePacketGaps;
         streamGapMs = dt;
+        scaleWeightUpdateIntervalMs = 0;
+      } else if (scaleWeightUpdateIntervalMs == 0) {
+        scaleWeightUpdateIntervalMs = dt;
+      } else {
+        // Low-cost EWMA over roughly eight updates. Keeping this integer-only
+        // makes the diagnostic passive even on the scale worker's hot path.
+        scaleWeightUpdateIntervalMs =
+            (scaleWeightUpdateIntervalMs * 7U + dt + 4U) / 8U;
       }
     }
     lastScaleWeightAtMs = stamped.receivedAtMs;

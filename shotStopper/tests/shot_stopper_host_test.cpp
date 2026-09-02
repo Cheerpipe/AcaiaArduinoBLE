@@ -206,6 +206,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scalePacketGaps = 0;
   lastScalePacketGapLogMs = 0;
   lastScaleWeightAtMs = 0;
+  scaleWeightUpdateIntervalMs = 0;
   scaleRejectedPackets = 0;
   scaleReconnects = 0;
   scaleRecoveredStaleCount = 0;
@@ -5621,6 +5622,35 @@ void r33b_stream_gap_counts_connected_inter_packet_silence() {
 
   processScaleWorkerEvents();
   CHECK(observedWeight == 2.0f);
+}
+
+void r33c_weight_update_interval_is_smoothed_and_reset_safely() {
+  resetHarness(false, true);
+  reachReadyFromBoot();
+  ScaleEvent sample;
+  sample.type = ScaleEventType::WEIGHT;
+  sample.receivedAtMs = hostMillis;
+  sample.weightG = 1.0f;
+  CHECK(publishScaleEvent(sample, false));
+  CHECK(getScaleLinkSnapshot().weightUpdateIntervalMs == 0);
+
+  sample.receivedAtMs += 100;
+  CHECK(publishScaleEvent(sample, false));
+  CHECK(getScaleLinkSnapshot().weightUpdateIntervalMs == 100);
+
+  sample.receivedAtMs += 108;
+  CHECK(publishScaleEvent(sample, false));
+  CHECK(getScaleLinkSnapshot().weightUpdateIntervalMs == 101);
+
+  sample.receivedAtMs += SCALE_STREAM_GAP_MS + 1;
+  CHECK(publishScaleEvent(sample, false));
+  CHECK(getScaleLinkSnapshot().weightUpdateIntervalMs == 0);
+
+  setScaleConnected(false);
+  setScaleConnected(true);
+  sample.receivedAtMs += 100;
+  CHECK(publishScaleEvent(sample, false));
+  CHECK(getScaleLinkSnapshot().weightUpdateIntervalMs == 0);
 }
 
 void r34_suspended_control_recovers_after_three_attributed_samples() {
@@ -11067,6 +11097,7 @@ const TestCase testCases[] = {
     {"R32", r32_old_connection_generation_cannot_update_weight},
     {"R33", r33_weight_mailbox_keeps_latest_without_consumer_gap},
     {"R33b", r33b_stream_gap_counts_connected_inter_packet_silence},
+    {"R33c", r33c_weight_update_interval_is_smoothed_and_reset_safely},
     {"R34", r34_suspended_control_recovers_after_three_attributed_samples},
     {"R35", r35_connected_without_weight_stream_is_not_available},
     {"R36", r36_recovered_stale_metrics_count_connected_gaps_only},

@@ -26,7 +26,7 @@ http://192.168.1.50:8123/api/webhook/shot_stopper_replace_with_a_long_secret
 ## 2. Receive, transform, and save each notification
 
 Paste this into the automation from step 1 and change only `webhook_id`. The
-templates read `trigger.json` and convert milliseconds to seconds.
+templates read `trigger.json` directly and convert milliseconds to seconds.
 
 ```yaml
 alias: Shot Stopper — receive extraction
@@ -39,103 +39,101 @@ triggers:
     allowed_methods:
       - POST
     local_only: true
-variables:
-  payload: "{{ trigger.json }}"
 actions:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ payload.event == 'brew_state' }}"
+            value_template: "{{ trigger.json.event == 'brew_state' }}"
         sequence:
           - action: input_text.set_value
             target:
               entity_id: input_text.shot_stopper_last_shot_state
             data:
-              value: "{{ payload.state }}"
+              value: "{{ trigger.json.state }}"
           - action: input_number.set_value
             target:
               entity_id: input_number.shot_stopper_last_shot_target_weight
             data:
-              value: "{{ payload.targetWeightG | float(0) }}"
+              value: "{{ trigger.json.targetWeightG | float(0) }}"
           - if:
               - condition: template
-                value_template: "{{ payload.state == 'idle' }}"
+                value_template: "{{ trigger.json.state == 'idle' }}"
             then:
               - action: input_number.set_value
                 target:
                   entity_id: input_number.shot_stopper_last_shot_duration
                 data:
-                  value: "{{ payload.durationMs | float(0) / 1000 }}"
+                  value: "{{ trigger.json.durationMs | float(0) / 1000 }}"
               - action: input_text.set_value
                 target:
                   entity_id: input_text.shot_stopper_last_shot_stop_detail
                 data:
-                  value: "{{ payload.stopDetail }}"
+                  value: "{{ trigger.json.stopDetail }}"
       - conditions:
           - condition: template
-            value_template: "{{ payload.event == 'first_drop' }}"
+            value_template: "{{ trigger.json.event == 'first_drop' }}"
         sequence:
           - action: input_number.set_value
             target:
               entity_id: input_number.shot_stopper_last_shot_first_drop
             data:
-              value: "{{ payload.firstDropMs | float(0) / 1000 }}"
+              value: "{{ trigger.json.firstDropMs | float(0) / 1000 }}"
           - action: input_number.set_value
             target:
               entity_id: input_number.shot_stopper_last_shot_target_weight
             data:
-              value: "{{ payload.targetWeightG | float(0) }}"
+              value: "{{ trigger.json.targetWeightG | float(0) }}"
       - conditions:
           - condition: template
-            value_template: "{{ payload.event == 'end' }}"
+            value_template: "{{ trigger.json.event == 'end' }}"
         sequence:
           - action: input_number.set_value
             target:
               entity_id: input_number.shot_stopper_last_shot_duration
             data:
-              value: "{{ payload.durationMs | float(0) / 1000 }}"
+              value: "{{ trigger.json.durationMs | float(0) / 1000 }}"
           - action: input_number.set_value
             target:
               entity_id: input_number.shot_stopper_last_shot_target_weight
             data:
-              value: "{{ payload.targetWeightG | float(0) }}"
+              value: "{{ trigger.json.targetWeightG | float(0) }}"
           - action: input_text.set_value
             target:
               entity_id: input_text.shot_stopper_last_shot_type
             data:
-              value: "{{ payload.shotType }}"
+              value: "{{ trigger.json.shotType }}"
           - action: input_text.set_value
             target:
               entity_id: input_text.shot_stopper_last_shot_stop_detail
             data:
-              value: "{{ payload.stopDetail }}"
+              value: "{{ trigger.json.stopDetail }}"
           - if:
               - condition: template
-                value_template: "{{ payload.weightG is defined }}"
+                value_template: "{{ trigger.json.weightG is defined }}"
             then:
               - action: input_number.set_value
                 target:
                   entity_id: input_number.shot_stopper_last_shot_final_weight
                 data:
-                  value: "{{ payload.weightG | float(0) }}"
+                  value: "{{ trigger.json.weightG | float(0) }}"
           - if:
               - condition: template
-                value_template: "{{ payload.firstDropMs is defined }}"
+                value_template: "{{ trigger.json.firstDropMs is defined }}"
             then:
               - action: input_number.set_value
                 target:
                   entity_id: input_number.shot_stopper_last_shot_first_drop
                 data:
-                  value: "{{ payload.firstDropMs | float(0) / 1000 }}"
+                  value: "{{ trigger.json.firstDropMs | float(0) / 1000 }}"
           - if:
               - condition: template
-                value_template: "{{ payload.averageFlowGps is defined }}"
+                value_template: "{{ trigger.json.averageFlowGps is defined }}"
             then:
               - action: input_number.set_value
                 target:
                   entity_id: input_number.shot_stopper_last_shot_average_flow
                 data:
-                  value: "{{ payload.averageFlowGps | float(0) }}"
+                  value: "{{ trigger.json.averageFlowGps | float(0) }}"
 ```
 
 The `end` event arrives after Shot Stopper's drip delay, so it is the best
@@ -238,6 +236,9 @@ template:
       - name: Shot Stopper last shot state
         unique_id: shot_stopper_last_shot_state
         state: "{{ states('input_text.shot_stopper_last_shot_state') }}"
+      - name: Shot Stopper last shot type
+        unique_id: shot_stopper_last_shot_type
+        state: "{{ states('input_text.shot_stopper_last_shot_type') }}"
       - name: Shot Stopper last shot stop detail
         unique_id: shot_stopper_last_shot_stop_detail
         state: "{{ states('input_text.shot_stopper_last_shot_stop_detail') }}"
@@ -253,103 +254,101 @@ automation:
         allowed_methods:
           - POST
         local_only: true
-    variables:
-      payload: "{{ trigger.json }}"
     actions:
       - choose:
           - conditions:
               - condition: template
-                value_template: "{{ payload.event == 'brew_state' }}"
+                value_template: "{{ trigger.json.event == 'brew_state' }}"
             sequence:
               - action: input_text.set_value
                 target:
                   entity_id: input_text.shot_stopper_last_shot_state
                 data:
-                  value: "{{ payload.state }}"
+                  value: "{{ trigger.json.state }}"
               - action: input_number.set_value
                 target:
                   entity_id: input_number.shot_stopper_last_shot_target_weight
                 data:
-                  value: "{{ payload.targetWeightG | float(0) }}"
+                  value: "{{ trigger.json.targetWeightG | float(0) }}"
               - if:
                   - condition: template
-                    value_template: "{{ payload.state == 'idle' }}"
+                    value_template: "{{ trigger.json.state == 'idle' }}"
                 then:
                   - action: input_number.set_value
                     target:
                       entity_id: input_number.shot_stopper_last_shot_duration
                     data:
-                      value: "{{ payload.durationMs | float(0) / 1000 }}"
+                      value: "{{ trigger.json.durationMs | float(0) / 1000 }}"
                   - action: input_text.set_value
                     target:
                       entity_id: input_text.shot_stopper_last_shot_stop_detail
                     data:
-                      value: "{{ payload.stopDetail }}"
+                      value: "{{ trigger.json.stopDetail }}"
           - conditions:
               - condition: template
-                value_template: "{{ payload.event == 'first_drop' }}"
+                value_template: "{{ trigger.json.event == 'first_drop' }}"
             sequence:
               - action: input_number.set_value
                 target:
                   entity_id: input_number.shot_stopper_last_shot_first_drop
                 data:
-                  value: "{{ payload.firstDropMs | float(0) / 1000 }}"
+                  value: "{{ trigger.json.firstDropMs | float(0) / 1000 }}"
               - action: input_number.set_value
                 target:
                   entity_id: input_number.shot_stopper_last_shot_target_weight
                 data:
-                  value: "{{ payload.targetWeightG | float(0) }}"
+                  value: "{{ trigger.json.targetWeightG | float(0) }}"
           - conditions:
               - condition: template
-                value_template: "{{ payload.event == 'end' }}"
+                value_template: "{{ trigger.json.event == 'end' }}"
             sequence:
               - action: input_number.set_value
                 target:
                   entity_id: input_number.shot_stopper_last_shot_duration
                 data:
-                  value: "{{ payload.durationMs | float(0) / 1000 }}"
+                  value: "{{ trigger.json.durationMs | float(0) / 1000 }}"
               - action: input_number.set_value
                 target:
                   entity_id: input_number.shot_stopper_last_shot_target_weight
                 data:
-                  value: "{{ payload.targetWeightG | float(0) }}"
+                  value: "{{ trigger.json.targetWeightG | float(0) }}"
               - action: input_text.set_value
                 target:
                   entity_id: input_text.shot_stopper_last_shot_type
                 data:
-                  value: "{{ payload.shotType }}"
+                  value: "{{ trigger.json.shotType }}"
               - action: input_text.set_value
                 target:
                   entity_id: input_text.shot_stopper_last_shot_stop_detail
                 data:
-                  value: "{{ payload.stopDetail }}"
+                  value: "{{ trigger.json.stopDetail }}"
               - if:
                   - condition: template
-                    value_template: "{{ payload.weightG is defined }}"
+                    value_template: "{{ trigger.json.weightG is defined }}"
                 then:
                   - action: input_number.set_value
                     target:
                       entity_id: input_number.shot_stopper_last_shot_final_weight
                     data:
-                      value: "{{ payload.weightG | float(0) }}"
+                      value: "{{ trigger.json.weightG | float(0) }}"
               - if:
                   - condition: template
-                    value_template: "{{ payload.firstDropMs is defined }}"
+                    value_template: "{{ trigger.json.firstDropMs is defined }}"
                 then:
                   - action: input_number.set_value
                     target:
                       entity_id: input_number.shot_stopper_last_shot_first_drop
                     data:
-                      value: "{{ payload.firstDropMs | float(0) / 1000 }}"
+                      value: "{{ trigger.json.firstDropMs | float(0) / 1000 }}"
               - if:
                   - condition: template
-                    value_template: "{{ payload.averageFlowGps is defined }}"
+                    value_template: "{{ trigger.json.averageFlowGps is defined }}"
                 then:
                   - action: input_number.set_value
                     target:
                       entity_id: input_number.shot_stopper_last_shot_average_flow
                     data:
-                      value: "{{ payload.averageFlowGps | float(0) }}"
+                      value: "{{ trigger.json.averageFlowGps | float(0) }}"
 ```
 
 After saving the package file, restart Home Assistant. From then on, this one
@@ -543,6 +542,9 @@ template:
       - name: Shot Stopper last shot state
         unique_id: shot_stopper_last_shot_state
         state: "{{ states('input_text.shot_stopper_last_shot_state') }}"
+      - name: Shot Stopper last shot type
+        unique_id: shot_stopper_last_shot_type
+        state: "{{ states('input_text.shot_stopper_last_shot_type') }}"
       - name: Shot Stopper last shot stop detail
         unique_id: shot_stopper_last_shot_stop_detail
         state: "{{ states('input_text.shot_stopper_last_shot_stop_detail') }}"

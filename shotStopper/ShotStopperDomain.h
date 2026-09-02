@@ -1980,6 +1980,7 @@ struct ControlStatusSnapshot {
   uint32_t scaleConnectionGeneration = 0;
   uint32_t scalePacketSequence = 0;
   uint32_t scalePacketGaps = 0;
+  uint32_t scaleWeightUpdateIntervalMs = 0;
   uint32_t scaleRejectedPackets = 0;
   uint32_t scaleReconnects = 0;
   uint32_t scaleRecoveredStaleCount = 0;

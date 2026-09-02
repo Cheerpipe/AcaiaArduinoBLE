@@ -2271,6 +2271,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !diagHtml.includes('id="dStream"') ||
       !diagHtml.includes('id="dControl"') ||
       !diagHtml.includes('id="dScaleRssi"') ||
+      !diagHtml.includes('id="hScaleRate"') ||
       !diagHtml.includes('id="hRecoveredStales"') ||
       !diagHtml.includes('id="hStaleTime"') ||
       !ui.includes("t('dMachine',s.machineState)") ||
@@ -2286,6 +2287,8 @@ if (!ui.includes('<legend>Brew</legend>') ||
       !ui.includes("t('dStream',sc.streamState)") ||
       !ui.includes("t('dControl',sc.controlState)") ||
       !ui.includes("t('dScaleRssi',typeof sc.rssi==='number'?sc.rssi+' dBm':'')") ||
+      !ui.includes("t('hScaleRate',typeof wi==='number'&&wi>0?") ||
+      !ui.includes("(1000/wi).toFixed(1)+' Hz (≈'+wi+' ms)'") ||
       !ui.includes("t('hRecoveredStales',String(sc.recoveredStaleCount))") ||
       !ui.includes("t('hStaleTime',typeof sc.recoveredStaleMs==='number'?sc.recoveredStaleMs+' ms':'')") ||
       !diagHtml.includes('<strong>Heap min</strong>') ||
@@ -3565,6 +3568,7 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
     'workBufExternal', 'jsonArenaExternal', 'allocExternalFallback',
     'resetReasonCode', 'packetGaps', 'rejectedPackets', 'reconnects',
     'eventsDropped', 'recoveredStaleCount', 'recoveredStaleMs',
+    'weightUpdateIntervalMs',
     'lastCommand', 'loopIntervalGapMs', 'loopMaxGapMs',
     'machineState', 'physicalActivatorOn', 'reedOn', 'controlSource', 'cupPresence',
     'streamState', 'controlState', 'taskWatchdogReady', 'recoveryRequired',
@@ -3575,8 +3579,11 @@ if ((statusFormat.match(/page == StatusPage::Diagnostic/g) || []).length < 1 ||
       throw new Error('status/diagnostic missing required field: ' + field);
     }
   }
-  if (!diagBody.includes('\\"recoveredStaleMs\\":%lu,\\"rssi\\":%s}') ||
+  if (!diagBody.includes('\\"recoveredStaleMs\\":%lu,\\"rssi\\":%s,') ||
+      !diagBody.includes('\\"weightUpdateIntervalMs\\":%s}') ||
       !network.includes('scaleRssiJson') ||
+      !network.includes('scaleWeightUpdateIntervalJson') ||
+      !network.includes('control.weightStreamState == WeightStreamState::FRESH') ||
       !network.includes('\\"lastDisconnectReasonName\\":\\"%s\\",\\"rssi\\":%s}') ||
       !firmware.includes('serviceScaleLinkRssi') ||
       !firmware.includes('SCALE_LINK_RSSI_SAMPLE_MS') ||
