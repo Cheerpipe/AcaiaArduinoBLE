@@ -143,6 +143,218 @@ final result. Weight, first-drop time, and average flow can be omitted when no
 reliable reading exists; the conditional actions leave the previous value
 untouched instead of replacing it with zero.
 
+## One-file package example
+
+If you prefer to keep this setup together, Home Assistant packages let one
+file define the helpers, sensors, and automation. This is an additional option;
+the examples above remain useful if you prefer to keep each section separate.
+
+First, enable packages once in `configuration.yaml`:
+
+```yaml
+homeassistant:
+  packages: !include_dir_named packages
+```
+
+Then create `packages/shot_stopper.yaml` with the complete content below. It
+creates everything used by the webhook setup. Change the webhook ID in both
+the URL configured in Shot Stopper and the `webhook_id` value below.
+
+```yaml
+input_number:
+  shot_stopper_duration:
+    name: Shot Stopper duration
+    min: 0
+    max: 60
+    step: 0.1
+    unit_of_measurement: s
+  shot_stopper_final_weight:
+    name: Shot Stopper final weight
+    min: 0
+    max: 200
+    step: 0.01
+    unit_of_measurement: g
+  shot_stopper_target_weight:
+    name: Shot Stopper target weight
+    min: 0
+    max: 200
+    step: 0.01
+    unit_of_measurement: g
+  shot_stopper_average_flow:
+    name: Shot Stopper average flow
+    min: 0
+    max: 20
+    step: 0.01
+    unit_of_measurement: g/s
+  shot_stopper_first_drop:
+    name: Shot Stopper first drop
+    min: 0
+    max: 60
+    step: 0.1
+    unit_of_measurement: s
+
+input_text:
+  shot_stopper_state:
+    name: Shot Stopper state
+    max: 32
+  shot_stopper_shot_type:
+    name: Shot Stopper shot type
+    max: 32
+  shot_stopper_stop_detail:
+    name: Shot Stopper stop detail
+    max: 64
+
+template:
+  - sensor:
+      - name: Shot Stopper last extraction duration
+        unique_id: shot_stopper_last_extraction_duration
+        state: "{{ states('input_number.shot_stopper_duration') }}"
+        unit_of_measurement: s
+        device_class: duration
+        state_class: measurement
+      - name: Shot Stopper last extraction final weight
+        unique_id: shot_stopper_last_extraction_final_weight
+        state: "{{ states('input_number.shot_stopper_final_weight') }}"
+        unit_of_measurement: g
+        device_class: weight
+        state_class: measurement
+      - name: Shot Stopper target weight
+        unique_id: shot_stopper_target_weight
+        state: "{{ states('input_number.shot_stopper_target_weight') }}"
+        unit_of_measurement: g
+        device_class: weight
+        state_class: measurement
+      - name: Shot Stopper average flow
+        unique_id: shot_stopper_average_flow
+        state: "{{ states('input_number.shot_stopper_average_flow') }}"
+        unit_of_measurement: g/s
+        state_class: measurement
+      - name: Shot Stopper first drop
+        unique_id: shot_stopper_first_drop
+        state: "{{ states('input_number.shot_stopper_first_drop') }}"
+        unit_of_measurement: s
+        device_class: duration
+        state_class: measurement
+      - name: Shot Stopper extraction state
+        unique_id: shot_stopper_extraction_state
+        state: "{{ states('input_text.shot_stopper_state') }}"
+      - name: Shot Stopper stop detail
+        unique_id: shot_stopper_stop_detail
+        state: "{{ states('input_text.shot_stopper_stop_detail') }}"
+
+automation:
+  - alias: Shot Stopper — receive extraction
+    description: Store Shot Stopper webhook events in helpers.
+    mode: queued
+    max: 10
+    triggers:
+      - trigger: webhook
+        webhook_id: shot_stopper_replace_with_a_long_secret
+        allowed_methods:
+          - POST
+        local_only: true
+    variables:
+      payload: "{{ trigger.json }}"
+    actions:
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ payload.event == 'brew_state' }}"
+            sequence:
+              - action: input_text.set_value
+                target:
+                  entity_id: input_text.shot_stopper_state
+                data:
+                  value: "{{ payload.state }}"
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.shot_stopper_target_weight
+                data:
+                  value: "{{ payload.targetWeightG | float(0) }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ payload.state == 'idle' }}"
+                then:
+                  - action: input_number.set_value
+                    target:
+                      entity_id: input_number.shot_stopper_duration
+                    data:
+                      value: "{{ payload.durationMs | float(0) / 1000 }}"
+                  - action: input_text.set_value
+                    target:
+                      entity_id: input_text.shot_stopper_stop_detail
+                    data:
+                      value: "{{ payload.stopDetail }}"
+          - conditions:
+              - condition: template
+                value_template: "{{ payload.event == 'first_drop' }}"
+            sequence:
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.shot_stopper_first_drop
+                data:
+                  value: "{{ payload.firstDropMs | float(0) / 1000 }}"
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.shot_stopper_target_weight
+                data:
+                  value: "{{ payload.targetWeightG | float(0) }}"
+          - conditions:
+              - condition: template
+                value_template: "{{ payload.event == 'end' }}"
+            sequence:
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.shot_stopper_duration
+                data:
+                  value: "{{ payload.durationMs | float(0) / 1000 }}"
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.shot_stopper_target_weight
+                data:
+                  value: "{{ payload.targetWeightG | float(0) }}"
+              - action: input_text.set_value
+                target:
+                  entity_id: input_text.shot_stopper_shot_type
+                data:
+                  value: "{{ payload.shotType }}"
+              - action: input_text.set_value
+                target:
+                  entity_id: input_text.shot_stopper_stop_detail
+                data:
+                  value: "{{ payload.stopDetail }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ payload.weightG is defined }}"
+                then:
+                  - action: input_number.set_value
+                    target:
+                      entity_id: input_number.shot_stopper_final_weight
+                    data:
+                      value: "{{ payload.weightG | float(0) }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ payload.firstDropMs is defined }}"
+                then:
+                  - action: input_number.set_value
+                    target:
+                      entity_id: input_number.shot_stopper_first_drop
+                    data:
+                      value: "{{ payload.firstDropMs | float(0) / 1000 }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ payload.averageFlowGps is defined }}"
+                then:
+                  - action: input_number.set_value
+                    target:
+                      entity_id: input_number.shot_stopper_average_flow
+                    data:
+                      value: "{{ payload.averageFlowGps | float(0) }}"
+```
+
+After saving the package file, restart Home Assistant. From then on, this one
+file is the place to update the names, measurements, or webhook behavior.
+
 ## Event payloads
 
 Every message is a `POST` with `Content-Type: application/json`.
