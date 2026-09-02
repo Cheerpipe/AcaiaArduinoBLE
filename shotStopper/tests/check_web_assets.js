@@ -1933,6 +1933,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
     html.indexOf('id="homePresetLabel"') > html.indexOf('id="homePresetCards"') ||
     html.indexOf('id="homePresetBlock"') > html.indexOf('id="homePresetLabel"') ||
     !ui.includes('id="homeBrewByWeight"') ||
+    !ui.includes('id="homeNoScaleBbwEnabled"') ||
     !ui.includes('id="quickSettingsPanel"') ||
     !html.includes('class="homeSwitchGrid"') ||
     !html.includes('id="homeBbwSub"') ||
@@ -2030,6 +2031,9 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes("persistHomeGuard('homeSlowExtractionGuardEnabled'") ||
     !ui.includes("persistHomeGuard('homeAutoToManualGuardEnabled'") ||
     !ui.includes("persistHomeGuard('homeCupProtectionEnabled'") ||
+    !ui.includes('onchange=R.persistHomeNoScaleBbw') ||
+    !ui.includes('function persistHomeNoScaleBbw(') ||
+    !ui.includes("p.noScaleBbwMode=$('homeNoScaleBbwEnabled').checked?nsm:'off'") ||
     ui.includes("persistHomeGuard('homeSoundAlertsEnabled'") ||
     !ui.includes("'fastExtractionGuardEnabled',1)") ||
     !ui.includes("'avoidAccidentalTouchEnabled',1)") ||
@@ -2047,6 +2051,7 @@ if (!ui.includes('<legend>Brew</legend>') ||
     !ui.includes("typeof c[k]==='boolean'") ||
     html.includes('id="homeBrewByWeight" type="checkbox" role="switch" aria-label="Brew by weight" checked') ||
     html.includes('id="homeNoScaleBbwMode" type="checkbox"') ||
+    !html.includes('id="homeNoScaleBbwEnabled" type="checkbox" role="switch" aria-label="No-scale BBW"') ||
     html.includes('id="homeSoundAlertsEnabled"') ||
     html.includes('id="homeCupProtectionEnabled" type="checkbox" role="switch" aria-label="Cup protection" checked') ||
     !css.includes('.switchRow.switchPending') ||
@@ -4146,8 +4151,8 @@ if (generated.jsGzip.length > 6144) {
 if (generated.cssGzip.length > 6600) {
   throw new Error('Compressed Web CSS exceeds the 6.5 KiB gzip budget');
 }
-if (generated.runtimeGzip.length > 28800) {
-  throw new Error('Compressed Web UI runtime JS exceeds the 28.1 KiB gzip budget');
+if (generated.runtimeGzip.length > 29000) {
+  throw new Error('Compressed Web UI runtime JS exceeds the 28.3 KiB gzip budget');
 }
 if (generated.secondaryGzip.length > 5600) {
   throw new Error('Compressed secondary view JS exceeds the 5.5 KiB gzip budget');
@@ -4155,8 +4160,8 @@ if (generated.secondaryGzip.length > 5600) {
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
 }
-if (generated.combined > 58200) {
-  throw new Error('Combined Web UI gzip exceeds the 56.8 KiB flash budget');
+if (generated.combined > 58400) {
+  throw new Error('Combined Web UI gzip exceeds the 57 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
