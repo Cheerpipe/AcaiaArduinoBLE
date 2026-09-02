@@ -2662,9 +2662,8 @@ if (!ui.includes('id="firmwareFooter"') ||
     !ui.includes("const inactive=$('inactiveFirmware')") ||
     !shellHtml.includes('id="navFirmware"') ||
     !shellHtml.includes('class="navMeta"') ||
-    !css.includes('body.homeAdminActions #view-home:not(.hidden)~.pageFooter{display:none}') ||
-    css.includes('#view-home:not(.hidden)~.pageFooter{padding-bottom:8.5rem}') ||
-    !css.includes('body.homeAdminActions #view-home:not(.hidden){padding-bottom:') ||
+    !css.includes('body.homeAdminActions #view-home:not(.hidden)~.pageFooter{margin-bottom:calc(7rem + env(safe-area-inset-bottom))}') ||
+    css.includes('body.homeAdminActions #view-home:not(.hidden)~.pageFooter{display:none}') ||
     !css.includes('#actionsPanel{position:fixed;left:0;right:0') ||
     !css.includes('@media(min-width:700px){#actionsPanel{left:1rem;right:1rem') ||
     !network.includes('\\"firmwareVersion\\"') ||

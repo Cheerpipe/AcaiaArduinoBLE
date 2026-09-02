@@ -48,8 +48,7 @@ body.devBuild .adminSession,body.devBuild #navAdminLock{display:none}
 .navMeta small{display:block}
 .navMeta a,.navMeta a:link,.navMeta a:visited{display:inline;min-height:0;padding:0;font-weight:600;color:var(--ac);text-decoration:none}
 .navMeta a:hover{text-decoration:underline}
-body.homeAdminActions #view-home:not(.hidden){padding-bottom:calc(7rem + env(safe-area-inset-bottom))}
-body.homeAdminActions #view-home:not(.hidden)~.pageFooter{display:none}
+body.homeAdminActions #view-home:not(.hidden)~.pageFooter{margin-bottom:calc(7rem + env(safe-area-inset-bottom))}
 body.webUiInactive{overflow:hidden}
 .inactiveOverlay{position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;align-items:center;padding:1.25rem 1.25rem max(1.25rem,env(safe-area-inset-bottom));box-sizing:border-box;background:var(--bg);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .5s ease,visibility 0s linear .5s}
 .inactiveOverlay.isVisible{opacity:1;visibility:visible;pointer-events:auto;transition:opacity .5s ease,visibility 0s}
