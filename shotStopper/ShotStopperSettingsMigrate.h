@@ -2,7 +2,8 @@
 
 // Settings schema migrations.
 //
-// Current on-disk schema is CONFIG_SCHEMA_VERSION (V4). V4 adds HTTP webhook
+// Current on-disk schema is CONFIG_SCHEMA_VERSION (V6). V6 adds the webhook
+// delivery deferral setting. V5 adds the public Diagnostic-page setting. V4 adds HTTP webhook
 // settings. V3 adds the fixed-size
 // Bullseye melody record. V1/V2 are both 1912 bytes; V1 has unnamed padding
 // after staOpen while V2 names that byte staWifiSleep. Unrecognized blobs are
@@ -143,9 +144,60 @@ struct PersistedSettingsV3 {
   uint32_t checksum = 0;
 };
 
+// V4 has the same byte layout as V5; V5 uses one formerly trailing RuntimeConfig
+// padding byte for showDiagnosticPage. Migrate explicitly so old blobs always
+// default that new opt-in setting to off.
+struct WebhookConfigV4 {
+  bool enabled = false;
+  bool brewState = true;
+  bool firstDrop = true;
+  bool end = true;
+  char url[WEBHOOK_URL_CAPACITY] = {};
+};
+
+struct PersistedSettingsV4 {
+  uint32_t magic = PERSISTED_SETTINGS_MAGIC;
+  uint32_t schemaVersion = 4;
+  uint32_t structureSize = 0;
+  uint32_t storageRevision = 0;
+  RuntimeConfig runtime = {};
+  BullseyeMelodyConfig bullseyeMelody = {};
+  ShotPresetBank presets = {};
+  bool staConfigured = false;
+  bool staOpen = false;
+  bool staWifiSleep = true;
+  char staSsid[WIFI_SSID_CAPACITY] = {};
+  char staPassword[WIFI_PASSWORD_CAPACITY] = {};
+  uint8_t staIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  uint8_t staIp[4] = {};
+  uint8_t staNetmask[4] = {};
+  uint8_t staGateway[4] = {};
+  uint8_t staDns1[4] = {};
+  uint8_t staDns2[4] = {};
+  uint8_t staConfigState = static_cast<uint8_t>(StaConfigState::CONFIRMED);
+  bool lkgValid = false;
+  bool lkgOpen = false;
+  char lkgSsid[WIFI_SSID_CAPACITY] = {};
+  char lkgPassword[WIFI_PASSWORD_CAPACITY] = {};
+  uint8_t lkgIpMode = static_cast<uint8_t>(StaIpMode::DHCP);
+  uint8_t lkgIp[4] = {};
+  uint8_t lkgNetmask[4] = {};
+  uint8_t lkgGateway[4] = {};
+  uint8_t lkgDns1[4] = {};
+  uint8_t lkgDns2[4] = {};
+  char devicePassword[WIFI_PASSWORD_CAPACITY] = {};
+  char preferredScaleMac[PREFERRED_SCALE_MAC_CAPACITY] = {};
+  char preferredScaleName[PREFERRED_SCALE_NAME_CAPACITY] = {};
+  ScaleHistoryEntry scaleHistory[SCALE_HISTORY_CAPACITY] = {};
+  WebhookConfigV4 webhook = {};
+  uint32_t checksum = 0;
+};
+
 static_assert(sizeof(PersistedSettingsV1) == 1912, "V1 settings blob size");
 static_assert(sizeof(PersistedSettingsV2) == 1912, "V2 settings blob size");
 static_assert(sizeof(PersistedSettingsV3) == 2416, "V3 settings blob size");
+static_assert(sizeof(PersistedSettingsV4) == 2612, "V4 settings blob size");
+using PersistedSettingsV5 = PersistedSettingsV4;
 static_assert(offsetof(PersistedSettingsV1, staOpen) ==
                   offsetof(PersistedSettingsV2, staOpen),
               "V1/V2 header through staOpen must match");
@@ -169,6 +221,54 @@ inline uint32_t persistedSettingsV2Checksum(const PersistedSettingsV2 &settings)
 inline uint32_t persistedSettingsV3Checksum(const PersistedSettingsV3 &settings) {
   return crc32(reinterpret_cast<const uint8_t *>(&settings),
                offsetof(PersistedSettingsV3, checksum));
+}
+
+inline uint32_t persistedSettingsV4Checksum(const PersistedSettingsV4 &settings) {
+  return crc32(reinterpret_cast<const uint8_t *>(&settings),
+               offsetof(PersistedSettingsV4, checksum));
+}
+
+inline bool migratePersistedSettingsFromV4(const PersistedSettingsV4 &v4,
+                                           PersistedSettings &out) {
+  if (v4.magic != PERSISTED_SETTINGS_MAGIC || v4.schemaVersion != 4 ||
+      v4.structureSize != sizeof(PersistedSettingsV4) ||
+      v4.checksum != persistedSettingsV4Checksum(v4)) {
+    return false;
+  }
+  out = PersistedSettings{};
+  memcpy(&out, &v4, offsetof(PersistedSettingsV4, webhook));
+  out.schemaVersion = CONFIG_SCHEMA_VERSION;
+  out.runtime.showDiagnosticPage = false;
+  out.webhook.enabled = v4.webhook.enabled;
+  out.webhook.brewState = v4.webhook.brewState;
+  out.webhook.firstDrop = v4.webhook.firstDrop;
+  out.webhook.end = v4.webhook.end;
+  memcpy(out.webhook.url, v4.webhook.url, sizeof(v4.webhook.url));
+  out.webhook.deferDuringShot = true;
+  out.checksum = 0;
+  out.checksum = persistedSettingsChecksum(out);
+  return true;
+}
+
+inline bool migratePersistedSettingsFromV5(const PersistedSettingsV5 &v5,
+                                           PersistedSettings &out) {
+  if (v5.magic != PERSISTED_SETTINGS_MAGIC || v5.schemaVersion != 5 ||
+      v5.structureSize != sizeof(PersistedSettingsV5) ||
+      v5.checksum != persistedSettingsV4Checksum(v5)) {
+    return false;
+  }
+  out = PersistedSettings{};
+  memcpy(&out, &v5, offsetof(PersistedSettingsV5, webhook));
+  out.schemaVersion = CONFIG_SCHEMA_VERSION;
+  out.webhook.enabled = v5.webhook.enabled;
+  out.webhook.brewState = v5.webhook.brewState;
+  out.webhook.firstDrop = v5.webhook.firstDrop;
+  out.webhook.end = v5.webhook.end;
+  memcpy(out.webhook.url, v5.webhook.url, sizeof(v5.webhook.url));
+  out.webhook.deferDuringShot = true;
+  out.checksum = 0;
+  out.checksum = persistedSettingsChecksum(out);
+  return true;
 }
 
 inline bool migratePersistedSettingsFromV3(const PersistedSettingsV3 &v3,

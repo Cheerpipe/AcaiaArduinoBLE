@@ -85,6 +85,10 @@ inline uint8_t *persistedSettingsMigrationScratch() {
   return flashIoScratchBytes() + kOffset;
 }
 
+inline PersistedSettingsV4 &persistedSettingsV4MigrationScratch() {
+  return *reinterpret_cast<PersistedSettingsV4 *>(
+      persistedSettingsMigrationScratch());
+}
 inline PersistedSettingsV3 &persistedSettingsV3MigrationScratch() {
   return *reinterpret_cast<PersistedSettingsV3 *>(
       persistedSettingsMigrationScratch());
@@ -104,6 +108,21 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
     return false;
   }
   const size_t storedLength = preferences.getBytesLength(key);
+  if (storedLength == sizeof(PersistedSettingsV4)) {
+    PersistedSettingsV4 &legacy = persistedSettingsV4MigrationScratch();
+    legacy = PersistedSettingsV4{};
+    if (preferences.getBytes(key, &legacy, sizeof(legacy)) != sizeof(legacy)) {
+      return false;
+    }
+    if (legacy.schemaVersion == 4) {
+      return migratePersistedSettingsFromV4(legacy, settings) &&
+             validPersistedSettings(settings);
+    }
+    if (legacy.schemaVersion == 5) {
+      return migratePersistedSettingsFromV5(legacy, settings) &&
+             validPersistedSettings(settings);
+    }
+  }
   if (storedLength == sizeof(PersistedSettingsV3)) {
     PersistedSettingsV3 &legacy = persistedSettingsV3MigrationScratch();
     legacy = PersistedSettingsV3{};

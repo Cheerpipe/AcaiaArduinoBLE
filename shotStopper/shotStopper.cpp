@@ -3307,6 +3307,11 @@ void beginCycle(ControlSource source = ControlSource::PHYSICAL) {
 
 #ifndef SHOT_STOPPER_HOST_TEST
   webhookBrewStartPending = true;
+  // With real-time delivery selected, do not wait for the normal fresh-scale
+  // sample window: the circuit edge itself is the requested start event.
+  if (!networkManager.webhookConfig().deferDuringShot) {
+    queueWebhookBrewStart();
+  }
 #endif
 
   addDebugEvent(DebugCategory::STATE, DebugCode::CYCLE_STARTED,

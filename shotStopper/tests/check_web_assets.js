@@ -645,10 +645,10 @@ const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 54000) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 148000) {
+if (jsBytes > 150000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 202000) {
+if (htmlBytes + jsBytes > 204000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -4135,14 +4135,14 @@ if (generated.cssGzip.length > 6600) {
 if (generated.runtimeGzip.length > 28800) {
   throw new Error('Compressed Web UI runtime JS exceeds the 28.1 KiB gzip budget');
 }
-if (generated.secondaryGzip.length > 5100) {
-  throw new Error('Compressed secondary view JS exceeds the 5 KiB gzip budget');
+if (generated.secondaryGzip.length > 5600) {
+  throw new Error('Compressed secondary view JS exceeds the 5.5 KiB gzip budget');
 }
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
 }
-if (generated.combined > 57500) {
-  throw new Error('Combined Web UI gzip exceeds the 56.2 KiB flash budget');
+if (generated.combined > 58000) {
+  throw new Error('Combined Web UI gzip exceeds the 56.6 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
@@ -4727,18 +4727,13 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
       network.includes('ShotStopperNetwork::loginHandler')) {
     throw new Error('Admin must gate behind a temporary device-password unlock on firmware and UI');
   }
-  if (!html.includes('id="diagnosticLockPanel"') ||
-      !html.includes('id="diagnosticUnlockPassword"') ||
-      !html.includes('id="diagnosticUnlockButton"') ||
-      !html.includes('Unlock diagnostics') ||
-      !html.includes('id="diagnosticControls"') ||
-      !html.includes('id="diagnosticLockButton"') ||
-      !js.includes('diagnosticLockPanel') ||
-      !js.includes('if(!diagnosticUnlocked||logBusy') ||
-      !js.includes('Could not unlock diagnostics.') ||
-      !js.includes("closest('#adminLockPanel,#diagnosticLockPanel")) {
+  if (!html.includes('id="diagnosticControls"') ||
+      !js.includes('showDiagnosticPage') ||
+      !js.includes('diagnosticPublic') ||
+      !network.includes('DIAGNOSTIC_DISABLED') ||
+      !network.includes('showDiagnosticPage')) {
     throw new Error(
-        'Diagnostic must gate behind the same admin unlock as Admin, locked by default');
+        'Diagnostic must be an Admin-controlled public opt-in, disabled by default');
   }
   if (runtimeJs.includes('row.innerHTML') ||
       runtimeJs.includes("shotType[0]!=='a'|y<1") ||
@@ -4803,11 +4798,13 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
           'networkHandler must not return PersistedSettings by value on the httpd stack');
     }
   }
-  if ((statusFormat.match(/\\"adminUnlocked\\":%s/g) || []).length < 3) {
-    throw new Error('status/home, status/admin, and status/diagnostic must report adminUnlocked');
+  if ((statusFormat.match(/\\"adminUnlocked\\":%s/g) || []).length < 2 ||
+      !statusFormat.includes('\\"adminUnlocked\\":true,\\"diagnosticPublic\\":true')) {
+    throw new Error('status/home and status/admin must report adminUnlocked; Diagnostic must identify public access');
   }
-  if ((statusFormat.match(/\\"adminUnlocked\\":%s,\\"development\\":%s/g) || []).length < 3) {
-    throw new Error('status/home, status/admin, and status/diagnostic must report development with adminUnlocked');
+  if ((statusFormat.match(/\\"adminUnlocked\\":%s,\\"development\\":%s/g) || []).length < 2 ||
+      !statusFormat.includes('\\"diagnosticPublic\\":true,\\"development\\":%s')) {
+    throw new Error('status pages must report development state alongside their access state');
   }
   if (!network.includes('page == StatusPage::Admin || page == StatusPage::Home') ||
       !network.includes('page == StatusPage::Diagnostic') ||

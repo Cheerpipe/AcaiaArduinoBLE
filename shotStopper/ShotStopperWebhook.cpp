@@ -43,6 +43,7 @@ bool WebhookDispatcher::begin(const WebhookConfig &config) {
   portENTER_CRITICAL(&mux_);
   config_ = config;
   configGeneration_ = 1;
+  deferDuringShot_.store(config.deferDuringShot, std::memory_order_release);
   portEXIT_CRITICAL(&mux_);
   lifecycleMutex_ = xSemaphoreCreateMutex();
   if (lifecycleMutex_ == nullptr) {
@@ -164,6 +165,7 @@ void WebhookDispatcher::setConfig(const WebhookConfig &config) {
   changed = memcmp(&config_, &config, sizeof(config)) != 0;
   if (changed) {
     config_ = config;
+    deferDuringShot_.store(config.deferDuringShot, std::memory_order_release);
     ++configGeneration_;
     if (configGeneration_ == 0) configGeneration_ = 1;
   }
@@ -205,7 +207,8 @@ void WebhookDispatcher::setScaleConnecting(bool active) {
 }
 
 bool WebhookDispatcher::dispatchAllowed() const {
-  return !controlCritical_.load(std::memory_order_acquire) &&
+  return (!deferDuringShot_.load(std::memory_order_acquire) ||
+          !controlCritical_.load(std::memory_order_acquire)) &&
          !scaleConnecting_.load(std::memory_order_acquire);
 }
 

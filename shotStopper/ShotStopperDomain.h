@@ -63,7 +63,7 @@ constexpr uint32_t SERIAL_BAUD = 115200;
 // after staOpen). V2 names that byte staWifiSleep without growing the blob.
 // Bump and add a migration when the blob layout changes
 // (see ShotStopperSettingsMigrate.h).
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 4;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 6;
 // Rinse clock default. Detection window default is DEFAULT_RINSE_GESTURE_MS
 // (machine-owned, ShotStopperMachineTypes.h).
 constexpr uint32_t DEFAULT_RINSE_DURATION_MS = 4000;
@@ -683,6 +683,9 @@ struct RuntimeConfig {
   uint8_t shotReactTimeoutS = 0;
   // Firmware rinse on/off. Default off for every machine type.
   bool rinseEnabled = false;
+  // Makes the read-only Diagnostic view available without an Admin unlock.
+  // This occupies a former trailing padding byte, preserving the blob size.
+  bool showDiagnosticPage = false;
 };
 
 static_assert(sizeof(RuntimeConfig) == 252,

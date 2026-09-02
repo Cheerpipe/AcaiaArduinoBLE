@@ -4279,6 +4279,17 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
                      "Unknown status page; use /api/v1/status/{home|settings|admin|diagnostic}.");
   }
 
+  // Diagnostic is opt-in and, once enabled, intentionally has no Admin
+  // authentication requirement. Keep its mutating APIs separately locked.
+  bool diagnosticPageVisible = false;
+  portENTER_CRITICAL(&self.dataMux_);
+  diagnosticPageVisible = self.settings_.runtime.showDiagnosticPage;
+  portEXIT_CRITICAL(&self.dataMux_);
+  if (page == StatusPage::Diagnostic && !diagnosticPageVisible) {
+    return sendError(request, STATUS_FORBIDDEN, "DIAGNOSTIC_DISABLED",
+                     "Diagnostic page is disabled by the administrator.");
+  }
+
   // JSON / snapshot work lives in one PSRAM (or internal fallback) blob.
   if (!self.lockWorkBufForStatus()) {
     return self.workBufBusy(request);
@@ -4305,8 +4316,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   const uint32_t webUiOverrideRemainingMs =
       webUiOverrideActive ? self.webUiOverrideRemainingMs(request) : 0;
   bool adminUnlocked = false;
-  if (page == StatusPage::Admin || page == StatusPage::Home ||
-      page == StatusPage::Diagnostic) {
+  if (page == StatusPage::Admin || page == StatusPage::Home) {
     adminUnlocked = self.adminUnlockAllowed(request);
     if (adminUnlocked &&
         (page == StatusPage::Admin || page == StatusPage::Diagnostic)) {
@@ -4469,11 +4479,12 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
     ok = statusJsonAppend(
         &used,
         ",\"timezoneOffsetMinutes\":%d,\"ntpServerPreset\":\"%s\","
-        "\"ntpServerCustom\":\"%s\"",
+        "\"ntpServerCustom\":\"%s\",\"showDiagnosticPage\":%s",
         static_cast<int>(control.config.timezoneOffsetMinutes),
-        ntpPresetId(control.config.ntpServerPreset), safeNtpCustom);
+        ntpPresetId(control.config.ntpServerPreset), safeNtpCustom,
+        control.config.showDiagnosticPage ? "true" : "false");
   }
-  if (ok && page == StatusPage::Diagnostic && adminUnlocked) {
+  if (ok && page == StatusPage::Diagnostic) {
     ok = statusJsonAppend(
         &used,
         ",\"timezoneOffsetMinutes\":%d,\"serialDebugOutput\":%s",
@@ -4640,6 +4651,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
     ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s,\"development\":%s",
                           adminUnlocked ? "true" : "false",
                           DEVELOPMENT_BUILD ? "true" : "false");
+    if (ok) {
+      ok = statusJsonAppend(&used, ",\"diagnosticPageVisible\":%s",
+                            diagnosticPageVisible ? "true" : "false");
+    }
   }
   if (ok && page == StatusPage::Home) {
     ok = statusJsonAppend(
@@ -4867,6 +4882,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
             &used,
             ",\"webhooks\":{\"enabled\":%s,\"url\":\"%s\","
             "\"brewState\":%s,\"firstDrop\":%s,\"end\":%s,"
+            "\"deferDuringShot\":%s,"
             "\"workerReady\":%s,\"sending\":%s,\"lastSuccess\":%s,"
             "\"lastHttpStatus\":%u,\"lastError\":%ld,"
             "\"lastAttemptAtMs\":%lu,\"sent\":%lu,\"dropped\":%lu,"
@@ -4876,6 +4892,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
             webhookConfig.brewState ? "true" : "false",
             webhookConfig.firstDrop ? "true" : "false",
             webhookConfig.end ? "true" : "false",
+            webhookConfig.deferDuringShot ? "true" : "false",
             webhookStatus.workerReady ? "true" : "false",
             webhookStatus.sending ? "true" : "false",
             webhookStatus.lastSuccess ? "true" : "false",
@@ -4897,10 +4914,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       }
     }
   } else if (ok && page == StatusPage::Diagnostic) {
-    ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s,\"development\":%s",
-                          adminUnlocked ? "true" : "false",
+    ok = statusJsonAppend(&used, ",\"adminUnlocked\":true,\"diagnosticPublic\":true,\"development\":%s",
                           DEVELOPMENT_BUILD ? "true" : "false");
-    if (ok && adminUnlocked) {
+    if (ok) {
     // Lean diagnostic snapshot: metrics + log controls only (no STA address
     // form fields; those stay on status/admin).
     ok = statusJsonAppend(
@@ -5862,7 +5878,11 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.requireAdminUnlock(request)) {
+  bool diagnosticPageVisible = false;
+  portENTER_CRITICAL(&self.dataMux_);
+  diagnosticPageVisible = self.settings_.runtime.showDiagnosticPage;
+  portEXIT_CRITICAL(&self.dataMux_);
+  if (!diagnosticPageVisible && !self.requireAdminUnlock(request)) {
     return ESP_OK;
   }
   // Bounded diagnostic log: fixed enum-derived messages and numeric
@@ -6322,7 +6342,8 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       jsonFieldPresent(root, "ntpServerPreset") ||
       jsonFieldPresent(root, "ntpServerCustom");
   const bool diagnosticPatch = jsonFieldPresent(root, "serialDebugOutput") ||
-                               jsonFieldPresent(root, "ringRetainLogLevel");
+                               jsonFieldPresent(root, "ringRetainLogLevel") ||
+                               jsonFieldPresent(root, "showDiagnosticPage");
   // Patch: seed live effective config; only present keys overwrite.
   RuntimeConfig candidate = {};
   if (self.callbacks_.copyRuntimeConfig != nullptr) {
@@ -6378,7 +6399,7 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       "ntpServerCustom", "scaleMacCacheMode", "bookooMuteOnBuzzerOnly",
       "bookooConnectBeepLevel", "noScaleBbwMode", "avoidBbwShotWithoutScale",
       "lastShotCooldownMs",
-      "serialDebugOutput", "ringRetainLogLevel"};
+      "serialDebugOutput", "ringRetainLogLevel", "showDiagnosticPage"};
   const char *parseError = nullptr;
   size_t settingFieldCount = 0;
   if (root != nullptr) {
@@ -6657,6 +6678,10 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
              !jsonBoolean(root, "serialDebugOutput",
                           candidate.serialDebugOutput)) {
     parseError = "serialDebugOutput must be a boolean.";
+  } else if (jsonFieldPresent(root, "showDiagnosticPage") &&
+             !jsonBoolean(root, "showDiagnosticPage",
+                          candidate.showDiagnosticPage)) {
+    parseError = "showDiagnosticPage must be a boolean.";
   } else if (jsonFieldPresent(root, "ringRetainLogLevel") &&
              !jsonLogLevel(root, "ringRetainLogLevel",
                            candidate.ringRetainLogLevel)) {
@@ -6760,7 +6785,8 @@ esp_err_t ShotStopperNetwork::webhookHandler(httpd_req_t *request) {
 
   cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
   static const char *const fields[] = {
-      "action", "enabled", "url", "brewState", "firstDrop", "end"};
+      "action", "enabled", "url", "brewState", "firstDrop", "end",
+      "deferDuringShot"};
   char action[8] = {};
   WebhookConfig candidate = self.webhooks_.config();
   const bool known = root != nullptr &&
@@ -6774,6 +6800,7 @@ esp_err_t ShotStopperNetwork::webhookHandler(httpd_req_t *request) {
              jsonBoolean(root, "brewState", candidate.brewState) &&
              jsonBoolean(root, "firstDrop", candidate.firstDrop) &&
              jsonBoolean(root, "end", candidate.end) &&
+             jsonBoolean(root, "deferDuringShot", candidate.deferDuringShot) &&
              validWebhookConfig(candidate);
   } else if (parsed && strcmp(action, "test") == 0) {
     parsed = validWebhookUrl(candidate.url);
