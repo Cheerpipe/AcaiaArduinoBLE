@@ -183,6 +183,7 @@ class ShotStopperNetwork {
   void syncPreferredScale(const char *mac, const char *name);
   void syncScaleLinkRf(bool connectingOrUp);
   void syncScaleConnectingRf(bool connecting);
+  void syncControlCriticalRf(bool active);
   void syncScaleHuntRf(bool huntActive);
   void syncLiveRuntime(const RuntimeConfig &runtime,
                        const ShotPresetBank *presets);
@@ -275,6 +276,7 @@ class ShotStopperNetwork {
   bool httpStartHeld_ = false;
   std::atomic<bool> scaleConnectingOrUp_{false};
   std::atomic<bool> scaleConnecting_{false};
+  std::atomic<bool> controlCriticalRfActive_{false};
   std::atomic<bool> scaleHuntRfActive_{false};
   wifi_ps_type_t lastAppliedWifiPs_{WIFI_PS_NONE};
   bool lastAppliedWifiPsValid_{false};
@@ -310,6 +312,7 @@ class ShotStopperNetwork {
   uint32_t staNtpEligibleAtMs_ = 0;
   uint32_t ntpConfigRevision_ = 0;
   char ntpServerBuffer_[NTP_SERVER_HOST_CAPACITY] = {};
+  std::atomic<bool> ntpCallbackAccepting_{false};
   WebhookDispatcher webhooks_;
   WebhookConfig stagedWebhook_ = {};
   uint32_t stagedWebhookRequestId_ = 0;

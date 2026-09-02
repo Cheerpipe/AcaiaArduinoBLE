@@ -1,11 +1,11 @@
 #include "ShotStopperWebhook.h"
+#include "ShotStopperPsram.h"
 
 #if !defined(SHOT_STOPPER_HOST_TEST) && \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
 
 #include <Arduino.h>
 #include <WiFi.h>
-#include <esp_heap_caps.h>
 #include <esp_http_client.h>
 #include <esp_mac.h>
 
@@ -69,15 +69,23 @@ bool WebhookDispatcher::startWorker() {
   workerState_ = WorkerState::STARTING;
   stopAfterDrain_ = false;
 
-  QueueHandle_t queue = xQueueCreate(kWebhookQueueDepth, sizeof(QueuedWebhook));
-  char *payload = static_cast<char *>(heap_caps_malloc(
-      kWebhookPayloadCapacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-  if (payload == nullptr) {
-    payload = static_cast<char *>(malloc(kWebhookPayloadCapacity));
+  // Webhooks are optional. Their payload and queue contents must not consume
+  // internal control/BLE heap; fail closed when PSRAM is unavailable.
+  const size_t queueStorageBytes =
+      kWebhookQueueDepth * sizeof(QueuedWebhook);
+  uint8_t *queueStorage =
+      static_cast<uint8_t *>(allocExternal(queueStorageBytes));
+  char *payload =
+      static_cast<char *>(allocExternal(kWebhookPayloadCapacity));
+  QueueHandle_t queue = nullptr;
+  if (queueStorage != nullptr) {
+    queue = xQueueCreateStatic(kWebhookQueueDepth, sizeof(QueuedWebhook),
+                               queueStorage, &queueControl_);
   }
   if (queue == nullptr || payload == nullptr) {
     if (queue != nullptr) vQueueDelete(queue);
-    if (payload != nullptr) free(payload);
+    heapCapsFree(queueStorage);
+    heapCapsFree(payload);
     portENTER_CRITICAL(&mux_);
     workerState_ = WorkerState::STOPPED;
     status_.workerReady = false;
@@ -88,14 +96,17 @@ bool WebhookDispatcher::startWorker() {
   }
   portENTER_CRITICAL(&mux_);
   queue_ = queue;
+  queueStorage_ = queueStorage;
   payload_ = payload;
   portEXIT_CRITICAL(&mux_);
   if (xTaskCreatePinnedToCore(taskEntry, "webhook", 4096, this,
                              tskIDLE_PRIORITY, &task_, 0) != pdPASS) {
     vQueueDelete(queue);
-    free(payload);
+    heapCapsFree(queueStorage);
+    heapCapsFree(payload);
     portENTER_CRITICAL(&mux_);
     queue_ = nullptr;
+    queueStorage_ = nullptr;
     payload_ = nullptr;
     task_ = nullptr;
     workerState_ = WorkerState::STOPPED;
@@ -123,12 +134,15 @@ void WebhookDispatcher::requestWorkerStop() {
 
 void WebhookDispatcher::releaseWorkerFromTask() {
   QueueHandle_t queue = nullptr;
+  uint8_t *queueStorage = nullptr;
   char *payload = nullptr;
   if (lifecycleMutex_ != nullptr &&
       xSemaphoreTake(lifecycleMutex_, portMAX_DELAY) == pdTRUE) {
     queue = queue_;
+    queueStorage = queueStorage_;
     payload = payload_;
     queue_ = nullptr;
+    queueStorage_ = nullptr;
     payload_ = nullptr;
     task_ = nullptr;
     workerState_ = WorkerState::STOPPED;
@@ -140,7 +154,8 @@ void WebhookDispatcher::releaseWorkerFromTask() {
     xSemaphoreGive(lifecycleMutex_);
   }
   if (queue != nullptr) vQueueDelete(queue);
-  if (payload != nullptr) free(payload);
+  heapCapsFree(queueStorage);
+  heapCapsFree(payload);
 }
 
 void WebhookDispatcher::setConfig(const WebhookConfig &config) {
@@ -171,6 +186,19 @@ WebhookStatus WebhookDispatcher::status() const {
   copy = status_;
   portEXIT_CRITICAL(&mux_);
   return copy;
+}
+
+void WebhookDispatcher::setControlCritical(bool active) {
+  controlCritical_.store(active, std::memory_order_release);
+}
+
+void WebhookDispatcher::setScaleConnecting(bool active) {
+  scaleConnecting_.store(active, std::memory_order_release);
+}
+
+bool WebhookDispatcher::dispatchAllowed() const {
+  return !controlCritical_.load(std::memory_order_acquire) &&
+         !scaleConnecting_.load(std::memory_order_acquire);
 }
 
 bool WebhookDispatcher::enqueue(const WebhookEvent &event) {
@@ -231,8 +259,13 @@ void WebhookDispatcher::task() {
       xSemaphoreGive(lifecycleMutex_);
     }
     if (state == WorkerState::STOPPING || queue == nullptr) break;
-    if (xQueueReceive(queue, &queued, pdMS_TO_TICKS(100)) == pdTRUE) {
+    // Leave events queued while a shot/rinse or scale connection attempt owns
+    // radio time. Queue operations and HTTP remain entirely off control/BLE.
+    if (dispatchAllowed() &&
+        xQueueReceive(queue, &queued, pdMS_TO_TICKS(50)) == pdTRUE) {
       (void)send(queued);
+    } else {
+      vTaskDelay(pdMS_TO_TICKS(25));
     }
     if (lifecycleMutex_ != nullptr &&
         xSemaphoreTake(lifecycleMutex_, portMAX_DELAY) == pdTRUE) {
@@ -343,6 +376,18 @@ bool WebhookDispatcher::send(const QueuedWebhook &queued) {
     config.url = live.url;
     config.timeout_ms = kWebhookTimeoutMs;
     config.disable_auto_redirect = true;
+    config.user_data = this;
+    config.event_handler = [](esp_http_client_event_t *event) -> esp_err_t {
+      if (event == nullptr || event->user_data == nullptr ||
+          event->event_id == HTTP_EVENT_ERROR ||
+          event->event_id == HTTP_EVENT_DISCONNECTED) {
+        return ESP_OK;
+      }
+      auto *dispatcher =
+          static_cast<WebhookDispatcher *>(event->user_data);
+      return dispatcher->dispatchAllowed() ? ESP_OK
+                                            : ESP_ERR_INVALID_STATE;
+    };
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client != nullptr) {
       esp_http_client_set_method(client, HTTP_METHOD_POST);

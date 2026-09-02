@@ -13,6 +13,7 @@
 #include "ShotStopperBuzzerPatterns.h"
 #include "ShotStopperBuzzerPassive.h"
 #include "ShotStopperDomain.h"
+#include "ShotStopperPsram.h"
 
 namespace shotstopper {
 
@@ -27,6 +28,18 @@ inline bool buzzerRequestIsHighPriority(BuzzerPattern pattern, BuzzerCue cue) {
   }
   return buzzerPatternIsHighPriority(pattern);
 }
+
+#if SHOT_STOPPER_ENABLE_BUZZER == 1
+struct RtttlCatalog {
+  static constexpr uint8_t kCueCount =
+      static_cast<uint8_t>(BuzzerCue::RECOVERY_ERROR) + 1;
+  static constexpr uint8_t kPulseRateCount =
+      static_cast<uint8_t>(ExtendedPulseRate::RAPID) + 1;
+  RtttlNote bullseyeNotes[BULLSEYE_RTTTL_MAX_NOTES] = {};
+  RtttlNote cueNotes[kCueCount][RTTTL_MAX_NOTES] = {};
+  RtttlNote pulseNotes[kPulseRateCount][RTTTL_MAX_NOTES] = {};
+};
+#endif
 
 // Non-blocking local-buzzer driver. Passive piezo via hardware PWM (ledc)
 // and RTTTL for operational cues. Host stubs map PWM to a digital level.
@@ -54,23 +67,18 @@ struct LocalBuzzer {
   uint32_t acceptedRequests = 0;
   uint32_t toneHz = BUZZER_TONE_HZ;
   const BuzzerNote *sequenceNotes = nullptr;
-  // Playback and custom-note buffers stay in internal RAM because esp_timer
-  // can advance a queued tune while flash writes make PSRAM inaccessible.
-  // The custom tune is parsed only when settings change; starting it is a
-  // bounded memcpy with no allocation or expensive parsing under the mux.
+  // The active playback buffer stays in internal RAM because esp_timer can
+  // advance it while flash writes make PSRAM inaccessible. Cold/preparsed
+  // RTTTL catalogs live in PSRAM and are copied here only when playback starts.
   RtttlNote rtttlBuf[BULLSEYE_RTTTL_MAX_NOTES] = {};
-  RtttlNote bullseyeNotes[BULLSEYE_RTTTL_MAX_NOTES] = {};
   uint8_t rtttlCount = 0;
   uint8_t bullseyeNoteCount = 0;
   bool rtttlPlayback = false;
 #if SHOT_STOPPER_ENABLE_BUZZER == 1
-  static constexpr uint8_t kRtttlCueCount =
-      static_cast<uint8_t>(BuzzerCue::RECOVERY_ERROR) + 1;
-  static constexpr uint8_t kPulseRateCount =
-      static_cast<uint8_t>(ExtendedPulseRate::RAPID) + 1;
-  RtttlNote cueNotes[kRtttlCueCount][RTTTL_MAX_NOTES] = {};
+  static constexpr uint8_t kRtttlCueCount = RtttlCatalog::kCueCount;
+  static constexpr uint8_t kPulseRateCount = RtttlCatalog::kPulseRateCount;
+  RtttlCatalog *rtttlCatalog = nullptr;
   uint8_t cueNoteCount[kRtttlCueCount] = {};
-  RtttlNote pulseNotes[kPulseRateCount][RTTTL_MAX_NOTES] = {};
   uint8_t pulseNoteCount[kPulseRateCount] = {};
 #endif
   esp_timer_handle_t phaseTimer = nullptr;
@@ -203,21 +211,33 @@ inline void LocalBuzzer::begin(uint8_t gpioPin) {
     return;
   }
 #if SHOT_STOPPER_ENABLE_BUZZER == 1
+  if (rtttlCatalog == nullptr) {
+    rtttlCatalog = static_cast<RtttlCatalog *>(
+        allocExternalOrInternal(sizeof(RtttlCatalog)));
+  }
+  if (rtttlCatalog == nullptr) {
+    return;
+  }
+  memset(rtttlCatalog, 0, sizeof(*rtttlCatalog));
+  memset(cueNoteCount, 0, sizeof(cueNoteCount));
+  memset(pulseNoteCount, 0, sizeof(pulseNoteCount));
+  bullseyeNoteCount = 0;
   for (uint8_t i = 1; i < kRtttlCueCount; ++i) {
     const BuzzerCue cue = static_cast<BuzzerCue>(i);
     if (buzzerCueIsLooping(cue) || cue == BuzzerCue::BULLSEYE) {
       continue;
     }
     uint8_t count = 0;
-    if (!parseRtttl(rtttlForCue(cue), cueNotes[i], count) || count == 0) {
+    if (!parseRtttl(rtttlForCue(cue), rtttlCatalog->cueNotes[i], count) ||
+        count == 0) {
       return;
     }
     cueNoteCount[i] = count;
   }
   for (uint8_t rate = 1; rate < kPulseRateCount; ++rate) {
     uint8_t count = 0;
-    if (!parseRtttl(rtttlForExtendedPulseRate(rate), pulseNotes[rate], count) ||
-        count == 0) {
+    if (!parseRtttl(rtttlForExtendedPulseRate(rate),
+                    rtttlCatalog->pulseNotes[rate], count) || count == 0) {
       return;
     }
     pulseNoteCount[rate] = count;
@@ -332,7 +352,8 @@ inline bool LocalBuzzer::startRtttl(const BuzzerToneCommand &cmd,
       return false;
     }
     rtttlCount = bullseyeNoteCount;
-    memcpy(rtttlBuf, bullseyeNotes, sizeof(RtttlNote) * rtttlCount);
+    memcpy(rtttlBuf, rtttlCatalog->bullseyeNotes,
+           sizeof(RtttlNote) * rtttlCount);
     activePulseRate = 0;
   } else if (pulse) {
     const uint8_t rate = cmd.pulseRate;
@@ -340,14 +361,16 @@ inline bool LocalBuzzer::startRtttl(const BuzzerToneCommand &cmd,
       return false;
     }
     rtttlCount = pulseNoteCount[rate];
-    memcpy(rtttlBuf, pulseNotes[rate], sizeof(RtttlNote) * rtttlCount);
+    memcpy(rtttlBuf, rtttlCatalog->pulseNotes[rate],
+           sizeof(RtttlNote) * rtttlCount);
     activePulseRate = rate;
   } else {
     if (id == 0 || id >= kRtttlCueCount || cueNoteCount[id] == 0) {
       return false;
     }
     rtttlCount = cueNoteCount[id];
-    memcpy(rtttlBuf, cueNotes[id], sizeof(RtttlNote) * rtttlCount);
+    memcpy(rtttlBuf, rtttlCatalog->cueNotes[id],
+           sizeof(RtttlNote) * rtttlCount);
     activePulseRate = 0;
   }
   rtttlPlayback = true;
@@ -540,8 +563,9 @@ inline bool LocalBuzzer::configureBullseyeRtttl(const char *rtttl) {
   bullseyeNoteCount = 0;
   portEXIT_CRITICAL(&mux);
   uint8_t count = 0;
-  if (!parseRtttlBounded(rtttl, bullseyeNotes, BULLSEYE_RTTTL_MAX_NOTES, count) ||
-      count == 0) {
+  if (rtttlCatalog == nullptr ||
+      !parseRtttlBounded(rtttl, rtttlCatalog->bullseyeNotes,
+                         BULLSEYE_RTTTL_MAX_NOTES, count) || count == 0) {
     return false;
   }
   portENTER_CRITICAL(&mux);

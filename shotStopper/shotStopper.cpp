@@ -400,6 +400,8 @@ QueueHandle_t bleCompanionRequestQueue = nullptr;
 QueueHandle_t bleCompanionResultQueue = nullptr;
 portMUX_TYPE bleCompanionMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE debugLogMux = portMUX_INITIALIZER_UNLOCKED;
+uint32_t debugLogContentionDropped = 0;
+uint32_t debugLogDroppedSnapshot = 0;
 bool pendingCupRemovedSettle = false;
 uint32_t scaleRecoveredStaleCount = 0;
 uint32_t scaleRecoveredStaleMs = 0;
@@ -693,12 +695,33 @@ void logEmit(LogLevel level, DebugCategory category, DebugCode code,
     return;
   }
 
+  bool ringLocked = false;
+#if defined(SHOT_STOPPER_HOST_TEST)
   portENTER_CRITICAL(&debugLogMux);
-  if (toRing) {
-    debugLog.add(atMs, wallSec, level, category, code, argument1, argument2);
-    maybeReportLogOverrunLocked();
+  ringLocked = true;
+#else
+  // Logs are diagnostic only. Never spin the control/BLE core behind a web
+  // reader walking the PSRAM ring; drop on contention and account for it.
+  ringLocked =
+      portTRY_ENTER_CRITICAL(&debugLogMux, portMUX_TRY_LOCK) == pdPASS;
+#endif
+  if (ringLocked) {
+    if (toRing) {
+      debugLog.add(atMs, wallSec, level, category, code, argument1, argument2);
+      maybeReportLogOverrunLocked();
+      __atomic_store_n(
+          &debugLogDroppedSnapshot,
+          debugLog.overwritten() +
+              __atomic_load_n(&debugLogContentionDropped, __ATOMIC_RELAXED),
+          __ATOMIC_RELAXED);
+    }
+    portEXIT_CRITICAL(&debugLogMux);
+  } else if (toRing) {
+    (void)__atomic_add_fetch(&debugLogContentionDropped, 1U,
+                             __ATOMIC_RELAXED);
+    (void)__atomic_add_fetch(&debugLogDroppedSnapshot, 1U,
+                             __ATOMIC_RELAXED);
   }
-  portEXIT_CRITICAL(&debugLogMux);
 
   // USB CDC TX can block if the host is not draining. During a pour keep the
   // control path off Serial; the RAM ring still captures the event.
@@ -3135,6 +3158,11 @@ void resetSessionForNewCycle(ControlSource source) {
   }
   session.active = true;
   session.source = source;
+#if !defined(SHOT_STOPPER_HOST_TEST)
+  // Publish the RF gate before any deferred NTP request or webhook can wake a
+  // network worker. This is an atomic store/notify only; control never waits.
+  networkManager.syncControlCriticalRf(true);
+#endif
 #if defined(SHOT_STOPPER_HOST_TEST)
   // Host tests mutate RuntimeConfig brew fields directly; keep the active
   // preset (compose source of truth) aligned before snapshotting a cycle.
@@ -4953,6 +4981,9 @@ void publishControlGate() {
   __atomic_fetch_add(&controlGateSeq, 1U, __ATOMIC_RELAXED);
   publishedControlGate = next;
   __atomic_fetch_add(&controlGateSeq, 1U, __ATOMIC_RELEASE);
+#if !defined(SHOT_STOPPER_HOST_TEST)
+  networkManager.syncControlCriticalRf(next.activeCycle || next.relayClosed);
+#endif
 }
 
 void publishControlStatus() {
@@ -5168,9 +5199,8 @@ void publishControlStatus() {
     next.bleCompanionScanIntensity =
         static_cast<uint8_t>(liveBleScanIntensity());
   }
-  portENTER_CRITICAL(&debugLogMux);
-  next.debugEventsDropped = debugLog.overwritten();
-  portEXIT_CRITICAL(&debugLogMux);
+  next.debugEventsDropped =
+      __atomic_load_n(&debugLogDroppedSnapshot, __ATOMIC_RELAXED);
   __atomic_fetch_add(&controlStatusSeq, 1U, __ATOMIC_RELEASE);
   publishControlGate();
 }

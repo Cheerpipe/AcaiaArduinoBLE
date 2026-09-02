@@ -166,6 +166,18 @@ class WallClock {
 #endif
   }
 
+  void cancelPendingSync() {
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
+    portENTER_CRITICAL(&mux_);
+#endif
+    pendingSync_ = false;
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
+    portEXIT_CRITICAL(&mux_);
+#endif
+  }
+
   void markFailed(uint32_t monotonicMs, uint8_t maxConsecutiveFailures) {
 #if !defined(SHOT_STOPPER_HOST_TEST) && \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)

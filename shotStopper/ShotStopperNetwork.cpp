@@ -734,17 +734,6 @@ void sanitizeJsonEmbed(const char *input, char *output, size_t capacity) {
   output[written] = '\0';
 }
 
-bool applySystemTimeToWallClock(uint32_t now) {
-  time_t nowSec = 0;
-  time(&nowSec);
-  if (nowSec < 1000000000) {
-    return false;
-  }
-  g_wallClock.queueSyncFromCallback(static_cast<uint32_t>(nowSec));
-  return g_wallClock.applyPendingSync(now);
-}
-
-
 enum class StatusPage : uint8_t { Home, Settings, Admin, Diagnostic, Unknown };
 
 StatusPage parseStatusPage(const char *uri) {
@@ -1276,7 +1265,9 @@ void ShotStopperNetwork::taskLoop() {
     if (!feedCurrentTaskWatchdog()) {
       callbacks_.reportTaskWatchdogFault();
     }
-    vTaskDelay(pdMS_TO_TICKS(50));
+    // Critical control/scale transitions notify this low-priority task so NTP
+    // is canceled immediately; normal network maintenance remains 20 Hz.
+    (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50));
   }
 }
 
@@ -1653,8 +1644,7 @@ void ShotStopperNetwork::clearStaLinkMetrics() {
 }
 
 bool ShotStopperNetwork::brewRfActive() const {
-  const ControlGateSnapshot control = controlGate();
-  return control.activeCycle || control.relayClosed;
+  return controlCriticalRfActive_.load(std::memory_order_acquire);
 }
 
 void ShotStopperNetwork::syncScaleLinkRf(bool connectingOrUp) {
@@ -1662,7 +1652,23 @@ void ShotStopperNetwork::syncScaleLinkRf(bool connectingOrUp) {
 }
 
 void ShotStopperNetwork::syncScaleConnectingRf(bool connecting) {
-  scaleConnecting_.store(connecting, std::memory_order_relaxed);
+  const bool changed =
+      scaleConnecting_.exchange(connecting, std::memory_order_acq_rel) !=
+      connecting;
+  webhooks_.setScaleConnecting(connecting);
+  if (changed && taskHandle_ != nullptr) {
+    xTaskNotifyGive(taskHandle_);
+  }
+}
+
+void ShotStopperNetwork::syncControlCriticalRf(bool active) {
+  const bool changed =
+      controlCriticalRfActive_.exchange(active, std::memory_order_acq_rel) !=
+      active;
+  webhooks_.setControlCritical(active);
+  if (changed && taskHandle_ != nullptr) {
+    xTaskNotifyGive(taskHandle_);
+  }
 }
 
 void ShotStopperNetwork::syncScaleHuntRf(bool huntActive) {
@@ -3253,13 +3259,21 @@ void ShotStopperNetwork::refreshExtendedStatus(uint32_t now) {
 }
 
 void ShotStopperNetwork::ntpSyncNotificationCallback(struct timeval *tv) {
-  if (tv == nullptr) {
+  ShotStopperNetwork *self = instance_;
+  if (tv == nullptr || self == nullptr ||
+      !self->ntpCallbackAccepting_.load(std::memory_order_acquire)) {
     return;
   }
   g_wallClock.queueSyncFromCallback(static_cast<uint32_t>(tv->tv_sec));
+  if (self->taskHandle_ != nullptr) {
+    xTaskNotifyGive(self->taskHandle_);
+  }
 }
 
 void ShotStopperNetwork::stopNtp() {
+  // Close the callback gate before stopping lwIP so a late completion from an
+  // aborted attempt cannot be accepted after a shot/scale gate transition.
+  ntpCallbackAccepting_.store(false, std::memory_order_release);
   if (ntpStarted_ || esp_sntp_enabled()) {
     esp_sntp_stop();
     ntpStarted_ = false;
@@ -3287,6 +3301,8 @@ void ShotStopperNetwork::armNtp(uint32_t now) {
   resolveNtpServerHost(settings_.runtime, ntpFailoverIndex_, ntpServerBuffer_);
   g_wallClock.setSyncing(ntpServerBuffer_, now);
   ntpSyncStartedAtMs_ = now;
+  esp_sntp_set_time_sync_notification_cb(ntpSyncNotificationCallback);
+  ntpCallbackAccepting_.store(true, std::memory_order_release);
 
   if (esp_sntp_enabled()) {
     esp_sntp_setservername(0, ntpServerBuffer_);
@@ -3295,7 +3311,6 @@ void ShotStopperNetwork::armNtp(uint32_t now) {
     return;
   }
 
-  esp_sntp_set_time_sync_notification_cb(ntpSyncNotificationCallback);
   configTime(0, 0, ntpServerBuffer_);
   ntpStarted_ = true;
 }
@@ -3310,11 +3325,6 @@ void ShotStopperNetwork::handleNtpFailure(uint32_t now) {
 }
 
 void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
-  if (g_wallClock.applyPendingSync(now)) {
-    ntpFailoverIndex_ = 0;
-    log(DebugCategory::NETWORK, DebugCode::TIME_SYNC_OK);
-  }
-
   if (settings_.runtime.revision != ntpConfigRevision_) {
     ntpConfigRevision_ = settings_.runtime.revision;
     ntpRearmPending_ = true;
@@ -3327,25 +3337,37 @@ void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
     return;
   }
 
-  TimeStatusSnapshot timeStatus = g_wallClock.snapshot(now);
-
   // Brew RF or scale connecting: do not arm, and abort any in-flight SNTP
-  // without counting a failure so NTP rearms when the gate clears.
+  // without counting a failure so NTP rearms when the gate clears. This gate
+  // precedes callback application: a completion racing with cancellation is
+  // discarded rather than publishing a sync during critical activity.
+  TimeStatusSnapshot timeStatus = g_wallClock.snapshot(now);
   if (!ntpMayArm(now, staConnected)) {
     if (ntpStarted_ || timeStatus.state == TimeSyncState::SYNCING) {
       stopNtp();
       g_wallClock.cancelSyncing();
       ntpRearmPending_ = true;
+    } else {
+      // Clears a callback that arrived just after a prior stop/cancel pass.
+      g_wallClock.cancelPendingSync();
     }
     return;
   }
 
+  if (g_wallClock.applyPendingSync(now)) {
+    // SNTP is one-shot at the application level. Leaving it enabled would let
+    // lwIP resync periodically without consulting the shot/BLE gate.
+    stopNtp();
+    ntpFailoverIndex_ = 0;
+    log(DebugCategory::NETWORK, DebugCode::TIME_SYNC_OK);
+    return;
+  }
+
+  timeStatus = g_wallClock.snapshot(now);
+
   if (timeStatus.state == TimeSyncState::SYNCING) {
-    if (applySystemTimeToWallClock(now)) {
-      ntpFailoverIndex_ = 0;
-      log(DebugCategory::NETWORK, DebugCode::TIME_SYNC_OK);
-    } else if (static_cast<uint32_t>(now - ntpSyncStartedAtMs_) >=
-               NTP_FIRST_SYNC_TIMEOUT_MS) {
+    if (static_cast<uint32_t>(now - ntpSyncStartedAtMs_) >=
+        NTP_FIRST_SYNC_TIMEOUT_MS) {
       handleNtpFailure(now);
     }
     return;
@@ -3370,10 +3392,8 @@ void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
       return;
     case TimeSyncState::SYNCED:
     case TimeSyncState::STALE:
-      if (timeStatus.lastSyncAgeMs >= NTP_RESYNC_INTERVAL_MS &&
-          applySystemTimeToWallClock(now)) {
-        ntpFailoverIndex_ = 0;
-        log(DebugCategory::NETWORK, DebugCode::TIME_SYNC_OK);
+      if (timeStatus.lastSyncAgeMs >= NTP_RESYNC_INTERVAL_MS) {
+        armNtp(now);
       }
       return;
     case TimeSyncState::SYNCING:

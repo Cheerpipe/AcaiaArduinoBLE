@@ -7830,6 +7830,14 @@ void n01c_wall_clock_cancel_syncing_restores_anchor() {
   CHECK(g_wallClock.nowUtcSec(5000) == 1'700'000'004U);
   CHECK(restored.consecutiveFailures == 0);
 
+  // A callback racing with an RF gate must be discardable without losing the
+  // last good wall-clock anchor.
+  g_wallClock.queueSyncFromCallback(1'800'000'000U);
+  g_wallClock.cancelPendingSync();
+  CHECK(!g_wallClock.applyPendingSync(5001));
+  CHECK(g_wallClock.synced());
+  CHECK(g_wallClock.nowUtcSec(5001) == 1'700'000'004U);
+
   g_wallClock.reset();
   g_wallClock.setSyncing("pool.ntp.org", 100);
   g_wallClock.cancelSyncing();

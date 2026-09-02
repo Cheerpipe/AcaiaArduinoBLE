@@ -316,6 +316,16 @@ if (!psram.includes('#define SHOT_STOPPER_PSRAM_BSS EXT_RAM_BSS_ATTR') ||
   throw new Error(
       'Large history/settings/debug-ring/recipe BSS must use SHOT_STOPPER_PSRAM_BSS; flash scratch and live status snapshots stay internal');
 }
+if (!buzzer.includes('struct RtttlCatalog') ||
+    !buzzer.includes('RtttlCatalog *rtttlCatalog') ||
+    !buzzer.includes('allocExternalOrInternal(sizeof(RtttlCatalog))') ||
+    !buzzer.includes('RtttlNote rtttlBuf[BULLSEYE_RTTTL_MAX_NOTES]') ||
+    !firmwareCore.includes(
+        'portTRY_ENTER_CRITICAL(&debugLogMux, portMUX_TRY_LOCK)') ||
+    !firmwareCore.includes('debugLogDroppedSnapshot')) {
+  throw new Error(
+      'Cold RTTTL/log storage must favor PSRAM while active timer playback stays internal and log writes never spin control');
+}
 if (network.includes('ControlStatusSnapshot status;') ||
     network.includes('ControlStatusSnapshot control;') ||
     firmwareCore.includes('ControlStatusSnapshot status;') ||
@@ -3119,6 +3129,17 @@ if (!webhookSource.includes('xSemaphoreTake(lifecycleMutex_, 0)') ||
     !webhookSource.includes('releaseWorkerFromTask()')) {
   throw new Error('Webhook dispatch must remain non-blocking and release disabled worker resources');
 }
+if (!webhookSource.includes('allocExternal(queueStorageBytes)') ||
+    !webhookSource.includes('allocExternal(kWebhookPayloadCapacity)') ||
+    !webhookSource.includes('xQueueCreateStatic') ||
+    !webhookSource.includes('tskIDLE_PRIORITY') ||
+    !webhookSource.includes('dispatchAllowed()') ||
+    !webhookSource.includes('config.event_handler') ||
+    !webhookSource.includes('setControlCritical') ||
+    !webhookSource.includes('setScaleConnecting')) {
+  throw new Error(
+      'Webhook queue/payload must live in PSRAM and idle-priority delivery must defer for control/BLE activity');
+}
 if (!webhookSource.includes('\\"sentAtUptimeMs\\"') ||
     !firmwareCore.includes('webhookUnixSecAt(uint32_t occurredAtMs)') ||
     !firmwareCore.includes('baseWebhookEvent(WebhookEventType::END, snapshot.cycleId,\n                                        snapshot.endedAtMs)')) {
@@ -3771,6 +3792,18 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
       !serviceNtp.includes('stopNtp()')) {
     throw new Error(
         'serviceNtp must abort in-flight SNTP under ntpMayArm gate before SYNCING handling');
+  }
+  if (!network.includes('ntpCallbackAccepting_') ||
+      !network.includes('syncControlCriticalRf') ||
+      !network.includes('ulTaskNotifyTake') ||
+      !network.includes('xTaskNotifyGive') ||
+      !serviceNtp.includes('if (g_wallClock.applyPendingSync(now))') ||
+      !serviceNtp.includes('stopNtp();') ||
+      !serviceNtp.includes('timeStatus.lastSyncAgeMs >= NTP_RESYNC_INTERVAL_MS') ||
+      !serviceNtp.includes('armNtp(now);') ||
+      serviceNtp.includes('applySystemTimeToWallClock')) {
+    throw new Error(
+        'SNTP must be callback-driven one-shot work, wake promptly for gates, stop after sync, and rearm only through gated service');
   }
 }
 if (!domain.includes('selectBestStaAp') ||

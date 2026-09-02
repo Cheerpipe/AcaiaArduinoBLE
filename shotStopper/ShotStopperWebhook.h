@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <ctype.h>
 #include <string.h>
+#include <atomic>
 
 #if !defined(SHOT_STOPPER_HOST_TEST) && \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
@@ -145,6 +146,11 @@ class WebhookDispatcher {
   WebhookConfig config() const;
   WebhookStatus status() const;
   bool enqueue(const WebhookEvent &event);
+  // Radio-heavy delivery is deferred while control/BLE owns the machine.
+  // Setters are lock-free so control and scale workers never wait on webhook
+  // lifecycle/network locks.
+  void setControlCritical(bool active);
+  void setScaleConnecting(bool active);
 
  private:
   struct QueuedWebhook {
@@ -161,6 +167,7 @@ class WebhookDispatcher {
   void task();
   bool send(const QueuedWebhook &queued);
   bool buildPayload(const WebhookEvent &event, char *output, size_t capacity);
+  bool dispatchAllowed() const;
 
   mutable portMUX_TYPE mux_ = portMUX_INITIALIZER_UNLOCKED;
   WebhookConfig config_ = {};
@@ -170,8 +177,12 @@ class WebhookDispatcher {
   SemaphoreHandle_t lifecycleMutex_ = nullptr;
   bool stopAfterDrain_ = false;
   QueueHandle_t queue_ = nullptr;
+  StaticQueue_t queueControl_ = {};
+  uint8_t *queueStorage_ = nullptr;
   TaskHandle_t task_ = nullptr;
   char *payload_ = nullptr;
+  std::atomic<bool> controlCritical_{false};
+  std::atomic<bool> scaleConnecting_{false};
 };
 
 #endif
