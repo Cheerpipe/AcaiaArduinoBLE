@@ -42,8 +42,8 @@ constexpr uint32_t SCALE_PREFER_FALLBACK_MS = 5000;
 enum class ScaleMacCacheMode : uint8_t {
   // Numeric values: FIRST=0 and ONLY=1 match legacy OFF/FULL in NVS.
   FIRST = 0,  // Name scan; first compatible; do not lock preferred.
-  ONLY = 1,   // Name scan + connect-filter; preferred MAC only.
-  PREFER = 2, // Prefer preferred; after grace, fall back to any compatible.
+  ONLY = 1,   // Bootstrap by name if empty; then preferred MAC only.
+  PREFER = 2, // Bootstrap if empty; else prefer MAC, then fall back to any.
 };
 
 // GAP scan duty while discovering a scale. 0 matches existing Companion
@@ -105,11 +105,6 @@ struct ScaleHistoryEntry {
 inline bool validScaleMacCacheMode(uint8_t mode) {
   return mode == static_cast<uint8_t>(ScaleMacCacheMode::FIRST) ||
          mode == static_cast<uint8_t>(ScaleMacCacheMode::ONLY) ||
-         mode == static_cast<uint8_t>(ScaleMacCacheMode::PREFER);
-}
-
-inline bool scaleMacCacheModeRequiresPreferred(uint8_t mode) {
-  return mode == static_cast<uint8_t>(ScaleMacCacheMode::ONLY) ||
          mode == static_cast<uint8_t>(ScaleMacCacheMode::PREFER);
 }
 

@@ -924,17 +924,10 @@ void noteScaleHistory(const char *mac, const char *name, bool persist) {
 }
 
 void notePreferredScale(const char *mac, const char *name) {
-  noteScaleHistory(mac, name, true);
   const ScaleMacCacheMode cacheMode = currentScaleMacCacheMode();
-  // FIRST: never auto-write preferred. PREFER/ONLY: refresh name only when the
-  // connected MAC already matches the user-selected preferred (never auto-fill
-  // or steal on fallback connect).
-  if (cacheMode == ScaleMacCacheMode::FIRST) {
-    return;
-  }
-  if (scaleDiscoveryPaused()) {
-    return;
-  }
+  // FIRST never auto-writes preferred. PREFER/ONLY bootstrap from the first
+  // successful compatible connection when no preferred MAC exists. Once set,
+  // PREFER fallback connections must never replace it.
   if (mac == nullptr || !validPreferredScaleMac(mac) || mac[0] == '\0') {
     return;
   }
@@ -946,44 +939,42 @@ void notePreferredScale(const char *mac, const char *name) {
     copyCString(safeName, sizeof(safeName), name);
   }
   bool changed = false;
+  bool adopted = false;
   portENTER_CRITICAL(&scalePreferredMacMux);
-  if (scalePreferredMac[0] == '\0' ||
-      !preferredScaleMacEqual(scalePreferredMac, canonicalMac)) {
+  (void)upsertScaleHistory(scaleHistory, scaleHistorySeq, canonicalMac,
+                           safeName);
+  // Successful connections are durable history even in FIRST mode.
+  scalePreferredMacDirty = true;
+  const uint32_t pauseUntil = scaleDiscoveryPausedUntilMs;
+  const bool paused = pauseUntil != 0 &&
+      static_cast<int32_t>(pauseUntil - millis()) > 0;
+  if (cacheMode == ScaleMacCacheMode::FIRST || paused) {
     portEXIT_CRITICAL(&scalePreferredMacMux);
     return;
   }
-  const bool nameChanged =
-      strncmp(scalePreferredName, safeName, PREFERRED_SCALE_NAME_CAPACITY) != 0;
-  if (nameChanged) {
+  if (scalePreferredMac[0] == '\0') {
+    memcpy(scalePreferredMac, canonicalMac, sizeof(scalePreferredMac));
     copyCString(scalePreferredName, sizeof(scalePreferredName), safeName);
-    scalePreferredMacDirty = true;
+    changed = true;
+    adopted = true;
+  } else if (!preferredScaleMacEqual(scalePreferredMac, canonicalMac)) {
+    portEXIT_CRITICAL(&scalePreferredMacMux);
+    return;
+  } else if (strncmp(scalePreferredName, safeName,
+                     PREFERRED_SCALE_NAME_CAPACITY) != 0) {
+    copyCString(scalePreferredName, sizeof(scalePreferredName), safeName);
     changed = true;
   }
   portEXIT_CRITICAL(&scalePreferredMacMux);
   if (changed) {
-    serialTracef(LogLevel::INFO, "Preferred scale name updated: %s — %s",
+    serialTracef(LogLevel::INFO,
+                 adopted ? "First detected scale adopted: %s — %s"
+                         : "Preferred scale name updated: %s — %s",
                  safeName[0] != '\0' ? safeName : "(unknown)", canonicalMac);
   }
 }
 
-void coerceScalePreferenceModeToFirst() {
-  if (runtimeConfig.scaleMacCacheMode ==
-      static_cast<uint8_t>(ScaleMacCacheMode::FIRST)) {
-    return;
-  }
-  RuntimeConfig candidate = runtimeConfig;
-  candidate.scaleMacCacheMode =
-      static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
-  ++candidate.revision;
-  if (candidate.revision == 0) {
-    candidate.revision = 1;
-  }
-  commitLiveRuntimeConfig(candidate, RUNTIME_PERSIST_REASON_USER);
-  serialTrace(LogLevel::INFO,
-              "Scale preference coerced to first (no preferred)");
-}
-
-// Clear preferred without the Forget 30 s pause (dropdown "None").
+// Clear preferred without the Forget 30 s pause (API compatibility path).
 void clearPreferredScaleSelectionOnly() {
   portENTER_CRITICAL(&scalePreferredMacMux);
   scalePreferredMac[0] = '\0';
@@ -993,7 +984,6 @@ void clearPreferredScaleSelectionOnly() {
   ++scalePreferredDirectedResetGeneration;
   portEXIT_CRITICAL(&scalePreferredMacMux);
   serialTrace(LogLevel::INFO, "Preferred scale cleared (history kept)");
-  coerceScalePreferenceModeToFirst();
   if (scale.isScanning() || scale.isConnected()) {
     // Restart discovery under the new (unlocked) policy.
     scale.disconnect();
@@ -1066,7 +1056,6 @@ void clearPreferredScaleCache() {
   portEXIT_CRITICAL(&scalePreferredMacMux);
   serialTrace(LogLevel::INFO,
               "Paired scale forgotten; looking paused for 30 s");
-  coerceScalePreferenceModeToFirst();
 }
 
 void logScaleConnectionFailed(bool directed) {
@@ -1470,6 +1459,13 @@ void serviceScaleWorkerLink() {
     updateWorkerLinkState();
     setScaleLinkState(ScaleLinkState::DISCONNECTED);
     return;
+  }
+
+  // A user can enable PREFER/ONLY while an eligible scale is already linked.
+  // Adopt it on the worker task just as if this were a fresh connection.
+  if (currentScaleMacCacheMode() != ScaleMacCacheMode::FIRST &&
+      !hasPreferredScaleMac() && !scaleDiscoveryPaused()) {
+    notePreferredScale(scale.address(), scale.localName());
   }
 
   bool snapshotDirty = false;

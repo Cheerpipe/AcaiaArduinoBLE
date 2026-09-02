@@ -4442,6 +4442,80 @@ void d02_first_mode_uses_name_scan() {
   CHECK(scale.lastStartScanMac[0] == '\0');
 }
 
+void d02b_only_without_preferred_bootstraps_and_adopts_on_connect() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
+  scalePreferredMac[0] = '\0';
+  scalePreferredName[0] = '\0';
+  scalePreferredMacDirty = false;
+  uint32_t lastScanCycleMs = 0;
+  uint32_t lastConnectLogMs = 0;
+  bool connectAttemptSeriesActive = false;
+  uint32_t scanSessionAtMs = 0;
+  uint32_t scanLastAdvertAtMs = 0;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.scanning);
+  CHECK(!scale.directedScan);
+  CHECK(!scale.lastAddressScan);
+  CHECK(scalePreferredMac[0] == '\0');
+
+  strncpy(scale.seenMac, scale.connectedAddress, sizeof(scale.seenMac) - 1);
+  strncpy(scale.seenName, scale.connectedLocalName, sizeof(scale.seenName) - 1);
+  scale.seenPending = true;
+  hostMillis += SCALE_DISCOVERY_TICK_MS;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scalePreferredMac[0] == '\0');
+  CHECK(!scalePreferredMacDirty);
+
+  scale.pollScanConnects = true;
+  scale.pollScanStepsToConnect = 1;
+  hostMillis += SCALE_DISCOVERY_TICK_MS;
+  serviceScaleWorkerDiscovery(lastScanCycleMs, lastConnectLogMs,
+                              connectAttemptSeriesActive, scanSessionAtMs,
+                              scanLastAdvertAtMs);
+  CHECK(scale.connected);
+  CHECK(preferredScaleMacEqual(scalePreferredMac, scale.connectedAddress));
+  CHECK(strcmp(scalePreferredName, scale.connectedLocalName) == 0);
+  CHECK(scalePreferredMacDirty);
+}
+
+void d02c_prefer_adopts_an_already_connected_scale() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::PREFER);
+  scalePreferredMac[0] = '\0';
+  scalePreferredName[0] = '\0';
+  scalePreferredMacDirty = false;
+  scale.connected = true;
+  serviceScaleWorkerLink();
+  CHECK(preferredScaleMacEqual(scalePreferredMac, scale.connectedAddress));
+  CHECK(strcmp(scalePreferredName, scale.connectedLocalName) == 0);
+  CHECK(scalePreferredMacDirty);
+}
+
+void d02d_apply_only_without_preferred_is_accepted() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
+  scalePreferredMac[0] = '\0';
+  WebCommand update;
+  update.type = WebCommandType::APPLY_CONFIG;
+  update.config = runtimeConfig;
+  update.config.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
+  processWebCommand(update);
+  CHECK(runtimeConfig.scaleMacCacheMode ==
+        static_cast<uint8_t>(ScaleMacCacheMode::ONLY));
+}
+
 void d03_scan_start_failed_retries_immediately() {
   resetHarness(false, false);
   reachReadyFromBoot();
@@ -4708,7 +4782,7 @@ void d08_select_none_clears_without_pause() {
   selectPreferredScale("", "");
   CHECK(scalePreferredMac[0] == '\0');
   CHECK(runtimeConfig.scaleMacCacheMode ==
-        static_cast<uint8_t>(ScaleMacCacheMode::FIRST));
+        static_cast<uint8_t>(ScaleMacCacheMode::ONLY));
   CHECK(!scaleDiscoveryPaused());
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
@@ -11320,6 +11394,9 @@ const TestCase testCases[] = {
     {"D14", d14_control_status_publishes_on_cycle_edge},
     {"D15", d15_companion_publish_throttles_without_scale},
     {"D02", d02_first_mode_uses_name_scan},
+    {"D02b", d02b_only_without_preferred_bootstraps_and_adopts_on_connect},
+    {"D02c", d02c_prefer_adopts_an_already_connected_scale},
+    {"D02d", d02d_apply_only_without_preferred_is_accepted},
     {"D03", d03_scan_start_failed_retries_immediately},
     {"D04", d04_full_cache_keeps_directed_scan},
     {"D05", d05_hci_watchdog_force_restarts_same_filter},

@@ -27,8 +27,8 @@ offset learning, and eligible A→M samples.
 
 | Setting | Default | Range / notes | Effect |
 | --- | --- | --- | --- |
-| **Always use this scale** | ON (`full` MAC cache) | ON / OFF | ON: name-scan for compatible scales; when a preferred MAC is set, only that MAC is connected; other compatible advertisements are stored in history (up to 8) without connecting. OFF: connect the first compatible scale; do not lock preferred. |
-| **Preferred scale** | none until you pick one | Dropdown of BLE-seen scales | Which MAC to lock. **Clear preferred** pauses discovery 30 s and keeps history. |
+| **Scale preference** | Preferred only | First available / Prefer selected / Preferred only | **First available** connects whichever compatible scale appears first and never locks it. **Prefer selected** waits briefly for the preferred scale, then accepts another. **Preferred only** connects only to the saved preferred scale. If either selected mode has no saved scale yet, it uses the bootstrap flow below. |
+| **Preferred scale** | First detected | First detected or a BLE-seen scale | **First detected** is shown only while no preferred MAC is saved. The controller scans by compatible name and adopts the first scale that completes a successful connection; advertisements and failed connections are not enough. **Clear preferred** pauses discovery for 30 s, keeps history, and keeps the current Scale preference. |
 | **Drip delay (s)** | 3.0 s | 0–10 s | Wait after a shot ends before capturing the final post-drip weight. `0` finalizes on the next control loop with no intentional window. |
 | **Timer stop extra delay (ms)** | 0 ms | 0–1000 ms | Pad after the scale timer catches up to circuit whole seconds, before `STOP_TIMER`. `0` stops in that same instant. Does not delay the local machine circuit beep. |
 | **Bookoo combined command** | ON | ON / OFF | Combined tare + start-timer. Requires automatic tare. Also listed under [Tare](tare.md). |
@@ -44,10 +44,16 @@ limits remain in force.
 
 ## Example
 
-Always use this scale is on. You pick your Bookoo in **Preferred scale**.
-Other scales nearby are remembered in history but not connected. After each
-shot, the firmware waits 3 s of drip before storing the final weight used
-for offset learning.
+On a new controller, **Preferred only** and **First detected** are selected.
+Turn on your Bookoo: after its first successful connection, its MAC and name
+replace **First detected** and are saved. From then on, other scales may be
+remembered in history but are not connected. After each shot, the firmware
+waits 3 s of drip before storing the final weight used for offset learning.
+
+If no compatible scale is available, the controller stays in the bootstrap
+name scan indefinitely and does not silently change the saved preference.
+Choosing **Prefer selected** before a scale has been adopted uses the same
+bootstrap; after adoption, its normal preferred-first fallback applies.
 
 Related: [Brew by weight](../features/brew-by-weight.md), [Tare](tare.md),
 [Alerts](../alerts.md).

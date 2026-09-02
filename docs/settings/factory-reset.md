@@ -28,7 +28,9 @@ A shorter paddle gesture (three cycles) restores the device password / forgets S
 ## After reset
 
 Connect to `AdvancedShotStopperAP` / `ineedacoffee` at `http://192.168.4.1` and set
-the device up again. See [AP](ap.md) and the
+the device up again. Scale preference returns to **Preferred only**, with
+**First detected** shown until the first compatible scale connects
+successfully. See [Scales](scales.md), [AP](ap.md), and the
 [README first connection](../../README.md#first-connection).
 
 If the wipe cannot finish (for example NVS is full), the Web UI reports an

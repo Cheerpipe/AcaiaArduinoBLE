@@ -1191,6 +1191,7 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !ui.includes('id="forgetPairedScale"') ||
     !ui.includes('Scale preference') ||
     !ui.includes('First available') ||
+    !ui.includes('First detected') ||
     !ui.includes('Prefer selected') ||
     !ui.includes('Preferred only') ||
     !ui.includes('Preferred scale') ||
@@ -1201,6 +1202,9 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     !ui.includes('function formatPreferredScale(') ||
     !ui.includes('function updatePreferredScaleSelect(') ||
     !ui.includes('function updateScalePreferenceOptions(') ||
+    !ui.includes("if(!preferred){const first=document.createElement('option')") ||
+    ui.includes("if(!canPrefer&&(sel.value==='prefer'||sel.value==='only'))") ||
+    ui.includes("o.disabled=!canPrefer||!controlsMutable") ||
     // Regression: missing ';' after `prev` concatenated into
     // `prevupdateScalePreferenceOptions` and broke Settings status refresh.
     ui.includes(':prevupdateScalePreferenceOptions') ||
@@ -1231,6 +1235,9 @@ if (!statusSection || !statusSection[1].includes('class="statusColumn"') ||
     network.includes('Always use this scale must be on or off.') ||
     network.includes('scaleMacCacheMode must be disabled or full.') ||
     !network.includes('scaleMacCacheMode must be first, prefer, or only.') ||
+    firmwareCore.includes('scaleMacCacheModeRequiresPreferred(candidate.scaleMacCacheMode)') ||
+    scaleWorker.includes('coerceScalePreferenceModeToFirst') ||
+    !scaleWorker.includes('First detected scale adopted: %s — %s') ||
     !network.includes('The paired scale cannot be forgotten while a cycle') ||
     !network.includes('\\"history\\"') ||
     network.includes('Preferred scale cache cannot be cleared') ||

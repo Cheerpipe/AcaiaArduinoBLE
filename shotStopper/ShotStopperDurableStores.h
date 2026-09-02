@@ -9,10 +9,21 @@
 namespace shotstopper {
 
 inline bool verifyFactorySettings(const PersistedSettings &settings) {
-  return validPersistedSettings(settings) && !settings.staConfigured &&
-         !settings.lkgValid && passwordIsFactoryDefault(settings) &&
-         settings.preferredScaleMac[0] == '\0' &&
-         settings.preferredScaleName[0] == '\0';
+  if (!validPersistedSettings(settings) || settings.staConfigured ||
+      settings.lkgValid || !passwordIsFactoryDefault(settings) ||
+      settings.preferredScaleMac[0] != '\0' ||
+      settings.preferredScaleName[0] != '\0' ||
+      settings.runtime.scaleMacCacheMode !=
+          static_cast<uint8_t>(ScaleMacCacheMode::ONLY)) {
+    return false;
+  }
+  for (const ScaleHistoryEntry &entry : settings.scaleHistory) {
+    if (entry.mac[0] != '\0' || entry.name[0] != '\0' ||
+        entry.lastSeenSeq != 0) {
+      return false;
+    }
+  }
+  return true;
 }
 
 inline bool resetPersistedNetworkAccess(PersistedSettings &settings) {

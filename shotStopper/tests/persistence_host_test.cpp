@@ -75,7 +75,7 @@ void p01_defaults_are_valid() {
   CHECK(settings.preferredScaleMac[0] == '\0');
   CHECK(settings.preferredScaleName[0] == '\0');
   CHECK(settings.runtime.scaleMacCacheMode ==
-        static_cast<uint8_t>(ScaleMacCacheMode::FIRST));
+        static_cast<uint8_t>(ScaleMacCacheMode::ONLY));
   CHECK(settings.runtime.paddleMode ==
         static_cast<uint8_t>(PaddleMode::NATURAL));
   CHECK(runtimeStopPulseMs(settings.runtime) == COMPILED_STOP_PULSE_MS);
@@ -345,11 +345,39 @@ void p08_factory_reset_rebuilds_defaults() {
   CHECK(settings.preferredScaleMac[0] == '\0');
   CHECK(settings.preferredScaleName[0] == '\0');
   CHECK(settings.runtime.scaleMacCacheMode ==
-        static_cast<uint8_t>(ScaleMacCacheMode::FIRST));
+        static_cast<uint8_t>(ScaleMacCacheMode::ONLY));
+  for (const ScaleHistoryEntry &entry : settings.scaleHistory) {
+    CHECK(entry.mac[0] == '\0');
+    CHECK(entry.name[0] == '\0');
+    CHECK(entry.lastSeenSeq == 0);
+  }
   PersistedSettings loaded;
   CHECK(loadPersistedSettings(loaded));
   CHECK(verifyFactorySettings(loaded));
   CHECK(loaded.runtime.goalWeightG == DEFAULT_GOAL_WEIGHT_G);
+}
+
+void p08b_scale_preference_without_mac_round_trips() {
+  resetHostPersistence();
+  PersistedSettings settings;
+  CHECK(initializeDefaultSettings(settings));
+  CHECK(settings.preferredScaleMac[0] == '\0');
+  CHECK(settings.runtime.scaleMacCacheMode ==
+        static_cast<uint8_t>(ScaleMacCacheMode::ONLY));
+  CHECK(savePersistedSettings(settings));
+
+  PersistedSettings loaded;
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(loaded.preferredScaleMac[0] == '\0');
+  CHECK(loaded.runtime.scaleMacCacheMode ==
+        static_cast<uint8_t>(ScaleMacCacheMode::ONLY));
+
+  loaded.runtime.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
+  CHECK(savePersistedSettings(loaded));
+  CHECK(loadPersistedSettings(loaded));
+  CHECK(loaded.runtime.scaleMacCacheMode ==
+        static_cast<uint8_t>(ScaleMacCacheMode::FIRST));
 }
 
 void p64_factory_settings_overwrite_does_not_clear_ble_namespace() {
@@ -1550,6 +1578,7 @@ const TestCase tests[] = {
     {"P05", p05_password_change_updates_hash},
     {"P07", p07_invalid_schema_uses_factory_on_missing_slots},
     {"P08", p08_factory_reset_rebuilds_defaults},
+    {"P08B", p08b_scale_preference_without_mac_round_trips},
     {"P64", p64_factory_settings_overwrite_does_not_clear_ble_namespace},
     {"P65", p65_factory_settings_survives_second_slot_write_fail},
     {"P66", p66_shot_log_keeps_history_when_active_pointer_write_fails},

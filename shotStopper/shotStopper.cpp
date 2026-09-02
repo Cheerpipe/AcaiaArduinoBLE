@@ -4394,12 +4394,6 @@ void processWebCommand(const WebCommand &command) {
                      scaleMacCacheModeId(command.config.scaleMacCacheMode));
       }
       candidate.scaleMacCacheMode = command.config.scaleMacCacheMode;
-      if (scaleMacCacheModeRequiresPreferred(candidate.scaleMacCacheMode) &&
-          !hasPreferredScaleMac()) {
-        addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_REJECTED);
-        rejectWebCommand(command);
-        return;
-      }
       candidate.noScaleBbwMode = command.config.noScaleBbwMode;
       candidate.lastShotCooldownMs = command.config.lastShotCooldownMs;
       candidate.serialDebugOutput = command.config.serialDebugOutput;
