@@ -206,40 +206,40 @@ input_text:
 
 template:
   - sensor:
-      - name: Shot Stopper last extraction duration
-        unique_id: shot_stopper_last_extraction_duration
+      - name: Shot Stopper last shot duration
+        unique_id: shot_stopper_last_shot_duration
         state: "{{ states('input_number.shot_stopper_duration') }}"
         unit_of_measurement: s
         device_class: duration
         state_class: measurement
-      - name: Shot Stopper last extraction final weight
-        unique_id: shot_stopper_last_extraction_final_weight
+      - name: Shot Stopper last shot final weight
+        unique_id: shot_stopper_last_shot_final_weight
         state: "{{ states('input_number.shot_stopper_final_weight') }}"
         unit_of_measurement: g
         device_class: weight
         state_class: measurement
-      - name: Shot Stopper target weight
-        unique_id: shot_stopper_target_weight
+      - name: Shot Stopper last shot target weight
+        unique_id: shot_stopper_last_shot_target_weight
         state: "{{ states('input_number.shot_stopper_target_weight') }}"
         unit_of_measurement: g
         device_class: weight
         state_class: measurement
-      - name: Shot Stopper average flow
-        unique_id: shot_stopper_average_flow
+      - name: Shot Stopper last shot average flow
+        unique_id: shot_stopper_last_shot_average_flow
         state: "{{ states('input_number.shot_stopper_average_flow') }}"
         unit_of_measurement: g/s
         state_class: measurement
-      - name: Shot Stopper first drop
-        unique_id: shot_stopper_first_drop
+      - name: Shot Stopper last shot first drop
+        unique_id: shot_stopper_last_shot_first_drop
         state: "{{ states('input_number.shot_stopper_first_drop') }}"
         unit_of_measurement: s
         device_class: duration
         state_class: measurement
-      - name: Shot Stopper extraction state
-        unique_id: shot_stopper_extraction_state
+      - name: Shot Stopper last shot state
+        unique_id: shot_stopper_last_shot_state
         state: "{{ states('input_text.shot_stopper_state') }}"
-      - name: Shot Stopper stop detail
-        unique_id: shot_stopper_stop_detail
+      - name: Shot Stopper last shot stop detail
+        unique_id: shot_stopper_last_shot_stop_detail
         state: "{{ states('input_text.shot_stopper_stop_detail') }}"
 
 automation:
@@ -511,39 +511,39 @@ If you want entities in the `sensor` domain for dashboards and graphs, add:
 ```yaml
 template:
   - sensor:
-      - name: Shot Stopper last extraction duration
-        unique_id: shot_stopper_last_extraction_duration
+      - name: Shot Stopper last shot duration
+        unique_id: shot_stopper_last_shot_duration
         state: "{{ states('input_number.shot_stopper_duration') }}"
         unit_of_measurement: s
         device_class: duration
         state_class: measurement
-      - name: Shot Stopper last extraction final weight
-        unique_id: shot_stopper_last_extraction_final_weight
+      - name: Shot Stopper last shot final weight
+        unique_id: shot_stopper_last_shot_final_weight
         state: "{{ states('input_number.shot_stopper_final_weight') }}"
         unit_of_measurement: g
         device_class: weight
         state_class: measurement
-      - name: Shot Stopper target weight
-        unique_id: shot_stopper_target_weight
+      - name: Shot Stopper last shot target weight
+        unique_id: shot_stopper_last_shot_target_weight
         state: "{{ states('input_number.shot_stopper_target_weight') }}"
         unit_of_measurement: g
         device_class: weight
         state_class: measurement
-      - name: Shot Stopper average flow
-        unique_id: shot_stopper_average_flow
+      - name: Shot Stopper last shot average flow
+        unique_id: shot_stopper_last_shot_average_flow
         state: "{{ states('input_number.shot_stopper_average_flow') }}"
         unit_of_measurement: g/s
         state_class: measurement
-      - name: Shot Stopper first drop
-        unique_id: shot_stopper_first_drop
+      - name: Shot Stopper last shot first drop
+        unique_id: shot_stopper_last_shot_first_drop
         state: "{{ states('input_number.shot_stopper_first_drop') }}"
         unit_of_measurement: s
         device_class: duration
         state_class: measurement
-      - name: Shot Stopper extraction state
-        unique_id: shot_stopper_extraction_state
+      - name: Shot Stopper last shot state
+        unique_id: shot_stopper_last_shot_state
         state: "{{ states('input_text.shot_stopper_state') }}"
-      - name: Shot Stopper stop detail
-        unique_id: shot_stopper_stop_detail
+      - name: Shot Stopper last shot stop detail
+        unique_id: shot_stopper_last_shot_stop_detail
         state: "{{ states('input_text.shot_stopper_stop_detail') }}"
 ```
