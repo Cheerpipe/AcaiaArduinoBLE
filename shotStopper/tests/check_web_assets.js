@@ -322,7 +322,10 @@ if (!buzzer.includes('struct RtttlCatalog') ||
     !buzzer.includes('RtttlNote rtttlBuf[BULLSEYE_RTTTL_MAX_NOTES]') ||
     !firmwareCore.includes(
         'portTRY_ENTER_CRITICAL(&debugLogMux, portMUX_TRY_LOCK)') ||
-    !firmwareCore.includes('debugLogDroppedSnapshot')) {
+    !firmwareCore.includes('debugLogDroppedSnapshot') ||
+    !firmwareCore.includes(
+        '__atomic_load_n(&debugLogContentionDropped, __ATOMIC_RELAXED)') ||
+    firmwareCore.includes('__atomic_add_fetch(&debugLogDroppedSnapshot')) {
   throw new Error(
       'Cold RTTTL/log storage must favor PSRAM while active timer playback stays internal and log writes never spin control');
 }
@@ -3136,9 +3139,16 @@ if (!webhookSource.includes('allocExternal(queueStorageBytes)') ||
     !webhookSource.includes('dispatchAllowed()') ||
     !webhookSource.includes('config.event_handler') ||
     !webhookSource.includes('setControlCritical') ||
-    !webhookSource.includes('setScaleConnecting')) {
+    !webhookSource.includes('setScaleConnecting') ||
+    !webhookSource.includes('bool haveQueued = false') ||
+    !webhookSource.includes('if (haveQueued && dispatchAllowed())') ||
+    !webhookSource.includes('esp_http_client_close(event->client)') ||
+    !webhookSource.includes('esp_http_client_cancel_request(client)') ||
+    !webhookSource.includes('cancelActive_') ||
+    !webhookSource.includes('void WebhookDispatcher::serviceAbort()') ||
+    !network.includes('webhooks_.serviceAbort()')) {
   throw new Error(
-      'Webhook queue/payload must live in PSRAM and idle-priority delivery must defer for control/BLE activity');
+      'Webhook queue/payload must live in PSRAM; delivery must recheck its gate and actively cancel HTTP outside control/BLE');
 }
 if (!webhookSource.includes('\\"sentAtUptimeMs\\"') ||
     !firmwareCore.includes('webhookUnixSecAt(uint32_t occurredAtMs)') ||
@@ -3769,7 +3779,7 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
 }
 {
   const ntpArmStart = network.indexOf('bool ShotStopperNetwork::ntpMayArm');
-  const ntpArmEnd = network.indexOf('void ShotStopperNetwork::armNtp', ntpArmStart);
+  const ntpArmEnd = network.indexOf('bool ShotStopperNetwork::armNtp', ntpArmStart);
   const ntpArm = ntpArmStart >= 0 && ntpArmEnd > ntpArmStart
       ? network.slice(ntpArmStart, ntpArmEnd)
       : '';
@@ -3795,12 +3805,20 @@ if (!network.includes('WiFi.mode(WIFI_STA)') ||
   }
   if (!network.includes('ntpCallbackAccepting_') ||
       !network.includes('syncControlCriticalRf') ||
+      !network.includes('rfGateGeneration_') ||
+      !network.includes('expectedGateGeneration') ||
+      !network.includes('if (!gateStable())') ||
+      !network.includes('abortNtpForRfGate();') ||
+      !network.includes('void ShotStopperNetwork::abortNtpForRfGate()') ||
+      !network.includes('ntpAbortRequested_') ||
+      !network.includes(
+          'ntpCallbackAccepting_.store(false, std::memory_order_release)') ||
       !network.includes('ulTaskNotifyTake') ||
       !network.includes('xTaskNotifyGive') ||
       !serviceNtp.includes('if (g_wallClock.applyPendingSync(now))') ||
       !serviceNtp.includes('stopNtp();') ||
       !serviceNtp.includes('timeStatus.lastSyncAgeMs >= NTP_RESYNC_INTERVAL_MS') ||
-      !serviceNtp.includes('armNtp(now);') ||
+      !serviceNtp.includes('armNtp(now, staConnected, gateGeneration)') ||
       serviceNtp.includes('applySystemTimeToWallClock')) {
     throw new Error(
         'SNTP must be callback-driven one-shot work, wake promptly for gates, stop after sync, and rearm only through gated service');

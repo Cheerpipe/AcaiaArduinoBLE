@@ -190,15 +190,53 @@ WebhookStatus WebhookDispatcher::status() const {
 
 void WebhookDispatcher::setControlCritical(bool active) {
   controlCritical_.store(active, std::memory_order_release);
+  if (active) {
+    cancelActive_.store(true, std::memory_order_release);
+    abortRequested_.store(true, std::memory_order_release);
+  }
 }
 
 void WebhookDispatcher::setScaleConnecting(bool active) {
   scaleConnecting_.store(active, std::memory_order_release);
+  if (active) {
+    cancelActive_.store(true, std::memory_order_release);
+    abortRequested_.store(true, std::memory_order_release);
+  }
 }
 
 bool WebhookDispatcher::dispatchAllowed() const {
   return !controlCritical_.load(std::memory_order_acquire) &&
          !scaleConnecting_.load(std::memory_order_acquire);
+}
+
+void WebhookDispatcher::serviceAbort() {
+  if (!abortRequested_.exchange(false, std::memory_order_acq_rel)) return;
+
+  esp_http_client_handle_t client = nullptr;
+  portENTER_CRITICAL(&mux_);
+  if (activeClient_ != nullptr && !cancelInProgress_) {
+    cancelInProgress_ = true;
+    ++activeClientUsers_;
+    client = static_cast<esp_http_client_handle_t>(activeClient_);
+  }
+  portEXIT_CRITICAL(&mux_);
+  if (client == nullptr) return;
+
+  // This is the ESP-IDF API intended to interrupt a blocking perform from a
+  // different task. Its reconnect is immediately closed by the event handler
+  // below while the RF gate remains active.
+  const esp_err_t result = esp_http_client_cancel_request(client);
+  portENTER_CRITICAL(&mux_);
+  cancelInProgress_ = false;
+  if (activeClientUsers_ > 0) --activeClientUsers_;
+  const bool stillActive = activeClient_ == client;
+  portEXIT_CRITICAL(&mux_);
+  if (stillActive && result != ESP_OK &&
+      cancelActive_.load(std::memory_order_acquire)) {
+    // CONNECTING/DNS is not cancellable until the client reaches CONNECTED.
+    // Retry from the next 20 Hz network-manager pass.
+    abortRequested_.store(true, std::memory_order_release);
+  }
 }
 
 bool WebhookDispatcher::enqueue(const WebhookEvent &event) {
@@ -249,6 +287,7 @@ void WebhookDispatcher::taskEntry(void *parameter) {
 
 void WebhookDispatcher::task() {
   QueuedWebhook queued;
+  bool haveQueued = false;
   for (;;) {
     QueueHandle_t queue = nullptr;
     WorkerState state = WorkerState::STOPPED;
@@ -261,9 +300,15 @@ void WebhookDispatcher::task() {
     if (state == WorkerState::STOPPING || queue == nullptr) break;
     // Leave events queued while a shot/rinse or scale connection attempt owns
     // radio time. Queue operations and HTTP remain entirely off control/BLE.
-    if (dispatchAllowed() &&
-        xQueueReceive(queue, &queued, pdMS_TO_TICKS(50)) == pdTRUE) {
+    if (!haveQueued && dispatchAllowed()) {
+      haveQueued =
+          xQueueReceive(queue, &queued, pdMS_TO_TICKS(50)) == pdTRUE;
+    }
+    // The gate may change while xQueueReceive is blocked. Keep the dequeued
+    // item locally and recheck so no request starts after the critical edge.
+    if (haveQueued && dispatchAllowed()) {
       (void)send(queued);
+      haveQueued = false;
     } else {
       vTaskDelay(pdMS_TO_TICKS(25));
     }
@@ -385,8 +430,17 @@ bool WebhookDispatcher::send(const QueuedWebhook &queued) {
       }
       auto *dispatcher =
           static_cast<WebhookDispatcher *>(event->user_data);
-      return dispatcher->dispatchAllowed() ? ESP_OK
-                                            : ESP_ERR_INVALID_STATE;
+      if (!dispatcher->dispatchAllowed() ||
+          dispatcher->cancelActive_.load(std::memory_order_acquire)) {
+        dispatcher->abortRequested_.store(true, std::memory_order_release);
+        // ESP-IDF ignores event-handler return values in perform(). Closing the
+        // transport here makes connected/header/data events actually abort.
+        // DISCONNECTED is excluded above to avoid recursive close dispatch.
+        if (event->client != nullptr) {
+          (void)esp_http_client_close(event->client);
+        }
+      }
+      return ESP_OK;
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client != nullptr) {
@@ -394,9 +448,31 @@ bool WebhookDispatcher::send(const QueuedWebhook &queued) {
       esp_http_client_set_header(client, "Content-Type", "application/json");
       esp_http_client_set_header(client, "User-Agent", "ShotStopper/1");
       esp_http_client_set_post_field(client, payload_, strlen(payload_));
-      error = esp_http_client_perform(client);
-      statusCode = esp_http_client_get_status_code(client);
-      ok = error == ESP_OK && statusCode >= 200 && statusCode < 300;
+      cancelActive_.store(false, std::memory_order_release);
+      portENTER_CRITICAL(&mux_);
+      activeClient_ = client;
+      cancelInProgress_ = false;
+      portEXIT_CRITICAL(&mux_);
+      if (dispatchAllowed() &&
+          !cancelActive_.load(std::memory_order_acquire)) {
+        error = esp_http_client_perform(client);
+        statusCode = esp_http_client_get_status_code(client);
+        ok = error == ESP_OK && statusCode >= 200 && statusCode < 300 &&
+             dispatchAllowed() &&
+             !cancelActive_.load(std::memory_order_acquire);
+      } else {
+        error = ESP_ERR_INVALID_STATE;
+      }
+      portENTER_CRITICAL(&mux_);
+      activeClient_ = nullptr;
+      portEXIT_CRITICAL(&mux_);
+      for (;;) {
+        portENTER_CRITICAL(&mux_);
+        const bool referenced = activeClientUsers_ != 0;
+        portEXIT_CRITICAL(&mux_);
+        if (!referenced) break;
+        vTaskDelay(pdMS_TO_TICKS(1));
+      }
       esp_http_client_cleanup(client);
     }
   }

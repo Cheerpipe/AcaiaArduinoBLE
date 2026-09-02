@@ -401,6 +401,8 @@ QueueHandle_t bleCompanionResultQueue = nullptr;
 portMUX_TYPE bleCompanionMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE debugLogMux = portMUX_INITIALIZER_UNLOCKED;
 uint32_t debugLogContentionDropped = 0;
+// Snapshot of ring overwrites only. Contention drops are a separate monotonic
+// atomic counter so a producer cannot overwrite another producer's increment.
 uint32_t debugLogDroppedSnapshot = 0;
 bool pendingCupRemovedSettle = false;
 uint32_t scaleRecoveredStaleCount = 0;
@@ -709,17 +711,12 @@ void logEmit(LogLevel level, DebugCategory category, DebugCode code,
     if (toRing) {
       debugLog.add(atMs, wallSec, level, category, code, argument1, argument2);
       maybeReportLogOverrunLocked();
-      __atomic_store_n(
-          &debugLogDroppedSnapshot,
-          debugLog.overwritten() +
-              __atomic_load_n(&debugLogContentionDropped, __ATOMIC_RELAXED),
-          __ATOMIC_RELAXED);
+      __atomic_store_n(&debugLogDroppedSnapshot, debugLog.overwritten(),
+                       __ATOMIC_RELAXED);
     }
     portEXIT_CRITICAL(&debugLogMux);
   } else if (toRing) {
     (void)__atomic_add_fetch(&debugLogContentionDropped, 1U,
-                             __ATOMIC_RELAXED);
-    (void)__atomic_add_fetch(&debugLogDroppedSnapshot, 1U,
                              __ATOMIC_RELAXED);
   }
 
@@ -5200,7 +5197,8 @@ void publishControlStatus() {
         static_cast<uint8_t>(liveBleScanIntensity());
   }
   next.debugEventsDropped =
-      __atomic_load_n(&debugLogDroppedSnapshot, __ATOMIC_RELAXED);
+      __atomic_load_n(&debugLogDroppedSnapshot, __ATOMIC_RELAXED) +
+      __atomic_load_n(&debugLogContentionDropped, __ATOMIC_RELAXED);
   __atomic_fetch_add(&controlStatusSeq, 1U, __ATOMIC_RELEASE);
   publishControlGate();
 }

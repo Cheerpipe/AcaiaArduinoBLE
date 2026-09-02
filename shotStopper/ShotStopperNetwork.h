@@ -277,6 +277,7 @@ class ShotStopperNetwork {
   std::atomic<bool> scaleConnectingOrUp_{false};
   std::atomic<bool> scaleConnecting_{false};
   std::atomic<bool> controlCriticalRfActive_{false};
+  std::atomic<uint32_t> rfGateGeneration_{0};
   std::atomic<bool> scaleHuntRfActive_{false};
   wifi_ps_type_t lastAppliedWifiPs_{WIFI_PS_NONE};
   bool lastAppliedWifiPsValid_{false};
@@ -313,6 +314,7 @@ class ShotStopperNetwork {
   uint32_t ntpConfigRevision_ = 0;
   char ntpServerBuffer_[NTP_SERVER_HOST_CAPACITY] = {};
   std::atomic<bool> ntpCallbackAccepting_{false};
+  std::atomic<bool> ntpAbortRequested_{false};
   WebhookDispatcher webhooks_;
   WebhookConfig stagedWebhook_ = {};
   uint32_t stagedWebhookRequestId_ = 0;
@@ -322,8 +324,10 @@ class ShotStopperNetwork {
   void service();
   void serviceNtp(uint32_t now, bool staConnected);
   bool ntpMayArm(uint32_t now, bool staConnected) const;
+  void abortNtpForRfGate();
   void stopNtp();
-  void armNtp(uint32_t now);
+  bool armNtp(uint32_t now, bool staConnected,
+              uint32_t expectedGateGeneration);
   void handleNtpFailure(uint32_t now);
   static void ntpSyncNotificationCallback(struct timeval *tv);
   bool startNetwork();

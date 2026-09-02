@@ -1274,6 +1274,11 @@ void ShotStopperNetwork::taskLoop() {
 void ShotStopperNetwork::service() {
   const uint32_t now = millis();
 
+  // Socket cancellation can wait inside ESP-IDF, so it is serviced only by
+  // this low-priority task. Gate setters merely publish atomics and notify us.
+  webhooks_.serviceAbort();
+  abortNtpForRfGate();
+
   // Drain CLI link mutations even when SoftAP/HTTP startup is still failing.
   // A successful AP_START / WIFI_CONNECT can mark startup complete and skip
   // the automatic retry that would otherwise fight the user's command.
@@ -1656,6 +1661,15 @@ void ShotStopperNetwork::syncScaleConnectingRf(bool connecting) {
       scaleConnecting_.exchange(connecting, std::memory_order_acq_rel) !=
       connecting;
   webhooks_.setScaleConnecting(connecting);
+  if (connecting) {
+    // The lwIP callback may race the low-priority task that stops SNTP. Close
+    // its publication gate immediately without touching network APIs here.
+    ntpCallbackAccepting_.store(false, std::memory_order_release);
+    ntpAbortRequested_.store(true, std::memory_order_release);
+  }
+  if (changed) {
+    rfGateGeneration_.fetch_add(1U, std::memory_order_acq_rel);
+  }
   if (changed && taskHandle_ != nullptr) {
     xTaskNotifyGive(taskHandle_);
   }
@@ -1666,6 +1680,13 @@ void ShotStopperNetwork::syncControlCriticalRf(bool active) {
       controlCriticalRfActive_.exchange(active, std::memory_order_acq_rel) !=
       active;
   webhooks_.setControlCritical(active);
+  if (active) {
+    ntpCallbackAccepting_.store(false, std::memory_order_release);
+    ntpAbortRequested_.store(true, std::memory_order_release);
+  }
+  if (changed) {
+    rfGateGeneration_.fetch_add(1U, std::memory_order_acq_rel);
+  }
   if (changed && taskHandle_ != nullptr) {
     xTaskNotifyGive(taskHandle_);
   }
@@ -3297,22 +3318,64 @@ bool ShotStopperNetwork::ntpMayArm(uint32_t now, bool staConnected) const {
   return true;
 }
 
-void ShotStopperNetwork::armNtp(uint32_t now) {
+void ShotStopperNetwork::abortNtpForRfGate() {
+  const bool gateActive =
+      brewRfActive() || scaleConnecting_.load(std::memory_order_acquire);
+  const bool abortRequested =
+      ntpAbortRequested_.exchange(false, std::memory_order_acq_rel);
+  if (!gateActive && !abortRequested) {
+    return;
+  }
+  const TimeStatusSnapshot timeStatus = g_wallClock.snapshot(millis());
+  if (ntpStarted_ || timeStatus.state == TimeSyncState::SYNCING) {
+    stopNtp();
+    g_wallClock.cancelSyncing();
+    ntpRearmPending_ = true;
+  } else {
+    g_wallClock.cancelPendingSync();
+  }
+}
+
+bool ShotStopperNetwork::armNtp(uint32_t now, bool staConnected,
+                                uint32_t expectedGateGeneration) {
+  auto gateStable = [&]() {
+    return rfGateGeneration_.load(std::memory_order_acquire) ==
+               expectedGateGeneration &&
+           ntpMayArm(millis(), staConnected);
+  };
+  if (!gateStable()) return false;
+
   resolveNtpServerHost(settings_.runtime, ntpFailoverIndex_, ntpServerBuffer_);
   g_wallClock.setSyncing(ntpServerBuffer_, now);
   ntpSyncStartedAtMs_ = now;
   esp_sntp_set_time_sync_notification_cb(ntpSyncNotificationCallback);
   ntpCallbackAccepting_.store(true, std::memory_order_release);
 
+  // Close the check/use window before touching lwIP. A gate transition also
+  // closes callback acceptance synchronously in its lock-free setter.
+  if (!gateStable()) {
+    stopNtp();
+    g_wallClock.cancelSyncing();
+    return false;
+  }
+
   if (esp_sntp_enabled()) {
     esp_sntp_setservername(0, ntpServerBuffer_);
     sntp_restart();
     ntpStarted_ = true;
-    return;
+  } else {
+    configTime(0, 0, ntpServerBuffer_);
+    ntpStarted_ = true;
   }
 
-  configTime(0, 0, ntpServerBuffer_);
-  ntpStarted_ = true;
+  // Control/scale never waits for stopNtp. If it won the race with the actual
+  // arm, detect its generation here and tear SNTP down on this network task.
+  if (!gateStable()) {
+    stopNtp();
+    g_wallClock.cancelSyncing();
+    return false;
+  }
+  return true;
 }
 
 void ShotStopperNetwork::handleNtpFailure(uint32_t now) {
@@ -3342,6 +3405,8 @@ void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
   // precedes callback application: a completion racing with cancellation is
   // discarded rather than publishing a sync during critical activity.
   TimeStatusSnapshot timeStatus = g_wallClock.snapshot(now);
+  const uint32_t gateGeneration =
+      rfGateGeneration_.load(std::memory_order_acquire);
   if (!ntpMayArm(now, staConnected)) {
     if (ntpStarted_ || timeStatus.state == TimeSyncState::SYNCING) {
       stopNtp();
@@ -3378,7 +3443,9 @@ void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
     ntpManualSyncPending_ = false;
     ntpActivitySyncPending_ = false;
     ntpFailoverIndex_ = 0;
-    armNtp(now);
+    if (!armNtp(now, staConnected, gateGeneration)) {
+      ntpRearmPending_ = true;
+    }
     return;
   }
 
@@ -3388,12 +3455,16 @@ void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
       if (timeStatus.nextRetryInMs > 0) {
         return;
       }
-      armNtp(now);
+      if (!armNtp(now, staConnected, gateGeneration)) {
+        ntpRearmPending_ = true;
+      }
       return;
     case TimeSyncState::SYNCED:
     case TimeSyncState::STALE:
       if (timeStatus.lastSyncAgeMs >= NTP_RESYNC_INTERVAL_MS) {
-        armNtp(now);
+        if (!armNtp(now, staConnected, gateGeneration)) {
+          ntpRearmPending_ = true;
+        }
       }
       return;
     case TimeSyncState::SYNCING:

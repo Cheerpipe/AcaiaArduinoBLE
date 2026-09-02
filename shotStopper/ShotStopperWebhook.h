@@ -151,6 +151,9 @@ class WebhookDispatcher {
   // lifecycle/network locks.
   void setControlCritical(bool active);
   void setScaleConnecting(bool active);
+  // Called by the low-priority network manager. Never call from control/BLE:
+  // esp_http_client_cancel_request may wait while it tears down its socket.
+  void serviceAbort();
 
  private:
   struct QueuedWebhook {
@@ -183,6 +186,16 @@ class WebhookDispatcher {
   char *payload_ = nullptr;
   std::atomic<bool> controlCritical_{false};
   std::atomic<bool> scaleConnecting_{false};
+  std::atomic<bool> abortRequested_{false};
+  // Latched per active perform so a short critical pulse still cancels after
+  // the level gate has cleared, including cancel_request's reconnect event.
+  std::atomic<bool> cancelActive_{false};
+  // Opaque here so the header does not expose esp_http_client internals.
+  // mux_ protects publication/lifetime while the network task cancels a
+  // perform owned by the webhook task.
+  void *activeClient_ = nullptr;
+  uint8_t activeClientUsers_ = 0;
+  bool cancelInProgress_ = false;
 };
 
 #endif
