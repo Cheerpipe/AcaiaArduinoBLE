@@ -99,12 +99,6 @@ a commercial kit. You still need to know what to wire and how. See the
 
 ### Roadmap and safety boundaries
 
-**Webhooks.** Admin can configure asynchronous HTTP-only webhooks for brew
-state, first drop, and the final shot result (including time, weight, and stop
-detail). Delivery uses a bounded low-priority queue with short timeouts and no
-retries, so it never blocks the control loop or BLE. These notifications are
-event-based; they are not a persistent connection or remote-control interface.
-
 **Not planned — MQTT or remote shot start.** MQTT and other persistent
 HTTP/socket-based communication mechanisms are deliberately out of scope.
 The firmware will also not provide a way to start a shot remotely. An espresso
@@ -233,6 +227,13 @@ Finished shots are logged in the Web UI with goal, actual weight, duration,
 flow, first drop, cut type, and stop detail. Export CSV or clear the log from
 the same view. See [Shot history](docs/features/shot-history.md).
 
+### Webhooks
+
+Send brew-state, first-drop, and final-shot events to a local HTTP endpoint.
+They are a simple way to bring the extraction into Home Assistant without
+giving anything remote control over the machine. See
+[Webhooks with Home Assistant](docs/features/home-assistant-webhooks.md).
+
 ### Presets
 
 Brew recipes live in presets (factory **Single** and **Double**, plus custom
@@ -310,6 +311,7 @@ claim the Web UI to save your home Wi-Fi. Step-by-step notes are in
 - [Alerts](docs/alerts.md)
 - [Quick rinse](docs/settings/quick-rinse.md)
 - [Shot history](docs/features/shot-history.md)
+- [Webhooks with Home Assistant](docs/features/home-assistant-webhooks.md)
 - [Presets](docs/features/presets.md)
 
 **Technical**
