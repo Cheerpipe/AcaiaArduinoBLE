@@ -5,6 +5,104 @@
 #include "EspressoScaleBLE.h"
 #include <ArduinoBLE.h>
 
+#if defined(ESP32) && !defined(SHOT_STOPPER_HOST_TEST)
+#ifdef LOG_LOCAL_LEVEL
+#undef LOG_LOCAL_LEVEL
+#endif
+#define LOG_LOCAL_LEVEL ESP_LOG_DEBUG
+#include <esp_log.h>
+
+// The firmware provides this bridge when EspressoScaleBLE is linked into Shot
+// Stopper. Keep it weak so the library stays usable by other Arduino projects.
+extern "C" void shotStopperScaleLog(const char *message) __attribute__((weak));
+
+// EspressoScaleBLE used to build log lines through several Serial.print()
+// calls. Keep its public debug switch, but emit complete ESP-IDF log lines so
+// concurrent tasks cannot interleave fragments on USB.
+class EspressoScaleLogStream {
+ public:
+  void print(const char *value) { append(value); }
+  void print(char value) {
+    char text[2] = {value, '\0'};
+    append(text);
+  }
+  void print(const String &value) { append(value.c_str()); }
+  void print(int value) { appendNumber(static_cast<long>(value), 10); }
+  void print(unsigned int value) { appendUnsigned(value, 10); }
+  void print(long value) { appendNumber(value, 10); }
+  void print(unsigned long value) { appendUnsigned(value, 10); }
+  void print(uint8_t value) { appendUnsigned(value, 10); }
+  void print(int value, int base) { appendNumber(value, base); }
+  void print(unsigned int value, int base) { appendUnsigned(value, base); }
+  void print(uint8_t value, int base) { appendUnsigned(value, base); }
+  void println() { flush(); }
+  void println(int value, int base) {
+    print(value, base);
+    flush();
+  }
+  void println(unsigned int value, int base) {
+    print(value, base);
+    flush();
+  }
+  void println(uint8_t value, int base) {
+    print(value, base);
+    flush();
+  }
+  template <typename T>
+  void println(const T &value) {
+    print(value);
+    flush();
+  }
+
+ private:
+  void append(const char *value) {
+    if (value == nullptr || used_ >= sizeof(line_) - 1) {
+      return;
+    }
+    const size_t remaining = sizeof(line_) - used_;
+    const int written = snprintf(line_ + used_, remaining, "%s", value);
+    if (written > 0) {
+      used_ += static_cast<size_t>(written) < remaining
+                   ? static_cast<size_t>(written)
+                   : remaining - 1;
+    }
+  }
+  void appendNumber(long value, int base) {
+    char text[24] = {};
+    if (base == HEX) {
+      snprintf(text, sizeof(text), "%lX", static_cast<unsigned long>(value));
+    } else {
+      snprintf(text, sizeof(text), "%ld", value);
+    }
+    append(text);
+  }
+  void appendUnsigned(unsigned long value, int base) {
+    char text[24] = {};
+    if (base == HEX) {
+      snprintf(text, sizeof(text), "%lX", value);
+    } else {
+      snprintf(text, sizeof(text), "%lu", value);
+    }
+    append(text);
+  }
+  void flush() {
+    if (shotStopperScaleLog != nullptr) {
+      shotStopperScaleLog(line_);
+    } else {
+      esp_log_write(ESP_LOG_DEBUG, "scale.ble", "%s", line_);
+    }
+    used_ = 0;
+    line_[0] = '\0';
+  }
+  char line_[192] = {};
+  size_t used_ = 0;
+};
+
+static EspressoScaleLogStream espressoScaleLog;
+#undef Serial
+#define Serial espressoScaleLog
+#endif
+
 #if defined(ESP32) && __has_include("esp32-hal-alloc-ble-mem.h")
 #include "esp32-hal-alloc-ble-mem.h"
 #endif

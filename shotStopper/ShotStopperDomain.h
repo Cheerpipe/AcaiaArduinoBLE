@@ -63,7 +63,7 @@ constexpr uint32_t SERIAL_BAUD = 115200;
 // after staOpen). V2 names that byte staWifiSleep without growing the blob.
 // Bump and add a migration when the blob layout changes
 // (see ShotStopperSettingsMigrate.h).
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 6;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 7;
 // Rinse clock default. Detection window default is DEFAULT_RINSE_GESTURE_MS
 // (machine-owned, ShotStopperMachineTypes.h).
 constexpr uint32_t DEFAULT_RINSE_DURATION_MS = 4000;
@@ -663,8 +663,10 @@ struct RuntimeConfig {
   // Reuses the legacy avoidBbwShotWithoutScale byte: false=OFF, true=WARN_ONCE.
   uint8_t noScaleBbwMode = static_cast<uint8_t>(NoScaleBbwMode::WARN_ONCE);
   uint32_t lastShotCooldownMs = DEFAULT_LAST_SHOT_COOLDOWN_MS;
-  // USB debug spew (paddle/machine circuit/Wi-Fi traces). CLI replies stay independent.
-  bool serialDebugOutput = false;
+  // Minimum level sent to the ESP-IDF serial backend. NONE is off; CLI
+  // request/reply traffic remains independent. V7 reuses the old serial-debug
+  // boolean byte, preserving the V6 persisted record size.
+  uint8_t serialLogLevel = static_cast<uint8_t>(LogLevel::NONE);
   // Minimum level retained in the RAM debug ring (WebUI Log). NONE disables.
   uint8_t ringRetainLogLevel = static_cast<uint8_t>(LogLevel::NONE);
   // Momentary Switch timings packed to keep NVS size. 0 = compiled default
@@ -1258,6 +1260,9 @@ inline ConfigValidationError validateRuntimeConfig(
       static_cast<uint8_t>(LogLevel::NONE)) {
     return ConfigValidationError::RING_RETAIN_LOG_LEVEL;
   }
+  if (config.serialLogLevel > static_cast<uint8_t>(LogLevel::NONE)) {
+    return ConfigValidationError::RING_RETAIN_LOG_LEVEL;
+  }
   if (!validPaddleMode(config.paddleMode)) {
     return ConfigValidationError::PADDLE_MODE;
   }
@@ -1777,13 +1782,11 @@ inline bool isCliNetworkAction(WebCommandType type) {
 }
 
 inline LogLevel serialLogLevelFromRuntime(const RuntimeConfig &config) {
-  if (!config.serialDebugOutput) {
-    return LogLevel::NONE;
-  }
-  if (config.ringRetainLogLevel == static_cast<uint8_t>(LogLevel::DEBUG)) {
-    return LogLevel::DEBUG;
-  }
-  return LogLevel::INFO;
+  return static_cast<LogLevel>(config.serialLogLevel);
+}
+
+inline void setSerialLogLevel(RuntimeConfig &config, LogLevel level) {
+  config.serialLogLevel = static_cast<uint8_t>(level);
 }
 
 enum class CommandResultState : uint8_t {
@@ -2297,7 +2300,10 @@ enum class DebugCode : uint8_t {
   SCALE_SCAN_WAITING,
   SCALE_GATT_CONNECTING,
   SCALE_CONNECT_ATTEMPT_FAILED,
-  SCALE_CONNECT_FAILED
+  SCALE_CONNECT_FAILED,
+  // A bounded message emitted by the application logger. This exists for
+  // legacy diagnostics whose values cannot be represented by two integers.
+  LOG_TEXT
 };
 
 // argument1 for SCALE_SCAN_STARTED / SCALE_GATT_CONNECTING.
@@ -2348,6 +2354,7 @@ struct DebugEvent {
   DebugCode code = DebugCode::STATE_TRANSITION;
   int32_t argument1 = 0;
   int32_t argument2 = 0;
+  char text[192] = {};
 };
 
 class DebugRingBuffer {
@@ -2364,7 +2371,7 @@ class DebugRingBuffer {
 
   void add(uint32_t atMs, uint32_t wallSec, LogLevel level,
            DebugCategory category, DebugCode code, int32_t argument1 = 0,
-           int32_t argument2 = 0) {
+           int32_t argument2 = 0, const char *text = nullptr) {
     if (count_ == DEBUG_EVENT_CAPACITY) {
       ++overwritten_;
     } else {
@@ -2382,6 +2389,9 @@ class DebugRingBuffer {
     event.code = code;
     event.argument1 = argument1;
     event.argument2 = argument2;
+    if (text != nullptr) {
+      copyCString(event.text, sizeof(event.text), text);
+    }
     writeIndex_ = (writeIndex_ + 1) % DEBUG_EVENT_CAPACITY;
   }
 
@@ -2633,6 +2643,7 @@ inline const char *bootSubsystemName(int32_t subsystem) {
 
 inline const char *debugCodeName(DebugCode code) {
   switch (code) {
+    case DebugCode::LOG_TEXT: return "log text";
     case DebugCode::ACTIVATOR_ON: return "activator on";
     case DebugCode::ACTIVATOR_OFF: return "activator off";
     case DebugCode::RELAY_CLOSED: return "machine circuit closed";

@@ -132,6 +132,14 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
         sizeof(settings)) {
       return false;
     }
+    if (settings.schemaVersion == 6) {
+      PersistedSettings migrated = {};
+      if (!migratePersistedSettingsFromV6(settings, migrated)) {
+        return false;
+      }
+      settings = migrated;
+      return validPersistedSettings(settings);
+    }
     if (validPersistedSettings(settings)) {
       return true;
     }

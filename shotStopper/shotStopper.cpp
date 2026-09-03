@@ -35,6 +35,14 @@
   Released under the GNU Affero General Public License v3.0.
 */
 
+#if !defined(SHOT_STOPPER_HOST_TEST)
+#ifdef LOG_LOCAL_LEVEL
+#undef LOG_LOCAL_LEVEL
+#endif
+#define LOG_LOCAL_LEVEL ESP_LOG_DEBUG
+#include <esp_log.h>
+#endif
+
 #if defined(SHOT_STOPPER_HOST_TEST)
 #include "tests/shot_stopper_host_stubs.h"
 #else
@@ -499,6 +507,8 @@ TaskProfiler taskProfiler;
 bool platformClockReady = false;
 bool persistenceReady = false;
 bool firmwareInitializationComplete = false;
+bool serialLogSinkInstalled = false;
+bool serialLogSinkEnabled = false;
 
 bool beginMaintenanceLease(const WebCommand &networkCommand,
                            bool applyRuntimeOnSuccess);
@@ -573,9 +583,105 @@ uint32_t elapsedMs(uint32_t sinceMs) {
   return static_cast<uint32_t>(millis() - sinceMs);
 }
 
+const char *espLogTag(DebugCategory category) {
+  switch (category) {
+    case DebugCategory::ACTIVATOR: return "ss.activator";
+    case DebugCategory::RELAY: return "ss.relay";
+    case DebugCategory::STATE: return "ss.state";
+    case DebugCategory::SCALE: return "ss.scale";
+    case DebugCategory::CONFIG: return "ss.config";
+    case DebugCategory::NETWORK: return "ss.network";
+    case DebugCategory::SECURITY: return "ss.security";
+    case DebugCategory::WEB: return "ss.web";
+    case DebugCategory::BOOT: return "ss.boot";
+    case DebugCategory::SYSTEM: return "ss.system";
+  }
+  return "ss.unknown";
+}
+
+#if !defined(SHOT_STOPPER_HOST_TEST)
+esp_log_level_t espLogLevel(LogLevel level) {
+  switch (level) {
+    // ESP-IDF has no critical/fatal level. Keep that distinction in the
+    // application record and mark it in the emitted message.
+    case LogLevel::CRITICAL:
+    case LogLevel::ERROR: return ESP_LOG_ERROR;
+    case LogLevel::WARNING: return ESP_LOG_WARN;
+    case LogLevel::INFO: return ESP_LOG_INFO;
+    case LogLevel::DEBUG: return ESP_LOG_DEBUG;
+    case LogLevel::NONE: return ESP_LOG_NONE;
+  }
+  return ESP_LOG_NONE;
+}
+
+int shotStopperEspLogVprintf(const char *format, va_list args) {
+  if (!serialLogSinkEnabled || format == nullptr) {
+    return 0;
+  }
+  // esp_log may invoke this callback concurrently. The buffer is local and
+  // HWCDC serializes write(), satisfying the callback's re-entrancy contract.
+  char line[384] = {};
+  va_list copy;
+  va_copy(copy, args);
+  const int formatted = vsnprintf(line, sizeof(line), format, copy);
+  va_end(copy);
+  if (formatted <= 0) {
+    return formatted;
+  }
+  size_t length = static_cast<size_t>(formatted);
+  if (length >= sizeof(line)) {
+    length = sizeof(line) - 1;
+  }
+  return static_cast<int>(Serial.write(
+      reinterpret_cast<const uint8_t *>(line), length));
+}
+
+void installEspLogSink() {
+  if (!serialLogSinkInstalled) {
+    (void)esp_log_set_vprintf(shotStopperEspLogVprintf);
+    serialLogSinkInstalled = true;
+  }
+}
+
+void configureEspLogRuntime() {
+  const esp_log_level_t level = espLogLevel(serialLogLevel);
+  static const char *const tags[] = {
+      "ss.activator", "ss.relay", "ss.state", "ss.scale", "ss.config",
+      "ss.network", "ss.security", "ss.web", "ss.boot", "ss.system"};
+  for (const char *tag : tags) {
+    esp_log_level_set(tag, level);
+  }
+  serialLogSinkEnabled = serialLogLevel != LogLevel::NONE;
+}
+#else
+void installEspLogSink() {}
+void configureEspLogRuntime() {}
+#endif
+
+void emitEspLog(LogLevel level, DebugCategory category, const char *message) {
+  if (message == nullptr || level == LogLevel::NONE) {
+    return;
+  }
+#if !defined(SHOT_STOPPER_HOST_TEST)
+  const char *tag = espLogTag(category);
+  const char *criticalPrefix = level == LogLevel::CRITICAL ? "[CRITICAL] " : "";
+  // esp_log_write performs the runtime tag/level check. Unlike the ESP_LOGx
+  // macros it is not compiled out by Arduino cores that force a lower local
+  // level before application sources are included.
+  esp_log_write(espLogLevel(level), tag, "%s%s", criticalPrefix, message);
+#else
+  (void)category;
+  Serial.println(message);
+#endif
+}
+
 void formatDebugEventMessage(const DebugEvent &event, char *message,
                              size_t capacity) {
   if (message == nullptr || capacity == 0) {
+    return;
+  }
+  if (event.code == DebugCode::LOG_TEXT) {
+    copyCString(message, capacity, event.text);
     return;
   }
   if (event.code == DebugCode::BOOT_BANNER) {
@@ -618,34 +724,66 @@ void formatDebugEventMessage(const DebugEvent &event, char *message,
 void writeSerialLogLine(const DebugEvent &event) {
   char message[128] = {};
   formatDebugEventMessage(event, message, sizeof(message));
-  char line[192] = {};
-  const uint32_t wholeSec = event.atMs / 1000U;
-  const uint32_t fracMs = event.atMs % 1000U;
-  snprintf(line, sizeof(line), "%c (%lu.%03lu)[%s] %s",
-           logLevelLetter(event.level),
-           static_cast<unsigned long>(wholeSec),
-           static_cast<unsigned long>(fracMs),
-           debugCategoryName(event.category), message);
-  Serial.println(line);
+  emitEspLog(event.level, event.category, message);
 }
 
-// Ad-hoc Serial diagnostics honor serialLogLevel. Structured events already go
-// through writeSerialLogLine; prefer addDebugEvent for facts that have a code.
-void serialTrace(LogLevel level, const char *message) {
+void maybeReportLogOverrunLocked();
+
+void logText(LogLevel level, DebugCategory category, const char *message) {
   if (message == nullptr || !logLevelAtMost(level, serialLogLevel)) {
-    return;
+    // Serial and ring are independently configurable.
+    if (!logLevelAtMost(level, ringRetainLogLevel)) {
+      return;
+    }
   }
-  if (session.active || circuitClosed) {
-    return;
+  const uint32_t atMs = millis();
+  const uint32_t wallSec = g_wallClock.nowUtcSec(atMs);
+  const bool toSerial = logLevelAtMost(level, serialLogLevel);
+  const bool toRing = logLevelAtMost(level, ringRetainLogLevel);
+  if (toRing) {
+    bool ringLocked = false;
+#if defined(SHOT_STOPPER_HOST_TEST)
+    portENTER_CRITICAL(&debugLogMux);
+    ringLocked = true;
+#else
+    ringLocked =
+        portTRY_ENTER_CRITICAL(&debugLogMux, portMUX_TRY_LOCK) == pdPASS;
+#endif
+    if (ringLocked) {
+      debugLog.add(atMs, wallSec, level, category, DebugCode::LOG_TEXT, 0, 0,
+                   message);
+      maybeReportLogOverrunLocked();
+      __atomic_store_n(&debugLogDroppedSnapshot, debugLog.overwritten(),
+                       __ATOMIC_RELAXED);
+      portEXIT_CRITICAL(&debugLogMux);
+    } else {
+      (void)__atomic_add_fetch(&debugLogContentionDropped, 1U,
+                               __ATOMIC_RELAXED);
+    }
   }
-  Serial.println(message);
+  if (toSerial && !session.active && !circuitClosed) {
+    emitEspLog(level, category, message);
+  }
+}
+
+// Ad-hoc diagnostics are application logs too: retain them in the WebUI ring
+// and forward them to esp_log. Keep this compatibility wrapper for existing
+// call sites while they are gradually made category-specific.
+void serialTrace(LogLevel level, const char *message) {
+  logText(level, DebugCategory::SYSTEM, message);
+}
+
+void serialTraceCategory(LogLevel level, DebugCategory category,
+                         const char *message) {
+  logText(level, category, message);
+}
+
+extern "C" void shotStopperScaleLog(const char *message) {
+  serialTraceCategory(LogLevel::DEBUG, DebugCategory::SCALE, message);
 }
 
 void serialTracef(LogLevel level, const char *fmt, ...) {
-  if (fmt == nullptr || !logLevelAtMost(level, serialLogLevel)) {
-    return;
-  }
-  if (session.active || circuitClosed) {
+  if (fmt == nullptr) {
     return;
   }
   char line[192] = {};
@@ -653,7 +791,20 @@ void serialTracef(LogLevel level, const char *fmt, ...) {
   va_start(args, fmt);
   vsnprintf(line, sizeof(line), fmt, args);
   va_end(args);
-  Serial.println(line);
+  logText(level, DebugCategory::SYSTEM, line);
+}
+
+void serialTraceCategoryf(LogLevel level, DebugCategory category,
+                          const char *fmt, ...) {
+  if (fmt == nullptr) {
+    return;
+  }
+  char line[192] = {};
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(line, sizeof(line), fmt, args);
+  va_end(args);
+  logText(level, category, line);
 }
 
 void maybeReportLogOverrunLocked() {
@@ -3970,6 +4121,7 @@ void commitLiveRuntimeConfig(const RuntimeConfig &composed, int32_t reasonBits) 
   serialLogLevel = serialLogLevelFromRuntime(runtimeConfig);
   ringRetainLogLevel =
       static_cast<LogLevel>(runtimeConfig.ringRetainLogLevel);
+  configureEspLogRuntime();
   addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED,
                 static_cast<int32_t>(runtimeConfig.revision));
   requestBookooSilenceIfConfigured();
@@ -4400,7 +4552,7 @@ void processWebCommand(const WebCommand &command) {
       candidate.scaleMacCacheMode = command.config.scaleMacCacheMode;
       candidate.noScaleBbwMode = command.config.noScaleBbwMode;
       candidate.lastShotCooldownMs = command.config.lastShotCooldownMs;
-      candidate.serialDebugOutput = command.config.serialDebugOutput;
+      candidate.serialLogLevel = command.config.serialLogLevel;
       candidate.ringRetainLogLevel = command.config.ringRetainLogLevel;
       candidate.showDiagnosticPage = command.config.showDiagnosticPage;
       // Session Manual switch may arrive via brewByWeight on Home; keep as timerOnly.
@@ -5536,7 +5688,10 @@ void serialCliApplyDebugPersist(bool serialOn, LogLevel ringLevel,
     serialCliReply(okMessage);
   }
   RuntimeConfig candidate = runtimeConfig;
-  candidate.serialDebugOutput = serialOn;
+  setSerialLogLevel(candidate,
+                    serialOn ? (ringLevel == LogLevel::DEBUG ? LogLevel::DEBUG
+                                                              : LogLevel::INFO)
+                             : LogLevel::NONE);
   candidate.ringRetainLogLevel = static_cast<uint8_t>(ringLevel);
   ++candidate.revision;
   if (candidate.revision == 0) {
@@ -5634,7 +5789,7 @@ void dispatchSerialCliRequest(SerialCliRequest &request) {
         serialCliReply("OK serial debug off");
       }
       RuntimeConfig candidate = runtimeConfig;
-      candidate.serialDebugOutput = enable;
+      setSerialLogLevel(candidate, enable ? LogLevel::INFO : LogLevel::NONE);
       ++candidate.revision;
       if (candidate.revision == 0) {
         candidate.revision = 1;
@@ -5652,7 +5807,7 @@ void dispatchSerialCliRequest(SerialCliRequest &request) {
       serialCliApplyDebugPersist(false, LogLevel::NONE, "OK debug off");
       return;
     case SerialCliVerb::DEBUG_STATUS:
-      serialCliPrintDebugStatus(runtimeConfig.serialDebugOutput, serialLogLevel,
+      serialCliPrintDebugStatus(serialLogLevel != LogLevel::NONE, serialLogLevel,
                                 ringRetainLogLevel);
       return;
     case SerialCliVerb::WIFI_CONNECT:
@@ -5909,9 +6064,11 @@ void setup() {
   if (SHOT_STOPPER_ENABLE_JTAG == 1) {
     usbSerialEnableSource = UsbSerialEnableSource::COMPILE_FLAG;
     Serial.begin(SERIAL_BAUD);
+    installEspLogSink();
   } else if (usbConsoleJumperPresent()) {
     usbSerialEnableSource = UsbSerialEnableSource::JUMPER;
     Serial.begin(SERIAL_BAUD);
+    installEspLogSink();
   }
 
   persistenceReady = EEPROM.begin(EEPROM_SIZE);
@@ -5987,6 +6144,7 @@ void setup() {
   serialLogLevel = serialLogLevelFromRuntime(runtimeConfig);
   ringRetainLogLevel =
       static_cast<LogLevel>(runtimeConfig.ringRetainLogLevel);
+  configureEspLogRuntime();
   publishRecipeState();
 
   logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_RESET_REASON,

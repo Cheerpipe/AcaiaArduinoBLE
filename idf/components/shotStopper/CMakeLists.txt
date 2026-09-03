@@ -27,6 +27,7 @@ idf_component_register(
     esp_http_client
     esp_partition
     esp_hw_support
+    log
     heap
     soc
     # WiFiGeneric.h includes this even when CONFIG_ARDUINO_SELECTIVE_WiFiProv

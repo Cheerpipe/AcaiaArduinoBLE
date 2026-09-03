@@ -2715,17 +2715,17 @@ if (!/<fieldset[^>]*><legend>Log<\/legend>/.test(html) ||
     html.indexOf('id="ringRetainLogLevel"') < html.indexOf('id="view-diagnostic"') ||
     html.indexOf('id="ringRetainLogLevel"') >
         html.indexOf('</section>', html.indexOf('id="view-diagnostic"')) ||
-    html.indexOf('id="serialDebugOutput"') < html.indexOf('id="view-diagnostic"') ||
-    html.indexOf('id="serialDebugOutput"') >
+    html.indexOf('id="serialLogLevel"') < html.indexOf('id="view-diagnostic"') ||
+    html.indexOf('id="serialLogLevel"') >
         html.indexOf('</section>', html.indexOf('id="view-diagnostic"')) ||
-    html.indexOf('id="ringRetainLogLevel"') > html.indexOf('id="serialDebugOutput"') ||
-    !html.includes('id="serialDebugOutput" class="mutable"') ||
+    html.indexOf('id="ringRetainLogLevel"') > html.indexOf('id="serialLogLevel"') ||
+    !html.includes('id="serialLogLevel" class="mutable"') ||
     !html.includes('id="ringRetainLogLevel" class="mutable"') ||
     html.includes('id="navLogWrap"') ||
     ui.includes('function ringLogEnabled(') ||
     ui.includes('function updateLogNavVisibility(') ||
     !html.includes('<hr class="logSep">') ||
-    html.indexOf('<hr class="logSep">') < html.indexOf('id="serialDebugOutput"') ||
+    html.indexOf('<hr class="logSep">') < html.indexOf('id="serialLogLevel"') ||
     html.indexOf('<hr class="logSep">') > html.indexOf('id="logLevelFilter"') ||
     !css.includes('.logSep') ||
     html.includes('data-route="/debug"') ||
@@ -2814,9 +2814,9 @@ if (!(ui.includes("if($('serialDebugOutput'))$('serialDebugOutput').checked=!!c.
         firmware.indexOf('BOOT_RESET_REASON') ||
     firmware.indexOf('ringRetainLogLevel =',
                      firmware.indexOf('persistenceReady = EEPROM.begin')) < 0 ||
-    !ui.includes("serialDebugOutput:!!$('serialDebugOutput').checked") ||
+    !ui.includes("serialLogLevel:$('serialLogLevel').value") ||
     !ui.includes("ringRetainLogLevel:$('ringRetainLogLevel').value||'none'") ||
-    !ui.includes("serialDebugOutput').onchange") ||
+    !ui.includes("serialLogLevel').onchange") ||
     !ui.includes("ringRetainLogLevel').onchange") ||
     !ui.includes('baseRevision') ||
     !network.includes('ringRetainLogLevel') ||

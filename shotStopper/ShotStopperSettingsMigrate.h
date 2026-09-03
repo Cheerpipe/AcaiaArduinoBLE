@@ -2,7 +2,8 @@
 
 // Settings schema migrations.
 //
-// Current on-disk schema is CONFIG_SCHEMA_VERSION (V6). V6 adds the webhook
+// Current on-disk schema is CONFIG_SCHEMA_VERSION (V7). V7 replaces the
+// serial-debug boolean with an explicit serial ESP_LOG level. V6 adds the webhook
 // delivery deferral setting. V5 adds the public Diagnostic-page setting. V4 adds HTTP webhook
 // settings. V3 adds the fixed-size
 // Bullseye melody record. V1/V2 are both 1912 bytes; V1 has unnamed padding
@@ -32,6 +33,27 @@ inline void ensurePersistedPresetBank(PersistedSettings &settings) {
   }
   ensureShotPresetBank(settings.presets, settings.runtime.retareWindowMs,
                        settings.runtime.autoRetare);
+}
+
+// V6 and V7 have the same physical layout. The byte at serialLogLevel was a
+// boolean in V6, so migrate true to INFO (the old effective default) instead
+// of interpreting it as the numeric ERROR enum value.
+inline bool migratePersistedSettingsFromV6(const PersistedSettings &v6,
+                                           PersistedSettings &out) {
+  if (v6.magic != PERSISTED_SETTINGS_MAGIC || v6.schemaVersion != 6 ||
+      v6.structureSize != sizeof(PersistedSettings) ||
+      v6.checksum != persistedSettingsChecksum(v6)) {
+    return false;
+  }
+  out = v6;
+  setSerialLogLevel(out.runtime, v6.runtime.serialLogLevel != 0
+                                     ? LogLevel::INFO
+                                     : LogLevel::NONE);
+  out.schemaVersion = CONFIG_SCHEMA_VERSION;
+  out.structureSize = sizeof(PersistedSettings);
+  out.checksum = 0;
+  out.checksum = persistedSettingsChecksum(out);
+  return true;
 }
 
 // V1 on-disk layout: identical to V2 except it has no staWifiSleep after

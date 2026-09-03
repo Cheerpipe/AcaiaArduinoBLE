@@ -1906,7 +1906,7 @@ void w01_default_runtime_configuration_is_valid() {
   CHECK(fabsf(config.cupRemovedWeightG - DEFAULT_CUP_REMOVED_WEIGHT_G) < 0.001f);
   CHECK(config.lastShotCooldownMs == DEFAULT_LAST_SHOT_COOLDOWN_MS);
   CHECK(config.dripDelayMs == DEFAULT_DRIP_DELAY_MS);
-  CHECK(!config.serialDebugOutput);
+  CHECK(serialLogLevelFromRuntime(config) == LogLevel::NONE);
   CHECK(config.ringRetainLogLevel == static_cast<uint8_t>(LogLevel::NONE));
   CHECK(config.paddleMode == static_cast<uint8_t>(PaddleMode::NATURAL));
   CHECK(runtimeStopPulseMs(config) == COMPILED_STOP_PULSE_MS);
@@ -8442,7 +8442,7 @@ void sc09_serial_debug_toggles_without_ready() {
   reachReadyFromBoot();
   startCycle();
   CHECK(session.active);
-  CHECK(!runtimeConfig.serialDebugOutput);
+  CHECK(serialLogLevelFromRuntime(runtimeConfig) == LogLevel::NONE);
   CHECK(serialLogLevel == LogLevel::NONE);
   Serial.tx.clear();
   addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED);
@@ -8451,7 +8451,7 @@ void sc09_serial_debug_toggles_without_ready() {
   CHECK(!serialTxContains("Scale name scan: no advertisement"));
   feedSerial("SERIAL_DEBUG_ON\n");
   CHECK(serialTxContains("OK serial debug on"));
-  CHECK(runtimeConfig.serialDebugOutput);
+  CHECK(serialLogLevelFromRuntime(runtimeConfig) == LogLevel::INFO);
   CHECK(serialLogLevel == LogLevel::INFO);
   CHECK(runtimePersistPending);
   Serial.tx.clear();
@@ -8470,7 +8470,7 @@ void sc09_serial_debug_toggles_without_ready() {
   CHECK(sawAccepted);
   feedSerial("SERIAL_DEBUG_OFF\n");
   CHECK(serialTxContains("OK serial debug off"));
-  CHECK(!runtimeConfig.serialDebugOutput);
+  CHECK(serialLogLevelFromRuntime(runtimeConfig) == LogLevel::NONE);
   CHECK(serialLogLevel == LogLevel::NONE);
   Serial.tx.clear();
   addDebugEvent(DebugCategory::CONFIG, DebugCode::CONFIG_ACCEPTED);
@@ -8551,7 +8551,7 @@ void sc13_debug_full_and_off_during_cycle() {
   Serial.tx.clear();
   feedSerial("DEBUG_FULL\n");
   CHECK(serialTxContains("OK debug full"));
-  CHECK(runtimeConfig.serialDebugOutput);
+  CHECK(serialLogLevelFromRuntime(runtimeConfig) == LogLevel::DEBUG);
   CHECK(runtimeConfig.ringRetainLogLevel ==
         static_cast<uint8_t>(LogLevel::DEBUG));
   CHECK(serialLogLevel == LogLevel::DEBUG);
@@ -8571,7 +8571,7 @@ void sc13_debug_full_and_off_during_cycle() {
   CHECK(sawConnecting);
   feedSerial("DEBUG_OFF\n");
   CHECK(serialTxContains("OK debug off"));
-  CHECK(!runtimeConfig.serialDebugOutput);
+  CHECK(serialLogLevelFromRuntime(runtimeConfig) == LogLevel::NONE);
   CHECK(runtimeConfig.ringRetainLogLevel ==
         static_cast<uint8_t>(LogLevel::NONE));
   CHECK(serialLogLevel == LogLevel::NONE);

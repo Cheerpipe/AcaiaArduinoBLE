@@ -81,6 +81,8 @@ CONFIG_HTTPD_MAX_URI_LEN=128
 # Less console IRQ time on the control cores.
 CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 CONFIG_LOG_DEFAULT_LEVEL=2
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+CONFIG_LOG_MAXIMUM_LEVEL=4
 
 # USB Serial/JTAG console stays off so the PHY is not started before setup().
 # App CDC starts only when GPIO4 is jumpered to GND at boot (HWCDC begin),

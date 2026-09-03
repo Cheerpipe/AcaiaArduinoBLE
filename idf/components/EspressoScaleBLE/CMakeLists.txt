@@ -16,5 +16,5 @@ idf_component_register(
     "${ESPRESSO_SCALE_BLE_DIR}/src/protocols/Varia.cpp"
     "${ESPRESSO_SCALE_BLE_DIR}/src/protocols/Eureka.cpp"
   INCLUDE_DIRS "${ESPRESSO_SCALE_BLE_DIR}/src"
-  REQUIRES arduino-esp32 ArduinoBLE
+  REQUIRES arduino-esp32 ArduinoBLE log
 )
