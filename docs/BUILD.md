@@ -2,8 +2,8 @@
 
 Step-by-step from a git clone to a flashable firmware image.
 
-**Official supported path: ESP-IDF only.** Arduino / arduino-cli scripts still
-exist in the tree for transition; they are **not supported**. See
+**Official supported path: ESP-IDF with native NimBLE only.** The short script
+names remain as compatibility aliases to their `*-idf` counterparts. See
 [Build scripts](SCRIPTS.md).
 
 This page documents **macOS** and **Linux**. The maintainer develops on
@@ -97,31 +97,12 @@ If `idf.py --version` is not 5.5.x, the Shot Stopper scripts will stop.
 `./scripts/build-idf` sources `export.sh` from `IDF_PATH` or
 `$HOME/esp/esp-idf` when needed.
 
-## 4. BLE backend during the phase-5 gate
+## 4. BLE backend
 
-ArduinoBLE remains the temporary default and rollback until the NimBLE soak,
-OTA/reboot and beta gates pass. A default IDF build clones ArduinoBLE **2.1.0**
-into the IDF tree and runs `./scripts/patch_arduinoble.sh`; the patch is
-idempotent. Set `ARDUINO_BLE_HOME` only if ArduinoBLE is not in the default
-path.
-
-Build the phase-5 NimBLE release candidate explicitly:
-
-```sh
-./scripts/build-idf-nimble --arch n16r8
-```
-
-For the allocator qualification only, build the isolated internal-memory
-variant. The release candidate uses the external allocator:
-
-```sh
-SHOTSTOPPER_BLE_BACKEND=nimble SHOTSTOPPER_NIMBLE_ALLOCATOR=internal \
-  ./scripts/build-idf --arch n16r8
-```
-
-These write to `build-idf/<arch>-nimble` and
-`build-idf/<arch>-nimble-internal`; neither overwrites the ArduinoBLE rollback
-tree.
+Native ESP-IDF NimBLE is the only production backend. The qualified profile
+uses the external allocator and the fixed parameters in
+`idf/sdkconfig.defaults.nimble`; there is no runtime/build selector and no
+ArduinoBLE download or patch step.
 
 ## 5. Build
 
@@ -242,26 +223,11 @@ the firmware it already had. USB `./scripts/flash-idf` is always the way out.
 
 Full command tables: [Build scripts](SCRIPTS.md).
 
-## Arduino / arduino-cli (unsupported)
+## Compatibility aliases
 
-`./scripts/build` and related helpers remain for transition only. Prebuilt
-Arduino-ESP32 libraries do not move large buffers to PSRAM the way the IDF
-project does. **Do not use them for production firmware.**
-
-If you still inspect that path:
-
-```sh
-arduino-cli version
-arduino-cli config init
-arduino-cli config add board_manager.additional_urls \
-  https://espressif.github.io/arduino-esp32/package_esp32_index.json
-arduino-cli core update-index
-arduino-cli core install esp32:esp32@3.3.11
-arduino-cli lib install ArduinoBLE@2.1.0
-./scripts/patch_arduinoble.sh
-```
-
-Commands: [Build scripts](SCRIPTS.md).
+`./scripts/build`, `flash`, `monitor`, `ota`, `static`, `bf`, `bfm`, `bo` and
+`bsfm` execute their ESP-IDF equivalents. They do not invoke arduino-cli.
+New automation should prefer the explicit `*-idf` names.
 
 ## Optional static analysis
 

@@ -1,7 +1,5 @@
 #include "ShotStopperBleCompanionNimble.h"
 
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
-
 #include "ShotStopperBleRuntime.h"
 
 #include "esp_timer.h"
@@ -484,5 +482,3 @@ void ShotStopperBleCompanion::expirePending(uint32_t nowMs) {
 }
 
 }  // namespace shotstopper
-
-#endif

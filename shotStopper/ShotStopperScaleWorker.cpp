@@ -5,11 +5,7 @@
 #if defined(SHOT_STOPPER_HOST_TEST)
 #include "tests/shot_stopper_host_stubs.h"
 #else
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
-#include <ArduinoBLE.h>
-#else
 #include "ShotStopperBleRuntime.h"
-#endif
 #include "ShotStopperNetwork.h"
 #include "ShotStopperBleCompanion.h"
 #include "ShotStopperWatchdog.h"
@@ -74,8 +70,7 @@ namespace shotstopper {
 
 constexpr bool DEBUG = false;
 
-#if !defined(SHOT_STOPPER_HOST_TEST) && \
-    defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
+#if !defined(SHOT_STOPPER_HOST_TEST)
 void reportNimbleRuntimeHealth(bool force) {
   static bool reported = false;
   static ShotStopperBleRuntimeState previousState =
@@ -596,11 +591,8 @@ bool publishPendingScaleWeightEvent() {
 }
 
 void yieldBetweenScaleAttOps() {
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
-  BLE.poll();
-#endif
-  // Harvest notifications that arrived during a blocking ATT write so
-  // observedWeight (A→M / suspend) does not freeze while the link is up.
+  // Harvest notifications that arrived while issuing the command so observed
+  // weight (A→M / suspend) does not freeze while the link is up.
   publishPendingScaleWeightEvent();
   markScaleWorkerProgress();
   feedOrTripCurrentTaskWatchdog();
@@ -941,9 +933,6 @@ bool takeScaleCompletionBeep() {
 }
 
 void executeScaleCommand(const ScaleCommand &command) {
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
-  BLE.poll();
-#endif
   publishPendingScaleWeightEvent();
   markScaleWorkerProgress();
   switch (command.type) {
@@ -1702,13 +1691,9 @@ void scaleWorkerTask(void *) {
   }
 
 #if !defined(SHOT_STOPPER_HOST_TEST)
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
-  bleStackReady = BLE.begin();
-#else
   // The optional Companion GATT profile was registered before this start;
   // the central and peripheral roles share this one native host runtime.
   bleStackReady = shotStopperBleRuntimeStart(BLE_STACK_READY_WAIT_MS);
-#endif
   if (!bleStackReady) {
     addDebugEvent(DebugCategory::SCALE, DebugCode::INITIALIZATION_FAILED,
                   BOOT_SUBSYSTEM_BLE);
@@ -1718,17 +1703,10 @@ void scaleWorkerTask(void *) {
     vTaskDelete(nullptr);
     return;
   }
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
-  // ArduinoBLE defaults ATT operations to five seconds. Bound every central
-  // operation owned by this task so scale-staleness telemetry remains useful.
-  BLE.setTimeout(SCALE_ATT_TIMEOUT_MS);
-#endif
   ensureRfCoexBt();
   logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
           BOOT_SUBSYSTEM_BLE, 1);
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
   reportNimbleRuntimeHealth(true);
-#endif
   BleCompanionRuntimeSnapshot initialBleSnapshot;
   copyBleCompanionRuntimeSnapshot(initialBleSnapshot);
   if (bleCompanionProfileAllocated()) {
@@ -1748,14 +1726,10 @@ void scaleWorkerTask(void *) {
 #endif
 
   for (;;) {
-    // Block up to the tick budget waiting for HCI. Same 1 ms connected
-    // bound as vTaskDelay(1), but the core sleeps until a packet arrives.
+    // NimBLE owns HCI waits in its host task. Yield this worker for the
+    // selected connected/disconnected service cadence.
     const uint32_t tickDelayMs = scaleWorkerTickDelayMs();
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
-    BLE.poll(tickDelayMs);
-#else
     vTaskDelay(pdMS_TO_TICKS(tickDelayMs));
-#endif
 
     const uint32_t nowMs = millis();
     static uint32_t lastBackgroundMs = 0;
@@ -1881,8 +1855,7 @@ void scaleWorkerTask(void *) {
       telemetryAtMs = millis();
       scaleWorkerStackMinWords =
           static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
-#if !defined(SHOT_STOPPER_HOST_TEST) && \
-    defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
+#if !defined(SHOT_STOPPER_HOST_TEST)
       reportNimbleRuntimeHealth(false);
 #endif
     }
@@ -1900,8 +1873,7 @@ bool initializeScaleWorker() {
     bleCompanionResultQueue = xQueueCreate(BLE_COMPANION_RESULT_QUEUE_LENGTH,
                                            sizeof(BleCompanionResult));
   }
-#if !defined(SHOT_STOPPER_HOST_TEST) && \
-    defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
+#if !defined(SHOT_STOPPER_HOST_TEST)
   const bool companionPrepared =
       !bleCompanionProfileAllocated() ||
       (bleCompanionRequestQueue != nullptr &&
@@ -1954,9 +1926,9 @@ bool initializeScaleWorker() {
     return false;
   }
 #if !defined(SHOT_STOPPER_HOST_TEST)
-  // BLE.begin() runs on this worker. Do not start OTA/Wi-Fi until the
-  // controller has finished HCI reset: setup() continues on the same core
-  // and network_manager shares core 0 with bleTask.
+  // The native NimBLE host starts from this worker. Do not start OTA/Wi-Fi
+  // until the controller has finished HCI reset: setup() continues on the
+  // same core and network_manager shares core 0 with bleTask.
   const uint32_t bleWaitStartMs = millis();
   while (scaleWorkerTaskHandle != nullptr && !bleStackReady &&
          elapsedMs(bleWaitStartMs) < BLE_STACK_READY_WAIT_MS) {

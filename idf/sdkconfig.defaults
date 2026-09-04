@@ -143,9 +143,8 @@ CONFIG_ARDUINO_SELECTIVE_WiFi=y
 # CONFIG_ARDUINO_SELECTIVE_AsyncUDP is not set
 # CONFIG_ARDUINO_SELECTIVE_NetworkClientSecure is not set
 
-# The selected BLE host is supplied by sdkconfig.defaults.arduinoble or
-# sdkconfig.defaults.nimble. Keeping host choices out of this shared file makes
-# the two build trees reproducible and prevents an accidental mixed host.
+# The native NimBLE host configuration is supplied by
+# sdkconfig.defaults.nimble. It is the only BLE backend.
 CONFIG_BT_ENABLED=y
 CONFIG_BT_CONTROLLER_ENABLED=y
 

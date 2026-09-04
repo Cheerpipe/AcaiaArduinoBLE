@@ -1,5 +1,5 @@
-# Application firmware sources live in ../../shotStopper (shared with the
-# legacy Arduino sketch tree). This component is the ESP-IDF registration.
+# Application firmware sources live in ../../shotStopper. This component is
+# their ESP-IDF registration.
 set(SHOT_STOPPER_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../shotStopper")
 
 set(SHOT_STOPPER_SRCS
@@ -7,11 +7,8 @@ set(SHOT_STOPPER_SRCS
   "${SHOT_STOPPER_DIR}/ShotStopperScaleWorker.cpp"
   "${SHOT_STOPPER_DIR}/ShotStopperNetwork.cpp"
   "${SHOT_STOPPER_DIR}/ShotStopperOta.cpp"
-  "${SHOT_STOPPER_DIR}/ShotStopperWebhook.cpp")
-if(CONFIG_ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
-  list(APPEND SHOT_STOPPER_SRCS
-    "${SHOT_STOPPER_DIR}/ble/ShotStopperBleCompanionNimble.cpp")
-endif()
+  "${SHOT_STOPPER_DIR}/ShotStopperWebhook.cpp"
+  "${SHOT_STOPPER_DIR}/ble/ShotStopperBleCompanionNimble.cpp")
 
 idf_component_register(
   SRCS ${SHOT_STOPPER_SRCS}

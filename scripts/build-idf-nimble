@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-# Phase-5 NimBLE release-candidate build. Artifacts go to
-# build-idf/<arch>-nimble and never reuse the ArduinoBLE sdkconfig/cache.
-set -euo pipefail
-
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-export SHOTSTOPPER_BLE_BACKEND=nimble
-exec "$SCRIPT_DIR/build-idf" "$@"

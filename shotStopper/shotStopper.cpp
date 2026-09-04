@@ -47,9 +47,7 @@
 #include "tests/shot_stopper_host_stubs.h"
 #else
 #include <EspressoScaleBLE.h>
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
 #include "ShotStopperBleRuntime.h"
-#endif
 #include <EEPROM.h>
 #include <driver/gpio.h>
 #include <esp_heap_caps.h>
@@ -108,20 +106,6 @@ using namespace shotstopper;
 
 #include "ShotStopperScaleWorker.h"
 #include "ShotStopperRfCoex.h"
-
-#if !defined(SHOT_STOPPER_HOST_TEST) && \
-    defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
-// ArduinoBLE BLEHostAlloc counters (patches/ArduinoBLE-2.1.0-ble-host-psram).
-extern "C" uint32_t BLEHostAllocPsramCount(void);
-extern "C" uint32_t BLEHostAllocFallbackCount(void);
-extern "C" uint32_t BLEHostHciRxDropped(void);
-extern "C" uint32_t BLEHostHciTxDropped(void);
-#else
-static inline uint32_t BLEHostAllocPsramCount(void) { return 0; }
-static inline uint32_t BLEHostAllocFallbackCount(void) { return 0; }
-static inline uint32_t BLEHostHciRxDropped(void) { return 0; }
-static inline uint32_t BLEHostHciTxDropped(void) { return 0; }
-#endif
 
 // ---------------------------------------------------------------------------
 // User configuration
@@ -5277,11 +5261,7 @@ void publishControlStatus() {
   next.bleHostAllocFallbackCount = bleHostAllocFallbackCount;
   next.bleHostHciRxDropped = bleHostHciRxDropped;
   next.bleHostHciTxDropped = bleHostHciTxDropped;
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
   next.bleBackend = 2;
-#else
-  next.bleBackend = 1;
-#endif
   next.bleRuntimeState = bleRuntimeState;
   next.bleRuntimeLastError = bleRuntimeLastError;
   next.bleRuntimeLastResetReason = bleRuntimeLastResetReason;
@@ -5616,11 +5596,7 @@ void serialCliPrintLiveHealth() {
   dump.bleHostAllocFallbackCount = bleHostAllocFallbackCount;
   dump.bleHostHciRxDropped = bleHostHciRxDropped;
   dump.bleHostHciTxDropped = bleHostHciTxDropped;
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
   dump.bleBackend = 2;
-#else
-  dump.bleBackend = 1;
-#endif
   dump.bleRuntimeState = bleRuntimeState;
   dump.bleRuntimeLastError = bleRuntimeLastError;
   dump.bleRuntimeLastResetReason = bleRuntimeLastResetReason;
@@ -6520,11 +6496,6 @@ void loop() {
     psramSizeBytes = heap.psramTotal;
     psramFreeBytes = heap.psramFree;
     psramLargestFreeBlockBytes = heap.psramLargest;
-    bleHostAllocPsramCount = BLEHostAllocPsramCount();
-    bleHostAllocFallbackCount = BLEHostAllocFallbackCount();
-    bleHostHciRxDropped = BLEHostHciRxDropped();
-    bleHostHciTxDropped = BLEHostHciTxDropped();
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
     const ShotStopperBleHealth bleRuntime = shotStopperBleRuntimeHealth();
     bleRuntimeState = static_cast<uint8_t>(bleRuntime.state);
     bleRuntimeLastError = bleRuntime.lastError;
@@ -6532,10 +6503,6 @@ void loop() {
     bleRuntimeSyncGeneration = bleRuntime.syncGeneration;
     bleRuntimeResetCount = bleRuntime.resetCount;
     bleRuntimeHostStackMinWords = bleRuntime.hostTaskStackHighWaterWords;
-#else
-    bleRuntimeState = bleStackReady ? 2 : 0;
-    bleRuntimeSyncGeneration = bleStackReady ? 1 : 0;
-#endif
     hwmonSnapshot = hwmon.sample(intervalMs > 0U ? intervalMs
                                                  : HEALTH_TELEMETRY_INTERVAL_MS,
                                  &heap);

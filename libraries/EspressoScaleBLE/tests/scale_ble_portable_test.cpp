@@ -33,8 +33,8 @@ static_assert(sizeof(ScaleBleBackendHealth) <= 136,
               "BLE health snapshot must remain fixed and compact");
 static_assert(sizeof(ScaleBleEvent) <= 20,
               "BLE event DTO must stay suitable for a fixed queue");
-static_assert(kScaleBleBuildBackend == ScaleBleBackend::ArduinoBle,
-              "host/default build must remain ArduinoBLE in phase 1");
+static_assert(kScaleBleBuildBackend == ScaleBleBackend::NimBle,
+              "NimBLE must be the only scale backend");
 
 uint32_t fakeNow(void *context) {
     return *static_cast<uint32_t *>(context);

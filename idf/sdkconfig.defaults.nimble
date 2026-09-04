@@ -1,8 +1,5 @@
-# Phase-5 NimBLE release candidate. The Companion profile is registered at boot
-# only when its persisted enable flag is set. ArduinoBLE remains rollback until
-# the phase-5 soak, OTA and beta gates are complete.
-CONFIG_ESPRESSO_SCALE_BLE_BACKEND_NIMBLE=y
-# CONFIG_ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE is not set
+# Production native NimBLE host. The Companion profile is registered at boot
+# only when its persisted enable flag is set.
 # CONFIG_BT_CONTROLLER_ONLY is not set
 CONFIG_BT_NIMBLE_ENABLED=y
 
@@ -37,7 +34,7 @@ CONFIG_BT_NIMBLE_MAX_CONN_REATTEMPT=3
 
 # Shot Stopper registers only the standard GAP/GATT services and its own static
 # Companion profile. ESP-IDF enables these unrelated services by default; keep
-# them out of the release candidate without changing pools or radio behavior.
+# them out of production without changing pools or radio behavior.
 # CONFIG_BT_NIMBLE_PROX_SERVICE is not set
 # CONFIG_BT_NIMBLE_ANS_SERVICE is not set
 # CONFIG_BT_NIMBLE_CTS_SERVICE is not set
@@ -53,7 +50,7 @@ CONFIG_BT_NIMBLE_MAX_CONN_REATTEMPT=3
 
 # No Direct Test Mode, signed-write counter or characteristic presentation /
 # aggregate descriptors are used. ATT MTU reconfiguration stays enabled for
-# Companion client compatibility until the physical qualification says otherwise.
+# Companion client compatibility under the qualified production profile.
 # CONFIG_BT_NIMBLE_DTM_MODE_TEST is not set
 # CONFIG_BT_NIMBLE_SM_SIGN_CNT is not set
 # CONFIG_BT_NIMBLE_CPFD_CAFD is not set

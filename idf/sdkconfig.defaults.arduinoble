@@ -1,5 +1,0 @@
-# Production / rollback BLE backend.
-CONFIG_ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE=y
-# ArduinoBLE owns the host and talks to the IDF controller through VHCI.
-CONFIG_BT_CONTROLLER_ONLY=y
-# CONFIG_BT_NIMBLE_ENABLED is not set

@@ -21,6 +21,7 @@ ble_companion_protocol_sanitized=${TMPDIR:-/tmp}/shot_stopper_ble_companion_prot
 firmware_dir="$test_dir/.."
 firmware_file="$firmware_dir/shotStopper.cpp"
 ble_companion_file="$firmware_dir/ShotStopperBleCompanion.h"
+ble_companion_protocol_file="$firmware_dir/ble/ShotStopperBleCompanionProtocol.h"
 cxx=${CXX:-c++}
 
 # Domain split moved paddle/machine circuit/BBW out of shotStopper.cpp. Forbidden-symbol
@@ -263,7 +264,8 @@ for required_ble_config in '00000000-0000-0000-0000-000000000FFE' \
   '00000000-0000-0000-0000-00000000FF21' '00000000-0000-0000-0000-00000000FF22' \
   '00000000-0000-0000-0000-00000000FF23' '00000000-0000-0000-0000-00000000FF24' \
   '00000000-0000-0000-0000-00000000FF25' '00000000-0000-0000-0000-00000000FF26'; do
-  if ! grep -n "$required_ble_config" "$ble_companion_file" >/dev/null; then
+  if ! grep -n "$required_ble_config" "$ble_companion_file" \
+      "$ble_companion_protocol_file" >/dev/null; then
     echo "Required BLE Companion contract is missing: $required_ble_config" >&2
     exit 1
   fi

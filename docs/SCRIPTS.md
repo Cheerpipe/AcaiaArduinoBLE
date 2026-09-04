@@ -3,8 +3,8 @@
 Developer scripts under `scripts/`. Walkthrough from clone to flash:
 [Build environment](BUILD.md).
 
-**Supported: the `*-idf` scripts.** The Arduino-cli scripts are legacy and
-**unsupported**.
+**Supported: the `*-idf` scripts.** Names without `-idf` are compatibility
+aliases to the same ESP-IDF workflows.
 
 These are **not** the USB firmware commands (`HELP`, `FACTORY_RESET`, …).
 Those live in [USB serial CLI](SERIAL_CLI.md).
@@ -52,10 +52,8 @@ prompting. The same applies with `SHOTSTOPPER_NONINTERACTIVE=1`.
 | `-H`, `--host` | `SHOTSTOPPER_HOST` | Controller IP or hostname for OTA. |
 | `-t`, `--password` | `SHOTSTOPPER_DEVICE_PASSWORD` | Device password. Never persisted. |
 | `-f`, `--flags` | `SHOTSTOPPER_FLAGS` | Extra compile flags, as a single string. |
-| — | `SHOTSTOPPER_BLE_BACKEND` | Temporary phase-5 selector: `arduinoble` (default/rollback) or `nimble`. Prefer `build-idf-nimble` for the candidate. |
-| — | `SHOTSTOPPER_NIMBLE_ALLOCATOR` | NimBLE qualification selector: `external` (candidate default) or `internal` (A/B only). |
 | `-i`, `--image` | `SHOTSTOPPER_IMAGE` | Firmware `.bin` to use for flash or OTA instead of the normal build output. Checked locally and never persisted. |
-| `-b`, `--build-dir` | `SHOTSTOPPER_BUILD_DIR_OVERRIDE` | Build directory (`static` legacy only). |
+| `-b`, `--build-dir` | `SHOTSTOPPER_BUILD_DIR_OVERRIDE` | Build directory (`static`/`static-idf` only). |
 | `-o`, `--output-dir` | `SHOTSTOPPER_OUTPUT_DIR` | Reports directory (`static` / `static-idf` only). |
 | `--force` | — | OTA scripts only: commit without an interactive prompt and wait for the rebooted firmware to confirm itself through the HTTP API. No Web UI reload is required. |
 | `-h`, `--help` | — | Show the script help. |
@@ -87,7 +85,6 @@ Writes to `build-idf/<architecture>` (`shotstopper.bin`).
 | Script | Alias | Required | Description |
 | --- | --- | --- | --- |
 | `./scripts/build-idf` | `b-idf` | `--arch` (`--flags` optional) | Generate version and Web UI, build with ESP-IDF. |
-| `./scripts/build-idf-nimble` | | `--arch` (`--flags` optional) | Build the phase-5 NimBLE release candidate into `build-idf/<arch>-nimble`; ArduinoBLE remains rollback until the gate passes. |
 | `./scripts/flash-idf` | `f-idf` | `--port`, `--arch` | Flash the existing binary (or `--image <path>`); does not rebuild or open the monitor. |
 | `./scripts/monitor-idf` | `m-idf` | `--port`, `--speed` | IDF serial monitor (Ctrl+] to exit). |
 | `./scripts/ota-idf` | `o-idf` | `--arch`, `--host`, `--password` | Wi-Fi update with the already-built IDF binary, or `--image <path>`. |
@@ -106,7 +103,6 @@ Examples:
 
 # Explicit (macOS CDC port)
 ./scripts/build-idf --arch n16r8
-./scripts/build-idf-nimble --arch n16r8
 ./scripts/flash-idf --port /dev/cu.usbmodem2101 --arch n16r8
 ./scripts/flash-idf --port /dev/cu.usbmodem2101 --arch n16r8 --image ~/Downloads/shotstopper.bin
 ./scripts/monitor-idf -p /dev/cu.usbmodem2101 -s 115200
@@ -120,14 +116,6 @@ Examples:
 ./scripts/o-idf --arch n16r8 --host 192.168.1.50 --image ~/Downloads/shotstopper.bin
 ```
 
-Allocator A/B qualification uses a separate build tree and is not a release
-default:
-
-```sh
-SHOTSTOPPER_BLE_BACKEND=nimble SHOTSTOPPER_NIMBLE_ALLOCATOR=internal \
-  ./scripts/build-idf --arch n16r8
-```
-
 `--force` is accepted by `ota`, `ota-idf`, `bo`, and `bo-idf` (and their `o`
 aliases). It bypasses the final commit prompt, then polls the controller until
 the new image reports `confirmed: true` or four minutes pass.
@@ -139,20 +127,18 @@ checked against the selected `--arch` before transfer. For an IDF USB flash,
 an external image is written to the app partition at `0x10000`; it does not
 replace the bootloader or partition table.
 
-## Arduino-cli (unsupported)
+## Compatibility aliases
 
-Writes to `build/<architecture>`. Do **not** use for production firmware.
-See [Build environment](BUILD.md) for why.
+These names invoke the corresponding ESP-IDF scripts and write to
+`build-idf/<architecture>`:
 
 | Script | Alias | Description |
 | --- | --- | --- |
-| `./scripts/build` | `b` | Build with arduino-cli. |
-| `./scripts/flash` | `f` | Flash the Arduino-cli image, or `--image <path>`. |
-| `./scripts/monitor` | `m` | Arduino-cli serial monitor. |
-| `./scripts/ota` | `o` | OTA with the Arduino-cli image, or `--image <path>`. |
-| `./scripts/static` | `s` | Cppcheck against the Arduino-cli build directory. |
+| `./scripts/build` | `b` | Alias to `build-idf`. |
+| `./scripts/flash` | `f` | Alias to `flash-idf`. |
+| `./scripts/monitor` | `m` | Alias to `monitor-idf`. |
+| `./scripts/ota` | `o` | Alias to `ota-idf`. |
+| `./scripts/static` | `s` | Alias to `static-idf`. |
 | `./scripts/bf` / `bfm` / `bo` / `bsfm` | | Wrappers, same idea as the `*-idf` variants. |
 
-Required flags match the IDF table (`--arch`, `--port`, and so on). Prefer
-`./scripts/monitor-idf` over `./scripts/monitor` even when you only want the
-[USB serial CLI](SERIAL_CLI.md).
+Required flags match the IDF table (`--arch`, `--port`, and so on).

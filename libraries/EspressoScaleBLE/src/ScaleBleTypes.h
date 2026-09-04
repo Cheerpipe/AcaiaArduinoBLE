@@ -76,9 +76,8 @@ struct ScaleBleTimingSnapshot {
     }
 };
 
-// Backend-neutral, fixed-size diagnostics. ArduinoBLE returns a zeroed
-// snapshot; the native NimBLE adapter fills every counter without exposing
-// host types to the firmware.
+// Fixed-size native NimBLE diagnostics. The adapter fills every counter
+// without exposing host types to the firmware.
 struct ScaleBleBackendHealth {
     uint32_t generation;
     uint32_t operationId;

@@ -1,47 +1,5 @@
 #!/usr/bin/env bash
-# Open the Arduino CLI serial monitor.
+# Compatibility alias for the ESP-IDF serial monitor.
 set -euo pipefail
-
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-# shellcheck source=scripts/shotstopper_board.sh
-source "$SCRIPT_DIR/shotstopper_board.sh"
-# shellcheck source=scripts/shotstopper_cli.sh
-source "$SCRIPT_DIR/shotstopper_cli.sh"
-
-usage() {
-  cat <<EOF
-Usage: ./scripts/monitor [flags]
-
-Start the Arduino CLI serial monitor.
-
-Required parameters: --port and --speed.
-
-$(ss_flag_help)
-
-Examples:
-  ./scripts/monitor --port /dev/cu.usbmodem2101 --speed 115200
-  ./scripts/monitor -p /dev/cu.usbmodem2101 -s 115200
-EOF
-}
-
-ss_cli_parse "$@" || exit $?
-if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
-  usage
-  exit 0
-fi
-
-ss_cli_resolve "port speed" || exit $?
-
-command -v arduino-cli >/dev/null 2>&1 || {
-  echo "arduino-cli not found on PATH." >&2
-  exit 127
-}
-
-port="$(ss_get port)"
-speed="$(ss_get speed)"
-
-# Persist before exec: the monitor runs until the user stops it.
-ss_cli_save
-
-echo "Serial monitor on $port ($speed)"
-exec arduino-cli monitor --port "$port" --config "baudrate=$speed"
+exec "$SCRIPT_DIR/monitor-idf" "$@"

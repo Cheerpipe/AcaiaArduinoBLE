@@ -1,47 +1,5 @@
 #!/usr/bin/env bash
-# Build + OTA: compile and update the controller over Wi-Fi in one command.
+# Compatibility alias for the ESP-IDF build-and-OTA workflow.
 set -euo pipefail
-
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-# shellcheck source=scripts/shotstopper_board.sh
-source "$SCRIPT_DIR/shotstopper_board.sh"
-# shellcheck source=scripts/shotstopper_cli.sh
-source "$SCRIPT_DIR/shotstopper_cli.sh"
-
-usage() {
-  cat <<EOF
-Usage: ./scripts/bo [flags]
-
-Runs, in order: build and o (ota). No USB cable required.
-
-Required parameters: --arch, --host, and --password. --flags is optional.
-Pass the device password (including the factory default if unchanged).
-
-$(ss_flag_help)
-
-$(shotstopper_arch_help)
-
-Examples:
-  ./scripts/bo --arch n16r8 --host 192.168.1.50
-  ./scripts/bo -a n8r4 -H 192.168.4.1
-EOF
-}
-
-ss_cli_parse "$@" || exit $?
-if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
-  usage
-  exit 0
-fi
-
-ss_cli_resolve "arch host password" "flags" || exit $?
-ss_cli_normalize_image || exit $?
-
-root="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
-cd "$root"
-
-ss_cli_flags_for arch flags
-./scripts/build ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
-
-ss_cli_flags_for arch host image force
-ss_cli_export_secrets
-exec ./scripts/o ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
+exec "$SCRIPT_DIR/bo-idf" "$@"

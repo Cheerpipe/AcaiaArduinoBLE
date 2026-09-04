@@ -2,8 +2,6 @@
 
 #include "sdkconfig.h"
 
-#if CONFIG_ESPRESSO_SCALE_BLE_BACKEND_NIMBLE
-
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -299,21 +297,3 @@ bool shotStopperBleRuntimeStop(uint32_t timeoutMs) {
   portEXIT_CRITICAL(&gMux);
   return deinitError == ESP_OK;
 }
-
-#else
-
-bool shotStopperBleRuntimeStart(uint32_t) { return false; }
-bool shotStopperBleRuntimeConfigureGattProfile(
-    ShotStopperBleGattRegistration, void *) {
-  return false;
-}
-bool shotStopperBleRuntimeReady() { return false; }
-uint8_t shotStopperBleRuntimeOwnAddressType() { return 0xff; }
-uint32_t shotStopperBleRuntimeSyncGeneration() { return 0; }
-ShotStopperBleHealth shotStopperBleRuntimeHealth() {
-  return {ShotStopperBleRuntimeState::Stopped, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0};
-}
-bool shotStopperBleRuntimeStop(uint32_t) { return true; }
-
-#endif

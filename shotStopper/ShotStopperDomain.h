@@ -2015,13 +2015,15 @@ struct ControlStatusSnapshot {
   uint32_t psramSizeBytes = 0;
   uint32_t psramFreeBytes = 0;
   uint32_t psramLargestFreeBlockBytes = 0;
+  // Legacy diagnostic ABI. Native NimBLE exposes allocator health through the
+  // runtime snapshot; these counters intentionally remain zero.
   uint32_t bleHostAllocPsramCount = 0;
   uint32_t bleHostAllocFallbackCount = 0;
   uint32_t bleHostHciRxDropped = 0;
   uint32_t bleHostHciTxDropped = 0;
   // Backend-neutral host lifecycle metrics. Legacy BLEHost* counters above
   // remain during rollback compatibility and are removed only in phase 5.
-  uint8_t bleBackend = 0;  // 1=ArduinoBLE, 2=NimBLE.
+  uint8_t bleBackend = 2;  // Native NimBLE; retained in the diagnostic ABI.
   uint8_t bleRuntimeState = 0;
   int32_t bleRuntimeLastError = 0;
   int32_t bleRuntimeLastResetReason = 0;

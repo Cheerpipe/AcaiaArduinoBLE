@@ -1,6 +1,5 @@
 /*
-  ESP-IDF NimBLE backend for the backend-neutral EspressoScaleBLE facade.
-  This translation unit is compiled only in the experimental NimBLE variant.
+  Native ESP-IDF NimBLE implementation of the EspressoScaleBLE facade.
 */
 #include "EspressoScaleBLE.h"
 

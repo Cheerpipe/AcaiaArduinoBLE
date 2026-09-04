@@ -453,4 +453,3 @@ Runtime and tooling:
 
 - [Espressif ESP-IDF](https://github.com/espressif/esp-idf)
 - [Arduino-ESP32](https://github.com/espressif/arduino-esp32)
-- [ArduinoBLE](https://github.com/arduino-libraries/ArduinoBLE)

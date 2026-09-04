@@ -13,7 +13,7 @@
 #ifndef EspressoScaleBLE_h
 #define EspressoScaleBLE_h
 
-#define LIBRARY_VERSION                 "4.1.0"
+#define LIBRARY_VERSION                 "5.0.0"
 #define WRITE_CHAR_OLD_VERSION          "2a80"
 #define READ_CHAR_OLD_VERSION           "2a80"
 #define WRITE_CHAR_NEW_VERSION          "49535343-8841-43f4-a8d4-ecbe34729bb3"
@@ -60,11 +60,6 @@
 #include "ScaleProtocol.h"
 #include <stddef.h>
 #include <stdint.h>
-
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
-#include "Arduino.h"
-#include <ArduinoBLE.h>
-#endif
 
 enum scale_type {
     OLD,
@@ -156,105 +151,18 @@ class EspressoScaleBLE {
         uint32_t rejectedPacketCount() const;
         uint32_t reconnectCount() const;
         ScaleBleTimingSnapshot timingSnapshot() const;
-        // Native backend status for diagnostics. ArduinoBLE cannot expose a
-        // stable raw status and returns zero; NimBLE preserves the last
-        // ble_hs/HCI value without collapsing it into a domain reason.
+        // Native NimBLE status for diagnostics. Preserve the last ble_hs/HCI
+        // value without collapsing it into a domain reason.
         int32_t lastBackendStatus() const;
         ScaleBleBackendHealth backendHealth() const;
         int linkRssi();
 
     private:
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
-        bool isScaleName(const char *name) const;
-        bool configureCharacteristics(BLEDevice& peripheral,
-                                      const ScaleProtocol *protocol);
-        bool parseWeightPacket(const uint8_t data[], int length,
-                               float& weight) const;
-        bool parseTimerPacket(const uint8_t data[], int length,
-                              uint32_t& timerMs) const;
-        bool supportedPacketLength(int length) const;
-        ScaleCommandResult writeCommand(const uint8_t command[], int length);
-        ScaleCommandResult writeOp(ScaleOp op, uint8_t arg = 0);
-        bool beginConnection(BLEDevice& peripheral);
-        bool advanceConnection();
-        bool finishConnectionSuccess();
-        bool detectAndConfigureScale();
-        bool runInitWrites();
-        void clearConnectingState();
-        void logVersionOnce();
-        void stopIdleScan(ScaleDisconnectReason reason);
-        uint32_t maxPacketPeriodMs() const;
-
-        void retainCharacteristic(BLECharacteristic& destination,
-                                  const BLECharacteristic& source);
-        void clearCharacteristic(BLECharacteristic& characteristic);
-        void rememberPeripheral(const BLEDevice& peripheral);
-        void clearPeripheral();
-        void resetConnection(bool disconnectPeer,
-                             ScaleDisconnectReason reason);
-        void rejectPacket(const char* reason);
-        ScaleDisconnectReason mapHciDisconnectReason() const;
-
-        void exploreService(BLEService service);
-        void exploreCharacteristic(BLECharacteristic characteristic);
-        void exploreDescriptor(BLEDescriptor descriptor);
-
-        float               _currentWeight;
-        uint32_t            _currentTimerMs;
-        uint32_t            _lastTimerPacket;
-        bool                _hasTimer;
-        BLECharacteristic   _write;
-        BLECharacteristic   _read;
-        BLEDevice           _peripheral;
-        uint32_t            _lastHeartBeat;
-        uint32_t            _connectedAt;
-        uint32_t            _lastPacket;
-        uint32_t            _packetPeriod;
-        uint32_t            _rejectedPackets;
-        uint8_t             _consecutiveRejectedPackets;
-        uint32_t            _reconnects;
-        uint32_t            _successfulConnections;
-        bool                _hasPeripheral;
-        bool                _hasValidPacket;
-        uint32_t            _scanStartedAt;
-        bool                _scanning;
-        bool                _connected;
-        bool                _connecting;
-        bool                _loggedVersion;
-        const ScaleProtocol *_protocol;
-        bool                _debug;
-        enum class ConnectStep : uint8_t {
-            Idle = 0,
-            Settle,
-            Connect,
-            Discover,
-            Configure,
-            Subscribe,
-            InitWrites
-        };
-        ConnectStep         _connectStep;
-        uint32_t            _connectStartedAt;
-        uint32_t            _connectSettleStartedAt;
-        uint8_t             _connectAttempts;
-        uint32_t            _linkDownSince;
-        char                _scanMac[SCALE_MAC_CAPACITY];
-        bool                _scanAddressFilter;
-        uint16_t            _scanInterval;
-        uint16_t            _scanWindow;
-        char                _address[SCALE_MAC_CAPACITY];
-        char                _localName[SCALE_NAME_CAPACITY];
-        char                _seenMac[SCALE_MAC_CAPACITY];
-        char                _seenName[SCALE_NAME_CAPACITY];
-        bool                _seenPending;
-        ScaleBleTimingSnapshot _timingSnapshot;
-        ScaleDisconnectReason _lastDisconnectReason;
-#else
         // Placement storage keeps the implementation private, fixed-size and
         // allocation-free while preventing NimBLE types from leaking through
         // the public facade into ShotStopperScaleWorker.
         static constexpr size_t NIMBLE_CLIENT_STORAGE_SIZE = 3072;
         alignas(8) uint8_t _nimbleClientStorage[NIMBLE_CLIENT_STORAGE_SIZE];
-#endif
 };
 
 #endif

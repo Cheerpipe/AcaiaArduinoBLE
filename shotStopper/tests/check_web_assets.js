@@ -77,28 +77,33 @@ function readTree(dir) {
   }).join('\n');
 }
 const bleLibrary = readTree(bleSrcDir);
-const bleCompanion = fs.readFileSync(
-  path.join(sketchDir, 'ShotStopperBleCompanion.h'), 'utf8');
+const bleCompanion = [
+  fs.readFileSync(path.join(sketchDir, 'ShotStopperBleCompanion.h'), 'utf8'),
+  fs.readFileSync(path.join(sketchDir, 'ble',
+                            'ShotStopperBleCompanionNimble.cpp'), 'utf8'),
+].join('\n');
 const taskProfiler = fs.readFileSync(
   path.join(sketchDir, 'ShotStopperTaskProfiler.h'), 'utf8');
 const sdkconfigDefaults = fs.readFileSync(
   path.resolve(sketchDir, '..', 'idf', 'sdkconfig.defaults'), 'utf8');
 const sdkconfigNimble = fs.readFileSync(
   path.resolve(sketchDir, '..', 'idf', 'sdkconfig.defaults.nimble'), 'utf8');
-const sdkconfigNimbleInternal = fs.readFileSync(
-  path.resolve(sketchDir, '..', 'idf', 'sdkconfig.defaults.nimble-internal'),
-  'utf8');
+const bleComponentCmake = fs.readFileSync(
+  path.resolve(sketchDir, '..', 'idf', 'components', 'EspressoScaleBLE',
+               'CMakeLists.txt'), 'utf8');
+const idfBuildScript = fs.readFileSync(
+  path.resolve(sketchDir, '..', 'scripts', 'build-idf'), 'utf8');
 const bleRuntime = fs.readFileSync(
   path.resolve(sketchDir, '..', 'idf', 'components',
                'ShotStopperBleRuntime', 'ShotStopperBleRuntime.cpp'),
   'utf8');
 const flashIoScratch = fs.readFileSync(
   path.join(sketchDir, 'ShotStopperFlashIoScratch.h'), 'utf8');
-if (!bleCompanion.includes('BLECharacteristic::writeValue') ||
-    bleCompanion.includes('String("")') ||
-    bleCompanion.includes('String(value)')) {
-  throw new Error(
-      'BLE companion string writes must use BLECharacteristic::writeValue(const char*), not Arduino String');
+if (!bleCompanion.includes('ble_gatts_add_svcs(services)') ||
+    !bleCompanion.includes('os_mbuf_append(context->om') ||
+    bleCompanion.includes('BLECharacteristic') ||
+    bleCompanion.includes('ArduinoBLE')) {
+  throw new Error('BLE Companion must use native NimBLE GATTS APIs only');
 }
 if (!taskProfiler.includes('allocExternal(sizeof(ActiveWorkspace))') ||
     !taskProfiler.includes('heapCapsFree(workspace_)') ||
@@ -126,7 +131,23 @@ if (!sdkconfigNimble.includes('CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y') ||
     !sdkconfigNimble.includes('CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2') ||
     !sdkconfigNimble.includes('CONFIG_BT_NIMBLE_MAX_CCCDS=4')) {
   throw new Error(
-      'NimBLE release defaults must retain the conservative phase-5 pools, stack, MTU and external allocator');
+      'Production NimBLE defaults must retain the qualified pools, stack, MTU and external allocator');
+}
+if (!bleComponentCmake.includes('EspressoScaleBLENimble.cpp') ||
+    bleComponentCmake.includes('ESPRESSO_SCALE_BLE_BACKEND') ||
+    bleComponentCmake.includes('ArduinoBLE') ||
+    idfBuildScript.includes('SHOTSTOPPER_BLE_BACKEND') ||
+    idfBuildScript.includes('SHOTSTOPPER_NIMBLE_ALLOCATOR') ||
+    fs.existsSync(path.resolve(sketchDir, '..', 'scripts',
+                               'patch_arduinoble.sh')) ||
+    fs.existsSync(path.resolve(sketchDir, '..', 'idf', 'components',
+                               'ArduinoBLE')) ||
+    fs.existsSync(path.resolve(sketchDir, '..', 'idf',
+                               'sdkconfig.defaults.arduinoble')) ||
+    fs.existsSync(path.resolve(sketchDir, '..', 'idf',
+                               'sdkconfig.defaults.nimble-internal'))) {
+  throw new Error(
+      'Production must build native NimBLE only, without backend selectors or ArduinoBLE infrastructure');
 }
 for (const service of [
   'PROX', 'ANS', 'CTS', 'HTP', 'IPSS', 'TPS',
@@ -143,12 +164,6 @@ for (const feature of ['DTM_MODE_TEST', 'SM_SIGN_CNT', 'CPFD_CAFD']) {
     throw new Error(`Unused NimBLE ${feature} feature must stay disabled`);
   }
 }
-if (!sdkconfigNimbleInternal.includes(
-        'CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL=y') ||
-    !sdkconfigNimbleInternal.includes(
-        '# CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL is not set')) {
-  throw new Error('NimBLE allocator A/B overlay must select internal memory');
-}
 if (!bleRuntime.includes('gHostTask = xTaskGetCurrentTaskHandle()') ||
     !bleRuntime.includes('uxTaskGetStackHighWaterMark(') ||
     !bleRuntime.includes('hostTaskHandle')) {
@@ -160,30 +175,6 @@ if (!sdkconfigDefaults.includes('CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768') |
     sdkconfigDefaults.includes('CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM=y')) {
   throw new Error(
       'sdkconfig.defaults must pin SPIRAM_MALLOC_RESERVE_INTERNAL=32768 and keep task stacks internal');
-}
-{
-  const patchScript = fs.readFileSync(
-      path.resolve(sketchDir, '..', 'scripts', 'patch_arduinoble.sh'), 'utf8');
-  const staticPatch = fs.readFileSync(
-      path.resolve(sketchDir, '..', 'patches',
-                   'ArduinoBLE-2.1.0-hci-static-streams.patch'),
-      'utf8');
-  const copyPatch = fs.readFileSync(
-      path.resolve(sketchDir, '..', 'patches',
-                   'ArduinoBLE-2.1.0-ble-device-copy.patch'),
-      'utf8');
-  if (!patchScript.includes('hci-static-streams.patch') ||
-      !patchScript.includes('xStreamBufferCreateStatic') ||
-      !staticPatch.includes('xStreamBufferCreateStatic') ||
-      !staticPatch.includes('vhci_rx_storage')) {
-    throw new Error(
-        'ArduinoBLE VHCI streams must be xStreamBufferCreateStatic in internal DRAM');
-  }
-  if (!copyPatch.includes('hasAdvertisedUuid16') ||
-      !patchScript.includes('hasAdvertisedUuid16')) {
-    throw new Error(
-        'ArduinoBLE BLEDevice must expose hasAdvertisedUuid16 without Arduino String');
-  }
 }
 if (!sdkconfigDefaults.includes('CONFIG_FREERTOS_USE_TICKLESS_IDLE=y') ||
     sdkconfigDefaults.includes('CONFIG_PM_ENABLE=y')) {
@@ -405,22 +396,20 @@ if (!flashIoScratch.includes('inline void feedFlashIoWatchdog()') ||
   throw new Error(
       'Flash I/O watchdog feed must reset TWDT only when the current task is subscribed');
 }
-if (!bleLibrary.includes('readValue(input, MAX_BLE_PACKET_LENGTH)') ||
-    !bleLibrary.includes('length > MAX_BLE_PACKET_LENGTH')) {
-  throw new Error(
-      'Acaia BLE reads must clamp to MAX_BLE_PACKET_LENGTH');
+if (!bleLibrary.includes('length == 0 || length > MAX_BLE_PACKET_LENGTH') ||
+    !bleLibrary.includes('os_mbuf_copydata(buffer, 0, length, frame.data)')) {
+  throw new Error('Native NimBLE reads must bound and copy mbuf payloads');
 }
-if (!bleLibrary.includes('BLE.scan(true)') ||
-    bleLibrary.includes('BLE.scan(false)') ||
-    !bleLibrary.includes('BLE.scanForAddress(mac, true)') ||
-    bleLibrary.includes('scanForAddress(mac, false)') ||
-    !bleLibrary.includes('bool addressScan = false') ||
+if (!bleLibrary.includes('params.filter_duplicates = 0') ||
+    !bleLibrary.includes('const bool useAddressScan = filtered && addressScan') ||
+    !bleLibrary.includes('nimbleAdvertisementIsCompatible') ||
+    !bleLibrary.includes('scaleUuid16AllowsNamelessConnect') ||
     !firmware.includes(
         'currentScaleMacCacheMode() == ScaleMacCacheMode::ONLY') ||
     !firmware.includes(
         'scale.startScan(mac, forceRestart, interval, window, addressScan)')) {
   throw new Error(
-      'Idle GAP scan must stay on with withDuplicates=true; ONLY uses scanForAddress');
+      'Native GAP scan must retain duplicate reports, UUID matching and ONLY address filtering');
 }
 if (!firmware.includes('scaleWorkerTickDelayMs()') ||
     !firmware.includes('controlLoopTickDelayMs()') ||
@@ -488,77 +477,23 @@ if (!domain.includes('HEALTH_HEAP_LOW_RESTART_MS') ||
   throw new Error(
       'Sustained heap-low must request a safe restart only from Ready with the circuit open');
 }
-if (!bleLibrary.includes('BLE_CONNECT_TIMEOUT_MS') ||
-    !bleLibrary.includes('SCALE_CONNECT_ATTEMPTS') ||
-    !bleLibrary.includes('ConnectStep::Settle') ||
-    !bleLibrary.includes('rememberPeripheral(peripheral)') ||
-    !bleLibrary.includes('_connectAttempts < SCALE_CONNECT_ATTEMPTS') ||
-    !bleLibrary.includes('_connectSettleStartedAt') ||
-    !bleLibrary.includes('_peripheral.connected()')) {
-  throw new Error(
-      'GAP connect must settle after stopScan, settle between retries, skip disconnect if never linked, and retry');
+if (!bleLibrary.includes('enterState(State::Connecting, BLE_CONNECT_TIMEOUT_MS)') ||
+    !bleLibrary.includes('ble_gap_connect(shotStopperBleRuntimeOwnAddressType()') ||
+    !bleLibrary.includes('beginOperation(CallbackDomain::Link)') ||
+    !bleLibrary.includes('event.generation != generation_') ||
+    !bleLibrary.includes('finishLink(true')) {
+  throw new Error('Native GAP/GATT operations must be deadline- and generation-bounded');
 }
 if (/#define\s+BLE_CONNECT_TIMEOUT_MS\s+4000UL/.test(bleLibrary)) {
   throw new Error(
       'GAP connect timeout must stay under the 5 s task watchdog (not 4 s)');
 }
-{
-  const pollScanStart = bleLibrary.indexOf('bool EspressoScaleBLE::pollScan()');
-  const pollScanEnd = bleLibrary.indexOf('bool EspressoScaleBLE::beginConnection', pollScanStart);
-  const pollScan = pollScanStart >= 0 && pollScanEnd > pollScanStart
-      ? bleLibrary.slice(pollScanStart, pollScanEnd)
-      : '';
-  if (!pollScan.includes('char mac[ACAIA_MAC_CAPACITY]') ||
-      !pollScan.includes('char name[ACAIA_NAME_CAPACITY]') ||
-      !pollScan.includes('isScaleName(name)') ||
-      !pollScan.includes('advertisedUuidLooksLikeScale') ||
-      !pollScan.includes('copyAddress') ||
-      !pollScan.includes('copyLocalName') ||
-      pollScan.includes('peripheral.address()') ||
-      pollScan.includes('peripheral.localName()') ||
-      pollScan.includes('advertisedServiceUuid()')) {
-    throw new Error(
-        'pollScan must copy MAC/name into C buffers and match UUID16 without Arduino String');
-  }
-  if (!bleLibrary.includes('hasAdvertisedUuid16') ||
-      !bleLibrary.includes('scaleUuid16AllowsNamelessConnect')) {
-    throw new Error(
-        'Nameless scale ads must match 16-bit UUIDs via hasAdvertisedUuid16');
-  }
-}
-{
-  const rememberStart = bleLibrary.indexOf(
-      'void EspressoScaleBLE::rememberPeripheral');
-  const rememberEnd = bleLibrary.indexOf(
-      'void EspressoScaleBLE::clearPeripheral', rememberStart);
-  const remember = rememberStart >= 0 && rememberEnd > rememberStart
-      ? bleLibrary.slice(rememberStart, rememberEnd)
-      : '';
-  if (!remember.includes('copyAddress') ||
-      !remember.includes('copyLocalName') ||
-      remember.includes('String address') ||
-      remember.includes('String localName') ||
-      remember.includes('.address()') ||
-      remember.includes('.localName()')) {
-    throw new Error(
-        'rememberPeripheral must copy address/name without Arduino String');
-  }
-}
-if (bleLibrary.includes(
-        'resetConnection(false, ScaleDisconnectReason::CONNECT_FAILED)')) {
+if (!bleLibrary.includes(
+        'return clientFromStorage(_nimbleClientStorage).isLinkUp()') ||
+    !bleLibrary.includes(
+        'return clientFromStorage(_nimbleClientStorage).newWeightAvailable()')) {
   throw new Error(
-      'GAP connect exhaustion must disconnect the peer (resetConnection(true))');
-}
-{
-  const nwStart = bleLibrary.indexOf('bool EspressoScaleBLE::newWeightAvailable()');
-  const nwEnd = bleLibrary.indexOf('bool EspressoScaleBLE::supportedPacketLength', nwStart);
-  const nw = nwStart >= 0 && nwEnd > nwStart ? bleLibrary.slice(nwStart, nwEnd) : '';
-  if (!bleLibrary.includes('bool EspressoScaleBLE::isLinkUp()') ||
-      !nw.includes('if (!_connected)') ||
-      nw.includes('isConnected()')) {
-    throw new Error(
-        'Acaia newWeightAvailable must use the local link flag, not a live GAP isConnected()');
-  }
+      'EspressoScaleBLE facade must delegate link and packet state to native NimBLE storage');
 }
 if (firmware.includes('if (scaleLinked || changed)')) {
   throw new Error(
@@ -569,14 +504,14 @@ if (!firmware.includes('companionAdvertisingShouldPause') ||
     !firmware.includes('scale.isConnecting()') ||
     !firmware.includes('SCALE_HUNT_RF_CLEAR_MS') ||
     !firmware.includes('scaleHuntRfClearActive') ||
-    !firmware.includes('BLE.poll(tickDelayMs)') ||
-    firmware.includes('vTaskDelay(pdMS_TO_TICKS(scaleWorkerTickDelayMs()))') ||
+    firmware.includes('BLE.poll(') ||
+    !firmware.includes('vTaskDelay(pdMS_TO_TICKS(tickDelayMs))') ||
     (firmware.split('syncCompanionAdvertisingForScaleLink();').length - 1) < 3 ||
     (scaleWorker.split('syncScaleRadioCoex();').length - 1) < 2 ||
     !scaleWorker.includes('GAP/GATT setup must not wait behind') ||
-    !bleCompanion.includes('advertisingPaused_ && !status_.connected') ||
+    !bleCompanion.includes('!paused && status_.stackReady && !status_.connected') ||
     !bleCompanion.includes('BLE_COMPANION_ADV_INTERVAL') ||
-    !bleCompanion.includes('setAdvertisingInterval(BLE_COMPANION_ADV_INTERVAL)')) {
+    !bleCompanion.includes('params.itvl_min = BLE_COMPANION_ADV_INTERVAL')) {
   throw new Error(
       'Companion advertising must pause while connecting, scale-linked, or in the hunt RF window; worker must block on HCI');
 }

@@ -804,7 +804,7 @@ inline void serialCliPrintHealth(const SerialCliHealthDump &dump) {
   Serial.print("hciTxDropped=");
   Serial.println(static_cast<unsigned long>(dump.bleHostHciTxDropped));
   Serial.print("bleBackend=");
-  Serial.println(dump.bleBackend == 2 ? "nimble" : "arduinoble");
+  Serial.println("nimble");
   Serial.print("bleRuntimeState=");
   Serial.println(static_cast<unsigned>(dump.bleRuntimeState));
   Serial.print("bleRuntimeLastError=");
