@@ -2,7 +2,7 @@
 
 namespace {
 
-static const byte TARE_WEIGHMYBRU[6] =
+static const uint8_t TARE_WEIGHMYBRU[6] =
     {0x03, 0x0a, 0x01, 0x01, 0x00, 0x09};
 
 static const char *const kWeighMyBruPrefixes[] = {"WeighMyBru"};
@@ -15,7 +15,7 @@ static const ScaleFeatureSet kWeighMyBruFeatures = {
     8000
 };
 
-bool copyPayload(const byte *command, int commandLength, byte *out,
+bool copyPayload(const uint8_t *command, int commandLength, uint8_t *out,
                  int *length) {
     if (out == 0 || length == 0 || commandLength <= 0 ||
         commandLength > SCALE_MAX_COMMAND_LENGTH) {
@@ -32,7 +32,7 @@ bool weighMyBruSupportedPacketLength(int length) {
     return length == 20;
 }
 
-bool parseWeighMyBruWeight(const byte *data, int length, float *weight) {
+bool parseWeighMyBruWeight(const uint8_t *data, int length, float *weight) {
     if (length != 20 || data[0] != 0x03 || data[1] != 0x0b) {
         return false;
     }
@@ -48,7 +48,7 @@ bool parseWeighMyBruWeight(const byte *data, int length, float *weight) {
     return scaleValidWeight(*weight);
 }
 
-bool encodeWeighMyBruCommand(ScaleOp op, uint8_t arg, byte *out, int *length) {
+bool encodeWeighMyBruCommand(ScaleOp op, uint8_t arg, uint8_t *out, int *length) {
     (void)arg;
     if (op == ScaleOp::Tare) {
         return copyPayload(TARE_WEIGHMYBRU, sizeof(TARE_WEIGHMYBRU), out,

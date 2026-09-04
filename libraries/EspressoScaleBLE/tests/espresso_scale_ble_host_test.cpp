@@ -1,4 +1,5 @@
 #include "EspressoScaleBLE.h"
+#include "ScaleBleClock.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -137,6 +138,52 @@ const ScaleProtocol *protocolById(const char *id) {
         }
     }
     return nullptr;
+}
+
+void testProtocolRegistryGoldenMetadata() {
+    struct ExpectedProtocol {
+        const char *id;
+        const char *readUuid;
+        const char *writeUuid;
+        const char *compatibleName;
+        uint32_t featureFlags;
+        size_t initWriteCount;
+        bool requireAdvertisedName;
+    };
+    static const ExpectedProtocol expected[] = {
+        {"acaia_legacy", "2a80", "2a80", "ACAIA", 799, 2, false},
+        {"acaia", "49535343-1e4d-4bd9-ba61-23c647249616",
+         "49535343-8841-43f4-a8d4-ecbe34729bb3", "PYXIS", 799, 2,
+         false},
+        {"bookoo_generic", "ff11", "ff12", "BOOKOO", 511, 1, false},
+        {"felicita", "ffe1", "ffe1", "FELICITA", 287, 1, false},
+        {"atomheart_eclair", "AD736C5F-BBC9-1F96-D304-CB5D5F41E160",
+         "4F9A45BA-8E1B-4E07-E157-0814D393B968", "ECLAIR", 31, 0,
+         false},
+        {"decent", "fff4", "36f5", "Decent Scale", 515, 0, false},
+        {"difluid", "aa01", "aa01", "Microbalance", 515, 2, false},
+        {"myscale", "ffb2", "ffb1", "my_scale", 3, 0, false},
+        {"weighmybru", "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
+         "6E400003-B5A3-F393-E0A9-E50E24DCCA9E", "WeighMyBru", 3, 0,
+         false},
+        {"varia", "fff1", "fff2", "VARIA AKU", 31, 0, true},
+        {"eureka", "fff1", "fff2", "CFS-9002", 31, 0, true},
+    };
+
+    CHECK(scaleProtocolCount() == sizeof(expected) / sizeof(expected[0]));
+    for (size_t i = 0; i < scaleProtocolCount(); ++i) {
+        const ScaleProtocol *protocol = scaleProtocolAt(i);
+        CHECK(protocol != nullptr);
+        CHECK(std::strcmp(protocol->id, expected[i].id) == 0);
+        CHECK(std::strcmp(protocol->readUuid, expected[i].readUuid) == 0);
+        CHECK(std::strcmp(protocol->writeUuid, expected[i].writeUuid) == 0);
+        CHECK(scaleNameMatchesProtocol(expected[i].compatibleName, protocol));
+        CHECK(protocol->features.flags == expected[i].featureFlags);
+        CHECK(protocol->initWriteCount == expected[i].initWriteCount);
+        CHECK(protocol->requireAdvertisedName ==
+              expected[i].requireAdvertisedName);
+    }
+    CHECK(scaleProtocolAt(scaleProtocolCount()) == nullptr);
 }
 
 std::vector<byte> encodeOp(const ScaleProtocol *protocol, ScaleOp op,
@@ -293,7 +340,21 @@ void testNonBlockingScanConnectsWithoutInit() {
     EspressoScaleBLE scale(false);
     CHECK(scale.linkRssi() == SCALE_LINK_RSSI_UNAVAILABLE);
     CHECK(scale.startScan());
+    ScaleBleTimingSnapshot timing = scale.timingSnapshot();
+    CHECK(timing.has(ScaleBleTimingScanStarted));
+    CHECK(!timing.has(ScaleBleTimingFirstCompatibleAdvertisement));
+    CHECK(!timing.has(ScaleBleTimingConnectIssued));
+    CHECK(!timing.has(ScaleBleTimingReady));
     CHECK(pollUntilConnected(scale));
+    timing = scale.timingSnapshot();
+    CHECK(timing.has(ScaleBleTimingFirstCompatibleAdvertisement));
+    CHECK(timing.has(ScaleBleTimingConnectIssued));
+    CHECK(timing.has(ScaleBleTimingReady));
+    CHECK(scaleBleElapsedMs(timing.firstCompatibleAdvertisementMs,
+                            timing.scanStartedMs) <=
+          scaleBleElapsedMs(timing.connectIssuedMs, timing.scanStartedMs));
+    CHECK(scaleBleElapsedMs(timing.connectIssuedMs, timing.scanStartedMs) <=
+          scaleBleElapsedMs(timing.readyMs, timing.scanStartedMs));
     CHECK(scale.isConnected());
     CHECK(!scale.isScanning());
     CHECK(!scale.isConnecting());
@@ -1260,6 +1321,7 @@ void testGaggimateScaleProtocols() {
 } // namespace
 
 int main() {
+    testProtocolRegistryGoldenMetadata();
     testScanDiagnostics();
     testNonBlockingScanDoesNotRestartOrResetIdle();
     testScanParametersPresetsAndDiscoverTimeoutRestored();

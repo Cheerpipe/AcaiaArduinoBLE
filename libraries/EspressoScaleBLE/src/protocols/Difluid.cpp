@@ -2,13 +2,13 @@
 
 namespace {
 
-static const byte TARE_DIFLUID[7] =
+static const uint8_t TARE_DIFLUID[7] =
     {0xdf, 0xdf, 0x03, 0x02, 0x01, 0x01, 0xc5};
-static const byte UNIT_GRAM[7] =
+static const uint8_t UNIT_GRAM[7] =
     {0xdf, 0xdf, 0x01, 0x04, 0x01, 0x00, 0xc4};
-static const byte AUTO_NOTIFY[7] =
+static const uint8_t AUTO_NOTIFY[7] =
     {0xdf, 0xdf, 0x01, 0x00, 0x01, 0x01, 0xc1};
-static const byte HEARTBEAT_DIFLUID[6] =
+static const uint8_t HEARTBEAT_DIFLUID[6] =
     {0xdf, 0xdf, 0x03, 0x05, 0x00, 0xc6};
 
 static const char *const kDifluidPrefixes[] = {"Microbalance"};
@@ -26,7 +26,7 @@ static const ScaleFeatureSet kDifluidFeatures = {
     5000
 };
 
-bool copyPayload(const byte *command, int commandLength, byte *out,
+bool copyPayload(const uint8_t *command, int commandLength, uint8_t *out,
                  int *length) {
     if (out == 0 || length == 0 || commandLength <= 0 ||
         commandLength > SCALE_MAX_COMMAND_LENGTH) {
@@ -39,7 +39,7 @@ bool copyPayload(const byte *command, int commandLength, byte *out,
     return true;
 }
 
-uint8_t difluidChecksum(const byte *data, int length) {
+uint8_t difluidChecksum(const uint8_t *data, int length) {
     uint16_t sum = 0;
     for (int i = 0; i < length - 1; ++i) {
         sum = static_cast<uint16_t>(sum + data[i]);
@@ -51,16 +51,16 @@ bool difluidSupportedPacketLength(int length) {
     return length == 19 || length == 20;
 }
 
-bool parseDifluidWeight(const byte *data, int length, float *weight) {
+bool parseDifluidWeight(const uint8_t *data, int length, float *weight) {
     if (length < 19 || data[0] != 0xdf || data[1] != 0xdf) {
         return false;
     }
     if (difluidChecksum(data, length) != data[length - 1]) {
         return false;
     }
-    const byte func = data[2];
-    const byte cmd = data[3];
-    const byte dataLen = data[4];
+    const uint8_t func = data[2];
+    const uint8_t cmd = data[3];
+    const uint8_t dataLen = data[4];
     if (func != 0x03 || cmd != 0x00 || dataLen < 13 ||
         length < 6 + static_cast<int>(dataLen)) {
         return false;
@@ -73,7 +73,7 @@ bool parseDifluidWeight(const byte *data, int length, float *weight) {
     return scaleValidWeight(*weight);
 }
 
-bool encodeDifluidCommand(ScaleOp op, uint8_t arg, byte *out, int *length) {
+bool encodeDifluidCommand(ScaleOp op, uint8_t arg, uint8_t *out, int *length) {
     (void)arg;
     switch (op) {
         case ScaleOp::Tare:

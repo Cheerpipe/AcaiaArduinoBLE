@@ -2,22 +2,22 @@
 
 namespace {
 
-static const byte TARE_GENERIC[6] =
+static const uint8_t TARE_GENERIC[6] =
     {0x03, 0x0a, 0x01, 0x00, 0x00, 0x08};
-static const byte START_TIMER_GENERIC[6] =
+static const uint8_t START_TIMER_GENERIC[6] =
     {0x03, 0x0a, 0x04, 0x00, 0x00, 0x0a};
-static const byte STOP_TIMER_GENERIC[6] =
+static const uint8_t STOP_TIMER_GENERIC[6] =
     {0x03, 0x0a, 0x05, 0x00, 0x00, 0x0d};
-static const byte RESET_TIMER_GENERIC[6] =
+static const uint8_t RESET_TIMER_GENERIC[6] =
     {0x03, 0x0a, 0x06, 0x00, 0x00, 0x0c};
-static const byte TARE_START_TIMER_BOOKOO[6] =
+static const uint8_t TARE_START_TIMER_BOOKOO[6] =
     {0x03, 0x0a, 0x07, 0x00, 0x00, 0x00};
-static const byte FLOW_SMOOTHING_OFF[6] =
+static const uint8_t FLOW_SMOOTHING_OFF[6] =
     {0x03, 0x0a, 0x08, 0x00, 0x00, 0x01};
 
-static const byte GENERIC_PRODUCT = 0x03;
-static const byte GENERIC_TYPE = 0x0a;
-static const byte GENERIC_BEEP_LEVEL_CMD = 0x02;
+static const uint8_t GENERIC_PRODUCT = 0x03;
+static const uint8_t GENERIC_TYPE = 0x0a;
+static const uint8_t GENERIC_BEEP_LEVEL_CMD = 0x02;
 
 static const char *const kGenericPrefixes[] = {"BOOKO"};
 
@@ -35,16 +35,16 @@ static const ScaleFeatureSet kGenericFeatures = {
     8000
 };
 
-void fillGenericCommand(byte out[6], byte data1, byte data2, byte data3) {
+void fillGenericCommand(uint8_t out[6], uint8_t data1, uint8_t data2, uint8_t data3) {
     out[0] = GENERIC_PRODUCT;
     out[1] = GENERIC_TYPE;
     out[2] = data1;
     out[3] = data2;
     out[4] = data3;
-    out[5] = static_cast<byte>(out[0] ^ out[1] ^ out[2] ^ out[3] ^ out[4]);
+    out[5] = static_cast<uint8_t>(out[0] ^ out[1] ^ out[2] ^ out[3] ^ out[4]);
 }
 
-bool copyPayload(const byte *command, int commandLength, byte *out,
+bool copyPayload(const uint8_t *command, int commandLength, uint8_t *out,
                  int *length) {
     if (out == 0 || length == 0 || commandLength <= 0 ||
         commandLength > SCALE_MAX_COMMAND_LENGTH) {
@@ -61,7 +61,7 @@ bool genericSupportedPacketLength(int length) {
     return length == 20;
 }
 
-bool parseGenericWeight(const byte *data, int length, float *weight) {
+bool parseGenericWeight(const uint8_t *data, int length, float *weight) {
     if (length != 20 || data[0] != 0x03 ||
         (data[6] != '-' && data[6] != '+' && data[6] != ' ' &&
          data[6] != 0x00)) {
@@ -78,7 +78,7 @@ bool parseGenericWeight(const byte *data, int length, float *weight) {
     return scaleValidWeight(*weight);
 }
 
-bool parseGenericTimer(const byte *data, int length, uint32_t *timerMs) {
+bool parseGenericTimer(const uint8_t *data, int length, uint32_t *timerMs) {
     float ignoredWeight = 0.0f;
     if (!parseGenericWeight(data, length, &ignoredWeight)) {
         return false;
@@ -88,7 +88,7 @@ bool parseGenericTimer(const byte *data, int length, uint32_t *timerMs) {
     return true;
 }
 
-bool encodeGenericCommand(ScaleOp op, uint8_t arg, byte *out, int *length) {
+bool encodeGenericCommand(ScaleOp op, uint8_t arg, uint8_t *out, int *length) {
     switch (op) {
         case ScaleOp::Tare:
             return copyPayload(TARE_GENERIC, sizeof(TARE_GENERIC), out, length);
@@ -105,7 +105,7 @@ bool encodeGenericCommand(ScaleOp op, uint8_t arg, byte *out, int *length) {
             return copyPayload(TARE_START_TIMER_BOOKOO,
                                sizeof(TARE_START_TIMER_BOOKOO), out, length);
         case ScaleOp::SetVolume: {
-            byte command[6];
+            uint8_t command[6];
             fillGenericCommand(command, GENERIC_BEEP_LEVEL_CMD, 0x00, arg);
             return copyPayload(command, sizeof(command), out, length);
         }

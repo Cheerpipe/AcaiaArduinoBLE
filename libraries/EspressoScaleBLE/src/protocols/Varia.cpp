@@ -2,10 +2,10 @@
 
 namespace {
 
-static const byte TARE_VARIA[5] = {0xfa, 0x82, 0x01, 0x01, 0x82};
-static const byte START_TIMER_VARIA[5] = {0xfa, 0x88, 0x01, 0x01, 0x88};
-static const byte STOP_TIMER_VARIA[5] = {0xfa, 0x89, 0x01, 0x02, 0x8a};
-static const byte RESET_TIMER_VARIA[5] = {0xfa, 0x8a, 0x01, 0x03, 0x88};
+static const uint8_t TARE_VARIA[5] = {0xfa, 0x82, 0x01, 0x01, 0x82};
+static const uint8_t START_TIMER_VARIA[5] = {0xfa, 0x88, 0x01, 0x01, 0x88};
+static const uint8_t STOP_TIMER_VARIA[5] = {0xfa, 0x89, 0x01, 0x02, 0x8a};
+static const uint8_t RESET_TIMER_VARIA[5] = {0xfa, 0x8a, 0x01, 0x03, 0x88};
 
 static const char *const kVariaPrefixes[] = {
     "AKU MINI SCALE",
@@ -23,7 +23,7 @@ static const ScaleFeatureSet kVariaFeatures = {
     5000
 };
 
-bool copyPayload(const byte *command, int commandLength, byte *out,
+bool copyPayload(const uint8_t *command, int commandLength, uint8_t *out,
                  int *length) {
     if (out == 0 || length == 0 || commandLength <= 0 ||
         commandLength > SCALE_MAX_COMMAND_LENGTH) {
@@ -36,7 +36,7 @@ bool copyPayload(const byte *command, int commandLength, byte *out,
     return true;
 }
 
-bool variaXorValid(const byte *data, int length) {
+bool variaXorValid(const uint8_t *data, int length) {
     if (length < 3) {
         return false;
     }
@@ -47,7 +47,7 @@ bool variaSupportedPacketLength(int length) {
     return length == 6 || length == 7;
 }
 
-bool parseVariaWeight(const byte *data, int length, float *weight) {
+bool parseVariaWeight(const uint8_t *data, int length, float *weight) {
     if (length != 7 || data[0] != 0xfa || data[1] != 0x01) {
         return false;
     }
@@ -60,7 +60,7 @@ bool parseVariaWeight(const byte *data, int length, float *weight) {
     return scaleValidWeight(*weight);
 }
 
-bool parseVariaTimer(const byte *data, int length, uint32_t *timerMs) {
+bool parseVariaTimer(const uint8_t *data, int length, uint32_t *timerMs) {
     if (length != 6 || data[0] != 0xfa || data[1] != 0x87) {
         return false;
     }
@@ -73,7 +73,7 @@ bool parseVariaTimer(const byte *data, int length, uint32_t *timerMs) {
     return true;
 }
 
-bool encodeVariaCommand(ScaleOp op, uint8_t arg, byte *out, int *length) {
+bool encodeVariaCommand(ScaleOp op, uint8_t arg, uint8_t *out, int *length) {
     (void)arg;
     switch (op) {
         case ScaleOp::Tare:

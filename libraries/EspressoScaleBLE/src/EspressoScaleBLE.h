@@ -55,6 +55,8 @@
 #define ACAIA_NAME_CAPACITY              SCALE_NAME_CAPACITY
 
 #include "Arduino.h"
+#include "ScaleBleBackend.h"
+#include "ScaleBleTypes.h"
 #include "ScaleFeatures.h"
 #include "ScaleProtocol.h"
 #include <ArduinoBLE.h>
@@ -143,18 +145,19 @@ class EspressoScaleBLE {
         uint32_t lastValidPacketAgeMs() const;
         uint32_t rejectedPacketCount() const;
         uint32_t reconnectCount() const;
+        ScaleBleTimingSnapshot timingSnapshot() const;
         int linkRssi();
 
     private:
         bool isScaleName(const char *name) const;
         bool configureCharacteristics(BLEDevice& peripheral,
                                       const ScaleProtocol *protocol);
-        bool parseWeightPacket(const byte data[], int length,
+        bool parseWeightPacket(const uint8_t data[], int length,
                                float& weight) const;
-        bool parseTimerPacket(const byte data[], int length,
+        bool parseTimerPacket(const uint8_t data[], int length,
                               uint32_t& timerMs) const;
         bool supportedPacketLength(int length) const;
-        ScaleCommandResult writeCommand(const byte command[], int length);
+        ScaleCommandResult writeCommand(const uint8_t command[], int length);
         ScaleCommandResult writeOp(ScaleOp op, uint8_t arg = 0);
         bool beginConnection(BLEDevice& peripheral);
         bool advanceConnection();
@@ -227,6 +230,7 @@ class EspressoScaleBLE {
         char                _seenMac[SCALE_MAC_CAPACITY];
         char                _seenName[SCALE_NAME_CAPACITY];
         bool                _seenPending;
+        ScaleBleTimingSnapshot _timingSnapshot;
         ScaleDisconnectReason _lastDisconnectReason;
 };
 

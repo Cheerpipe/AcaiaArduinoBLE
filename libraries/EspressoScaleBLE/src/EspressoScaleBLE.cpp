@@ -187,6 +187,7 @@ EspressoScaleBLE::EspressoScaleBLE(bool debug) :
     _seenMac{},
     _seenName{},
     _seenPending(false),
+    _timingSnapshot{0, 0, 0, 0, 0},
     _lastDisconnectReason(ScaleDisconnectReason::NONE) {
 }
 
@@ -256,6 +257,7 @@ bool EspressoScaleBLE::startScan(const char *mac, bool forceRestart,
     _seenPending = false;
     _seenMac[0] = '\0';
     _seenName[0] = '\0';
+    _timingSnapshot = {0, 0, 0, 0, 0};
     if (filtered) {
         strncpy(_scanMac, mac, sizeof(_scanMac) - 1);
         _scanMac[sizeof(_scanMac) - 1] = '\0';
@@ -291,6 +293,8 @@ bool EspressoScaleBLE::startScan(const char *mac, bool forceRestart,
     }
     _scanning = true;
     _scanStartedAt = static_cast<uint32_t>(millis());
+    _timingSnapshot.scanStartedMs = _scanStartedAt;
+    _timingSnapshot.recordedFlags |= ScaleBleTimingScanStarted;
     return true;
 }
 
@@ -361,6 +365,16 @@ bool EspressoScaleBLE::pollScan() {
         const bool macOk = filtered && macAddressEqual(mac, _scanMac);
         const bool compatibleAd = nameOk || uuidOk;
 
+        if (compatibleAd || macOk) {
+            if (!_timingSnapshot.has(
+                    ScaleBleTimingFirstCompatibleAdvertisement)) {
+                _timingSnapshot.firstCompatibleAdvertisementMs =
+                    static_cast<uint32_t>(millis());
+                _timingSnapshot.recordedFlags |=
+                    ScaleBleTimingFirstCompatibleAdvertisement;
+            }
+        }
+
         if (compatibleAd) {
             strncpy(_seenMac, mac, sizeof(_seenMac) - 1);
             _seenMac[sizeof(_seenMac) - 1] = '\0';
@@ -421,6 +435,12 @@ bool EspressoScaleBLE::advanceConnection() {
 
         case ConnectStep::Connect:
             BLE.setTimeout(BLE_CONNECT_TIMEOUT_MS);
+            if (!_timingSnapshot.has(ScaleBleTimingConnectIssued)) {
+                _timingSnapshot.connectIssuedMs =
+                    static_cast<uint32_t>(millis());
+                _timingSnapshot.recordedFlags |=
+                    ScaleBleTimingConnectIssued;
+            }
             if (!_peripheral.connect()) {
                 ++_connectAttempts;
                 if (_debug) {
@@ -558,6 +578,8 @@ bool EspressoScaleBLE::finishConnectionSuccess() {
     clearConnectingState();
     _connected = true;
     _connectedAt = now;
+    _timingSnapshot.readyMs = now;
+    _timingSnapshot.recordedFlags |= ScaleBleTimingReady;
     _linkDownSince = 0;
     uint16_t heartbeatPeriod = HEARTBEAT_PERIOD_MS;
     if (_protocol != 0 && _protocol->features.heartbeatPeriodMs != 0) {
@@ -662,7 +684,7 @@ ScaleCommandResult EspressoScaleBLE::writeOp(ScaleOp op, uint8_t arg) {
     if (_protocol == 0 || _protocol->encodeCommand == 0) {
         return ScaleCommandResult::Unsupported;
     }
-    byte command[SCALE_MAX_COMMAND_LENGTH];
+    uint8_t command[SCALE_MAX_COMMAND_LENGTH];
     int length = 0;
     if (!_protocol->encodeCommand(op, arg, command, &length) || length <= 0) {
         return ScaleCommandResult::Unsupported;
@@ -900,7 +922,7 @@ bool EspressoScaleBLE::newWeightAvailable() {
         return false;
     }
 
-    byte input[MAX_BLE_PACKET_LENGTH] = {0};
+    uint8_t input[MAX_BLE_PACKET_LENGTH] = {0};
     const int bytesRead = _read.readValue(input, MAX_BLE_PACKET_LENGTH);
     if (_debug) {
         char hex[(MAX_BLE_PACKET_LENGTH * 2) + 1] = {};
@@ -947,7 +969,7 @@ bool EspressoScaleBLE::supportedPacketLength(int length) const {
     return _protocol->supportedPacketLength(length);
 }
 
-bool EspressoScaleBLE::parseWeightPacket(const byte data[], int length,
+bool EspressoScaleBLE::parseWeightPacket(const uint8_t data[], int length,
                                          float& weight) const {
     if (_protocol == 0 || _protocol->parseWeight == 0) {
         return false;
@@ -955,7 +977,7 @@ bool EspressoScaleBLE::parseWeightPacket(const byte data[], int length,
     return _protocol->parseWeight(data, length, &weight);
 }
 
-bool EspressoScaleBLE::parseTimerPacket(const byte data[], int length,
+bool EspressoScaleBLE::parseTimerPacket(const uint8_t data[], int length,
                                         uint32_t& timerMs) const {
     if (_protocol == 0 || _protocol->parseTimer == 0) {
         return false;
@@ -963,7 +985,7 @@ bool EspressoScaleBLE::parseTimerPacket(const byte data[], int length,
     return _protocol->parseTimer(data, length, &timerMs);
 }
 
-ScaleCommandResult EspressoScaleBLE::writeCommand(const byte command[],
+ScaleCommandResult EspressoScaleBLE::writeCommand(const uint8_t command[],
                                                   int length) {
     if (!isConnected() || !_write || command == nullptr || length <= 0) {
         return ScaleCommandResult::NotConnected;
@@ -1124,6 +1146,10 @@ uint32_t EspressoScaleBLE::rejectedPacketCount() const {
 
 uint32_t EspressoScaleBLE::reconnectCount() const {
     return _reconnects;
+}
+
+ScaleBleTimingSnapshot EspressoScaleBLE::timingSnapshot() const {
+    return _timingSnapshot;
 }
 
 int EspressoScaleBLE::linkRssi() {

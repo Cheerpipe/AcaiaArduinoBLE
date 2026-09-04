@@ -2,23 +2,23 @@
 
 namespace {
 
-static const byte IDENTIFY[20] = {
+static const uint8_t IDENTIFY[20] = {
     0xef, 0xdd, 0x0b, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36,
     0x37, 0x38, 0x39, 0x30, 0x31, 0x32, 0x33, 0x34, 0x9a, 0x6d
 };
-static const byte HEARTBEAT[7] =
+static const uint8_t HEARTBEAT[7] =
     {0xef, 0xdd, 0x00, 0x02, 0x00, 0x02, 0x00};
-static const byte NOTIFICATION_REQUEST[14] = {
+static const uint8_t NOTIFICATION_REQUEST[14] = {
     0xef, 0xdd, 0x0c, 0x09, 0x00, 0x01, 0x01,
     0x02, 0x02, 0x05, 0x03, 0x04, 0x15, 0x06
 };
-static const byte START_TIMER[7] =
+static const uint8_t START_TIMER[7] =
     {0xef, 0xdd, 0x0d, 0x00, 0x00, 0x00, 0x00};
-static const byte STOP_TIMER[7] =
+static const uint8_t STOP_TIMER[7] =
     {0xef, 0xdd, 0x0d, 0x00, 0x02, 0x00, 0x02};
-static const byte RESET_TIMER[7] =
+static const uint8_t RESET_TIMER[7] =
     {0xef, 0xdd, 0x0d, 0x00, 0x01, 0x00, 0x01};
-static const byte TARE_ACAIA[6] =
+static const uint8_t TARE_ACAIA[6] =
     {0xef, 0xdd, 0x04, 0x00, 0x00, 0x00};
 
 static const char *const kAcaiaPrefixes[] = {
@@ -39,7 +39,7 @@ static const ScaleFeatureSet kAcaiaFeatures = {
     5000
 };
 
-bool copyPayload(const byte *command, int commandLength, byte *out,
+bool copyPayload(const uint8_t *command, int commandLength, uint8_t *out,
                  int *length) {
     if (out == 0 || length == 0 || commandLength <= 0 ||
         commandLength > SCALE_MAX_COMMAND_LENGTH) {
@@ -52,7 +52,7 @@ bool copyPayload(const byte *command, int commandLength, byte *out,
     return true;
 }
 
-bool encodeAcaiaCommand(ScaleOp op, uint8_t arg, byte *out, int *length) {
+bool encodeAcaiaCommand(ScaleOp op, uint8_t arg, uint8_t *out, int *length) {
     (void)arg;
     switch (op) {
         case ScaleOp::Tare:
@@ -79,7 +79,7 @@ bool acaiaNewSupportedPacketLength(int length) {
     return length == 10 || length == 13 || length == 17;
 }
 
-bool parseAcaiaOldWeight(const byte *data, int length, float *weight) {
+bool parseAcaiaOldWeight(const uint8_t *data, int length, float *weight) {
     if ((length != 10 && length != 14) || data[6] < 1 || data[6] > 4) {
         return false;
     }
@@ -96,14 +96,14 @@ bool parseAcaiaOldWeight(const byte *data, int length, float *weight) {
     return scaleValidWeight(*weight);
 }
 
-bool parseAcaiaOldTimer(const byte *data, int length, uint32_t *timerMs) {
+bool parseAcaiaOldTimer(const uint8_t *data, int length, uint32_t *timerMs) {
     (void)data;
     (void)length;
     (void)timerMs;
     return false;
 }
 
-bool parseAcaiaNewWeight(const byte *data, int length, float *weight) {
+bool parseAcaiaNewWeight(const uint8_t *data, int length, float *weight) {
     if ((length != 13 && length != 17) || data[0] != 0xef ||
         data[1] != 0xdd || data[2] != 0x0c ||
         static_cast<int>(data[3]) + 5 != length || data[4] != 0x05 ||
@@ -121,7 +121,7 @@ bool parseAcaiaNewWeight(const byte *data, int length, float *weight) {
     return scaleValidWeight(*weight);
 }
 
-bool parseAcaiaNewTimer(const byte *data, int length, uint32_t *timerMs) {
+bool parseAcaiaNewTimer(const uint8_t *data, int length, uint32_t *timerMs) {
     if ((length != 10 && length != 13 && length != 17) ||
         data[0] != 0xef || data[1] != 0xdd || data[2] != 0x0c ||
         static_cast<int>(data[3]) + 5 != length ||

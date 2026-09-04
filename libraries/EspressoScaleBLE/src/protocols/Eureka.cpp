@@ -2,13 +2,13 @@
 
 namespace {
 
-static const byte TARE_EUREKA[6] =
+static const uint8_t TARE_EUREKA[6] =
     {0xaa, 0x02, 0x31, 0x31, 0x00, 0x00};
-static const byte START_TIMER_EUREKA[6] =
+static const uint8_t START_TIMER_EUREKA[6] =
     {0xaa, 0x02, 0x33, 0x33, 0x00, 0x00};
-static const byte STOP_TIMER_EUREKA[6] =
+static const uint8_t STOP_TIMER_EUREKA[6] =
     {0xaa, 0x02, 0x34, 0x34, 0x00, 0x00};
-static const byte RESET_TIMER_EUREKA[6] =
+static const uint8_t RESET_TIMER_EUREKA[6] =
     {0xaa, 0x02, 0x35, 0x35, 0x00, 0x00};
 
 static const char *const kEurekaPrefixes[] = {"CFS-9002", "LSJ-001"};
@@ -22,7 +22,7 @@ static const ScaleFeatureSet kEurekaFeatures = {
     5000
 };
 
-bool copyPayload(const byte *command, int commandLength, byte *out,
+bool copyPayload(const uint8_t *command, int commandLength, uint8_t *out,
                  int *length) {
     if (out == 0 || length == 0 || commandLength <= 0 ||
         commandLength > SCALE_MAX_COMMAND_LENGTH) {
@@ -39,7 +39,7 @@ bool eurekaSupportedPacketLength(int length) {
     return length == 11;
 }
 
-bool parseEurekaWeight(const byte *data, int length, float *weight) {
+bool parseEurekaWeight(const uint8_t *data, int length, float *weight) {
     if (length != 11) {
         return false;
     }
@@ -52,7 +52,7 @@ bool parseEurekaWeight(const byte *data, int length, float *weight) {
     return scaleValidWeight(*weight);
 }
 
-bool encodeEurekaCommand(ScaleOp op, uint8_t arg, byte *out, int *length) {
+bool encodeEurekaCommand(ScaleOp op, uint8_t arg, uint8_t *out, int *length) {
     (void)arg;
     switch (op) {
         case ScaleOp::Tare:

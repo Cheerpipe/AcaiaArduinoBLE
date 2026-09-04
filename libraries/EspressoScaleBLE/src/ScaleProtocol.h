@@ -1,8 +1,9 @@
 #ifndef ScaleProtocol_h
 #define ScaleProtocol_h
 
-#include "Arduino.h"
 #include "ScaleFeatures.h"
+#include <stddef.h>
+#include <stdint.h>
 
 #define SCALE_MAX_PACKET_LENGTH 20
 #define SCALE_MAX_COMMAND_LENGTH 20
@@ -12,7 +13,7 @@
      ScaleFeatureStopTimer | ScaleFeatureResetTimer)
 
 struct ScalePayload {
-    const byte *data;
+    const uint8_t *data;
     int length;
 };
 
@@ -25,9 +26,9 @@ struct ScaleProtocol {
     size_t namePrefixCount;
     ScaleFeatureSet features;
     bool (*supportedPacketLength)(int length);
-    bool (*parseWeight)(const byte *data, int length, float *weight);
-    bool (*parseTimer)(const byte *data, int length, uint32_t *timerMs);
-    bool (*encodeCommand)(ScaleOp op, uint8_t arg, byte *out, int *length);
+    bool (*parseWeight)(const uint8_t *data, int length, float *weight);
+    bool (*parseTimer)(const uint8_t *data, int length, uint32_t *timerMs);
+    bool (*encodeCommand)(ScaleOp op, uint8_t arg, uint8_t *out, int *length);
     const ScalePayload *initWrites;
     size_t initWriteCount;
     bool requireAdvertisedName;
@@ -41,13 +42,13 @@ bool scaleParseUuid16(const char *uuid, uint16_t *out);
 bool scaleUuid16AllowsNamelessConnect(uint16_t uuid);
 
 bool scaleValidWeight(float weight);
-uint8_t scaleXorBytes(const byte *data, int length);
-uint32_t scaleReadUint32LittleEndian(const byte *data);
-float scaleDecimalDivisor(byte exponent);
-bool scaleLooksLikeAcaiaTimer(byte minutes, byte seconds, byte tenths);
-uint32_t scaleAcaiaTimerToMs(byte minutes, byte seconds, byte tenths);
-bool scaleValidAcaiaChecksum(const byte *data, int length);
-bool scaleFelicitaAsciiTimer(const byte *data, uint32_t *timerMs);
+uint8_t scaleXorBytes(const uint8_t *data, int length);
+uint32_t scaleReadUint32LittleEndian(const uint8_t *data);
+float scaleDecimalDivisor(uint8_t exponent);
+bool scaleLooksLikeAcaiaTimer(uint8_t minutes, uint8_t seconds, uint8_t tenths);
+uint32_t scaleAcaiaTimerToMs(uint8_t minutes, uint8_t seconds, uint8_t tenths);
+bool scaleValidAcaiaChecksum(const uint8_t *data, int length);
+bool scaleFelicitaAsciiTimer(const uint8_t *data, uint32_t *timerMs);
 
 extern const ScaleProtocol kScaleProtocolAcaiaLegacy;
 extern const ScaleProtocol kScaleProtocolAcaia;

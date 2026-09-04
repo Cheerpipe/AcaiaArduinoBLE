@@ -2,11 +2,11 @@
 
 namespace {
 
-static const byte TARE_FELICITA[1] = {0x54};
-static const byte START_TIMER_FELICITA[1] = {0x52};
-static const byte STOP_TIMER_FELICITA[1] = {0x53};
-static const byte RESET_TIMER_FELICITA[1] = {0x43};
-static const byte WEIGHT_TIMER_MODE_FELICITA[1] = {0x32};
+static const uint8_t TARE_FELICITA[1] = {0x54};
+static const uint8_t START_TIMER_FELICITA[1] = {0x52};
+static const uint8_t STOP_TIMER_FELICITA[1] = {0x53};
+static const uint8_t RESET_TIMER_FELICITA[1] = {0x43};
+static const uint8_t WEIGHT_TIMER_MODE_FELICITA[1] = {0x32};
 
 static const char *const kFelicitaPrefixes[] = {"FELIC"};
 
@@ -23,7 +23,7 @@ static const ScaleFeatureSet kFelicitaFeatures = {
     5000
 };
 
-bool copyPayload(const byte *command, int commandLength, byte *out,
+bool copyPayload(const uint8_t *command, int commandLength, uint8_t *out,
                  int *length) {
     if (out == 0 || length == 0 || commandLength <= 0 ||
         commandLength > SCALE_MAX_COMMAND_LENGTH) {
@@ -40,7 +40,7 @@ bool felicitaSupportedPacketLength(int length) {
     return length == 18;
 }
 
-bool parseFelicitaWeight(const byte *data, int length, float *weight) {
+bool parseFelicitaWeight(const uint8_t *data, int length, float *weight) {
     if (length != 18 ||
         (data[2] != '-' && data[2] != '+' && data[2] != ' ' &&
          data[2] != 0x00)) {
@@ -66,7 +66,7 @@ bool parseFelicitaWeight(const byte *data, int length, float *weight) {
     return scaleValidWeight(*weight);
 }
 
-bool parseFelicitaTimer(const byte *data, int length, uint32_t *timerMs) {
+bool parseFelicitaTimer(const uint8_t *data, int length, uint32_t *timerMs) {
     float ignoredWeight = 0.0f;
     if (!parseFelicitaWeight(data, length, &ignoredWeight)) {
         return false;
@@ -81,7 +81,7 @@ bool parseFelicitaTimer(const byte *data, int length, uint32_t *timerMs) {
     return false;
 }
 
-bool encodeFelicitaCommand(ScaleOp op, uint8_t arg, byte *out, int *length) {
+bool encodeFelicitaCommand(ScaleOp op, uint8_t arg, uint8_t *out, int *length) {
     (void)arg;
     switch (op) {
         case ScaleOp::Tare:

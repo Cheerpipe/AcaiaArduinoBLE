@@ -2,10 +2,10 @@
 
 namespace {
 
-static const byte TARE_ECLAIR[3] = {0x54, 0x01, 0x01};
-static const byte START_TIMER_ECLAIR[3] = {0x53, 0x01, 0x01};
-static const byte STOP_TIMER_ECLAIR[3] = {0x45, 0x01, 0x01};
-static const byte RESET_TIMER_ECLAIR[3] = {0x52, 0x01, 0x01};
+static const uint8_t TARE_ECLAIR[3] = {0x54, 0x01, 0x01};
+static const uint8_t START_TIMER_ECLAIR[3] = {0x53, 0x01, 0x01};
+static const uint8_t STOP_TIMER_ECLAIR[3] = {0x45, 0x01, 0x01};
+static const uint8_t RESET_TIMER_ECLAIR[3] = {0x52, 0x01, 0x01};
 
 static const char *const kEclairPrefixes[] = {"ECLAI"};
 
@@ -17,7 +17,7 @@ static const ScaleFeatureSet kEclairFeatures = {
     5000
 };
 
-bool copyPayload(const byte *command, int commandLength, byte *out,
+bool copyPayload(const uint8_t *command, int commandLength, uint8_t *out,
                  int *length) {
     if (out == 0 || length == 0 || commandLength <= 0 ||
         commandLength > SCALE_MAX_COMMAND_LENGTH) {
@@ -34,7 +34,7 @@ bool eclairSupportedPacketLength(int length) {
     return length == 10;
 }
 
-bool parseEclairWeight(const byte *data, int length, float *weight) {
+bool parseEclairWeight(const uint8_t *data, int length, float *weight) {
     if (length != 10 || data[0] != 'W' ||
         scaleXorBytes(data + 1, 8) != data[9]) {
         return false;
@@ -45,7 +45,7 @@ bool parseEclairWeight(const byte *data, int length, float *weight) {
     return scaleValidWeight(*weight);
 }
 
-bool parseEclairTimer(const byte *data, int length, uint32_t *timerMs) {
+bool parseEclairTimer(const uint8_t *data, int length, uint32_t *timerMs) {
     float ignoredWeight = 0.0f;
     if (!parseEclairWeight(data, length, &ignoredWeight)) {
         return false;
@@ -54,7 +54,7 @@ bool parseEclairTimer(const byte *data, int length, uint32_t *timerMs) {
     return true;
 }
 
-bool encodeEclairCommand(ScaleOp op, uint8_t arg, byte *out, int *length) {
+bool encodeEclairCommand(ScaleOp op, uint8_t arg, uint8_t *out, int *length) {
     (void)arg;
     switch (op) {
         case ScaleOp::Tare:

@@ -21,6 +21,7 @@ common_flags=(
   -fsanitize=address,undefined \
   -fno-omit-frame-pointer \
   "$repo_root/src/EspressoScaleBLE.cpp" \
+  "$repo_root/src/ScaleBleStateMachine.cpp" \
   "$repo_root/src/ScaleProtocolCommon.cpp" \
   "$repo_root/src/protocols/Registry.cpp" \
   "$repo_root/src/protocols/Acaia.cpp" \
@@ -37,3 +38,12 @@ common_flags=(
   -o "$build_dir/espresso_scale_ble_host_test"
 
 ASAN_OPTIONS=detect_leaks=0 "$build_dir/espresso_scale_ble_host_test"
+
+"$compiler" "${common_flags[@]}" \
+  -fsanitize=address,undefined \
+  -fno-omit-frame-pointer \
+  "$repo_root/src/ScaleBleStateMachine.cpp" \
+  "$repo_root/tests/scale_ble_portable_test.cpp" \
+  -o "$build_dir/scale_ble_portable_test"
+
+ASAN_OPTIONS=detect_leaks=0 "$build_dir/scale_ble_portable_test"

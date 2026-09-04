@@ -2,7 +2,7 @@
 
 namespace {
 
-static const byte TARE_MYSCALE[20] = {
+static const uint8_t TARE_MYSCALE[20] = {
     0xac, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0xd2, 0xd2
@@ -22,7 +22,7 @@ static const ScaleFeatureSet kMyscaleFeatures = {
     5000
 };
 
-bool copyPayload(const byte *command, int commandLength, byte *out,
+bool copyPayload(const uint8_t *command, int commandLength, uint8_t *out,
                  int *length) {
     if (out == 0 || length == 0 || commandLength <= 0 ||
         commandLength > SCALE_MAX_COMMAND_LENGTH) {
@@ -39,11 +39,11 @@ bool myscaleSupportedPacketLength(int length) {
     return length >= 15 && length <= SCALE_MAX_PACKET_LENGTH;
 }
 
-bool parseMyscaleWeight(const byte *data, int length, float *weight) {
+bool parseMyscaleWeight(const uint8_t *data, int length, float *weight) {
     if (length < 15) {
         return false;
     }
-    const byte nibble = static_cast<byte>(data[2] >> 4);
+    const uint8_t nibble = static_cast<uint8_t>(data[2] >> 4);
     const bool negative = nibble == 0x08 || nibble == 0x0c;
     const uint32_t raw = (static_cast<uint32_t>(data[3] & 0x0f) << 24) |
                          (static_cast<uint32_t>(data[4]) << 16) |
@@ -55,7 +55,7 @@ bool parseMyscaleWeight(const byte *data, int length, float *weight) {
     return scaleValidWeight(*weight);
 }
 
-bool encodeMyscaleCommand(ScaleOp op, uint8_t arg, byte *out, int *length) {
+bool encodeMyscaleCommand(ScaleOp op, uint8_t arg, uint8_t *out, int *length) {
     (void)arg;
     if (op == ScaleOp::Tare) {
         return copyPayload(TARE_MYSCALE, sizeof(TARE_MYSCALE), out, length);
