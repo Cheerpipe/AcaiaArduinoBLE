@@ -8046,7 +8046,9 @@ void ShotStopperNetwork::buildOtaJson(char *buffer, size_t capacity,
   int written = snprintf(
       buffer, capacity,
       "{\"available\":%s,\"state\":\"%s\",\"slotBytes\":%lu,"
-      "\"receivedBytes\":%lu,\"expectedBytes\":%lu,\"pendingVerify\":%s,"
+      "\"receivedBytes\":%lu,\"expectedBytes\":%lu,"
+      "\"lastResult\":\"%s\",\"lastReceivedBytes\":%lu,"
+      "\"lastExpectedBytes\":%lu,\"pendingVerify\":%s,"
       "\"confirmed\":%s,\"safe\":%s,\"lockReason\":\"%s\","
       "\"passwordRequired\":true,\"passwordAvailable\":true,\"restartPending\":%s",
       ota.available() ? "true" : "false",
@@ -8054,6 +8056,9 @@ void ShotStopperNetwork::buildOtaJson(char *buffer, size_t capacity,
       static_cast<unsigned long>(ota_.slotBytes),
       static_cast<unsigned long>(ota_.receivedBytes),
       static_cast<unsigned long>(ota_.expectedBytes),
+      ShotStopperOta::resultName(ota_.lastResult),
+      static_cast<unsigned long>(ota_.lastReceivedBytes),
+      static_cast<unsigned long>(ota_.lastExpectedBytes),
       ota_.pendingVerify ? "true" : "false",
       ota_.confirmed ? "true" : "false", safe ? "true" : "false",
       configLockReason(control),

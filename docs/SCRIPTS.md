@@ -120,6 +120,11 @@ Examples:
 aliases). It bypasses the final commit prompt, then polls the controller until
 the new image reports `confirmed: true` or four minutes pass.
 
+OTA clients use a 10-second connection timeout and retain the existing long
+transfer window. A transient transport failure is reconciled with the OTA
+status endpoint before retrying, then retried at most twice when the controller
+is idle. Safety and validation failures are not retried.
+
 `--image` can also be passed to the flash/OTA wrappers (`bf`, `bfm`, `bo`,
 `bsfm` and their `*-idf` variants); they still execute their named build or
 analysis steps, then use the selected image for the transfer. The image is

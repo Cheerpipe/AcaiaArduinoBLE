@@ -113,6 +113,11 @@ struct OtaStatusSnapshot {
   uint32_t slotBytes = 0;
   uint32_t receivedBytes = 0;
   uint32_t expectedBytes = 0;
+  // Failure diagnostics are retained after the active counters are reset, so
+  // a client can distinguish a cut transport from a validation failure.
+  OtaResult lastResult = OtaResult::OK;
+  uint32_t lastReceivedBytes = 0;
+  uint32_t lastExpectedBytes = 0;
   bool stagedValid = false;
   OtaImageTag staged = {};
   // The running image was booted by an OTA commit and has not been confirmed.
@@ -191,6 +196,9 @@ class ShotStopperOta {
   uint32_t slotBytes_ = 0;
   uint32_t receivedBytes_ = 0;
   uint32_t expectedBytes_ = 0;
+  OtaResult lastResult_ = OtaResult::OK;
+  uint32_t lastReceivedBytes_ = 0;
+  uint32_t lastExpectedBytes_ = 0;
   uint32_t stagedTagOffset_ = 0;
   uint32_t stagedSizeBytes_ = 0;
   OtaImageTag stagedTag_ = {};

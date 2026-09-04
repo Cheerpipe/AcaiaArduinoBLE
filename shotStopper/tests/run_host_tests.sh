@@ -273,6 +273,8 @@ done
 
 echo "BLE Companion v2 characteristics: present"
 
+bash "$test_dir/ota_cli_resilience_test.sh"
+
 for script in "$repo_root"/scripts/*; do
   [ -f "$script" ] || continue
   case "$script" in

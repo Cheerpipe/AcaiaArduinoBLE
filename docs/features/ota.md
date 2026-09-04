@@ -63,6 +63,12 @@ Use the project scripts from the repository root. The CLI authenticates with
 the device password; pass it with `--password` (or `-t`) or enter it when the
 script prompts. The password is never saved by the scripts.
 
+The CLI retries an interrupted upload up to two additional times after it
+confirms the controller is idle again. If the image was verified but its HTTP
+response was lost, it detects the staged image and continues without sending
+the binary again. It never retries a paddle/shot abort, an invalid image, a
+wrong password, or another safety/validation refusal.
+
 Build and upload in one command:
 
 ```sh

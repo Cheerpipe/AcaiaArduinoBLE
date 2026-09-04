@@ -215,7 +215,10 @@ class ShotStopperNetwork {
   // marked invalid so the bootloader can roll back; if no previous slot is
   // bootable the running image is confirmed so the machine still has firmware.
   static constexpr uint32_t OTA_CONFIRM_DEADLINE_MS = 180000;
-  static constexpr uint8_t OTA_RECEIVE_ATTEMPTS = 3;
+  // Each HTTP socket read waits five seconds. Wi-Fi/BLE coexistence can stall
+  // longer than the previous 15 s total without meaning that the peer died.
+  // This remains bounded so a vanished client cannot occupy a socket forever.
+  static constexpr uint8_t OTA_RECEIVE_ATTEMPTS = 6;
   static constexpr uint32_t OTA_RESTART_GIVE_UP_MS = 300000;
   static constexpr uint32_t NETWORK_RETRY_MIN_MS = 1000;
   static constexpr uint32_t NETWORK_RETRY_MAX_MS = 30000;

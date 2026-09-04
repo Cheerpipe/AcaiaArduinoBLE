@@ -97,6 +97,9 @@ OtaStatusSnapshot ShotStopperOta::snapshot() const {
   copy.slotBytes = slotBytes_;
   copy.receivedBytes = receivedBytes_;
   copy.expectedBytes = expectedBytes_;
+  copy.lastResult = lastResult_;
+  copy.lastReceivedBytes = lastReceivedBytes_;
+  copy.lastExpectedBytes = lastExpectedBytes_;
   copy.stagedValid = stagedValid_;
   copy.staged = stagedTag_;
   copy.pendingVerify = pendingVerify_;
@@ -105,6 +108,12 @@ OtaStatusSnapshot ShotStopperOta::snapshot() const {
 }
 
 OtaResult ShotStopperOta::finishFailure(OtaResult result) {
+  // Keep this evidence after clearing the active transfer. The HTTP handler
+  // reads its snapshot after stage() returns, so resetting first used to make
+  // every failed upload look as though it had failed at byte zero.
+  lastResult_ = result;
+  lastReceivedBytes_ = receivedBytes_;
+  lastExpectedBytes_ = expectedBytes_;
   busy_ = false;
   receivedBytes_ = 0;
   expectedBytes_ = 0;
@@ -157,7 +166,9 @@ OtaResult ShotStopperOta::stage(uint32_t contentLength, bool allowDowngrade,
   const esp_partition_t *target =
       static_cast<const esp_partition_t *>(targetPartition_);
   if (target == nullptr) {
-    return OtaResult::UNAVAILABLE;
+    // available_ was established at boot, but do not leave OTA permanently
+    // busy if an unexpected partition lookup inconsistency is ever reached.
+    return finishFailure(OtaResult::UNAVAILABLE);
   }
 
   OtaChunkBuffer chunk(OTA_CHUNK_BYTES);
@@ -319,6 +330,9 @@ OtaResult ShotStopperOta::stage(uint32_t contentLength, bool allowDowngrade,
   busy_ = false;
   state_ = OtaState::STAGED;
   receivedBytes_ = received;
+  lastResult_ = OtaResult::OK;
+  lastReceivedBytes_ = received;
+  lastExpectedBytes_ = contentLength;
   return OtaResult::OK;
 }
 
