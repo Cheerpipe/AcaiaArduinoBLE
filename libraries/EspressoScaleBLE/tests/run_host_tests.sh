@@ -68,3 +68,12 @@ ASAN_OPTIONS=detect_leaks=0 "$build_dir/scale_ble_portable_test"
   -o "$build_dir/nimble_advertisement_test"
 
 ASAN_OPTIONS=detect_leaks=0 "$build_dir/nimble_advertisement_test"
+
+"$compiler" "${common_flags[@]}" \
+  -fsanitize=address,undefined \
+  -fno-omit-frame-pointer \
+  "$repo_root/src/nimble/NimbleResilience.cpp" \
+  "$repo_root/tests/nimble_resilience_test.cpp" \
+  -o "$build_dir/nimble_resilience_test"
+
+ASAN_OPTIONS=detect_leaks=0 "$build_dir/nimble_resilience_test"

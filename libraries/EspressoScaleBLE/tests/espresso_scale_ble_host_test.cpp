@@ -338,6 +338,15 @@ void testNonBlockingScanConnectsWithoutInit() {
     resetFake();
     ScaleFixture fixture = makeScale(NEW);
     EspressoScaleBLE scale(false);
+    const ScaleBleBackendHealth initialHealth = scale.backendHealth();
+    CHECK(initialHealth.generation == 0);
+    CHECK(initialHealth.operationId == 0);
+    CHECK(initialHealth.state == 0);
+    CHECK(initialHealth.cleanupCount == 0);
+    CHECK(initialHealth.criticalEventDrops == 0);
+    CHECK(initialHealth.controlEventDrops == 0);
+    CHECK(initialHealth.rxDrops == 0);
+    CHECK(scale.lastBackendStatus() == 0);
     CHECK(scale.linkRssi() == SCALE_LINK_RSSI_UNAVAILABLE);
     CHECK(scale.startScan());
     ScaleBleTimingSnapshot timing = scale.timingSnapshot();

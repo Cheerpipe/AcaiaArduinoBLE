@@ -6,6 +6,7 @@
 
 #include "ShotStopperBleRuntime.h"
 #include "nimble/NimbleAdvertisement.h"
+#include "nimble/NimbleResilience.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -36,8 +37,12 @@ constexpr uint16_t kInvalidHandle = 0xffff;
 constexpr size_t kCandidateCount = 8;
 constexpr size_t kServiceCount = 24;
 constexpr size_t kEventCount = 12;
+constexpr size_t kCriticalEventCount = 6;
 constexpr size_t kRxFrameCount = 16;
 constexpr size_t kProtocolCapacity = 11;
+constexpr uint32_t kScanCancelTimeoutMs = 1000;
+constexpr uint32_t kUnsupportedCooldownMs = 60000;
+constexpr uint32_t kGattFailureCooldownMs = 2000;
 
 void scaleLogDebug(const char *format, ...) {
   if (format == nullptr) {
@@ -133,6 +138,15 @@ const char *disconnectReasonName(ScaleDisconnectReason reason) {
       return "supervision timeout";
     case ScaleDisconnectReason::CONNECTION_FAILED_TO_ESTABLISH:
       return "connection failed to be established";
+    case ScaleDisconnectReason::RX_QUEUE_OVERFLOW:
+      return "RX queue overflow";
+    case ScaleDisconnectReason::EVENT_QUEUE_OVERFLOW:
+      return "event queue overflow";
+    case ScaleDisconnectReason::HOST_RESET: return "host reset";
+    case ScaleDisconnectReason::OPERATION_TIMEOUT:
+      return "operation timeout";
+    case ScaleDisconnectReason::MBUF_ALLOCATION_FAILED:
+      return "mbuf allocation failed";
   }
   return "unknown";
 }
@@ -149,15 +163,28 @@ ScaleDisconnectReason mapRawDisconnectReason(int status) {
 
 class NimbleScaleClient {
  public:
-  explicit NimbleScaleClient(bool debug) : debug_(debug) {}
+  explicit NimbleScaleClient(bool debug) : debug_(debug) {
+    if (activeClient_ == nullptr) {
+      activeClient_ = this;
+      callbackOwner_ = true;
+    }
+  }
 
   ~NimbleScaleClient() {
-    resetConnection(true, ScaleDisconnectReason::USER_REQUEST);
+    finishLink(true, ScaleDisconnectReason::USER_REQUEST, 0);
+    if (callbackOwner_ && activeClient_ == this) {
+      activeClient_ = nullptr;
+    }
   }
 
   bool startScan(const char *mac, bool forceRestart, uint16_t interval,
                  uint16_t window, bool addressScan) {
     service();
+    if (!callbackOwner_) {
+      lastReason_ = ScaleDisconnectReason::SCAN_START_FAILED;
+      lastRawStatus_ = BLE_HS_EBUSY;
+      return false;
+    }
     if (scaleProtocolCount() > kProtocolCapacity) {
       lastReason_ = ScaleDisconnectReason::UNSUPPORTED_SCALE;
       lastRawStatus_ = BLE_HS_EINVAL;
@@ -181,7 +208,8 @@ class NimbleScaleClient {
       return false;
     }
     const bool useAddressScan = filtered && addressScan;
-    if (state_ == State::Scanning && !forceRestart &&
+    if ((state_ == State::Scanning || state_ == State::Backoff) &&
+        !forceRestart &&
         scanInterval_ == interval && scanWindow_ == window &&
         scanAddressFilter_ == useAddressScan &&
         filterPresent_ == filtered &&
@@ -190,13 +218,8 @@ class NimbleScaleClient {
     }
 
     if (state_ != State::Idle) {
-      resetConnection(true, ScaleDisconnectReason::NONE);
+      finishLink(true, ScaleDisconnectReason::NONE, 0);
     }
-    ++generation_;
-    if (generation_ == 0) {
-      generation_ = 1;
-    }
-    syncGeneration_ = shotStopperBleRuntimeSyncGeneration();
     scanInterval_ = interval;
     scanWindow_ = window;
     filterPresent_ = filtered;
@@ -206,32 +229,14 @@ class NimbleScaleClient {
     } else {
       memset(filterAddress_, 0, sizeof(filterAddress_));
     }
-    clearScanData();
-    timing_ = {};
-
-    ble_gap_disc_params params = {};
-    params.passive = 0;
-    params.filter_duplicates = 0;
-    params.itvl = interval;
-    params.window = window;
-    params.filter_policy = 0;
-    params.limited = 0;
-    const int rc = ble_gap_disc(shotStopperBleRuntimeOwnAddressType(),
-                                BLE_HS_FOREVER, &params, gapCallback, this);
-    if (rc != 0) {
-      lastReason_ = ScaleDisconnectReason::SCAN_START_FAILED;
-      lastRawStatus_ = rc;
-      state_ = State::Idle;
-      return false;
+    if (forceRestart) {
+      backoff_.reset();
     }
-    state_ = State::Scanning;
-    scanStartedAt_ = nowMs();
-    timing_.scanStartedMs = scanStartedAt_;
-    timing_.recordedFlags = ScaleBleTimingScanStarted;
-    if (debug_) {
-      scaleLogDebug("active scan started (%u/%u)", interval, window);
+    if (backoff_.active(nowMs())) {
+      enterState(State::Backoff, backoff_.remainingMs(nowMs()));
+      return true;
     }
-    return true;
+    return beginConfiguredScan(forceRestart);
   }
 
   bool poll() {
@@ -239,7 +244,9 @@ class NimbleScaleClient {
     return state_ == State::Ready;
   }
 
-  bool isScanning() const { return state_ == State::Scanning; }
+  bool isScanning() const {
+    return state_ == State::Scanning || state_ == State::Backoff;
+  }
 
   bool isConnecting() const {
     return state_ == State::CancelPending || state_ == State::Connecting ||
@@ -250,7 +257,7 @@ class NimbleScaleClient {
   }
 
   void disconnect() {
-    resetConnection(true, ScaleDisconnectReason::USER_REQUEST);
+    finishLink(true, ScaleDisconnectReason::USER_REQUEST, 0);
   }
 
   bool isConnected() {
@@ -266,11 +273,13 @@ class NimbleScaleClient {
       return false;
     }
     if (!hasValidPacket_ && elapsedMs(connectedAt_) >= FIRST_PACKET_TIMEOUT_MS) {
-      resetConnection(true, ScaleDisconnectReason::FIRST_PACKET_TIMEOUT);
+      finishLink(true, ScaleDisconnectReason::FIRST_PACKET_TIMEOUT,
+                 BLE_HS_ETIMEOUT);
       return false;
     }
     if (hasValidPacket_ && elapsedMs(lastPacket_) >= maxPacketPeriodMs()) {
-      resetConnection(true, ScaleDisconnectReason::PACKET_TIMEOUT);
+      finishLink(true, ScaleDisconnectReason::PACKET_TIMEOUT,
+                 BLE_HS_ETIMEOUT);
       return false;
     }
 
@@ -360,7 +369,8 @@ class NimbleScaleClient {
   const char *address() const { return identityPresent_ ? address_ : ""; }
   const char *name() const { return identityPresent_ ? name_ : ""; }
   bool directedScan() const {
-    return state_ == State::Scanning && filterPresent_;
+    return (state_ == State::Scanning || state_ == State::Backoff) &&
+           filterPresent_;
   }
 
   bool takeSeenAdvertisement(char *macOut, size_t macCapacity, char *nameOut,
@@ -412,6 +422,51 @@ class NimbleScaleClient {
   uint16_t rxHighWater() const { return rxHighWater_; }
   uint32_t rxDrops() const { return rxDrops_; }
 
+  ScaleBleBackendHealth health() const {
+    ScaleBleBackendHealth result = {};
+    portENTER_CRITICAL(&mux_);
+    result.generation = generation_;
+    result.operationId = operationId_;
+    result.stateAgeMs = elapsedMs(stateEnteredAtMs_);
+    result.advertisementsSeen = advertisementsSeen_;
+    result.compatibleAdvertisements = compatibleAdvertisements_;
+    result.discardedAdvertisements = discardedAdvertisements_;
+    result.malformedAdvertisements = malformedAdvertisements_;
+    result.negativeCacheHits = negativeCacheHits_;
+    result.negativeCacheInsertions = negativeCacheInsertions_;
+    result.scanStarts = scanStarts_;
+    result.scanCancels = scanCancels_;
+    result.scanRestarts = scanRestarts_;
+    result.connectAttempts = connectAttemptsTotal_;
+    result.connectionFailures = connectionFailures_;
+    result.discoveryFailures = discoveryFailures_;
+    result.subscriptionFailures = subscriptionFailures_;
+    result.writeFailures = writeFailures_;
+    result.staleCallbacks = staleCallbacks_;
+    result.criticalEventDrops = criticalEvents_.drops();
+    result.controlEventDrops = controlEvents_.drops();
+    result.rxDrops = rxDrops_;
+    result.mbufFailures = mbufFailures_;
+    result.cleanupCount = cleanupCount_;
+    result.duplicateCleanups = duplicateCleanups_;
+    result.backoffCount = backoffCount_;
+    result.lastAdvertisementToConnectMs = lastAdvertisementToConnectMs_;
+    result.lastAdvertisementToReadyMs = lastAdvertisementToReadyMs_;
+    result.criticalEventHighWater =
+        static_cast<uint16_t>(criticalEvents_.highWater());
+    result.controlEventHighWater =
+        static_cast<uint16_t>(controlEvents_.highWater());
+    result.rxHighWater = rxHighWater_;
+    result.state = static_cast<uint8_t>(state_);
+    result.backoffFailures = backoff_.failureCount();
+    portEXIT_CRITICAL(&mux_);
+    portENTER_CRITICAL(&advertMux_);
+    result.negativeCacheEntries = static_cast<uint8_t>(
+        negativeCache_.activeCount(nowMs()));
+    portEXIT_CRITICAL(&advertMux_);
+    return result;
+  }
+
  private:
   enum class State : uint8_t {
     Idle,
@@ -423,7 +478,8 @@ class NimbleScaleClient {
     DiscoveringDescriptors,
     Subscribing,
     Initializing,
-    Ready
+    Ready,
+    Backoff
   };
 
   enum class EventType : uint8_t {
@@ -439,9 +495,12 @@ class NimbleScaleClient {
 
   enum class WritePurpose : uint8_t { None, Subscribe, Initialize, Command };
 
+  enum class CallbackDomain : uint8_t { Scan, Link, Gatt };
+
   struct Event {
     EventType type;
     uint32_t generation;
+    uint32_t operationId;
     int32_t status;
     uint16_t connectionHandle;
     ble_addr_t address;
@@ -472,68 +531,123 @@ class NimbleScaleClient {
 
   struct RxFrame {
     uint32_t generation;
+    uint32_t operationId;
     uint32_t receivedAtMs;
     uint8_t length;
     uint8_t data[MAX_BLE_PACKET_LENGTH];
   };
 
+  static void *callbackArg(uint32_t operationId) {
+    return reinterpret_cast<void *>(static_cast<uintptr_t>(operationId));
+  }
+
+  void noteStaleCallback() {
+    portENTER_CRITICAL(&mux_);
+    ++staleCallbacks_;
+    portEXIT_CRITICAL(&mux_);
+  }
+
+  bool callbackMatches(uint32_t actual, CallbackDomain domain) {
+    portENTER_CRITICAL(&mux_);
+    const uint32_t expected =
+        domain == CallbackDomain::Scan
+            ? scanOperationId_
+            : (domain == CallbackDomain::Link ? linkOperationId_
+                                               : gattOperationId_);
+    const bool matches = actual != 0 && actual == expected;
+    if (!matches) {
+      ++staleCallbacks_;
+    }
+    portEXIT_CRITICAL(&mux_);
+    return matches;
+  }
+
   static int gapCallback(ble_gap_event *event, void *arg) {
-    return static_cast<NimbleScaleClient *>(arg)->onGapEvent(event);
+    return activeClient_ == nullptr
+               ? 0
+               : activeClient_->onGapEvent(
+                     event, static_cast<uint32_t>(
+                                reinterpret_cast<uintptr_t>(arg)));
   }
 
   static int serviceCallback(uint16_t connectionHandle,
                              const ble_gatt_error *error,
                              const ble_gatt_svc *service, void *arg) {
-    return static_cast<NimbleScaleClient *>(arg)->onService(
-        connectionHandle, error, service);
+    return activeClient_ == nullptr
+               ? 0
+               : activeClient_->onService(
+                     connectionHandle, error, service,
+                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(arg)));
   }
 
   static int characteristicCallback(uint16_t connectionHandle,
                                     const ble_gatt_error *error,
                                     const ble_gatt_chr *characteristic,
                                     void *arg) {
-    return static_cast<NimbleScaleClient *>(arg)->onCharacteristic(
-        connectionHandle, error, characteristic);
+    return activeClient_ == nullptr
+               ? 0
+               : activeClient_->onCharacteristic(
+                     connectionHandle, error, characteristic,
+                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(arg)));
   }
 
   static int descriptorCallback(uint16_t connectionHandle,
                                 const ble_gatt_error *error,
                                 uint16_t characteristicValueHandle,
                                 const ble_gatt_dsc *descriptor, void *arg) {
-    return static_cast<NimbleScaleClient *>(arg)->onDescriptor(
-        connectionHandle, error, characteristicValueHandle, descriptor);
+    return activeClient_ == nullptr
+               ? 0
+               : activeClient_->onDescriptor(
+                     connectionHandle, error, characteristicValueHandle,
+                     descriptor,
+                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(arg)));
   }
 
   static int writeCallback(uint16_t connectionHandle,
                            const ble_gatt_error *error, ble_gatt_attr *,
                            void *arg) {
-    return static_cast<NimbleScaleClient *>(arg)->onWrite(connectionHandle,
-                                                           error);
+    return activeClient_ == nullptr
+               ? 0
+               : activeClient_->onWrite(
+                     connectionHandle, error,
+                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(arg)));
   }
 
-  int onGapEvent(ble_gap_event *event) {
+  int onGapEvent(ble_gap_event *event, uint32_t operationId) {
     if (event == nullptr) {
       return 0;
     }
     switch (event->type) {
       case BLE_GAP_EVENT_DISC:
-        onAdvertisement(event->disc);
+        if (callbackMatches(operationId, CallbackDomain::Scan)) {
+          onAdvertisement(event->disc, operationId);
+        }
         return 0;
       case BLE_GAP_EVENT_DISC_COMPLETE:
-        pushSimpleEvent(EventType::ScanComplete,
-                        event->disc_complete.reason, kInvalidHandle);
+        if (callbackMatches(operationId, CallbackDomain::Scan)) {
+          pushCriticalEvent(EventType::ScanComplete,
+                            event->disc_complete.reason, kInvalidHandle,
+                            operationId);
+        }
         return 0;
       case BLE_GAP_EVENT_CONNECT:
-        pushSimpleEvent(EventType::ConnectComplete, event->connect.status,
-                        event->connect.conn_handle);
+        if (callbackMatches(operationId, CallbackDomain::Link)) {
+          pushCriticalEvent(EventType::ConnectComplete, event->connect.status,
+                            event->connect.conn_handle, operationId);
+        }
         return 0;
       case BLE_GAP_EVENT_DISCONNECT:
-        pushSimpleEvent(EventType::Disconnected, event->disconnect.reason,
-                        event->disconnect.conn.conn_handle);
+        if (callbackMatches(operationId, CallbackDomain::Link)) {
+          pushCriticalEvent(EventType::Disconnected, event->disconnect.reason,
+                            event->disconnect.conn.conn_handle, operationId);
+        }
         return 0;
       case BLE_GAP_EVENT_NOTIFY_RX:
-        onNotification(event->notify_rx.conn_handle,
-                       event->notify_rx.attr_handle, event->notify_rx.om);
+        if (callbackMatches(operationId, CallbackDomain::Link)) {
+          onNotification(event->notify_rx.conn_handle,
+                         event->notify_rx.attr_handle, event->notify_rx.om,
+                         operationId);
+        }
         return 0;
       default:
         return 0;
@@ -562,16 +676,28 @@ class NimbleScaleClient {
     return oldest;
   }
 
-  void onAdvertisement(const ble_gap_disc_desc &discovery) {
-    if (state_ != State::Scanning) {
+  void onAdvertisement(const ble_gap_disc_desc &discovery,
+                       uint32_t operationId) {
+    portENTER_CRITICAL(&mux_);
+    const bool scanning =
+        (state_ == State::Scanning || state_ == State::Backoff) &&
+        operationId == scanOperationId_;
+    portEXIT_CRITICAL(&mux_);
+    if (!scanning) {
       return;
     }
+    portENTER_CRITICAL(&mux_);
+    ++advertisementsSeen_;
+    portEXIT_CRITICAL(&mux_);
     ble_hs_adv_fields fields = {};
     if (ble_hs_adv_parse_fields(&fields, discovery.data,
                                 discovery.length_data) != 0) {
+      portENTER_CRITICAL(&mux_);
       ++malformedAdvertisements_;
+      portEXIT_CRITICAL(&mux_);
       return;
     }
+    portENTER_CRITICAL(&advertMux_);
     Candidate *candidate = candidateFor(discovery.addr);
     candidate->sequence = ++candidateSequence_;
     if (discovery.event_type == BLE_HCI_ADV_RPT_EVTYPE_ADV_IND ||
@@ -590,10 +716,20 @@ class NimbleScaleClient {
         nimbleAdvertisementIsCompatible(candidate->advertisement);
     const bool addressMatches =
         filterPresent_ && addressEqual(filterAddress_, discovery.addr.val);
+    const uint32_t receivedAtMs = nowMs();
+    const NimblePeerKey peer = peerKey(discovery.addr);
+    portENTER_CRITICAL(&mux_);
+    const bool wakesBackoff =
+        state_ == State::Backoff && backoffPeerPresent_ &&
+        nimblePeerKeyEqual(peer, backoffPeer_);
+    portEXIT_CRITICAL(&mux_);
+    const bool negativeCached =
+        (compatible || addressMatches) && negativeCache_.contains(peer, receivedAtMs);
     if (compatible || addressMatches) {
       portENTER_CRITICAL(&mux_);
+      ++compatibleAdvertisements_;
       if (!timing_.has(ScaleBleTimingFirstCompatibleAdvertisement)) {
-        timing_.firstCompatibleAdvertisementMs = nowMs();
+        timing_.firstCompatibleAdvertisementMs = receivedAtMs;
         timing_.recordedFlags |=
             ScaleBleTimingFirstCompatibleAdvertisement;
       }
@@ -607,6 +743,14 @@ class NimbleScaleClient {
       }
       portEXIT_CRITICAL(&mux_);
     }
+    if (negativeCached) {
+      portENTER_CRITICAL(&mux_);
+      ++negativeCacheHits_;
+      ++discardedAdvertisements_;
+      portEXIT_CRITICAL(&mux_);
+      portEXIT_CRITICAL(&advertMux_);
+      return;
+    }
     if (candidate->connectable &&
         ((!filterPresent_ && compatible) || addressMatches)) {
       Event selected = {};
@@ -616,42 +760,65 @@ class NimbleScaleClient {
              sizeof(selected.name));
       bool shouldQueue = false;
       portENTER_CRITICAL(&mux_);
-      if (!candidateQueued_) {
+      if ((state_ == State::Scanning || wakesBackoff) &&
+          operationId == scanOperationId_ && !candidateQueued_) {
         candidateQueued_ = true;
         selected.generation = generation_;
+        selected.operationId = operationId;
+        candidateMailbox_ = selected;
+        candidatePending_ = true;
         shouldQueue = true;
       }
       portEXIT_CRITICAL(&mux_);
-      if (shouldQueue) {
-        (void)pushEvent(selected);
-      }
+      (void)shouldQueue;
+    } else if (!compatible && !addressMatches) {
+      portENTER_CRITICAL(&mux_);
+      ++discardedAdvertisements_;
+      portEXIT_CRITICAL(&mux_);
     }
+    portEXIT_CRITICAL(&advertMux_);
   }
 
   void onNotification(uint16_t connectionHandle, uint16_t attributeHandle,
-                      os_mbuf *buffer) {
+                      os_mbuf *buffer, uint32_t operationId) {
     if (connectionHandle != connectionHandle_ ||
         attributeHandle != readHandle_ || buffer == nullptr) {
       return;
     }
     const uint16_t length = OS_MBUF_PKTLEN(buffer);
     if (length == 0 || length > MAX_BLE_PACKET_LENGTH) {
+      portENTER_CRITICAL(&mux_);
       ++rejectedPackets_;
+      if (invalidNotificationStreak_ != 0xff) {
+        ++invalidNotificationStreak_;
+      }
+      if (invalidNotificationStreak_ >= MAX_CONSECUTIVE_REJECTED_PACKETS) {
+        invalidNotificationStream_ = true;
+      }
+      portEXIT_CRITICAL(&mux_);
       return;
     }
     RxFrame frame = {};
-    frame.generation = generation_;
+    frame.operationId = operationId;
     frame.receivedAtMs = nowMs();
     frame.length = static_cast<uint8_t>(length);
     if (os_mbuf_copydata(buffer, 0, length, frame.data) != 0) {
-      ++rejectedPackets_;
+      portENTER_CRITICAL(&mux_);
+      ++mbufFailures_;
+      mbufFailed_ = true;
+      portEXIT_CRITICAL(&mux_);
       return;
     }
     portENTER_CRITICAL(&mux_);
-    if (rxCount_ == kRxFrameCount) {
+    if (operationId != linkOperationId_ ||
+        connectionHandle != connectionHandle_ ||
+        attributeHandle != readHandle_) {
+      ++staleCallbacks_;
+    } else if (rxCount_ == kRxFrameCount) {
       ++rxDrops_;
       rxOverflowed_ = true;
     } else {
+      frame.generation = generation_;
       rxFrames_[rxTail_] = frame;
       rxTail_ = (rxTail_ + 1) % kRxFrameCount;
       ++rxCount_;
@@ -663,138 +830,222 @@ class NimbleScaleClient {
   }
 
   int onService(uint16_t connectionHandle, const ble_gatt_error *error,
-                const ble_gatt_svc *service) {
-    if (connectionHandle != connectionHandle_ || error == nullptr) {
+                const ble_gatt_svc *service, uint32_t operationId) {
+    if (!callbackMatches(operationId, CallbackDomain::Gatt)) {
+      return 0;
+    }
+    if (error == nullptr) {
       return 0;
     }
     if (error->status == 0 && service != nullptr) {
-      if (serviceCount_ < kServiceCount) {
+      portENTER_CRITICAL(&mux_);
+      const bool current = operationId == gattOperationId_ &&
+                           connectionHandle == connectionHandle_;
+      if (!current) {
+        ++staleCallbacks_;
+      } else if (serviceCount_ < kServiceCount) {
         services_[serviceCount_++] = {service->start_handle,
                                       service->end_handle};
       } else {
         serviceOverflowed_ = true;
       }
+      portEXIT_CRITICAL(&mux_);
       return 0;
     }
-    pushSimpleEvent(EventType::ServicesComplete, error->status,
-                    connectionHandle);
+    pushControlEvent(EventType::ServicesComplete, error->status,
+                     connectionHandle, operationId);
     return 0;
   }
 
   int onCharacteristic(uint16_t connectionHandle,
                        const ble_gatt_error *error,
-                       const ble_gatt_chr *characteristic) {
-    if (connectionHandle != connectionHandle_ || error == nullptr) {
+                       const ble_gatt_chr *characteristic,
+                       uint32_t operationId) {
+    if (!callbackMatches(operationId, CallbackDomain::Gatt)) {
+      return 0;
+    }
+    if (error == nullptr) {
       return 0;
     }
     if (error->status == 0 && characteristic != nullptr) {
       for (size_t index = 0; index < scaleProtocolCount(); ++index) {
-        ProtocolHandles &handles = protocolHandles_[index];
-        if (handles.read != 0 && handles.readService == serviceIndex_ &&
-            characteristic->def_handle > handles.read &&
-            characteristic->def_handle - 1 < handles.readEnd) {
-          handles.readEnd = characteristic->def_handle - 1;
-        }
         const ScaleProtocol *protocol = scaleProtocolAt(index);
         ble_uuid_any_t uuid = {};
-        if (protocol != nullptr &&
+        const bool readMatch =
+            protocol != nullptr &&
             ble_uuid_from_str(&uuid, protocol->readUuid) == 0 &&
-            ble_uuid_cmp(&uuid.u, &characteristic->uuid.u) == 0 &&
-            handles.read == 0) {
-          handles.read = characteristic->val_handle;
-          handles.readEnd = services_[serviceIndex_].end;
-          handles.readProperties = characteristic->properties;
-          handles.readService = static_cast<uint8_t>(serviceIndex_);
-        }
-        if (protocol != nullptr &&
+            ble_uuid_cmp(&uuid.u, &characteristic->uuid.u) == 0;
+        const bool writeMatch =
+            protocol != nullptr &&
             ble_uuid_from_str(&uuid, protocol->writeUuid) == 0 &&
-            ble_uuid_cmp(&uuid.u, &characteristic->uuid.u) == 0 &&
-            handles.write == 0) {
-          handles.write = characteristic->val_handle;
-          handles.writeProperties = characteristic->properties;
+            ble_uuid_cmp(&uuid.u, &characteristic->uuid.u) == 0;
+        portENTER_CRITICAL(&mux_);
+        const bool current = operationId == gattOperationId_ &&
+                             connectionHandle == connectionHandle_ &&
+                             serviceIndex_ < serviceCount_;
+        if (current) {
+          ProtocolHandles &handles = protocolHandles_[index];
+          if (handles.read != 0 && handles.readService == serviceIndex_ &&
+              characteristic->def_handle > handles.read &&
+              characteristic->def_handle - 1 < handles.readEnd) {
+            handles.readEnd = characteristic->def_handle - 1;
+          }
+          if (readMatch && handles.read == 0) {
+            handles.read = characteristic->val_handle;
+            handles.readEnd = services_[serviceIndex_].end;
+            handles.readProperties = characteristic->properties;
+            handles.readService = static_cast<uint8_t>(serviceIndex_);
+          }
+          if (writeMatch && handles.write == 0) {
+            handles.write = characteristic->val_handle;
+            handles.writeProperties = characteristic->properties;
+          }
+        } else {
+          ++staleCallbacks_;
+        }
+        portEXIT_CRITICAL(&mux_);
+        if (!current) {
+          return 0;
         }
       }
       return 0;
     }
-    pushSimpleEvent(EventType::CharacteristicsComplete, error->status,
-                    connectionHandle);
+    pushControlEvent(EventType::CharacteristicsComplete, error->status,
+                     connectionHandle, operationId);
     return 0;
   }
 
   int onDescriptor(uint16_t connectionHandle, const ble_gatt_error *error,
-                   uint16_t, const ble_gatt_dsc *descriptor) {
-    if (connectionHandle != connectionHandle_ || error == nullptr) {
+                   uint16_t, const ble_gatt_dsc *descriptor,
+                   uint32_t operationId) {
+    if (!callbackMatches(operationId, CallbackDomain::Gatt)) {
+      return 0;
+    }
+    if (error == nullptr) {
       return 0;
     }
     if (error->status == 0 && descriptor != nullptr) {
-      if (ble_uuid_u16(&descriptor->uuid.u) ==
-          BLE_GATT_DSC_CLT_CFG_UUID16) {
+      portENTER_CRITICAL(&mux_);
+      const bool current = operationId == gattOperationId_ &&
+                           connectionHandle == connectionHandle_;
+      if (!current) {
+        ++staleCallbacks_;
+      } else if (ble_uuid_u16(&descriptor->uuid.u) ==
+                 BLE_GATT_DSC_CLT_CFG_UUID16) {
         cccdHandle_ = descriptor->handle;
       }
+      portEXIT_CRITICAL(&mux_);
       return 0;
     }
-    pushSimpleEvent(EventType::DescriptorsComplete, error->status,
-                    connectionHandle);
+    pushControlEvent(EventType::DescriptorsComplete, error->status,
+                     connectionHandle, operationId);
     return 0;
   }
 
-  int onWrite(uint16_t connectionHandle, const ble_gatt_error *error) {
-    if (error == nullptr || connectionHandle != connectionHandle_) {
+  int onWrite(uint16_t connectionHandle, const ble_gatt_error *error,
+              uint32_t operationId) {
+    if (!callbackMatches(operationId, CallbackDomain::Gatt)) {
+      return 0;
+    }
+    if (error == nullptr) {
       return 0;
     }
     TaskHandle_t waiter = nullptr;
     WritePurpose purpose = WritePurpose::None;
     portENTER_CRITICAL(&mux_);
-    purpose = writePurpose_;
-    writeResult_ = error->status;
-    writeCompleted_ = true;
-    waiter = writeWaiter_;
-    if (purpose != WritePurpose::Command) {
-      writePurpose_ = WritePurpose::None;
+    const bool current = operationId == gattOperationId_ &&
+                         connectionHandle == connectionHandle_;
+    if (current) {
+      purpose = writePurpose_;
+      writeResult_ = error->status;
+      writeCompleted_ = true;
+      if (error->status == BLE_HS_ENOMEM) {
+        ++mbufFailures_;
+      }
+      waiter = writeWaiter_;
+      if (purpose != WritePurpose::Command) {
+        writePurpose_ = WritePurpose::None;
+      }
+    } else {
+      ++staleCallbacks_;
     }
     portEXIT_CRITICAL(&mux_);
+    if (!current) {
+      return 0;
+    }
     if (purpose == WritePurpose::Command && waiter != nullptr) {
       xTaskNotifyGive(waiter);
     } else if (purpose != WritePurpose::None) {
-      pushSimpleEvent(EventType::WriteComplete, error->status,
-                      connectionHandle);
+      pushControlEvent(EventType::WriteComplete, error->status,
+                       connectionHandle, operationId);
     }
     return 0;
   }
 
-  bool pushEvent(const Event &event) {
+  bool pushControlEvent(EventType type, int32_t status,
+                        uint16_t connectionHandle, uint32_t operationId) {
+    Event event = {};
+    event.type = type;
+    event.operationId = operationId;
+    event.status = status;
+    event.connectionHandle = connectionHandle;
     bool pushed = false;
     portENTER_CRITICAL(&mux_);
-    if (eventCount_ < kEventCount) {
-      events_[eventTail_] = event;
-      eventTail_ = (eventTail_ + 1) % kEventCount;
-      ++eventCount_;
-      pushed = true;
-    } else {
-      ++eventDrops_;
+    event.generation = generation_;
+    pushed = controlEvents_.push(event);
+    if (!pushed) {
       eventOverflowed_ = true;
     }
     portEXIT_CRITICAL(&mux_);
     return pushed;
   }
 
-  void pushSimpleEvent(EventType type, int32_t status,
-                       uint16_t connectionHandle) {
+  bool pushCriticalEvent(EventType type, int32_t status,
+                         uint16_t connectionHandle, uint32_t operationId) {
     Event event = {};
     event.type = type;
-    event.generation = generation_;
+    event.operationId = operationId;
     event.status = status;
     event.connectionHandle = connectionHandle;
-    (void)pushEvent(event);
+    portENTER_CRITICAL(&mux_);
+    event.generation = generation_;
+    const bool pushed = criticalEvents_.push(event);
+    if (!pushed) {
+      criticalOverflowed_ = true;
+    }
+    TaskHandle_t waiter = nullptr;
+    if (type == EventType::Disconnected) {
+      waiter = writeWaiter_;
+      writeResult_ = status;
+      writeInterrupted_ = true;
+    }
+    portEXIT_CRITICAL(&mux_);
+    if (waiter != nullptr) {
+      xTaskNotifyGive(waiter);
+    }
+    return pushed;
   }
 
-  bool popEvent(Event &event) {
+  bool popCriticalEvent(Event &event) {
     portENTER_CRITICAL(&mux_);
-    const bool present = eventCount_ != 0;
+    const bool present = criticalEvents_.pop(event);
+    portEXIT_CRITICAL(&mux_);
+    return present;
+  }
+
+  bool popControlEvent(Event &event) {
+    portENTER_CRITICAL(&mux_);
+    const bool present = controlEvents_.pop(event);
+    portEXIT_CRITICAL(&mux_);
+    return present;
+  }
+
+  bool popCandidate(Event &event) {
+    portENTER_CRITICAL(&mux_);
+    const bool present = candidatePending_;
     if (present) {
-      event = events_[eventHead_];
-      eventHead_ = (eventHead_ + 1) % kEventCount;
-      --eventCount_;
+      event = candidateMailbox_;
+      candidatePending_ = false;
     }
     portEXIT_CRITICAL(&mux_);
     return present;
@@ -809,35 +1060,181 @@ class NimbleScaleClient {
       --rxCount_;
     }
     portEXIT_CRITICAL(&mux_);
-    return present && frame.generation == generation_;
+    return present && frame.generation == generation_ &&
+           frame.operationId == linkOperationId_;
+  }
+
+  static NimblePeerKey peerKey(const ble_addr_t &address) {
+    NimblePeerKey key = {};
+    memcpy(key.address, address.val, sizeof(key.address));
+    key.type = address.type;
+    return key;
+  }
+
+  uint32_t nextOperationIdLocked() {
+    ++operationId_;
+    if (operationId_ == 0) {
+      operationId_ = 1;
+    }
+    return operationId_;
+  }
+
+  uint32_t beginOperation(CallbackDomain domain) {
+    portENTER_CRITICAL(&mux_);
+    const uint32_t id = nextOperationIdLocked();
+    if (domain == CallbackDomain::Scan) {
+      scanOperationId_ = id;
+    } else if (domain == CallbackDomain::Link) {
+      linkOperationId_ = id;
+    } else {
+      gattOperationId_ = id;
+    }
+    portEXIT_CRITICAL(&mux_);
+    return id;
+  }
+
+  uint32_t beginGeneration() {
+    portENTER_CRITICAL(&mux_);
+    ++generation_;
+    if (generation_ == 0) {
+      generation_ = 1;
+    }
+    const uint32_t generation = generation_;
+    portEXIT_CRITICAL(&mux_);
+    return generation;
+  }
+
+  void invalidateGeneration() {
+    portENTER_CRITICAL(&mux_);
+    ++generation_;
+    if (generation_ == 0) {
+      generation_ = 1;
+    }
+    scanOperationId_ = 0;
+    linkOperationId_ = 0;
+    gattOperationId_ = 0;
+    portEXIT_CRITICAL(&mux_);
+  }
+
+  void enterState(State state, uint32_t timeoutMs = 0) {
+    portENTER_CRITICAL(&mux_);
+    state_ = state;
+    stateEnteredAtMs_ = nowMs();
+    stateTimeoutMs_ = timeoutMs;
+    stateDeadlineArmed_ = timeoutMs != 0;
+    portEXIT_CRITICAL(&mux_);
+  }
+
+  bool beginConfiguredScan(bool restart, State initialState = State::Scanning,
+                           uint32_t stateTimeoutMs = 0) {
+    beginGeneration();
+    lifecycleActive_ = true;
+    syncGeneration_ = shotStopperBleRuntimeSyncGeneration();
+    clearScanData();
+    timing_ = {};
+    const uint32_t scanOperationId = beginOperation(CallbackDomain::Scan);
+
+    ble_gap_disc_params params = {};
+    params.passive = 0;
+    params.filter_duplicates = 0;
+    params.itvl = scanInterval_;
+    params.window = scanWindow_;
+    params.filter_policy = 0;
+    params.limited = 0;
+    const int rc = ble_gap_disc(shotStopperBleRuntimeOwnAddressType(),
+                                BLE_HS_FOREVER, &params, gapCallback,
+                                callbackArg(scanOperationId));
+    if (rc != 0) {
+      backoff_.reset();
+      portENTER_CRITICAL(&mux_);
+      backoffPeerPresent_ = false;
+      portEXIT_CRITICAL(&mux_);
+      finishLink(false, ScaleDisconnectReason::SCAN_START_FAILED, rc);
+      return false;
+    }
+    enterState(initialState, stateTimeoutMs);
+    scanStartedAt_ = stateEnteredAtMs_;
+    timing_.scanStartedMs = scanStartedAt_;
+    timing_.recordedFlags = ScaleBleTimingScanStarted;
+    ++scanStarts_;
+    if (restart) {
+      ++scanRestarts_;
+    }
+    if (debug_) {
+      scaleLogDebug("active scan started (%u/%u)", scanInterval_, scanWindow_);
+    }
+    return true;
   }
 
   void service() {
-    if (syncGeneration_ != 0 &&
-        syncGeneration_ != shotStopperBleRuntimeSyncGeneration()) {
-      resetConnection(false, ScaleDisconnectReason::REMOTE_DISCONNECTED);
-      syncGeneration_ = shotStopperBleRuntimeSyncGeneration();
+    const uint32_t runtimeGeneration =
+        shotStopperBleRuntimeSyncGeneration();
+    if (syncGeneration_ != 0 && syncGeneration_ != runtimeGeneration) {
+      const ShotStopperBleHealth health = shotStopperBleRuntimeHealth();
+      finishLink(false, ScaleDisconnectReason::HOST_RESET,
+                 health.lastResetReason);
+      syncGeneration_ = runtimeGeneration;
     }
     if (!shotStopperBleRuntimeReady() && state_ != State::Idle) {
-      resetConnection(false, ScaleDisconnectReason::REMOTE_DISCONNECTED);
+      finishLink(false, ScaleDisconnectReason::HOST_RESET, BLE_HS_ENOTSYNCED);
       return;
     }
-    bool overflowed = false;
+    bool criticalOverflowed = false;
+    bool controlOverflowed = false;
+    bool rxOverflowed = false;
+    bool mbufFailed = false;
+    bool invalidNotificationStream = false;
     portENTER_CRITICAL(&mux_);
-    overflowed = eventOverflowed_ || rxOverflowed_;
+    criticalOverflowed = criticalOverflowed_;
+    controlOverflowed = eventOverflowed_;
+    rxOverflowed = rxOverflowed_;
+    mbufFailed = mbufFailed_;
+    invalidNotificationStream = invalidNotificationStream_;
+    criticalOverflowed_ = false;
     eventOverflowed_ = false;
     rxOverflowed_ = false;
+    mbufFailed_ = false;
+    invalidNotificationStream_ = false;
     portEXIT_CRITICAL(&mux_);
-    if (overflowed) {
-      lastRawStatus_ = BLE_HS_ENOMEM;
-      resetConnection(true, ScaleDisconnectReason::INVALID_PACKET_STREAM);
+    if (criticalOverflowed || controlOverflowed) {
+      finishLink(true, ScaleDisconnectReason::EVENT_QUEUE_OVERFLOW,
+                 BLE_HS_ENOMEM);
+      return;
+    }
+    if (rxOverflowed) {
+      finishLink(true, ScaleDisconnectReason::RX_QUEUE_OVERFLOW,
+                 BLE_HS_ENOMEM);
+      return;
+    }
+    if (mbufFailed) {
+      finishLink(true, ScaleDisconnectReason::MBUF_ALLOCATION_FAILED,
+                 BLE_HS_ENOMEM);
+      return;
+    }
+    if (invalidNotificationStream) {
+      finishLink(true, ScaleDisconnectReason::INVALID_PACKET_STREAM,
+                 BLE_HS_EBADDATA);
       return;
     }
 
     Event event = {};
-    while (popEvent(event)) {
-      if (event.generation != generation_) {
-        ++staleCallbacks_;
+    while (popCriticalEvent(event)) {
+      if (!eventMatches(event)) {
+        noteStaleCallback();
+        continue;
+      }
+      handleEvent(event);
+    }
+    if (popCandidate(event)) {
+      if (eventMatches(event)) {
+        handleEvent(event);
+      } else {
+        noteStaleCallback();
+      }
+    }
+    while (popControlEvent(event)) {
+      if (!eventMatches(event)) {
+        noteStaleCallback();
         continue;
       }
       handleEvent(event);
@@ -845,47 +1242,103 @@ class NimbleScaleClient {
 
     if (isConnecting() && connectStartedAt_ != 0 &&
         elapsedMs(connectStartedAt_) >= SCALE_CONNECT_BUDGET_MS) {
-      lastRawStatus_ = BLE_HS_ETIMEOUT;
-      resetConnection(true, ScaleDisconnectReason::CONNECT_FAILED);
+      finishLink(true, ScaleDisconnectReason::OPERATION_TIMEOUT,
+                 BLE_HS_ETIMEOUT);
+      return;
     }
+    if (state_ == State::Backoff && !backoff_.active(nowMs())) {
+      backoff_.reset();
+      backoffPeerPresent_ = false;
+      // GAP scanning remains active during backoff; only candidate selection
+      // was gated. No radio restart is needed when the timer expires.
+      enterState(State::Scanning);
+      return;
+    }
+    if (stateDeadlineArmed_ &&
+        elapsedMs(stateEnteredAtMs_) >= stateTimeoutMs_) {
+      finishLink(true, ScaleDisconnectReason::OPERATION_TIMEOUT,
+                 BLE_HS_ETIMEOUT);
+      return;
+    }
+  }
+
+  bool eventMatches(const Event &event) const {
+    if (event.generation != generation_ || event.operationId == 0) {
+      return false;
+    }
+    switch (event.type) {
+      case EventType::Candidate:
+      case EventType::ScanComplete:
+        return event.operationId == scanOperationId_;
+      case EventType::ConnectComplete:
+      case EventType::Disconnected:
+        return event.operationId == linkOperationId_;
+      case EventType::ServicesComplete:
+      case EventType::CharacteristicsComplete:
+      case EventType::DescriptorsComplete:
+      case EventType::WriteComplete:
+        return event.operationId == gattOperationId_;
+    }
+    return false;
   }
 
   void handleEvent(const Event &event) {
     switch (event.type) {
-      case EventType::Candidate:
-        if (state_ != State::Scanning) {
+      case EventType::Candidate: {
+        const NimblePeerKey candidatePeer = peerKey(event.address);
+        const bool wakesBackoff =
+            state_ == State::Backoff && backoffPeerPresent_ &&
+            nimblePeerKeyEqual(candidatePeer, backoffPeer_);
+        if (state_ != State::Scanning && !wakesBackoff) {
+          noteStaleCallback();
           return;
+        }
+        if (wakesBackoff) {
+          // The host callback only queued evidence. The worker owns the state
+          // transition and can safely cancel scan before reconnecting.
+          backoff_.reset();
+          backoffPeerPresent_ = false;
+          enterState(State::Scanning);
         }
         selectedAddress_ = event.address;
         strncpy(name_, event.name, sizeof(name_) - 1);
         name_[sizeof(name_) - 1] = '\0';
         formatAddress(event.address.val, address_, sizeof(address_));
         identityPresent_ = true;
-        state_ = State::CancelPending;
+        backoff_.reset();
+        enterState(State::CancelPending, kScanCancelTimeoutMs);
         connectStartedAt_ = nowMs();
-        if (ble_gap_disc_cancel() != 0) {
+        ++scanCancels_;
+        const int cancelResult = ble_gap_disc_cancel();
+        if (cancelResult == BLE_HS_EALREADY) {
           beginConnect();
+        } else if (cancelResult != 0) {
+          finishLink(false, ScaleDisconnectReason::SCAN_START_FAILED,
+                     cancelResult);
         }
         return;
+      }
 
       case EventType::ScanComplete:
         if (state_ == State::CancelPending) {
           beginConnect();
-        } else if (state_ == State::Scanning) {
-          state_ = State::Idle;
-          lastReason_ = ScaleDisconnectReason::SCAN_START_FAILED;
-          lastRawStatus_ = event.status;
+        } else if (state_ == State::Scanning || state_ == State::Backoff) {
+          finishLink(false, ScaleDisconnectReason::SCAN_START_FAILED,
+                     event.status);
+        } else {
+          noteStaleCallback();
         }
         return;
 
       case EventType::ConnectComplete:
         if (state_ != State::Connecting) {
+          noteStaleCallback();
           return;
         }
         if (event.status != 0) {
-          ++connectAttempts_;
-          lastRawStatus_ = event.status;
-          resetConnection(false, mapRawDisconnectReason(event.status));
+          ++connectionFailures_;
+          finishLink(false, mapRawDisconnectReason(event.status),
+                     event.status);
           return;
         }
         connectionHandle_ = event.connectionHandle;
@@ -894,21 +1347,23 @@ class NimbleScaleClient {
 
       case EventType::Disconnected:
         if (event.connectionHandle != connectionHandle_) {
-          ++staleCallbacks_;
+          noteStaleCallback();
           return;
         }
-        lastRawStatus_ = event.status;
-        resetConnection(false, mapRawDisconnectReason(event.status));
+        finishLink(false, mapRawDisconnectReason(event.status), event.status);
         return;
 
       case EventType::ServicesComplete:
         if (state_ != State::DiscoveringServices) {
+          noteStaleCallback();
           return;
         }
         if (event.status != BLE_HS_EDONE || serviceOverflowed_ ||
             serviceCount_ == 0) {
-          lastRawStatus_ = serviceOverflowed_ ? BLE_HS_ENOMEM : event.status;
-          resetConnection(true, ScaleDisconnectReason::DISCOVERY_FAILED);
+          ++discoveryFailures_;
+          cooldownSelected(kGattFailureCooldownMs);
+          finishLink(true, ScaleDisconnectReason::DISCOVERY_FAILED,
+                     serviceOverflowed_ ? BLE_HS_ENOMEM : event.status);
           return;
         }
         serviceIndex_ = 0;
@@ -917,11 +1372,14 @@ class NimbleScaleClient {
 
       case EventType::CharacteristicsComplete:
         if (state_ != State::DiscoveringCharacteristics) {
+          noteStaleCallback();
           return;
         }
         if (event.status != BLE_HS_EDONE) {
-          lastRawStatus_ = event.status;
-          resetConnection(true, ScaleDisconnectReason::DISCOVERY_FAILED);
+          ++discoveryFailures_;
+          cooldownSelected(kGattFailureCooldownMs);
+          finishLink(true, ScaleDisconnectReason::DISCOVERY_FAILED,
+                     event.status);
           return;
         }
         ++serviceIndex_;
@@ -934,11 +1392,14 @@ class NimbleScaleClient {
 
       case EventType::DescriptorsComplete:
         if (state_ != State::DiscoveringDescriptors) {
+          noteStaleCallback();
           return;
         }
         if (event.status != BLE_HS_EDONE || cccdHandle_ == 0) {
-          lastRawStatus_ = event.status;
-          resetConnection(true, ScaleDisconnectReason::SUBSCRIBE_FAILED);
+          ++subscriptionFailures_;
+          cooldownSelected(kGattFailureCooldownMs);
+          finishLink(true, ScaleDisconnectReason::SUBSCRIBE_FAILED,
+                     cccdHandle_ == 0 ? BLE_HS_ENOENT : event.status);
           return;
         }
         beginSubscription();
@@ -947,18 +1408,27 @@ class NimbleScaleClient {
       case EventType::WriteComplete:
         if (state_ == State::Subscribing) {
           if (event.status != 0) {
-            lastRawStatus_ = event.status;
-            resetConnection(true, ScaleDisconnectReason::SUBSCRIBE_FAILED);
+            ++subscriptionFailures_;
+            cooldownSelected(kGattFailureCooldownMs);
+            finishLink(true,
+                       event.status == BLE_HS_ENOMEM
+                           ? ScaleDisconnectReason::MBUF_ALLOCATION_FAILED
+                           : ScaleDisconnectReason::SUBSCRIBE_FAILED,
+                       event.status);
             return;
           }
           initWriteIndex_ = 0;
-          state_ = State::Initializing;
+          enterState(State::Initializing, BLE_OPERATION_TIMEOUT_MS);
           beginNextInitWrite();
         } else if (state_ == State::Initializing) {
           if (event.status != 0) {
-            lastRawStatus_ = event.status;
-            resetConnection(
-                true, ScaleDisconnectReason::INITIALIZATION_WRITE_FAILED);
+            ++writeFailures_;
+            cooldownSelected(kGattFailureCooldownMs);
+            finishLink(true,
+                       event.status == BLE_HS_ENOMEM
+                           ? ScaleDisconnectReason::MBUF_ALLOCATION_FAILED
+                           : ScaleDisconnectReason::INITIALIZATION_WRITE_FAILED,
+                       event.status);
             return;
           }
           ++initWriteIndex_;
@@ -969,17 +1439,23 @@ class NimbleScaleClient {
   }
 
   void beginConnect() {
-    state_ = State::Connecting;
+    enterState(State::Connecting, BLE_CONNECT_TIMEOUT_MS);
     if (!timing_.has(ScaleBleTimingConnectIssued)) {
       timing_.connectIssuedMs = nowMs();
       timing_.recordedFlags |= ScaleBleTimingConnectIssued;
     }
+    const uint32_t linkOperationId = beginOperation(CallbackDomain::Link);
+    if (connectAttempts_ != 0xff) {
+      ++connectAttempts_;
+    }
+    ++connectAttemptsTotal_;
     const int rc = ble_gap_connect(shotStopperBleRuntimeOwnAddressType(),
                                    &selectedAddress_, BLE_CONNECT_TIMEOUT_MS,
-                                   nullptr, gapCallback, this);
+                                   nullptr, gapCallback,
+                                   callbackArg(linkOperationId));
     if (rc != 0) {
-      lastRawStatus_ = rc;
-      resetConnection(true, ScaleDisconnectReason::CONNECT_FAILED);
+      ++connectionFailures_;
+      finishLink(false, ScaleDisconnectReason::CONNECT_FAILED, rc);
     }
   }
 
@@ -988,24 +1464,28 @@ class NimbleScaleClient {
     serviceOverflowed_ = false;
     memset(services_, 0, sizeof(services_));
     memset(protocolHandles_, 0, sizeof(protocolHandles_));
-    state_ = State::DiscoveringServices;
+    enterState(State::DiscoveringServices, BLE_DISCOVER_TIMEOUT_MS);
+    const uint32_t gattOperationId = beginOperation(CallbackDomain::Gatt);
     const int rc = ble_gattc_disc_all_svcs(connectionHandle_, serviceCallback,
-                                           this);
+                                           callbackArg(gattOperationId));
     if (rc != 0) {
-      lastRawStatus_ = rc;
-      resetConnection(true, ScaleDisconnectReason::DISCOVERY_FAILED);
+      ++discoveryFailures_;
+      cooldownSelected(kGattFailureCooldownMs);
+      finishLink(true, ScaleDisconnectReason::DISCOVERY_FAILED, rc);
     }
   }
 
   void beginCharacteristicDiscovery() {
-    state_ = State::DiscoveringCharacteristics;
+    enterState(State::DiscoveringCharacteristics, BLE_DISCOVER_TIMEOUT_MS);
     const ServiceRange &service = services_[serviceIndex_];
+    const uint32_t gattOperationId = beginOperation(CallbackDomain::Gatt);
     const int rc = ble_gattc_disc_all_chrs(
         connectionHandle_, service.start, service.end, characteristicCallback,
-        this);
+        callbackArg(gattOperationId));
     if (rc != 0) {
-      lastRawStatus_ = rc;
-      resetConnection(true, ScaleDisconnectReason::DISCOVERY_FAILED);
+      ++discoveryFailures_;
+      cooldownSelected(kGattFailureCooldownMs);
+      finishLink(true, ScaleDisconnectReason::DISCOVERY_FAILED, rc);
     }
   }
 
@@ -1036,21 +1516,28 @@ class NimbleScaleClient {
       }
     }
     if (protocol_ == nullptr) {
-      resetConnection(true, ScaleDisconnectReason::UNSUPPORTED_SCALE);
+      cooldownSelected(kUnsupportedCooldownMs);
+      finishLink(true, ScaleDisconnectReason::UNSUPPORTED_SCALE,
+                 BLE_HS_ENOENT);
       return;
     }
     cccdHandle_ = 0;
     if (readEndHandle_ <= readHandle_) {
-      resetConnection(true, ScaleDisconnectReason::SUBSCRIBE_FAILED);
+      ++subscriptionFailures_;
+      cooldownSelected(kGattFailureCooldownMs);
+      finishLink(true, ScaleDisconnectReason::SUBSCRIBE_FAILED,
+                 BLE_HS_EINVAL);
       return;
     }
-    state_ = State::DiscoveringDescriptors;
+    enterState(State::DiscoveringDescriptors, BLE_DISCOVER_TIMEOUT_MS);
+    const uint32_t gattOperationId = beginOperation(CallbackDomain::Gatt);
     const int rc = ble_gattc_disc_all_dscs(
         connectionHandle_, readHandle_, readEndHandle_, descriptorCallback,
-        this);
+        callbackArg(gattOperationId));
     if (rc != 0) {
-      lastRawStatus_ = rc;
-      resetConnection(true, ScaleDisconnectReason::SUBSCRIBE_FAILED);
+      ++subscriptionFailures_;
+      cooldownSelected(kGattFailureCooldownMs);
+      finishLink(true, ScaleDisconnectReason::SUBSCRIBE_FAILED, rc);
     }
   }
 
@@ -1059,10 +1546,14 @@ class NimbleScaleClient {
         (readProperties_ & BLE_GATT_CHR_PROP_NOTIFY) != 0 ? 1 : 2;
     const uint8_t cccd[2] = {static_cast<uint8_t>(value & 0xff),
                              static_cast<uint8_t>(value >> 8)};
-    state_ = State::Subscribing;
+    enterState(State::Subscribing, BLE_OPERATION_TIMEOUT_MS);
     if (!submitWrite(cccdHandle_, cccd, sizeof(cccd),
                      WritePurpose::Subscribe, true)) {
-      resetConnection(true, ScaleDisconnectReason::SUBSCRIBE_FAILED);
+      ++subscriptionFailures_;
+      finishLink(true, lastRawStatus_ == BLE_HS_ENOMEM
+                           ? ScaleDisconnectReason::MBUF_ALLOCATION_FAILED
+                           : ScaleDisconnectReason::SUBSCRIBE_FAILED,
+                 lastRawStatus_);
     }
   }
 
@@ -1074,17 +1565,25 @@ class NimbleScaleClient {
     const ScalePayload &payload = protocol_->initWrites[initWriteIndex_];
     if (payload.data == nullptr || payload.length <= 0 ||
         payload.length > SCALE_MAX_COMMAND_LENGTH) {
-      resetConnection(true,
-                      ScaleDisconnectReason::INITIALIZATION_WRITE_FAILED);
+      ++writeFailures_;
+      finishLink(true, ScaleDisconnectReason::INITIALIZATION_WRITE_FAILED,
+                 BLE_HS_EINVAL);
       return;
     }
     const bool withResponse =
         (writeProperties_ & BLE_GATT_CHR_PROP_WRITE) != 0;
+    // Each initialization transaction owns a fresh bounded deadline. This is
+    // important for protocols with several writes: one slow/lost callback must
+    // not inherit an already-expired deadline from the previous transaction.
+    enterState(State::Initializing, BLE_OPERATION_TIMEOUT_MS);
     if (!submitWrite(writeHandle_, payload.data,
                      static_cast<uint16_t>(payload.length),
                      WritePurpose::Initialize, withResponse)) {
-      resetConnection(true,
-                      ScaleDisconnectReason::INITIALIZATION_WRITE_FAILED);
+      ++writeFailures_;
+      finishLink(true, lastRawStatus_ == BLE_HS_ENOMEM
+                           ? ScaleDisconnectReason::MBUF_ALLOCATION_FAILED
+                           : ScaleDisconnectReason::INITIALIZATION_WRITE_FAILED,
+                 lastRawStatus_);
       return;
     }
     if (!withResponse) {
@@ -1103,24 +1602,33 @@ class NimbleScaleClient {
       const int rc = ble_gattc_write_no_rsp_flat(connectionHandle_, handle,
                                                  data, length);
       lastRawStatus_ = rc;
+      if (rc == BLE_HS_ENOMEM) {
+        ++mbufFailures_;
+      }
       return rc == 0;
     }
+    const uint32_t gattOperationId = beginOperation(CallbackDomain::Gatt);
     portENTER_CRITICAL(&mux_);
     writePurpose_ = purpose;
     writeCompleted_ = false;
+    writeInterrupted_ = false;
     writeResult_ = BLE_HS_EUNKNOWN;
     writeWaiter_ = purpose == WritePurpose::Command
                        ? xTaskGetCurrentTaskHandle()
                        : nullptr;
     portEXIT_CRITICAL(&mux_);
     const int rc = ble_gattc_write_flat(connectionHandle_, handle, data,
-                                        length, writeCallback, this);
+                                        length, writeCallback,
+                                        callbackArg(gattOperationId));
     if (rc != 0) {
       portENTER_CRITICAL(&mux_);
       writePurpose_ = WritePurpose::None;
       writeWaiter_ = nullptr;
       portEXIT_CRITICAL(&mux_);
       lastRawStatus_ = rc;
+      if (rc == BLE_HS_ENOMEM) {
+        ++mbufFailures_;
+      }
       return false;
     }
     return true;
@@ -1134,17 +1642,26 @@ class NimbleScaleClient {
                       false)) {
         return ScaleCommandResult::Ok;
       }
-      resetConnection(true, ScaleDisconnectReason::COMMAND_WRITE_FAILED);
+      ++writeFailures_;
+      finishLink(true, lastRawStatus_ == BLE_HS_ENOMEM
+                           ? ScaleDisconnectReason::MBUF_ALLOCATION_FAILED
+                           : ScaleDisconnectReason::COMMAND_WRITE_FAILED,
+                 lastRawStatus_);
       return ScaleCommandResult::WriteFailed;
     }
     (void)ulTaskNotifyTake(pdTRUE, 0);
     if (!submitWrite(writeHandle_, data, length, WritePurpose::Command, true)) {
-      resetConnection(true, ScaleDisconnectReason::COMMAND_WRITE_FAILED);
+      ++writeFailures_;
+      finishLink(true, lastRawStatus_ == BLE_HS_ENOMEM
+                           ? ScaleDisconnectReason::MBUF_ALLOCATION_FAILED
+                           : ScaleDisconnectReason::COMMAND_WRITE_FAILED,
+                 lastRawStatus_);
       return ScaleCommandResult::WriteFailed;
     }
     (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(BLE_OPERATION_TIMEOUT_MS));
     portENTER_CRITICAL(&mux_);
     const bool completed = writeCompleted_;
+    const bool interrupted = writeInterrupted_;
     const int result = writeResult_;
     writePurpose_ = WritePurpose::None;
     writeWaiter_ = nullptr;
@@ -1152,13 +1669,17 @@ class NimbleScaleClient {
     if (completed && result == 0) {
       return ScaleCommandResult::Ok;
     }
-    lastRawStatus_ = completed ? result : BLE_HS_ETIMEOUT;
-    resetConnection(true, ScaleDisconnectReason::COMMAND_WRITE_FAILED);
+    lastRawStatus_ = (completed || interrupted) ? result : BLE_HS_ETIMEOUT;
+    ++writeFailures_;
+    finishLink(true, lastRawStatus_ == BLE_HS_ENOMEM
+                         ? ScaleDisconnectReason::MBUF_ALLOCATION_FAILED
+                         : ScaleDisconnectReason::COMMAND_WRITE_FAILED,
+               lastRawStatus_);
     return ScaleCommandResult::WriteFailed;
   }
 
   void finishReady() {
-    state_ = State::Ready;
+    enterState(State::Ready);
     connectedAt_ = nowMs();
     timing_.readyMs = connectedAt_;
     timing_.recordedFlags |= ScaleBleTimingReady;
@@ -1168,6 +1689,7 @@ class NimbleScaleClient {
             : HEARTBEAT_PERIOD_MS;
     lastHeartbeat_ = connectedAt_ - heartbeatPeriod;
     hasValidPacket_ = false;
+    invalidNotificationStreak_ = 0;
     hasTimer_ = false;
     currentTimerMs_ = 0;
     lastTimerPacket_ = 0;
@@ -1175,24 +1697,64 @@ class NimbleScaleClient {
       ++reconnects_;
     }
     ++successfulConnections_;
+    backoff_.reset();
+    portENTER_CRITICAL(&advertMux_);
+    negativeCache_.erase(peerKey(selectedAddress_));
+    portEXIT_CRITICAL(&advertMux_);
+    if (timing_.has(ScaleBleTimingFirstCompatibleAdvertisement)) {
+      lastAdvertisementToConnectMs_ =
+          timing_.connectIssuedMs - timing_.firstCompatibleAdvertisementMs;
+      lastAdvertisementToReadyMs_ =
+          timing_.readyMs - timing_.firstCompatibleAdvertisementMs;
+    }
     if (debug_) {
       scaleLogDebug("ready: %s @ %s", protocol_->id, address_);
     }
   }
 
-  void resetConnection(bool terminatePeer, ScaleDisconnectReason reason) {
+  void cooldownSelected(uint32_t cooldownMs) {
+    if (!identityPresent_) {
+      return;
+    }
+    portENTER_CRITICAL(&advertMux_);
+    negativeCache_.insert(peerKey(selectedAddress_), nowMs(), cooldownMs);
+    portEXIT_CRITICAL(&advertMux_);
+    ++negativeCacheInsertions_;
+  }
+
+  bool finishLink(bool terminatePeer, ScaleDisconnectReason reason,
+                  int32_t rawStatus) {
+    if (!lifecycleActive_) {
+      if (state_ == State::Backoff &&
+          reason == ScaleDisconnectReason::USER_REQUEST) {
+        backoff_.reset();
+        enterState(State::Idle);
+      } else if (state_ != State::Idle && state_ != State::Backoff) {
+        enterState(State::Idle);
+      }
+      if (reason != ScaleDisconnectReason::NONE) {
+        lastReason_ = reason;
+        lastRawStatus_ = rawStatus;
+      }
+      ++duplicateCleanups_;
+      return false;
+    }
     const State previous = state_;
     const uint16_t oldHandle = connectionHandle_;
-    ++generation_;
-    if (generation_ == 0) {
-      generation_ = 1;
-    }
-    state_ = State::Idle;
+    const uint32_t finishedGeneration = generation_;
+    lifecycleActive_ = false;
+    invalidateGeneration();
+    enterState(State::Idle);
+    ++cleanupCount_;
     if (reason != ScaleDisconnectReason::NONE) {
       lastReason_ = reason;
+      lastRawStatus_ = rawStatus;
     }
-    if (previous == State::Scanning || previous == State::CancelPending) {
+    if (previous == State::Scanning || previous == State::CancelPending ||
+        previous == State::Backoff) {
       (void)ble_gap_disc_cancel();
+    } else if (previous == State::Connecting) {
+      (void)ble_gap_conn_cancel();
     }
     connectionHandle_ = kInvalidHandle;
     if (terminatePeer && oldHandle != kInvalidHandle) {
@@ -1205,11 +1767,6 @@ class NimbleScaleClient {
     readEndHandle_ = 0;
     readProperties_ = 0;
     writeProperties_ = 0;
-    identityPresent_ = false;
-    address_[0] = '\0';
-    name_[0] = '\0';
-    filterPresent_ = false;
-    scanAddressFilter_ = false;
     scanStartedAt_ = 0;
     connectStartedAt_ = 0;
     connectedAt_ = 0;
@@ -1221,22 +1778,70 @@ class NimbleScaleClient {
     hasTimer_ = false;
     currentTimerMs_ = 0;
     lastTimerPacket_ = 0;
+    invalidNotificationStreak_ = 0;
+    TaskHandle_t waiterToWake = nullptr;
     portENTER_CRITICAL(&mux_);
-    eventHead_ = eventTail_ = eventCount_ = 0;
+    criticalEvents_.clear();
+    controlEvents_.clear();
+    candidatePending_ = false;
     rxHead_ = rxTail_ = rxCount_ = 0;
     writePurpose_ = WritePurpose::None;
+    waiterToWake = writeWaiter_;
+    if (waiterToWake != nullptr) {
+      writeResult_ = rawStatus;
+      writeInterrupted_ = true;
+    }
     writeWaiter_ = nullptr;
+    eventOverflowed_ = false;
+    criticalOverflowed_ = false;
+    rxOverflowed_ = false;
+    mbufFailed_ = false;
+    invalidNotificationStream_ = false;
     portEXIT_CRITICAL(&mux_);
+    if (waiterToWake != nullptr && waiterToWake != xTaskGetCurrentTaskHandle()) {
+      xTaskNotifyGive(waiterToWake);
+    }
+    if (reason == ScaleDisconnectReason::CONNECTION_FAILED_TO_ESTABLISH) {
+      const NimblePeerKey failedPeer = peerKey(selectedAddress_);
+      const bool failedPeerPresent = identityPresent_;
+      const uint32_t entropy = static_cast<uint32_t>(selectedAddress_.val[0]) |
+                               generation_ << 8;
+      const uint32_t delayMs = backoff_.schedule(nowMs(), entropy);
+      ++backoffCount_;
+      portENTER_CRITICAL(&mux_);
+      backoffPeer_ = failedPeer;
+      backoffPeerPresent_ = failedPeerPresent;
+      portEXIT_CRITICAL(&mux_);
+      // Continue active scanning while candidate selection is delayed. A new
+      // connectable advertisement from this exact peer wakes the retry early.
+      (void)beginConfiguredScan(false, State::Backoff, delayMs);
+    } else {
+      backoff_.reset();
+      portENTER_CRITICAL(&mux_);
+      backoffPeerPresent_ = false;
+      portEXIT_CRITICAL(&mux_);
+    }
+    if (debug_ && reason != ScaleDisconnectReason::NONE) {
+      scaleLogDebug("link finished: %s raw=%ld gen=%lu",
+                    disconnectReasonName(reason), static_cast<long>(rawStatus),
+                    static_cast<unsigned long>(finishedGeneration));
+    }
+    return true;
   }
 
   void clearScanData() {
+    portENTER_CRITICAL(&advertMux_);
     memset(candidates_, 0, sizeof(candidates_));
     candidateSequence_ = 0;
+    portEXIT_CRITICAL(&advertMux_);
     identityPresent_ = false;
+    portENTER_CRITICAL(&mux_);
     seenPending_ = false;
     seenAddress_[0] = '\0';
     seenName_[0] = '\0';
     candidateQueued_ = false;
+    candidatePending_ = false;
+    portEXIT_CRITICAL(&mux_);
   }
 
   uint32_t maxPacketPeriodMs() const {
@@ -1254,29 +1859,53 @@ class NimbleScaleClient {
     ++rejectedPackets_;
     ++consecutiveRejectedPackets_;
     if (consecutiveRejectedPackets_ >= MAX_CONSECUTIVE_REJECTED_PACKETS) {
-      resetConnection(true, ScaleDisconnectReason::INVALID_PACKET_STREAM);
+      finishLink(true, ScaleDisconnectReason::INVALID_PACKET_STREAM,
+                 BLE_HS_EBADDATA);
     }
   }
 
   mutable portMUX_TYPE mux_ = portMUX_INITIALIZER_UNLOCKED;
+  mutable portMUX_TYPE advertMux_ = portMUX_INITIALIZER_UNLOCKED;
+  static NimbleScaleClient *activeClient_;
   State state_ = State::Idle;
   bool debug_ = false;
+  bool callbackOwner_ = false;
+  bool lifecycleActive_ = false;
   uint32_t generation_ = 0;
+  uint32_t operationId_ = 0;
+  uint32_t scanOperationId_ = 0;
+  uint32_t linkOperationId_ = 0;
+  uint32_t gattOperationId_ = 0;
   uint32_t syncGeneration_ = 0;
+  uint32_t stateEnteredAtMs_ = 0;
+  uint32_t stateTimeoutMs_ = 0;
+  bool stateDeadlineArmed_ = false;
   int32_t lastRawStatus_ = 0;
   ScaleDisconnectReason lastReason_ = ScaleDisconnectReason::NONE;
 
-  Event events_[kEventCount] = {};
-  size_t eventHead_ = 0;
-  size_t eventTail_ = 0;
-  size_t eventCount_ = 0;
-  uint32_t eventDrops_ = 0;
+  NimbleFixedRing<Event, kCriticalEventCount> criticalEvents_;
+  NimbleFixedRing<Event, kEventCount> controlEvents_;
+  Event candidateMailbox_ = {};
+  bool candidatePending_ = false;
+  bool criticalOverflowed_ = false;
   bool eventOverflowed_ = false;
   uint32_t staleCallbacks_ = 0;
 
   Candidate candidates_[kCandidateCount] = {};
+  NimbleNegativeCache negativeCache_;
+  NimbleBackoffPolicy backoff_;
+  NimblePeerKey backoffPeer_ = {};
+  bool backoffPeerPresent_ = false;
   uint32_t candidateSequence_ = 0;
+  uint32_t advertisementsSeen_ = 0;
+  uint32_t compatibleAdvertisements_ = 0;
+  uint32_t discardedAdvertisements_ = 0;
   uint32_t malformedAdvertisements_ = 0;
+  uint32_t negativeCacheHits_ = 0;
+  uint32_t negativeCacheInsertions_ = 0;
+  uint32_t scanStarts_ = 0;
+  uint32_t scanCancels_ = 0;
+  uint32_t scanRestarts_ = 0;
   bool candidateQueued_ = false;
   ble_addr_t selectedAddress_ = {};
   uint8_t filterAddress_[6] = {};
@@ -1304,11 +1933,17 @@ class NimbleScaleClient {
   uint8_t writeProperties_ = 0;
   size_t initWriteIndex_ = 0;
   uint8_t connectAttempts_ = 0;
+  uint32_t connectAttemptsTotal_ = 0;
+  uint32_t connectionFailures_ = 0;
+  uint32_t discoveryFailures_ = 0;
+  uint32_t subscriptionFailures_ = 0;
+  uint32_t writeFailures_ = 0;
   uint32_t connectStartedAt_ = 0;
 
   WritePurpose writePurpose_ = WritePurpose::None;
   TaskHandle_t writeWaiter_ = nullptr;
   bool writeCompleted_ = false;
+  bool writeInterrupted_ = false;
   int writeResult_ = 0;
 
   RxFrame rxFrames_[kRxFrameCount] = {};
@@ -1318,6 +1953,10 @@ class NimbleScaleClient {
   uint16_t rxHighWater_ = 0;
   uint32_t rxDrops_ = 0;
   bool rxOverflowed_ = false;
+  bool mbufFailed_ = false;
+  bool invalidNotificationStream_ = false;
+  uint8_t invalidNotificationStreak_ = 0;
+  uint32_t mbufFailures_ = 0;
 
   bool identityPresent_ = false;
   char address_[SCALE_MAC_CAPACITY] = {};
@@ -1334,9 +1973,16 @@ class NimbleScaleClient {
   uint8_t consecutiveRejectedPackets_ = 0;
   uint32_t reconnects_ = 0;
   uint32_t successfulConnections_ = 0;
+  uint32_t cleanupCount_ = 0;
+  uint32_t duplicateCleanups_ = 0;
+  uint32_t backoffCount_ = 0;
+  uint32_t lastAdvertisementToConnectMs_ = 0;
+  uint32_t lastAdvertisementToReadyMs_ = 0;
   bool hasValidPacket_ = false;
   bool hasTimer_ = false;
 };
+
+NimbleScaleClient *NimbleScaleClient::activeClient_ = nullptr;
 
 NimbleScaleClient &clientFromStorage(void *storage) {
   return *reinterpret_cast<NimbleScaleClient *>(storage);
@@ -1373,7 +2019,7 @@ bool EspressoScaleBLE::init(const char *mac) {
     if (client.poll()) {
       return true;
     }
-    vTaskDelay(1);
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
   client.disconnect();
   return false;
@@ -1562,6 +2208,10 @@ ScaleBleTimingSnapshot EspressoScaleBLE::timingSnapshot() const {
 
 int32_t EspressoScaleBLE::lastBackendStatus() const {
   return clientFromStorage(_nimbleClientStorage).lastRawStatus();
+}
+
+ScaleBleBackendHealth EspressoScaleBLE::backendHealth() const {
+  return clientFromStorage(_nimbleClientStorage).health();
 }
 
 int EspressoScaleBLE::linkRssi() {

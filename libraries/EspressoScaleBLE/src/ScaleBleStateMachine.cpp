@@ -21,10 +21,8 @@ ScaleBleTransition accepted(const ScaleBleLifecycle& current,
 
 bool isCurrentOperation(const ScaleBleLifecycle& current,
                         const ScaleBleEvent& event) {
-    if (event.generation != current.generation) {
-        return false;
-    }
-    return event.operationId == 0 || current.operationId == 0 ||
+    return event.generation == current.generation &&
+           event.operationId != 0 && current.operationId != 0 &&
            event.operationId == current.operationId;
 }
 
@@ -32,6 +30,9 @@ ScaleBleTransition enterBackoff(const ScaleBleLifecycle& current) {
     ScaleBleTransition result = accepted(
         current, ScaleBleLifecycleState::Backoff,
         ScaleBleActionCleanup | ScaleBleActionScheduleBackoff);
+    // Invalidate the failed lifecycle at the cleanup edge. A late GAP/GATT
+    // callback can therefore never be accepted while backoff is pending.
+    result.next.generation = nextGeneration(current.generation);
     result.next.connectionHandle = SCALE_BLE_INVALID_CONNECTION_HANDLE;
     result.next.operationId = 0;
     return result;
@@ -71,6 +72,17 @@ ScaleBleTransition scaleBleReduce(const ScaleBleLifecycle& current,
         result.next.generation = nextGeneration(current.generation);
         result.next.operationId = event.operationId;
         result.next.connectionHandle = SCALE_BLE_INVALID_CONNECTION_HANDLE;
+        return result;
+    }
+
+    if (current.state == ScaleBleLifecycleState::Backoff &&
+        event.type == ScaleBleEventType::BackoffExpired &&
+        event.generation == current.generation && event.operationId != 0) {
+        ScaleBleTransition result = accepted(
+            current, ScaleBleLifecycleState::Scanning,
+            ScaleBleActionStartScan);
+        result.next.generation = nextGeneration(current.generation);
+        result.next.operationId = event.operationId;
         return result;
     }
 
@@ -131,14 +143,6 @@ ScaleBleTransition scaleBleReduce(const ScaleBleLifecycle& current,
             break;
 
         case ScaleBleLifecycleState::Backoff:
-            if (event.type == ScaleBleEventType::BackoffExpired) {
-                ScaleBleTransition result = accepted(
-                    current, ScaleBleLifecycleState::Scanning,
-                    ScaleBleActionStartScan);
-                result.next.generation = nextGeneration(current.generation);
-                result.next.operationId = event.operationId;
-                return result;
-            }
             break;
 
         case ScaleBleLifecycleState::Stopped:

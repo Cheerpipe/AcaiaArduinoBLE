@@ -1124,6 +1124,15 @@ const char* EspressoScaleBLE::lastDisconnectReasonName() const {
             return "supervision timeout";
         case ScaleDisconnectReason::CONNECTION_FAILED_TO_ESTABLISH:
             return "connection failed to be established";
+        case ScaleDisconnectReason::RX_QUEUE_OVERFLOW:
+            return "RX queue overflow";
+        case ScaleDisconnectReason::EVENT_QUEUE_OVERFLOW:
+            return "event queue overflow";
+        case ScaleDisconnectReason::HOST_RESET: return "host reset";
+        case ScaleDisconnectReason::OPERATION_TIMEOUT:
+            return "operation timeout";
+        case ScaleDisconnectReason::MBUF_ALLOCATION_FAILED:
+            return "mbuf allocation failed";
     }
     return "unknown";
 }
@@ -1154,6 +1163,10 @@ ScaleBleTimingSnapshot EspressoScaleBLE::timingSnapshot() const {
 
 int32_t EspressoScaleBLE::lastBackendStatus() const {
     return 0;
+}
+
+ScaleBleBackendHealth EspressoScaleBLE::backendHealth() const {
+    return {};
 }
 
 int EspressoScaleBLE::linkRssi() {

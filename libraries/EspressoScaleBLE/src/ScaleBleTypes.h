@@ -76,4 +76,43 @@ struct ScaleBleTimingSnapshot {
     }
 };
 
+// Backend-neutral, fixed-size diagnostics. ArduinoBLE returns a zeroed
+// snapshot; the native NimBLE adapter fills every counter without exposing
+// host types to the firmware.
+struct ScaleBleBackendHealth {
+    uint32_t generation;
+    uint32_t operationId;
+    uint32_t stateAgeMs;
+    uint32_t advertisementsSeen;
+    uint32_t compatibleAdvertisements;
+    uint32_t discardedAdvertisements;
+    uint32_t malformedAdvertisements;
+    uint32_t negativeCacheHits;
+    uint32_t negativeCacheInsertions;
+    uint32_t scanStarts;
+    uint32_t scanCancels;
+    uint32_t scanRestarts;
+    uint32_t connectAttempts;
+    uint32_t connectionFailures;
+    uint32_t discoveryFailures;
+    uint32_t subscriptionFailures;
+    uint32_t writeFailures;
+    uint32_t staleCallbacks;
+    uint32_t criticalEventDrops;
+    uint32_t controlEventDrops;
+    uint32_t rxDrops;
+    uint32_t mbufFailures;
+    uint32_t cleanupCount;
+    uint32_t duplicateCleanups;
+    uint32_t backoffCount;
+    uint32_t lastAdvertisementToConnectMs;
+    uint32_t lastAdvertisementToReadyMs;
+    uint16_t criticalEventHighWater;
+    uint16_t controlEventHighWater;
+    uint16_t rxHighWater;
+    uint8_t negativeCacheEntries;
+    uint8_t state;
+    uint8_t backoffFailures;
+};
+
 #endif

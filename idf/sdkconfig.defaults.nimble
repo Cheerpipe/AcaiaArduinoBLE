@@ -1,4 +1,4 @@
-# Experimental phase-2 BLE backend. Companion remains disabled in firmware;
+# Experimental NimBLE backend. Companion remains disabled through phase 3;
 # peripheral/server roles stay compiled for the phase-4 profile migration.
 CONFIG_ESPRESSO_SCALE_BLE_BACKEND_NIMBLE=y
 # CONFIG_ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE is not set

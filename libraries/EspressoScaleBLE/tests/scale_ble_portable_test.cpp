@@ -27,6 +27,10 @@ static_assert(std::is_trivially_copyable<ScaleBleEvent>::value,
               "BLE event DTO must remain trivially copyable");
 static_assert(std::is_trivially_copyable<ScaleBleLifecycle>::value,
               "BLE lifecycle must remain trivially copyable");
+static_assert(std::is_trivially_copyable<ScaleBleBackendHealth>::value,
+              "BLE health snapshot must remain trivially copyable");
+static_assert(sizeof(ScaleBleBackendHealth) <= 136,
+              "BLE health snapshot must remain fixed and compact");
 static_assert(sizeof(ScaleBleEvent) <= 20,
               "BLE event DTO must stay suitable for a fixed queue");
 static_assert(kScaleBleBuildBackend == ScaleBleBackend::ArduinoBle,
@@ -134,16 +138,17 @@ void testStaleAndFailureEvents() {
                      SCALE_BLE_INVALID_CONNECTION_HANDLE, 0x3e));
     CHECK(transition.accepted);
     CHECK(transition.next.state == ScaleBleLifecycleState::Backoff);
+    CHECK(transition.next.generation == 10);
     CHECK(transition.next.operationId == 0);
     CHECK((transition.actions & ScaleBleActionCleanup) != 0);
     CHECK((transition.actions & ScaleBleActionScheduleBackoff) != 0);
 
     state = transition.next;
     transition = scaleBleReduce(
-        state, event(ScaleBleEventType::BackoffExpired, 9, 23));
+        state, event(ScaleBleEventType::BackoffExpired, 10, 23));
     CHECK(transition.accepted);
     CHECK(transition.next.state == ScaleBleLifecycleState::Scanning);
-    CHECK(transition.next.generation == 10);
+    CHECK(transition.next.generation == 11);
     CHECK(transition.next.operationId == 23);
 
     state = transition.next;
@@ -156,12 +161,123 @@ void testStaleAndFailureEvents() {
     CHECK(transition.actions == ScaleBleActionCleanup);
 }
 
+void advanceToFaultStage(ScaleBleLifecycle& state, uint32_t operationId,
+                         uint8_t stage) {
+    if (stage == 0) {
+        return;
+    }
+    ScaleBleTransition transition = scaleBleReduce(
+        state, event(ScaleBleEventType::CompatibleAdvertisement,
+                     state.generation, operationId));
+    CHECK(transition.accepted);
+    state = transition.next;
+    if (stage == 1) {
+        return;
+    }
+    transition = scaleBleReduce(
+        state, event(ScaleBleEventType::ConnectIssued, state.generation,
+                     operationId));
+    CHECK(transition.accepted);
+    state = transition.next;
+    if (stage == 2) {
+        return;
+    }
+    transition = scaleBleReduce(
+        state, event(ScaleBleEventType::Connected, state.generation,
+                     operationId, 17));
+    CHECK(transition.accepted);
+    state = transition.next;
+    if (stage == 3) {
+        return;
+    }
+    transition = scaleBleReduce(
+        state, event(ScaleBleEventType::DiscoveryComplete, state.generation,
+                     operationId, 17));
+    CHECK(transition.accepted);
+    state = transition.next;
+    if (stage == 4) {
+        return;
+    }
+    transition = scaleBleReduce(
+        state, event(ScaleBleEventType::SubscriptionComplete,
+                     state.generation, operationId, 17));
+    CHECK(transition.accepted);
+    state = transition.next;
+    if (stage == 5) {
+        return;
+    }
+    transition = scaleBleReduce(
+        state, event(ScaleBleEventType::InitializationComplete,
+                     state.generation, operationId, 17));
+    CHECK(transition.accepted);
+    state = transition.next;
+}
+
+void testThousandFaultInjectedLifecycles() {
+    ScaleBleLifecycle state = scaleBleInitialLifecycle();
+    uint32_t operationId = 100;
+    ScaleBleTransition transition = scaleBleReduce(
+        state, event(ScaleBleEventType::StartRequested, 0, operationId));
+    CHECK(transition.accepted);
+    state = transition.next;
+    uint32_t cleanupEdges = 0;
+
+    for (uint32_t cycle = 0; cycle < 1000; ++cycle) {
+        const uint8_t faultStage = static_cast<uint8_t>(cycle % 7);
+        advanceToFaultStage(state, operationId, faultStage);
+        const ScaleBleLifecycle beforeFailure = state;
+        const ScaleBleEvent failure = event(
+            cycle % 3 == 0 ? ScaleBleEventType::Disconnected
+                           : (cycle % 3 == 1
+                                  ? ScaleBleEventType::OperationFailed
+                                  : ScaleBleEventType::DeadlineExpired),
+            state.generation, operationId, state.connectionHandle, 0x3e);
+        transition = scaleBleReduce(state, failure);
+        CHECK(transition.accepted);
+        CHECK((transition.actions & ScaleBleActionCleanup) != 0);
+        CHECK(transition.next.state == ScaleBleLifecycleState::Backoff);
+        CHECK(transition.next.connectionHandle ==
+              SCALE_BLE_INVALID_CONNECTION_HANDLE);
+        CHECK(transition.next.operationId == 0);
+        CHECK(transition.next.generation != beforeFailure.generation);
+        ++cleanupEdges;
+        state = transition.next;
+
+        // Duplicate cleanup and two representative late callbacks must be
+        // inert; neither can resurrect the completed generation.
+        transition = scaleBleReduce(state, failure);
+        CHECK(!transition.accepted);
+        CHECK(transition.actions == ScaleBleActionNone);
+        CHECK(transition.next.generation == state.generation);
+        transition = scaleBleReduce(
+            state, event(ScaleBleEventType::Connected,
+                         beforeFailure.generation, operationId, 17));
+        CHECK(!transition.accepted);
+        transition = scaleBleReduce(
+            state, event(ScaleBleEventType::InitializationComplete,
+                         state.generation, 0, 17));
+        CHECK(!transition.accepted);
+
+        ++operationId;
+        transition = scaleBleReduce(
+            state, event(ScaleBleEventType::BackoffExpired,
+                         state.generation, operationId));
+        CHECK(transition.accepted);
+        CHECK(transition.next.state == ScaleBleLifecycleState::Scanning);
+        CHECK(transition.next.generation != state.generation);
+        state = transition.next;
+    }
+    CHECK(cleanupEdges == 1000);
+    CHECK(state.state == ScaleBleLifecycleState::Scanning);
+}
+
 } // namespace
 
 int main() {
     testClockAndDeadline();
     testHappyPathAndActions();
     testStaleAndFailureEvents();
+    testThousandFaultInjectedLifecycles();
     std::cout << "Scale BLE portable tests passed: " << checks << " checks"
               << std::endl;
     return 0;

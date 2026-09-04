@@ -18,7 +18,8 @@ set(ESPRESSO_SCALE_BLE_SRCS
 if(CONFIG_ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
   list(APPEND ESPRESSO_SCALE_BLE_SRCS
     "${ESPRESSO_SCALE_BLE_DIR}/src/EspressoScaleBLENimble.cpp"
-    "${ESPRESSO_SCALE_BLE_DIR}/src/nimble/NimbleAdvertisement.cpp")
+    "${ESPRESSO_SCALE_BLE_DIR}/src/nimble/NimbleAdvertisement.cpp"
+    "${ESPRESSO_SCALE_BLE_DIR}/src/nimble/NimbleResilience.cpp")
   set(ESPRESSO_SCALE_BLE_BACKEND_DEFINE
     ESPRESSO_SCALE_BLE_BACKEND_NIMBLE=1)
 else()

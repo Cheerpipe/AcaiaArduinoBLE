@@ -83,11 +83,25 @@ void reportNimbleRuntimeHealth(bool force) {
   static int32_t previousError = 0;
   static int32_t previousResetReason = 0;
   static uint32_t previousSyncGeneration = 0;
+  static uint32_t previousAdvertisements = 0;
+  static uint32_t previousOperation = 0;
+  static uint32_t previousStaleCallbacks = 0;
+  static uint32_t previousCleanupCount = 0;
+  static uint32_t previousTotalDrops = 0;
+  static uint8_t previousClientState = 0xff;
   const ShotStopperBleHealth health = shotStopperBleRuntimeHealth();
+  const ScaleBleBackendHealth client = scale.backendHealth();
+  const uint32_t totalDrops = client.criticalEventDrops +
+                              client.controlEventDrops + client.rxDrops;
   if (!force && reported && health.state == previousState &&
       health.lastError == previousError &&
       health.lastResetReason == previousResetReason &&
-      health.syncGeneration == previousSyncGeneration) {
+      health.syncGeneration == previousSyncGeneration &&
+      client.advertisementsSeen == previousAdvertisements &&
+      client.operationId == previousOperation &&
+      client.staleCallbacks == previousStaleCallbacks &&
+      client.cleanupCount == previousCleanupCount &&
+      totalDrops == previousTotalDrops && client.state == previousClientState) {
     return;
   }
   reported = true;
@@ -95,6 +109,12 @@ void reportNimbleRuntimeHealth(bool force) {
   previousError = health.lastError;
   previousResetReason = health.lastResetReason;
   previousSyncGeneration = health.syncGeneration;
+  previousAdvertisements = client.advertisementsSeen;
+  previousOperation = client.operationId;
+  previousStaleCallbacks = client.staleCallbacks;
+  previousCleanupCount = client.cleanupCount;
+  previousTotalDrops = totalDrops;
+  previousClientState = client.state;
   serialTracef(
       LogLevel::DEBUG,
       "NimBLE runtime state=%u raw=%ld linkRaw=%ld reset=%ld sync=%lu resets=%lu "
@@ -111,6 +131,47 @@ void reportNimbleRuntimeHealth(bool force) {
       static_cast<unsigned long>(health.psramFreeBytes),
       static_cast<unsigned long>(health.psramMinimumFreeBytes),
       static_cast<unsigned long>(health.psramLargestBlockBytes));
+  serialTracef(
+      LogLevel::DEBUG,
+      "NimBLE client state=%u age=%lu gen/op=%lu/%lu adv=%lu compatible=%lu "
+      "discarded=%lu malformed=%lu cache=%u hits=%lu scans=%lu/%lu/%lu "
+      "connect=%lu/%lu gattFail=%lu/%lu writeFail=%lu",
+      static_cast<unsigned>(client.state),
+      static_cast<unsigned long>(client.stateAgeMs),
+      static_cast<unsigned long>(client.generation),
+      static_cast<unsigned long>(client.operationId),
+      static_cast<unsigned long>(client.advertisementsSeen),
+      static_cast<unsigned long>(client.compatibleAdvertisements),
+      static_cast<unsigned long>(client.discardedAdvertisements),
+      static_cast<unsigned long>(client.malformedAdvertisements),
+      static_cast<unsigned>(client.negativeCacheEntries),
+      static_cast<unsigned long>(client.negativeCacheHits),
+      static_cast<unsigned long>(client.scanStarts),
+      static_cast<unsigned long>(client.scanCancels),
+      static_cast<unsigned long>(client.scanRestarts),
+      static_cast<unsigned long>(client.connectAttempts),
+      static_cast<unsigned long>(client.connectionFailures),
+      static_cast<unsigned long>(client.discoveryFailures),
+      static_cast<unsigned long>(client.subscriptionFailures),
+      static_cast<unsigned long>(client.writeFailures));
+  serialTracef(
+      LogLevel::DEBUG,
+      "NimBLE resilience stale=%lu cleanup=%lu duplicate=%lu backoff=%lu/%u "
+      "queueHwm=%u/%u/%u drops=%lu/%lu/%lu mbuf=%lu latency=%lu/%lu",
+      static_cast<unsigned long>(client.staleCallbacks),
+      static_cast<unsigned long>(client.cleanupCount),
+      static_cast<unsigned long>(client.duplicateCleanups),
+      static_cast<unsigned long>(client.backoffCount),
+      static_cast<unsigned>(client.backoffFailures),
+      static_cast<unsigned>(client.criticalEventHighWater),
+      static_cast<unsigned>(client.controlEventHighWater),
+      static_cast<unsigned>(client.rxHighWater),
+      static_cast<unsigned long>(client.criticalEventDrops),
+      static_cast<unsigned long>(client.controlEventDrops),
+      static_cast<unsigned long>(client.rxDrops),
+      static_cast<unsigned long>(client.mbufFailures),
+      static_cast<unsigned long>(client.lastAdvertisementToConnectMs),
+      static_cast<unsigned long>(client.lastAdvertisementToReadyMs));
 }
 #endif
 
