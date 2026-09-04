@@ -156,6 +156,10 @@ constexpr size_t WIFI_SSID_CAPACITY = 33;
 constexpr size_t WIFI_PASSWORD_CAPACITY = 64;
 constexpr size_t WEB_COMMAND_QUEUE_LENGTH = 4;
 constexpr size_t DEBUG_EVENT_CAPACITY = 96;
+// Text logs are formatted into 128-byte views throughout the firmware. Keep
+// the retained record at the same bound instead of paying for unreachable
+// bytes in both the PSRAM ring and the HTTP copy batch.
+constexpr size_t DEBUG_EVENT_TEXT_CAPACITY = 128;
 
 #ifndef SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL
 #define SHOT_STOPPER_ENABLE_REMOTE_MACHINE_CONTROL 0
@@ -934,6 +938,7 @@ enum class ConfigValidationError : uint8_t {
   NO_SCALE_BBW_MODE,
   LAST_SHOT_COOLDOWN,
   DRIP_DELAY,
+  SERIAL_LOG_LEVEL,
   RING_RETAIN_LOG_LEVEL,
   PADDLE_MODE,
   CUP_PRESENT_WEIGHT,
@@ -1261,7 +1266,7 @@ inline ConfigValidationError validateRuntimeConfig(
     return ConfigValidationError::RING_RETAIN_LOG_LEVEL;
   }
   if (config.serialLogLevel > static_cast<uint8_t>(LogLevel::NONE)) {
-    return ConfigValidationError::RING_RETAIN_LOG_LEVEL;
+    return ConfigValidationError::SERIAL_LOG_LEVEL;
   }
   if (!validPaddleMode(config.paddleMode)) {
     return ConfigValidationError::PADDLE_MODE;
@@ -1391,6 +1396,8 @@ inline const char *configValidationErrorName(ConfigValidationError error) {
       return "lastShotCooldownMs";
     case ConfigValidationError::DRIP_DELAY:
       return "dripDelayMs";
+    case ConfigValidationError::SERIAL_LOG_LEVEL:
+      return "serialLogLevel";
     case ConfigValidationError::STOP_PULSE:
       return "stopPulseMs";
     case ConfigValidationError::MAX_SINGLE_PRESS:
@@ -2354,8 +2361,11 @@ struct DebugEvent {
   DebugCode code = DebugCode::STATE_TRANSITION;
   int32_t argument1 = 0;
   int32_t argument2 = 0;
-  char text[192] = {};
+  char text[DEBUG_EVENT_TEXT_CAPACITY] = {};
 };
+
+static_assert(sizeof(DebugEvent) <= 160,
+              "DebugEvent exceeded its retained-log RAM budget");
 
 class DebugRingBuffer {
  public:
@@ -2389,6 +2399,9 @@ class DebugRingBuffer {
     event.code = code;
     event.argument1 = argument1;
     event.argument2 = argument2;
+    // Slots alternate between text and structured records. Clear the old
+    // payload so an overwritten structured event never retains stale text.
+    event.text[0] = '\0';
     if (text != nullptr) {
       copyCString(event.text, sizeof(event.text), text);
     }
@@ -2456,6 +2469,9 @@ class DebugRingBuffer {
   size_t writeIndex_ = 0;
   uint32_t overwritten_ = 0;
 };
+
+static_assert(sizeof(DebugRingBuffer) <= 16 * 1024,
+              "Debug ring exceeded its PSRAM budget");
 
 inline const char *logLevelName(LogLevel level) {
   switch (level) {

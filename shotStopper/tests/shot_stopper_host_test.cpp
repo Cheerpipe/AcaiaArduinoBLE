@@ -2022,6 +2022,10 @@ void w03_runtime_timing_relations_are_transactional() {
   config.ringRetainLogLevel = static_cast<uint8_t>(LogLevel::NONE) + 1;
   CHECK(validateRuntimeConfig(config) ==
         ConfigValidationError::RING_RETAIN_LOG_LEVEL);
+  config = RuntimeConfig{};
+  config.serialLogLevel = static_cast<uint8_t>(LogLevel::NONE) + 1;
+  CHECK(validateRuntimeConfig(config) ==
+        ConfigValidationError::SERIAL_LOG_LEVEL);
   uint8_t parsedLevel = 255;
   CHECK(parseLogLevel("info", parsedLevel));
   CHECK(parsedLevel == static_cast<uint8_t>(LogLevel::INFO));
@@ -2523,6 +2527,22 @@ void w24_debug_ring_is_bounded_and_ordered() {
   DebugEvent second = {};
   CHECK(ring.copyFirstAfter(first.sequence, second));
   CHECK(second.argument1 == 6);
+
+  DebugRingBuffer reused;
+  reused.add(1, 0, LogLevel::INFO, DebugCategory::SYSTEM,
+             DebugCode::LOG_TEXT, 0, 0, "old text");
+  for (size_t index = 0; index < DEBUG_EVENT_CAPACITY; ++index) {
+    reused.add(static_cast<uint32_t>(index + 2), 0, LogLevel::INFO,
+               DebugCategory::SYSTEM, DebugCode::BOOT_SUBSYSTEM,
+               static_cast<int32_t>(index));
+  }
+  DebugEvent reusedEvents[DEBUG_EVENT_CAPACITY] = {};
+  const size_t reusedCount =
+      reused.copyAfter(0, reusedEvents, DEBUG_EVENT_CAPACITY);
+  CHECK(reusedCount == DEBUG_EVENT_CAPACITY);
+  for (size_t index = 0; index < reusedCount; ++index) {
+    CHECK(reusedEvents[index].text[0] == '\0');
+  }
 }
 
 void w25_weight_samples_do_not_fill_debug_log() {

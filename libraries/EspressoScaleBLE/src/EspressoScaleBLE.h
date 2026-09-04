@@ -179,7 +179,6 @@ class EspressoScaleBLE {
         void exploreService(BLEService service);
         void exploreCharacteristic(BLECharacteristic characteristic);
         void exploreDescriptor(BLEDescriptor descriptor);
-        void printData(const unsigned char data[], int length);
 
         float               _currentWeight;
         uint32_t            _currentTimerMs;

@@ -91,6 +91,23 @@ void quietIdfWifiDriverWarnings() {
   esp_log_level_set("wifi", ESP_LOG_ERROR);
 }
 
+LogLevel networkTextLogLevel(const char *message) {
+  if (message == nullptr) {
+    return LogLevel::INFO;
+  }
+  if (strncmp(message, "ERR ", 4) == 0) {
+    return LogLevel::ERROR;
+  }
+  if (strstr(message, " failed") != nullptr ||
+      strstr(message, " mismatch") != nullptr ||
+      strstr(message, "timed out") != nullptr ||
+      strstr(message, "rollback impossible") != nullptr ||
+      strstr(message, "rolling back") != nullptr) {
+    return LogLevel::WARNING;
+  }
+  return LogLevel::INFO;
+}
+
 void formatWifiMac(const uint8_t mac[6], char *output, size_t outputCapacity) {
   if (mac == nullptr || output == nullptr || outputCapacity < 18) {
     return;
@@ -425,6 +442,9 @@ const char *configValidationMessage(ConfigValidationError error) {
       return "Last shot cooldown must be from 5 to 240 min.";
     case ConfigValidationError::DRIP_DELAY:
       return "Drip delay must be from 0 to 10 s.";
+    case ConfigValidationError::SERIAL_LOG_LEVEL:
+      return "Serial log level must be none, critical, error, warning, info, "
+             "or debug.";
     case ConfigValidationError::RING_RETAIN_LOG_LEVEL:
       return "Ring log level must be none, critical, error, warning, info, or "
              "debug.";
@@ -1489,24 +1509,13 @@ void ShotStopperNetwork::publishConfiguredAddressStatus() {
   portEXIT_CRITICAL(&dataMux_);
 }
 
-bool ShotStopperNetwork::serialDebugEnabled() const {
-  if (callbacks_.copyRuntimeConfig == nullptr) {
-    return false;
-  }
-  RuntimeConfig live = {};
-  callbacks_.copyRuntimeConfig(&live);
-  return serialLogLevelFromRuntime(live) != LogLevel::NONE;
-}
-
 void ShotStopperNetwork::armPendingConfirmWindow(uint32_t now) {
   portENTER_CRITICAL(&dataMux_);
   staConfirmArmed_ = true;
   staConfirmDeadlineMs_ = now + STA_CONFIRM_TIMEOUT_MS;
   portEXIT_CRITICAL(&dataMux_);
-  if (serialDebugEnabled()) {
-    ::serialTraceCategory(LogLevel::INFO, DebugCategory::NETWORK,
-                          "WiFi STA config pending confirmation for 180 s");
-  }
+  ::serialTraceCategory(LogLevel::INFO, DebugCategory::NETWORK,
+                        "WiFi STA config pending confirmation for 180 s");
 }
 
 void ShotStopperNetwork::clearPendingConfirmWindow() {
@@ -1551,13 +1560,11 @@ bool ShotStopperNetwork::confirmPendingNetwork(const char *reason) {
   publishConfiguredAddressStatus();
   log(DebugCategory::CONFIG, DebugCode::CONFIG_PERSISTED,
       static_cast<int32_t>(next.runtime.revision));
-  if (serialDebugEnabled()) {
-    ::serialTraceCategoryf(LogLevel::INFO, DebugCategory::NETWORK,
-                           "WiFi STA config confirmed%s%s%s",
-                           reason != nullptr && reason[0] != '\0' ? " (" : "",
-                           reason != nullptr && reason[0] != '\0' ? reason : "",
-                           reason != nullptr && reason[0] != '\0' ? ")" : "");
-  }
+  ::serialTraceCategoryf(LogLevel::INFO, DebugCategory::NETWORK,
+                         "WiFi STA config confirmed%s%s%s",
+                         reason != nullptr && reason[0] != '\0' ? " (" : "",
+                         reason != nullptr && reason[0] != '\0' ? reason : "",
+                         reason != nullptr && reason[0] != '\0' ? ")" : "");
   return true;
 }
 
@@ -1567,13 +1574,11 @@ bool ShotStopperNetwork::revertPendingNetwork(uint32_t now,
   if (next.staConfigState != static_cast<uint8_t>(StaConfigState::PENDING)) {
     return false;
   }
-  if (serialDebugEnabled()) {
-    ::serialTraceCategoryf(LogLevel::WARNING, DebugCategory::NETWORK,
-                           "WiFi STA pending config reverted%s%s%s",
-                           reason != nullptr && reason[0] != '\0' ? " (" : "",
-                           reason != nullptr && reason[0] != '\0' ? reason : "",
-                           reason != nullptr && reason[0] != '\0' ? ")" : "");
-  }
+  ::serialTraceCategoryf(LogLevel::WARNING, DebugCategory::NETWORK,
+                         "WiFi STA pending config reverted%s%s%s",
+                         reason != nullptr && reason[0] != '\0' ? " (" : "",
+                         reason != nullptr && reason[0] != '\0' ? reason : "",
+                         reason != nullptr && reason[0] != '\0' ? ")" : "");
   if (!restoreLkgToActive(next)) {
     clearStaNetwork(next);
   }
@@ -3130,39 +3135,43 @@ void ShotStopperNetwork::log(DebugCategory category, DebugCode code,
 }
 
 void ShotStopperNetwork::actionLog(const char *message) {
-  if (serialDebugEnabled() && message != nullptr) {
-    ::serialTraceCategory(LogLevel::INFO, DebugCategory::NETWORK, message);
+  if (message != nullptr) {
+    ::serialTraceCategory(networkTextLogLevel(message), DebugCategory::NETWORK,
+                          message);
   }
 }
 
 void ShotStopperNetwork::actionLogf(const char *fmt, ...) {
-  if (!serialDebugEnabled() || fmt == nullptr) {
+  if (fmt == nullptr) {
     return;
   }
-  char line[192] = {};
+  char line[DEBUG_EVENT_TEXT_CAPACITY] = {};
   va_list args;
   va_start(args, fmt);
   vsnprintf(line, sizeof(line), fmt, args);
   va_end(args);
-  ::serialTraceCategory(LogLevel::INFO, DebugCategory::NETWORK, line);
+  ::serialTraceCategory(networkTextLogLevel(line), DebugCategory::NETWORK,
+                        line);
 }
 
 void ShotStopperNetwork::lifecycleLog(const char *message) {
-  if (serialDebugEnabled() && message != nullptr) {
-    ::serialTraceCategory(LogLevel::INFO, DebugCategory::NETWORK, message);
+  if (message != nullptr) {
+    ::serialTraceCategory(networkTextLogLevel(message), DebugCategory::NETWORK,
+                          message);
   }
 }
 
 void ShotStopperNetwork::lifecycleLogf(const char *fmt, ...) {
-  if (!serialDebugEnabled() || fmt == nullptr) {
+  if (fmt == nullptr) {
     return;
   }
-  char line[192] = {};
+  char line[DEBUG_EVENT_TEXT_CAPACITY] = {};
   va_list args;
   va_start(args, fmt);
   vsnprintf(line, sizeof(line), fmt, args);
   va_end(args);
-  ::serialTraceCategory(LogLevel::INFO, DebugCategory::NETWORK, line);
+  ::serialTraceCategory(networkTextLogLevel(line), DebugCategory::NETWORK,
+                        line);
 }
 
 void ShotStopperNetwork::printActionSnapshot(const char *command, bool ok) {
@@ -4498,9 +4507,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   if (ok && page == StatusPage::Diagnostic) {
     ok = statusJsonAppend(
         &used,
-        ",\"timezoneOffsetMinutes\":%d,\"serialLogLevel\":\"%s\",\"serialDebugOutput\":%s",
+        ",\"timezoneOffsetMinutes\":%d,\"serialDebugOutput\":%s",
         static_cast<int>(control.config.timezoneOffsetMinutes),
-        logLevelName(serialLogLevelFromRuntime(control.config)),
         serialLogLevelFromRuntime(control.config) != LogLevel::NONE ? "true"
                                                                      : "false");
   }

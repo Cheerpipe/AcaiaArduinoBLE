@@ -286,6 +286,20 @@ ss_idf_verify_firmware() {
   fi
   echo "sdkconfig: CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y"
 
+  if ! grep -q '^CONFIG_SPIRAM_USE_MALLOC=y$' "$IDF_SDKCONFIG"; then
+    echo "CONFIG_SPIRAM_USE_MALLOC is not enabled in $IDF_SDKCONFIG." >&2
+    exit 1
+  fi
+  echo "sdkconfig: CONFIG_SPIRAM_USE_MALLOC=y"
+
+  if ! grep -q '^CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y$' "$IDF_SDKCONFIG" ||
+     ! grep -q '^CONFIG_LOG_MAXIMUM_LEVEL=4$' "$IDF_SDKCONFIG"; then
+    echo "ESP-IDF log maximum must be DEBUG so the runtime selector can emit INFO/DEBUG." >&2
+    grep 'CONFIG_LOG_MAXIMUM' "$IDF_SDKCONFIG" >&2 || true
+    exit 1
+  fi
+  echo "sdkconfig: CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y"
+
   if ! grep -q '^CONFIG_AUTOSTART_ARDUINO=y$' "$IDF_SDKCONFIG"; then
     echo "CONFIG_AUTOSTART_ARDUINO is not enabled in $IDF_SDKCONFIG." >&2
     exit 1
@@ -330,7 +344,7 @@ ss_idf_verify_firmware() {
   fi
 
   local symbol
-  for symbol in shotLog shotCurves persistedSettings; do
+  for symbol in shotLog shotCurves persistedSettings debugLog; do
     nm_line="$(xtensa-esp32s3-elf-nm "$IDF_ELF" | grep -E "[[:space:]]${symbol}$" || true)"
     if [[ -z "$nm_line" ]]; then
       echo "nm did not find ${symbol} in $IDF_ELF." >&2
@@ -343,6 +357,13 @@ ss_idf_verify_firmware() {
       exit 1
     fi
   done
+
+  nm_line="$(xtensa-esp32s3-elf-nm "$IDF_ELF" | grep -E '[[:space:]][Tt][[:space:]]shotStopperScaleLog$' || true)"
+  if [[ -z "$nm_line" ]]; then
+    echo "The final ELF has no strong shotStopperScaleLog bridge definition." >&2
+    exit 1
+  fi
+  echo "EspressoScaleBLE log bridge: $nm_line"
 
   if [[ ! -f "$IDF_IMAGE" ]]; then
     echo "$IDF_IMAGE does not exist, so the OTA marker could not be verified." >&2

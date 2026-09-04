@@ -4,6 +4,8 @@
 #include "Arduino.h"
 #include "EspressoScaleBLE.h"
 #include <ArduinoBLE.h>
+#include <stdarg.h>
+#include <stdio.h>
 
 #if defined(ESP32) && !defined(SHOT_STOPPER_HOST_TEST)
 #ifdef LOG_LOCAL_LEVEL
@@ -13,94 +15,9 @@
 #include <esp_log.h>
 
 // The firmware provides this bridge when EspressoScaleBLE is linked into Shot
-// Stopper. Keep it weak so the library stays usable by other Arduino projects.
-extern "C" void shotStopperScaleLog(const char *message) __attribute__((weak));
-
-// EspressoScaleBLE used to build log lines through several Serial.print()
-// calls. Keep its public debug switch, but emit complete ESP-IDF log lines so
-// concurrent tasks cannot interleave fragments on USB.
-class EspressoScaleLogStream {
- public:
-  void print(const char *value) { append(value); }
-  void print(char value) {
-    char text[2] = {value, '\0'};
-    append(text);
-  }
-  void print(const String &value) { append(value.c_str()); }
-  void print(int value) { appendNumber(static_cast<long>(value), 10); }
-  void print(unsigned int value) { appendUnsigned(value, 10); }
-  void print(long value) { appendNumber(value, 10); }
-  void print(unsigned long value) { appendUnsigned(value, 10); }
-  void print(uint8_t value) { appendUnsigned(value, 10); }
-  void print(int value, int base) { appendNumber(value, base); }
-  void print(unsigned int value, int base) { appendUnsigned(value, base); }
-  void print(uint8_t value, int base) { appendUnsigned(value, base); }
-  void println() { flush(); }
-  void println(int value, int base) {
-    print(value, base);
-    flush();
-  }
-  void println(unsigned int value, int base) {
-    print(value, base);
-    flush();
-  }
-  void println(uint8_t value, int base) {
-    print(value, base);
-    flush();
-  }
-  template <typename T>
-  void println(const T &value) {
-    print(value);
-    flush();
-  }
-
- private:
-  void append(const char *value) {
-    if (value == nullptr || used_ >= sizeof(line_) - 1) {
-      return;
-    }
-    const size_t remaining = sizeof(line_) - used_;
-    const int written = snprintf(line_ + used_, remaining, "%s", value);
-    if (written > 0) {
-      used_ += static_cast<size_t>(written) < remaining
-                   ? static_cast<size_t>(written)
-                   : remaining - 1;
-    }
-  }
-  void appendNumber(long value, int base) {
-    char text[24] = {};
-    if (base == HEX) {
-      snprintf(text, sizeof(text), "%lX", static_cast<unsigned long>(value));
-    } else {
-      snprintf(text, sizeof(text), "%ld", value);
-    }
-    append(text);
-  }
-  void appendUnsigned(unsigned long value, int base) {
-    char text[24] = {};
-    if (base == HEX) {
-      snprintf(text, sizeof(text), "%lX", value);
-    } else {
-      snprintf(text, sizeof(text), "%lu", value);
-    }
-    append(text);
-  }
-  void flush() {
-    if (shotStopperScaleLog != nullptr) {
-      shotStopperScaleLog(line_);
-    } else {
-      esp_log_write(ESP_LOG_DEBUG, "scale.ble", "%s", line_);
-    }
-    used_ = 0;
-    line_[0] = '\0';
-  }
-  char line_[192] = {};
-  size_t used_ = 0;
-};
-
-static EspressoScaleLogStream espressoScaleLog;
-#undef Serial
-#define Serial espressoScaleLog
+// Stopper. Keep it weak so the library remains usable by other projects.
+extern "C" void shotStopperScaleLog(uint8_t severity, const char *message)
+    __attribute__((weak));
 #endif
 
 #if defined(ESP32) && __has_include("esp32-hal-alloc-ble-mem.h")
@@ -112,6 +29,74 @@ extern "C" uint8_t BLEHostLastHciDisconnectReason(void);
 #endif
 
 namespace {
+
+enum class ScaleLogSeverity : uint8_t {
+    Debug = 0,
+    Warning = 1,
+    Error = 2,
+};
+
+constexpr size_t SCALE_LOG_LINE_CAPACITY = 128;
+constexpr size_t SCALE_LOG_HEX_CAPACITY = 65;
+
+void scaleLog(ScaleLogSeverity severity, const char *message) {
+    if (message == nullptr) {
+        return;
+    }
+#if defined(ESP32) && !defined(SHOT_STOPPER_HOST_TEST)
+    if (shotStopperScaleLog != nullptr) {
+        shotStopperScaleLog(static_cast<uint8_t>(severity), message);
+        return;
+    }
+    switch (severity) {
+        case ScaleLogSeverity::Error:
+            ESP_LOGE("scale.ble", "%s", message);
+            return;
+        case ScaleLogSeverity::Warning:
+            ESP_LOGW("scale.ble", "%s", message);
+            return;
+        case ScaleLogSeverity::Debug:
+            ESP_LOGD("scale.ble", "%s", message);
+            return;
+    }
+#else
+    (void)severity;
+    Serial.println(message);
+#endif
+}
+
+void scaleLogf(ScaleLogSeverity severity, const char *format, ...) {
+    if (format == nullptr) {
+        return;
+    }
+    // Per-call storage keeps the logger re-entrant without a shared heap or
+    // BSS accumulator. The line bound matches Shot Stopper's retained record.
+    char line[SCALE_LOG_LINE_CAPACITY] = {};
+    va_list args;
+    va_start(args, format);
+    vsnprintf(line, sizeof(line), format, args);
+    va_end(args);
+    scaleLog(severity, line);
+}
+
+void formatHexData(const unsigned char data[], int length, char *output,
+                   size_t capacity) {
+    if (output == nullptr || capacity == 0) {
+        return;
+    }
+    output[0] = '\0';
+    if (data == nullptr || length <= 0) {
+        return;
+    }
+    static constexpr char HEX_DIGITS[] = "0123456789ABCDEF";
+    size_t used = 0;
+    for (int index = 0; index < length && used + 2 < capacity; ++index) {
+        const unsigned char value = data[index];
+        output[used++] = HEX_DIGITS[value >> 4];
+        output[used++] = HEX_DIGITS[value & 0x0f];
+    }
+    output[used] = '\0';
+}
 
 uint32_t elapsedSince(uint32_t timestamp) {
     return static_cast<uint32_t>(millis()) - timestamp;
@@ -215,9 +200,8 @@ void EspressoScaleBLE::logVersionOnce() {
     }
     _loggedVersion = true;
     if (_debug) {
-        Serial.print("EspressoScaleBLE Library v");
-        Serial.print(LIBRARY_VERSION);
-        Serial.println(" ready");
+        scaleLogf(ScaleLogSeverity::Debug,
+                  "EspressoScaleBLE Library v%s ready", LIBRARY_VERSION);
     }
 }
 
@@ -280,15 +264,17 @@ bool EspressoScaleBLE::startScan(const char *mac, bool forceRestart,
     }
     if (_debug) {
         if (!filtered) {
-            Serial.println("Scanning for any compatible scale (name scan)...");
+            scaleLog(ScaleLogSeverity::Debug,
+                     "Scanning for any compatible scale (name scan)...");
         } else if (useAddressScan) {
-            Serial.print("Scanning for preferred scale ");
-            Serial.print(_scanMac);
-            Serial.println(" (address scan)...");
+            scaleLogf(ScaleLogSeverity::Debug,
+                      "Scanning for preferred scale %s (address scan)...",
+                      _scanMac);
         } else {
-            Serial.print("Scanning for preferred scale ");
-            Serial.print(_scanMac);
-            Serial.println(" (name scan + connect filter)...");
+            scaleLogf(
+                ScaleLogSeverity::Debug,
+                "Scanning for preferred scale %s (name scan + connect filter)...",
+                _scanMac);
         }
     }
 
@@ -297,7 +283,8 @@ bool EspressoScaleBLE::startScan(const char *mac, bool forceRestart,
         : static_cast<bool>(BLE.scan(true));
     if (!scanStarted) {
         if (_debug) {
-            Serial.println("BLE scan failed to start");
+            scaleLog(ScaleLogSeverity::Warning,
+                     "BLE scan failed to start");
         }
         stopIdleScan(ScaleDisconnectReason::SCAN_START_FAILED);
         return false;
@@ -365,11 +352,7 @@ bool EspressoScaleBLE::pollScan() {
         peripheral.copyLocalName(name, sizeof(name));
 
         if (_debug) {
-            Serial.print("Found ");
-            Serial.print(mac);
-            Serial.print(" '");
-            Serial.print(name);
-            Serial.println("'");
+            scaleLogf(ScaleLogSeverity::Debug, "Found %s '%s'", mac, name);
         }
 
         const bool filtered = _scanMac[0] != '\0';
@@ -400,7 +383,7 @@ bool EspressoScaleBLE::pollScan() {
 
 bool EspressoScaleBLE::beginConnection(BLEDevice& peripheral) {
     if (_debug) {
-        Serial.println("Connecting ...");
+        scaleLog(ScaleLogSeverity::Debug, "Connecting ...");
     }
     if (!_hasPeripheral) {
         rememberPeripheral(peripheral);
@@ -419,7 +402,8 @@ bool EspressoScaleBLE::advanceConnection() {
     }
     if (elapsedSince(_connectStartedAt) >= SCALE_CONNECT_BUDGET_MS) {
         if (_debug) {
-            Serial.println("Scale connect budget exceeded");
+            scaleLog(ScaleLogSeverity::Warning,
+                     "Scale connect budget exceeded");
         }
         BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
         resetConnection(true, ScaleDisconnectReason::CONNECT_FAILED);
@@ -440,9 +424,9 @@ bool EspressoScaleBLE::advanceConnection() {
             if (!_peripheral.connect()) {
                 ++_connectAttempts;
                 if (_debug) {
-                    Serial.print("Failed to connect (attempt ");
-                    Serial.print(_connectAttempts);
-                    Serial.println(")");
+                    scaleLogf(ScaleLogSeverity::Warning,
+                              "Failed to connect (attempt %u)",
+                              static_cast<unsigned>(_connectAttempts));
                 }
                 if (_connectAttempts < SCALE_CONNECT_ATTEMPTS) {
                     BLE.poll();
@@ -456,8 +440,9 @@ bool EspressoScaleBLE::advanceConnection() {
             }
             BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
             if (_debug) {
-                Serial.println("Connected");
-                Serial.println("Discovering attributes ...");
+                scaleLog(ScaleLogSeverity::Debug, "Connected");
+                scaleLog(ScaleLogSeverity::Debug,
+                         "Discovering attributes ...");
             }
             _connectStep = ConnectStep::Discover;
             return false;
@@ -467,20 +452,19 @@ bool EspressoScaleBLE::advanceConnection() {
             if (!_peripheral.discoverAttributes()) {
                 BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
                 if (_debug) {
-                    Serial.println("Attribute discovery failed!");
+                    scaleLog(ScaleLogSeverity::Warning,
+                             "Attribute discovery failed!");
                 }
                 resetConnection(true, ScaleDisconnectReason::DISCOVERY_FAILED);
                 return false;
             }
             BLE.setTimeout(BLE_OPERATION_TIMEOUT_MS);
             if (_debug) {
-                Serial.println("Attributes discovered");
-                Serial.println();
-                Serial.print("Device name: ");
-                Serial.println(_peripheral.deviceName());
-                Serial.print("Appearance: 0x");
-                Serial.println(_peripheral.appearance(), HEX);
-                Serial.println();
+                scaleLog(ScaleLogSeverity::Debug, "Attributes discovered");
+                scaleLogf(ScaleLogSeverity::Debug, "Device name: %s",
+                          _peripheral.deviceName().c_str());
+                scaleLogf(ScaleLogSeverity::Debug, "Appearance: 0x%X",
+                          static_cast<unsigned>(_peripheral.appearance()));
                 for (int i = 0; i < _peripheral.serviceCount(); ++i) {
                     exploreService(_peripheral.service(i));
                 }
@@ -491,7 +475,9 @@ bool EspressoScaleBLE::advanceConnection() {
         case ConnectStep::Configure:
             if (!detectAndConfigureScale()) {
                 if (_debug) {
-                    Serial.println("Unable to determine scale type or capabilities");
+                    scaleLog(
+                        ScaleLogSeverity::Warning,
+                        "Unable to determine scale type or capabilities");
                 }
                 resetConnection(true, ScaleDisconnectReason::UNSUPPORTED_SCALE);
                 return false;
@@ -502,13 +488,14 @@ bool EspressoScaleBLE::advanceConnection() {
         case ConnectStep::Subscribe:
             if (!_read.subscribe()) {
                 if (_debug) {
-                    Serial.println("Subscription failed");
+                    scaleLog(ScaleLogSeverity::Warning,
+                             "Subscription failed");
                 }
                 resetConnection(true, ScaleDisconnectReason::SUBSCRIBE_FAILED);
                 return false;
             }
             if (_debug) {
-                Serial.println("Subscribed");
+                scaleLog(ScaleLogSeverity::Debug, "Subscribed");
             }
             _connectStep = ConnectStep::InitWrites;
             return false;
@@ -537,7 +524,7 @@ bool EspressoScaleBLE::detectAndConfigureScale() {
             _peripheral.characteristic(protocol->readUuid);
         if (candidate && candidate.canSubscribe()) {
             if (_debug) {
-                Serial.println(protocol->debugLabel);
+                scaleLog(ScaleLogSeverity::Debug, protocol->debugLabel);
             }
             if (configureCharacteristics(_peripheral, protocol)) {
                 return true;
@@ -555,7 +542,8 @@ bool EspressoScaleBLE::runInitWrites() {
         const ScalePayload &payload = _protocol->initWrites[i];
         if (!_write.writeValue(payload.data, payload.length)) {
             if (_debug) {
-                Serial.println("Initialization write failed");
+                scaleLog(ScaleLogSeverity::Warning,
+                         "Initialization write failed");
             }
             resetConnection(
                 true, ScaleDisconnectReason::INITIALIZATION_WRITE_FAILED);
@@ -604,7 +592,8 @@ bool EspressoScaleBLE::init(const char *mac) {
         if (!_scanning && !_connecting) {
             if (_lastDisconnectReason == ScaleDisconnectReason::SCAN_TIMEOUT) {
                 if (_debug) {
-                    Serial.println("Scale scan timed out");
+                    scaleLog(ScaleLogSeverity::Warning,
+                             "Scale scan timed out");
                 }
             }
             return false;
@@ -632,7 +621,7 @@ bool EspressoScaleBLE::init(const char *mac) {
     }
 
     if (_debug) {
-        Serial.println("Scale scan timed out");
+        scaleLog(ScaleLogSeverity::Warning, "Scale scan timed out");
     }
     stopIdleScan(ScaleDisconnectReason::SCAN_TIMEOUT);
     return false;
@@ -684,8 +673,10 @@ ScaleCommandResult EspressoScaleBLE::writeOp(ScaleOp op, uint8_t arg) {
 ScaleCommandResult EspressoScaleBLE::tare() {
     const ScaleCommandResult result = writeOp(ScaleOp::Tare);
     if (_debug) {
-        Serial.println(scaleCommandOk(result) ? "Tare write successful"
-                                              : "Tare write failed");
+        scaleLog(scaleCommandOk(result) ? ScaleLogSeverity::Debug
+                                        : ScaleLogSeverity::Warning,
+                 scaleCommandOk(result) ? "Tare write successful"
+                                        : "Tare write failed");
     }
     return result;
 }
@@ -693,8 +684,10 @@ ScaleCommandResult EspressoScaleBLE::tare() {
 ScaleCommandResult EspressoScaleBLE::startTimer() {
     const ScaleCommandResult result = writeOp(ScaleOp::StartTimer);
     if (_debug) {
-        Serial.println(scaleCommandOk(result) ? "Start timer write successful"
-                                              : "Start timer write failed");
+        scaleLog(scaleCommandOk(result) ? ScaleLogSeverity::Debug
+                                        : ScaleLogSeverity::Warning,
+                 scaleCommandOk(result) ? "Start timer write successful"
+                                        : "Start timer write failed");
     }
     return result;
 }
@@ -702,8 +695,10 @@ ScaleCommandResult EspressoScaleBLE::startTimer() {
 ScaleCommandResult EspressoScaleBLE::stopTimer() {
     const ScaleCommandResult result = writeOp(ScaleOp::StopTimer);
     if (_debug) {
-        Serial.println(scaleCommandOk(result) ? "Stop timer write successful"
-                                              : "Stop timer write failed");
+        scaleLog(scaleCommandOk(result) ? ScaleLogSeverity::Debug
+                                        : ScaleLogSeverity::Warning,
+                 scaleCommandOk(result) ? "Stop timer write successful"
+                                        : "Stop timer write failed");
     }
     return result;
 }
@@ -711,8 +706,10 @@ ScaleCommandResult EspressoScaleBLE::stopTimer() {
 ScaleCommandResult EspressoScaleBLE::resetTimer() {
     const ScaleCommandResult result = writeOp(ScaleOp::ResetTimer);
     if (_debug) {
-        Serial.println(scaleCommandOk(result) ? "Reset timer write successful"
-                                              : "Reset timer write failed");
+        scaleLog(scaleCommandOk(result) ? ScaleLogSeverity::Debug
+                                        : ScaleLogSeverity::Warning,
+                 scaleCommandOk(result) ? "Reset timer write successful"
+                                        : "Reset timer write failed");
     }
     return result;
 }
@@ -720,15 +717,18 @@ ScaleCommandResult EspressoScaleBLE::resetTimer() {
 ScaleCommandResult EspressoScaleBLE::tareStartTimer() {
     if (!supportsTareStartTimer()) {
         if (_debug) {
-            Serial.println("Tare-and-start unsupported for this scale");
+            scaleLog(ScaleLogSeverity::Warning,
+                     "Tare-and-start unsupported for this scale");
         }
         return ScaleCommandResult::Unsupported;
     }
     const ScaleCommandResult result = writeOp(ScaleOp::CombinedTareStart);
     if (_debug) {
-        Serial.println(scaleCommandOk(result)
-                           ? "Tare-and-start write successful"
-                           : "Tare-and-start write failed");
+        scaleLog(scaleCommandOk(result) ? ScaleLogSeverity::Debug
+                                        : ScaleLogSeverity::Warning,
+                 scaleCommandOk(result)
+                     ? "Tare-and-start write successful"
+                     : "Tare-and-start write failed");
     }
     return result;
 }
@@ -757,21 +757,25 @@ ScaleCommandResult EspressoScaleBLE::setBeepLevel(uint8_t level) {
     if (!features().has(ScaleFeatureVolume) &&
         !features().has(ScaleFeatureIndependentBeep)) {
         if (_debug) {
-            Serial.println("Beep level unsupported for this scale");
+            scaleLog(ScaleLogSeverity::Warning,
+                     "Beep level unsupported for this scale");
         }
         return ScaleCommandResult::Unsupported;
     }
     const uint8_t maxLevel = features().volumeMax;
     if (level > maxLevel) {
         if (_debug) {
-            Serial.println("Beep level out of range");
+            scaleLog(ScaleLogSeverity::Warning,
+                     "Beep level out of range");
         }
         return ScaleCommandResult::InvalidArgument;
     }
     const ScaleCommandResult result = writeOp(ScaleOp::SetVolume, level);
     if (_debug) {
-        Serial.println(scaleCommandOk(result) ? "Beep level write successful"
-                                              : "Beep level write failed");
+        scaleLog(scaleCommandOk(result) ? ScaleLogSeverity::Debug
+                                        : ScaleLogSeverity::Warning,
+                 scaleCommandOk(result) ? "Beep level write successful"
+                                        : "Beep level write failed");
     }
     return result;
 }
@@ -869,7 +873,8 @@ bool EspressoScaleBLE::newWeightAvailable() {
         static_cast<uint32_t>(now - _connectedAt) >=
             FIRST_PACKET_TIMEOUT_MS) {
         if (_debug) {
-            Serial.println("First scale packet timed out");
+            scaleLog(ScaleLogSeverity::Warning,
+                     "First scale packet timed out");
         }
         resetConnection(true,
                         ScaleDisconnectReason::FIRST_PACKET_TIMEOUT);
@@ -878,7 +883,8 @@ bool EspressoScaleBLE::newWeightAvailable() {
     if (_hasValidPacket &&
         static_cast<uint32_t>(now - _lastPacket) >= maxPacketPeriodMs()) {
         if (_debug) {
-            Serial.println("Scale packet timed out");
+            scaleLog(ScaleLogSeverity::Warning,
+                     "Scale packet timed out");
         }
         resetConnection(true, ScaleDisconnectReason::PACKET_TIMEOUT);
         return false;
@@ -897,10 +903,9 @@ bool EspressoScaleBLE::newWeightAvailable() {
     byte input[MAX_BLE_PACKET_LENGTH] = {0};
     const int bytesRead = _read.readValue(input, MAX_BLE_PACKET_LENGTH);
     if (_debug) {
-        Serial.print(bytesRead);
-        Serial.print(": 0x");
-        printData(input, bytesRead);
-        Serial.println();
+        char hex[(MAX_BLE_PACKET_LENGTH * 2) + 1] = {};
+        formatHexData(input, bytesRead, hex, sizeof(hex));
+        scaleLogf(ScaleLogSeverity::Debug, "%d: 0x%s", bytesRead, hex);
     }
     if (bytesRead != length) {
         rejectPacket("truncated read");
@@ -1040,13 +1045,14 @@ void EspressoScaleBLE::rejectPacket(const char* reason) {
     ++_rejectedPackets;
     ++_consecutiveRejectedPackets;
     if (_debug) {
-        Serial.print("Rejected scale packet: ");
-        Serial.println(reason);
+        scaleLogf(ScaleLogSeverity::Warning, "Rejected scale packet: %s",
+                  reason != nullptr ? reason : "unknown");
     }
     if (_connected &&
         _consecutiveRejectedPackets >= MAX_CONSECUTIVE_REJECTED_PACKETS) {
         if (_debug) {
-            Serial.println(
+            scaleLog(
+                ScaleLogSeverity::Error,
                 "Invalid scale packet stream; disconnecting (worker will rescan)");
         }
         resetConnection(true,
@@ -1132,8 +1138,7 @@ bool EspressoScaleBLE::isScaleName(const char *name) const {
 }
 
 void EspressoScaleBLE::exploreService(BLEService service) {
-    Serial.print("Service ");
-    Serial.println(service.uuid());
+    scaleLogf(ScaleLogSeverity::Debug, "Service %s", service.uuid());
     for (int i = 0; i < service.characteristicCount(); ++i) {
         exploreCharacteristic(service.characteristic(i));
     }
@@ -1141,19 +1146,19 @@ void EspressoScaleBLE::exploreService(BLEService service) {
 
 void EspressoScaleBLE::exploreCharacteristic(
         BLECharacteristic characteristic) {
-    Serial.print("\tCharacteristic ");
-    Serial.print(characteristic.uuid());
-    Serial.print(", properties 0x");
-    Serial.print(characteristic.properties(), HEX);
-
+    char hex[SCALE_LOG_HEX_CAPACITY] = {};
     if (characteristic.canRead()) {
         characteristic.read();
         if (characteristic.valueLength() > 0) {
-            Serial.print(", value 0x");
-            printData(characteristic.value(), characteristic.valueLength());
+            formatHexData(characteristic.value(),
+                          characteristic.valueLength(), hex, sizeof(hex));
         }
     }
-    Serial.println();
+    scaleLogf(ScaleLogSeverity::Debug,
+              "  Characteristic %s, properties 0x%X%s%s",
+              characteristic.uuid(),
+              static_cast<unsigned>(characteristic.properties()),
+              hex[0] != '\0' ? ", value 0x" : "", hex);
 
     for (int i = 0; i < characteristic.descriptorCount(); ++i) {
         exploreDescriptor(characteristic.descriptor(i));
@@ -1161,23 +1166,10 @@ void EspressoScaleBLE::exploreCharacteristic(
 }
 
 void EspressoScaleBLE::exploreDescriptor(BLEDescriptor descriptor) {
-    Serial.print("\t\tDescriptor ");
-    Serial.print(descriptor.uuid());
     descriptor.read();
-    Serial.print(", value 0x");
-    printData(descriptor.value(), descriptor.valueLength());
-    Serial.println();
-}
-
-void EspressoScaleBLE::printData(const unsigned char data[], int length) {
-    if (data == nullptr || length <= 0) {
-        return;
-    }
-    for (int i = 0; i < length; ++i) {
-        const unsigned char value = data[i];
-        if (value < 16) {
-            Serial.print('0');
-        }
-        Serial.print(value, HEX);
-    }
+    char hex[SCALE_LOG_HEX_CAPACITY] = {};
+    formatHexData(descriptor.value(), descriptor.valueLength(), hex,
+                  sizeof(hex));
+    scaleLogf(ScaleLogSeverity::Debug, "    Descriptor %s, value 0x%s",
+              descriptor.uuid(), hex);
 }

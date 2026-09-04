@@ -2807,13 +2807,11 @@ if (!(ui.includes("if($('serialDebugOutput'))$('serialDebugOutput').checked=!!c.
          ui.includes("$('serialDebugOutput').checked=!!c.serialDebugOutput")) ||
     !(ui.includes("if($('ringRetainLogLevel'))$('ringRetainLogLevel').value=c.ringRetainLogLevel||'none'") ||
          ui.includes("$('ringRetainLogLevel').value=c.ringRetainLogLevel||'none'")) ||
-    firmware.indexOf('serialLogLevel = serialLogLevelFromRuntime',
+    firmware.indexOf('publishLogLevels(serialLogLevelFromRuntime(runtimeConfig)',
                      firmware.indexOf('persistenceReady = EEPROM.begin')) < 0 ||
-    firmware.indexOf('serialLogLevel = serialLogLevelFromRuntime',
+    firmware.indexOf('publishLogLevels(serialLogLevelFromRuntime(runtimeConfig)',
                      firmware.indexOf('persistenceReady = EEPROM.begin')) >
         firmware.indexOf('BOOT_RESET_REASON') ||
-    firmware.indexOf('ringRetainLogLevel =',
-                     firmware.indexOf('persistenceReady = EEPROM.begin')) < 0 ||
     !ui.includes("serialLogLevel:$('serialLogLevel').value") ||
     !ui.includes("ringRetainLogLevel:$('ringRetainLogLevel').value||'none'") ||
     !ui.includes("serialLogLevel').onchange") ||
@@ -3958,9 +3956,9 @@ if (snapshotStart < 0 || snapshotEnd < 0 ||
       'CLI action snapshot must refresh holds after the mutation');
 }
 if (!network.includes('void ShotStopperNetwork::lifecycleLog(') ||
-    !network.includes('serialDebugEnabled() && message')) {
+    network.includes('serialDebugEnabled()')) {
   throw new Error(
-      'Automatic STA/SoftAP lifecycle logs must stay behind serialDebugEnabled');
+      'Network lifecycle logs must use the shared serial/ring logger');
 }
 if (network.includes('raising SoftAP and retrying STA') ||
     network.includes('retrying STA before SoftAP')) {
