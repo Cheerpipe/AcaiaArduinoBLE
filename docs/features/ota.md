@@ -69,6 +69,14 @@ Build and upload in one command:
 ./scripts/bo-idf --arch n16r8 --host 192.168.1.50 --password "my-device-password"
 ```
 
+For unattended updates, add `--force`. It skips the commit prompt and waits
+for the rebooted firmware to report that the OTA image is confirmed; it does
+not need a Web UI reload:
+
+```sh
+./scripts/bo-idf --arch n16r8 --host 192.168.1.50 --password "my-device-password" --force
+```
+
 Upload an image that was already built:
 
 ```sh

@@ -55,6 +55,7 @@ prompting. The same applies with `SHOTSTOPPER_NONINTERACTIVE=1`.
 | `-i`, `--image` | `SHOTSTOPPER_IMAGE` | Firmware `.bin` to use for flash or OTA instead of the normal build output. Checked locally and never persisted. |
 | `-b`, `--build-dir` | `SHOTSTOPPER_BUILD_DIR_OVERRIDE` | Build directory (`static` legacy only). |
 | `-o`, `--output-dir` | `SHOTSTOPPER_OUTPUT_DIR` | Reports directory (`static` / `static-idf` only). |
+| `--force` | — | OTA scripts only: commit without an interactive prompt and wait for the rebooted firmware to confirm itself through the HTTP API. No Web UI reload is required. |
 | `-h`, `--help` | — | Show the script help. |
 
 Suggested `--flags` at the prompt (Enter accepts them):
@@ -114,6 +115,10 @@ Examples:
 ./scripts/o-idf --arch n16r8 --host 192.168.1.50
 ./scripts/o-idf --arch n16r8 --host 192.168.1.50 --image ~/Downloads/shotstopper.bin
 ```
+
+`--force` is accepted by `ota`, `ota-idf`, `bo`, and `bo-idf` (and their `o`
+aliases). It bypasses the final commit prompt, then polls the controller until
+the new image reports `confirmed: true` or four minutes pass.
 
 `--image` can also be passed to the flash/OTA wrappers (`bf`, `bfm`, `bo`,
 `bsfm` and their `*-idf` variants); they still execute their named build or

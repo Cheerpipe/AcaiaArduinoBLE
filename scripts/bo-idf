@@ -42,6 +42,6 @@ cd "$root"
 ss_cli_flags_for arch flags
 ./scripts/build-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
 
-ss_cli_flags_for arch host image
+ss_cli_flags_for arch host image force
 ss_cli_export_secrets
 exec ./scripts/o-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}

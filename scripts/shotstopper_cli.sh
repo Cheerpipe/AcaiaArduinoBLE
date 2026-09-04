@@ -89,6 +89,7 @@ ss_port_exists() {
 
 ss_cli_reset() {
   local key
+  SS_CLI_FORCE=0
   for key in $SS_CLI_KEYS; do
     ss_set "$key" ""
     ss_origin_set "$key" ""
@@ -121,6 +122,7 @@ Named parameters (long and short):
   -i, --image <path>       Firmware .bin to flash or upload (not persisted)
   -b, --build-dir <path>   Build directory (static / static-idf only)
   -o, --output-dir <path>  Reports directory (static / static-idf only)
+      --force              Commit OTA without a prompt and wait for confirmation
   -h, --help               Show this help
 
 No script silently fills in missing values. Each parameter comes from the flag,
@@ -134,6 +136,7 @@ EOF
 }
 
 SS_CLI_HELP_REQUESTED=0
+SS_CLI_FORCE=0
 
 ss_cli_die() {
   printf '%s\n' "$1" >&2
@@ -145,6 +148,15 @@ ss_cli_parse() {
   local key value
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --force)
+        SS_CLI_FORCE=1
+        shift
+        continue
+        ;;
+      --force=*)
+        printf '%s\n' '--force does not take a value.' >&2
+        return 2
+        ;;
       --*=*)
         key="${1%%=*}"
         value="${1#*=}"
@@ -650,6 +662,10 @@ ss_cli_flags_for() {
   local key
   SS_CLI_FORWARD=()
   for key in "$@"; do
+    if [[ "$key" == "force" ]]; then
+      [[ "$SS_CLI_FORCE" == "1" ]] && SS_CLI_FORWARD+=(--force)
+      continue
+    fi
     ss_is_set "$key" || continue
     case "$key" in
       port) SS_CLI_FORWARD+=(--port "$(ss_get port)") ;;

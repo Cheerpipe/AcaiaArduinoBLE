@@ -28,11 +28,15 @@ Examples:
   ./scripts/ota-idf --arch n16r8 --host 192.168.1.50
   ./scripts/ota-idf -a n16r8 -H 192.168.4.1 -t "my-device-password"
   ./scripts/ota-idf -a n16r8 -H 192.168.1.50 -t "my-device-password" --image ~/Downloads/shotstopper.bin
+  ./scripts/ota-idf -a n16r8 -H 192.168.1.50 -t "my-device-password" --force
 
 Without --image, the image comes from build-idf/<architecture>/shotstopper.bin,
 so compile first (./scripts/build-idf / ./scripts/b-idf) or use
 ./scripts/bo-idf, which does both. You can also use the short alias
 ./scripts/o-idf.
+
+With --force, the script commits without asking and waits until the rebooted
+firmware confirms itself through its HTTP API; no Web UI reload is needed.
 EOF
 }
 
@@ -172,7 +176,7 @@ if [[ -z "$staged_version" ]]; then
 fi
 printf '\nVerified image: %s · %s\n' "$staged_version" "$staged_arch"
 
-if ss_can_prompt; then
+if [[ "$SS_CLI_FORCE" != "1" ]] && ss_can_prompt; then
   printf 'Commit and reboot the controller? [y/N]: ' > /dev/tty
   IFS= read -r answer < /dev/tty || answer=""
   case "$answer" in
@@ -191,6 +195,26 @@ ota_request POST /api/v1/ota/flash "" 30 || {
   exit 1
 }
 [[ "$OTA_HTTP_STATUS" == "202" ]] || ota_fail "Commit"
+
+if [[ "$SS_CLI_FORCE" == "1" ]]; then
+  echo "Waiting for reboot and OTA confirmation (up to 4 minutes)..."
+  confirm_deadline=$((SECONDS + 240))
+  while (( SECONDS < confirm_deadline )); do
+    if ota_request GET /api/v1/ota "" 10 && [[ "$OTA_HTTP_STATUS" == "200" ]] &&
+       [[ "$(ota_field running.version)" == "$staged_version" ]] &&
+       [[ "$(ota_field running.arch)" == "$staged_arch" ]] &&
+       [[ "$(ota_field restartPending)" == "false" ]] &&
+       [[ "$(ota_field confirmed)" == "true" ]]; then
+      echo "OTA confirmed by the rebooted firmware."
+      ss_cli_save
+      exit 0
+    fi
+    sleep 2
+  done
+  echo "The image was committed, but was not confirmed within 4 minutes." >&2
+  echo "Check the controller's network connection and OTA status." >&2
+  exit 1
+fi
 
 cat <<EOF
 
