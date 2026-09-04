@@ -1309,9 +1309,13 @@ class NimbleScaleClient {
         connectStartedAt_ = nowMs();
         ++scanCancels_;
         const int cancelResult = ble_gap_disc_cancel();
-        if (cancelResult == BLE_HS_EALREADY) {
+        // ble_gap_disc_cancel() is synchronous: a zero return means scanning
+        // has been fully aborted and a connect procedure can start
+        // immediately.  A manual cancellation does not produce a later
+        // BLE_GAP_EVENT_DISC_COMPLETE callback.
+        if (cancelResult == 0 || cancelResult == BLE_HS_EALREADY) {
           beginConnect();
-        } else if (cancelResult != 0) {
+        } else {
           finishLink(false, ScaleDisconnectReason::SCAN_START_FAILED,
                      cancelResult);
         }
