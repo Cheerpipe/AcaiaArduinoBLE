@@ -1,5 +1,5 @@
-# Experimental NimBLE backend. Companion remains disabled through phase 3;
-# peripheral/server roles stay compiled for the phase-4 profile migration.
+# Experimental NimBLE backend. The phase-4 Companion profile is registered at
+# boot only when its persisted enable flag is set; ArduinoBLE remains rollback.
 CONFIG_ESPRESSO_SCALE_BLE_BACKEND_NIMBLE=y
 # CONFIG_ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE is not set
 # CONFIG_BT_CONTROLLER_ONLY is not set

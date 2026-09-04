@@ -4869,7 +4869,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
           "\"restartRequired\":%s,\"stackReady\":%s,"
           "\"advertising\":%s,\"connected\":%s,\"protocolVersion\":%u,"
           "\"acceptedWrites\":%lu,\"rejectedWrites\":%lu,"
-          "\"lastReject\":\"%s\",\"scanIntensity\":\"%s\"}",
+          "\"lastReject\":\"%s\",\"lastRawError\":%ld,"
+          "\"advertisingStarts\":%lu,\"advertisingFailures\":%lu,"
+          "\"phoneConnects\":%lu,\"phoneDisconnects\":%lu,"
+          "\"scanIntensity\":\"%s\"}",
           network.apActive ? "true" : "false", network.apIp,
           static_cast<unsigned>(network.apClients),
           network.wifiConfigured ? "true" : "false", safeStaSsid,
@@ -4892,6 +4895,11 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
           static_cast<unsigned long>(control.bleCompanionRejectedWrites),
           bleCompanionRejectReasonName(static_cast<BleCompanionRejectReason>(
               control.bleCompanionLastReject)),
+          static_cast<long>(control.bleCompanionLastRawError),
+          static_cast<unsigned long>(control.bleCompanionAdvertisingStarts),
+          static_cast<unsigned long>(control.bleCompanionAdvertisingFailures),
+          static_cast<unsigned long>(control.bleCompanionPhoneConnects),
+          static_cast<unsigned long>(control.bleCompanionPhoneDisconnects),
           bleScanIntensityName(clampBleScanIntensity(
               control.bleCompanionScanIntensity)));
       if (ok) {
@@ -4962,6 +4970,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         "\"psramLargestFreeBlockBytes\":%lu,"
         "\"bleHostAllocPsram\":%lu,\"bleHostAllocFallback\":%lu,"
         "\"hciRxDropped\":%lu,\"hciTxDropped\":%lu,"
+        "\"bleBackend\":\"%s\",\"bleRuntimeState\":%u,"
+        "\"bleRuntimeLastError\":%ld,\"bleRuntimeLastResetReason\":%ld,"
+        "\"bleRuntimeSyncGeneration\":%lu,\"bleRuntimeResetCount\":%lu,"
+        "\"bleRuntimeHostStackMinWords\":%lu,"
         "\"workBufExternal\":%s,\"jsonArenaExternal\":%s,"
         "\"allocExternalFallback\":%lu,"
         "\"hwmon\":{\"cpuLoad5s\":%.2f,\"cpuLoad1m\":%.2f,\"cpuLoad5m\":%.2f,"
@@ -5027,6 +5039,13 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
         static_cast<unsigned long>(control.bleHostAllocFallbackCount),
         static_cast<unsigned long>(control.bleHostHciRxDropped),
         static_cast<unsigned long>(control.bleHostHciTxDropped),
+        control.bleBackend == 2 ? "nimble" : "arduinoble",
+        static_cast<unsigned>(control.bleRuntimeState),
+        static_cast<long>(control.bleRuntimeLastError),
+        static_cast<long>(control.bleRuntimeLastResetReason),
+        static_cast<unsigned long>(control.bleRuntimeSyncGeneration),
+        static_cast<unsigned long>(control.bleRuntimeResetCount),
+        static_cast<unsigned long>(control.bleRuntimeHostStackMinWords),
         control.workBufExternal ? "true" : "false",
         control.jsonArenaExternal ? "true" : "false",
         static_cast<unsigned long>(control.allocExternalFallbackCount),
@@ -5708,7 +5727,11 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            "\"psramSizeBytes\":%lu,\"psramFreeBytes\":%lu,"
            "\"psramLargestFreeBlockBytes\":%lu,\"bleHostAllocPsram\":%lu,"
            "\"bleHostAllocFallback\":%lu,\"hciRxDropped\":%lu,"
-           "\"hciTxDropped\":%lu,\"workBufExternal\":%s,"
+           "\"hciTxDropped\":%lu,\"bleBackend\":\"%s\","
+           "\"bleRuntimeState\":%u,\"bleRuntimeLastError\":%ld,"
+           "\"bleRuntimeLastResetReason\":%ld,"
+           "\"bleRuntimeSyncGeneration\":%lu,\"bleRuntimeResetCount\":%lu,"
+           "\"bleRuntimeHostStackMinWords\":%lu,\"workBufExternal\":%s,"
            "\"jsonArenaExternal\":%s,\"allocExternalFallback\":%lu,"
            "\"heapAlertLatched\":%s,"
            "\"stackAlertLatched\":%s,\"loopGapAlertLatched\":%s,"
@@ -5729,6 +5752,13 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            static_cast<unsigned long>(c.bleHostAllocFallbackCount),
            static_cast<unsigned long>(c.bleHostHciRxDropped),
            static_cast<unsigned long>(c.bleHostHciTxDropped),
+           c.bleBackend == 2 ? "nimble" : "arduinoble",
+           static_cast<unsigned>(c.bleRuntimeState),
+           static_cast<long>(c.bleRuntimeLastError),
+           static_cast<long>(c.bleRuntimeLastResetReason),
+           static_cast<unsigned long>(c.bleRuntimeSyncGeneration),
+           static_cast<unsigned long>(c.bleRuntimeResetCount),
+           static_cast<unsigned long>(c.bleRuntimeHostStackMinWords),
            c.workBufExternal ? "true" : "false",
            c.jsonArenaExternal ? "true" : "false",
            static_cast<unsigned long>(c.allocExternalFallbackCount),
@@ -5782,7 +5812,10 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            "\"bleCompanion\":{\"enabled\":%s,\"active\":%s,"
            "\"restartRequired\":%s,\"stackReady\":%s,\"advertising\":%s,"
            "\"connected\":%s,\"protocolVersion\":%u,\"acceptedWrites\":%lu,"
-           "\"rejectedWrites\":%lu,\"scanIntensity\":\"%s\"},",
+           "\"rejectedWrites\":%lu,\"lastRawError\":%ld,"
+           "\"advertisingStarts\":%lu,\"advertisingFailures\":%lu,"
+           "\"phoneConnects\":%lu,\"phoneDisconnects\":%lu,"
+           "\"scanIntensity\":\"%s\"},",
            c.bleCompanionEnabled ? "true" : "false",
            c.bleCompanionActive ? "true" : "false",
            c.bleCompanionRestartRequired ? "true" : "false",
@@ -5792,6 +5825,11 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
            static_cast<unsigned>(c.bleCompanionProtocolVersion),
            static_cast<unsigned long>(c.bleCompanionAcceptedWrites),
            static_cast<unsigned long>(c.bleCompanionRejectedWrites),
+           static_cast<long>(c.bleCompanionLastRawError),
+           static_cast<unsigned long>(c.bleCompanionAdvertisingStarts),
+           static_cast<unsigned long>(c.bleCompanionAdvertisingFailures),
+           static_cast<unsigned long>(c.bleCompanionPhoneConnects),
+           static_cast<unsigned long>(c.bleCompanionPhoneDisconnects),
            bleScanIntensityName(clampBleScanIntensity(
                c.bleCompanionScanIntensity)));
 

@@ -27,6 +27,8 @@
 
 #endif  // !SHOT_STOPPER_SCALE_WORKER_IN_ORCHESTRATOR
 
+#include "ble/ShotStopperBleRadioPolicy.h"
+
 #if !defined(SHOT_STOPPER_SCALE_WORKER_IN_ORCHESTRATOR)
 // Orchestrator symbols live in the global namespace (shotStopper.cpp).
 uint32_t elapsedMs(uint32_t sinceMs);
@@ -64,9 +66,7 @@ bool soundAlertsEnabled();
 shotstopper::AlertOutputChannel currentAlertOutputChannel();
 #if !defined(SHOT_STOPPER_HOST_TEST)
 extern shotstopper::ShotStopperNetwork networkManager;
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
 extern shotstopper::ShotStopperBleCompanion *bleCompanion;
-#endif
 #endif
 #endif
 
@@ -1051,13 +1051,16 @@ void armScaleHuntRfClear() {
 // so the scanner owns the radio. After that window, scan coexists with
 // Companion advertising again.
 bool companionAdvertisingShouldPause() {
-  return scale.isConnecting() || scale.isLinkUp() ||
-         getRelaySafetySnapshot().closed || scaleHuntRfClearActive();
+  BleRadioPolicyInputs inputs;
+  inputs.scaleConnecting = scale.isConnecting();
+  inputs.scaleLinked = scale.isLinkUp();
+  inputs.machineCircuitClosed = getRelaySafetySnapshot().closed;
+  inputs.scaleHuntRfClear = scaleHuntRfClearActive();
+  return bleRadioPolicyPauseCompanionAdvertising(inputs);
 }
 
 void syncCompanionAdvertisingForScaleLink() {
-#if !defined(SHOT_STOPPER_HOST_TEST) && \
-    defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
+#if !defined(SHOT_STOPPER_HOST_TEST)
   if (bleCompanion != nullptr) {
     bleCompanion->setAdvertisingPaused(companionAdvertisingShouldPause());
   }
@@ -1702,8 +1705,8 @@ void scaleWorkerTask(void *) {
 #if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
   bleStackReady = BLE.begin();
 #else
-  // Phase 2 owns one native host runtime. Companion deliberately remains
-  // unavailable until its GATT profile is migrated in phase 4.
+  // The optional Companion GATT profile was registered before this start;
+  // the central and peripheral roles share this one native host runtime.
   bleStackReady = shotStopperBleRuntimeStart(BLE_STACK_READY_WAIT_MS);
 #endif
   if (!bleStackReady) {
@@ -1728,21 +1731,20 @@ void scaleWorkerTask(void *) {
 #endif
   BleCompanionRuntimeSnapshot initialBleSnapshot;
   copyBleCompanionRuntimeSnapshot(initialBleSnapshot);
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
   if (bleCompanionProfileAllocated()) {
-    bleCompanion->begin(enqueueBleCompanionRequest);
-    syncCompanionAdvertisingForScaleLink();
-    publishBleCompanionStatus(bleCompanion->status());
+    if (bleCompanion->begin(enqueueBleCompanionRequest)) {
+      syncCompanionAdvertisingForScaleLink();
+      publishBleCompanionStatus(bleCompanion->status());
+    } else {
+      publishInactiveCompanionStatus(initialBleSnapshot,
+                                     BleCompanionRejectReason::NOT_READY,
+                                     false);
+    }
   } else {
     publishInactiveCompanionStatus(initialBleSnapshot,
                                    BleCompanionRejectReason::ALLOCATION_FAILED,
                                    false);
   }
-#else
-  publishInactiveCompanionStatus(initialBleSnapshot,
-                                 BleCompanionRejectReason::SUPPORT_DISABLED,
-                                 true);
-#endif
 #endif
 
   for (;;) {
@@ -1771,8 +1773,7 @@ void scaleWorkerTask(void *) {
     syncCompanionAdvertisingForScaleLink();
     syncScaleRadioCoex();
 
-#if !defined(SHOT_STOPPER_HOST_TEST) && \
-    defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
+#if !defined(SHOT_STOPPER_HOST_TEST)
     if (bleCompanion != nullptr) {
       BleCompanionResult bleResult;
       while (bleCompanionResultQueue != nullptr &&
@@ -1899,10 +1900,21 @@ bool initializeScaleWorker() {
     bleCompanionResultQueue = xQueueCreate(BLE_COMPANION_RESULT_QUEUE_LENGTH,
                                            sizeof(BleCompanionResult));
   }
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
+  const bool companionPrepared =
+      !bleCompanionProfileAllocated() ||
+      (bleCompanionRequestQueue != nullptr &&
+       bleCompanionResultQueue != nullptr &&
+       bleCompanion->prepare(enqueueBleCompanionRequest));
+#else
+  const bool companionPrepared = true;
+#endif
   if (scaleCommandQueue == nullptr || scaleEventQueue == nullptr ||
       (bleCompanionProfileAllocated() &&
        (bleCompanionRequestQueue == nullptr ||
-        bleCompanionResultQueue == nullptr))) {
+        bleCompanionResultQueue == nullptr)) ||
+      !companionPrepared) {
     if (scaleCommandQueue != nullptr) {
       vQueueDelete(scaleCommandQueue);
       scaleCommandQueue = nullptr;

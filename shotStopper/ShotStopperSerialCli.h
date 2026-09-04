@@ -582,6 +582,13 @@ struct SerialCliHealthDump {
   uint32_t bleHostAllocFallbackCount = 0;
   uint32_t bleHostHciRxDropped = 0;
   uint32_t bleHostHciTxDropped = 0;
+  uint8_t bleBackend = 0;
+  uint8_t bleRuntimeState = 0;
+  int32_t bleRuntimeLastError = 0;
+  int32_t bleRuntimeLastResetReason = 0;
+  uint32_t bleRuntimeSyncGeneration = 0;
+  uint32_t bleRuntimeResetCount = 0;
+  uint32_t bleRuntimeHostStackMinWords = 0;
   bool workBufExternal = false;
   bool jsonArenaExternal = false;
   uint32_t allocExternalFallbackCount = 0;
@@ -796,6 +803,21 @@ inline void serialCliPrintHealth(const SerialCliHealthDump &dump) {
   Serial.println(static_cast<unsigned long>(dump.bleHostHciRxDropped));
   Serial.print("hciTxDropped=");
   Serial.println(static_cast<unsigned long>(dump.bleHostHciTxDropped));
+  Serial.print("bleBackend=");
+  Serial.println(dump.bleBackend == 2 ? "nimble" : "arduinoble");
+  Serial.print("bleRuntimeState=");
+  Serial.println(static_cast<unsigned>(dump.bleRuntimeState));
+  Serial.print("bleRuntimeLastError=");
+  Serial.println(static_cast<long>(dump.bleRuntimeLastError));
+  Serial.print("bleRuntimeLastResetReason=");
+  Serial.println(static_cast<long>(dump.bleRuntimeLastResetReason));
+  Serial.print("bleRuntimeSyncGeneration=");
+  Serial.println(static_cast<unsigned long>(dump.bleRuntimeSyncGeneration));
+  Serial.print("bleRuntimeResetCount=");
+  Serial.println(static_cast<unsigned long>(dump.bleRuntimeResetCount));
+  Serial.print("bleRuntimeHostStackMinWords=");
+  Serial.println(
+      static_cast<unsigned long>(dump.bleRuntimeHostStackMinWords));
   Serial.print("workBufExternal=");
   Serial.println(dump.workBufExternal ? "true" : "false");
   Serial.print("jsonArenaExternal=");

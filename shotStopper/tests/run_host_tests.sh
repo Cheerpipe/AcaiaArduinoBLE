@@ -16,6 +16,8 @@ remote_policy_binary=${TMPDIR:-/tmp}/shot_stopper_remote_policy_host_test
 remote_lockdown_binary=${TMPDIR:-/tmp}/shot_stopper_remote_lockdown_host_test
 ota_image_binary=${TMPDIR:-/tmp}/shot_stopper_ota_image_host_test
 ota_image_sanitized=${TMPDIR:-/tmp}/shot_stopper_ota_image_host_test_sanitized
+ble_companion_protocol_binary=${TMPDIR:-/tmp}/shot_stopper_ble_companion_protocol_host_test
+ble_companion_protocol_sanitized=${TMPDIR:-/tmp}/shot_stopper_ble_companion_protocol_host_test_sanitized
 firmware_dir="$test_dir/.."
 firmware_file="$firmware_dir/shotStopper.cpp"
 ble_companion_file="$firmware_dir/ShotStopperBleCompanion.h"
@@ -147,6 +149,18 @@ ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
   -o "$ota_image_sanitized"
 ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
   "$ota_image_sanitized"
+
+"$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+  "$test_dir/ble_companion_protocol_host_test.cpp" \
+  -o "$ble_companion_protocol_binary"
+"$ble_companion_protocol_binary"
+
+"$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+  -fno-omit-frame-pointer -fsanitize=address,undefined \
+  "$test_dir/ble_companion_protocol_host_test.cpp" \
+  -o "$ble_companion_protocol_sanitized"
+ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  "$ble_companion_protocol_sanitized"
 
 json_arena_binary=${TMPDIR:-/tmp}/shot_stopper_json_arena_host_test
 json_arena_cflags=""

@@ -27,6 +27,14 @@ struct ShotStopperBleHealth {
   uint32_t psramLargestBlockBytes;
 };
 
+using ShotStopperBleGattRegistration = int (*)(void *context);
+
+// Installs the optional application GATT profile registration hook. It is
+// called after nimble_port_init() and the standard GAP/GATT services, but
+// before the host task starts. Configuration is immutable once start begins.
+bool shotStopperBleRuntimeConfigureGattProfile(
+    ShotStopperBleGattRegistration registration, void *context);
+
 // Starts the single process-wide NimBLE host and waits for the sync callback.
 // NVS must already be initialized by the firmware. Safe to call repeatedly.
 bool shotStopperBleRuntimeStart(uint32_t timeoutMs);

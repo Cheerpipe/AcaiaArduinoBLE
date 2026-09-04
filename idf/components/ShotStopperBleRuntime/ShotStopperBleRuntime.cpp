@@ -29,6 +29,8 @@ ShotStopperBleHealth gHealth = {
     ShotStopperBleRuntimeState::Stopped, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 uint8_t gOwnAddressType = 0xff;
 bool gPortInitialized = false;
+ShotStopperBleGattRegistration gGattRegistration = nullptr;
+void *gGattRegistrationContext = nullptr;
 
 struct MemorySnapshot {
   uint32_t internalFreeBytes;
@@ -118,6 +120,19 @@ TickType_t timeoutTicks(uint32_t timeoutMs) {
 
 }  // namespace
 
+bool shotStopperBleRuntimeConfigureGattProfile(
+    ShotStopperBleGattRegistration registration, void *context) {
+  portENTER_CRITICAL(&gMux);
+  const bool configurable = !gPortInitialized &&
+                            gHealth.state == ShotStopperBleRuntimeState::Stopped;
+  if (configurable) {
+    gGattRegistration = registration;
+    gGattRegistrationContext = context;
+  }
+  portEXIT_CRITICAL(&gMux);
+  return configurable;
+}
+
 bool shotStopperBleRuntimeStart(uint32_t timeoutMs) {
   if (gEvents == nullptr) {
     gEvents = xEventGroupCreateStatic(&gEventStorage);
@@ -158,6 +173,26 @@ bool shotStopperBleRuntimeStart(uint32_t timeoutMs) {
     ble_hs_cfg.sync_cb = onSync;
     ble_svc_gap_init();
     ble_svc_gatt_init();
+    if (gGattRegistration != nullptr) {
+      const int registrationRc =
+          gGattRegistration(gGattRegistrationContext);
+      if (registrationRc != 0) {
+        const MemorySnapshot failedMemory = captureMemory();
+        const esp_err_t deinitError = nimble_port_deinit();
+        portENTER_CRITICAL(&gMux);
+        gPortInitialized = false;
+        gHealth.state = ShotStopperBleRuntimeState::Failed;
+        gHealth.lastError = registrationRc;
+        if (deinitError != ESP_OK && gHealth.lastError == 0) {
+          gHealth.lastError = static_cast<int32_t>(deinitError);
+        }
+        storeMemoryLocked(failedMemory);
+        portEXIT_CRITICAL(&gMux);
+        ESP_LOGE(kTag, "GATT profile registration failed: %d",
+                 registrationRc);
+        return false;
+      }
+    }
     nimble_port_freertos_init(hostTask);
   }
 
@@ -248,6 +283,10 @@ bool shotStopperBleRuntimeStop(uint32_t timeoutMs) {
 #else
 
 bool shotStopperBleRuntimeStart(uint32_t) { return false; }
+bool shotStopperBleRuntimeConfigureGattProfile(
+    ShotStopperBleGattRegistration, void *) {
+  return false;
+}
 bool shotStopperBleRuntimeReady() { return false; }
 uint8_t shotStopperBleRuntimeOwnAddressType() { return 0xff; }
 uint32_t shotStopperBleRuntimeSyncGeneration() { return 0; }

@@ -116,6 +116,11 @@ struct BleCompanionStatusSnapshot {
   uint32_t acceptedWrites = 0;
   uint32_t rejectedWrites = 0;
   BleCompanionRejectReason lastReject = BleCompanionRejectReason::NONE;
+  int32_t lastRawError = 0;
+  uint32_t advertisingStarts = 0;
+  uint32_t advertisingFailures = 0;
+  uint32_t phoneConnects = 0;
+  uint32_t phoneDisconnects = 0;
 };
 
 inline bool bleCompanionSecondsToMs(uint8_t seconds, uint32_t &outMs) {
@@ -543,6 +548,11 @@ class ShotStopperBleCompanion {
   uint32_t pendingAtMs_[BLE_COMPANION_REQUEST_TYPE_COUNT] = {};
 };
 
-#endif  // production ArduinoBLE Companion (migrated in phase 4)
+#endif  // production ArduinoBLE Companion
 
 }  // namespace shotstopper
+
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
+#include "ble/ShotStopperBleCompanionNimble.h"
+#endif

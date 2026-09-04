@@ -47,6 +47,9 @@
 #include "tests/shot_stopper_host_stubs.h"
 #else
 #include <EspressoScaleBLE.h>
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
+#include "ShotStopperBleRuntime.h"
+#endif
 #include <EEPROM.h>
 #include <driver/gpio.h>
 #include <esp_heap_caps.h>
@@ -333,19 +336,15 @@ struct MaintenanceLease {
 // BLE companion, application state and input state
 // ---------------------------------------------------------------------------
 
-#if !defined(SHOT_STOPPER_HOST_TEST) && \
-    defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
+#if !defined(SHOT_STOPPER_HOST_TEST)
 ShotStopperBleCompanion *bleCompanion = nullptr;
-BleCompanionPersistedSettings bleCompanionPersistedSettings;
-#elif !defined(SHOT_STOPPER_HOST_TEST)
 BleCompanionPersistedSettings bleCompanionPersistedSettings;
 #endif
 BleCompanionRuntimeSnapshot bleCompanionRuntimeSnapshot;
 BleCompanionStatusSnapshot bleCompanionStatusSnapshot;
 
 bool bleCompanionProfileAllocated() {
-#if !defined(SHOT_STOPPER_HOST_TEST) && \
-    defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
+#if !defined(SHOT_STOPPER_HOST_TEST)
   return bleCompanion != nullptr;
 #else
   return false;
@@ -501,6 +500,12 @@ uint32_t bleHostAllocPsramCount = 0;
 uint32_t bleHostAllocFallbackCount = 0;
 uint32_t bleHostHciRxDropped = 0;
 uint32_t bleHostHciTxDropped = 0;
+uint8_t bleRuntimeState = 0;
+int32_t bleRuntimeLastError = 0;
+int32_t bleRuntimeLastResetReason = 0;
+uint32_t bleRuntimeSyncGeneration = 0;
+uint32_t bleRuntimeResetCount = 0;
+uint32_t bleRuntimeHostStackMinWords = 0;
 bool healthHeapAlertLatched = false;
 bool healthHeapRestartLatched = false;
 uint32_t healthHeapLowSinceMs = 0;
@@ -1437,7 +1442,12 @@ bool bleCompanionStatusUnchanged(const BleCompanionStatusSnapshot &a,
          a.connected == b.connected &&
          a.protocolVersion == b.protocolVersion && a.apActive == b.apActive &&
          a.acceptedWrites == b.acceptedWrites &&
-         a.rejectedWrites == b.rejectedWrites && a.lastReject == b.lastReject;
+         a.rejectedWrites == b.rejectedWrites && a.lastReject == b.lastReject &&
+         a.lastRawError == b.lastRawError &&
+         a.advertisingStarts == b.advertisingStarts &&
+         a.advertisingFailures == b.advertisingFailures &&
+         a.phoneConnects == b.phoneConnects &&
+         a.phoneDisconnects == b.phoneDisconnects;
 }
 
 bool bleCompanionStatusShouldPublish(bool /*scaleLinked*/, bool changed,
@@ -5267,6 +5277,17 @@ void publishControlStatus() {
   next.bleHostAllocFallbackCount = bleHostAllocFallbackCount;
   next.bleHostHciRxDropped = bleHostHciRxDropped;
   next.bleHostHciTxDropped = bleHostHciTxDropped;
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
+  next.bleBackend = 2;
+#else
+  next.bleBackend = 1;
+#endif
+  next.bleRuntimeState = bleRuntimeState;
+  next.bleRuntimeLastError = bleRuntimeLastError;
+  next.bleRuntimeLastResetReason = bleRuntimeLastResetReason;
+  next.bleRuntimeSyncGeneration = bleRuntimeSyncGeneration;
+  next.bleRuntimeResetCount = bleRuntimeResetCount;
+  next.bleRuntimeHostStackMinWords = bleRuntimeHostStackMinWords;
   next.workBufExternal = workBufIsExternal();
 #ifndef SHOT_STOPPER_HOST_TEST
   next.jsonArenaExternal = jsonArenaIsExternal();
@@ -5393,6 +5414,11 @@ void publishControlStatus() {
     next.bleCompanionAcceptedWrites = ble.acceptedWrites;
     next.bleCompanionRejectedWrites = ble.rejectedWrites;
     next.bleCompanionLastReject = static_cast<uint8_t>(ble.lastReject);
+    next.bleCompanionLastRawError = ble.lastRawError;
+    next.bleCompanionAdvertisingStarts = ble.advertisingStarts;
+    next.bleCompanionAdvertisingFailures = ble.advertisingFailures;
+    next.bleCompanionPhoneConnects = ble.phoneConnects;
+    next.bleCompanionPhoneDisconnects = ble.phoneDisconnects;
     next.bleCompanionScanIntensity =
         static_cast<uint8_t>(liveBleScanIntensity());
   }
@@ -5590,6 +5616,17 @@ void serialCliPrintLiveHealth() {
   dump.bleHostAllocFallbackCount = bleHostAllocFallbackCount;
   dump.bleHostHciRxDropped = bleHostHciRxDropped;
   dump.bleHostHciTxDropped = bleHostHciTxDropped;
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
+  dump.bleBackend = 2;
+#else
+  dump.bleBackend = 1;
+#endif
+  dump.bleRuntimeState = bleRuntimeState;
+  dump.bleRuntimeLastError = bleRuntimeLastError;
+  dump.bleRuntimeLastResetReason = bleRuntimeLastResetReason;
+  dump.bleRuntimeSyncGeneration = bleRuntimeSyncGeneration;
+  dump.bleRuntimeResetCount = bleRuntimeResetCount;
+  dump.bleRuntimeHostStackMinWords = bleRuntimeHostStackMinWords;
   dump.workBufExternal = workBufIsExternal();
 #ifndef SHOT_STOPPER_HOST_TEST
   dump.jsonArenaExternal = jsonArenaIsExternal();
@@ -6149,10 +6186,9 @@ void setup() {
       bleCompanionPersistedSettings.scanIntensity));
   bleCompanionStatusSnapshot.configuredEnabled = bleCompanionConfigured;
   bleCompanionRuntimeSnapshot.configuredEnabled = bleCompanionConfigured;
-#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
   if (bleCompanionConfigured) {
-    // Host GATT profile (object + characteristic value buffers via ArduinoBLE
-    // BLEHostAlloc) prefers PSRAM; fall back to internal if SPIRAM is full.
+    // The profile object is allocated once per boot. Backend GATT storage is
+    // registered only when enabled; reconnects never allocate this object.
     static_assert(sizeof(ShotStopperBleCompanion) >= 64u &&
                       sizeof(ShotStopperBleCompanion) <= 8192u,
                   "ShotStopperBleCompanion size outside expected host budget");
@@ -6167,7 +6203,6 @@ void setup() {
                     BOOT_SUBSYSTEM_BLE);
     }
   }
-#endif
   bleCompanionStatusSnapshot.restartRequired =
       bleCompanionConfigured != bleCompanionRuntimeSnapshot.enabled;
   if (settingsLoaded) {
@@ -6489,6 +6524,18 @@ void loop() {
     bleHostAllocFallbackCount = BLEHostAllocFallbackCount();
     bleHostHciRxDropped = BLEHostHciRxDropped();
     bleHostHciTxDropped = BLEHostHciTxDropped();
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
+    const ShotStopperBleHealth bleRuntime = shotStopperBleRuntimeHealth();
+    bleRuntimeState = static_cast<uint8_t>(bleRuntime.state);
+    bleRuntimeLastError = bleRuntime.lastError;
+    bleRuntimeLastResetReason = bleRuntime.lastResetReason;
+    bleRuntimeSyncGeneration = bleRuntime.syncGeneration;
+    bleRuntimeResetCount = bleRuntime.resetCount;
+    bleRuntimeHostStackMinWords = bleRuntime.hostTaskStackHighWaterWords;
+#else
+    bleRuntimeState = bleStackReady ? 2 : 0;
+    bleRuntimeSyncGeneration = bleStackReady ? 1 : 0;
+#endif
     hwmonSnapshot = hwmon.sample(intervalMs > 0U ? intervalMs
                                                  : HEALTH_TELEMETRY_INTERVAL_MS,
                                  &heap);

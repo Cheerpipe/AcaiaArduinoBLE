@@ -2019,6 +2019,15 @@ struct ControlStatusSnapshot {
   uint32_t bleHostAllocFallbackCount = 0;
   uint32_t bleHostHciRxDropped = 0;
   uint32_t bleHostHciTxDropped = 0;
+  // Backend-neutral host lifecycle metrics. Legacy BLEHost* counters above
+  // remain during rollback compatibility and are removed only in phase 5.
+  uint8_t bleBackend = 0;  // 1=ArduinoBLE, 2=NimBLE.
+  uint8_t bleRuntimeState = 0;
+  int32_t bleRuntimeLastError = 0;
+  int32_t bleRuntimeLastResetReason = 0;
+  uint32_t bleRuntimeSyncGeneration = 0;
+  uint32_t bleRuntimeResetCount = 0;
+  uint32_t bleRuntimeHostStackMinWords = 0;
   bool workBufExternal = false;
   bool jsonArenaExternal = false;
   uint32_t allocExternalFallbackCount = 0;
@@ -2100,6 +2109,11 @@ struct ControlStatusSnapshot {
   uint32_t bleCompanionAcceptedWrites = 0;
   uint32_t bleCompanionRejectedWrites = 0;
   uint8_t bleCompanionLastReject = 0;
+  int32_t bleCompanionLastRawError = 0;
+  uint32_t bleCompanionAdvertisingStarts = 0;
+  uint32_t bleCompanionAdvertisingFailures = 0;
+  uint32_t bleCompanionPhoneConnects = 0;
+  uint32_t bleCompanionPhoneDisconnects = 0;
   uint8_t bleCompanionScanIntensity = 0;
 };
 
