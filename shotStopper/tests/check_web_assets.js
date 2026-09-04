@@ -11,6 +11,8 @@ const network = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.cpp'), 
 const networkHeader = fs.readFileSync(path.join(sketchDir, 'ShotStopperNetwork.h'), 'utf8');
 const webhookSource = fs.readFileSync(path.join(sketchDir, 'ShotStopperWebhook.cpp'), 'utf8');
 const firmwareCore = fs.readFileSync(path.join(sketchDir, 'shotStopper.cpp'), 'utf8');
+const idfMain = fs.readFileSync(
+  path.resolve(sketchDir, '..', 'idf', 'main', 'main.cpp'), 'utf8');
 const scaleWorker = fs.readFileSync(path.join(sketchDir, 'ShotStopperScaleWorker.cpp'), 'utf8');
 const firmware = [
   firmwareCore,
@@ -99,6 +101,10 @@ const bleRuntime = fs.readFileSync(
   'utf8');
 const flashIoScratch = fs.readFileSync(
   path.join(sketchDir, 'ShotStopperFlashIoScratch.h'), 'utf8');
+if (!idfMain.includes('bool bleInUse(void) { return true; }')) {
+  throw new Error(
+      'Native NimBLE must keep BLE controller memory from being released by initArduino');
+}
 if (!bleCompanion.includes('ble_gatts_add_svcs(services)') ||
     !bleCompanion.includes('os_mbuf_append(context->om') ||
     bleCompanion.includes('BLECharacteristic') ||

@@ -354,7 +354,14 @@ ss_idf_verify_firmware() {
     exit 127
   }
 
-  local nm_line addr
+  local nm_line addr ble_in_use_line
+  ble_in_use_line="$(xtensa-esp32s3-elf-nm "$IDF_ELF" | grep -E '[[:space:]]T[[:space:]]+bleInUse$' || true)"
+  if [[ -z "$ble_in_use_line" ]]; then
+    echo "ELF does not contain the strong bleInUse override required to retain BLE controller memory." >&2
+    exit 1
+  fi
+  echo "BLE memory retention: $ble_in_use_line"
+
   nm_line="$(xtensa-esp32s3-elf-nm "$IDF_ELF" | grep -E '[[:space:]]g_probe$|[[:space:]]_ZL[0-9]+g_probe$' || true)"
   if [[ -z "$nm_line" ]]; then
     echo "nm did not find g_probe in $IDF_ELF." >&2
