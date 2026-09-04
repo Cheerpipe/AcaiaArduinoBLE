@@ -27,6 +27,9 @@ http://192.168.1.50:8123/api/webhook/shot_stopper_replace_with_a_long_secret
 
 Paste this into the automation from step 1 and change only `webhook_id`. The
 templates read `trigger.json` directly and convert milliseconds to seconds.
+The existing `last_shot` helpers are the **raw** set: every `end` event updates
+them. The `last_good_shot` helpers update only when the completed shot lasted
+more than 12 seconds and its final weight was more than 2 g.
 
 ```yaml
 alias: Shot Stopper — receive extraction
@@ -134,12 +137,63 @@ actions:
                   entity_id: input_number.shot_stopper_last_shot_average_flow
                 data:
                   value: "{{ trigger.json.averageFlowGps | float(0) }}"
+          - if:
+              - condition: template
+                value_template: >-
+                  {{ trigger.json.durationMs | float(0) > 12000
+                     and trigger.json.weightG | float(0) > 2 }}
+            then:
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.shot_stopper_last_good_shot_duration
+                data:
+                  value: "{{ trigger.json.durationMs | float(0) / 1000 }}"
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.shot_stopper_last_good_shot_final_weight
+                data:
+                  value: "{{ trigger.json.weightG | float(0) }}"
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.shot_stopper_last_good_shot_target_weight
+                data:
+                  value: "{{ trigger.json.targetWeightG | float(0) }}"
+              - action: input_text.set_value
+                target:
+                  entity_id: input_text.shot_stopper_last_good_shot_type
+                data:
+                  value: "{{ trigger.json.shotType }}"
+              - action: input_text.set_value
+                target:
+                  entity_id: input_text.shot_stopper_last_good_shot_stop_detail
+                data:
+                  value: "{{ trigger.json.stopDetail }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ trigger.json.firstDropMs is defined }}"
+                then:
+                  - action: input_number.set_value
+                    target:
+                      entity_id: input_number.shot_stopper_last_good_shot_first_drop
+                    data:
+                      value: "{{ trigger.json.firstDropMs | float(0) / 1000 }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ trigger.json.averageFlowGps is defined }}"
+                then:
+                  - action: input_number.set_value
+                    target:
+                      entity_id: input_number.shot_stopper_last_good_shot_average_flow
+                    data:
+                      value: "{{ trigger.json.averageFlowGps | float(0) }}"
 ```
 
 The `end` event arrives after Shot Stopper's drip delay, so it is the best
 final result. Weight, first-drop time, and average flow can be omitted when no
 reliable reading exists; the conditional actions leave the previous value
-untouched instead of replacing it with zero.
+untouched instead of replacing it with zero. A rinse or an empty shot still
+updates the raw set, but cannot overwrite the good-shot set because it fails
+the strict `durationMs > 12000` and `weightG > 2` test.
 
 ## One-file package example
 
@@ -190,6 +244,36 @@ input_number:
     max: 60
     step: 0.1
     unit_of_measurement: s
+  shot_stopper_last_good_shot_duration:
+    name: Shot Stopper last good shot duration
+    min: 0
+    max: 60
+    step: 0.1
+    unit_of_measurement: s
+  shot_stopper_last_good_shot_final_weight:
+    name: Shot Stopper last good shot final weight
+    min: 0
+    max: 200
+    step: 0.01
+    unit_of_measurement: g
+  shot_stopper_last_good_shot_target_weight:
+    name: Shot Stopper last good shot target weight
+    min: 0
+    max: 200
+    step: 0.01
+    unit_of_measurement: g
+  shot_stopper_last_good_shot_average_flow:
+    name: Shot Stopper last good shot average flow
+    min: 0
+    max: 20
+    step: 0.01
+    unit_of_measurement: g/s
+  shot_stopper_last_good_shot_first_drop:
+    name: Shot Stopper last good shot first drop
+    min: 0
+    max: 60
+    step: 0.1
+    unit_of_measurement: s
 
 input_text:
   shot_stopper_last_shot_state:
@@ -200,6 +284,12 @@ input_text:
     max: 32
   shot_stopper_last_shot_stop_detail:
     name: Shot Stopper last shot stop detail
+    max: 64
+  shot_stopper_last_good_shot_type:
+    name: Shot Stopper last good shot type
+    max: 32
+  shot_stopper_last_good_shot_stop_detail:
+    name: Shot Stopper last good shot stop detail
     max: 64
 
 template:
@@ -242,6 +332,41 @@ template:
       - name: Shot Stopper last shot stop detail
         unique_id: shot_stopper_last_shot_stop_detail
         state: "{{ states('input_text.shot_stopper_last_shot_stop_detail') }}"
+      - name: Shot Stopper last good shot duration
+        unique_id: shot_stopper_last_good_shot_duration
+        state: "{{ states('input_number.shot_stopper_last_good_shot_duration') }}"
+        unit_of_measurement: s
+        device_class: duration
+        state_class: measurement
+      - name: Shot Stopper last good shot final weight
+        unique_id: shot_stopper_last_good_shot_final_weight
+        state: "{{ states('input_number.shot_stopper_last_good_shot_final_weight') }}"
+        unit_of_measurement: g
+        device_class: weight
+        state_class: measurement
+      - name: Shot Stopper last good shot target weight
+        unique_id: shot_stopper_last_good_shot_target_weight
+        state: "{{ states('input_number.shot_stopper_last_good_shot_target_weight') }}"
+        unit_of_measurement: g
+        device_class: weight
+        state_class: measurement
+      - name: Shot Stopper last good shot average flow
+        unique_id: shot_stopper_last_good_shot_average_flow
+        state: "{{ states('input_number.shot_stopper_last_good_shot_average_flow') }}"
+        unit_of_measurement: g/s
+        state_class: measurement
+      - name: Shot Stopper last good shot first drop
+        unique_id: shot_stopper_last_good_shot_first_drop
+        state: "{{ states('input_number.shot_stopper_last_good_shot_first_drop') }}"
+        unit_of_measurement: s
+        device_class: duration
+        state_class: measurement
+      - name: Shot Stopper last good shot type
+        unique_id: shot_stopper_last_good_shot_type
+        state: "{{ states('input_text.shot_stopper_last_good_shot_type') }}"
+      - name: Shot Stopper last good shot stop detail
+        unique_id: shot_stopper_last_good_shot_stop_detail
+        state: "{{ states('input_text.shot_stopper_last_good_shot_stop_detail') }}"
 
 automation:
   - alias: Shot Stopper — receive extraction
@@ -349,6 +474,55 @@ automation:
                       entity_id: input_number.shot_stopper_last_shot_average_flow
                     data:
                       value: "{{ trigger.json.averageFlowGps | float(0) }}"
+              - if:
+                  - condition: template
+                    value_template: >-
+                      {{ trigger.json.durationMs | float(0) > 12000
+                         and trigger.json.weightG | float(0) > 2 }}
+                then:
+                  - action: input_number.set_value
+                    target:
+                      entity_id: input_number.shot_stopper_last_good_shot_duration
+                    data:
+                      value: "{{ trigger.json.durationMs | float(0) / 1000 }}"
+                  - action: input_number.set_value
+                    target:
+                      entity_id: input_number.shot_stopper_last_good_shot_final_weight
+                    data:
+                      value: "{{ trigger.json.weightG | float(0) }}"
+                  - action: input_number.set_value
+                    target:
+                      entity_id: input_number.shot_stopper_last_good_shot_target_weight
+                    data:
+                      value: "{{ trigger.json.targetWeightG | float(0) }}"
+                  - action: input_text.set_value
+                    target:
+                      entity_id: input_text.shot_stopper_last_good_shot_type
+                    data:
+                      value: "{{ trigger.json.shotType }}"
+                  - action: input_text.set_value
+                    target:
+                      entity_id: input_text.shot_stopper_last_good_shot_stop_detail
+                    data:
+                      value: "{{ trigger.json.stopDetail }}"
+                  - if:
+                      - condition: template
+                        value_template: "{{ trigger.json.firstDropMs is defined }}"
+                    then:
+                      - action: input_number.set_value
+                        target:
+                          entity_id: input_number.shot_stopper_last_good_shot_first_drop
+                        data:
+                          value: "{{ trigger.json.firstDropMs | float(0) / 1000 }}"
+                  - if:
+                      - condition: template
+                        value_template: "{{ trigger.json.averageFlowGps is defined }}"
+                    then:
+                      - action: input_number.set_value
+                        target:
+                          entity_id: input_number.shot_stopper_last_good_shot_average_flow
+                        data:
+                          value: "{{ trigger.json.averageFlowGps | float(0) }}"
 ```
 
 After saving the package file, restart Home Assistant. From then on, this one
@@ -459,7 +633,10 @@ same network.
 ## Additional entity definitions
 
 Add these helpers to `configuration.yaml` (or a package), then restart Home
-Assistant or reload the relevant YAML configuration.
+Assistant or reload the relevant YAML configuration. `last_shot` is the raw
+set, retained for compatibility and updated by every completed shot.
+`last_good_shot` is the filtered set, updated only by completed shots over
+12 seconds and over 2 g.
 
 ```yaml
 input_number:
@@ -493,6 +670,36 @@ input_number:
     max: 60
     step: 0.1
     unit_of_measurement: s
+  shot_stopper_last_good_shot_duration:
+    name: Shot Stopper last good shot duration
+    min: 0
+    max: 60
+    step: 0.1
+    unit_of_measurement: s
+  shot_stopper_last_good_shot_final_weight:
+    name: Shot Stopper last good shot final weight
+    min: 0
+    max: 200
+    step: 0.01
+    unit_of_measurement: g
+  shot_stopper_last_good_shot_target_weight:
+    name: Shot Stopper last good shot target weight
+    min: 0
+    max: 200
+    step: 0.01
+    unit_of_measurement: g
+  shot_stopper_last_good_shot_average_flow:
+    name: Shot Stopper last good shot average flow
+    min: 0
+    max: 20
+    step: 0.01
+    unit_of_measurement: g/s
+  shot_stopper_last_good_shot_first_drop:
+    name: Shot Stopper last good shot first drop
+    min: 0
+    max: 60
+    step: 0.1
+    unit_of_measurement: s
 input_text:
   shot_stopper_last_shot_state:
     name: Shot Stopper last shot state
@@ -502,6 +709,12 @@ input_text:
     max: 32
   shot_stopper_last_shot_stop_detail:
     name: Shot Stopper last shot stop detail
+    max: 64
+  shot_stopper_last_good_shot_type:
+    name: Shot Stopper last good shot type
+    max: 32
+  shot_stopper_last_good_shot_stop_detail:
+    name: Shot Stopper last good shot stop detail
     max: 64
 ```
 
@@ -548,4 +761,39 @@ template:
       - name: Shot Stopper last shot stop detail
         unique_id: shot_stopper_last_shot_stop_detail
         state: "{{ states('input_text.shot_stopper_last_shot_stop_detail') }}"
+      - name: Shot Stopper last good shot duration
+        unique_id: shot_stopper_last_good_shot_duration
+        state: "{{ states('input_number.shot_stopper_last_good_shot_duration') }}"
+        unit_of_measurement: s
+        device_class: duration
+        state_class: measurement
+      - name: Shot Stopper last good shot final weight
+        unique_id: shot_stopper_last_good_shot_final_weight
+        state: "{{ states('input_number.shot_stopper_last_good_shot_final_weight') }}"
+        unit_of_measurement: g
+        device_class: weight
+        state_class: measurement
+      - name: Shot Stopper last good shot target weight
+        unique_id: shot_stopper_last_good_shot_target_weight
+        state: "{{ states('input_number.shot_stopper_last_good_shot_target_weight') }}"
+        unit_of_measurement: g
+        device_class: weight
+        state_class: measurement
+      - name: Shot Stopper last good shot average flow
+        unique_id: shot_stopper_last_good_shot_average_flow
+        state: "{{ states('input_number.shot_stopper_last_good_shot_average_flow') }}"
+        unit_of_measurement: g/s
+        state_class: measurement
+      - name: Shot Stopper last good shot first drop
+        unique_id: shot_stopper_last_good_shot_first_drop
+        state: "{{ states('input_number.shot_stopper_last_good_shot_first_drop') }}"
+        unit_of_measurement: s
+        device_class: duration
+        state_class: measurement
+      - name: Shot Stopper last good shot type
+        unique_id: shot_stopper_last_good_shot_type
+        state: "{{ states('input_text.shot_stopper_last_good_shot_type') }}"
+      - name: Shot Stopper last good shot stop detail
+        unique_id: shot_stopper_last_good_shot_stop_detail
+        state: "{{ states('input_text.shot_stopper_last_good_shot_stop_detail') }}"
 ```
