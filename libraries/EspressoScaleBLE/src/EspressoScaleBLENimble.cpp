@@ -1305,6 +1305,11 @@ class NimbleScaleClient {
         formatAddress(event.address.val, address_, sizeof(address_));
         identityPresent_ = true;
         backoff_.reset();
+        // This facade counter describes failed attempts in the current
+        // connection sequence (the worker uses increases to emit warnings),
+        // not attempts merely started.  Keep the lifetime attempt total in
+        // connectAttemptsTotal_ for backend health telemetry.
+        connectAttempts_ = 0;
         enterState(State::CancelPending, kScanCancelTimeoutMs);
         connectStartedAt_ = nowMs();
         ++scanCancels_;
@@ -1339,6 +1344,9 @@ class NimbleScaleClient {
           return;
         }
         if (event.status != 0) {
+          if (connectAttempts_ != 0xff) {
+            ++connectAttempts_;
+          }
           ++connectionFailures_;
           finishLink(false, mapRawDisconnectReason(event.status),
                      event.status);
@@ -1448,15 +1456,15 @@ class NimbleScaleClient {
       timing_.recordedFlags |= ScaleBleTimingConnectIssued;
     }
     const uint32_t linkOperationId = beginOperation(CallbackDomain::Link);
-    if (connectAttempts_ != 0xff) {
-      ++connectAttempts_;
-    }
     ++connectAttemptsTotal_;
     const int rc = ble_gap_connect(shotStopperBleRuntimeOwnAddressType(),
                                    &selectedAddress_, BLE_CONNECT_TIMEOUT_MS,
                                    nullptr, gapCallback,
                                    callbackArg(linkOperationId));
     if (rc != 0) {
+      if (connectAttempts_ != 0xff) {
+        ++connectAttempts_;
+      }
       ++connectionFailures_;
       finishLink(false, ScaleDisconnectReason::CONNECT_FAILED, rc);
     }
