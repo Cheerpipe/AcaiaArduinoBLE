@@ -9,6 +9,7 @@
 #if !defined(SHOT_STOPPER_HOST_TEST) && \
     !defined(SHOT_STOPPER_PERSISTENCE_HOST_TEST)
 #include <Arduino.h>
+#include <esp_http_client.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
@@ -171,6 +172,7 @@ class WebhookDispatcher {
   void requestWorkerStop();
   void releaseWorkerFromTask();
   static void taskEntry(void *parameter);
+  static esp_err_t httpEventHandler(esp_http_client_event_t *event);
   void task();
   bool send(const QueuedWebhook &queued);
   bool buildPayload(const WebhookEvent &event, char *output, size_t capacity);

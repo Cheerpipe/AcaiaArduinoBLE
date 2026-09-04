@@ -20,6 +20,7 @@ idf_build_set_property(COMPILE_DEFINITIONS "ARDUINO_USB_MODE=1" APPEND)
 set(_ss_extra_flags_file "${CMAKE_BINARY_DIR}/shot_stopper_extra_flags")
 set(_ss_extra_raw "")
 set(_ss_cdc_on_boot 0)
+set(_ss_enable_gcc_analyzer OFF)
 if(DEFINED ENV{SHOT_STOPPER_EXTRA_FLAGS})
   set(_ss_extra_raw "$ENV{SHOT_STOPPER_EXTRA_FLAGS}")
 endif()
@@ -35,7 +36,12 @@ if(NOT _ss_extra_raw STREQUAL "")
     if(_opt STREQUAL "-DSHOT_STOPPER_ENABLE_JTAG=1")
       set(_ss_cdc_on_boot 1)
     endif()
-    if(_opt MATCHES "^-D(.+)$")
+    if(_opt STREQUAL "-fanalyzer")
+      # The analyzer is attached below only to project-owned components.
+      # Applying it globally makes ESP-IDF's dependency warnings fatal before
+      # the firmware can be examined.
+      set(_ss_enable_gcc_analyzer ON)
+    elseif(_opt MATCHES "^-D(.+)$")
       idf_build_set_property(COMPILE_DEFINITIONS "${CMAKE_MATCH_1}" APPEND)
     elseif(_opt MATCHES "^-W")
       # gcc C rejects C++-only warnings such as -Werror=deprecated-copy (the
@@ -76,3 +82,15 @@ target_compile_options(${_ss_modbus_lib} PRIVATE -Wno-stringop-truncation)
 # remain visible and the SDK itself is never patched.
 idf_component_get_property(_ss_bt_lib bt COMPONENT_LIB)
 target_compile_options(${_ss_bt_lib} PRIVATE -Wno-unused-but-set-variable)
+
+# Analyze only code maintained in this repository. SDK and managed-component
+# diagnostics are neither hidden nor downgraded; they are simply outside this
+# firmware-focused analyzer pass.
+if(_ss_enable_gcc_analyzer)
+  foreach(_ss_analyzer_component IN ITEMS
+      main shotStopper EspressoScaleBLE ShotStopperBleRuntime)
+    idf_component_get_property(_ss_analyzer_component_lib
+      ${_ss_analyzer_component} COMPONENT_LIB)
+    target_compile_options(${_ss_analyzer_component_lib} PRIVATE -fanalyzer)
+  endforeach()
+endif()

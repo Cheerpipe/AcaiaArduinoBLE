@@ -51,7 +51,17 @@ mkdir -p "$output_path"
 echo "Running GCC -fanalyzer for $SHOTSTOPPER_ARCH..."
 # -fanalyzer is a tool flag, not a user preference: passing it through
 # ./scripts/build would persist it into .shotstopper and every later compile.
-user_flags="$(ss_get flags)"
+# A failed/interrupted legacy analyzer run may have left -fanalyzer in the
+# persisted flags. Strip every copy before building and saving so this tool
+# never leaks its analysis-only option into ordinary builds.
+configured_flags="$(ss_get flags)"
+user_flags=""
+for configured_flag in $configured_flags; do
+  case "$configured_flag" in
+    -fanalyzer) ;;
+    *) user_flags="${user_flags:+$user_flags }$configured_flag" ;;
+  esac
+done
 analyzer_flags="$user_flags -fanalyzer"
 
 raw_report="$output_path/gcc-analyzer-raw.txt"
@@ -72,13 +82,19 @@ if [[ $build_status -ne 0 ]]; then
   exit "$build_status"
 fi
 
-# GCC also analyzes transitively installed libraries. Keep each warning block
-# only when its primary location belongs to the repository; associated traces
-# are retained so the diagnostic remains useful.
-awk -v root="$ROOT/" '
+# GCC also analyzes ESP-IDF and managed components. Keep each warning block
+# only when its primary location is in a project-owned source tree; associated
+# traces are retained so the diagnostic remains useful.
+awk -v shotstopper="$ROOT/shotStopper/" \
+    -v espresso_scale_ble="$ROOT/libraries/EspressoScaleBLE/" \
+    -v idf_main="$ROOT/idf/main/" \
+    -v idf_components="$ROOT/idf/components/" '
   /^[^:]+:[0-9]+:[0-9]+: (warning|error):/ {
     if ($0 ~ /\[-Wanalyzer-/) {
-      keep = index($0, root) == 1
+      keep = index($0, shotstopper) == 1 || \
+             index($0, espresso_scale_ble) == 1 || \
+             index($0, idf_main) == 1 || \
+             index($0, idf_components) == 1
       if (keep) print
       next
     }

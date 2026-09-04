@@ -288,6 +288,26 @@ void WebhookDispatcher::taskEntry(void *parameter) {
   static_cast<WebhookDispatcher *>(parameter)->task();
 }
 
+esp_err_t WebhookDispatcher::httpEventHandler(esp_http_client_event_t *event) {
+  if (event == nullptr || event->user_data == nullptr ||
+      event->event_id == HTTP_EVENT_ERROR ||
+      event->event_id == HTTP_EVENT_DISCONNECTED) {
+    return ESP_OK;
+  }
+  auto *dispatcher = static_cast<WebhookDispatcher *>(event->user_data);
+  if (!dispatcher->dispatchAllowed() ||
+      dispatcher->cancelActive_.load(std::memory_order_acquire)) {
+    dispatcher->abortRequested_.store(true, std::memory_order_release);
+    // ESP-IDF ignores event-handler return values in perform(). Closing the
+    // transport here makes connected/header/data events actually abort.
+    // DISCONNECTED is excluded above to avoid recursive close dispatch.
+    if (event->client != nullptr) {
+      (void)esp_http_client_close(event->client);
+    }
+  }
+  return ESP_OK;
+}
+
 void WebhookDispatcher::task() {
   QueuedWebhook queued;
   bool haveQueued = false;
@@ -425,26 +445,7 @@ bool WebhookDispatcher::send(const QueuedWebhook &queued) {
     config.timeout_ms = kWebhookTimeoutMs;
     config.disable_auto_redirect = true;
     config.user_data = this;
-    config.event_handler = [](esp_http_client_event_t *event) -> esp_err_t {
-      if (event == nullptr || event->user_data == nullptr ||
-          event->event_id == HTTP_EVENT_ERROR ||
-          event->event_id == HTTP_EVENT_DISCONNECTED) {
-        return ESP_OK;
-      }
-      auto *dispatcher =
-          static_cast<WebhookDispatcher *>(event->user_data);
-      if (!dispatcher->dispatchAllowed() ||
-          dispatcher->cancelActive_.load(std::memory_order_acquire)) {
-        dispatcher->abortRequested_.store(true, std::memory_order_release);
-        // ESP-IDF ignores event-handler return values in perform(). Closing the
-        // transport here makes connected/header/data events actually abort.
-        // DISCONNECTED is excluded above to avoid recursive close dispatch.
-        if (event->client != nullptr) {
-          (void)esp_http_client_close(event->client);
-        }
-      }
-      return ESP_OK;
-    };
+    config.event_handler = httpEventHandler;
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client != nullptr) {
       esp_http_client_set_method(client, HTTP_METHOD_POST);
