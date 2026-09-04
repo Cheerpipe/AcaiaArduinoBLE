@@ -83,6 +83,15 @@ const taskProfiler = fs.readFileSync(
   path.join(sketchDir, 'ShotStopperTaskProfiler.h'), 'utf8');
 const sdkconfigDefaults = fs.readFileSync(
   path.resolve(sketchDir, '..', 'idf', 'sdkconfig.defaults'), 'utf8');
+const sdkconfigNimble = fs.readFileSync(
+  path.resolve(sketchDir, '..', 'idf', 'sdkconfig.defaults.nimble'), 'utf8');
+const sdkconfigNimbleInternal = fs.readFileSync(
+  path.resolve(sketchDir, '..', 'idf', 'sdkconfig.defaults.nimble-internal'),
+  'utf8');
+const bleRuntime = fs.readFileSync(
+  path.resolve(sketchDir, '..', 'idf', 'components',
+               'ShotStopperBleRuntime', 'ShotStopperBleRuntime.cpp'),
+  'utf8');
 const flashIoScratch = fs.readFileSync(
   path.join(sketchDir, 'ShotStopperFlashIoScratch.h'), 'utf8');
 if (!bleCompanion.includes('BLECharacteristic::writeValue') ||
@@ -109,6 +118,42 @@ if (!sdkconfigDefaults.includes('CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y') ||
     !sdkconfigDefaults.includes('CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y')) {
   throw new Error(
       'sdkconfig.defaults must enable run-time stats and vTaskList core IDs');
+}
+if (!sdkconfigNimble.includes('CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y') ||
+    !sdkconfigNimble.includes('CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=4096') ||
+    !sdkconfigNimble.includes('CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=96') ||
+    !sdkconfigNimble.includes('CONFIG_BT_NIMBLE_ATT_MAX_PREP_ENTRIES=4') ||
+    !sdkconfigNimble.includes('CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2') ||
+    !sdkconfigNimble.includes('CONFIG_BT_NIMBLE_MAX_CCCDS=4')) {
+  throw new Error(
+      'NimBLE release defaults must retain the conservative phase-5 pools, stack, MTU and external allocator');
+}
+for (const service of [
+  'PROX', 'ANS', 'CTS', 'HTP', 'IPSS', 'TPS',
+  'IAS', 'LLS', 'SPS', 'HR', 'BAS', 'DIS'
+]) {
+  if (!sdkconfigNimble.includes(
+          `# CONFIG_BT_NIMBLE_${service}_SERVICE is not set`)) {
+    throw new Error(`Unused NimBLE ${service} service must stay disabled`);
+  }
+}
+for (const feature of ['DTM_MODE_TEST', 'SM_SIGN_CNT', 'CPFD_CAFD']) {
+  if (!sdkconfigNimble.includes(
+          `# CONFIG_BT_NIMBLE_${feature} is not set`)) {
+    throw new Error(`Unused NimBLE ${feature} feature must stay disabled`);
+  }
+}
+if (!sdkconfigNimbleInternal.includes(
+        'CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL=y') ||
+    !sdkconfigNimbleInternal.includes(
+        '# CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL is not set')) {
+  throw new Error('NimBLE allocator A/B overlay must select internal memory');
+}
+if (!bleRuntime.includes('gHostTask = xTaskGetCurrentTaskHandle()') ||
+    !bleRuntime.includes('uxTaskGetStackHighWaterMark(') ||
+    !bleRuntime.includes('hostTaskHandle')) {
+  throw new Error(
+      'NimBLE HEALTH must sample the live host-task stack watermark');
 }
 if (!sdkconfigDefaults.includes('CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768') ||
     !sdkconfigDefaults.includes('xTaskCreate still allocates internal stacks') ||

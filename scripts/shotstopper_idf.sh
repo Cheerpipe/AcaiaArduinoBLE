@@ -98,6 +98,7 @@ ss_idf_jtag_enabled() {
 # IDF_IMAGE, IDF_ELF, IDF_MAP, IDF_SDKCONFIG, IDF_SDKCONFIG_DEFAULTS.
 ss_idf_resolve_paths() {
   local ble_backend="${SHOTSTOPPER_BLE_BACKEND:-arduinoble}"
+  local nimble_allocator="${SHOTSTOPPER_NIMBLE_ALLOCATOR:-external}"
   case "$ble_backend" in
     arduinoble|nimble) ;;
     *)
@@ -105,9 +106,24 @@ ss_idf_resolve_paths() {
       return 2
       ;;
   esac
+  case "$nimble_allocator" in
+    external|internal) ;;
+    *)
+      echo "Invalid SHOTSTOPPER_NIMBLE_ALLOCATOR=$nimble_allocator (use external or internal)." >&2
+      return 2
+      ;;
+  esac
+  if [[ "$ble_backend" != "nimble" && "$nimble_allocator" != "external" ]]; then
+    echo "SHOTSTOPPER_NIMBLE_ALLOCATOR is only valid with SHOTSTOPPER_BLE_BACKEND=nimble." >&2
+    return 2
+  fi
   IDF_PROJECT="$SS_CLI_ROOT/idf"
   if [[ "$ble_backend" == "nimble" ]]; then
-    IDF_BUILD_DIR="$SS_CLI_ROOT/build-idf/${SHOTSTOPPER_ARCH}-nimble"
+    if [[ "$nimble_allocator" == "internal" ]]; then
+      IDF_BUILD_DIR="$SS_CLI_ROOT/build-idf/${SHOTSTOPPER_ARCH}-nimble-internal"
+    else
+      IDF_BUILD_DIR="$SS_CLI_ROOT/build-idf/${SHOTSTOPPER_ARCH}-nimble"
+    fi
   else
     IDF_BUILD_DIR="$SS_CLI_ROOT/build-idf/$SHOTSTOPPER_ARCH"
   fi
@@ -116,6 +132,9 @@ ss_idf_resolve_paths() {
   IDF_MAP="$IDF_BUILD_DIR/${IDF_PROJECT_NAME}.map"
   IDF_SDKCONFIG="$IDF_BUILD_DIR/sdkconfig"
   IDF_SDKCONFIG_DEFAULTS="$IDF_PROJECT/sdkconfig.defaults;$IDF_PROJECT/sdkconfig.defaults.$ble_backend;$IDF_PROJECT/sdkconfig.defaults.$SHOTSTOPPER_ARCH"
+  if [[ "$ble_backend" == "nimble" && "$nimble_allocator" == "internal" ]]; then
+    IDF_SDKCONFIG_DEFAULTS="$IDF_PROJECT/sdkconfig.defaults;$IDF_PROJECT/sdkconfig.defaults.nimble;$IDF_PROJECT/sdkconfig.defaults.nimble-internal;$IDF_PROJECT/sdkconfig.defaults.$SHOTSTOPPER_ARCH"
+  fi
   if ss_idf_jtag_enabled; then
     IDF_SDKCONFIG_DEFAULTS="$IDF_SDKCONFIG_DEFAULTS;$IDF_PROJECT/sdkconfig.defaults.jtag"
   fi
@@ -123,6 +142,10 @@ ss_idf_resolve_paths() {
 
 ss_idf_ble_backend() {
   printf '%s' "${SHOTSTOPPER_BLE_BACKEND:-arduinoble}"
+}
+
+ss_idf_nimble_allocator() {
+  printf '%s' "${SHOTSTOPPER_NIMBLE_ALLOCATOR:-external}"
 }
 
 ss_idf_py_args() {
@@ -225,6 +248,37 @@ ss_idf_sync_jtag_console() {
   fi
   echo "USB Serial/JTAG console mismatch (want=${want} has=${has}); dropping sdkconfig so defaults re-apply"
   rm -f "$IDF_SDKCONFIG" "$IDF_BUILD_DIR/CMakeCache.txt"
+}
+
+# sdkconfig.defaults only seed a new sdkconfig. Recreate an older NimBLE build
+# tree when the phase-5 release profile or allocator selection does not match;
+# otherwise a successful incremental build could silently retain phase-4
+# defaults (including unrelated built-in GATT services).
+ss_idf_sync_nimble_release_config() {
+  ss_idf_resolve_paths
+  [[ "$(ss_idf_ble_backend)" == "nimble" && -f "$IDF_SDKCONFIG" ]] || return 0
+
+  local stale=0 unused_service
+  if [[ "$(ss_idf_nimble_allocator)" == "external" ]]; then
+    grep -q '^CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y$' "$IDF_SDKCONFIG" || stale=1
+  else
+    grep -q '^CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL=y$' "$IDF_SDKCONFIG" || stale=1
+  fi
+  for unused_service in PROX ANS CTS HTP IPSS TPS IAS LLS SPS HR BAS DIS; do
+    if grep -q "^CONFIG_BT_NIMBLE_${unused_service}_SERVICE=y$" "$IDF_SDKCONFIG"; then
+      stale=1
+    fi
+  done
+  for unused_service in DTM_MODE_TEST SM_SIGN_CNT CPFD_CAFD; do
+    if grep -q "^CONFIG_BT_NIMBLE_${unused_service}=y$" "$IDF_SDKCONFIG"; then
+      stale=1
+    fi
+  done
+  grep -q '^CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=4096$' "$IDF_SDKCONFIG" || stale=1
+  if [[ "$stale" -eq 1 ]]; then
+    echo "NimBLE release profile changed; recreating the IDF build configuration"
+    rm -f "$IDF_SDKCONFIG" "$IDF_BUILD_DIR/CMakeCache.txt"
+  fi
 }
 
 # idf.py set-target always fullcleans. fullclean is a no-op on an empty dir,
@@ -338,11 +392,37 @@ ss_idf_verify_firmware() {
       grep -E 'CONFIG_(ESPRESSO_SCALE_BLE_BACKEND|BT_NIMBLE_ENABLED|BT_CONTROLLER_ONLY)' "$IDF_SDKCONFIG" >&2 || true
       exit 1
     fi
+    if [[ "$(ss_idf_nimble_allocator)" == "external" ]]; then
+      if ! grep -q '^CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y$' "$IDF_SDKCONFIG"; then
+        echo "NimBLE release candidate must use the external allocator." >&2
+        exit 1
+      fi
+    elif ! grep -q '^CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL=y$' "$IDF_SDKCONFIG"; then
+      echo "NimBLE allocator A/B build did not select internal memory." >&2
+      exit 1
+    fi
+    local unused_service
+    for unused_service in PROX ANS CTS HTP IPSS TPS IAS LLS SPS HR BAS DIS; do
+      if grep -q "^CONFIG_BT_NIMBLE_${unused_service}_SERVICE=y$" "$IDF_SDKCONFIG"; then
+        echo "Unused NimBLE ${unused_service} service is enabled in $IDF_SDKCONFIG." >&2
+        exit 1
+      fi
+    done
+    for unused_service in DTM_MODE_TEST SM_SIGN_CNT CPFD_CAFD; do
+      if grep -q "^CONFIG_BT_NIMBLE_${unused_service}=y$" "$IDF_SDKCONFIG"; then
+        echo "Unused NimBLE ${unused_service} feature is enabled in $IDF_SDKCONFIG." >&2
+        exit 1
+      fi
+    done
+    if ! grep -q '^CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=4096$' "$IDF_SDKCONFIG"; then
+      echo "NimBLE host stack must remain at the qualified starting size (4096 bytes)." >&2
+      exit 1
+    fi
     if [[ -f "$IDF_MAP" ]] && grep -q 'esp-idf/ArduinoBLE/libArduinoBLE.a(' "$IDF_MAP"; then
       echo "ArduinoBLE objects leaked into the NimBLE firmware map." >&2
       exit 1
     fi
-    echo "BLE backend: native NimBLE host; no ArduinoBLE objects in ELF map"
+    echo "BLE backend: native NimBLE host ($(ss_idf_nimble_allocator) allocator); no ArduinoBLE objects in ELF map"
   else
     if ! grep -q '^CONFIG_ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE=y$' "$IDF_SDKCONFIG" ||
        ! grep -q '^CONFIG_BT_CONTROLLER_ONLY=y$' "$IDF_SDKCONFIG" ||

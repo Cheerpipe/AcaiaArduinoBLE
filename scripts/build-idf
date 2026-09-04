@@ -32,7 +32,8 @@ it exists.
 
 BLE backend:
   ArduinoBLE (default): ./scripts/build-idf --arch n16r8
-  NimBLE experimental: SHOTSTOPPER_BLE_BACKEND=nimble ./scripts/build-idf --arch n16r8
+  NimBLE release candidate: ./scripts/build-idf-nimble --arch n16r8
+  Allocator A/B only: SHOTSTOPPER_BLE_BACKEND=nimble SHOTSTOPPER_NIMBLE_ALLOCATOR=internal ./scripts/build-idf --arch n16r8
 
 Examples:
   ./scripts/build-idf --arch n16r8
@@ -64,7 +65,11 @@ if [[ "$(ss_idf_ble_backend)" == "arduinoble" ]]; then
   ss_idf_ensure_arduino_ble "$IDF_PROJECT/third_party/ArduinoBLE"
 fi
 
-echo "Building $SHOTSTOPPER_ARCH (IDF, BLE=$(ss_idf_ble_backend))"
+if [[ "$(ss_idf_ble_backend)" == "nimble" ]]; then
+  echo "Building $SHOTSTOPPER_ARCH (IDF, BLE=nimble, allocator=$(ss_idf_nimble_allocator))"
+else
+  echo "Building $SHOTSTOPPER_ARCH (IDF, BLE=arduinoble)"
+fi
 ./scripts/gen_version.sh "$SHOTSTOPPER_ARCH"
 node ./scripts/gen_web_ui.js
 
@@ -93,6 +98,7 @@ echo "Building IDF firmware $SHOTSTOPPER_ARCH → $IDF_BUILD_DIR"
 ss_idf_py_args
 ss_idf_sync_extra_flags
 ss_idf_sync_jtag_console
+ss_idf_sync_nimble_release_config
 
 if [[ ! -f "$IDF_SDKCONFIG" ]] ||
    ! grep -q '^CONFIG_IDF_TARGET="esp32s3"$' "$IDF_SDKCONFIG"; then

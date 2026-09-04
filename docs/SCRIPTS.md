@@ -52,6 +52,8 @@ prompting. The same applies with `SHOTSTOPPER_NONINTERACTIVE=1`.
 | `-H`, `--host` | `SHOTSTOPPER_HOST` | Controller IP or hostname for OTA. |
 | `-t`, `--password` | `SHOTSTOPPER_DEVICE_PASSWORD` | Device password. Never persisted. |
 | `-f`, `--flags` | `SHOTSTOPPER_FLAGS` | Extra compile flags, as a single string. |
+| — | `SHOTSTOPPER_BLE_BACKEND` | Temporary phase-5 selector: `arduinoble` (default/rollback) or `nimble`. Prefer `build-idf-nimble` for the candidate. |
+| — | `SHOTSTOPPER_NIMBLE_ALLOCATOR` | NimBLE qualification selector: `external` (candidate default) or `internal` (A/B only). |
 | `-i`, `--image` | `SHOTSTOPPER_IMAGE` | Firmware `.bin` to use for flash or OTA instead of the normal build output. Checked locally and never persisted. |
 | `-b`, `--build-dir` | `SHOTSTOPPER_BUILD_DIR_OVERRIDE` | Build directory (`static` legacy only). |
 | `-o`, `--output-dir` | `SHOTSTOPPER_OUTPUT_DIR` | Reports directory (`static` / `static-idf` only). |
@@ -85,6 +87,7 @@ Writes to `build-idf/<architecture>` (`shotstopper.bin`).
 | Script | Alias | Required | Description |
 | --- | --- | --- | --- |
 | `./scripts/build-idf` | `b-idf` | `--arch` (`--flags` optional) | Generate version and Web UI, build with ESP-IDF. |
+| `./scripts/build-idf-nimble` | | `--arch` (`--flags` optional) | Build the phase-5 NimBLE release candidate into `build-idf/<arch>-nimble`; ArduinoBLE remains rollback until the gate passes. |
 | `./scripts/flash-idf` | `f-idf` | `--port`, `--arch` | Flash the existing binary (or `--image <path>`); does not rebuild or open the monitor. |
 | `./scripts/monitor-idf` | `m-idf` | `--port`, `--speed` | IDF serial monitor (Ctrl+] to exit). |
 | `./scripts/ota-idf` | `o-idf` | `--arch`, `--host`, `--password` | Wi-Fi update with the already-built IDF binary, or `--image <path>`. |
@@ -103,6 +106,7 @@ Examples:
 
 # Explicit (macOS CDC port)
 ./scripts/build-idf --arch n16r8
+./scripts/build-idf-nimble --arch n16r8
 ./scripts/flash-idf --port /dev/cu.usbmodem2101 --arch n16r8
 ./scripts/flash-idf --port /dev/cu.usbmodem2101 --arch n16r8 --image ~/Downloads/shotstopper.bin
 ./scripts/monitor-idf -p /dev/cu.usbmodem2101 -s 115200
@@ -114,6 +118,14 @@ Examples:
 ./scripts/bo-idf --arch n16r8 --host 192.168.1.50
 ./scripts/o-idf --arch n16r8 --host 192.168.1.50
 ./scripts/o-idf --arch n16r8 --host 192.168.1.50 --image ~/Downloads/shotstopper.bin
+```
+
+Allocator A/B qualification uses a separate build tree and is not a release
+default:
+
+```sh
+SHOTSTOPPER_BLE_BACKEND=nimble SHOTSTOPPER_NIMBLE_ALLOCATOR=internal \
+  ./scripts/build-idf --arch n16r8
 ```
 
 `--force` is accepted by `ota`, `ota-idf`, `bo`, and `bo-idf` (and their `o`

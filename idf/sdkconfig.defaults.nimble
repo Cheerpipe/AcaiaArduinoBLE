@@ -1,5 +1,6 @@
-# Experimental NimBLE backend. The phase-4 Companion profile is registered at
-# boot only when its persisted enable flag is set; ArduinoBLE remains rollback.
+# Phase-5 NimBLE release candidate. The Companion profile is registered at boot
+# only when its persisted enable flag is set. ArduinoBLE remains rollback until
+# the phase-5 soak, OTA and beta gates are complete.
 CONFIG_ESPRESSO_SCALE_BLE_BACKEND_NIMBLE=y
 # CONFIG_ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE is not set
 # CONFIG_BT_CONTROLLER_ONLY is not set
@@ -18,6 +19,7 @@ CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=96
 CONFIG_BT_NIMBLE_ATT_MAX_PREP_ENTRIES=4
 CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2
 CONFIG_BT_NIMBLE_MAX_CCCDS=4
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=4096
 
 CONFIG_BT_NIMBLE_MEM_OPTIMIZATION=y
 CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC=y
@@ -32,3 +34,26 @@ CONFIG_BT_NIMBLE_MAX_CONN_REATTEMPT=3
 # CONFIG_BT_NIMBLE_HS_PVCY is not set
 # CONFIG_BT_NIMBLE_50_FEATURE_SUPPORT is not set
 # CONFIG_BT_NIMBLE_MESH is not set
+
+# Shot Stopper registers only the standard GAP/GATT services and its own static
+# Companion profile. ESP-IDF enables these unrelated services by default; keep
+# them out of the release candidate without changing pools or radio behavior.
+# CONFIG_BT_NIMBLE_PROX_SERVICE is not set
+# CONFIG_BT_NIMBLE_ANS_SERVICE is not set
+# CONFIG_BT_NIMBLE_CTS_SERVICE is not set
+# CONFIG_BT_NIMBLE_HTP_SERVICE is not set
+# CONFIG_BT_NIMBLE_IPSS_SERVICE is not set
+# CONFIG_BT_NIMBLE_TPS_SERVICE is not set
+# CONFIG_BT_NIMBLE_IAS_SERVICE is not set
+# CONFIG_BT_NIMBLE_LLS_SERVICE is not set
+# CONFIG_BT_NIMBLE_SPS_SERVICE is not set
+# CONFIG_BT_NIMBLE_HR_SERVICE is not set
+# CONFIG_BT_NIMBLE_BAS_SERVICE is not set
+# CONFIG_BT_NIMBLE_DIS_SERVICE is not set
+
+# No Direct Test Mode, signed-write counter or characteristic presentation /
+# aggregate descriptors are used. ATT MTU reconfiguration stays enabled for
+# Companion client compatibility until the physical qualification says otherwise.
+# CONFIG_BT_NIMBLE_DTM_MODE_TEST is not set
+# CONFIG_BT_NIMBLE_SM_SIGN_CNT is not set
+# CONFIG_BT_NIMBLE_CPFD_CAFD is not set

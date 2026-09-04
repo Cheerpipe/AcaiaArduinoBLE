@@ -97,12 +97,31 @@ If `idf.py --version` is not 5.5.x, the Shot Stopper scripts will stop.
 `./scripts/build-idf` sources `export.sh` from `IDF_PATH` or
 `$HOME/esp/esp-idf` when needed.
 
-## 4. ArduinoBLE patch (handled for you)
+## 4. BLE backend during the phase-5 gate
 
-The first IDF build clones ArduinoBLE **2.1.0** into the IDF tree and runs
-`./scripts/patch_arduinoble.sh`. You do not need to run that by hand.
-`./scripts/build-idf` does it. The patch is idempotent. Set `ARDUINO_BLE_HOME`
-only if ArduinoBLE is not in the default path.
+ArduinoBLE remains the temporary default and rollback until the NimBLE soak,
+OTA/reboot and beta gates pass. A default IDF build clones ArduinoBLE **2.1.0**
+into the IDF tree and runs `./scripts/patch_arduinoble.sh`; the patch is
+idempotent. Set `ARDUINO_BLE_HOME` only if ArduinoBLE is not in the default
+path.
+
+Build the phase-5 NimBLE release candidate explicitly:
+
+```sh
+./scripts/build-idf-nimble --arch n16r8
+```
+
+For the allocator qualification only, build the isolated internal-memory
+variant. The release candidate uses the external allocator:
+
+```sh
+SHOTSTOPPER_BLE_BACKEND=nimble SHOTSTOPPER_NIMBLE_ALLOCATOR=internal \
+  ./scripts/build-idf --arch n16r8
+```
+
+These write to `build-idf/<arch>-nimble` and
+`build-idf/<arch>-nimble-internal`; neither overwrites the ArduinoBLE rollback
+tree.
 
 ## 5. Build
 

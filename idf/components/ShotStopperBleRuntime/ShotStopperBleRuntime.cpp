@@ -29,6 +29,7 @@ ShotStopperBleHealth gHealth = {
     ShotStopperBleRuntimeState::Stopped, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 uint8_t gOwnAddressType = 0xff;
 bool gPortInitialized = false;
+TaskHandle_t gHostTask = nullptr;
 ShotStopperBleGattRegistration gGattRegistration = nullptr;
 void *gGattRegistrationContext = nullptr;
 
@@ -98,6 +99,9 @@ void onSync() {
 }
 
 void hostTask(void *) {
+  portENTER_CRITICAL(&gMux);
+  gHostTask = xTaskGetCurrentTaskHandle();
+  portEXIT_CRITICAL(&gMux);
   nimble_port_run();
   const uint32_t highWater =
       static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
@@ -148,9 +152,11 @@ bool shotStopperBleRuntimeStart(uint32_t timeoutMs) {
   portENTER_CRITICAL(&gMux);
   const bool canStart = !gPortInitialized;
   if (canStart) {
+    gHostTask = nullptr;
     gHealth.state = ShotStopperBleRuntimeState::Starting;
     gHealth.lastError = 0;
     gHealth.lastResetReason = 0;
+    gHealth.hostTaskStackHighWaterWords = 0;
     storeMemoryLocked(startingMemory);
   }
   portEXIT_CRITICAL(&gMux);
@@ -236,7 +242,18 @@ uint32_t shotStopperBleRuntimeSyncGeneration() {
 ShotStopperBleHealth shotStopperBleRuntimeHealth() {
   const MemorySnapshot memory = captureMemory();
   portENTER_CRITICAL(&gMux);
+  TaskHandle_t hostTaskHandle = gHostTask;
+  portEXIT_CRITICAL(&gMux);
+  const uint32_t liveHighWater = hostTaskHandle == nullptr
+                                     ? 0
+                                     : static_cast<uint32_t>(
+                                           uxTaskGetStackHighWaterMark(
+                                               hostTaskHandle));
+  portENTER_CRITICAL(&gMux);
   storeMemoryLocked(memory);
+  if (hostTaskHandle != nullptr) {
+    gHealth.hostTaskStackHighWaterWords = liveHighWater;
+  }
   const ShotStopperBleHealth health = gHealth;
   portEXIT_CRITICAL(&gMux);
   return health;
@@ -264,6 +281,9 @@ bool shotStopperBleRuntimeStop(uint32_t timeoutMs) {
     return false;
   }
   nimble_port_freertos_deinit();
+  portENTER_CRITICAL(&gMux);
+  gHostTask = nullptr;
+  portEXIT_CRITICAL(&gMux);
   const esp_err_t deinitError = nimble_port_deinit();
   const MemorySnapshot stoppedMemory = captureMemory();
   portENTER_CRITICAL(&gMux);
