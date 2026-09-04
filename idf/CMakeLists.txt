@@ -69,3 +69,10 @@ target_compile_options(${_ss_arduino_lib} PRIVATE -Wno-missing-field-initializer
 # managed_components (overwritten on component update).
 idf_component_get_property(_ss_modbus_lib espressif__esp-modbus COMPONENT_LIB)
 target_compile_options(${_ss_modbus_lib} PRIVATE -Wno-stringop-truncation)
+
+# ESP-IDF 5.5.5 NimBLE assigns key_rc in ble_hs_startup_go() even when
+# BLE_HS_PVCY is disabled, leaving it unused in that upstream configuration.
+# Keep the suppression scoped to ESP-IDF's bt component; firmware warnings
+# remain visible and the SDK itself is never patched.
+idf_component_get_property(_ss_bt_lib bt COMPONENT_LIB)
+target_compile_options(${_ss_bt_lib} PRIVATE -Wno-unused-but-set-variable)
