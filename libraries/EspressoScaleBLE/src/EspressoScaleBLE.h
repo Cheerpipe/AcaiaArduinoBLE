@@ -1,5 +1,5 @@
 /*
-  EspressoScaleBLE.h - BLE client for espresso scales using ArduinoBLE.
+  EspressoScaleBLE.h - backend-neutral BLE client facade for espresso scales.
 
   Maintainer: Felipe Urzúa <cheerpipe@gmail.com>
   https://github.com/Cheerpipe/AcaiaArduinoBLE
@@ -54,12 +54,17 @@
 #define ACAIA_MAC_CAPACITY               SCALE_MAC_CAPACITY
 #define ACAIA_NAME_CAPACITY              SCALE_NAME_CAPACITY
 
-#include "Arduino.h"
 #include "ScaleBleBackend.h"
 #include "ScaleBleTypes.h"
 #include "ScaleFeatures.h"
 #include "ScaleProtocol.h"
+#include <stddef.h>
+#include <stdint.h>
+
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
+#include "Arduino.h"
 #include <ArduinoBLE.h>
+#endif
 
 enum scale_type {
     OLD,
@@ -146,9 +151,14 @@ class EspressoScaleBLE {
         uint32_t rejectedPacketCount() const;
         uint32_t reconnectCount() const;
         ScaleBleTimingSnapshot timingSnapshot() const;
+        // Native backend status for diagnostics. ArduinoBLE cannot expose a
+        // stable raw status and returns zero; NimBLE preserves the last
+        // ble_hs/HCI value without collapsing it into a domain reason.
+        int32_t lastBackendStatus() const;
         int linkRssi();
 
     private:
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
         bool isScaleName(const char *name) const;
         bool configureCharacteristics(BLEDevice& peripheral,
                                       const ScaleProtocol *protocol);
@@ -232,6 +242,13 @@ class EspressoScaleBLE {
         bool                _seenPending;
         ScaleBleTimingSnapshot _timingSnapshot;
         ScaleDisconnectReason _lastDisconnectReason;
+#else
+        // Placement storage keeps the implementation private, fixed-size and
+        // allocation-free while preventing NimBLE types from leaking through
+        // the public facade into ShotStopperScaleWorker.
+        static constexpr size_t NIMBLE_CLIENT_STORAGE_SIZE = 2176;
+        alignas(8) uint8_t _nimbleClientStorage[NIMBLE_CLIENT_STORAGE_SIZE];
+#endif
 };
 
 #endif

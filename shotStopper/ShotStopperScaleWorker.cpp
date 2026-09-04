@@ -5,7 +5,11 @@
 #if defined(SHOT_STOPPER_HOST_TEST)
 #include "tests/shot_stopper_host_stubs.h"
 #else
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
 #include <ArduinoBLE.h>
+#else
+#include "ShotStopperBleRuntime.h"
+#endif
 #include "ShotStopperNetwork.h"
 #include "ShotStopperBleCompanion.h"
 #include "ShotStopperWatchdog.h"
@@ -60,13 +64,55 @@ bool soundAlertsEnabled();
 shotstopper::AlertOutputChannel currentAlertOutputChannel();
 #if !defined(SHOT_STOPPER_HOST_TEST)
 extern shotstopper::ShotStopperNetwork networkManager;
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
 extern shotstopper::ShotStopperBleCompanion *bleCompanion;
+#endif
 #endif
 #endif
 
 namespace shotstopper {
 
 constexpr bool DEBUG = false;
+
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
+void reportNimbleRuntimeHealth(bool force) {
+  static bool reported = false;
+  static ShotStopperBleRuntimeState previousState =
+      ShotStopperBleRuntimeState::Stopped;
+  static int32_t previousError = 0;
+  static int32_t previousResetReason = 0;
+  static uint32_t previousSyncGeneration = 0;
+  const ShotStopperBleHealth health = shotStopperBleRuntimeHealth();
+  if (!force && reported && health.state == previousState &&
+      health.lastError == previousError &&
+      health.lastResetReason == previousResetReason &&
+      health.syncGeneration == previousSyncGeneration) {
+    return;
+  }
+  reported = true;
+  previousState = health.state;
+  previousError = health.lastError;
+  previousResetReason = health.lastResetReason;
+  previousSyncGeneration = health.syncGeneration;
+  serialTracef(
+      LogLevel::DEBUG,
+      "NimBLE runtime state=%u raw=%ld linkRaw=%ld reset=%ld sync=%lu resets=%lu "
+      "hostStackMin=%lu internal=%lu/%lu/%lu psram=%lu/%lu/%lu",
+      static_cast<unsigned>(health.state), static_cast<long>(health.lastError),
+      static_cast<long>(scale.lastBackendStatus()),
+      static_cast<long>(health.lastResetReason),
+      static_cast<unsigned long>(health.syncGeneration),
+      static_cast<unsigned long>(health.resetCount),
+      static_cast<unsigned long>(health.hostTaskStackHighWaterWords),
+      static_cast<unsigned long>(health.internalFreeBytes),
+      static_cast<unsigned long>(health.internalMinimumFreeBytes),
+      static_cast<unsigned long>(health.internalLargestBlockBytes),
+      static_cast<unsigned long>(health.psramFreeBytes),
+      static_cast<unsigned long>(health.psramMinimumFreeBytes),
+      static_cast<unsigned long>(health.psramLargestBlockBytes));
+}
+#endif
 
 EspressoScaleBLE scale(DEBUG);
 TaskHandle_t scaleWorkerTaskHandle = nullptr;
@@ -452,6 +498,21 @@ void updateWorkerLinkState() {
                                         : ScaleLinkState::DISCONNECTED);
 }
 
+void publishInactiveCompanionStatus(
+    const BleCompanionRuntimeSnapshot &runtime,
+    BleCompanionRejectReason unavailableReason,
+    bool restartRequired) {
+  BleCompanionStatusSnapshot inactiveStatus;
+  inactiveStatus.stackReady = true;
+  inactiveStatus.configuredEnabled = runtime.configuredEnabled;
+  inactiveStatus.restartRequired = restartRequired && runtime.configuredEnabled;
+  inactiveStatus.apActive = runtime.apActive;
+  if (runtime.configuredEnabled) {
+    inactiveStatus.lastReject = unavailableReason;
+  }
+  publishBleCompanionStatus(inactiveStatus);
+}
+
 bool publishPendingScaleWeightEvent() {
   if (!scale.isLinkUp()) {
     return false;
@@ -474,7 +535,9 @@ bool publishPendingScaleWeightEvent() {
 }
 
 void yieldBetweenScaleAttOps() {
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
   BLE.poll();
+#endif
   // Harvest notifications that arrived during a blocking ATT write so
   // observedWeight (A→M / suspend) does not freeze while the link is up.
   publishPendingScaleWeightEvent();
@@ -817,7 +880,9 @@ bool takeScaleCompletionBeep() {
 }
 
 void executeScaleCommand(const ScaleCommand &command) {
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
   BLE.poll();
+#endif
   publishPendingScaleWeightEvent();
   markScaleWorkerProgress();
   switch (command.type) {
@@ -930,7 +995,8 @@ bool companionAdvertisingShouldPause() {
 }
 
 void syncCompanionAdvertisingForScaleLink() {
-#if !defined(SHOT_STOPPER_HOST_TEST)
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
   if (bleCompanion != nullptr) {
     bleCompanion->setAdvertisingPaused(companionAdvertisingShouldPause());
   }
@@ -1572,7 +1638,13 @@ void scaleWorkerTask(void *) {
   }
 
 #if !defined(SHOT_STOPPER_HOST_TEST)
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
   bleStackReady = BLE.begin();
+#else
+  // Phase 2 owns one native host runtime. Companion deliberately remains
+  // unavailable until its GATT profile is migrated in phase 4.
+  bleStackReady = shotStopperBleRuntimeStart(BLE_STACK_READY_WAIT_MS);
+#endif
   if (!bleStackReady) {
     addDebugEvent(DebugCategory::SCALE, DebugCode::INITIALIZATION_FAILED,
                   BOOT_SUBSYSTEM_BLE);
@@ -1582,35 +1654,45 @@ void scaleWorkerTask(void *) {
     vTaskDelete(nullptr);
     return;
   }
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
   // ArduinoBLE defaults ATT operations to five seconds. Bound every central
   // operation owned by this task so scale-staleness telemetry remains useful.
   BLE.setTimeout(SCALE_ATT_TIMEOUT_MS);
+#endif
   ensureRfCoexBt();
   logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
           BOOT_SUBSYSTEM_BLE, 1);
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
+  reportNimbleRuntimeHealth(true);
+#endif
   BleCompanionRuntimeSnapshot initialBleSnapshot;
   copyBleCompanionRuntimeSnapshot(initialBleSnapshot);
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
   if (bleCompanionProfileAllocated()) {
     bleCompanion->begin(enqueueBleCompanionRequest);
     syncCompanionAdvertisingForScaleLink();
     publishBleCompanionStatus(bleCompanion->status());
   } else {
-    BleCompanionStatusSnapshot inactiveStatus;
-    inactiveStatus.stackReady = true;
-    inactiveStatus.apActive = initialBleSnapshot.apActive;
-    if (initialBleSnapshot.configuredEnabled) {
-      inactiveStatus.lastReject =
-          BleCompanionRejectReason::ALLOCATION_FAILED;
-    }
-    publishBleCompanionStatus(inactiveStatus);
+    publishInactiveCompanionStatus(initialBleSnapshot,
+                                   BleCompanionRejectReason::ALLOCATION_FAILED,
+                                   false);
   }
+#else
+  publishInactiveCompanionStatus(initialBleSnapshot,
+                                 BleCompanionRejectReason::SUPPORT_DISABLED,
+                                 true);
+#endif
 #endif
 
   for (;;) {
     // Block up to the tick budget waiting for HCI. Same 1 ms connected
     // bound as vTaskDelay(1), but the core sleeps until a packet arrives.
     const uint32_t tickDelayMs = scaleWorkerTickDelayMs();
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
     BLE.poll(tickDelayMs);
+#else
+    vTaskDelay(pdMS_TO_TICKS(tickDelayMs));
+#endif
 
     const uint32_t nowMs = millis();
     static uint32_t lastBackgroundMs = 0;
@@ -1628,7 +1710,8 @@ void scaleWorkerTask(void *) {
     syncCompanionAdvertisingForScaleLink();
     syncScaleRadioCoex();
 
-#if !defined(SHOT_STOPPER_HOST_TEST)
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
     if (bleCompanion != nullptr) {
       BleCompanionResult bleResult;
       while (bleCompanionResultQueue != nullptr &&
@@ -1736,6 +1819,10 @@ void scaleWorkerTask(void *) {
       telemetryAtMs = millis();
       scaleWorkerStackMinWords =
           static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    defined(ESPRESSO_SCALE_BLE_BACKEND_NIMBLE)
+      reportNimbleRuntimeHealth(false);
+#endif
     }
   }
 }

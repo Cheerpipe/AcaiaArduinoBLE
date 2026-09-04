@@ -30,6 +30,10 @@ Recommended development compile flags (Enter at the prompt):
 Requires ESP-IDF 5.5.x. If IDF_PATH is unset, ${IDF_DEFAULT_HOME} is used when
 it exists.
 
+BLE backend:
+  ArduinoBLE (default): ./scripts/build-idf --arch n16r8
+  NimBLE experimental: SHOTSTOPPER_BLE_BACKEND=nimble ./scripts/build-idf --arch n16r8
+
 Examples:
   ./scripts/build-idf --arch n16r8
   ./scripts/build-idf -a n16r8 -f "-DSHOT_STOPPER_ENABLE_JTAG=1"
@@ -55,10 +59,12 @@ command -v node >/dev/null 2>&1 || {
 root="$SS_CLI_ROOT"
 cd "$root"
 
-# GAP scan stock 20/20, OOM-safe discover, BLE host objects in PSRAM (ArduinoBLE 2.1.0).
-ss_idf_ensure_arduino_ble "$IDF_PROJECT/third_party/ArduinoBLE"
+if [[ "$(ss_idf_ble_backend)" == "arduinoble" ]]; then
+  # GAP scan stock 20/20, OOM-safe discover, BLE host objects in PSRAM.
+  ss_idf_ensure_arduino_ble "$IDF_PROJECT/third_party/ArduinoBLE"
+fi
 
-echo "Building $SHOTSTOPPER_ARCH (IDF)"
+echo "Building $SHOTSTOPPER_ARCH (IDF, BLE=$(ss_idf_ble_backend))"
 ./scripts/gen_version.sh "$SHOTSTOPPER_ARCH"
 node ./scripts/gen_web_ui.js
 

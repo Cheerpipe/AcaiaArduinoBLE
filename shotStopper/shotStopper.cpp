@@ -106,7 +106,8 @@ using namespace shotstopper;
 #include "ShotStopperScaleWorker.h"
 #include "ShotStopperRfCoex.h"
 
-#if !defined(SHOT_STOPPER_HOST_TEST)
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
 // ArduinoBLE BLEHostAlloc counters (patches/ArduinoBLE-2.1.0-ble-host-psram).
 extern "C" uint32_t BLEHostAllocPsramCount(void);
 extern "C" uint32_t BLEHostAllocFallbackCount(void);
@@ -332,15 +333,19 @@ struct MaintenanceLease {
 // BLE companion, application state and input state
 // ---------------------------------------------------------------------------
 
-#if !defined(SHOT_STOPPER_HOST_TEST)
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
 ShotStopperBleCompanion *bleCompanion = nullptr;
+BleCompanionPersistedSettings bleCompanionPersistedSettings;
+#elif !defined(SHOT_STOPPER_HOST_TEST)
 BleCompanionPersistedSettings bleCompanionPersistedSettings;
 #endif
 BleCompanionRuntimeSnapshot bleCompanionRuntimeSnapshot;
 BleCompanionStatusSnapshot bleCompanionStatusSnapshot;
 
 bool bleCompanionProfileAllocated() {
-#if !defined(SHOT_STOPPER_HOST_TEST)
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
   return bleCompanion != nullptr;
 #else
   return false;
@@ -6144,6 +6149,7 @@ void setup() {
       bleCompanionPersistedSettings.scanIntensity));
   bleCompanionStatusSnapshot.configuredEnabled = bleCompanionConfigured;
   bleCompanionRuntimeSnapshot.configuredEnabled = bleCompanionConfigured;
+#if defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
   if (bleCompanionConfigured) {
     // Host GATT profile (object + characteristic value buffers via ArduinoBLE
     // BLEHostAlloc) prefers PSRAM; fall back to internal if SPIRAM is full.
@@ -6161,6 +6167,7 @@ void setup() {
                     BOOT_SUBSYSTEM_BLE);
     }
   }
+#endif
   bleCompanionStatusSnapshot.restartRequired =
       bleCompanionConfigured != bleCompanionRuntimeSnapshot.enabled;
   if (settingsLoaded) {

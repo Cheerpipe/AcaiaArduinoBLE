@@ -1152,6 +1152,10 @@ ScaleBleTimingSnapshot EspressoScaleBLE::timingSnapshot() const {
     return _timingSnapshot;
 }
 
+int32_t EspressoScaleBLE::lastBackendStatus() const {
+    return 0;
+}
+
 int EspressoScaleBLE::linkRssi() {
     if (!_connected || !_hasPeripheral) {
         return SCALE_LINK_RSSI_UNAVAILABLE;

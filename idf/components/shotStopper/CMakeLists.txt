@@ -14,6 +14,7 @@ idf_component_register(
   REQUIRES
     arduino-esp32
     EspressoScaleBLE
+    ShotStopperBleRuntime
   PRIV_REQUIRES
     json
     nvs_flash

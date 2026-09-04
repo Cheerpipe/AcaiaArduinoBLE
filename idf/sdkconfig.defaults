@@ -143,9 +143,10 @@ CONFIG_ARDUINO_SELECTIVE_WiFi=y
 # CONFIG_ARDUINO_SELECTIVE_AsyncUDP is not set
 # CONFIG_ARDUINO_SELECTIVE_NetworkClientSecure is not set
 
-# ArduinoBLE talks to the controller over VHCI (no Bluedroid/NimBLE host).
+# The selected BLE host is supplied by sdkconfig.defaults.arduinoble or
+# sdkconfig.defaults.nimble. Keeping host choices out of this shared file makes
+# the two build trees reproducible and prevents an accidental mixed host.
 CONFIG_BT_ENABLED=y
-CONFIG_BT_CONTROLLER_ONLY=y
 CONFIG_BT_CONTROLLER_ENABLED=y
 
 # Compile-time requirements from ShotStopperWatchdog.h / ShotStopperOta.h /

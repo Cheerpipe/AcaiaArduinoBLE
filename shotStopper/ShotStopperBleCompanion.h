@@ -6,7 +6,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#if !defined(SHOT_STOPPER_HOST_TEST)
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
 #include <ArduinoBLE.h>
 #endif
 
@@ -127,7 +128,8 @@ inline uint8_t bleCompanionMsToSeconds(uint32_t milliseconds) {
   return static_cast<uint8_t>(seconds > 255U ? 255U : seconds);
 }
 
-#if !defined(SHOT_STOPPER_HOST_TEST)
+#if !defined(SHOT_STOPPER_HOST_TEST) && \
+    defined(ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE)
 
 inline bool readBleStringValue(BLEStringCharacteristic &characteristic,
                                char *output, size_t capacity,
@@ -541,6 +543,6 @@ class ShotStopperBleCompanion {
   uint32_t pendingAtMs_[BLE_COMPANION_REQUEST_TYPE_COUNT] = {};
 };
 
-#endif
+#endif  // production ArduinoBLE Companion (migrated in phase 4)
 
 }  // namespace shotstopper

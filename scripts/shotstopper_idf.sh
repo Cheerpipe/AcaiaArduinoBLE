@@ -97,16 +97,32 @@ ss_idf_jtag_enabled() {
 # Call after shotstopper_resolve_board. Sets IDF_PROJECT, IDF_BUILD_DIR,
 # IDF_IMAGE, IDF_ELF, IDF_MAP, IDF_SDKCONFIG, IDF_SDKCONFIG_DEFAULTS.
 ss_idf_resolve_paths() {
+  local ble_backend="${SHOTSTOPPER_BLE_BACKEND:-arduinoble}"
+  case "$ble_backend" in
+    arduinoble|nimble) ;;
+    *)
+      echo "Invalid SHOTSTOPPER_BLE_BACKEND=$ble_backend (use arduinoble or nimble)." >&2
+      return 2
+      ;;
+  esac
   IDF_PROJECT="$SS_CLI_ROOT/idf"
-  IDF_BUILD_DIR="$SS_CLI_ROOT/build-idf/$SHOTSTOPPER_ARCH"
+  if [[ "$ble_backend" == "nimble" ]]; then
+    IDF_BUILD_DIR="$SS_CLI_ROOT/build-idf/${SHOTSTOPPER_ARCH}-nimble"
+  else
+    IDF_BUILD_DIR="$SS_CLI_ROOT/build-idf/$SHOTSTOPPER_ARCH"
+  fi
   IDF_IMAGE="$IDF_BUILD_DIR/${IDF_PROJECT_NAME}.bin"
   IDF_ELF="$IDF_BUILD_DIR/${IDF_PROJECT_NAME}.elf"
   IDF_MAP="$IDF_BUILD_DIR/${IDF_PROJECT_NAME}.map"
   IDF_SDKCONFIG="$IDF_BUILD_DIR/sdkconfig"
-  IDF_SDKCONFIG_DEFAULTS="$IDF_PROJECT/sdkconfig.defaults;$IDF_PROJECT/sdkconfig.defaults.$SHOTSTOPPER_ARCH"
+  IDF_SDKCONFIG_DEFAULTS="$IDF_PROJECT/sdkconfig.defaults;$IDF_PROJECT/sdkconfig.defaults.$ble_backend;$IDF_PROJECT/sdkconfig.defaults.$SHOTSTOPPER_ARCH"
   if ss_idf_jtag_enabled; then
     IDF_SDKCONFIG_DEFAULTS="$IDF_SDKCONFIG_DEFAULTS;$IDF_PROJECT/sdkconfig.defaults.jtag"
   fi
+}
+
+ss_idf_ble_backend() {
+  printf '%s' "${SHOTSTOPPER_BLE_BACKEND:-arduinoble}"
 }
 
 ss_idf_py_args() {
@@ -313,6 +329,30 @@ ss_idf_verify_firmware() {
     exit 1
   fi
   echo "sdkconfig: CONFIG_COMPILER_OPTIMIZATION_PERF=y (-O2)"
+
+  if [[ "$(ss_idf_ble_backend)" == "nimble" ]]; then
+    if ! grep -q '^CONFIG_ESPRESSO_SCALE_BLE_BACKEND_NIMBLE=y$' "$IDF_SDKCONFIG" ||
+       ! grep -q '^CONFIG_BT_NIMBLE_ENABLED=y$' "$IDF_SDKCONFIG" ||
+       grep -q '^CONFIG_BT_CONTROLLER_ONLY=y$' "$IDF_SDKCONFIG"; then
+      echo "NimBLE backend/host configuration is inconsistent in $IDF_SDKCONFIG." >&2
+      grep -E 'CONFIG_(ESPRESSO_SCALE_BLE_BACKEND|BT_NIMBLE_ENABLED|BT_CONTROLLER_ONLY)' "$IDF_SDKCONFIG" >&2 || true
+      exit 1
+    fi
+    if [[ -f "$IDF_MAP" ]] && grep -q 'esp-idf/ArduinoBLE/libArduinoBLE.a(' "$IDF_MAP"; then
+      echo "ArduinoBLE objects leaked into the NimBLE firmware map." >&2
+      exit 1
+    fi
+    echo "BLE backend: native NimBLE host; no ArduinoBLE objects in ELF map"
+  else
+    if ! grep -q '^CONFIG_ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE=y$' "$IDF_SDKCONFIG" ||
+       ! grep -q '^CONFIG_BT_CONTROLLER_ONLY=y$' "$IDF_SDKCONFIG" ||
+       grep -q '^CONFIG_BT_NIMBLE_ENABLED=y$' "$IDF_SDKCONFIG"; then
+      echo "ArduinoBLE backend/controller-only configuration is inconsistent in $IDF_SDKCONFIG." >&2
+      grep -E 'CONFIG_(ESPRESSO_SCALE_BLE_BACKEND|BT_NIMBLE_ENABLED|BT_CONTROLLER_ONLY)' "$IDF_SDKCONFIG" >&2 || true
+      exit 1
+    fi
+    echo "BLE backend: ArduinoBLE with controller-only mode"
+  fi
 
   if [[ ! -f "$IDF_ELF" ]]; then
     echo "$IDF_ELF does not exist." >&2

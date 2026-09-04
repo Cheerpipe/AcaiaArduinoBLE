@@ -2,14 +2,14 @@ choice ESPRESSO_SCALE_BLE_BACKEND
     prompt "Espresso scale BLE backend"
     default ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE
     help
-        Select exactly one BLE host for the scale client. Phase 1 keeps
-        ArduinoBLE as the production default and reserves NimBLE for the
-        guarded phase-2 implementation.
+        Select exactly one BLE host for the scale client. ArduinoBLE remains
+        the production default and NimBLE is the experimental phase-2 build.
 
     config ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE
         bool "ArduinoBLE (production)"
 
     config ESPRESSO_SCALE_BLE_BACKEND_NIMBLE
-        bool "NimBLE (phase-1 guarded stub)"
+        bool "ESP-IDF NimBLE (experimental central)"
+        depends on BT_NIMBLE_ENABLED
 
 endchoice

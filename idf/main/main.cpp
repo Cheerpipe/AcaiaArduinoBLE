@@ -8,10 +8,12 @@
 extern "C" {
 EXT_RAM_BSS_ATTR uint8_t g_probe[256];
 
-// Arduino core only defines this flag when Bluedroid or NimBLE is the host.
-// ArduinoBLE talks to the controller over VHCI (CONFIG_BT_CONTROLLER_ONLY),
-// but esp32-hal-alloc-ble-mem.h still references the symbol.
+// In controller-only ArduinoBLE builds the Arduino core does not define this
+// flag, but esp32-hal-alloc-ble-mem.h still references it. With the native
+// NimBLE host the core supplies the symbol, so defining it here would collide.
+#if CONFIG_ESPRESSO_SCALE_BLE_BACKEND_ARDUINOBLE
 bool _bleLibraryInUse = false;
+#endif
 }
 
 // Keep g_probe in the ELF so ./scripts/build-idf can still prove ALLOW_BSS.
