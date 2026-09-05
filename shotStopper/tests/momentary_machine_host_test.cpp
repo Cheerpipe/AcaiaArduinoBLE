@@ -80,8 +80,9 @@ void resetMomentaryHarness() {
   runtimeConfig.slowExtractionGuardEnabled = false;
   platformClockReady = true;
   persistenceReady = true;
-  bleStackReady = true;
+  setScaleWorkerBleReadyForHost(true);
   firmwareInitializationComplete = true;
+  publishScaleWorkerPolicy(runtimeConfig, firmwareInitializationComplete);
   lastScaleWeightAtMs = 0;
   scaleWeightUpdateIntervalMs = 0;
   lastScalePacketGapLogMs = 0;

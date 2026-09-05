@@ -189,7 +189,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   observedWeightConnectionGeneration = 0;
   weightStreamState = WeightStreamState::NO_SAMPLE;
   nextCycleId = 1;
-  scaleWorkerTaskHandle = nullptr;
+  resetScaleWorkerMetricsForHost();
   scale = EspressoScaleBLE(DEBUG);
   scale.connected = scaleConnected;
   resetScaleWorkerRadioStateForHost();
@@ -224,10 +224,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scaleTimerMs = 0;
   scaleTimerAgeMs = 0;
   scaleLinkFeatures = scaleFeatureSetNone();
-  copyCString(scaleProtocolName, sizeof(scaleProtocolName), "none");
   scaleWorkerProgressAtMs = hostMillis;
-  scaleEventsDropped = 0;
-  scaleWorkerStackMinWords = 0;
   freeHeapBytes = 0;
   minimumFreeHeapBytes = 0;
   largestFreeHeapBlockBytes = 0;
@@ -261,6 +258,11 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   scaleCompletionBeepScheduled = false;
   hostAutoScaleWorkerProgress = true;
   updateWorkerLinkState();
+  {
+    const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+    handledScaleConnectionGeneration = link.connectionGeneration;
+    handledScaleDisconnectSequence = link.disconnectSequence;
+  }
 
   rawActivatorOn = false;
   activatorOn = false;
@@ -291,11 +293,12 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   safeRestartRequested = false;
   platformClockReady = true;
   persistenceReady = true;
-  bleStackReady = true;
+  setScaleWorkerBleReadyForHost(true);
   bootDegraded = false;
   bleCompanionResultDropped = 0;
   safetyResetStatus = SafetyResetSnapshot{};
   firmwareInitializationComplete = true;
+  publishScaleWorkerPolicy(runtimeConfig, firmwareInitializationComplete);
   scaleConnectedLedInitialized = false;
   lastScaleConnectedLedOn = false;
   lastScaleConnectedLedPattern = ScaleConnectedLedPattern::OFF;
@@ -419,6 +422,11 @@ void setRawPaddle(bool on) {
 void setScaleConnected(bool connected) {
   scale.connected = connected;
   updateWorkerLinkState();
+  processScaleLinkTransitions();
+}
+
+void publishTestScaleWorkerPolicy() {
+  publishScaleWorkerPolicy(runtimeConfig, firmwareInitializationComplete);
 }
 
 void publishWeight(float weight, uint32_t receivedAtMs = UINT32_MAX,
@@ -3723,6 +3731,51 @@ void w94_scale_connected_silent_when_flag_off_or_scale_only() {
   CHECK(localBuzzer.acceptedRequests == beforeScaleOnly);
 }
 
+void f01_link_side_effects_run_only_on_control() {
+  resetHarness(false, false);
+  reachReadyFromBoot();
+  runtimeConfig.alertOutputChannel =
+      static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  runtimeConfig.buzzerScaleConnectedBeep = true;
+  runtimeConfig.buzzerScaleLostBeep = true;
+  cupPresence.state = CupPresenceState::PRESENT;
+
+  const uint32_t beforeConnect = localBuzzer.acceptedRequests;
+  scale.connected = true;
+  updateWorkerLinkState();
+  CHECK(localBuzzer.acceptedRequests == beforeConnect);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+
+  processScaleLinkTransitions();
+  CHECK(localBuzzer.acceptedRequests == beforeConnect + 1);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+
+  const uint32_t beforeDisconnect = localBuzzer.acceptedRequests;
+  scale.connected = false;
+  updateWorkerLinkState();
+  CHECK(localBuzzer.acceptedRequests == beforeDisconnect);
+  CHECK(cupPresenceState() == CupPresenceState::PRESENT);
+
+  processScaleLinkTransitions();
+  CHECK(localBuzzer.acceptedRequests == beforeDisconnect + 1);
+  CHECK(cupPresenceState() == CupPresenceState::ABSENT);
+}
+
+void f01_worker_uses_only_published_policy() {
+  resetHarness(false, false);
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
+  publishTestScaleWorkerPolicy();
+  CHECK(currentScaleMacCacheMode() == ScaleMacCacheMode::FIRST);
+
+  // Mutating control-owned state cannot be observed until control publishes.
+  runtimeConfig.scaleMacCacheMode =
+      static_cast<uint8_t>(ScaleMacCacheMode::ONLY);
+  CHECK(currentScaleMacCacheMode() == ScaleMacCacheMode::FIRST);
+  publishTestScaleWorkerPolicy();
+  CHECK(currentScaleMacCacheMode() == ScaleMacCacheMode::ONLY);
+}
+
 void w95_web_buzzer_test_plays_chime_sequence() {
   resetHarness(false, false);
   reachReadyFromBoot();
@@ -3916,6 +3969,7 @@ void w70_bookoo_connect_mutes_in_buzzer_only() {
   runtimeConfig.bookooMuteOnBuzzerOnly = true;
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  publishTestScaleWorkerPolicy();
   scale.commandLog.clear();
   applyBookooConnectBeepPolicy();
   CHECK(scale.commandLog.size() == 1);
@@ -3929,6 +3983,7 @@ void w71_bookoo_connect_sets_volume_in_scale_priority() {
   runtimeConfig.bookooConnectBeepLevel = DEFAULT_BOOKOO_CONNECT_BEEP_LEVEL;
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+  publishTestScaleWorkerPolicy();
   scale.commandLog.clear();
   applyBookooConnectBeepPolicy();
   CHECK(scale.commandLog.size() == 1);
@@ -3941,6 +3996,7 @@ void w72_bookoo_connect_skips_disabled_volume_and_non_bookoo() {
   runtimeConfig.bookooConnectBeepLevel = 0;
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::SCALE_PRIORITY);
+  publishTestScaleWorkerPolicy();
   scale.commandLog.clear();
   applyBookooConnectBeepPolicy();
   CHECK(scale.commandLog.empty());
@@ -4052,6 +4108,7 @@ void w75_bookoo_discovery_connect_applies_beep_policy() {
   runtimeConfig.bookooMuteOnBuzzerOnly = true;
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  publishTestScaleWorkerPolicy();
   scale.scanning = true;
   scale.connected = true;
   scale.commandLog.clear();
@@ -4077,6 +4134,7 @@ void w75_bookoo_discovery_connect_applies_beep_policy() {
   runtimeConfig.bookooMuteOnBuzzerOnly = true;
   runtimeConfig.alertOutputChannel =
       static_cast<uint8_t>(AlertOutputChannel::BUZZER_ONLY);
+  publishTestScaleWorkerPolicy();
   scale.scanning = true;
   scale.connected = true;
   scale.commandLog.clear();
@@ -4541,6 +4599,7 @@ void d02e_mode_change_restarts_an_active_scan_with_the_new_filter() {
   reachReadyFromBoot();
   runtimeConfig.scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
+  publishTestScaleWorkerPolicy();
   setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
@@ -4834,6 +4893,7 @@ void d07_prefer_falls_back_after_grace() {
   reachReadyFromBoot();
   runtimeConfig.scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::PREFER);
+  publishTestScaleWorkerPolicy();
   setHostPreferredScaleMac("AA:BB:CC:DD:EE:FF");
   uint32_t lastScanCycleMs = 0;
   uint32_t lastConnectLogMs = 0;
@@ -4886,6 +4946,7 @@ void d09_first_mode_connects_seen_advertisement() {
   reachReadyFromBoot();
   runtimeConfig.scaleMacCacheMode =
       static_cast<uint8_t>(ScaleMacCacheMode::FIRST);
+  publishTestScaleWorkerPolicy();
   scalePreferredMac[0] = '\0';
   memset(scaleHistory, 0, sizeof(scaleHistory));
   scaleHistorySeq = 0;
@@ -5576,7 +5637,7 @@ void r25_critical_scale_mailbox_never_blocks_and_keeps_latest() {
   CHECK(publishScaleEvent(first, true));
   CHECK(publishScaleEvent(latest, true));
   CHECK(scaleCriticalEventPending);
-  CHECK(scaleEventsDropped == 1);
+  CHECK(scaleWorkerDroppedEventCount() == 1);
   CHECK(scaleCriticalEvent.cycleId == 2);
   ScaleEvent startResult = first;
   startResult.type = ScaleEventType::TIMER_START_RESULT;
@@ -5848,7 +5909,7 @@ void r35_connected_without_weight_stream_is_not_available() {
   resetHarness(false, true);
   reachReadyFromBoot();
   observedWeightSequence = 0;
-  scaleWorkerTaskHandle = reinterpret_cast<TaskHandle_t>(1);
+  setScaleWorkerTaskPresentForHost(true);
   CHECK(getScaleLinkSnapshot().state == ScaleLinkState::CONNECTED);
   publishControlStatus();
   ControlStatusSnapshot status;
@@ -8839,19 +8900,18 @@ void s04e_delete_shot_record_keeps_log_if_curve_remove_fails() {
 
 void b01_scale_worker_requires_ble_stack() {
   resetHarness(false, true);
-  bleStackReady = false;
+  setScaleWorkerBleReadyForHost(false);
   CHECK(!initializeScaleWorker());
   publishControlStatus();
   CHECK(!publishedControlStatus.scaleWorkerReady);
-  bleStackReady = true;
+  setScaleWorkerBleReadyForHost(true);
   publishControlStatus();
-  CHECK(publishedControlStatus.scaleWorkerReady ==
-        (scaleWorkerTaskHandle != nullptr));
+  CHECK(publishedControlStatus.scaleWorkerReady == scaleWorkerReady());
 }
 
 void b02_setup_degrades_without_ble() {
   resetHarness(false, true);
-  bleStackReady = false;
+  setScaleWorkerBleReadyForHost(false);
   setup();
   CHECK(bootDegraded);
   CHECK(!firmwareInitializationComplete);
@@ -9248,7 +9308,7 @@ void h01_health_threshold_alerts_fire_once_per_crossing() {
   freeHeapBytes = HEALTH_HEAP_FREE_ALERT_BYTES - 1;
   largestFreeHeapBlockBytes = HEALTH_HEAP_LARGEST_CLEAR_BYTES;
   loopStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
-  scaleWorkerStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  setScaleWorkerStackMinWordsForHost(HEALTH_STACK_MIN_CLEAR_WORDS);
   serviceHealthThresholdAlerts(0);
   CHECK(debugEventExists(DebugCode::HEALTH_HEAP_LOW,
                          static_cast<int32_t>(freeHeapBytes),
@@ -9289,7 +9349,7 @@ void h01b_health_heap_low_restarts_only_when_ready_and_sustained() {
   freeHeapBytes = HEALTH_HEAP_FREE_ALERT_BYTES - 1;
   largestFreeHeapBlockBytes = HEALTH_HEAP_LARGEST_ALERT_BYTES - 1;
   loopStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
-  scaleWorkerStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  setScaleWorkerStackMinWordsForHost(HEALTH_STACK_MIN_CLEAR_WORDS);
   serviceHealthThresholdAlerts(0);
   CHECK(healthHeapAlertLatched);
   CHECK(!safeRestartRequested);
@@ -9318,7 +9378,7 @@ void h01b_health_heap_low_restarts_only_when_ready_and_sustained() {
   freeHeapBytes = HEALTH_HEAP_FREE_ALERT_BYTES - 1;
   largestFreeHeapBlockBytes = HEALTH_HEAP_LARGEST_ALERT_BYTES - 1;
   loopStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
-  scaleWorkerStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  setScaleWorkerStackMinWordsForHost(HEALTH_STACK_MIN_CLEAR_WORDS);
   serviceHealthThresholdAlerts(0);
   hostMillis += HEALTH_HEAP_LOW_RESTART_MS / 2;
   serviceHealthThresholdAlerts(0);
@@ -9337,7 +9397,7 @@ void h01b_health_heap_low_restarts_only_when_ready_and_sustained() {
   freeHeapBytes = HEALTH_HEAP_FREE_ALERT_BYTES - 1;
   largestFreeHeapBlockBytes = HEALTH_HEAP_LARGEST_ALERT_BYTES - 1;
   loopStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
-  scaleWorkerStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  setScaleWorkerStackMinWordsForHost(HEALTH_STACK_MIN_CLEAR_WORDS);
   serviceHealthThresholdAlerts(0);
   hostMillis += HEALTH_HEAP_LOW_RESTART_MS;
   serviceHealthThresholdAlerts(0);
@@ -9351,7 +9411,7 @@ void h01b_health_heap_low_restarts_only_when_ready_and_sustained() {
   freeHeapBytes = HEALTH_HEAP_FREE_ALERT_BYTES - 1;
   largestFreeHeapBlockBytes = HEALTH_HEAP_LARGEST_ALERT_BYTES - 1;
   loopStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
-  scaleWorkerStackMinWords = HEALTH_STACK_MIN_CLEAR_WORDS;
+  setScaleWorkerStackMinWordsForHost(HEALTH_STACK_MIN_CLEAR_WORDS);
   serviceHealthThresholdAlerts(0);
   hostMillis += HEALTH_HEAP_LOW_RESTART_MS;
   serviceHealthThresholdAlerts(0);
@@ -11471,6 +11531,8 @@ const TestCase testCases[] = {
     {"W92", w92_parse_sequence_pattern_ids},
     {"W93", w93_scale_connected_echo_on_rising_edge},
     {"W94", w94_scale_connected_silent_when_flag_off_or_scale_only},
+    {"F01A", f01_link_side_effects_run_only_on_control},
+    {"F01B", f01_worker_uses_only_published_policy},
     {"W95", w95_web_buzzer_test_plays_chime_sequence},
     {"W96", w96_echo_inverted_uses_long_bookend_tones},
     {"W98", w98_buzzer_sequences_start_and_end_with_sound},

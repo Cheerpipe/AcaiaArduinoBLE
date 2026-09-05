@@ -39,10 +39,6 @@ void feedOrTripCurrentTaskWatchdog();
 bool feedCurrentTaskWatchdog();
 void reportTaskWatchdogFault();
 shotstopper::RelaySafetySnapshot getRelaySafetySnapshot();
-void commitLiveRuntimeConfig(const shotstopper::RuntimeConfig &composed,
-                             int32_t reasonBits);
-void resetCupPresence();
-bool emitAlert(shotstopper::AlertEvent event, uint32_t cycleId = 0);
 shotstopper::BleCompanionStatusSnapshot copyBleCompanionStatus();
 void copyBleCompanionRuntimeSnapshot(
     shotstopper::BleCompanionRuntimeSnapshot &output);
@@ -54,12 +50,8 @@ bool bleCompanionStatusUnchanged(
     const shotstopper::BleCompanionStatusSnapshot &b);
 bool bleCompanionStatusShouldPublish(bool scaleLinked, bool changed,
                                      uint32_t lastPublishMs, uint32_t nowMs);
-extern bool firmwareInitializationComplete;
 extern QueueHandle_t bleCompanionRequestQueue;
 extern QueueHandle_t bleCompanionResultQueue;
-extern shotstopper::RuntimeConfig runtimeConfig;
-bool soundAlertsEnabled();
-shotstopper::AlertOutputChannel currentAlertOutputChannel();
 #if !defined(SHOT_STOPPER_HOST_TEST)
 extern shotstopper::ShotStopperNetwork networkManager;
 extern shotstopper::ShotStopperBleCompanion *bleCompanion;
@@ -171,7 +163,7 @@ void reportNimbleRuntimeHealth(bool force) {
 #endif
 
 EspressoScaleBLE scale(DEBUG);
-TaskHandle_t scaleWorkerTaskHandle = nullptr;
+static TaskHandle_t scaleWorkerTaskHandle = nullptr;
 QueueHandle_t scaleCommandQueue = nullptr;
 QueueHandle_t scaleEventQueue = nullptr;
 portMUX_TYPE scaleLinkMux = portMUX_INITIALIZER_UNLOCKED;
@@ -197,7 +189,7 @@ uint8_t scaleLastDisconnectReason = 0;
 bool scaleTimerValid = false;
 uint32_t scaleTimerMs = 0;
 uint32_t scaleTimerAgeMs = 0;
-char scaleProtocolName[20] = "none";
+static char scaleProtocolName[20] = "none";
 ScaleFeatureSet scaleLinkFeatures = {};
 bool scaleLinkRssiValid = false;
 int8_t scaleLinkRssi = 0;
@@ -212,8 +204,8 @@ uint32_t scalePreferredDirectedResetGeneration = 0;
 uint32_t scalePreferredAppliedResetGeneration = 0;
 uint8_t scalePreferredResetReasonBits = 0;
 uint32_t scaleWorkerProgressAtMs = 0;
-uint32_t scaleEventsDropped = 0;
-uint32_t scaleWorkerStackMinWords = 0;
+static std::atomic<uint32_t> scaleEventsDropped{0};
+static std::atomic<uint32_t> scaleWorkerStackMinWords{0};
 ScaleEvent scaleCriticalEvent;
 bool scaleCriticalEventPending = false;
 ScaleEvent scaleTimerStartEvent;
@@ -238,7 +230,108 @@ std::atomic<uint8_t> liveBleScanIntensityRaw{
 bool bookooConnectBeepPending = false;
 bool bookooConnectBeepSawWeight = false;
 uint32_t bookooConnectBeepArmedAtMs = 0;
-bool bleStackReady = false;
+static std::atomic<bool> bleStackReady{false};
+static std::atomic<bool> scaleWorkerStartupFinished{false};
+
+namespace {
+
+constexpr uint32_t kPolicyControlReadyBit = 1U << 0;
+constexpr uint32_t kPolicySoundAlertsBit = 1U << 1;
+constexpr uint32_t kPolicyBookooMuteBit = 1U << 2;
+constexpr uint32_t kPolicyAlertChannelShift = 3;
+constexpr uint32_t kPolicyAlertChannelMask = 0x3U;
+constexpr uint32_t kPolicyBookooLevelShift = 8;
+constexpr uint32_t kPolicyBookooLevelMask = 0xffU;
+constexpr uint32_t kPolicyMacCacheModeShift = 16;
+constexpr uint32_t kPolicyMacCacheModeMask = 0x3U;
+
+// Safe pre-publication default: do not emit sound, use ONLY discovery.
+static std::atomic<uint32_t> scaleWorkerPolicyBits{
+    static_cast<uint32_t>(ScaleMacCacheMode::ONLY)
+    << kPolicyMacCacheModeShift};
+
+struct ScaleWorkerPolicySnapshot {
+  bool controlReady = false;
+  bool soundAlertsEnabled = false;
+  bool bookooMuteOnBuzzerOnly = true;
+  AlertOutputChannel alertOutputChannel = AlertOutputChannel::SCALE_ONLY;
+  uint8_t bookooConnectBeepLevel = 0;
+  ScaleMacCacheMode macCacheMode = ScaleMacCacheMode::ONLY;
+};
+
+ScaleWorkerPolicySnapshot currentScaleWorkerPolicy() {
+  const uint32_t bits = scaleWorkerPolicyBits.load(std::memory_order_acquire);
+  ScaleWorkerPolicySnapshot policy;
+  policy.controlReady = (bits & kPolicyControlReadyBit) != 0;
+  policy.soundAlertsEnabled = (bits & kPolicySoundAlertsBit) != 0;
+  policy.bookooMuteOnBuzzerOnly = (bits & kPolicyBookooMuteBit) != 0;
+  policy.alertOutputChannel = static_cast<AlertOutputChannel>(
+      (bits >> kPolicyAlertChannelShift) & kPolicyAlertChannelMask);
+  policy.bookooConnectBeepLevel = static_cast<uint8_t>(
+      (bits >> kPolicyBookooLevelShift) & kPolicyBookooLevelMask);
+  policy.macCacheMode = static_cast<ScaleMacCacheMode>(
+      (bits >> kPolicyMacCacheModeShift) & kPolicyMacCacheModeMask);
+  return policy;
+}
+
+}  // namespace
+
+void publishScaleWorkerPolicy(const RuntimeConfig &config, bool controlReady) {
+  const AlertOutputChannel channel =
+      effectiveAlertOutputChannel(config.alertOutputChannel);
+  const ScaleMacCacheMode cacheMode =
+      validScaleMacCacheMode(config.scaleMacCacheMode)
+          ? static_cast<ScaleMacCacheMode>(config.scaleMacCacheMode)
+          : ScaleMacCacheMode::ONLY;
+  uint32_t bits = controlReady ? kPolicyControlReadyBit : 0U;
+  if (!config.soundAlertsMuted) {
+    bits |= kPolicySoundAlertsBit;
+  }
+  if (config.bookooMuteOnBuzzerOnly) {
+    bits |= kPolicyBookooMuteBit;
+  }
+  bits |= static_cast<uint32_t>(channel) << kPolicyAlertChannelShift;
+  bits |= static_cast<uint32_t>(config.bookooConnectBeepLevel)
+          << kPolicyBookooLevelShift;
+  bits |= static_cast<uint32_t>(cacheMode) << kPolicyMacCacheModeShift;
+  scaleWorkerPolicyBits.store(bits, std::memory_order_release);
+}
+
+bool scaleWorkerReady() {
+  return scaleWorkerTaskHandle != nullptr &&
+         bleStackReady.load(std::memory_order_acquire);
+}
+
+uint32_t scaleWorkerDroppedEventCount() {
+  return scaleEventsDropped.load(std::memory_order_relaxed);
+}
+
+uint32_t scaleWorkerStackMinWordsValue() {
+  return scaleWorkerStackMinWords.load(std::memory_order_relaxed);
+}
+
+#if defined(SHOT_STOPPER_HOST_TEST)
+void setScaleWorkerBleReadyForHost(bool ready) {
+  bleStackReady.store(ready, std::memory_order_release);
+}
+
+void setScaleWorkerTaskPresentForHost(bool present) {
+  scaleWorkerTaskHandle =
+      present ? reinterpret_cast<TaskHandle_t>(1) : nullptr;
+}
+
+void setScaleWorkerStackMinWordsForHost(uint32_t words) {
+  scaleWorkerStackMinWords.store(words, std::memory_order_relaxed);
+}
+
+void resetScaleWorkerMetricsForHost() {
+  scaleWorkerTaskHandle = nullptr;
+  bleStackReady.store(false, std::memory_order_relaxed);
+  scaleWorkerStartupFinished.store(false, std::memory_order_relaxed);
+  scaleEventsDropped.store(0, std::memory_order_relaxed);
+  scaleWorkerStackMinWords.store(0, std::memory_order_relaxed);
+}
+#endif
 
 static uint32_t scaleCommandDropCount = 0;
 
@@ -387,18 +480,6 @@ void setScaleLinkState(ScaleLinkState state) {
                   state == ScaleLinkState::CONNECTED
                       ? 0
                       : static_cast<int32_t>(scaleLastDisconnectReason));
-    if (state == ScaleLinkState::CONNECTED &&
-        runtimeConfig.buzzerScaleConnectedBeep) {
-      emitAlert(AlertEvent::SCALE_CONNECTED);
-    } else if (previous == ScaleLinkState::CONNECTED &&
-               state != ScaleLinkState::CONNECTED &&
-               runtimeConfig.buzzerScaleLostBeep) {
-      emitAlert(AlertEvent::SCALE_LOST);
-    }
-  }
-  if (previous == ScaleLinkState::CONNECTED &&
-      state != ScaleLinkState::CONNECTED) {
-    resetCupPresence();
   }
 }
 
@@ -454,7 +535,7 @@ bool publishScaleEvent(const ScaleEvent &event, bool critical) {
       }
       stamped.packetSequence = scalePacketSequence;
     }
-    if (firmwareInitializationComplete &&
+    if (currentScaleWorkerPolicy().controlReady &&
         scaleLinkState == ScaleLinkState::CONNECTED &&
         lastScaleWeightAtMs != 0 &&
         static_cast<int32_t>(stamped.receivedAtMs - lastScaleWeightAtMs) > 0) {
@@ -783,23 +864,24 @@ void applyBookooConnectBeepPolicy() {
       !scale.features().has(ScaleFeatureIndependentBeep)) {
     return;
   }
-  if (!soundAlertsEnabled()) {
+  const ScaleWorkerPolicySnapshot policy = currentScaleWorkerPolicy();
+  if (!policy.soundAlertsEnabled) {
     (void)scale.setBeepLevel(0);
     yieldBetweenScaleAttOps();
     return;
   }
-  const AlertOutputChannel channel = currentAlertOutputChannel();
-  if (runtimeConfig.bookooMuteOnBuzzerOnly &&
+  const AlertOutputChannel channel = policy.alertOutputChannel;
+  if (policy.bookooMuteOnBuzzerOnly &&
       channel == AlertOutputChannel::BUZZER_ONLY) {
     (void)scale.setBeepLevel(0);
     yieldBetweenScaleAttOps();
     return;
   }
-  if (runtimeConfig.bookooConnectBeepLevel >= 1 &&
-      runtimeConfig.bookooConnectBeepLevel <= BOOKOO_BEEP_LEVEL_MAX &&
+  if (policy.bookooConnectBeepLevel >= 1 &&
+      policy.bookooConnectBeepLevel <= BOOKOO_BEEP_LEVEL_MAX &&
       (channel == AlertOutputChannel::SCALE_ONLY ||
        channel == AlertOutputChannel::SCALE_PRIORITY)) {
-    (void)scale.setBeepLevel(runtimeConfig.bookooConnectBeepLevel);
+    (void)scale.setBeepLevel(policy.bookooConnectBeepLevel);
     yieldBetweenScaleAttOps();
   }
 }
@@ -839,28 +921,6 @@ void serviceBookooConnectBeepPolicy(bool sawWeightThisTick) {
   }
   bookooConnectBeepPending = false;
   applyBookooConnectBeepPolicy();
-}
-
-void requestBookooSilenceIfConfigured() {
-  if (!soundAlertsEnabled()) {
-    (void)enqueueScaleDebugCommand(BookooDebugAction::VOLUME, 0);
-    return;
-  }
-  if (runtimeConfig.bookooMuteOnBuzzerOnly &&
-      currentAlertOutputChannel() == AlertOutputChannel::BUZZER_ONLY) {
-    (void)enqueueScaleDebugCommand(BookooDebugAction::VOLUME, 0);
-  }
-}
-
-void requestBookooAlertVolumeRestore() {
-  const AlertOutputChannel channel = currentAlertOutputChannel();
-  if (soundAlertsEnabled() && runtimeConfig.bookooConnectBeepLevel >= 1 &&
-      runtimeConfig.bookooConnectBeepLevel <= BOOKOO_BEEP_LEVEL_MAX &&
-      (channel == AlertOutputChannel::SCALE_ONLY ||
-       channel == AlertOutputChannel::SCALE_PRIORITY)) {
-    (void)enqueueScaleDebugCommand(BookooDebugAction::VOLUME,
-                                   runtimeConfig.bookooConnectBeepLevel);
-  }
 }
 
 void requestScaleBrewBeep(uint32_t cycleId) {
@@ -1021,7 +1081,7 @@ uint8_t takeScalePreferenceResetReasons() {
 }
 
 ScaleMacCacheMode currentScaleMacCacheMode() {
-  return static_cast<ScaleMacCacheMode>(runtimeConfig.scaleMacCacheMode);
+  return currentScaleWorkerPolicy().macCacheMode;
 }
 
 bool scaleHuntRfClearActive(uint32_t nowMs = millis()) {
@@ -1322,6 +1382,9 @@ void resetScaleWorkerRadioStateForHost() {
   scaleLinkRssiValid = false;
   scaleLinkRssi = 0;
   lastScaleLinkRssiSampleMs = 0;
+  portENTER_CRITICAL(&scaleLinkMux);
+  copyCString(scaleProtocolName, sizeof(scaleProtocolName), "none");
+  portEXIT_CRITICAL(&scaleLinkMux);
   portENTER_CRITICAL(&scalePreferredMacMux);
   scalePreferredDirectedResetGeneration = 0;
   scalePreferredAppliedResetGeneration = 0;
@@ -1693,8 +1756,10 @@ void scaleWorkerTask(void *) {
 #if !defined(SHOT_STOPPER_HOST_TEST)
   // The optional Companion GATT profile was registered before this start;
   // the central and peripheral roles share this one native host runtime.
-  bleStackReady = shotStopperBleRuntimeStart(BLE_STACK_READY_WAIT_MS);
-  if (!bleStackReady) {
+  const bool runtimeReady =
+      shotStopperBleRuntimeStart(BLE_STACK_READY_WAIT_MS);
+  bleStackReady.store(runtimeReady, std::memory_order_release);
+  if (!runtimeReady) {
     addDebugEvent(DebugCategory::SCALE, DebugCode::INITIALIZATION_FAILED,
                   BOOT_SUBSYSTEM_BLE);
     logEmit(LogLevel::ERROR, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
@@ -1717,10 +1782,11 @@ void scaleWorkerTask(void *) {
       vQueueDelete(bleCompanionResultQueue);
       bleCompanionResultQueue = nullptr;
     }
-    scaleWorkerTaskHandle = nullptr;
+    scaleWorkerStartupFinished.store(true, std::memory_order_release);
     vTaskDelete(nullptr);
     return;
   }
+  scaleWorkerStartupFinished.store(true, std::memory_order_release);
   ensureRfCoexBt();
   logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
           BOOT_SUBSYSTEM_BLE, 1);
@@ -1871,8 +1937,9 @@ void scaleWorkerTask(void *) {
     }
     if (elapsedMs(telemetryAtMs) >= HEALTH_TELEMETRY_INTERVAL_MS) {
       telemetryAtMs = millis();
-      scaleWorkerStackMinWords =
-          static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
+      scaleWorkerStackMinWords.store(
+          static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr)),
+          std::memory_order_relaxed);
 #if !defined(SHOT_STOPPER_HOST_TEST)
       reportNimbleRuntimeHealth(false);
 #endif
@@ -1881,6 +1948,10 @@ void scaleWorkerTask(void *) {
 }
 
 bool initializeScaleWorker() {
+  scaleWorkerStartupFinished.store(false, std::memory_order_relaxed);
+#if !defined(SHOT_STOPPER_HOST_TEST)
+  bleStackReady.store(false, std::memory_order_relaxed);
+#endif
   scaleCommandQueue =
       xQueueCreate(SCALE_COMMAND_QUEUE_LENGTH, sizeof(ScaleCommand));
   scaleEventQueue = xQueueCreate(SCALE_EVENT_QUEUE_LENGTH,
@@ -1941,6 +2012,7 @@ bool initializeScaleWorker() {
     bleCompanionRequestQueue = nullptr;
     bleCompanionResultQueue = nullptr;
     scaleWorkerTaskHandle = nullptr;
+    scaleWorkerStartupFinished.store(true, std::memory_order_release);
     return false;
   }
 #if !defined(SHOT_STOPPER_HOST_TEST)
@@ -1948,13 +2020,17 @@ bool initializeScaleWorker() {
   // until the controller has finished HCI reset: setup() continues on the
   // same core and network_manager shares core 0 with bleTask.
   const uint32_t bleWaitStartMs = millis();
-  while (scaleWorkerTaskHandle != nullptr && !bleStackReady &&
+  while (!scaleWorkerStartupFinished.load(std::memory_order_acquire) &&
          elapsedMs(bleWaitStartMs) < BLE_STACK_READY_WAIT_MS) {
     feedOrTripCurrentTaskWatchdog();
     delay(20);
   }
+#else
+  // Host task stubs do not execute scaleWorkerTask(). Tests inject BLE startup
+  // readiness explicitly before initializeScaleWorker().
+  scaleWorkerStartupFinished.store(true, std::memory_order_release);
 #endif
-  return scaleWorkerTaskHandle != nullptr && bleStackReady;
+  return scaleWorkerReady();
 }
 
 }  // namespace shotstopper

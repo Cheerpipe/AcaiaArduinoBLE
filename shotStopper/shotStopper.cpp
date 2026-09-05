@@ -409,6 +409,10 @@ uint32_t recoverableStaleDisconnectSequence = 0;
 uint32_t recoverableStaleConnectionGeneration = 0;
 WeightStreamState telemetryWeightStreamState = WeightStreamState::NO_SAMPLE;
 bool scaleCompletionBeepScheduled = false;
+// Control-owned cursors over the worker-published monotonic link counters.
+// They let control observe every kind of edge without touching worker state.
+uint32_t handledScaleConnectionGeneration = 0;
+uint32_t handledScaleDisconnectSequence = 0;
 #ifndef SHOT_STOPPER_HOST_TEST
 bool webhookBrewStartPending = false;
 #endif
@@ -1222,8 +1226,9 @@ void persistLastShotFromEndedCycle(EndReason reason, uint32_t durationMs) {
             ? 0U
             : session.config.minBbwBrewTimeMs - durationMs;
   }
+  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
   copyCString(last.scaleProtocol, sizeof(last.scaleProtocol),
-              scaleProtocolName);
+              link.protocolName);
   last.scaleProtocol[sizeof(last.scaleProtocol) - 1] = '\0';
   applyLastShotManualFields(last);
   persistLastShotSnapshot(last);
@@ -1795,6 +1800,27 @@ AlertOutputChannel currentAlertOutputChannel() {
 }
 
 bool soundAlertsEnabled() { return !runtimeConfig.soundAlertsMuted; }
+
+// These policy decisions execute only on the control task. The worker receives
+// a concrete volume command and never reads runtimeConfig.
+void requestBookooSilenceIfConfigured() {
+  if (!soundAlertsEnabled() ||
+      (runtimeConfig.bookooMuteOnBuzzerOnly &&
+       currentAlertOutputChannel() == AlertOutputChannel::BUZZER_ONLY)) {
+    (void)enqueueScaleDebugCommand(BookooDebugAction::VOLUME, 0);
+  }
+}
+
+void requestBookooAlertVolumeRestore() {
+  const AlertOutputChannel channel = currentAlertOutputChannel();
+  if (soundAlertsEnabled() && runtimeConfig.bookooConnectBeepLevel >= 1 &&
+      runtimeConfig.bookooConnectBeepLevel <= BOOKOO_BEEP_LEVEL_MAX &&
+      (channel == AlertOutputChannel::SCALE_ONLY ||
+       channel == AlertOutputChannel::SCALE_PRIORITY)) {
+    (void)enqueueScaleDebugCommand(BookooDebugAction::VOLUME,
+                                   runtimeConfig.bookooConnectBeepLevel);
+  }
+}
 
 #ifndef SHOT_STOPPER_HOST_TEST
 void serviceBootRecoverySafety();
@@ -2448,8 +2474,9 @@ void schedulePendingShotFinalize(EndReason reason, uint32_t durationMs) {
       noScaleBbwEnabled(runtimeConfig.noScaleBbwMode);
   pendingFinalize.noScaleShotGuardArmed = noScaleShotGuardArmed;
   pendingFinalize.noScaleBbwMode = runtimeConfig.noScaleBbwMode;
+  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
   copyCString(pendingFinalize.scaleProtocol,
-              sizeof(pendingFinalize.scaleProtocol), scaleProtocolName);
+              sizeof(pendingFinalize.scaleProtocol), link.protocolName);
   pendingFinalize.scaleProtocol[sizeof(pendingFinalize.scaleProtocol) - 1] =
       '\0';
   if (session.hasWeightAnchor) {
@@ -3187,7 +3214,49 @@ void servicePreferredScaleMacPersistence() {
 
 
 
+void processScaleLinkTransitions() {
+  const ScaleLinkSnapshot link = getScaleLinkSnapshot();
+  const bool connectedEdge =
+      link.connectionGeneration != handledScaleConnectionGeneration;
+  const bool disconnectedEdge =
+      link.disconnectSequence != handledScaleDisconnectSequence;
+
+  auto handleConnected = [&]() {
+    if (runtimeConfig.buzzerScaleConnectedBeep) {
+      emitAlert(AlertEvent::SCALE_CONNECTED);
+    }
+  };
+  auto handleDisconnected = [&]() {
+    if (runtimeConfig.buzzerScaleLostBeep) {
+      emitAlert(AlertEvent::SCALE_LOST);
+    }
+    // Cup presence is control-owned. A link loss invalidates the observation,
+    // but only this task is allowed to mutate the detector.
+    resetCupPresence();
+  };
+
+  // If both edges occurred between control slices, the final state determines
+  // their order. Side effects are intentionally coalesced to one per edge kind;
+  // the monotonic counters make the disconnect reset impossible to lose.
+  if (connectedEdge && disconnectedEdge) {
+    if (link.state == ScaleLinkState::CONNECTED) {
+      handleDisconnected();
+      handleConnected();
+    } else {
+      handleConnected();
+      handleDisconnected();
+    }
+  } else if (connectedEdge) {
+    handleConnected();
+  } else if (disconnectedEdge) {
+    handleDisconnected();
+  }
+  handledScaleConnectionGeneration = link.connectionGeneration;
+  handledScaleDisconnectSequence = link.disconnectSequence;
+}
+
 void processScaleWorkerEvents() {
+  processScaleLinkTransitions();
   if (scaleEventQueue == nullptr && !scaleCriticalEventPending &&
       !scaleTimerStartEventPending && !scaleWeightEventPending) {
     return;
@@ -4146,6 +4215,7 @@ void commitLiveRuntimeConfig(const RuntimeConfig &composed, int32_t reasonBits) 
   const uint8_t previousNoScaleMode = runtimeConfig.noScaleBbwMode;
   const uint8_t previousScaleMacCacheMode = runtimeConfig.scaleMacCacheMode;
   runtimeConfig = composed;
+  publishScaleWorkerPolicy(runtimeConfig, firmwareInitializationComplete);
   if (runtimeConfig.scaleMacCacheMode != previousScaleMacCacheMode) {
     requestScalePreferenceModeReset();
   }
@@ -5256,7 +5326,7 @@ void publishControlStatus() {
                                                  : loopIntervalGapMs;
   next.loopMaxGapMs = loopMaxGapMs;
   next.loopStackMinWords = loopStackMinWords;
-  next.scaleStackMinWords = scaleWorkerStackMinWords;
+  next.scaleStackMinWords = scaleWorkerStackMinWordsValue();
   next.freeHeapBytes = freeHeapBytes;
   next.minimumFreeHeapBytes = minimumFreeHeapBytes;
   next.largestFreeHeapBlockBytes = largestFreeHeapBlockBytes;
@@ -5282,7 +5352,7 @@ void publishControlStatus() {
 #endif
   next.allocExternalFallbackCount = allocExternalFallbackCount();
   next.hwmon = hwmonSnapshot;
-  next.scaleEventsDropped = scaleEventsDropped;
+  next.scaleEventsDropped = scaleWorkerDroppedEventCount();
   next.config = effectiveRuntimeConfig();
   next.lastCycle = lastCycle;
   next.lastShot = persistedLastShot;
@@ -5383,8 +5453,7 @@ void publishControlStatus() {
   next.configPersistFailed = runtimePersistFailed;
   next.bootComplete = firmwareInitializationComplete;
   next.bootDegraded = bootDegraded;
-  next.scaleWorkerReady =
-      scaleWorkerTaskHandle != nullptr && bleStackReady;
+  next.scaleWorkerReady = scaleWorkerReady();
   next.usbConsoleIo4Closed = usbConsoleJumperPresent();
   next.usbSerialEnableSource = usbSerialEnableSource;
   next.bleCompanionResultDropped = bleCompanionResultDropped;
@@ -5621,7 +5690,7 @@ void serialCliPrintLiveHealth() {
       healthIntervalMaxGapMs > loopIntervalGapMs ? healthIntervalMaxGapMs
                                                  : loopIntervalGapMs;
   dump.loopStackMinWords = loopStackMinWords;
-  dump.scaleWorkerStackMinWords = scaleWorkerStackMinWords;
+  dump.scaleWorkerStackMinWords = scaleWorkerStackMinWordsValue();
 #ifndef SHOT_STOPPER_HOST_TEST
   dump.networkStackMinWords = networkManager.snapshot().taskStackMinWords;
 #endif
@@ -6208,6 +6277,7 @@ void setup() {
                    static_cast<LogLevel>(runtimeConfig.ringRetainLogLevel));
   configureEspLogRuntime();
   publishRecipeState();
+  publishScaleWorkerPolicy(runtimeConfig, false);
 
   logEmit(LogLevel::INFO, DebugCategory::BOOT, DebugCode::BOOT_RESET_REASON,
           static_cast<int32_t>(safetyResetStatus.reasonCode));
@@ -6365,6 +6435,7 @@ void setup() {
   bootDegraded = !persistenceReady || !scaleWorkerOk || !webQueueOk ||
                  !networkOk;
   firmwareInitializationComplete = !bootDegraded;
+  publishScaleWorkerPolicy(runtimeConfig, firmwareInitializationComplete);
   if (firmwareInitializationComplete) {
     addDebugEvent(DebugCategory::BOOT, DebugCode::BOOT_READY);
   } else {
@@ -6413,9 +6484,9 @@ void serviceHealthThresholdAlerts(uint32_t intervalMaxGapMs) {
   if (loopStackMinWords > 0 && loopStackMinWords < worstStackWords) {
     worstStackWords = loopStackMinWords;
   }
-  if (scaleWorkerStackMinWords > 0 &&
-      scaleWorkerStackMinWords < worstStackWords) {
-    worstStackWords = scaleWorkerStackMinWords;
+  const uint32_t scaleStackMinWords = scaleWorkerStackMinWordsValue();
+  if (scaleStackMinWords > 0 && scaleStackMinWords < worstStackWords) {
+    worstStackWords = scaleStackMinWords;
   }
 #ifndef SHOT_STOPPER_HOST_TEST
   const uint32_t networkStack = networkManager.snapshot().taskStackMinWords;
@@ -6433,7 +6504,7 @@ void serviceHealthThresholdAlerts(uint32_t intervalMaxGapMs) {
     healthStackAlertLatched = true;
     addDebugEvent(DebugCategory::SYSTEM, DebugCode::HEALTH_STACK_LOW,
                   static_cast<int32_t>(loopStackMinWords),
-                  static_cast<int32_t>(scaleWorkerStackMinWords));
+                  static_cast<int32_t>(scaleStackMinWords));
   } else if (stackClear) {
     healthStackAlertLatched = false;
   }

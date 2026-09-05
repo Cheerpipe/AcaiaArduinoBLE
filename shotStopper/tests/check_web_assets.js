@@ -431,6 +431,15 @@ if (!firmware.includes('scaleWorkerTickDelayMs()') ||
   throw new Error(
       'No-scale idle must relax worker/loop; status snapshot is GET-driven, not 50 ms');
 }
+if (/\bruntimeConfig\b/.test(scaleWorker) ||
+    /\bfirmwareInitializationComplete\b/.test(scaleWorker) ||
+    /\bresetCupPresence\s*\(/.test(scaleWorker) ||
+    /\bemitAlert\s*\(/.test(scaleWorker) ||
+    !firmwareCore.includes('publishScaleWorkerPolicy(runtimeConfig,') ||
+    !firmwareCore.includes('void processScaleLinkTransitions()')) {
+  throw new Error(
+      'Scale worker must consume published policy/facts; only control may mutate cup state or emit alerts');
+}
 {
   const loopBody = firmwareCore.slice(firmwareCore.indexOf('void loop()'));
   const drainCount = (loopBody.match(/processScaleWorkerEvents\(\)/g) || []).length;

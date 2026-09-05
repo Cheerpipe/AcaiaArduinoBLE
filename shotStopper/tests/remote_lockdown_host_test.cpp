@@ -112,8 +112,9 @@ void resetHarness() {
   criticalTaskWatchdogFault = false;
   platformClockReady = true;
   persistenceReady = true;
-  bleStackReady = true;
+  setScaleWorkerBleReadyForHost(true);
   firmwareInitializationComplete = true;
+  publishScaleWorkerPolicy(runtimeConfig, firmwareInitializationComplete);
 
   scaleCommandQueue =
       xQueueCreate(SCALE_COMMAND_QUEUE_LENGTH, sizeof(ScaleCommand));

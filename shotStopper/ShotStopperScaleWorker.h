@@ -62,6 +62,10 @@ bool scaleWorkerCopyPreferredIfDirty(char *mac, char *name,
 void scaleWorkerClearPreferredDirty();
 bool scaleWorkerTakeConnectedEdge();
 
+// Control publishes only the worker-owned subset of RuntimeConfig. The worker
+// never reads the orchestrator's mutable runtimeConfig object directly.
+void publishScaleWorkerPolicy(const RuntimeConfig &config, bool controlReady);
+
 ScaleLinkSnapshot getScaleLinkSnapshot();
 void setScaleLinkState(ScaleLinkState state);
 void markScaleWorkerProgress();
@@ -71,6 +75,16 @@ bool enqueueScaleCommand(const ScaleCommand &command, bool toFront = false);
 bool publishScaleEvent(const ScaleEvent &event, bool critical);
 bool initializeScaleWorker();
 void resetScaleWorkerRadioStateForHost();
+bool scaleWorkerReady();
+uint32_t scaleWorkerDroppedEventCount();
+uint32_t scaleWorkerStackMinWordsValue();
+
+#if defined(SHOT_STOPPER_HOST_TEST)
+void setScaleWorkerBleReadyForHost(bool ready);
+void setScaleWorkerTaskPresentForHost(bool present);
+void setScaleWorkerStackMinWordsForHost(uint32_t words);
+void resetScaleWorkerMetricsForHost();
+#endif
 
 void copyPreferredScaleMac(char *out, size_t capacity);
 void copyPreferredScaleName(char *out, size_t capacity);
@@ -86,8 +100,6 @@ void requestScalePreferenceModeReset();
 
 bool enqueueScaleDebugCommand(BookooDebugAction action, uint8_t beepLevel);
 bool scaleHasVolumeControl();
-void requestBookooSilenceIfConfigured();
-void requestBookooAlertVolumeRestore();
 
 void requestScaleBrewBeep(uint32_t cycleId);
 void cancelScaleBrewBeep(uint32_t cycleId);
@@ -99,16 +111,12 @@ void cancelOperationalScaleBeeps();
 
 // Orchestrator-owned. The worker task is the BLE radio guest for Companion.
 extern EspressoScaleBLE scale;
-extern TaskHandle_t scaleWorkerTaskHandle;
 extern QueueHandle_t scaleCommandQueue;
 extern QueueHandle_t scaleEventQueue;
 extern portMUX_TYPE scaleLinkMux;
 extern portMUX_TYPE scalePreferredMacMux;
 extern portMUX_TYPE scaleCriticalEventMux;
 extern portMUX_TYPE scaleWeightEventMux;
-extern bool bleStackReady;
-extern uint32_t scaleEventsDropped;
-extern uint32_t scaleWorkerStackMinWords;
 extern uint32_t scalePacketSequence;
 extern char scalePreferredMac[PREFERRED_SCALE_MAC_CAPACITY];
 extern char scalePreferredName[PREFERRED_SCALE_NAME_CAPACITY];
@@ -125,6 +133,5 @@ extern bool scaleWeightEventPending;
 extern bool scaleBeepPending;
 extern uint32_t scaleBeepCycleId;
 extern bool scaleCompletionBeepPending;
-extern char scaleProtocolName[20];
 
 }  // namespace shotstopper
