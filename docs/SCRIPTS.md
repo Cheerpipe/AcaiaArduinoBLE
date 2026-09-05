@@ -56,6 +56,7 @@ prompting. The same applies with `SHOTSTOPPER_NONINTERACTIVE=1`.
 | `-b`, `--build-dir` | `SHOTSTOPPER_BUILD_DIR_OVERRIDE` | Build directory (`static`/`static-idf` only). |
 | `-o`, `--output-dir` | `SHOTSTOPPER_OUTPUT_DIR` | Reports directory (`static` / `static-idf` only). |
 | `--force` | — | OTA scripts only: commit without an interactive prompt and wait for the rebooted firmware to confirm itself through the HTTP API. No Web UI reload is required. |
+| `--no-check` | — | Flash/OTA only: skip the local image identity check and the implicit rebuild, flashing the existing build outputs as-is. `bf`/`bfm`/`bsfm`/`bo` pass it to their install step automatically because `build-idf` just verified the image. |
 | `-h`, `--help` | — | Show the script help. |
 
 Suggested `--flags` at the prompt (Enter accepts them):
@@ -85,14 +86,14 @@ Writes to `build-idf/<architecture>` (`shotstopper.bin`).
 | Script | Alias | Required | Description |
 | --- | --- | --- | --- |
 | `./scripts/build-idf` | `b-idf` | `--arch` (`--flags` optional) | Generate version and Web UI, build with ESP-IDF. |
-| `./scripts/flash-idf` | `f-idf` | `--port`, `--arch` | Flash the existing binary (or `--image <path>`); does not rebuild or open the monitor. |
+| `./scripts/flash-idf` | `f-idf` | `--port`, `--arch` | Flash the existing binary (or `--image <path>`); without `--no-check` idf.py rebuilds first if the build tree is stale. Does not open the monitor. |
 | `./scripts/monitor-idf` | `m-idf` | `--port`, `--speed` | IDF serial monitor (Ctrl+] to exit). |
 | `./scripts/ota-idf` | `o-idf` | `--arch`, `--host`, `--password` | Wi-Fi update with the already-built IDF binary, or `--image <path>`. |
 | `./scripts/static-idf` | `s-idf` | `--arch` | Cppcheck against the IDF compilation database. Does not build. |
-| `./scripts/bf-idf` | | `--port`, `--arch` | build-idf then flash-idf. |
-| `./scripts/bfm-idf` | | `--port`, `--arch`, `--speed` | build-idf, flash-idf, monitor-idf. |
-| `./scripts/bo-idf` | | `--arch`, `--host`, `--password` | build-idf then ota-idf. |
-| `./scripts/bsfm-idf` | | `--port`, `--arch`, `--speed` | build-idf, static-idf, flash-idf, monitor-idf. Does not flash if analysis reports diagnostics. |
+| `./scripts/bf-idf` | | `--port`, `--arch` | build-idf then flash-idf (no rebuild or image re-check at flash time). |
+| `./scripts/bfm-idf` | | `--port`, `--arch`, `--speed` | build-idf, flash-idf (no rebuild or image re-check), monitor-idf. |
+| `./scripts/bo-idf` | | `--arch`, `--host`, `--password` | build-idf then ota-idf (no local image re-check at OTA time). |
+| `./scripts/bsfm-idf` | | `--port`, `--arch`, `--speed` | build-idf, static-idf, flash-idf (no rebuild or image re-check), monitor-idf. Does not flash if analysis reports diagnostics. |
 | `./scripts/gcc_analyzer` | | `--arch` (`--flags` optional) | Build with GCC `-fanalyzer` into `reports/gcc-analyzer/`. |
 
 Examples:
@@ -119,6 +120,15 @@ Examples:
 `--force` is accepted by `ota`, `ota-idf`, `bo`, and `bo-idf` (and their `o`
 aliases). It bypasses the final commit prompt, then polls the controller until
 the new image reports `confirmed: true` or four minutes pass.
+
+`--no-check` is accepted by `flash`, `flash-idf`, `ota`, `ota-idf`, and their
+wrappers (`bf`, `bfm`, `bsfm`, `bo`, which forward it to the install step).
+For USB flash it flashes the current build outputs directly with esptool
+(bootloader, partition table, otadata, and app) instead of letting `idf.py
+flash` re-run the build. For OTA it skips the local image identity check; the
+controller-side verification and the post-reboot confirmation still run.
+Use it when you know the build outputs already match what you want on the
+device (the combined scripts pass it for you after a fresh build).
 
 OTA clients use a 10-second connection timeout and retain the existing long
 transfer window. A transient transport failure is reconciled with the OTA

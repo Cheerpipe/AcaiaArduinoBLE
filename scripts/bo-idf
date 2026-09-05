@@ -13,6 +13,8 @@ usage() {
 Usage: ./scripts/bo-idf [flags]
 
 Runs, in order: build-idf and o-idf (ota-idf). No USB cable required.
+The OTA step skips the local image re-check because build-idf just
+verified it.
 
 Required parameters: --arch, --host, and --password. --flags is optional.
 Pass the device password (including the factory default if unchanged).
@@ -42,6 +44,6 @@ cd "$root"
 ss_cli_flags_for arch flags
 ./scripts/build-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
 
-ss_cli_flags_for arch host image force
+ss_cli_flags_for arch host image force no_check
 ss_cli_export_secrets
 exec ./scripts/o-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}

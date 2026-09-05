@@ -12,7 +12,8 @@ usage() {
   cat <<EOF
 Usage: ./scripts/bf-idf [flags]
 
-Runs, in order: build-idf and flash-idf.
+Runs, in order: build-idf and flash-idf. The flash step skips the local
+image re-check and the implicit rebuild because build-idf just ran.
 
 Required parameters: --port and --arch. --flags is optional.
 
@@ -40,5 +41,5 @@ cd "$root"
 ss_cli_flags_for arch flags
 ./scripts/build-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
 
-ss_cli_flags_for port arch image
+ss_cli_flags_for port arch image no_check
 exec ./scripts/flash-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}

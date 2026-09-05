@@ -15,9 +15,10 @@ usage() {
 Usage: ./scripts/flash-idf [flags]
 
 Flash an ESP-IDF firmware binary over USB. Without --image, uses the
-already-built binary from build-idf/<architecture>. Does not recompile and
-does not open the monitor. This is the official USB flash path (replaces the
-firmware currently on the device).
+already-built binary from build-idf/<architecture>. If the build tree is
+missing or stale, idf.py rebuilds it first; with --no-check the existing
+build outputs are flashed as-is. Does not open the monitor. This is the
+official USB flash path (replaces the firmware currently on the device).
 
 Required parameters: --port and --arch.
 
@@ -44,11 +45,6 @@ shotstopper_resolve_board "$(ss_get arch)"
 ss_idf_source
 ss_idf_py_args
 
-command -v node >/dev/null 2>&1 || {
-  echo "node not found on PATH (needed to verify the firmware image)." >&2
-  exit 127
-}
-
 cd "$SS_CLI_ROOT"
 
 image="$IDF_IMAGE"
@@ -58,8 +54,16 @@ else
   ss_idf_require_image
 fi
 
-echo "Local image identity:"
-node ./scripts/image_tag.js "$image" --expect-arch "$SHOTSTOPPER_ARCH"
+if [[ "$SS_CLI_NO_CHECK" == "1" ]]; then
+  echo "Skipping local image verification (--no-check)."
+else
+  command -v node >/dev/null 2>&1 || {
+    echo "node not found on PATH (needed to verify the firmware image)." >&2
+    exit 127
+  }
+  echo "Local image identity:"
+  node ./scripts/image_tag.js "$image" --expect-arch "$SHOTSTOPPER_ARCH"
+fi
 
 port="$(ss_get port)"
 echo "Flashing $image ($SHOTSTOPPER_ARCH) via $port (IDF)"
@@ -72,6 +76,25 @@ if ss_is_set image; then
   # An external application image replaces app0 only. Bootloader and partition
   # table remain in place, so the selected image must match this architecture.
   esptool.py --chip esp32s3 --port "$port" write_flash 0x10000 "$image"
+elif [[ "$SS_CLI_NO_CHECK" == "1" ]]; then
+  # The build tree was just produced (or the caller trusts it): flash the
+  # project outputs directly. `idf.py flash` would re-run the build target,
+  # duplicating the build step of ./scripts/bf-idf.
+  if [[ ! -f "$IDF_BUILD_DIR/flash_args" ]]; then
+    echo "$IDF_BUILD_DIR/flash_args does not exist." >&2
+    echo "Build first: ./scripts/build-idf --arch $SHOTSTOPPER_ARCH" >&2
+    exit 1
+  fi
+  command -v esptool.py >/dev/null 2>&1 || {
+    echo "esptool.py not found on PATH (did ESP-IDF export.sh run?)." >&2
+    exit 127
+  }
+  # flash_args lists bootloader, partition table, otadata and app at their
+  # offsets with relative paths, so esptool must run from the build directory.
+  (
+    cd "$IDF_BUILD_DIR" &&
+      esptool.py --chip esp32s3 --port "$port" write_flash @flash_args
+  )
 else
   idf.py "${IDF_PY_ARGS[@]}" -p "$port" flash
 fi

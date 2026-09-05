@@ -39,6 +39,10 @@ so compile first (./scripts/build-idf / ./scripts/b-idf) or use
 
 With --force, the script commits without asking and waits until the rebooted
 firmware confirms itself through its HTTP API; no Web UI reload is needed.
+
+With --no-check, the local image identity check is skipped. Use it when the
+image was just built and verified (./scripts/bo-idf does this automatically).
+The controller-side verification and the post-reboot confirmation still run.
 EOF
 }
 
@@ -65,5 +69,5 @@ fi
 
 trap ss_ota_cleanup EXIT
 ss_ota_run "$image" "$SHOTSTOPPER_ARCH" "$(ss_get host)" \
-  "$(ss_get password)" "$SS_CLI_FORCE" || exit $?
+  "$(ss_get password)" "$SS_CLI_FORCE" "$SS_CLI_NO_CHECK" || exit $?
 ss_cli_save

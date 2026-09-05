@@ -90,6 +90,7 @@ ss_port_exists() {
 ss_cli_reset() {
   local key
   SS_CLI_FORCE=0
+  SS_CLI_NO_CHECK=0
   for key in $SS_CLI_KEYS; do
     ss_set "$key" ""
     ss_origin_set "$key" ""
@@ -123,6 +124,8 @@ Named parameters (long and short):
   -b, --build-dir <path>   Build directory (static / static-idf only)
   -o, --output-dir <path>  Reports directory (static / static-idf only)
       --force              Commit OTA without a prompt and wait for confirmation
+      --no-check           Skip the local image verification and the implicit
+                           rebuild before flashing/OTA (advanced)
   -h, --help               Show this help
 
 No script silently fills in missing values. Each parameter comes from the flag,
@@ -137,6 +140,7 @@ EOF
 
 SS_CLI_HELP_REQUESTED=0
 SS_CLI_FORCE=0
+SS_CLI_NO_CHECK=0
 
 ss_cli_die() {
   printf '%s\n' "$1" >&2
@@ -155,6 +159,15 @@ ss_cli_parse() {
         ;;
       --force=*)
         printf '%s\n' '--force does not take a value.' >&2
+        return 2
+        ;;
+      --no-check)
+        SS_CLI_NO_CHECK=1
+        shift
+        continue
+        ;;
+      --no-check=*)
+        printf '%s\n' '--no-check does not take a value.' >&2
         return 2
         ;;
       --*=*)
@@ -664,6 +677,10 @@ ss_cli_flags_for() {
   for key in "$@"; do
     if [[ "$key" == "force" ]]; then
       [[ "$SS_CLI_FORCE" == "1" ]] && SS_CLI_FORWARD+=(--force)
+      continue
+    fi
+    if [[ "$key" == "no_check" ]]; then
+      [[ "$SS_CLI_NO_CHECK" == "1" ]] && SS_CLI_FORWARD+=(--no-check)
       continue
     fi
     ss_is_set "$key" || continue

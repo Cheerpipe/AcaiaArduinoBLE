@@ -43,8 +43,16 @@ ss_ota_status() {
 }
 
 ss_ota_staged_matches_image() {
-  [[ "$(ss_ota_field state)" == "staged" ]] &&
-      [[ "$(ss_ota_field staged.arch)" == "$SS_OTA_IMAGE_ARCH" ]] &&
+  [[ "$(ss_ota_field state)" == "staged" ]] || return 1
+  if [[ -z "$SS_OTA_IMAGE_VERSION" ]]; then
+    # --no-check skipped the local image tag, so there is nothing to compare
+    # version/packed against. Accept any staged image of the requested arch;
+    # the post-reboot confirmation still validates the result.
+    [[ -n "$(ss_ota_field staged.version)" ]] &&
+        [[ "$(ss_ota_field staged.arch)" == "$SS_OTA_IMAGE_ARCH" ]]
+    return
+  fi
+  [[ "$(ss_ota_field staged.arch)" == "$SS_OTA_IMAGE_ARCH" ]] &&
       [[ "$(ss_ota_field staged.version)" == "$SS_OTA_IMAGE_VERSION" ]] &&
       [[ "$(ss_ota_field staged.packed)" == "$SS_OTA_IMAGE_PACKED" ]]
 }
@@ -144,9 +152,9 @@ ss_ota_cleanup() {
 }
 
 ss_ota_run() {
-  # image, requested arch, host, password, force
+  # image, requested arch, host, password, force, skip local image check
   SS_OTA_IMAGE="$1"
-  local arch="$2" host="$3" password="$4" force="$5"
+  local arch="$2" host="$3" password="$4" force="$5" skip_local_check="${6:-0}"
   SS_OTA_BASE="http://$host"
 
   for tool in curl node; do
@@ -156,12 +164,22 @@ ss_ota_run() {
     }
   done
 
-  local tag_json
-  echo 'Local image identity:'
-  tag_json="$(node ./scripts/image_tag.js "$SS_OTA_IMAGE" --expect-arch "$arch" --json)" || return $?
-  SS_OTA_IMAGE_ARCH="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).arch)' "$tag_json")"
-  SS_OTA_IMAGE_VERSION="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).version)' "$tag_json")"
-  SS_OTA_IMAGE_PACKED="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).packed))' "$tag_json")"
+  if [[ "$skip_local_check" == "1" ]]; then
+    # The build step already verified this image (./scripts/bo-idf or an
+    # explicit --no-check). Keep only the arch so the staged-image match can
+    # degrade to arch-only in ss_ota_staged_matches_image.
+    SS_OTA_IMAGE_ARCH="$arch"
+    SS_OTA_IMAGE_VERSION=""
+    SS_OTA_IMAGE_PACKED=""
+    echo "Skipping local image verification (--no-check)."
+  else
+    local tag_json
+    echo 'Local image identity:'
+    tag_json="$(node ./scripts/image_tag.js "$SS_OTA_IMAGE" --expect-arch "$arch" --json)" || return $?
+    SS_OTA_IMAGE_ARCH="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).arch)' "$tag_json")"
+    SS_OTA_IMAGE_VERSION="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).version)' "$tag_json")"
+    SS_OTA_IMAGE_PACKED="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).packed))' "$tag_json")"
+  fi
 
   SS_OTA_CURL_CONFIG="$(mktemp "${TMPDIR:-/tmp}/shotstopper-ota.XXXXXX")"
   chmod 600 "$SS_OTA_CURL_CONFIG"

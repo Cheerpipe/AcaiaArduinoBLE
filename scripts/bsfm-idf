@@ -12,7 +12,9 @@ usage() {
   cat <<EOF
 Usage: ./scripts/bsfm-idf [flags]
 
-Runs, in order: build-idf, static-idf, flash-idf, and monitor-idf.
+Runs, in order: build-idf, static-idf, flash-idf, and monitor-idf. The flash
+step skips the local image re-check and the implicit rebuild because
+build-idf just ran.
 
 Required parameters: --port, --arch, and --speed. --flags is optional.
 
@@ -42,7 +44,7 @@ ss_cli_flags_for arch flags
 ss_cli_flags_for arch
 ./scripts/static-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
 
-ss_cli_flags_for port arch image
+ss_cli_flags_for port arch image no_check
 ./scripts/flash-idf ${SS_CLI_FORWARD[@]+"${SS_CLI_FORWARD[@]}"}
 
 ss_cli_flags_for port speed
