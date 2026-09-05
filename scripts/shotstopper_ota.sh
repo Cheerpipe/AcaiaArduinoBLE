@@ -15,6 +15,26 @@ process.stdout.write(value == null ? "" : String(value));
 ' "$SS_OTA_BODY_FILE" "$1"
 }
 
+ss_ota_upload_progress() {
+  # Render the confirmed byte offset against the entire image.  Uploads are
+  # sent in ranges, so curl's own progress bar would otherwise reach 100% for
+  # every individual range.
+  local received="$1" total="$2" width=50 filled=0 index=0 bar=""
+  (( total > 0 )) || return 0
+  (( received > total )) && received="$total"
+  filled=$((received * width / total))
+  while (( index < width )); do
+    if (( index < filled )); then
+      bar="${bar}#"
+    else
+      bar="${bar}-"
+    fi
+    index=$((index + 1))
+  done
+  printf '\rUpload: [%s] %3s%% (%s / %s KiB)' "$bar" \
+      "$((received * 100 / total))" "$((received / 1024))" "$((total / 1024))"
+}
+
 ss_ota_request() {
   # method, path, optional payload file, timeout seconds, extra curl headers
   local method="$1" path="$2" payload="$3" timeout="$4"
@@ -27,7 +47,7 @@ ss_ota_request() {
   if [[ -n "$payload" ]]; then
     # The ESP HTTP server is deliberately small. Removing Expect avoids a
     # needless extra round trip before the request body starts flowing.
-    args+=(--progress-bar --header "Content-Type: ${SS_OTA_CONTENT_TYPE:-application/octet-stream}"
+    args+=(--silent --header "Content-Type: ${SS_OTA_CONTENT_TYPE:-application/octet-stream}"
            --header 'Expect:' --data-binary "@$payload")
   else
     args+=(--silent)
@@ -75,6 +95,7 @@ ss_ota_upload() {
   SS_OTA_CONTENT_TYPE=application/octet-stream
   local offset="$(ss_ota_field nextOffset)"
   [[ "$offset" =~ ^[0-9]+$ ]] || return 1
+  ss_ota_upload_progress "$offset" "$SS_OTA_IMAGE_SIZE"
   while (( offset < SS_OTA_IMAGE_SIZE )); do
     local end=$((offset + SS_OTA_CHUNK_BYTES))
     (( end > SS_OTA_IMAGE_SIZE )) && end=$SS_OTA_IMAGE_SIZE
@@ -89,7 +110,7 @@ ss_ota_upload() {
         local next="$(ss_ota_field nextOffset)"
         [[ "$next" =~ ^[0-9]+$ ]] && (( next > offset )) || return 1
         offset="$next"
-        printf 'Uploaded %s / %s KiB\n' "$((offset / 1024))" "$((SS_OTA_IMAGE_SIZE / 1024))"
+        ss_ota_upload_progress "$offset" "$SS_OTA_IMAGE_SIZE"
         break
       fi
       case "$(ss_ota_field error)" in
@@ -109,6 +130,7 @@ ss_ota_upload() {
       attempt=$((attempt + 1))
     done
   done
+  printf '\n'
   ss_ota_staged_matches_image
 }
 
