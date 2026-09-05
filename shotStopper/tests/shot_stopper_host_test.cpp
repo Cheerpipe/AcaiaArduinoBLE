@@ -5,12 +5,14 @@
 #define SHOT_STOPPER_ENABLE_BUZZER 1
 #endif
 
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <limits>
 #include <string>
+#include <thread>
 
 #include "../shotStopper.cpp"
 
@@ -146,9 +148,7 @@ void resetHarness(bool initialPaddleOn, bool scaleConnected) {
   ringRetainLogLevel = LogLevel::INFO;
   publishedControlStatus = ControlStatusSnapshot{};
   taskProfiler.resetForHost();
-  controlStatusSeq = 0;
   publishedControlGate = ControlGateSnapshot{};
-  controlGateSeq = 0;
   controlStatusPublishRequested = false;
   bleCompanionRuntimeSnapshot = BleCompanionRuntimeSnapshot{};
   bleCompanionRuntimeSnapshot.enabled = true;
@@ -4478,12 +4478,13 @@ void d14_control_status_publishes_on_cycle_edge() {
   CHECK(gate.activeCycle);
   CHECK(gate.relayClosed);
 
-  const uint32_t seqAfterEdge = controlStatusSeq;
+  const uint32_t publishedAtEdge = publishedControlStatus.uptimeMs;
   serviceControlStatusPublish();
-  CHECK(controlStatusSeq == seqAfterEdge);
+  CHECK(publishedControlStatus.uptimeMs == publishedAtEdge);
+  ++hostMillis;
   controlStatusPublishRequested = true;
   serviceControlStatusPublish();
-  CHECK(controlStatusSeq != seqAfterEdge);
+  CHECK(publishedControlStatus.uptimeMs == publishedAtEdge + 1U);
   CHECK(!controlStatusPublishRequested);
 }
 
@@ -8982,24 +8983,105 @@ void m08_recipe_copies_match_published_state() {
   CHECK(findShotPreset(afterBank, afterBank.activeId)->goalWeightG == 44);
 }
 
-void m09_seqlock_yields_when_writer_active() {
+void m09_snapshot_mutexes_preserve_concurrent_invariants() {
   resetHarness(false, true);
-  publishControlStatus();
-  hostTaskYieldCalls = 0;
-  controlStatusSeq = 1;
-  ControlStatusSnapshot status = {};
-  copyControlStatus(status);
-  CHECK(hostTaskYieldCalls == kControlStatusSeqlockTries);
-  CHECK(status.state == publishedControlStatus.state);
-  controlStatusSeq = 0;
+  constexpr uint32_t kIterations = 2000;
+  std::atomic<bool> start{false};
+  std::atomic<bool> done{false};
+  std::atomic<uint32_t> violations{0};
 
-  hostTaskYieldCalls = 0;
-  recipeSeq = 1;
-  RuntimeConfig copied = {};
-  copyRuntimeConfig(&copied);
-  CHECK(hostTaskYieldCalls == kControlStatusSeqlockTries);
-  CHECK(copied.goalWeightG == publishedRuntimeConfig.goalWeightG);
-  recipeSeq = 0;
+  auto publishInvariant = [](uint32_t generation) {
+    maintenanceLease.active = true;
+    maintenanceLease.id = generation;
+    session.active = (generation & 1U) != 0U;
+    session.id = generation;
+    session.source = ControlSource::WEB;
+    runtimeConfig.revision = generation;
+    runtimeConfig.goalWeightG = static_cast<uint8_t>(20U + generation % 40U);
+    runtimeConfig.dripDelayMs = generation ^ 0x5a5a5a5aU;
+    ShotPreset &active = mutableActiveShotPreset(presetBank);
+    active.goalWeightG = runtimeConfig.goalWeightG;
+    active.operationalWallMs = 10000U + active.goalWeightG;
+    publishRecipeState();
+    publishControlStatus();
+
+    TaskProfilerSnapshot profiler;
+    profiler.sampleCount = generation;
+    profiler.elapsedMs = generation * 2U;
+    profiler.rowCount = 1;
+    profiler.rows[0].taskNumber = generation;
+    taskProfiler.publishForHost(profiler);
+  };
+
+  publishInvariant(1);
+  auto reader = [&]() {
+    while (!start.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+    do {
+      ControlStatusSnapshot status;
+      copyControlStatus(status);
+      if ((status.activeCycle &&
+           (status.cycleId == 0 || status.source != ControlSource::WEB)) ||
+          (!status.activeCycle &&
+           (status.cycleId != 0 || status.source != ControlSource::NONE))) {
+        violations.fetch_add(1, std::memory_order_relaxed);
+      }
+
+      ControlGateSnapshot gate;
+      copyControlGate(gate);
+      if (!gate.maintenanceLeaseActive || gate.maintenanceLeaseId == 0 ||
+          (gate.activeCycle && gate.source != ControlSource::WEB) ||
+          (!gate.activeCycle && gate.source != ControlSource::NONE)) {
+        violations.fetch_add(1, std::memory_order_relaxed);
+      }
+
+      RuntimeConfig config;
+      copyRuntimeConfig(&config);
+      if (config.goalWeightG != 20U + config.revision % 40U ||
+          config.dripDelayMs != (config.revision ^ 0x5a5a5a5aU)) {
+        violations.fetch_add(1, std::memory_order_relaxed);
+      }
+
+      ShotPresetBank bank;
+      copyPresetBank(&bank);
+      const ShotPreset *active = findShotPreset(bank, bank.activeId);
+      if (active == nullptr ||
+          active->operationalWallMs != 10000U + active->goalWeightG) {
+        violations.fetch_add(1, std::memory_order_relaxed);
+      }
+
+      TaskProfilerSnapshot profiler;
+      taskProfiler.copySnapshot(profiler);
+      if (profiler.rowCount != 1 ||
+          profiler.elapsedMs != profiler.sampleCount * 2U ||
+          profiler.rows[0].taskNumber != profiler.sampleCount) {
+        violations.fetch_add(1, std::memory_order_relaxed);
+      }
+    } while (!done.load(std::memory_order_acquire));
+  };
+
+  std::thread firstReader(reader);
+  std::thread secondReader(reader);
+  std::thread writer([&]() {
+    start.store(true, std::memory_order_release);
+    for (uint32_t generation = 2; generation <= kIterations; ++generation) {
+      publishInvariant(generation);
+    }
+    done.store(true, std::memory_order_release);
+  });
+  writer.join();
+  firstReader.join();
+  secondReader.join();
+  CHECK(violations.load(std::memory_order_relaxed) == 0);
+
+  ControlStatusSnapshot status;
+  controlStatusPublishRequested = true;
+  copyControlStatus(status);
+  CHECK(status.snapshotStale);
+  controlStatusPublishRequested = false;
+  copyControlStatus(status);
+  CHECK(!status.snapshotStale);
 }
 
 void m12_ble_companion_result_drop_is_counted() {
@@ -11598,7 +11680,7 @@ const TestCase testCases[] = {
 #endif
     {"B04", b04_usb_console_starts_when_jumper_held},
     {"M08", m08_recipe_copies_match_published_state},
-    {"M09", m09_seqlock_yields_when_writer_active},
+    {"M09", m09_snapshot_mutexes_preserve_concurrent_invariants},
     {"M12", m12_ble_companion_result_drop_is_counted},
     {"S04b", s04b_shot_log_page_slice},
     {"S04f", s04f_shot_log_sort_date_and_rating},
@@ -11652,8 +11734,11 @@ const TestCase testCases[] = {
 
 }  // namespace
 
-int main() {
+int main(int argc, char **argv) {
   for (const TestCase &test : testCases) {
+    if (argc > 1 && strcmp(argv[1], test.id) != 0) {
+      continue;
+    }
     const int failuresBefore = failures;
     test.function();
     ++testsRun;
@@ -11662,6 +11747,10 @@ int main() {
   }
 
   deleteHostResources();
+  if (testsRun == 0) {
+    std::cerr << "No matching test\n";
+    return EXIT_FAILURE;
+  }
   std::cout << testsRun << " tests, " << failures << " failures\n";
   return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -32,6 +32,7 @@ else
 fi
 
 "$cxx" -std=c++17 -O0 -fprofile-instr-generate -fcoverage-mapping \
+  -pthread \
   "$test_dir/shot_stopper_host_test.cpp" \
   -o "$coverage_binary"
 

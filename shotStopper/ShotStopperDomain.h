@@ -1951,6 +1951,9 @@ struct PersistedLastShot {
 struct ControlStatusSnapshot {
   StopperState state = StopperState::REQUIRES_OFF;
   bool activeCycle = false;
+  // True only on a reader copy when its requested control refresh timed out.
+  // The remaining fields still come from one complete committed snapshot.
+  bool snapshotStale = false;
   bool relayClosed = false;
   bool machineRunning = false;
   bool reedOn = false;

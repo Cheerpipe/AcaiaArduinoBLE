@@ -367,7 +367,12 @@ bool WebhookDispatcher::buildPayload(const WebhookEvent &event, char *output,
   size_t used = static_cast<size_t>(written);
   auto append = [&](const char *format, auto... args) {
     if (used >= capacity) return false;
-    const int count = snprintf(output + used, capacity - used, format, args...);
+    // The lambda always receives a string literal at every call site; the
+    // non-literal parameter is what makes -Wformat-security fire.
+    const int count =
+        snprintf(output + used, capacity - used,
+                 format,  // NOLINT(clang-diagnostic-format-security)
+                 args...);
     if (count <= 0 || static_cast<size_t>(count) >= capacity - used) return false;
     used += static_cast<size_t>(count);
     return true;

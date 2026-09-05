@@ -90,6 +90,7 @@ HWCDC shotStopperUsbConsole;
 #include "ShotStopperWatchdog.h"
 #include "ShotStopperHwmon.h"
 #include "ShotStopperTaskProfiler.h"
+#include "ShotStopperTaskMutex.h"
 #include "ShotStopperPsram.h"
 #ifndef SHOT_STOPPER_HOST_TEST
 #include "ShotStopperJsonArena.h"
@@ -419,18 +420,16 @@ bool webhookBrewStartPending = false;
 
 bool virtualHoldOn = false;
 // Full status snapshots stay in internal DRAM (check_web_assets forbids
-// SHOT_STOPPER_PSRAM_BSS on this type). The 32-byte gate is published every
-// loop tick; the ~876 B blob is rebuilt in-place on GET and control/safety
-// edges under the seqlock — no staging copy.
+// SHOT_STOPPER_PSRAM_BSS on this type). Task mutexes make the ordinary C++
+// payload copies race-free; readers never accept an in-progress publication.
 ControlStatusSnapshot publishedControlStatus;
-uint32_t controlStatusSeq = 0;
+TaskMutex controlStatusMutex;
 ControlGateSnapshot publishedControlGate;
-uint32_t controlGateSeq = 0;
+TaskMutex controlGateMutex;
 bool controlStatusPublishRequested = false;
-constexpr uint32_t kControlStatusSeqlockTries = 64;
 SHOT_STOPPER_PSRAM_BSS RuntimeConfig publishedRuntimeConfig;
 SHOT_STOPPER_PSRAM_BSS ShotPresetBank publishedPresetBank;
-uint32_t recipeSeq = 0;
+TaskMutex recipeMutex;
 bool bootDegraded = false;
 uint32_t bleCompanionResultDropped = 0;
 MaintenanceLease maintenanceLease;
@@ -944,34 +943,14 @@ void copyTaskProfiler(TaskProfilerSnapshot &output) {
 }
 
 void copyControlStatus(ControlStatusSnapshot &output) {
-  for (uint32_t attempt = 0; attempt < kControlStatusSeqlockTries; ++attempt) {
-    const uint32_t s0 = __atomic_load_n(&controlStatusSeq, __ATOMIC_ACQUIRE);
-    if ((s0 & 1U) != 0U) {
-      taskYIELD();
-      continue;
-    }
-    output = publishedControlStatus;
-    const uint32_t s1 = __atomic_load_n(&controlStatusSeq, __ATOMIC_ACQUIRE);
-    if (s0 == s1) {
-      return;
-    }
-  }
+  TaskLockGuard lock(controlStatusMutex);
   output = publishedControlStatus;
+  output.snapshotStale =
+      __atomic_load_n(&controlStatusPublishRequested, __ATOMIC_ACQUIRE);
 }
 
 void copyControlGate(ControlGateSnapshot &output) {
-  for (uint32_t attempt = 0; attempt < kControlStatusSeqlockTries; ++attempt) {
-    const uint32_t s0 = __atomic_load_n(&controlGateSeq, __ATOMIC_ACQUIRE);
-    if ((s0 & 1U) != 0U) {
-      taskYIELD();
-      continue;
-    }
-    output = publishedControlGate;
-    const uint32_t s1 = __atomic_load_n(&controlGateSeq, __ATOMIC_ACQUIRE);
-    if (s0 == s1) {
-      return;
-    }
-  }
+  TaskLockGuard lock(controlGateMutex);
   output = publishedControlGate;
 }
 
@@ -1316,28 +1295,16 @@ RuntimeConfig effectiveRuntimeConfig() {
 }
 
 void publishRecipeState() {
-  __atomic_fetch_add(&recipeSeq, 1U, __ATOMIC_RELAXED);
+  TaskLockGuard lock(recipeMutex);
   publishedRuntimeConfig = runtimeConfig;
   publishedPresetBank = presetBank;
-  __atomic_fetch_add(&recipeSeq, 1U, __ATOMIC_RELEASE);
 }
 
 void copyPresetBank(ShotPresetBank *out) {
   if (out == nullptr) {
     return;
   }
-  for (uint32_t attempt = 0; attempt < kControlStatusSeqlockTries; ++attempt) {
-    const uint32_t s0 = __atomic_load_n(&recipeSeq, __ATOMIC_ACQUIRE);
-    if ((s0 & 1U) != 0U) {
-      taskYIELD();
-      continue;
-    }
-    *out = publishedPresetBank;
-    const uint32_t s1 = __atomic_load_n(&recipeSeq, __ATOMIC_ACQUIRE);
-    if (s0 == s1) {
-      return;
-    }
-  }
+  TaskLockGuard lock(recipeMutex);
   *out = publishedPresetBank;
 }
 
@@ -1345,18 +1312,7 @@ void copyRuntimeConfig(RuntimeConfig *out) {
   if (out == nullptr) {
     return;
   }
-  for (uint32_t attempt = 0; attempt < kControlStatusSeqlockTries; ++attempt) {
-    const uint32_t s0 = __atomic_load_n(&recipeSeq, __ATOMIC_ACQUIRE);
-    if ((s0 & 1U) != 0U) {
-      taskYIELD();
-      continue;
-    }
-    *out = publishedRuntimeConfig;
-    const uint32_t s1 = __atomic_load_n(&recipeSeq, __ATOMIC_ACQUIRE);
-    if (s0 == s1) {
-      return;
-    }
-  }
+  TaskLockGuard lock(recipeMutex);
   *out = publishedRuntimeConfig;
 }
 
@@ -5244,9 +5200,10 @@ void publishControlGate() {
   next.maintenanceLeaseActive = maintenanceLease.active;
   next.maintenanceLeaseId = maintenanceLease.active ? maintenanceLease.id : 0;
   next.source = session.active ? session.source : ControlSource::NONE;
-  __atomic_fetch_add(&controlGateSeq, 1U, __ATOMIC_RELAXED);
-  publishedControlGate = next;
-  __atomic_fetch_add(&controlGateSeq, 1U, __ATOMIC_RELEASE);
+  {
+    TaskLockGuard lock(controlGateMutex);
+    publishedControlGate = next;
+  }
 #if !defined(SHOT_STOPPER_HOST_TEST)
   networkManager.syncControlCriticalRf(next.activeCycle || next.relayClosed);
 #endif
@@ -5256,7 +5213,7 @@ void publishControlStatus() {
   const uint32_t now = millis();
   const RelaySafetySnapshot relay = getRelaySafetySnapshot();
   const ScaleLinkSnapshot scaleLink = getScaleLinkSnapshot();
-  __atomic_fetch_add(&controlStatusSeq, 1U, __ATOMIC_RELAXED);
+  TaskLockGuard lock(controlStatusMutex);
   ControlStatusSnapshot &next = publishedControlStatus;
   next = ControlStatusSnapshot{};
   next.state = stopperState;
@@ -5480,7 +5437,7 @@ void publishControlStatus() {
   next.debugEventsDropped =
       __atomic_load_n(&debugLogDroppedSnapshot, __ATOMIC_RELAXED) +
       __atomic_load_n(&debugLogContentionDropped, __ATOMIC_RELAXED);
-  __atomic_fetch_add(&controlStatusSeq, 1U, __ATOMIC_RELEASE);
+  lock.unlock();
   publishControlGate();
 }
 
@@ -5488,7 +5445,8 @@ void refreshControlStatus() {
 #if defined(SHOT_STOPPER_HOST_TEST)
   return;
 #else
-  // Waits until loop commits the status seqlock, not merely until the request
+  // Waits until loop commits the requested status snapshot, not merely until
+  // the request is noticed. Timeout leaves the request flag set.
   // is noticed. Timeout copies the last snapshot and leaves the flag set.
   __atomic_store_n(&controlStatusPublishRequested, true, __ATOMIC_RELEASE);
   const uint32_t startedAtMs = millis();
@@ -5521,9 +5479,9 @@ void serviceControlStatusPublish() {
   if (requested || forcePublish) {
     publishControlStatus();
   }
-  // Clear after the seqlock commit so httpd's wait cannot copy the previous
-  // blob. A GET that arrives mid-publish still sees the snapshot that just
-  // finished.
+  // Clear after the mutex-protected commit so httpd's wait cannot copy the
+  // previous blob. A GET that arrives mid-publish blocks until that snapshot
+  // is complete.
   if (requested) {
     __atomic_store_n(&controlStatusPublishRequested, false, __ATOMIC_RELEASE);
   }

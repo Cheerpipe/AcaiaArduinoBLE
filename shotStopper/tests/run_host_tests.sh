@@ -8,6 +8,7 @@ repo_root=$(CDPATH= cd -- "$test_dir/../.." && pwd)
 "$repo_root/scripts/gen_version.sh"
 test_binary=${TMPDIR:-/tmp}/shot_stopper_host_test
 sanitized_binary=${TMPDIR:-/tmp}/shot_stopper_host_test_sanitized
+tsan_binary=${TMPDIR:-/tmp}/shot_stopper_f02_tsan
 persistence_binary=${TMPDIR:-/tmp}/shot_stopper_persistence_host_test
 persistence_sanitized=${TMPDIR:-/tmp}/shot_stopper_persistence_host_test_sanitized
 external_safety_binary=${TMPDIR:-/tmp}/shot_stopper_external_safety_host_test
@@ -63,19 +64,28 @@ scan_firmware_sources() {
 }
 
 "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+  -pthread \
   "$test_dir/shot_stopper_host_test.cpp" \
   -o "$test_binary"
 
 "$test_binary"
 
+"$cxx" -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic \
+  -pthread -fno-omit-frame-pointer -fsanitize=thread \
+  "$test_dir/shot_stopper_host_test.cpp" \
+  -o "$tsan_binary"
+TSAN_OPTIONS=halt_on_error=1 "$tsan_binary" M09
+
 momentary_binary=${TMPDIR:-/tmp}/shot_stopper_momentary_host_test
 for machine_type in 1 2; do
   "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+    -pthread \
     -DSHOT_STOPPER_MACHINE_TYPE="$machine_type" \
     "$test_dir/momentary_machine_host_test.cpp" \
     -o "$momentary_binary"
   "$momentary_binary"
   "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+    -pthread \
     -DSHOT_STOPPER_MACHINE_TYPE="$machine_type" \
     "$test_dir/shot_stopper_host_test.cpp" \
     -o /tmp/shot_stopper_host_test_type"$machine_type"
@@ -83,12 +93,14 @@ for machine_type in 1 2; do
 done
 
 "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+  -pthread \
   -DSHOT_STOPPER_ENABLE_JTAG=1 \
   "$test_dir/shot_stopper_host_test.cpp" \
   -o /tmp/shot_stopper_host_test_jtag
 echo "JTAG-enabled host compile OK"
 
 "$cxx" -std=c++17 -Wall -Wextra -Werror -pedantic \
+  -pthread \
   -fno-omit-frame-pointer -fsanitize=address,undefined \
   "$test_dir/shot_stopper_host_test.cpp" \
   -o "$sanitized_binary"

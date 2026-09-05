@@ -282,11 +282,11 @@ if (sdkconfigDefaults.includes('CONFIG_BT_LE_SLEEP_ENABLE=y') ||
   }
 }
 if (!taskProfiler.includes('void copySnapshot(TaskProfilerSnapshot &out) const') ||
-    !taskProfiler.includes('taskYIELD()') ||
-    !taskProfiler.includes('__atomic_load_n(&seq_') ||
+    !taskProfiler.includes('TaskLockGuard lock(reportMutex_)') ||
+    taskProfiler.includes('__atomic_load_n(&seq_') ||
     !taskProfiler.includes('beginSnapshotWrite_()')) {
   throw new Error(
-      'TaskProfiler snapshot copies must use a seqlock; uxTaskGetSystemState must not run under it');
+      'TaskProfiler snapshot copies must use a task mutex; uxTaskGetSystemState must not run under it');
 }
 if (!firmwareCore.includes('#include "ShotStopperTaskProfiler.h"') ||
     !firmwareCore.includes('TaskProfiler taskProfiler') ||
@@ -382,12 +382,16 @@ if (network.includes('ControlStatusSnapshot status;') ||
 if (firmwareCore.includes('portENTER_CRITICAL(&webStatusMux)') ||
     firmwareCore.includes('next.presets = presetBank') ||
     firmwareCore.includes('copyScaleHistory(next.scaleHistory)') ||
-    !firmwareCore.includes('__atomic_fetch_add(&controlStatusSeq') ||
-    !firmwareCore.includes('__atomic_fetch_add(&controlGateSeq') ||
+    !firmwareCore.includes('TaskMutex controlStatusMutex') ||
+    !firmwareCore.includes('TaskMutex controlGateMutex') ||
+    !firmwareCore.includes('TaskMutex recipeMutex') ||
+    firmwareCore.includes('controlStatusSeq') ||
+    firmwareCore.includes('controlGateSeq') ||
+    firmwareCore.includes('recipeSeq') ||
     !network.includes('self.callbacks_.copyPresetBank(&g_work->presetBank)') ||
     !network.includes('self.callbacks_.copyScaleHistory(g_work->scaleHistory)')) {
   throw new Error(
-      'Status snapshot publish must use a seqlock and fill presets/history on demand');
+      'Status and recipe snapshots must use task mutexes and fill presets/history on demand');
 }
 if (network.includes('composeEffectiveConfig(candidate, status.presets)') ||
     network.includes('status.presets') ||
@@ -424,7 +428,7 @@ if (!firmware.includes('scaleWorkerTickDelayMs()') ||
     !firmwareCore.includes('void refreshControlStatus()') ||
     !firmwareCore.includes('void serviceControlStatusPublish()') ||
     !firmwareCore.includes('void publishControlGate()') ||
-    !firmwareCore.includes('taskYIELD()') ||
+    !firmwareCore.includes('vTaskDelay(pdMS_TO_TICKS(1))') ||
     firmwareCore.includes('CONTROL_STATUS_PUBLISH_MS') ||
     firmwareCore.includes('CONTROL_STATUS_PUBLISH_NO_SCALE_MS') ||
     (firmware.split('publishBleCompanionStatus(inactiveStatus)').length - 1) !== 1) {

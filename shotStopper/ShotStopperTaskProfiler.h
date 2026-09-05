@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "ShotStopperScaleTypes.h"
+#include "ShotStopperTaskMutex.h"
 
 #if defined(ARDUINO) && !defined(SHOT_STOPPER_HOST_TEST)
 #include "ShotStopperPsram.h"
@@ -175,39 +176,39 @@ class TaskProfiler {
 #endif
   }
 
-  bool running() const { return report_.state == TaskProfilerState::RUNNING; }
-  const TaskProfilerSnapshot &snapshot() const { return report_; }
+  bool running() const {
+    TaskLockGuard lock(reportMutex_);
+    return report_.state == TaskProfilerState::RUNNING;
+  }
+  TaskProfilerSnapshot snapshot() const {
+    TaskProfilerSnapshot out;
+    copySnapshot(out);
+    return out;
+  }
 
   void copySnapshot(TaskProfilerSnapshot &out) const {
-    constexpr uint32_t kTries = 64;
-    for (uint32_t attempt = 0; attempt < kTries; ++attempt) {
-      const uint32_t s0 = __atomic_load_n(&seq_, __ATOMIC_ACQUIRE);
-      if ((s0 & 1U) != 0U) {
-        taskYIELD();
-        continue;
-      }
-      out = report_;
-      const uint32_t s1 = __atomic_load_n(&seq_, __ATOMIC_ACQUIRE);
-      if (s0 == s1) {
-        return;
-      }
-    }
+    TaskLockGuard lock(reportMutex_);
     out = report_;
   }
 
 #if defined(SHOT_STOPPER_HOST_TEST)
   void resetForHost() {
+    TaskLockGuard lock(reportMutex_);
     report_ = TaskProfilerSnapshot{};
-    seq_ = 0;
+  }
+
+  void publishForHost(const TaskProfilerSnapshot &next) {
+    TaskLockGuard lock(reportMutex_);
+    report_ = next;
   }
 #endif
 
  private:
   void beginSnapshotWrite_() {
-    __atomic_fetch_add(&seq_, 1U, __ATOMIC_RELAXED);
+    reportMutex_.lock();
   }
   void endSnapshotWrite_() {
-    __atomic_fetch_add(&seq_, 1U, __ATOMIC_RELEASE);
+    reportMutex_.unlock();
   }
 #if defined(ARDUINO) && !defined(SHOT_STOPPER_HOST_TEST)
   struct TrackedTask {
@@ -465,7 +466,7 @@ class TaskProfiler {
 #endif
 
   TaskProfilerSnapshot report_ = {};
-  uint32_t seq_ = 0;
+  mutable TaskMutex reportMutex_;
 };
 
 }  // namespace shotstopper

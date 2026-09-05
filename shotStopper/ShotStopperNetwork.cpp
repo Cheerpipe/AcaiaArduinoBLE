@@ -4503,11 +4503,13 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   bool ok = statusJsonAppend(
       &used,
       "{\"firmwareVersion\":\"%s\",\"bootId\":%lu,\"configMutable\":%s,"
+      "\"snapshotStale\":%s,"
       "\"webUiOverrideActive\":%s,\"webUiOverrideRemainingMs\":%lu,"
       "\"configLockReason\":\"%s\",\"liveShot\":%s",
       safeFirmwareVersion,
       static_cast<unsigned long>(control.bootId),
       configMutable ? "true" : "false",
+      control.snapshotStale ? "true" : "false",
       webUiOverrideActive ? "true" : "false",
       static_cast<unsigned long>(webUiOverrideRemainingMs),
       configLockReason(control), liveShot ? "true" : "false");
@@ -5308,12 +5310,14 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
        debugExportChunkf(
            request, buf, cap,
            "\"envelope\":{\"configMutable\":%s,\"liveShot\":%s,"
+           "\"snapshotStale\":%s,"
            "\"configRevision\":%lu,\"ringRetainLogLevel\":\"%s\","
            "\"serialLogLevel\":\"%s\",\"serialDebugOutput\":%s,\"bootComplete\":%s,\"bootDegraded\":%s,"
            "\"scaleWorkerReady\":%s},",
            configMutable ? "true" : "false",
            (c.activeCycle || c.machineRunning || c.relayClosed) ? "true"
                                                                 : "false",
+           c.snapshotStale ? "true" : "false",
            static_cast<unsigned long>(c.config.revision),
            logLevelName(
                static_cast<LogLevel>(c.config.ringRetainLogLevel)),
