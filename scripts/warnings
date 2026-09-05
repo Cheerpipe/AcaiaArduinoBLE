@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Compatibility alias for the ESP-IDF extra-warnings build.
+set -euo pipefail
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+exec "$SCRIPT_DIR/warnings-idf" "$@"

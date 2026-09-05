@@ -19,8 +19,10 @@ usage() {
 Usage: ./scripts/static-idf [flags]
 
 Run Cppcheck against a compilation database already produced by ESP-IDF.
-The output directory is deleted and recreated on every run. This script never
-builds the firmware; run ./scripts/build-idf separately first.
+Checks warning, performance, portability and unusedFunction (dead code
+across translation units). The output directory is deleted and recreated on
+every run. This script never builds the firmware; run ./scripts/build-idf
+separately first.
 
 Required parameters: --arch (implies build-idf/<architecture>).
 --build-dir and --output-dir are one-shot overrides: they are not persisted.
@@ -93,7 +95,7 @@ mkdir -p "$output_path"
 printf 'Build database: %s\n' "$compile_commands" > "$output_path/README.txt"
 printf 'Generated: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >> "$output_path/README.txt"
 
-echo "Running Cppcheck on $build_dir..."
+echo "Running Cppcheck (warning, performance, portability, unusedFunction) on $build_dir..."
 cppcheck \
   --project="$compile_commands" \
   --suppressions-list="$SUPPRESSIONS_FILE" \
@@ -103,7 +105,8 @@ cppcheck \
   --file-filter='*/idf/main/*.cpp' \
   --file-filter='*/idf/components/EspressoScaleBLE/*.cpp' \
   --file-filter='*/idf/components/shotStopper/*' \
-  --enable=warning,performance,portability \
+  --enable=warning,performance,portability,unusedFunction \
+  --inline-suppr \
   --inconclusive \
   --error-exitcode=1 \
   2>&1 | tee "$output_path/cppcheck.txt"

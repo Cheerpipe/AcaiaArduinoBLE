@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Build the official ESP-IDF firmware with extra GCC warnings enabled
+# (-Wunused-parameter, which ESP-IDF disables with -Wno-unused-parameter) and
+# report only diagnostics located in project-owned code. Much faster than
+# gcc_analyzer: no -fanalyzer interprocedural analysis is involved.
+set -uo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/shotstopper_board.sh
+source "$SCRIPT_DIR/shotstopper_board.sh"
+# shellcheck source=scripts/shotstopper_cli.sh
+source "$SCRIPT_DIR/shotstopper_cli.sh"
+
+readonly ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+readonly OUTPUT_DIR="reports/gcc-warnings"
+
+usage() {
+  cat <<EOF
+Usage: ./scripts/warnings-idf [flags]
+
+Build Shot Stopper with the official ESP-IDF path plus extra GCC warnings
+(currently -Wunused-parameter) and save the filtered result to
+$OUTPUT_DIR/gcc-warnings.txt. Replaces the previous report. The full compile
+log is kept in gcc-warnings-raw.txt; the main report keeps only diagnostics
+whose primary location is versioned code in this repository.
+
+The extra warning flags are never persisted to .shotstopper; ordinary builds
+stay unaffected.
+
+For the slow interprocedural -fanalyzer pass use ./scripts/gcc_analyzer
+instead. For cppcheck (no build required) use ./scripts/static-idf.
+
+Required parameters: --arch. --flags is optional and appended to the warnings
+build.
+
+$(ss_flag_help)
+
+$(shotstopper_arch_help)
+
+Examples:
+  ./scripts/warnings-idf --arch n16r8
+  ./scripts/warnings-idf -a n8r4 -f "-DSHOT_STOPPER_ENABLE_BUZZER=1"
+EOF
+}
+
+ss_cli_parse "$@" || exit $?
+if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
+  usage
+  exit 0
+fi
+
+ss_cli_resolve "arch" "flags" || exit $?
+if ! shotstopper_resolve_board "$(ss_get arch)"; then
+  exit 2
+fi
+
+cd "$ROOT"
+output_path="$ROOT/$OUTPUT_DIR"
+rm -rf "$output_path"
+mkdir -p "$output_path"
+
+# -Wunused-parameter is a tool flag, not a user preference: passing it through
+# ./scripts/build-idf would persist it into .shotstopper and every later
+# compile. Strip every copy before building and saving so this tool never
+# leaks its analysis-only option into ordinary builds.
+configured_flags="$(ss_get flags)"
+user_flags=""
+for configured_flag in $configured_flags; do
+  case "$configured_flag" in
+    -Wunused-parameter) ;;
+    *) user_flags="${user_flags:+$user_flags }$configured_flag" ;;
+  esac
+done
+warning_flags="$user_flags -Wunused-parameter"
+
+raw_report="$output_path/gcc-warnings-raw.txt"
+report="$output_path/gcc-warnings.txt"
+
+echo "Building $SHOTSTOPPER_ARCH (IDF) with extra GCC warnings..."
+SHOTSTOPPER_NONINTERACTIVE=1 ./scripts/build-idf --arch "$SHOTSTOPPER_ARCH" \
+  --flags "$warning_flags" >"$raw_report" 2>&1
+build_status=$?
+
+ss_put flags "$user_flags" cli
+ss_cli_save
+
+if [[ $build_status -ne 0 ]]; then
+  cat "$raw_report" >&2
+  printf 'Architecture: %s\nBuild exit status: %d\n' \
+    "$SHOTSTOPPER_ARCH" "$build_status" > "$output_path/README.txt"
+  echo "Build failed; log saved under $OUTPUT_DIR/gcc-warnings-raw.txt" >&2
+  exit "$build_status"
+fi
+
+# ESP-IDF builds the SDK and managed components too. Keep each warning block
+# only when its primary location is in a project-owned source tree; associated
+# context and trace lines (source snippets, "In function ..." notes) are
+# retained so the diagnostic remains useful.
+awk -v shotstopper="$ROOT/shotStopper/" \
+    -v espresso_scale_ble="$ROOT/libraries/EspressoScaleBLE/" \
+    -v idf_main="$ROOT/idf/main/" \
+    -v idf_components="$ROOT/idf/components/" '
+  /^[^:]+:[0-9]+:[0-9]+: warning:/ {
+    keep = index($0, shotstopper) == 1 || \
+           index($0, espresso_scale_ble) == 1 || \
+           index($0, idf_main) == 1 || \
+           index($0, idf_components) == 1
+    inblock = keep
+    if (keep) print
+    next
+  }
+  /^[^:]+:[0-9]+:[0-9]+: error:/ { keep = 0; inblock = 0; next }
+  inblock && /^[ \t][ \t]*/ { print; next }
+  { inblock = 0 }
+' "$raw_report" > "$report"
+
+warnings_status=0
+
+if [[ -s "$report" ]]; then
+  warnings_status=1
+fi
+
+printf 'Architecture: %s\nExtra warning flags: %s\nBuild exit status: %d\n' \
+  "$SHOTSTOPPER_ARCH" "$warning_flags" "$warnings_status" > "$output_path/README.txt"
+
+echo "Report saved under $OUTPUT_DIR/"
+exit "$warnings_status"

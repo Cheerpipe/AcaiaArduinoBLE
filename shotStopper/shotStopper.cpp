@@ -6087,6 +6087,7 @@ bool usbConsoleJumperPresent() {
   return digitalRead(USB_CONSOLE_GPIO) == USB_CONSOLE_ACTIVE_LEVEL;
 }
 
+// cppcheck-suppress unusedFunction ; Arduino framework entry point
 void setup() {
   bootStartedAtMs = millis();
   // Safe OPEN before Serial, EEPROM or BLE. Arduino-ESP32 3.x rejects
@@ -6448,6 +6449,7 @@ void serviceHealthThresholdAlerts(uint32_t intervalMaxGapMs) {
   }
 }
 
+// cppcheck-suppress unusedFunction ; Arduino framework entry point
 void loop() {
   const uint32_t loopStartedAtMs = millis();
   recordResetUptime(loopStartedAtMs);

@@ -21,6 +21,7 @@ set(_ss_extra_flags_file "${CMAKE_BINARY_DIR}/shot_stopper_extra_flags")
 set(_ss_extra_raw "")
 set(_ss_cdc_on_boot 0)
 set(_ss_enable_gcc_analyzer OFF)
+set(_ss_enable_unused_parameter OFF)
 if(DEFINED ENV{SHOT_STOPPER_EXTRA_FLAGS})
   set(_ss_extra_raw "$ENV{SHOT_STOPPER_EXTRA_FLAGS}")
 endif()
@@ -41,6 +42,15 @@ if(NOT _ss_extra_raw STREQUAL "")
       # Applying it globally makes ESP-IDF's dependency warnings fatal before
       # the firmware can be examined.
       set(_ss_enable_gcc_analyzer ON)
+    elseif(_opt STREQUAL "-Wunused-parameter")
+      # Same scoping as -fanalyzer: ESP-IDF builds its C++ components with
+      # -Werror (e.g. cxx_exception_stubs.cpp has unused parameters), so
+      # re-enabling this warning globally breaks the SDK build. Attach it
+      # below only to project-owned components.
+      set(_ss_enable_unused_parameter ON)
+      # Project components inherit -Werror=all/-Werror=deprecated-copy, so
+      # the re-enabled warning must stay a diagnostic, not a build break.
+      set(_ss_unused_parameter_options "-Wunused-parameter" "-Wno-error=unused-parameter")
     elseif(_opt MATCHES "^-D(.+)$")
       idf_build_set_property(COMPILE_DEFINITIONS "${CMAKE_MATCH_1}" APPEND)
     elseif(_opt MATCHES "^-W")
@@ -92,5 +102,18 @@ if(_ss_enable_gcc_analyzer)
     idf_component_get_property(_ss_analyzer_component_lib
       ${_ss_analyzer_component} COMPONENT_LIB)
     target_compile_options(${_ss_analyzer_component_lib} PRIVATE -fanalyzer)
+  endforeach()
+endif()
+
+# Extra parameter warnings behave like -fanalyzer: ESP-IDF disables them
+# project-wide (-Wno-unused-parameter) and its own -Werror components cannot
+# tolerate them, so only project-owned components see them.
+if(_ss_enable_unused_parameter)
+  foreach(_ss_unused_parameter_component IN ITEMS
+      main shotStopper EspressoScaleBLE ShotStopperBleRuntime)
+    idf_component_get_property(_ss_unused_parameter_component_lib
+      ${_ss_unused_parameter_component} COMPONENT_LIB)
+    target_compile_options(${_ss_unused_parameter_component_lib} PRIVATE
+      ${_ss_unused_parameter_options})
   endforeach()
 endif()

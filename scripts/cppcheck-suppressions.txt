@@ -13,3 +13,5 @@ dangerousTypeCast:*/shotStopper/ShotStopperWebhook.cpp
 # reboot. It is always validated by magic, inverse fields, and checksum before
 # its contents are consumed; initializing it would defeat that safety guard.
 uninitMemberVarNoCtor:*/shotStopper/ShotStopperResetGuard.h
+# unusedFunction false positives are suppressed inline at the call-less
+# Arduino framework entry points (setup/loop in shotStopper.cpp).
