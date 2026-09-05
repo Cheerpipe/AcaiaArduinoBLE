@@ -68,6 +68,12 @@ ss_ota_status() {
   ss_ota_request GET /api/v1/ota "" 20 && [[ "$SS_OTA_HTTP_STATUS" == "200" ]]
 }
 
+ss_ota_status_quiet() {
+  # A connection failure is expected while the controller reboots after a
+  # forced OTA.  Keep polling without printing curl's transient timeout.
+  ss_ota_status 2>/dev/null
+}
+
 ss_ota_staged_matches_image() {
   [[ "$(ss_ota_field state)" == "staged" ]] || return 1
   [[ "$(ss_ota_field transferId)" == "$SS_OTA_TRANSFER_ID" ]] &&
@@ -263,7 +269,7 @@ ss_ota_run() {
     echo 'Waiting for reboot and OTA confirmation (up to 4 minutes)...'
     local deadline=$((SECONDS + 240))
     while (( SECONDS < deadline )); do
-      if ss_ota_status &&
+      if ss_ota_status_quiet &&
           [[ "$(ss_ota_field running.version)" == "$staged_version" ]] &&
           [[ "$(ss_ota_field running.arch)" == "$staged_arch" ]] &&
           [[ "$(ss_ota_field restartPending)" == "false" ]] &&
