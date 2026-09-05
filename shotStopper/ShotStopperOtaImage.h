@@ -246,6 +246,7 @@ class OtaImageTagScanner {
     done_ = false;
     tagOffset_ = 0;
     position_ = 0;
+    replays_ = 0;
     tag_ = OtaImageTag{};
   }
 
@@ -300,8 +301,12 @@ class OtaImageTagScanner {
   }
 
   // Re-scan bytes consumed into an abandoned capture. The live `body_` buffer
-  // is copied first because a new capture writes into it. Recursion is bounded
-  // by shrinking the replayed window by one byte each time.
+  // is copied first because a new capture writes into it. Each replay nests
+  // feedByte() frames (~200 B each on an 8 KiB httpd stack), so the number of
+  // replays is capped: adversarial bytes that keep failing capture are
+  // consumed and normal prefix matching resumes on the next byte.
+  static constexpr uint8_t kMaxBodyReplays = 4;
+
   void replayAbandonedBody() {
     const size_t replay = bodyLength_;
     if (replay == 0) {
@@ -310,6 +315,14 @@ class OtaImageTagScanner {
       tag_ = OtaImageTag{};
       return;
     }
+    if (replays_ >= kMaxBodyReplays) {
+      bodyLength_ = 0;
+      capturing_ = false;
+      matchLength_ = 0;
+      tag_ = OtaImageTag{};
+      return;
+    }
+    ++replays_;
     char saved[OTA_TAG_BODY_CAPACITY];
     memcpy(saved, body_, replay);
     bodyLength_ = 0;
@@ -364,6 +377,7 @@ class OtaImageTagScanner {
   size_t bodyLength_ = 0;
   bool capturing_ = false;
   bool done_ = false;
+  uint8_t replays_ = 0;
   uint32_t tagOffset_ = 0;
   size_t position_ = 0;
   OtaImageTag tag_ = {};

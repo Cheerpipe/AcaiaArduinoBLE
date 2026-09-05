@@ -313,6 +313,23 @@ void testScannerFindsTagAfterUnparseableCandidate() {
   CHECK(std::string(tag.arch) == "n8r4");
 }
 
+void testScannerBoundsReplaysOnAdversarialCandidates() {
+  // A long run of candidate bodies that each fail parse (bad packed field)
+  // must not drive unbounded nested replay frames; the replay cap drops
+  // captures instead, and a clean tag after the noise is still found.
+  std::string stream;
+  for (int i = 0; i < 32; ++i) {
+    stream += makeTag("n16r8", "1.0.0", "not-a-number");
+    stream += std::to_string(i);
+  }
+  stream += makeTag("n8r4", "3.1.4+1234567", "50397188");
+  OtaImageTag tag;
+  uint32_t offset = 0;
+  CHECK(scanEverySplit(stream, tag, offset));
+  CHECK(std::string(tag.arch) == "n8r4");
+  CHECK(tag.packed == 50397188U);
+}
+
 void testPendingVerifyKeepRunningWhenRollbackImpossible() {
   CHECK(decideOtaPendingVerify(true, false, false, kConfirmDeadlineMs,
                                kConfirmMinMs, kConfirmDeadlineMs, false) ==
@@ -390,6 +407,7 @@ int main() {
   testScannerReportsNothingWithoutTag();
   testScannerIgnoresOversizedCandidate();
   testScannerFindsTagAfterUnparseableCandidate();
+  testScannerBoundsReplaysOnAdversarialCandidates();
   testPendingVerifyKeepRunningWhenRollbackImpossible();
   testPendingVerifyRejectWhenRollbackPossible();
   testPendingVerifyConfirmAfterHttpUptime();

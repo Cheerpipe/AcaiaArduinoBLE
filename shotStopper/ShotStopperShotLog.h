@@ -215,11 +215,6 @@ class ShotLog {
   uint32_t nextRecordId() const { return store_.header.nextRecordId; }
 
   bool append(const ShotLogRecord &record, bool persistNow = true) {
-    const uint16_t previousWriteIndex = store_.header.writeIndex;
-    const uint16_t previousCount = store_.header.count;
-    const uint32_t previousNextRecordId = store_.header.nextRecordId;
-    const ShotLogRecord overwritten = store_.records[previousWriteIndex];
-
     ShotLogRecord stored = record;
     stored.id = store_.header.nextRecordId;
     if (store_.header.nextRecordId < UINT32_MAX) {
@@ -239,10 +234,11 @@ class ShotLog {
     if (save()) {
       return true;
     }
-    store_.records[previousWriteIndex] = overwritten;
-    store_.header.writeIndex = previousWriteIndex;
-    store_.header.count = previousCount;
-    store_.header.nextRecordId = previousNextRecordId;
+    // save() may have compacted the ring before the NVS write failed, so the
+    // pre-append slot/index snapshot no longer describes the live layout —
+    // restoring it would clobber a compacted record. Reload the last-good
+    // store from NVS instead (same pattern as updateRating/removeById).
+    load();
     return false;
   }
 

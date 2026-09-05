@@ -96,6 +96,15 @@ inline PersistedSettingsV1 &persistedSettingsV1MigrationScratch() {
   return *reinterpret_cast<PersistedSettingsV1 *>(
       persistedSettingsMigrationScratch());
 }
+// Same-size V6→current migration target: a full PersistedSettings would be
+// 2,616 B on the NVS call chain of the 8 KiB loop task if left on the stack.
+inline PersistedSettings &persistedSettingsV6MigrationScratch() {
+  static_assert(2 * sizeof(PersistedSettings) + sizeof(PersistedSettings) <=
+                    FLASH_IO_SCRATCH_BYTES,
+                "V6 migration scratch exceeds flash I/O buffer");
+  return *reinterpret_cast<PersistedSettings *>(
+      persistedSettingsMigrationScratch());
+}
 
 inline bool readSettingsSlot(Preferences &preferences, const char *key,
                              PersistedSettings &settings) {
@@ -133,7 +142,8 @@ inline bool readSettingsSlot(Preferences &preferences, const char *key,
       return false;
     }
     if (settings.schemaVersion == 6) {
-      PersistedSettings migrated = {};
+      PersistedSettings &migrated = persistedSettingsV6MigrationScratch();
+      migrated = PersistedSettings{};
       if (!migratePersistedSettingsFromV6(settings, migrated)) {
         return false;
       }

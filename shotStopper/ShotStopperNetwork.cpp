@@ -3360,7 +3360,18 @@ bool ShotStopperNetwork::armNtp(uint32_t now, bool staConnected,
   };
   if (!gateStable()) return false;
 
-  resolveNtpServerHost(settings_.runtime, ntpFailoverIndex_, ntpServerBuffer_);
+  // One locked snapshot of the NTP runtime fields: the control task rewrites
+  // settings_.runtime wholesale under dataMux_, so reading it unlocked here
+  // would race a torn copy.
+  uint8_t ntpServerPreset = 0;
+  char ntpServerCustom[NTP_SERVER_HOST_CAPACITY] = {};
+  portENTER_CRITICAL(&dataMux_);
+  ntpServerPreset = settings_.runtime.ntpServerPreset;
+  memcpy(ntpServerCustom, settings_.runtime.ntpServerCustom,
+         sizeof(ntpServerCustom));
+  portEXIT_CRITICAL(&dataMux_);
+  resolveNtpServerHost(ntpServerPreset, ntpServerCustom, ntpFailoverIndex_,
+                       ntpServerBuffer_);
   g_wallClock.setSyncing(ntpServerBuffer_, now);
   ntpSyncStartedAtMs_ = now;
   esp_sntp_set_time_sync_notification_cb(ntpSyncNotificationCallback);
@@ -3403,8 +3414,11 @@ void ShotStopperNetwork::handleNtpFailure(uint32_t now) {
 }
 
 void ShotStopperNetwork::serviceNtp(uint32_t now, bool staConnected) {
-  if (settings_.runtime.revision != ntpConfigRevision_) {
-    ntpConfigRevision_ = settings_.runtime.revision;
+  portENTER_CRITICAL(&dataMux_);
+  const uint32_t runtimeRevision = settings_.runtime.revision;
+  portEXIT_CRITICAL(&dataMux_);
+  if (runtimeRevision != ntpConfigRevision_) {
+    ntpConfigRevision_ = runtimeRevision;
     ntpRearmPending_ = true;
   }
 
@@ -8215,9 +8229,18 @@ esp_err_t ShotStopperNetwork::otaUploadHandler(httpd_req_t *request) {
     self.log(DebugCategory::NETWORK, DebugCode::OTA_UPLOAD_REJECTED,
              static_cast<int32_t>(result),
              static_cast<int32_t>(failed.receivedBytes / 1024U));
-    return sendError(request, otaResultHttpStatus(result),
-                     ShotStopperOta::resultName(result),
-                     otaResultMessage(result));
+    // stage() can fail before reading a single body byte; the socket close
+    // keeps ESP-IDF from purging the unread 2 MB body 32 bytes at a time.
+    // When the body was fully consumed there is nothing to purge, and a clean
+    // sendError is more reliable than closing before the response flushes.
+    if (failed.receivedBytes >= static_cast<uint32_t>(request->content_len)) {
+      return sendError(request, otaResultHttpStatus(result),
+                       ShotStopperOta::resultName(result),
+                       otaResultMessage(result));
+    }
+    return rejectUpload(otaResultHttpStatus(result),
+                        ShotStopperOta::resultName(result),
+                        otaResultMessage(result));
   }
   const OtaStatusSnapshot staged = ota.snapshot();
   self.log(DebugCategory::NETWORK, DebugCode::OTA_IMAGE_STAGED,

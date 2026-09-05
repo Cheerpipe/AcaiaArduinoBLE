@@ -38,15 +38,19 @@ inline const char *timeSyncStateName(TimeSyncState state) {
   return "UNKNOWN";
 }
 
-inline void resolveNtpServerHost(const RuntimeConfig &config,
-                                 uint8_t failoverIndex,
-                                 char output[NTP_SERVER_HOST_CAPACITY]) {
+// Takes the two NTP-related RuntimeConfig fields instead of the whole struct:
+// callers snapshot them under dataMux_ because the control task rewrites
+// settings_.runtime wholesale under that lock.
+inline void resolveNtpServerHost(
+    uint8_t ntpServerPreset,
+    const char (&ntpServerCustom)[NTP_SERVER_HOST_CAPACITY],
+    uint8_t failoverIndex, char output[NTP_SERVER_HOST_CAPACITY]) {
   const char *candidates[4] = {};
   size_t count = 0;
-  if (config.ntpServerCustom[0] != '\0') {
-    candidates[count++] = config.ntpServerCustom;
+  if (ntpServerCustom[0] != '\0') {
+    candidates[count++] = ntpServerCustom;
   }
-  candidates[count++] = ntpPresetHostname(config.ntpServerPreset);
+  candidates[count++] = ntpPresetHostname(ntpServerPreset);
   candidates[count++] = "pool.ntp.org";
   candidates[count++] = "time.google.com";
   const char *selected = candidates[failoverIndex % count];

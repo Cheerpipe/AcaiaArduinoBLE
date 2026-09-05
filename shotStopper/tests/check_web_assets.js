@@ -360,7 +360,7 @@ if (!psram.includes('#define SHOT_STOPPER_PSRAM_BSS EXT_RAM_BSS_ATTR') ||
 }
 if (!buzzer.includes('struct RtttlCatalog') ||
     !buzzer.includes('RtttlCatalog *rtttlCatalog') ||
-    !buzzer.includes('allocExternalOrInternal(sizeof(RtttlCatalog))') ||
+    !buzzer.includes('allocInternal(sizeof(RtttlCatalog))') ||
     !buzzer.includes('RtttlNote rtttlBuf[BULLSEYE_RTTTL_MAX_NOTES]') ||
     !firmwareCore.includes(
         'portTRY_ENTER_CRITICAL(&debugLogMux, portMUX_TRY_LOCK)') ||
@@ -369,7 +369,7 @@ if (!buzzer.includes('struct RtttlCatalog') ||
         '__atomic_load_n(&debugLogContentionDropped, __ATOMIC_RELAXED)') ||
     firmwareCore.includes('__atomic_add_fetch(&debugLogDroppedSnapshot')) {
   throw new Error(
-      'Cold RTTTL/log storage must favor PSRAM while active timer playback stays internal and log writes never spin control');
+      'RTTTL catalog and active playback buffer must stay internal RAM — playback starts from the esp_timer task under a spinlock, and PSRAM is unreachable while flash writes disable the cache');
 }
 if (network.includes('ControlStatusSnapshot status;') ||
     network.includes('ControlStatusSnapshot control;') ||

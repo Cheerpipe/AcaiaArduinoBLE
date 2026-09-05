@@ -2330,6 +2330,11 @@ bool recordWeightSampleWithProvenance(float weight, uint32_t receivedAtMs,
   return acceptWeightAndNotifyFirstFlow(weight, receivedAtMs, packetSequence);
 }
 
+// Host-test-only entry point: the firmware path feeds weight through
+// processScaleWorkerEvents() -> recordWeightSampleWithProvenance(). Kept out
+// of the ESP32 build so a future caller cannot bypass the worker's sequence
+// accounting from a BLE callback.
+#if defined(SHOT_STOPPER_HOST_TEST)
 bool recordWeightSample(float weight, uint32_t receivedAtMs) {
   uint32_t packetSequence = 0;
   portENTER_CRITICAL(&scaleLinkMux);
@@ -2343,6 +2348,7 @@ bool recordWeightSample(float weight, uint32_t receivedAtMs) {
       weight, receivedAtMs, packetSequence,
       session.ownedConnectionGeneration);
 }
+#endif
 
 
 bool endingRinseCycle(EndReason reason) {

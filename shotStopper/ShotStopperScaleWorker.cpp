@@ -1699,6 +1699,24 @@ void scaleWorkerTask(void *) {
                   BOOT_SUBSYSTEM_BLE);
     logEmit(LogLevel::ERROR, DebugCategory::BOOT, DebugCode::BOOT_SUBSYSTEM,
             BOOT_SUBSYSTEM_BLE, 0);
+    // Free the queues this boot no longer services; leaving the handles set
+    // would let producers enqueue into queues nobody drains.
+    if (scaleCommandQueue != nullptr) {
+      vQueueDelete(scaleCommandQueue);
+      scaleCommandQueue = nullptr;
+    }
+    if (scaleEventQueue != nullptr) {
+      vQueueDelete(scaleEventQueue);
+      scaleEventQueue = nullptr;
+    }
+    if (bleCompanionRequestQueue != nullptr) {
+      vQueueDelete(bleCompanionRequestQueue);
+      bleCompanionRequestQueue = nullptr;
+    }
+    if (bleCompanionResultQueue != nullptr) {
+      vQueueDelete(bleCompanionResultQueue);
+      bleCompanionResultQueue = nullptr;
+    }
     scaleWorkerTaskHandle = nullptr;
     vTaskDelete(nullptr);
     return;

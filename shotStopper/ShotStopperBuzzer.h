@@ -67,9 +67,11 @@ struct LocalBuzzer {
   uint32_t acceptedRequests = 0;
   uint32_t toneHz = BUZZER_TONE_HZ;
   const BuzzerNote *sequenceNotes = nullptr;
-  // The active playback buffer stays in internal RAM because esp_timer can
-  // advance it while flash writes make PSRAM inaccessible. Cold/preparsed
-  // RTTTL catalogs live in PSRAM and are copied here only when playback starts.
+  // The catalog and the active playback buffer both stay in internal RAM:
+  // playback starts (and pending slots resolve) from the esp_timer task under
+  // a spinlock, and reading PSRAM there while any task is mid flash write
+  // trips the "cache disabled" panic. The catalog is only ~2 KiB and written
+  // once at begin().
   RtttlNote rtttlBuf[BULLSEYE_RTTTL_MAX_NOTES] = {};
   uint8_t rtttlCount = 0;
   uint8_t bullseyeNoteCount = 0;
@@ -212,8 +214,8 @@ inline void LocalBuzzer::begin(uint8_t gpioPin) {
   }
 #if SHOT_STOPPER_ENABLE_BUZZER == 1
   if (rtttlCatalog == nullptr) {
-    rtttlCatalog = static_cast<RtttlCatalog *>(
-        allocExternalOrInternal(sizeof(RtttlCatalog)));
+    rtttlCatalog =
+        static_cast<RtttlCatalog *>(allocInternal(sizeof(RtttlCatalog)));
   }
   if (rtttlCatalog == nullptr) {
     return;

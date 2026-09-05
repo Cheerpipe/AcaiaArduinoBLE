@@ -315,6 +315,9 @@ OtaResult ShotStopperOta::stage(uint32_t contentLength, bool allowDowngrade,
   // a transfer that was silently corrupted in flight fails here.
   const esp_err_t endStatus = esp_ota_end(handle);
   if (endStatus != ESP_OK) {
+    // A failed esp_ota_end leaves the OTA operation open in the runtime state
+    // table; without abort, the next esp_ota_begin can refuse until reboot.
+    esp_ota_abort(handle);
     return finishFailure(OtaResult::VERIFY_FAILED);
   }
 

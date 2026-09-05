@@ -461,7 +461,9 @@ inline ShotCurveRecord shotCurveRecordFromStatusFields(
     uint16_t atmClearedDs, uint16_t endedDs, int16_t endedCg,
     const int16_t *weightCg, size_t weightCount) {
   ShotCurveRecord curve = {};
-  curve.count = count;
+  // Clamp at the boundary: weightCg only holds SHOT_CURVE_MAX_POINTS samples,
+  // and count arrives from Web-UI status input.
+  curve.count = count > SHOT_CURVE_MAX_POINTS ? SHOT_CURVE_MAX_POINTS : count;
   curve.intervalS = intervalS == 0 ? SHOT_CURVE_INTERVAL_S : intervalS;
   curve.atmClearedDs = atmClearedDs;
   curve.firstDrop.atDs = firstDropDs;
