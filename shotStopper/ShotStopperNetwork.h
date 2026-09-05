@@ -442,7 +442,9 @@ class ShotStopperNetwork {
   // exclusive WebUI claim, so the command line client works without stealing
   // control from an open browser window.
   static esp_err_t otaStatusHandler(httpd_req_t *request);
+  static esp_err_t otaSessionHandler(httpd_req_t *request);
   static esp_err_t otaUploadHandler(httpd_req_t *request);
+  static esp_err_t otaPatchHandler(httpd_req_t *request);
   static esp_err_t otaFlashHandler(httpd_req_t *request);
   static esp_err_t otaAbortHandler(httpd_req_t *request);
 

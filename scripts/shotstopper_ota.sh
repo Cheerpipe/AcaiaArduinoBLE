@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Shared resilient OTA client. Source after shotstopper_cli.sh (bash 3.2).
 
-SS_OTA_UPLOAD_ATTEMPTS=3
+SS_OTA_RANGE_ATTEMPTS=3
 SS_OTA_COMMIT_ATTEMPTS=2
+SS_OTA_CHUNK_BYTES=65536
 
 ss_ota_field() {
   node -e '
@@ -15,8 +16,9 @@ process.stdout.write(value == null ? "" : String(value));
 }
 
 ss_ota_request() {
-  # method, path, optional binary file, timeout seconds
+  # method, path, optional payload file, timeout seconds, extra curl headers
   local method="$1" path="$2" payload="$3" timeout="$4"
+  shift 4
   local args
   args=(--show-error --config "$SS_OTA_CURL_CONFIG" --connect-timeout 10
         --max-time "$timeout" --output "$SS_OTA_BODY_FILE"
@@ -25,11 +27,15 @@ ss_ota_request() {
   if [[ -n "$payload" ]]; then
     # The ESP HTTP server is deliberately small. Removing Expect avoids a
     # needless extra round trip before the request body starts flowing.
-    args+=(--progress-bar --header 'Content-Type: application/octet-stream'
+    args+=(--progress-bar --header "Content-Type: ${SS_OTA_CONTENT_TYPE:-application/octet-stream}"
            --header 'Expect:' --data-binary "@$payload")
   else
     args+=(--silent)
   fi
+  while (( $# > 0 )); do
+    args+=(--header "$1")
+    shift
+  done
   SS_OTA_HTTP_STATUS=""
   set +e
   SS_OTA_HTTP_STATUS="$(curl "${args[@]}" "$SS_OTA_BASE$path")"
@@ -44,28 +50,11 @@ ss_ota_status() {
 
 ss_ota_staged_matches_image() {
   [[ "$(ss_ota_field state)" == "staged" ]] || return 1
-  if [[ -z "$SS_OTA_IMAGE_VERSION" ]]; then
-    # --no-check skipped the local image tag, so there is nothing to compare
-    # version/packed against. Accept any staged image of the requested arch;
-    # the post-reboot confirmation still validates the result.
-    [[ -n "$(ss_ota_field staged.version)" ]] &&
-        [[ "$(ss_ota_field staged.arch)" == "$SS_OTA_IMAGE_ARCH" ]]
-    return
-  fi
-  [[ "$(ss_ota_field staged.arch)" == "$SS_OTA_IMAGE_ARCH" ]] &&
+  [[ "$(ss_ota_field transferId)" == "$SS_OTA_TRANSFER_ID" ]] &&
+      [[ "$(ss_ota_field sha256)" == "$SS_OTA_IMAGE_SHA256" ]] &&
+      [[ "$(ss_ota_field staged.arch)" == "$SS_OTA_IMAGE_ARCH" ]] &&
       [[ "$(ss_ota_field staged.version)" == "$SS_OTA_IMAGE_VERSION" ]] &&
       [[ "$(ss_ota_field staged.packed)" == "$SS_OTA_IMAGE_PACKED" ]]
-}
-
-ss_ota_transient_failure() {
-  # curl failure, a broken upload, or temporary server/network overload.
-  local curl_exit="$1" http_status="$2" error="$3"
-  [[ "$curl_exit" != "0" ]] && return 0
-  case "$http_status" in
-    408|429|500|502|503|504) return 0 ;;
-    400) [[ "$error" == "RECEIVE_FAILED" ]] && return 0 ;;
-  esac
-  return 1
 }
 
 ss_ota_backoff() {
@@ -77,43 +66,50 @@ ss_ota_backoff() {
 }
 
 ss_ota_upload() {
-  local attempt=1
-  while (( attempt <= SS_OTA_UPLOAD_ATTEMPTS )); do
-    printf 'Uploading attempt %s/%s...\n' "$attempt" "$SS_OTA_UPLOAD_ATTEMPTS"
-    if ss_ota_request POST /api/v1/ota "$SS_OTA_IMAGE" 900 &&
-        [[ "$SS_OTA_HTTP_STATUS" == "200" ]]; then
-      return 0
-    fi
-
-    local curl_exit="$SS_OTA_CURL_EXIT" http_status="$SS_OTA_HTTP_STATUS"
-    local error="$(ss_ota_field error)"
-    printf 'Upload attempt %s ended with curl=%s HTTP=%s%s.\n' \
-        "$attempt" "$curl_exit" "${http_status:-no-response}" \
-        "${error:+ code=$error}" >&2
-
-    # If the response itself was lost after verification, avoid sending the
-    # image again. The controller verifies the same image identity before it
-    # can stage it; compare all of its stable fields before continuing.
-    if ss_ota_status && ss_ota_staged_matches_image; then
-      echo 'The controller verified the image; its upload response was lost.' >&2
-      return 0
-    fi
-
-    if (( attempt < SS_OTA_UPLOAD_ATTEMPTS )) &&
-        ss_ota_transient_failure "$curl_exit" "$http_status" "$error"; then
-      # A failed legacy POST discards its partial slot before returning. Only
-      # restart it after the device confirms that it is idle and safe.
-      if [[ "$(ss_ota_field state)" == "idle" ]] &&
-          [[ "$(ss_ota_field safe)" == "true" ]]; then
-        ss_ota_backoff "$attempt" "$SS_OTA_UPLOAD_ATTEMPTS"
-        attempt=$((attempt + 1))
-        continue
-      fi
-    fi
-    echo 'Upload did not reach a verified state. Running firmware was not touched.' >&2
+  SS_OTA_CONTENT_TYPE=application/json
+  if ! ss_ota_request POST /api/v1/ota/session "$SS_OTA_SESSION_BODY" 30 ||
+      [[ "$SS_OTA_HTTP_STATUS" != "200" ]]; then
+    echo 'The controller refused the OTA session.' >&2
     return 1
+  fi
+  SS_OTA_CONTENT_TYPE=application/octet-stream
+  local offset="$(ss_ota_field nextOffset)"
+  [[ "$offset" =~ ^[0-9]+$ ]] || return 1
+  while (( offset < SS_OTA_IMAGE_SIZE )); do
+    local end=$((offset + SS_OTA_CHUNK_BYTES))
+    (( end > SS_OTA_IMAGE_SIZE )) && end=$SS_OTA_IMAGE_SIZE
+    local length=$((end - offset)) attempt=1
+    dd if="$SS_OTA_IMAGE" of="$SS_OTA_CHUNK_FILE" bs=1 skip="$offset" count="$length" 2>/dev/null
+    while :; do
+      if ss_ota_request PATCH /api/v1/ota "$SS_OTA_CHUNK_FILE" 90 \
+          "X-OTA-Transfer: $SS_OTA_TRANSFER_ID" "X-OTA-Offset: $offset" \
+          "X-OTA-Length: $SS_OTA_IMAGE_SIZE" \
+          "Content-Range: bytes $offset-$((end - 1))/$SS_OTA_IMAGE_SIZE" &&
+          [[ "$SS_OTA_HTTP_STATUS" =~ ^(200|208)$ ]]; then
+        local next="$(ss_ota_field nextOffset)"
+        [[ "$next" =~ ^[0-9]+$ ]] && (( next > offset )) || return 1
+        offset="$next"
+        printf 'Uploaded %s / %s KiB\n' "$((offset / 1024))" "$((SS_OTA_IMAGE_SIZE / 1024))"
+        break
+      fi
+      case "$(ss_ota_field error)" in
+        SAFETY_LOST|OTA_SHA256_MISMATCH|OTA_SESSION_IDENTITY_MISMATCH|OTA_INVALID_RANGE)
+          return 1 ;;
+      esac
+      # A lost response is reconciled before any retry.  Only this exact,
+      # idempotent range can be repeated, never the entire image.
+      if ss_ota_request GET /api/v1/ota/session "" 20 &&
+          [[ "$(ss_ota_field transferId)" == "$SS_OTA_TRANSFER_ID" ]] &&
+          [[ "$(ss_ota_field sha256)" == "$SS_OTA_IMAGE_SHA256" ]]; then
+        local next="$(ss_ota_field nextOffset)"
+        if [[ "$next" =~ ^[0-9]+$ ]] && (( next > offset )); then offset="$next"; break; fi
+      fi
+      (( attempt < SS_OTA_RANGE_ATTEMPTS )) || return 1
+      ss_ota_backoff "$attempt" "$SS_OTA_RANGE_ATTEMPTS"
+      attempt=$((attempt + 1))
+    done
   done
-  return 1
+  ss_ota_staged_matches_image
 }
 
 ss_ota_commit() {
@@ -135,9 +131,7 @@ ss_ota_commit() {
       echo 'The controller accepted the commit; its response was lost.' >&2
       return 0
     fi
-    if (( attempt < SS_OTA_COMMIT_ATTEMPTS )) &&
-        ss_ota_transient_failure "$curl_exit" "$http_status" "$error" &&
-        ss_ota_staged_matches_image; then
+    if (( attempt < SS_OTA_COMMIT_ATTEMPTS )) && ss_ota_staged_matches_image; then
       ss_ota_backoff "$attempt" "$SS_OTA_COMMIT_ATTEMPTS"
       attempt=$((attempt + 1))
       continue
@@ -148,7 +142,7 @@ ss_ota_commit() {
 }
 
 ss_ota_cleanup() {
-  rm -f "${SS_OTA_CURL_CONFIG:-}" "${SS_OTA_BODY_FILE:-}"
+  rm -f "${SS_OTA_CURL_CONFIG:-}" "${SS_OTA_BODY_FILE:-}" "${SS_OTA_SESSION_BODY:-}" "${SS_OTA_CHUNK_FILE:-}"
 }
 
 ss_ota_run() {
@@ -165,13 +159,8 @@ ss_ota_run() {
   done
 
   if [[ "$skip_local_check" == "1" ]]; then
-    # The build step already verified this image (./scripts/bo-idf or an
-    # explicit --no-check). Keep only the arch so the staged-image match can
-    # degrade to arch-only in ss_ota_staged_matches_image.
-    SS_OTA_IMAGE_ARCH="$arch"
-    SS_OTA_IMAGE_VERSION=""
-    SS_OTA_IMAGE_PACKED=""
-    echo "Skipping local image verification (--no-check)."
+    echo '--no-check cannot perform resumable OTA: the SHA-256, architecture, and version are required.' >&2
+    return 2
   else
     local tag_json
     echo 'Local image identity:'
@@ -181,9 +170,17 @@ ss_ota_run() {
     SS_OTA_IMAGE_PACKED="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).packed))' "$tag_json")"
   fi
 
+  SS_OTA_IMAGE_SIZE="$(wc -c < "$SS_OTA_IMAGE" | tr -d ' ')"
+  SS_OTA_IMAGE_SHA256="$(shasum -a 256 "$SS_OTA_IMAGE" | awk '{print $1}')"
+  SS_OTA_TRANSFER_ID="$(node -e 'const c=require("crypto");process.stdout.write(c.randomBytes(18).toString("hex"))')"
+
   SS_OTA_CURL_CONFIG="$(mktemp "${TMPDIR:-/tmp}/shotstopper-ota.XXXXXX")"
   chmod 600 "$SS_OTA_CURL_CONFIG"
   SS_OTA_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/shotstopper-ota-body.XXXXXX")"
+  SS_OTA_SESSION_BODY="$(mktemp "${TMPDIR:-/tmp}/shotstopper-ota-session.XXXXXX")"
+  SS_OTA_CHUNK_FILE="$(mktemp "${TMPDIR:-/tmp}/shotstopper-ota-chunk.XXXXXX")"
+  node -e 'process.stdout.write(JSON.stringify({size:Number(process.argv[1]),sha256:process.argv[2],arch:process.argv[3],version:process.argv[4],transferId:process.argv[5]}))' \
+      "$SS_OTA_IMAGE_SIZE" "$SS_OTA_IMAGE_SHA256" "$SS_OTA_IMAGE_ARCH" "$SS_OTA_IMAGE_VERSION" "$SS_OTA_TRANSFER_ID" > "$SS_OTA_SESSION_BODY"
   password="${password//\\/\\\\}"
   password="${password//\"/\\\"}"
   printf 'header = "X-Device-Password: %s"\n' "$password" > "$SS_OTA_CURL_CONFIG"
@@ -208,9 +205,7 @@ ss_ota_run() {
     return 1
   fi
 
-  local size
-  size="$(wc -c < "$SS_OTA_IMAGE" | tr -d ' ')"
-  printf 'Uploading %s (%s KiB)...\n' "$SS_OTA_IMAGE" "$((size / 1024))"
+  printf 'Uploading %s (%s KiB, SHA-256 %s)…\n' "$SS_OTA_IMAGE" "$((SS_OTA_IMAGE_SIZE / 1024))" "$SS_OTA_IMAGE_SHA256"
   ss_ota_upload || return 1
 
   local staged_version staged_arch

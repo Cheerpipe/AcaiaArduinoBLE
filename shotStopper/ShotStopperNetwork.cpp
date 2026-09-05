@@ -48,9 +48,10 @@ struct NetworkWorkBuf {
   static constexpr size_t kPresetsJson = 2800;
   static constexpr size_t kHistoryJson = 1400;
   static constexpr size_t kJsonItem = 1800;
-  // Worst case is ~493 B: the envelope with the longest state and lock reason,
-  // plus two fully populated tags at OTA_ARCH_CAPACITY + OTA_VERSION_CAPACITY.
-  static constexpr size_t kOtaJson = 640;
+  // Includes resumable-session identity (transfer id + SHA-256) as well as
+  // two image tags. This buffer is in the shared external work area, never
+  // used by the flash-writing path.
+  static constexpr size_t kOtaJson = 1024;
   char statusJson[kStatusJson]{};
   char presetsJson[kPresetsJson]{};
   char historyJson[kHistoryJson]{};
@@ -172,6 +173,7 @@ constexpr const char *STATUS_OK = "200 OK";
 constexpr const char *STATUS_NO_CONTENT = "204 No Content";
 constexpr const char *STATUS_NOT_MODIFIED = "304 Not Modified";
 constexpr const char *STATUS_ACCEPTED = "202 Accepted";
+constexpr const char *STATUS_ALREADY_REPORTED = "208 Already Reported";
 constexpr size_t IF_NONE_MATCH_CAPACITY = 80;
 constexpr const char *STATUS_BAD_REQUEST = "400 Bad Request";
 constexpr const char *STATUS_UNAUTHORIZED = "401 Unauthorized";
@@ -182,6 +184,9 @@ constexpr const char *DEVICE_PASSWORD_HEADER = "X-Device-Password";
 // Legacy header name kept so older CLI scripts still authenticate.
 constexpr const char *DEVICE_PASSWORD_HEADER_LEGACY = "X-OTA-Token";
 constexpr const char *OTA_ALLOW_DOWNGRADE_HEADER = "X-OTA-Allow-Downgrade";
+constexpr const char *OTA_TRANSFER_HEADER = "X-OTA-Transfer";
+constexpr const char *OTA_OFFSET_HEADER = "X-OTA-Offset";
+constexpr const char *OTA_LENGTH_HEADER = "X-OTA-Length";
 constexpr size_t OTA_STATUS_JSON_CAPACITY = NetworkWorkBuf::kOtaJson;
 constexpr const char *STATUS_TOO_MANY = "429 Too Many Requests";
 constexpr const char *STATUS_CONFLICT = "409 Conflict";
@@ -3608,6 +3613,9 @@ bool ShotStopperNetwork::startHttpServer() {
       registerHandler(server_, "/api/v1/diagnostic/profiler", HTTP_POST, ownedApiHandler) &&
       registerHandler(server_, "/api/v1/ota", HTTP_GET, otaStatusHandler) &&
       registerHandler(server_, "/api/v1/ota", HTTP_POST, otaUploadHandler) &&
+      registerHandler(server_, "/api/v1/ota/session", HTTP_GET, otaSessionHandler) &&
+      registerHandler(server_, "/api/v1/ota/session", HTTP_POST, otaSessionHandler) &&
+      registerHandler(server_, "/api/v1/ota", HTTP_PATCH, otaPatchHandler) &&
       registerHandler(server_, "/api/v1/ota/flash", HTTP_POST, otaFlashHandler) &&
       registerHandler(server_, "/api/v1/ota/abort", HTTP_POST, otaAbortHandler);
   if (!registered ||
@@ -7918,6 +7926,76 @@ struct OtaTransfer {
   httpd_req_t *request = nullptr;
 };
 
+bool readOtaHeader(httpd_req_t *request, const char *name, char *output,
+                   size_t capacity) {
+  if (request == nullptr || output == nullptr || capacity == 0) return false;
+  const size_t length = httpd_req_get_hdr_value_len(request, name);
+  return length > 0 && length + 1 <= capacity &&
+         httpd_req_get_hdr_value_str(request, name, output, capacity) == ESP_OK;
+}
+
+bool parseOtaUint32(const char *text, uint32_t &value) {
+  if (text == nullptr || text[0] == '\0') return false;
+  uint64_t parsed = 0;
+  for (const char *cursor = text; *cursor != '\0'; ++cursor) {
+    if (*cursor < '0' || *cursor > '9') return false;
+    parsed = parsed * 10U + static_cast<uint64_t>(*cursor - '0');
+    if (parsed > UINT32_MAX) return false;
+  }
+  value = static_cast<uint32_t>(parsed);
+  return true;
+}
+
+bool validOtaTransferId(const char *value) {
+  if (value == nullptr) return false;
+  const size_t length = strlen(value);
+  if (length < 16 || length >= OTA_TRANSFER_ID_CAPACITY) return false;
+  for (size_t index = 0; index < length; ++index) {
+    const char c = value[index];
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '-' || c == '_')) return false;
+  }
+  return true;
+}
+
+bool normalizeOtaSha256(char value[OTA_SHA256_HEX_CAPACITY]) {
+  if (value == nullptr || strlen(value) != 64) return false;
+  for (size_t index = 0; index < 64; ++index) {
+    char &c = value[index];
+    if (c >= 'A' && c <= 'F') c = static_cast<char>(c - 'A' + 'a');
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+  }
+  return true;
+}
+
+bool validOtaVersion(const char *value) {
+  if (value == nullptr || value[0] == '\0') return false;
+  for (const char *cursor = value; *cursor != '\0'; ++cursor) {
+    if (!otaVersionCharAllowed(*cursor)) return false;
+  }
+  return true;
+}
+
+bool parseContentRange(const char *value, uint32_t &offset, uint32_t &end,
+                       uint32_t &total) {
+  if (value == nullptr || strncmp(value, "bytes ", 6) != 0) return false;
+  const char *cursor = value + 6;
+  char first[16] = {};
+  char last[16] = {};
+  char size[16] = {};
+  size_t firstLength = 0, lastLength = 0, sizeLength = 0;
+  while (*cursor >= '0' && *cursor <= '9' && firstLength + 1 < sizeof(first))
+    first[firstLength++] = *cursor++;
+  if (*cursor++ != '-') return false;
+  while (*cursor >= '0' && *cursor <= '9' && lastLength + 1 < sizeof(last))
+    last[lastLength++] = *cursor++;
+  if (*cursor++ != '/') return false;
+  while (*cursor >= '0' && *cursor <= '9' && sizeLength + 1 < sizeof(size))
+    size[sizeLength++] = *cursor++;
+  return *cursor == '\0' && parseOtaUint32(first, offset) &&
+         parseOtaUint32(last, end) && parseOtaUint32(size, total) && end >= offset;
+}
+
 bool devicePasswordsMatch(const char *candidate, const char *expected) {
   return secretsMatch(candidate, expected);
 }
@@ -7931,12 +8009,19 @@ const char *otaResultHttpStatus(OtaResult result) {
     case OtaResult::SAFETY_LOST:
     case OtaResult::NO_IDENTITY:
     case OtaResult::NOTHING_STAGED: return STATUS_CONFLICT;
+    case OtaResult::SESSION_REQUIRED:
+    case OtaResult::SESSION_CONFLICT:
+    case OtaResult::SESSION_IDENTITY_MISMATCH:
+    case OtaResult::OFFSET_MISMATCH:
+    case OtaResult::SESSION_EXPIRED: return STATUS_CONFLICT;
     case OtaResult::TOO_LARGE: return STATUS_TOO_LARGE;
     case OtaResult::BAD_LENGTH:
     case OtaResult::BAD_IMAGE:
     case OtaResult::NO_TAG:
     case OtaResult::ARCH_MISMATCH:
     case OtaResult::DOWNGRADE: return STATUS_UNPROCESSABLE;
+    case OtaResult::INVALID_RANGE: return STATUS_BAD_REQUEST;
+    case OtaResult::HASH_MISMATCH: return STATUS_UNPROCESSABLE;
     case OtaResult::RECEIVE_FAILED: return STATUS_BAD_REQUEST;
     case OtaResult::WRITE_FAILED:
     case OtaResult::VERIFY_FAILED:
@@ -7972,6 +8057,20 @@ const char *otaResultMessage(OtaResult result) {
       return "The running firmware does not say which board it was built for, "
              "so no image can be checked against it. Reflash over USB with "
              "./scripts/build --arch <board> to update over Wi-Fi again.";
+    case OtaResult::SESSION_REQUIRED:
+      return "Create an OTA session before sending image ranges.";
+    case OtaResult::SESSION_CONFLICT:
+      return "Another firmware transfer owns the update slot. Abort it before choosing another image.";
+    case OtaResult::SESSION_IDENTITY_MISMATCH:
+      return "The transfer identity does not match the declared image.";
+    case OtaResult::OFFSET_MISMATCH:
+      return "This range is not the next confirmed firmware range.";
+    case OtaResult::INVALID_RANGE:
+      return "The firmware range headers or length are invalid.";
+    case OtaResult::HASH_MISMATCH:
+      return "The received firmware does not match its declared SHA-256.";
+    case OtaResult::SESSION_EXPIRED:
+      return "The inactive firmware transfer expired. Create a new session.";
     case OtaResult::ARCH_MISMATCH:
       return "This image was built for a different controller board.";
     case OtaResult::DOWNGRADE:
@@ -8064,7 +8163,10 @@ void ShotStopperNetwork::buildOtaJson(char *buffer, size_t capacity,
       "\"lastResult\":\"%s\",\"lastReceivedBytes\":%lu,"
       "\"lastExpectedBytes\":%lu,\"pendingVerify\":%s,"
       "\"confirmed\":%s,\"safe\":%s,\"lockReason\":\"%s\","
-      "\"passwordRequired\":true,\"passwordAvailable\":true,\"restartPending\":%s",
+      "\"passwordRequired\":true,\"passwordAvailable\":true,\"restartPending\":%s,"
+      "\"transferId\":\"%s\",\"sha256\":\"%s\",\"nextOffset\":%lu,"
+      "\"chunkBytes\":%lu,\"sessionActive\":%s,\"sessionExpiresInMs\":%lu,"
+      "\"lastChunkSha256\":\"%s\"",
       ota.available() ? "true" : "false",
       ShotStopperOta::stateName(ota_.state),
       static_cast<unsigned long>(ota_.slotBytes),
@@ -8076,7 +8178,11 @@ void ShotStopperNetwork::buildOtaJson(char *buffer, size_t capacity,
       ota_.pendingVerify ? "true" : "false",
       ota_.confirmed ? "true" : "false", safe ? "true" : "false",
       configLockReason(control),
-      otaRestartPending_ ? "true" : "false");
+      otaRestartPending_ ? "true" : "false", ota_.session.transferId,
+      ota_.session.sha256, static_cast<unsigned long>(ota_.nextOffset),
+      static_cast<unsigned long>(ota_.chunkBytes),
+      ota_.sessionActive ? "true" : "false",
+      static_cast<unsigned long>(ota_.sessionExpiresInMs), ota_.lastChunkSha256);
   if (written <= 0 || static_cast<size_t>(written) >= capacity) {
     snprintf(buffer, capacity, "{\"available\":false}");
     return;
@@ -8158,94 +8264,134 @@ esp_err_t ShotStopperNetwork::otaStatusHandler(httpd_req_t *request) {
     return sendError(request, STATUS_UNAUTHORIZED, "DEVICE_PASSWORD_INVALID",
                      "Send the device password, or unlock administration first.");
   }
+  ShotStopperOta::instance().expireSession(millis());
   return self.sendOtaSnapshot(request, STATUS_OK);
 }
 
 esp_err_t ShotStopperNetwork::otaUploadHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  auto rejectUpload = [request](const char *status, const char *error,
-                                const char *message) {
+  if (!self.authorizeOtaRequest(request)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "DEVICE_PASSWORD_INVALID",
+                     "Send the device password, or unlock administration first.");
+  }
+  return sendError(request, STATUS_CONFLICT, "OTA_SESSION_REQUIRED",
+                   "Create /api/v1/ota/session, then upload PATCH ranges.");
+}
+
+esp_err_t ShotStopperNetwork::otaSessionHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  if (!self.authorizeOtaRequest(request)) {
+    return sendError(request, STATUS_UNAUTHORIZED, "DEVICE_PASSWORD_INVALID",
+                     "Send the device password, or unlock administration first.");
+  }
+  if (request->method == HTTP_GET) return self.sendOtaSnapshot(request, STATUS_OK);
+  const ControlGateSnapshot control = self.controlGate();
+  if (!controlAllowsConfiguration(control)) {
+    return sendError(request, STATUS_CONFLICT, "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                     "Stop the cycle and wait for Ready before updating firmware.");
+  }
+  if (self.otaRestartPending_) {
+    return sendError(request, STATUS_CONFLICT, "OTA_RESTART_PENDING",
+                     "A firmware image is already flashed and waiting for restart.");
+  }
+  const esp_err_t bodyStatus =
+      self.lockJsonBody(request, "A JSON OTA session identity is required.");
+  if (bodyStatus != ESP_OK) return bodyStatus;
+  cJSON *root = parseJsonInArena(self.workBuf_->requestBody);
+  OtaSessionIdentity identity;
+  static const char *const fields[] = {"size", "sha256", "arch", "version", "transferId"};
+  const bool parsed = root != nullptr && jsonHasOnlyUniqueFields(root, fields, 5) &&
+                      jsonUint32(root, "size", identity.size) &&
+                      jsonString(root, "sha256", identity.sha256, sizeof(identity.sha256), false) &&
+                      jsonString(root, "arch", identity.arch, sizeof(identity.arch), false) &&
+                      jsonString(root, "version", identity.version, sizeof(identity.version), false) &&
+                      jsonString(root, "transferId", identity.transferId,
+                                 sizeof(identity.transferId), false) &&
+                      normalizeOtaSha256(identity.sha256) &&
+                      otaArchIsUsable(identity.arch) && validOtaVersion(identity.version) &&
+                      validOtaTransferId(identity.transferId);
+  if (root != nullptr) cJSON_Delete(root);
+  self.unlockJsonBody();
+  if (!parsed) {
+    return sendError(request, STATUS_UNPROCESSABLE, "INVALID_OTA_SESSION",
+                     "size, sha256, arch, version, and transferId must identify one image.");
+  }
+  ShotStopperOta &ota = ShotStopperOta::instance();
+  const OtaResult result = ota.createSession(identity, millis());
+  if (result != OtaResult::OK) {
+    return sendError(request, otaResultHttpStatus(result),
+                     ShotStopperOta::resultName(result), otaResultMessage(result));
+  }
+  return self.sendOtaSnapshot(request, STATUS_OK);
+}
+
+esp_err_t ShotStopperNetwork::otaPatchHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  auto rejectRange = [request](const char *status, const char *error,
+                               const char *message) {
     const esp_err_t sent = sendError(request, status, error, message);
-    // ESP-IDF otherwise purges the unread body 32 bytes at a time on the
-    // only httpd task, so a 2 MB POST with a bad token would freeze the
-    // Web UI for tens of seconds. Closing the socket drops the rest.
     if (request->content_len > 0) {
-      httpd_sess_trigger_close(request->handle,
-                               httpd_req_to_sockfd(request));
+      httpd_sess_trigger_close(request->handle, httpd_req_to_sockfd(request));
     }
     return sent;
   };
   if (!self.authorizeOtaRequest(request)) {
-    return rejectUpload(STATUS_UNAUTHORIZED, "DEVICE_PASSWORD_INVALID",
-                        "Send the device password, or unlock administration first.");
+    return rejectRange(STATUS_UNAUTHORIZED, "DEVICE_PASSWORD_INVALID",
+                       "Send the device password, or unlock administration first.");
+  }
+  if (!controlAllowsConfiguration(self.controlGate())) {
+    return rejectRange(STATUS_CONFLICT, "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
+                       "Stop the cycle and wait for Ready before updating firmware.");
+  }
+  char transferId[OTA_TRANSFER_ID_CAPACITY] = {};
+  char offsetText[16] = {};
+  char totalText[16] = {};
+  char contentRange[96] = {};
+  uint32_t headerOffset = 0, offset = 0, declaredTotal = 0, rangeEnd = 0, rangeTotal = 0;
+  if (!readOtaHeader(request, OTA_TRANSFER_HEADER, transferId, sizeof(transferId)) ||
+      !readOtaHeader(request, OTA_OFFSET_HEADER, offsetText, sizeof(offsetText)) ||
+      !readOtaHeader(request, OTA_LENGTH_HEADER, totalText, sizeof(totalText)) ||
+      !readOtaHeader(request, "Content-Range", contentRange, sizeof(contentRange)) ||
+      !parseOtaUint32(offsetText, headerOffset) || !parseOtaUint32(totalText, declaredTotal) ||
+      !parseContentRange(contentRange, offset, rangeEnd, rangeTotal) ||
+      headerOffset != offset || rangeTotal != declaredTotal || request->content_len <= 0 ||
+      static_cast<uint32_t>(request->content_len) != rangeEnd - offset + 1U) {
+    return rejectRange(STATUS_BAD_REQUEST, "OTA_INVALID_RANGE",
+                       "PATCH must contain matching offset, length, and Content-Range headers.");
   }
   ShotStopperOta &ota = ShotStopperOta::instance();
-
-  // A firmware update never honours the unsafe WebUI override: unlike a
-  // setting, it cannot be undone from the Web UI if the machine is mid-shot.
-  const ControlGateSnapshot control = self.controlGate();
-  if (!controlAllowsConfiguration(control)) {
-    return rejectUpload(STATUS_CONFLICT, "CONFIG_LOCKED_DURING_ACTIVE_CYCLE",
-                        "Stop the cycle and wait for Ready before updating "
-                        "firmware.");
+  ota.expireSession(millis());
+  const OtaStatusSnapshot snapshot = ota.snapshot();
+  if (strncmp(snapshot.session.transferId, transferId, sizeof(transferId)) != 0 ||
+      snapshot.expectedBytes != declaredTotal) {
+    return rejectRange(STATUS_CONFLICT, "OTA_SESSION_IDENTITY_MISMATCH",
+                       "This range does not belong to the active OTA session.");
   }
-  if (self.otaRestartPending_) {
-    return rejectUpload(STATUS_CONFLICT, "OTA_RESTART_PENDING",
-                        "A firmware image is already flashed and waiting for "
-                        "the restart.");
+  const uint32_t rangeLength = static_cast<uint32_t>(request->content_len);
+  if (ota.isDuplicateRange(offset, rangeLength)) {
+    return self.sendOtaSnapshot(request, STATUS_ALREADY_REPORTED);
   }
-  if (request->content_len == 0) {
-    return sendError(request, STATUS_BAD_REQUEST, "OTA_LENGTH_REQUIRED",
-                     "A Content-Length is required.");
-  }
-
-  bool allowDowngrade = false;
-  char downgrade[8] = {};
-  const size_t downgradeLength =
-      httpd_req_get_hdr_value_len(request, OTA_ALLOW_DOWNGRADE_HEADER);
-  if (downgradeLength > 0 && downgradeLength + 1 <= sizeof(downgrade) &&
-      httpd_req_get_hdr_value_str(request, OTA_ALLOW_DOWNGRADE_HEADER,
-                                  downgrade, sizeof(downgrade)) == ESP_OK) {
-    allowDowngrade = strcmp(downgrade, "yes") == 0;
-  }
-
-  self.log(DebugCategory::NETWORK, DebugCode::OTA_UPLOAD_STARTED,
-           static_cast<int32_t>(request->content_len / 1024U));
-
-  OtaTransfer transfer;
-  transfer.network = &self;
-  transfer.request = request;
+  OtaTransfer transfer{&self, request};
   OtaStreamIo io;
   io.read = otaReadChunk;
   io.stillSafe = otaTransferStillSafe;
   io.progress = otaTransferProgress;
   io.context = &transfer;
-
-  const OtaResult result =
-      ota.stage(static_cast<uint32_t>(request->content_len), allowDowngrade,
-                io);
+  const OtaResult result = ota.writeRange(offset, rangeLength, io, millis());
   if (result != OtaResult::OK) {
     const OtaStatusSnapshot failed = ota.snapshot();
     self.log(DebugCategory::NETWORK, DebugCode::OTA_UPLOAD_REJECTED,
              static_cast<int32_t>(result),
              static_cast<int32_t>(failed.receivedBytes / 1024U));
-    // stage() can fail before reading a single body byte; the socket close
-    // keeps ESP-IDF from purging the unread 2 MB body 32 bytes at a time.
-    // When the body was fully consumed there is nothing to purge, and a clean
-    // sendError is more reliable than closing before the response flushes.
-    if (failed.receivedBytes >= static_cast<uint32_t>(request->content_len)) {
-      return sendError(request, otaResultHttpStatus(result),
-                       ShotStopperOta::resultName(result),
+    return rejectRange(otaResultHttpStatus(result), ShotStopperOta::resultName(result),
                        otaResultMessage(result));
-    }
-    return rejectUpload(otaResultHttpStatus(result),
-                        ShotStopperOta::resultName(result),
-                        otaResultMessage(result));
   }
-  const OtaStatusSnapshot staged = ota.snapshot();
-  self.log(DebugCategory::NETWORK, DebugCode::OTA_IMAGE_STAGED,
-           static_cast<int32_t>(staged.receivedBytes / 1024U),
-           static_cast<int32_t>(staged.staged.packed));
+  const OtaStatusSnapshot updated = ota.snapshot();
+  if (updated.stagedValid) {
+    self.log(DebugCategory::NETWORK, DebugCode::OTA_IMAGE_STAGED,
+             static_cast<int32_t>(updated.receivedBytes / 1024U),
+             static_cast<int32_t>(updated.staged.packed));
+  }
   return self.sendOtaSnapshot(request, STATUS_OK);
 }
 

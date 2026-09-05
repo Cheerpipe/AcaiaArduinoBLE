@@ -121,7 +121,7 @@ Examples:
 aliases). It bypasses the final commit prompt, then polls the controller until
 the new image reports `confirmed: true` or four minutes pass.
 
-`--no-check` is accepted by `flash`, `flash-idf`, `ota`, `ota-idf`, and their
+`--no-check` is accepted by `flash`, `flash-idf`, and their
 wrappers (`bf`, `bfm`, `bsfm`, `bo`, which forward it to the install step).
 For USB flash it flashes the current build outputs directly with esptool
 (bootloader, partition table, otadata, and app) instead of letting `idf.py

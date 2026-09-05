@@ -72,7 +72,29 @@ enum class OtaResult : uint8_t {
   // This build never declared which board it is for, so no image can be proven
   // compatible with it. Reachable on firmware not produced by ./scripts/build-idf.
   NO_IDENTITY,
+  SESSION_REQUIRED,
+  SESSION_CONFLICT,
+  SESSION_IDENTITY_MISMATCH,
+  OFFSET_MISMATCH,
+  INVALID_RANGE,
+  HASH_MISMATCH,
+  SESSION_EXPIRED,
   INTERNAL,
+};
+
+constexpr size_t OTA_TRANSFER_ID_CAPACITY = 65;
+constexpr size_t OTA_SHA256_HEX_CAPACITY = 65;
+constexpr uint32_t OTA_TRANSFER_CHUNK_BYTES = 64U * 1024U;
+
+// Supplied by the client before any flash operation.  The SHA-256 makes the
+// session identity independent of a human version string: a rebuild with the
+// same version cannot inherit another image's prefix.
+struct OtaSessionIdentity {
+  uint32_t size = 0;
+  char sha256[OTA_SHA256_HEX_CAPACITY] = {};
+  char arch[OTA_ARCH_CAPACITY] = {};
+  char version[OTA_VERSION_CAPACITY] = {};
+  char transferId[OTA_TRANSFER_ID_CAPACITY] = {};
 };
 
 // PENDING_VERIFY policy. Pure: no I/O, no heap. `rollbackPossible` is ignored
@@ -123,6 +145,12 @@ struct OtaStatusSnapshot {
   // The running image was booted by an OTA commit and has not been confirmed.
   bool pendingVerify = false;
   bool confirmed = false;
+  bool sessionActive = false;
+  uint32_t nextOffset = 0;
+  uint32_t chunkBytes = OTA_TRANSFER_CHUNK_BYTES;
+  uint32_t sessionExpiresInMs = 0;
+  OtaSessionIdentity session = {};
+  char lastChunkSha256[OTA_SHA256_HEX_CAPACITY] = {};
 };
 
 // Transport hooks supplied by the HTTP layer. Keeping them as plain function
@@ -148,14 +176,21 @@ class ShotStopperOta {
   void begin();
 
   bool available() const { return available_; }
-  bool busy() const { return busy_; }
+  bool busy() const { return busy_ || sessionActive_; }
   uint32_t slotBytes() const { return slotBytes_; }
   OtaStatusSnapshot snapshot() const;
 
-  // Streams an image into the inactive slot and validates it. Never changes
-  // the boot selection.
-  OtaResult stage(uint32_t contentLength, bool allowDowngrade,
-                  const OtaStreamIo &io);
+  // Starts (or reconnects to) a resumable transfer.  This does not erase or
+  // write flash; the first range validates the image header before begin().
+  OtaResult createSession(const OtaSessionIdentity &identity, uint32_t now);
+  // Writes exactly one contiguous range. `offset` must be nextOffset(). A
+  // completed duplicate is reported as OFFSET_MISMATCH to the HTTP layer,
+  // which answers 208 without touching flash.
+  OtaResult writeRange(uint32_t offset, uint32_t contentLength,
+                       const OtaStreamIo &io, uint32_t now);
+  void expireSession(uint32_t now);
+  bool isExactSession(const OtaSessionIdentity &identity) const;
+  bool isDuplicateRange(uint32_t offset, uint32_t contentLength) const;
   // Points the bootloader at the staged image. The caller performs the
   // restart, so machine circuit can be opened first.
   OtaResult commit();
@@ -184,6 +219,11 @@ class ShotStopperOta {
 
   OtaResult finishFailure(OtaResult result);
   bool reconfirmStagedTag();
+  bool verifySessionSha256();
+  void clearSession(bool abortHandle);
+  bool persistSession();
+  void removeSessionJournal();
+  void restoreSessionJournal();
 
   bool started_ = false;
   bool available_ = false;
@@ -205,6 +245,16 @@ class ShotStopperOta {
   OtaImageTag runningTag_ = {};
   const void *runningPartition_ = nullptr;
   const void *targetPartition_ = nullptr;
+  bool sessionActive_ = false;
+  bool handleOpen_ = false;
+  uint32_t sessionLastActivityMs_ = 0;
+  uint32_t sessionGeneration_ = 0;
+  OtaSessionIdentity session_ = {};
+  char lastChunkSha256_[OTA_SHA256_HEX_CAPACITY] = {};
+  uint32_t lastChunkOffset_ = 0;
+  uint32_t lastChunkLength_ = 0;
+  uint32_t otaHandle_ = 0;
+  OtaImageTagScanner scanner_ = {};
 };
 
 }  // namespace shotstopper

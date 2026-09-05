@@ -63,11 +63,17 @@ Use the project scripts from the repository root. The CLI authenticates with
 the device password; pass it with `--password` (or `-t`) or enter it when the
 script prompts. The password is never saved by the scripts.
 
-The CLI retries an interrupted upload up to two additional times after it
-confirms the controller is idle again. If the image was verified but its HTTP
-response was lost, it detects the staged image and continues without sending
-the binary again. It never retries a paddle/shot abort, an invalid image, a
-wrong password, or another safety/validation refusal.
+The CLI computes the image SHA-256 before the transfer, creates a named OTA
+session, and sends 64 KiB ranges. If Wi-Fi drops, it queries the confirmed
+offset and repeats only the unconfirmed range; it never resends the complete
+image. The device keeps a checksummed, double-record journal so an interrupted
+transfer can continue after a restart when its SHA-256, size, architecture,
+version, and transfer ID still match. A different build must start a new
+session after explicitly discarding the previous one.
+
+`--no-check` is intentionally unavailable for resumable OTA because an image
+without a verified SHA-256, architecture, and version cannot be safely matched
+to a staged slot or committed.
 
 Build and upload in one command:
 

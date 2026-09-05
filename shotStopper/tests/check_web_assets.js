@@ -631,10 +631,13 @@ const jsBytes = Buffer.byteLength(allJs, 'utf8');
 if (htmlBytes > 54000) {
   throw new Error('Web UI HTML source exceeds the authoring budget');
 }
-if (jsBytes > 152000) {
+// Resumable OTA hashes File slices incrementally in the browser so it never
+// retains a full firmware image. The SHA-256 state machine adds source, but
+// keeps the generated asset comfortably below the firmware-size limit.
+if (jsBytes > 158000) {
   throw new Error('Web UI JS source exceeds the authoring budget');
 }
-if (htmlBytes + jsBytes > 206000) {
+if (htmlBytes + jsBytes > 212000) {
   throw new Error('Web UI HTML+JS source exceeds the combined authoring budget');
 }
 if (!/lang="en"/.test(html) || !ui.includes('role="switch"') ||
@@ -4106,6 +4109,21 @@ const runtimeRoundTrip = zlib.gunzipSync(generated.runtimeGzip).toString('utf8')
 if (runtimeRoundTrip !== generated.runtimeJs) {
   throw new Error('Generated gzip runtime JS does not round-trip');
 }
+const otaHashStart = runtimeJs.indexOf('const OTA_SHA256_K=');
+const otaHashEnd = runtimeJs.indexOf('async function otaFileIdentity', otaHashStart);
+if (otaHashStart < 0 || otaHashEnd < 0) {
+  throw new Error('Web UI must hash OTA files incrementally');
+}
+const makeOtaHash = new Function(
+    `${runtimeJs.slice(otaHashStart, otaHashEnd)}; return otaHash;`);
+const otaHash = makeOtaHash();
+const otaDigest = otaHash();
+otaDigest.add(new TextEncoder().encode('a'));
+otaDigest.add(new TextEncoder().encode('bc'));
+if (otaDigest.end() !==
+    'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad') {
+  throw new Error('Web UI incremental OTA SHA-256 is incorrect');
+}
 const secondaryRoundTrip =
     zlib.gunzipSync(generated.secondaryGzip).toString('utf8');
 if (secondaryRoundTrip !== generated.secondaryJs) {
@@ -4135,8 +4153,8 @@ if (generated.jsGzip.length > 6144) {
 if (generated.cssGzip.length > 6600) {
   throw new Error('Compressed Web CSS exceeds the 6.5 KiB gzip budget');
 }
-if (generated.runtimeGzip.length > 29000) {
-  throw new Error('Compressed Web UI runtime JS exceeds the 28.3 KiB gzip budget');
+if (generated.runtimeGzip.length > 31200) {
+  throw new Error('Compressed Web UI runtime JS exceeds the 30.5 KiB gzip budget');
 }
 if (generated.secondaryGzip.length > 5600) {
   throw new Error('Compressed secondary view JS exceeds the 5.5 KiB gzip budget');
@@ -4144,8 +4162,8 @@ if (generated.secondaryGzip.length > 5600) {
 if (generated.settingsGzip.length > 4096) {
   throw new Error('Compressed settings view JS exceeds the 4 KiB gzip budget');
 }
-if (generated.combined > 58400) {
-  throw new Error('Combined Web UI gzip exceeds the 57 KiB flash budget');
+if (generated.combined > 61000) {
+  throw new Error('Combined Web UI gzip exceeds the 59.6 KiB flash budget');
 }
 if (!network.includes('#include "ShotStopperWebAssetsGzip.h"') ||
     network.includes('#include "ShotStopperWebAssets.h"')) {
@@ -4486,7 +4504,8 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
   }
   // Any early exit has to release the OTA handle; a leaked handle would keep
   // the flash driver's state machine open until the next reboot.
-  if (!ota.includes('esp_ota_abort(handle)') || !ota.includes('esp_ota_end(handle)')) {
+  if (!ota.includes('esp_ota_abort(') || !ota.includes('esp_ota_end(') ||
+      !ota.includes('clearSession(true)')) {
     throw new Error('OTA must abort or end every esp_ota_begin handle');
   }
   // The boot selection changes in exactly one place, after re-reading the
@@ -4584,11 +4603,11 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
       otaHandlers.includes('webUiConfigurationAllowed')) {
     throw new Error('OTA handlers must not honour the unsafe WebUI override');
   }
-  if ((otaHandlers.match(/authorizeOtaRequest\(request\)/g) || []).length !== 4) {
+  if ((otaHandlers.match(/authorizeOtaRequest\(request\)/g) || []).length !== 6) {
     throw new Error('Every OTA route must authenticate the request');
   }
   if (ota.includes('OTA_SAFETY_CHECK_INTERVAL_BYTES') ||
-      !/while \(received < contentLength\) \{\s*\n\s*\/\/ Shot always wins[\s\S]{0,400}?if \(!io\.stillSafe\(io\.context\)\) \{/
+      !/while \(failure == OtaResult::OK && rangeReceived < contentLength\) \{\s*\n\s*\/\/ Shot always wins[\s\S]{0,400}?if \(!io\.stillSafe\(io\.context\)\) \{/
           .test(ota)) {
     throw new Error(
         'OTA must abort on every chunk when the paddle moves, not on a byte interval');
@@ -4903,7 +4922,9 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
       'OTA must accept an admin unlock session or the device password header');
   }
   // Two steps: verify writes the spare slot, a separate button flashes it.
-  if (!js.includes("otaSend('/api/v1/ota',file") ||
+  if (!js.includes("otaSend('/api/v1/ota/session'") ||
+      !js.includes("otaSend('/api/v1/ota',chunk") ||
+      !js.includes("'PATCH',headers") || !js.includes('otaFileIdentity') ||
       !js.includes("otaSend('/api/v1/ota/flash'") ||
       !js.includes("otaSend('/api/v1/ota/abort'") ||
       !js.includes("$('otaFlashButton').disabled=!ready||!staged")) {
