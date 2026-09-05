@@ -17,7 +17,7 @@ static const ScaleFeatureSet kWeighMyBruFeatures = {
 
 bool copyPayload(const uint8_t *command, int commandLength, uint8_t *out,
                  int *length) {
-    if (out == 0 || length == 0 || commandLength <= 0 ||
+    if (out == nullptr || length == nullptr || commandLength <= 0 ||
         commandLength > SCALE_MAX_COMMAND_LENGTH) {
         return false;
     }
@@ -69,9 +69,9 @@ const ScaleProtocol kScaleProtocolWeighMyBru = {
     kWeighMyBruFeatures,
     &weighMyBruSupportedPacketLength,
     &parseWeighMyBruWeight,
-    0,
+    nullptr,
     &encodeWeighMyBruCommand,
-    0,
+    nullptr,
     0,
     false
 };

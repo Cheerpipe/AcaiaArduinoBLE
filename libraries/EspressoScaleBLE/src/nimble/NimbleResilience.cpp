@@ -42,10 +42,10 @@ uint32_t NimbleBackoffPolicy::remainingMs(uint32_t nowMs) const {
 }
 
 void NimbleNegativeCache::expire(uint32_t nowMs) {
-  for (size_t index = 0; index < NIMBLE_NEGATIVE_CACHE_CAPACITY; ++index) {
-    if (entries_[index].used &&
-        nimbleTimeReached(nowMs, entries_[index].expiresAtMs)) {
-      entries_[index].used = false;
+  for (auto & entrie : entries_) {
+    if (entrie.used &&
+        nimbleTimeReached(nowMs, entrie.expiresAtMs)) {
+      entrie.used = false;
     }
   }
 }
@@ -53,9 +53,9 @@ void NimbleNegativeCache::expire(uint32_t nowMs) {
 bool NimbleNegativeCache::contains(const NimblePeerKey &key,
                                    uint32_t nowMs) {
   expire(nowMs);
-  for (size_t index = 0; index < NIMBLE_NEGATIVE_CACHE_CAPACITY; ++index) {
-    if (entries_[index].used && nimblePeerKeyEqual(entries_[index].key, key)) {
-      entries_[index].sequence = ++sequence_;
+  for (auto & entrie : entries_) {
+    if (entrie.used && nimblePeerKeyEqual(entrie.key, key)) {
+      entrie.sequence = ++sequence_;
       return true;
     }
   }
@@ -66,8 +66,7 @@ void NimbleNegativeCache::insert(const NimblePeerKey &key, uint32_t nowMs,
                                  uint32_t cooldownMs) {
   expire(nowMs);
   Entry *replacement = &entries_[0];
-  for (size_t index = 0; index < NIMBLE_NEGATIVE_CACHE_CAPACITY; ++index) {
-    Entry &entry = entries_[index];
+  for (auto & entry : entries_) {
     if (entry.used && nimblePeerKeyEqual(entry.key, key)) {
       replacement = &entry;
       break;
@@ -87,10 +86,10 @@ void NimbleNegativeCache::insert(const NimblePeerKey &key, uint32_t nowMs,
 }
 
 void NimbleNegativeCache::erase(const NimblePeerKey &key) {
-  for (size_t index = 0; index < NIMBLE_NEGATIVE_CACHE_CAPACITY; ++index) {
-    if (entries_[index].used &&
-        nimblePeerKeyEqual(entries_[index].key, key)) {
-      entries_[index].used = false;
+  for (auto & entrie : entries_) {
+    if (entrie.used &&
+        nimblePeerKeyEqual(entrie.key, key)) {
+      entrie.used = false;
     }
   }
 }
@@ -102,9 +101,9 @@ void NimbleNegativeCache::clear() {
 
 size_t NimbleNegativeCache::activeCount(uint32_t nowMs) const {
   size_t count = 0;
-  for (size_t index = 0; index < NIMBLE_NEGATIVE_CACHE_CAPACITY; ++index) {
-    if (entries_[index].used &&
-        !nimbleTimeReached(nowMs, entries_[index].expiresAtMs)) {
+  for (const auto & entrie : entries_) {
+    if (entrie.used &&
+        !nimbleTimeReached(nowMs, entrie.expiresAtMs)) {
       ++count;
     }
   }

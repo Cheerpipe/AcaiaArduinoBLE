@@ -16,7 +16,7 @@ static const ScaleProtocol *const kProtocols[] = {
 
 const ScaleProtocol *scaleProtocolAt(size_t index) {
     if (index >= scaleProtocolCount()) {
-        return 0;
+        return nullptr;
     }
     return kProtocols[index];
 }
@@ -26,7 +26,7 @@ size_t scaleProtocolCount() {
 }
 
 bool scaleNameIsCompatible(const char *name) {
-    if (name == 0 || name[0] == '\0') {
+    if (name == nullptr || name[0] == '\0') {
         return false;
     }
     for (size_t i = 0; i < scaleProtocolCount(); ++i) {

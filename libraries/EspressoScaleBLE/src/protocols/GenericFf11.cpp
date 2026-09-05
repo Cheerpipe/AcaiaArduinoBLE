@@ -46,7 +46,7 @@ void fillGenericCommand(uint8_t out[6], uint8_t data1, uint8_t data2, uint8_t da
 
 bool copyPayload(const uint8_t *command, int commandLength, uint8_t *out,
                  int *length) {
-    if (out == 0 || length == 0 || commandLength <= 0 ||
+    if (out == nullptr || length == nullptr || commandLength <= 0 ||
         commandLength > SCALE_MAX_COMMAND_LENGTH) {
         return false;
     }

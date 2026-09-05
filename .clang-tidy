@@ -1,0 +1,65 @@
+# Static analysis configuration for Shot Stopper.
+# Run through scripts/static-tidy (Espressif esp-clang clang-tidy) against the
+# ESP-IDF compilation database. The check set starts deliberately small: every
+# enabled check must pass on the current codebase, so a failing run means a
+# real regression. Grow it one check at a time and document any NOLINT with a
+# comment explaining why, mirroring scripts/cppcheck-suppressions.txt.
+#
+# Diagnostics are NOT promoted to errors here (WarningsAsErrors is empty on
+# purpose): promoted errors bypass the header filter and would fail the run on
+# third-party ESP-IDF headers. Scope gating is done by scripts/static-tidy,
+# which only counts diagnostics whose file is inside this repository.
+#
+# Checks currently disabled, with the reason:
+#   bugprone-easily-swappable-parameters  intentionally untyped hardware-style
+#                                         APIs; would need hundreds of NOLINTs
+#   bugprone-macro-parentheses            fires inside ESP-IDF/xtensa headers
+#                                         that this project does not own
+#   bugprone-reserved-identifier          same (xtensa headers)
+#   bugprone-branch-clone                 false positives on the ESP_LOGx macro
+#                                         chain expansion, also in project code
+#   bugprone-narrowing-conversions        ~25 findings pending review; enable
+#                                         once fixed
+#   bugprone-incorrect-roundings          8 findings of the (x + 0.5f) pattern;
+#                                         needs a deliberate lround migration
+#   bugprone-signed-char-misuse           3 findings pending review
+#   bugprone-casting-through-void         FreeRTOS handle casts in the network
+#                                         worker; matches the cppcheck
+#                                         dangerousTypeCast suppressions
+#   bugprone-switch-missing-default-case  11 findings pending review
+#   bugprone-suspicious-memory-comparison intentional byte-wise comparison of
+#                                         persisted records (validated by
+#                                         magic/checksum elsewhere); the
+#                                         alternative is per-member compare
+#   performance-enum-size                 fires throughout ESP-IDF headers;
+#                                         revisit per enum with a fixed width
+#   performance-no-int-to-ptr             fires in ESP-IDF headers and a few
+#                                         project sites pending review
+---
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-macro-parentheses,
+  -bugprone-reserved-identifier,
+  -bugprone-branch-clone,
+  -bugprone-narrowing-conversions,
+  -bugprone-incorrect-roundings,
+  -bugprone-signed-char-misuse,
+  -bugprone-casting-through-void,
+  -bugprone-switch-missing-default-case,
+  -bugprone-suspicious-memory-comparison,
+  performance-*,
+  -performance-enum-size,
+  -performance-no-int-to-ptr,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  modernize-use-override,
+  modernize-use-nullptr,
+  modernize-use-emplace,
+  modernize-use-bool-literals,
+  modernize-loop-convert
+WarningsAsErrors: ''
+HeaderFilterRegex: >-
+  shotStopper/|libraries/EspressoScaleBLE/|idf/main/|idf/components/
+FormatStyle: none

@@ -343,7 +343,8 @@ claim the Web UI to save your home Wi-Fi. Step-by-step notes are in
 **Building and hardware**
 
 - [Machine types](#machine-types) — paddle/latch, momentary, momentary+reed (compile-time)
-- [Build environment](docs/BUILD.md) — macOS and Linux, from `git clone` to a flashable image. ESP-IDF only.
+- [Build environment](docs/BUILD.md) — macOS, Linux and Windows, from `git clone` to a flashable image. ESP-IDF only.
+- [Static analysis](docs/STATIC_ANALYSIS.md) — prepare and run the static inspection suite (Cppcheck, clang-tidy, GCC `-fanalyzer`, IWYU) per OS.
 - [Build scripts](docs/SCRIPTS.md) — IDF commands and legacy Arduino-cli (unsupported).
 - [Hardware](docs/HARDWARE.md) — development board, default GPIOs, and 3D-printable enclosure; BOM and schematic are TODO.
 

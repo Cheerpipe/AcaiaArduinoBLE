@@ -28,7 +28,7 @@ static const ScaleFeatureSet kDifluidFeatures = {
 
 bool copyPayload(const uint8_t *command, int commandLength, uint8_t *out,
                  int *length) {
-    if (out == 0 || length == 0 || commandLength <= 0 ||
+    if (out == nullptr || length == nullptr || commandLength <= 0 ||
         commandLength > SCALE_MAX_COMMAND_LENGTH) {
         return false;
     }
@@ -100,7 +100,7 @@ const ScaleProtocol kScaleProtocolDifluid = {
     kDifluidFeatures,
     &difluidSupportedPacketLength,
     &parseDifluidWeight,
-    0,
+    nullptr,
     &encodeDifluidCommand,
     kDifluidInitWrites,
     sizeof(kDifluidInitWrites) / sizeof(kDifluidInitWrites[0]),

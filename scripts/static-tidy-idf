@@ -1,0 +1,305 @@
+#!/usr/bin/env bash
+# Run clang-tidy (Espressif esp-clang) against an existing ESP-IDF
+# compilation database. This script deliberately never builds the firmware.
+set -uo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/shotstopper_board.sh
+source "$SCRIPT_DIR/shotstopper_board.sh"
+# shellcheck source=scripts/shotstopper_cli.sh
+source "$SCRIPT_DIR/shotstopper_cli.sh"
+# shellcheck source=scripts/shotstopper_idf.sh
+source "$SCRIPT_DIR/shotstopper_idf.sh"
+
+readonly ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+
+usage() {
+  cat <<EOF
+Usage: ./scripts/static-tidy-idf [flags]
+
+Run clang-tidy (Espressif esp-clang) against a compilation database already
+produced by ESP-IDF. The output directory is deleted and recreated on every
+run. This script never builds the firmware; run ./scripts/build-idf separately
+first.
+
+Required parameters: --arch (implies build-idf/<architecture>).
+--build-dir and --output-dir are one-shot overrides: they are not persisted.
+
+The clang-tidy binary comes from Espressif's LLVM fork (esp-clang), which
+understands the xtensa-esp32s3 target. Override it with the ESP_CLANG_TIDY
+environment variable (full path to a clang-tidy executable).
+
+$(ss_flag_help)
+
+Examples:
+  ./scripts/static-tidy-idf --arch n16r8
+  ./scripts/static-tidy-idf -a n8r4 -o reports/static-tidy-n8r4
+EOF
+}
+
+ss_cli_parse "$@" || exit $?
+if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
+  usage
+  exit 0
+fi
+
+ss_cli_resolve "arch" || exit $?
+shotstopper_resolve_board "$(ss_get arch)" || exit 2
+ss_idf_resolve_paths
+
+if ss_is_set build_dir; then
+  build_dir="$(ss_get build_dir)"
+else
+  build_dir="build-idf/$SHOTSTOPPER_ARCH"
+fi
+if ss_is_set output_dir; then
+  output_dir="$(ss_get output_dir)"
+else
+  output_dir="reports/static-tidy"
+fi
+
+case "$build_dir" in
+  /*) build_path="$build_dir" ;;
+  *) build_path="$ROOT/$build_dir" ;;
+esac
+
+# Keep the destructive cleanup strictly inside the repository.
+case "$output_dir" in
+  /*|*'..'*)
+    echo "Output directory must be a relative path inside the repository." >&2
+    exit 2
+    ;;
+esac
+output_path="$ROOT/$output_dir"
+compile_commands="$build_path/compile_commands.json"
+
+if [[ -n "${ESP_CLANG_TIDY:-}" ]]; then
+  tidy_bin="$ESP_CLANG_TIDY"
+else
+  tidy_bin=""
+  for candidate in "$HOME"/.espressif/tools/esp-clang/*/esp-clang/bin/clang-tidy \
+                   "$HOME"/.espressif/tools/esp-clang/*/bin/clang-tidy; do
+    if [[ -x "$candidate" ]]; then
+      tidy_bin="$candidate"
+      break
+    fi
+  done
+fi
+
+if [[ -z "${tidy_bin:-}" || ! -x "$tidy_bin" ]]; then
+  echo "clang-tidy (esp-clang) not found." >&2
+  echo "Install Espressif's LLVM fork and try again:" >&2
+  echo "  python \"\$HOME/esp/esp-idf/tools/idf_tools.py\" install esp-clang" >&2
+  echo "Or point ESP_CLANG_TIDY at an existing esp-clang clang-tidy binary." >&2
+  exit 127
+fi
+
+if [[ ! -f "$compile_commands" ]]; then
+  echo "$compile_commands does not exist." >&2
+  echo "Build the chosen variant first (e.g. ./scripts/build-idf --arch $SHOTSTOPPER_ARCH)." >&2
+  exit 1
+fi
+
+command -v python3 >/dev/null 2>&1 || {
+  echo "python3 not found on PATH." >&2
+  exit 127
+}
+
+rm -rf "$output_path"
+mkdir -p "$output_path"
+
+printf 'Tool: %s\n' "$tidy_bin" > "$output_path/README.txt"
+printf 'Build database: %s\n' "$compile_commands" >> "$output_path/README.txt"
+printf 'Generated: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >> "$output_path/README.txt"
+
+# Rewrite the GCC database into a clang-tidy friendly one:
+#   - keep only translation units inside the project scope (the same scope as
+#     scripts/static-idf);
+#   - drop GCC-only optimization flags clang rejects;
+#   - add the explicit -target triple, because the GCC database encodes the
+#     target in the compiler name (xtensa-esp32s3-elf-g++) and esp-clang needs
+#     the flag form. Only esp-clang knows this target; the stock clang from
+#     Homebrew does not.
+python3 - "$compile_commands" "$output_path" <<'PY'
+import json, os, shlex, subprocess, sys
+
+cc_path, out_dir = sys.argv[1], sys.argv[2]
+patterns = [
+    "*/shotStopper/*.cpp",
+    "*/libraries/EspressoScaleBLE/src/*.cpp",
+    "*/libraries/EspressoScaleBLE/src/protocols/*.cpp",
+    "*/idf/main/*.cpp",
+    "*/idf/components/EspressoScaleBLE/*.cpp",
+    "*/idf/components/shotStopper/*.cpp",
+]
+drop_prefixes = ("-fno-tree-", "-fstrict-volatile-bitfields", "-fuse-ld=",
+                 "-Wl,", "--param=", "-mdisable-hardware-", "-fanalyzer")
+drop_two_token = ("--param", "-specs")
+
+def fnmatch_any(path):
+    from fnmatch import fnmatch
+    return any(fnmatch(path, p) for p in patterns)
+
+def triple_of(compiler):
+    base = os.path.basename(compiler)
+    suffixes = ("-g++", "-gcc", "-clang++", "-clang", "-c++")
+    for suffix in suffixes:
+        if base.endswith(suffix):
+            return base[: -len(suffix)]
+    return None
+
+sysroots = {}
+
+def toolchain_args(compiler):
+    # GCC resolves its own C library and libstdc++ include paths internally;
+    # the esp-clang driver does not consume --gcc-toolchain for Xtensa, so the
+    # paths must be spelled out. Ask the GCC driver that produced the database
+    # where its sysroot is, then add the C++ standard library include dirs.
+    if compiler in sysroots:
+        return sysroots[compiler]
+    args = []
+    try:
+        result = subprocess.run([compiler, "-print-sysroot"],
+                                capture_output=True, text=True, timeout=30)
+        sysroot = result.stdout.strip()
+        if result.returncode == 0 and sysroot and os.path.isdir(sysroot):
+            args = ["--sysroot=%s" % sysroot]
+            import glob
+            for cxx_dir in sorted(glob.glob(
+                    os.path.join(sysroot, "include", "c++", "*"))):
+                args.append("-isystem%s" % cxx_dir)
+                # Add only the target-configuration directory (the one that
+                # ships bits/c++config.h) and backward; blanket -isystem of
+                # every subdirectory breaks <tr1>/<cstdint> resolution.
+                for sub in sorted(os.listdir(cxx_dir)):
+                    sub_path = os.path.join(cxx_dir, sub)
+                    if not os.path.isdir(sub_path):
+                        continue
+                    if os.path.isfile(
+                            os.path.join(sub_path, "bits", "c++config.h")):
+                        args.append("-isystem%s" % sub_path)
+                    elif sub == "backward":
+                        args.append("-isystem%s" % sub_path)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    sysroots[compiler] = args
+    return args
+
+def expand_args(args):
+    # CMake stores shared toolchain flags as @response-file tokens (e.g.
+    # build-idf/<arch>/toolchain/cxxflags). clang reads them too, but the
+    # GCC-only flags inside must be filtered, so splice the contents in.
+    expanded = []
+    for tok in args:
+        if tok.startswith("@") and os.path.isfile(tok[1:]):
+            try:
+                with open(tok[1:]) as fh:
+                    expanded.extend(shlex.split(fh.read()))
+            except (OSError, ValueError):
+                expanded.append(tok)
+        else:
+            expanded.append(tok)
+    return expanded
+
+db = json.load(open(cc_path))
+out_entries = []
+for entry in db:
+    src = entry.get("file") or ""
+    if not src.endswith(".cpp") or not fnmatch_any(src):
+        continue
+    args = entry.get("arguments")
+    if args is None:
+        args = shlex.split(entry.get("command") or "")
+    args = expand_args(list(args))
+    if not args:
+        continue
+    triple = triple_of(args[0])
+    cleaned = []
+    skip_next = False
+    for tok in args[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if tok in drop_two_token:
+            skip_next = True
+            continue
+        if tok.startswith(drop_prefixes):
+            continue
+        cleaned.append(tok)
+    if triple:
+        cleaned = ["-target", triple] + toolchain_args(args[0]) + cleaned
+    # NimBLE's C log headers trip clang's C/C++ compat warning inside code
+    # this project does not own; tidy would otherwise treat it as a parse
+    # error for the whole translation unit.
+    cleaned.append("-Wno-extern-c-compat")
+    out_entries.append({"directory": entry.get("directory"),
+                        "file": src, "arguments": [args[0]] + cleaned})
+
+if not out_entries:
+    sys.stderr.write("No in-scope translation units found in %s\n" % cc_path)
+    sys.exit(1)
+
+sanitized = os.path.join(out_dir, "compile_commands.json")
+with open(sanitized, "w") as fh:
+    json.dump(out_entries, fh, indent=1)
+with open(os.path.join(out_dir, "files.txt"), "w") as fh:
+    for entry in out_entries:
+        fh.write(entry["file"] + "\n")
+print("Sanitized database: %s (%d translation units)" % (sanitized, len(out_entries)))
+PY
+sanitize_status=$?
+if [[ $sanitize_status -ne 0 ]]; then
+  echo "Failed to sanitize $compile_commands." >&2
+  exit 1
+fi
+
+echo "Running clang-tidy on in-scope sources..."
+# .clang-tidy deliberately leaves WarningsAsErrors empty because promoted
+# errors would bypass the header filter and fail on third-party ESP-IDF
+# headers. Gating is therefore done here: only diagnostics whose file sits
+# inside the repository scope count, mirroring the HeaderFilterRegex.
+scope_regex="^$ROOT/(shotStopper/|libraries/|idf/main/|idf/components/).*: (warning|error): "
+tidy_status=0
+failed_files=""
+total=0
+failed=0
+while IFS= read -r src; do
+  total=$((total + 1))
+  printf '[%d] %s\n' "$total" "$src"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/shotstopper-tidy.XXXXXX")"
+  "$tidy_bin" -p "$output_path" "$src" > "$tmp" 2>&1
+  run_status=$?
+  cat "$tmp" >> "$output_path/tidy.txt"
+  findings="$(grep -Ec "$scope_regex" "$tmp" || true)"
+  parse_errors="$(grep -c 'clang-diagnostic-error' "$tmp" || true)"
+  rm -f "$tmp"
+  if [[ "$findings" -gt 0 || "$parse_errors" -gt 0 ]]; then
+    failed=$((failed + 1))
+    failed_files="$failed_files $src"
+    tidy_status=1
+    if [[ "$parse_errors" -gt 0 ]]; then
+      printf 'FAILED: %d in-scope diagnostics, %d parse errors\n' \
+        "$findings" "$parse_errors"
+    else
+      printf 'FAILED: %d in-scope diagnostics\n' "$findings"
+    fi
+  fi
+done < "$output_path/files.txt"
+
+{
+  printf '\nTranslation units: %d\n' "$total"
+  printf 'Failed (in-scope diagnostics or parse errors): %d\n' "$failed"
+} >> "$output_path/README.txt"
+
+if [[ $tidy_status -ne 0 ]]; then
+  echo "clang-tidy reported diagnostics for $failed of $total translation units:" >&2
+  for src in $failed_files; do
+    echo "  $src" >&2
+  done
+  echo "Full output: $output_path/tidy.txt" >&2
+else
+  echo "clang-tidy clean: $total translation units, no diagnostics."
+fi
+
+ss_cli_save
+exit $tidy_status

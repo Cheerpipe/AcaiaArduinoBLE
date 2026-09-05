@@ -349,13 +349,13 @@ void scaleWorkerLoadPreferred(const char *mac, const char *name,
     memcpy(scaleHistory, history, sizeof(scaleHistory));
   }
   scaleHistorySeq = 0;
-  for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
-    if (scaleHistory[i].mac[0] != '\0') {
-      canonicalizePreferredScaleMac(scaleHistory[i].mac,
-                                    sizeof(scaleHistory[i].mac));
+  for (auto & i : scaleHistory) {
+    if (i.mac[0] != '\0') {
+      canonicalizePreferredScaleMac(i.mac,
+                                    sizeof(i.mac));
     }
-    if (scaleHistory[i].lastSeenSeq > scaleHistorySeq) {
-      scaleHistorySeq = scaleHistory[i].lastSeenSeq;
+    if (i.lastSeenSeq > scaleHistorySeq) {
+      scaleHistorySeq = i.lastSeenSeq;
     }
   }
   seedScaleHistoryFromPreferred(scaleHistory, scaleHistorySeq,

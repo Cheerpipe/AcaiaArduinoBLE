@@ -8,13 +8,13 @@ bool scaleValidWeight(float weight) {
 }
 
 bool scaleNameMatchesProtocol(const char *name, const ScaleProtocol *protocol) {
-    if (name == 0 || name[0] == '\0' || protocol == 0 ||
-        protocol->namePrefixes == 0) {
+    if (name == nullptr || name[0] == '\0' || protocol == nullptr ||
+        protocol->namePrefixes == nullptr) {
         return false;
     }
     for (size_t p = 0; p < protocol->namePrefixCount; ++p) {
         const char *prefix = protocol->namePrefixes[p];
-        if (prefix == 0 || prefix[0] == '\0') {
+        if (prefix == nullptr || prefix[0] == '\0') {
             continue;
         }
         if (strncmp(name, prefix, strlen(prefix)) == 0) {
@@ -25,7 +25,7 @@ bool scaleNameMatchesProtocol(const char *name, const ScaleProtocol *protocol) {
 }
 
 bool scaleParseUuid16(const char *uuid, uint16_t *out) {
-    if (uuid == 0 || out == 0) {
+    if (uuid == nullptr || out == nullptr) {
         return false;
     }
     uint16_t value = 0;
@@ -56,7 +56,7 @@ bool scaleUuid16AllowsNamelessConnect(uint16_t uuid) {
     }
     for (size_t i = 0; i < scaleProtocolCount(); ++i) {
         const ScaleProtocol *protocol = scaleProtocolAt(i);
-        if (protocol == 0 || protocol->requireAdvertisedName) {
+        if (protocol == nullptr || protocol->requireAdvertisedName) {
             continue;
         }
         uint16_t parsed = 0;

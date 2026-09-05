@@ -90,6 +90,8 @@ Writes to `build-idf/<architecture>` (`shotstopper.bin`).
 | `./scripts/monitor-idf` | `m-idf` | `--port`, `--speed` | IDF serial monitor (Ctrl+] to exit). |
 | `./scripts/ota-idf` | `o-idf` | `--arch`, `--host`, `--password` | Wi-Fi update with the already-built IDF binary, or `--image <path>`. |
 | `./scripts/static-idf` | `s-idf` | `--arch` | Cppcheck against the IDF compilation database. Does not build. |
+| `./scripts/static-tidy-idf` | `static-tidy` | `--arch` | clang-tidy (Espressif esp-clang) against the IDF compilation database. Does not build. [Static analysis](STATIC_ANALYSIS.md). |
+| `./scripts/iwyu-idf` | `iwyu` | `--arch` | Include-What-You-Use against the IDF compilation database. Advisory report, does not build. [Static analysis](STATIC_ANALYSIS.md). |
 | `./scripts/bf-idf` | | `--port`, `--arch` | build-idf then flash-idf (no rebuild or image re-check at flash time). |
 | `./scripts/bfm-idf` | | `--port`, `--arch`, `--speed` | build-idf, flash-idf (no rebuild or image re-check), monitor-idf. |
 | `./scripts/bo-idf` | | `--arch`, `--host`, `--password` | build-idf then ota-idf (no local image re-check at OTA time). |
@@ -154,6 +156,7 @@ These names invoke the corresponding ESP-IDF scripts and write to
 | `./scripts/monitor` | `m` | Alias to `monitor-idf`. |
 | `./scripts/ota` | `o` | Alias to `ota-idf`. |
 | `./scripts/static` | `s` | Alias to `static-idf`. |
+| `./scripts/static-tidy` / `./scripts/iwyu` | | Aliases to `static-tidy-idf` and `iwyu-idf`. |
 | `./scripts/bf` / `bfm` / `bo` / `bsfm` | | Wrappers, same idea as the `*-idf` variants. |
 
 Required flags match the IDF table (`--arch`, `--port`, and so on).

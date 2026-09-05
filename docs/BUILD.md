@@ -231,6 +231,10 @@ New automation should prefer the explicit `*-idf` names.
 
 ## Optional static analysis
 
+The full static inspection suite (Cppcheck, clang-tidy via Espressif's
+esp-clang, GCC `-fanalyzer`, Include-What-You-Use) has its own per-OS
+preparation and run guide: [Static analysis](STATIC_ANALYSIS.md).
+
 ```sh
 ./scripts/build-idf --arch n16r8
 ./scripts/static-idf --arch n16r8

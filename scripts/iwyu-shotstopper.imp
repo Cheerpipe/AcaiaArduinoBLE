@@ -1,0 +1,9 @@
+# Include-What-You-Use mappings for Shot Stopper.
+#
+# Intentionally empty: stock IWYU already maps the C standard headers
+# (<stdio.h> -> <cstdio>, <stdint.h> -> <cstdint>, ...) and re-mapping them
+# aborts IWYU with a "same file seen with two different visibilities"
+# assertion. Add entries here only when IWYU repeatedly suggests something
+# wrong for ESP-IDF/Arduino headers in this codebase, and document each one.
+# Mapping syntax: https://github.com/include-what-you-use/include-what-you-use/blob/master/docs/IWYUMappings.md
+[]

@@ -368,11 +368,14 @@ bool WebhookDispatcher::buildPayload(const WebhookEvent &event, char *output,
   auto append = [&](const char *format, auto... args) {
     if (used >= capacity) return false;
     // The lambda always receives a string literal at every call site; the
-    // non-literal parameter is what makes -Wformat-security fire.
+    // non-literal parameter is what makes -Wformat-security fire. Suppress it
+    // here only: NOLINT is not honored for compiler diagnostics, and the
+    // GCC-style pragma is the form both GCC and clang accept.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-security"
     const int count =
-        snprintf(output + used, capacity - used,
-                 format,  // NOLINT(clang-diagnostic-format-security)
-                 args...);
+        snprintf(output + used, capacity - used, format, args...);
+#pragma GCC diagnostic pop
     if (count <= 0 || static_cast<size_t>(count) >= capacity - used) return false;
     used += static_cast<size_t>(count);
     return true;

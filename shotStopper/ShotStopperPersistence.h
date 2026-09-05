@@ -42,9 +42,9 @@ inline bool validPersistedSettings(const PersistedSettings &settings) {
 inline void finalizePersistedSettings(PersistedSettings &settings) {
   ensurePersistedPresetBank(settings);
   uint32_t seedSeq = 0;
-  for (size_t i = 0; i < SCALE_HISTORY_CAPACITY; ++i) {
-    if (settings.scaleHistory[i].lastSeenSeq > seedSeq) {
-      seedSeq = settings.scaleHistory[i].lastSeenSeq;
+  for (auto & i : settings.scaleHistory) {
+    if (i.lastSeenSeq > seedSeq) {
+      seedSeq = i.lastSeenSeq;
     }
   }
   seedScaleHistoryFromPreferred(settings.scaleHistory, seedSeq,

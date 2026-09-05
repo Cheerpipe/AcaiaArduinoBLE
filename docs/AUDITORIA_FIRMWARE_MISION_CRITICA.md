@@ -109,6 +109,15 @@ Además:
 
 ### F-02. Seqlocks formalmente inseguros y fallback con copia rasgada
 
+**Estado de remediación (2026-09-05): corregido.** Los cuatro dominios usan
+ahora mutexes de tarea estáticos (`SemaphoreHandle_t` con herencia de prioridad
+en ESP32 y `std::mutex` en host). Se eliminaron los contadores de secuencia, los
+reintentos acotados y el fallback que copiaba el payload activo. La prueba host
+M09 ejecuta un escritor continuo y dos lectores, comprueba invariantes de
+`ControlStatus`, `ControlGate`, receta y profiler, y forma parte de la ejecución
+con ThreadSanitizer. Si el refresh de status agota su plazo, se devuelve
+exclusivamente la última copia completa con `snapshotStale=true`.
+
 **Vectores:** concurrencia, memoria, resiliencia  
 **Confianza:** alta  
 **Evidencia:** `shotStopper.cpp:942-971`, `:1313-1355`, `:5166-5415`; `ShotStopperTaskProfiler.h:181-195`.

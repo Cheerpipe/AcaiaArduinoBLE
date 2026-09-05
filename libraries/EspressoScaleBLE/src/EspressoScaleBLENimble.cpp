@@ -655,8 +655,7 @@ class NimbleScaleClient {
 
   Candidate *candidateFor(const ble_addr_t &address) {
     Candidate *oldest = &candidates_[0];
-    for (size_t index = 0; index < kCandidateCount; ++index) {
-      Candidate &candidate = candidates_[index];
+    for (auto & candidate : candidates_) {
       if (candidate.used && candidate.address.type == address.type &&
           addressEqual(candidate.address.val, address.val)) {
         return &candidate;

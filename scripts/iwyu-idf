@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+# Run Include-What-You-Use against an existing ESP-IDF compilation database.
+# This script deliberately never builds the firmware. IWYU is advisory: its
+# suggestions are collected into a report and never fail the run unless the
+# tooling itself is missing or every translation unit failed to parse.
+set -uo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/shotstopper_board.sh
+source "$SCRIPT_DIR/shotstopper_board.sh"
+# shellcheck source=scripts/shotstopper_cli.sh
+source "$SCRIPT_DIR/shotstopper_cli.sh"
+# shellcheck source=scripts/shotstopper_idf.sh
+source "$SCRIPT_DIR/shotstopper_idf.sh"
+
+readonly ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+readonly MAPPINGS_FILE="$ROOT/scripts/iwyu-shotstopper.imp"
+
+usage() {
+  cat <<EOF
+Usage: ./scripts/iwyu-idf [flags]
+
+Run Include-What-You-Use against a compilation database already produced by
+ESP-IDF. The output directory is deleted and recreated on every run. This
+script never builds the firmware; run ./scripts/build-idf separately first.
+
+Required parameters: --arch (implies build-idf/<architecture>).
+--build-dir and --output-dir are one-shot overrides: they are not persisted.
+
+IWYU must be built against the same clang version it runs with. Override the
+binary with the IWYU_BINARY environment variable (full path).
+
+$(ss_flag_help)
+
+Examples:
+  ./scripts/iwyu-idf --arch n16r8
+  ./scripts/iwyu-idf -a n8r4 -o reports/iwyu-n8r4
+EOF
+}
+
+ss_cli_parse "$@" || exit $?
+if [[ "$SS_CLI_HELP_REQUESTED" == "1" ]]; then
+  usage
+  exit 0
+fi
+
+ss_cli_resolve "arch" || exit $?
+shotstopper_resolve_board "$(ss_get arch)" || exit 2
+ss_idf_resolve_paths
+
+if ss_is_set build_dir; then
+  build_dir="$(ss_get build_dir)"
+else
+  build_dir="build-idf/$SHOTSTOPPER_ARCH"
+fi
+if ss_is_set output_dir; then
+  output_dir="$(ss_get output_dir)"
+else
+  output_dir="reports/iwyu"
+fi
+
+case "$build_dir" in
+  /*) build_path="$build_dir" ;;
+  *) build_path="$ROOT/$build_dir" ;;
+esac
+
+# Keep the destructive cleanup strictly inside the repository.
+case "$output_dir" in
+  /*|*'..'*)
+    echo "Output directory must be a relative path inside the repository." >&2
+    exit 2
+    ;;
+esac
+output_path="$ROOT/$output_dir"
+compile_commands="$build_path/compile_commands.json"
+
+if [[ -n "${IWYU_BINARY:-}" ]]; then
+  iwyu_bin="$IWYU_BINARY"
+elif command -v include-what-you-use >/dev/null 2>&1; then
+  iwyu_bin="include-what-you-use"
+else
+  echo "include-what-you-use not found on PATH." >&2
+  echo "macOS:   brew install include-what-you-use" >&2
+  echo "Linux:   build from source against your clang version (see docs/STATIC_ANALYSIS.md)" >&2
+  echo "Windows: optional; build from source with Visual Studio Build Tools" >&2
+  echo "Or point IWYU_BINARY at an existing binary." >&2
+  exit 127
+fi
+
+if [[ ! -f "$MAPPINGS_FILE" ]]; then
+  echo "Mappings file $MAPPINGS_FILE does not exist." >&2
+  exit 1
+fi
+
+if [[ ! -f "$compile_commands" ]]; then
+  echo "$compile_commands does not exist." >&2
+  echo "Build the chosen variant first (e.g. ./scripts/build-idf --arch $SHOTSTOPPER_ARCH)." >&2
+  exit 1
+fi
+
+command -v python3 >/dev/null 2>&1 || {
+  echo "python3 not found on PATH." >&2
+  exit 127
+}
+
+rm -rf "$output_path"
+mkdir -p "$output_path"
+
+# Homebrew clang cannot locate the macOS SDK when SDKROOT is unset.
+if [[ "$(uname -s)" == "Darwin" && -z "${SDKROOT:-}" ]] && command -v xcrun >/dev/null 2>&1; then
+  SDKROOT="$(xcrun --show-sdk-path 2>/dev/null)" && export SDKROOT
+fi
+
+printf 'Tool: %s\n' "$("$iwyu_bin" --version 2>&1 | head -n1)" > "$output_path/README.txt"
+printf 'Build database: %s\n' "$compile_commands" >> "$output_path/README.txt"
+printf 'Mappings: %s\n' "$MAPPINGS_FILE" >> "$output_path/README.txt"
+printf 'Generated: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >> "$output_path/README.txt"
+
+# The stock IWYU binary runs with the host clang, which does not know the
+# xtensa target. Rewrite the GCC database for the host:
+#   - keep only translation units inside the project scope;
+#   - drop the explicit target triple and every target-specific flag so the
+#     host compiler parses the command line;
+#   - drop GCC-only optimization and linker flags.
+# Translation units that reach Xtensa-specific headers may still fail to
+# parse; those are skipped and reported instead of aborting the run.
+python3 - "$compile_commands" "$output_path" <<'PY'
+import json, os, shlex, sys
+
+cc_path, out_dir = sys.argv[1], sys.argv[2]
+patterns = [
+    "*/shotStopper/*.cpp",
+    "*/libraries/EspressoScaleBLE/src/*.cpp",
+    "*/libraries/EspressoScaleBLE/src/protocols/*.cpp",
+    "*/idf/main/*.cpp",
+    "*/idf/components/EspressoScaleBLE/*.cpp",
+    "*/idf/components/shotStopper/*.cpp",
+]
+drop_prefixes = ("-m", "-fno-tree-", "-fstrict-volatile-bitfields",
+                 "-fuse-ld=", "-Wl,", "--sysroot", "--param=", "--target=",
+                 "-fanalyzer")
+drop_two_token = ("--param", "-specs", "-target", "--target", "--sysroot")
+
+def fnmatch_any(path):
+    from fnmatch import fnmatch
+    return any(fnmatch(path, p) for p in patterns)
+
+def expand_args(args):
+    # CMake stores shared toolchain flags as @response-file tokens; splice
+    # their contents in so the target-specific flags inside are filtered too.
+    expanded = []
+    for tok in args:
+        if tok.startswith("@") and os.path.isfile(tok[1:]):
+            try:
+                with open(tok[1:]) as fh:
+                    expanded.extend(shlex.split(fh.read()))
+            except (OSError, ValueError):
+                expanded.append(tok)
+        else:
+            expanded.append(tok)
+    return expanded
+
+db = json.load(open(cc_path))
+out_entries = []
+for entry in db:
+    src = entry.get("file") or ""
+    if not src.endswith(".cpp") or not fnmatch_any(src):
+        continue
+    args = entry.get("arguments")
+    if args is None:
+        args = shlex.split(entry.get("command") or "")
+    args = expand_args(list(args))
+    if not args:
+        continue
+    cleaned = []
+    skip_next = False
+    for tok in args[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if tok in drop_two_token:
+            skip_next = True
+            continue
+        if tok.startswith(drop_prefixes):
+            continue
+        cleaned.append(tok)
+    out_entries.append({"directory": entry.get("directory"),
+                        "file": src, "arguments": ["clang++"] + cleaned})
+
+if not out_entries:
+    sys.stderr.write("No in-scope translation units found in %s\n" % cc_path)
+    sys.exit(1)
+
+sanitized = os.path.join(out_dir, "compile_commands.sanitized.json")
+with open(sanitized, "w") as fh:
+    json.dump(out_entries, fh, indent=1)
+# IWYU has no -p flag: it needs the full flag list per translation unit,
+# without the compiler token itself. Emit "file<TAB>flags" lines (no tab or
+# space in these paths).
+with open(os.path.join(out_dir, "files.txt"), "w") as fh:
+    for entry in out_entries:
+        fh.write(entry["file"] + "\t" + " ".join(entry["arguments"][1:]) + "\n")
+print("Sanitized database: %s (%d translation units)" % (sanitized, len(out_entries)))
+PY
+sanitize_status=$?
+if [[ $sanitize_status -ne 0 ]]; then
+  echo "Failed to sanitize $compile_commands." >&2
+  exit 1
+fi
+
+echo "Running Include-What-You-Use on in-scope sources..."
+parsed=0
+skipped=0
+total=0
+while IFS=$'\t' read -r src flags; do
+  total=$((total + 1))
+  printf '[%d] %s\n' "$total" "$src"
+  # shellcheck disable=SC2086  # flags is a space-separated list by design
+  if "$iwyu_bin" \
+      -Xiwyu --no_fwd_decls \
+      -Xiwyu --max_line_length=160 \
+      -Xiwyu --mapping_file="$MAPPINGS_FILE" \
+      $flags "$src" >> "$output_path/iwyu.txt" 2>&1; then
+    parsed=$((parsed + 1))
+  else
+    skipped=$((skipped + 1))
+    printf '\nSKIPPED (parse error or crash): %s\n\n' "$src" >> "$output_path/iwyu.txt"
+  fi
+done < "$output_path/files.txt"
+
+{
+  printf '\nTranslation units: %d\n' "$total"
+  printf 'Parsed: %d\n' "$parsed"
+  printf 'Skipped (parse errors, expected for Xtensa-specific code): %d\n' "$skipped"
+  printf 'Suggestions are advisory: review iwyu.txt and apply selectively with fix_includes.py.\n'
+} >> "$output_path/README.txt"
+
+echo "Parsed $parsed of $total translation units; report: $output_path/iwyu.txt"
+if [[ $parsed -eq 0 ]]; then
+  echo "No translation unit could be parsed; check $output_path/iwyu.txt." >&2
+  ss_cli_save
+  exit 1
+fi
+
+ss_cli_save
+exit 0
