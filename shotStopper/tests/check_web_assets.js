@@ -4830,7 +4830,7 @@ if (!js.includes('withPollGate(async()=>{if(scanBusy||!webUiPollingActive())retu
     }
   }
   if ((statusFormat.match(/\\"adminUnlocked\\":%s/g) || []).length < 2 ||
-      !statusFormat.includes('\\"adminUnlocked\\":true,\\"diagnosticPublic\\":true')) {
+      !statusFormat.includes('\\"adminUnlocked\\":%s,\\"diagnosticPublic\\":true')) {
     throw new Error('status/home and status/admin must report adminUnlocked; Diagnostic must identify public access');
   }
   if ((statusFormat.match(/\\"adminUnlocked\\":%s,\\"development\\":%s/g) || []).length < 2 ||

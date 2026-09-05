@@ -58,7 +58,7 @@ export function init(){
   
   R.ensureBleCompanionPanel();
   const diagnosticOption=document.createElement('label');
-  diagnosticOption.innerHTML='<input id="showDiagnosticPage" type="checkbox" role="switch"> Show diagnostic page<small class="fieldHint">Makes Diagnostic visible and readable to every Web UI visitor. Diagnostic actions remain restricted to Admin.</small>';
+  diagnosticOption.innerHTML='<input id="showDiagnosticPage" type="checkbox" role="switch"> Show diagnostic page<small class="fieldHint">Makes Diagnostic visible and fully usable by every Web UI visitor. Turning it off hides the tab and blocks the page; debug settings stay available here.</small>';
   $('frontendPanel').appendChild(diagnosticOption);
   const webhookPanel=document.createElement('fieldset');
   webhookPanel.id='webhookPanel';

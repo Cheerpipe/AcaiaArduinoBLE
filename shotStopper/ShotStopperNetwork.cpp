@@ -3882,6 +3882,14 @@ bool ShotStopperNetwork::requireAdminUnlock(httpd_req_t *request) {
   return true;
 }
 
+bool ShotStopperNetwork::diagnosticPageEnabled() {
+  bool visible = false;
+  portENTER_CRITICAL(&dataMux_);
+  visible = settings_.runtime.showDiagnosticPage;
+  portEXIT_CRITICAL(&dataMux_);
+  return visible;
+}
+
 esp_err_t ShotStopperNetwork::adminUnlockHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
   const esp_err_t bodyStatus =
@@ -4167,6 +4175,13 @@ esp_err_t ShotStopperNetwork::partialStatsHandler(httpd_req_t *request) {
 }
 
 esp_err_t ShotStopperNetwork::partialDiagnosticHandler(httpd_req_t *request) {
+  ShotStopperNetwork &self = *instance_;
+  // With the page disabled the partial must not exist for any visitor; the
+  // SPA shell keeps serving so /diagnostic can bounce to Home.
+  if (!self.diagnosticPageEnabled()) {
+    return sendError(request, "404 Not Found", "DIAGNOSTIC_DISABLED",
+                     "Diagnostic page is disabled by the administrator.");
+  }
   return serveImmutableGzip(request, "text/html; charset=utf-8",
                             SHOT_STOPPER_WEB_PARTIAL_DIAGNOSTIC_GZIP,
                             SHOT_STOPPER_WEB_PARTIAL_DIAGNOSTIC_GZIP_LEN);
@@ -4317,12 +4332,9 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   }
 
   // Diagnostic is opt-in and, once enabled, intentionally has no Admin
-  // authentication requirement. Keep its mutating APIs separately locked.
-  bool diagnosticPageVisible = false;
-  portENTER_CRITICAL(&self.dataMux_);
-  diagnosticPageVisible = self.settings_.runtime.showDiagnosticPage;
-  portEXIT_CRITICAL(&self.dataMux_);
-  if (page == StatusPage::Diagnostic && !diagnosticPageVisible) {
+  // authentication requirement: the page is fully functional for every
+  // visitor while visible. Only the Admin-only toggle itself stays locked.
+  if (page == StatusPage::Diagnostic && !self.diagnosticPageEnabled()) {
     return sendError(request, STATUS_FORBIDDEN, "DIAGNOSTIC_DISABLED",
                      "Diagnostic page is disabled by the administrator.");
   }
@@ -4353,7 +4365,8 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   const uint32_t webUiOverrideRemainingMs =
       webUiOverrideActive ? self.webUiOverrideRemainingMs(request) : 0;
   bool adminUnlocked = false;
-  if (page == StatusPage::Admin || page == StatusPage::Home) {
+  if (page == StatusPage::Admin || page == StatusPage::Home ||
+      page == StatusPage::Diagnostic) {
     adminUnlocked = self.adminUnlockAllowed(request);
     if (adminUnlocked &&
         (page == StatusPage::Admin || page == StatusPage::Diagnostic)) {
@@ -4504,7 +4517,7 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
   }
   if (ok) {
     ok = statusJsonAppend(&used, ",\"diagnosticPageVisible\":%s",
-                          diagnosticPageVisible ? "true" : "false");
+                          self.diagnosticPageEnabled() ? "true" : "false");
   }
   if (ok && page == StatusPage::Settings) {
     ok = statusJsonAppend(&used, ",\"buzzerSupported\":%s",
@@ -4961,7 +4974,10 @@ esp_err_t ShotStopperNetwork::statusHandler(httpd_req_t *request) {
       }
     }
   } else if (ok && page == StatusPage::Diagnostic) {
-    ok = statusJsonAppend(&used, ",\"adminUnlocked\":true,\"diagnosticPublic\":true,\"development\":%s",
+    // Reading the diagnostic page is public while it is enabled; adminUnlocked
+    // reflects the caller's real Admin session (controls chrome on the UI).
+    ok = statusJsonAppend(&used, ",\"adminUnlocked\":%s,\"diagnosticPublic\":true,\"development\":%s",
+                          adminUnlocked ? "true" : "false",
                           DEVELOPMENT_BUILD ? "true" : "false");
     if (ok) {
     // Lean diagnostic snapshot: metrics + log controls only (no STA address
@@ -5246,7 +5262,9 @@ bool debugExportChunkf(httpd_req_t *request, char *buf, size_t cap,
 
 esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.requireAdminUnlock(request)) {
+  // Public while the diagnostic page is enabled (it carries no secrets);
+  // Admin unlock keeps it available with the page disabled.
+  if (!self.diagnosticPageEnabled() && !self.requireAdminUnlock(request)) {
     return ESP_OK;
   }
   // DEBUG EXPORT MAINTENANCE: extend sections below when adding diagnostically
@@ -5959,11 +5977,7 @@ esp_err_t ShotStopperNetwork::debugExportHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::logHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  bool diagnosticPageVisible = false;
-  portENTER_CRITICAL(&self.dataMux_);
-  diagnosticPageVisible = self.settings_.runtime.showDiagnosticPage;
-  portEXIT_CRITICAL(&self.dataMux_);
-  if (!diagnosticPageVisible && !self.requireAdminUnlock(request)) {
+  if (!self.diagnosticPageEnabled() && !self.requireAdminUnlock(request)) {
     return ESP_OK;
   }
   // Bounded diagnostic log: fixed enum-derived messages and numeric
@@ -6424,10 +6438,13 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
       jsonFieldPresent(root, "timezoneOffsetMinutes") ||
       jsonFieldPresent(root, "ntpServerPreset") ||
       jsonFieldPresent(root, "ntpServerCustom");
-  const bool diagnosticPatch = jsonFieldPresent(root, "serialLogLevel") ||
-                               jsonFieldPresent(root, "serialDebugOutput") ||
-                               jsonFieldPresent(root, "ringRetainLogLevel") ||
-                               jsonFieldPresent(root, "showDiagnosticPage");
+  // Log/debug fields are public while the diagnostic page is enabled; the
+  // page visibility toggle itself always requires the Admin session.
+  const bool diagnosticLogPatch = jsonFieldPresent(root, "serialLogLevel") ||
+                                  jsonFieldPresent(root, "serialDebugOutput") ||
+                                  jsonFieldPresent(root, "ringRetainLogLevel");
+  const bool diagnosticPagePatch =
+      jsonFieldPresent(root, "showDiagnosticPage");
   // Patch: seed live effective config; only present keys overwrite.
   RuntimeConfig candidate = {};
   if (self.callbacks_.copyRuntimeConfig != nullptr) {
@@ -6802,7 +6819,12 @@ esp_err_t ShotStopperNetwork::configHandler(httpd_req_t *request) {
     memset(customNtp, 0, sizeof(customNtp));
     return ESP_OK;
   }
-  if (diagnosticPatch && !self.requireAdminUnlock(request)) {
+  if (diagnosticLogPatch && !self.diagnosticPageEnabled() &&
+      !self.requireAdminUnlock(request)) {
+    memset(customNtp, 0, sizeof(customNtp));
+    return ESP_OK;
+  }
+  if (diagnosticPagePatch && !self.requireAdminUnlock(request)) {
     memset(customNtp, 0, sizeof(customNtp));
     return ESP_OK;
   }
@@ -7424,7 +7446,10 @@ esp_err_t ShotStopperNetwork::restartHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::clearResetHistoryHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.requireAdminUnlock(request)) return ESP_OK;
+  // Public while the diagnostic page is enabled; Admin unlock otherwise.
+  if (!self.diagnosticPageEnabled() && !self.requireAdminUnlock(request)) {
+    return ESP_OK;
+  }
   const esp_err_t bodyStatus = self.lockJsonBody(
       request, "An explicit reset-history confirmation is required.");
   if (bodyStatus != ESP_OK) return bodyStatus;
@@ -7886,7 +7911,8 @@ esp_err_t ShotStopperNetwork::bleCompatHandler(httpd_req_t *request) {
 
 esp_err_t ShotStopperNetwork::taskProfilerHandler(httpd_req_t *request) {
   ShotStopperNetwork &self = *instance_;
-  if (!self.requireAdminUnlock(request)) {
+  // Public while the diagnostic page is enabled; Admin unlock otherwise.
+  if (!self.diagnosticPageEnabled() && !self.requireAdminUnlock(request)) {
     return ESP_OK;
   }
   const esp_err_t bodyStatus =

@@ -476,6 +476,7 @@ class ShotStopperNetwork {
   void touchAdminUnlock();
   bool adminUnlockAllowed(httpd_req_t *request);
   bool requireAdminUnlock(httpd_req_t *request);
+  bool diagnosticPageEnabled();
   bool webUiOverrideAllowed(httpd_req_t *request);
   uint32_t webUiOverrideRemainingMs(httpd_req_t *request);
   bool webUiConfigurationAllowed(httpd_req_t *request,
